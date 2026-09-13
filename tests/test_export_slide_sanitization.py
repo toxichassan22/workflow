@@ -8,6 +8,25 @@ import slide_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+
+def read_frontend_text():
+    """The full client source: shell + styles + scripts in load order."""
+    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
+        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for name in FRONTEND_JS_ORDER:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
 
 class ExportSlideSanitizationTests(unittest.TestCase):
     def test_pptx_resolves_extensionless_tenant_watermark_asset(self):
@@ -370,7 +389,7 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         self.assertIn('data-visual-media-only="1"', migrated[0]['html'])
 
     def test_slide_preview_matches_export_margin_reset(self):
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         self.assertIn('display: block !important;', source)
         self.assertIn('transform: scale(var(--slide-scale, 0.75)) !important;', source)
         self.assertIn(

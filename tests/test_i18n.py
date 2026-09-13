@@ -11,7 +11,7 @@ Translating all of them at once is not feasible, so this suite does two things:
    the baseline only ever shrinks.
 2. It keeps the ``assets/i18n.js`` dictionaries honest: identical key sets in
    both languages, no empty values, real English on the en side, and the shell
-   actually loading the file before its main inline script.
+   actually loading the file before its application scripts.
 
 To regenerate the baseline AFTER deliberately migrating literals (never to
 silence this test for new strings)::
@@ -35,6 +35,32 @@ ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / 'index.html'
 I18N_JS = ROOT / 'assets' / 'i18n.js'
 BASELINE = Path(__file__).resolve().parent / 'i18n_hardcoded_baseline.txt'
+
+# index.html is a slim shell: styles live in assets/css and code in these
+# classic scripts, loaded in order so they keep one shared global scope.
+FRONTEND_CSS_ORDER = ('base.css', 'project-form.css')
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+
+def read_shell():
+    return INDEX.read_text(encoding='utf-8')
+
+
+def read_frontend_text():
+    """Shell + styles + scripts in load order: the whole client source."""
+    parts = [read_shell()]
+    for name in FRONTEND_CSS_ORDER:
+        parts.append((ROOT / 'assets' / 'css' / name).read_text(encoding='utf-8'))
+    for name in FRONTEND_JS_ORDER:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
 
 AR_CHAR = r'[\u0600-\u06FF]'
 
@@ -121,7 +147,7 @@ def load_baseline():
 class I18nFoundationTests(unittest.TestCase):
     def test_i18n_file_exists_and_shell_loads_it_first(self):
         self.assertTrue(I18N_JS.exists(), 'assets/i18n.js is missing')
-        html = INDEX.read_text(encoding='utf-8')
+        html = read_shell()
         tag = html.find('/assets/i18n.js')
         self.assertNotEqual(
             tag, -1,
@@ -129,15 +155,34 @@ class I18nFoundationTests(unittest.TestCase):
         # Absolute path: client routes (/app/..., /c/<slug>) would resolve a
         # relative assets/... URL against the deep link and 404.
         self.assertIn('src="/assets/i18n.js"', html)
+        # The old single inline <script> block is gone: code ships as ordered
+        # classic scripts sharing one global scope (no async, no modules).
         bare_scripts = [
             m.start() for m in
             re.finditer(r'^\s*<script>\s*$', html, re.M)]
-        self.assertTrue(
-            bare_scripts,
-            'main inline <script> block not found in index.html')
+        self.assertEqual(
+            bare_scripts, [],
+            'index.html must not carry an inline <script> block anymore; '
+            'put the code in assets/js/')
+        for name in FRONTEND_CSS_ORDER:
+            self.assertIn(
+                'href="/assets/css/%s"' % name, html,
+                'index.html must link assets/css/%s' % name)
+            self.assertTrue(
+                (ROOT / 'assets' / 'css' / name).exists(),
+                'assets/css/%s is missing' % name)
+        referenced = re.findall(r'<script src="/assets/js/([^"]+)"></script>', html)
+        self.assertEqual(
+            referenced, list(FRONTEND_JS_ORDER),
+            'index.html must load every assets/js file exactly once, in order')
+        for name in FRONTEND_JS_ORDER:
+            self.assertTrue(
+                (ROOT / 'assets' / 'js' / name).exists(),
+                'assets/js/%s is missing' % name)
+        first_app = html.find('/assets/js/')
         self.assertLess(
-            tag, bare_scripts[-1],
-            'assets/i18n.js must load BEFORE the main inline script so '
+            tag, first_app,
+            'assets/i18n.js must load BEFORE the application scripts so '
             'WFI18n/WFT exist when application code runs')
 
     def test_runtime_api_is_present(self):
@@ -183,7 +228,7 @@ class I18nFoundationTests(unittest.TestCase):
 
     def test_static_bindings_reference_known_keys(self):
         dicts = read_dicts()
-        html = INDEX.read_text(encoding='utf-8')
+        html = read_shell()
         used = set(re.findall(r'data-i18n(?:-ph|-title|-aria)?="([^"]+)"', html))
         self.assertTrue(used, 'no data-i18n bindings found in index.html')
         unknown = sorted(k for k in used if k not in dicts['ar'])
@@ -197,8 +242,7 @@ class I18nFoundationTests(unittest.TestCase):
             baseline,
             'baseline file missing: %s (regenerate with '
             'python tests/test_i18n.py --rebuild-baseline)' % BASELINE)
-        current = extract_hardcoded_ui_strings(
-            INDEX.read_text(encoding='utf-8'))
+        current = extract_hardcoded_ui_strings(read_frontend_text())
         fresh = [v for v in current if v not in set(baseline)]
         self.assertEqual(
             fresh, [],
@@ -240,16 +284,18 @@ class I18nFoundationTests(unittest.TestCase):
         node = shutil.which('node')
         if not node:
             self.skipTest('node is not installed')
-        proc = subprocess.run(
-            [node, '--check', str(I18N_JS)],
-            capture_output=True, text=True, timeout=60)
-        self.assertEqual(
-            proc.returncode, 0,
-            'node --check assets/i18n.js failed:\n%s' % proc.stderr)
+        targets = [I18N_JS] + [ROOT / 'assets' / 'js' / name for name in FRONTEND_JS_ORDER]
+        for target in targets:
+            proc = subprocess.run(
+                [node, '--check', str(target)],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(
+                proc.returncode, 0,
+                'node --check %s failed:\n%s' % (target.name, proc.stderr))
 
 
 def _rebuild_baseline():
-    current = extract_hardcoded_ui_strings(INDEX.read_text(encoding='utf-8'))
+    current = extract_hardcoded_ui_strings(read_frontend_text())
     BASELINE.write_text('\n'.join(current) + '\n', encoding='utf-8')
     print('baseline rewritten: %d entries -> %s' % (len(current), BASELINE))
 

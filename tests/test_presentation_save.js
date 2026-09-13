@@ -1,7 +1,16 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync('index.html', 'utf8');
+// index.html is a slim shell now; the code under test lives in ordered classic scripts.
+const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+  '03-executive-classification.js', '04-market.js', '05-market-competitors.js', '06-team.js',
+  '07-project-form.js', '08-location-maps.js', '09-financial.js', '10-financial-report-timeline.js',
+  '11-land-croquis.js', '12-files-media.js', '13-visual.js', '14-slides-gen.js',
+  '15-slide-edit-chat.js', '16-presentations-export.js', '17-admin-boot.js'];
+const source = ['index.html', 'assets/css/base.css', 'assets/css/project-form.css',
+  ...FRONTEND_JS_ORDER.map(n => 'assets/js/' + n)]
+  .map(f => fs.readFileSync(path.join(process.cwd(), f), 'utf8')).join('\n');
 const names = ['commitTenantPresentation', 'saveTenantPresentation', 'savePresentationFromToolbar', 'savePresentationCopy', 'preparePresentationGenerationTarget'];
 const start = source.indexOf('    async function commitTenantPresentation(');
 const end = source.indexOf('    async function openExistingPresentation(', start);

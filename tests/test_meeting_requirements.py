@@ -26,6 +26,34 @@ from flask import Flask
 import auth
 import db
 
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+
+def read_frontend_text():
+    """The full client source: shell + styles + scripts in load order.
+
+    index.html was split into assets/css + assets/js; literal-source
+    assertions must read the combined text, not the shell alone.
+    """
+    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
+        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for name in FRONTEND_JS_ORDER:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
+
+def read_shell_text():
+    """index.html alone: markup plus resource references, no inline code."""
+    return read_frontend_text()
+
 
 class MeetingRequirementsTests(unittest.TestCase):
     @classmethod
@@ -636,7 +664,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('ديك قديم', prompt)
 
         # The client must not upload the previous deck or the image state with every slide either.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function slimGenerationProjectData(data)', index_source)
         self.assertIn('projectData: slimGenerationProjectData(tenantProjectData)', index_source)
         for dropped in ('tenantSlidesData', 'pageDrafts', 'tenantCreativeImages', 'visual_concept'):
@@ -1652,7 +1680,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('height:48px!important', logo)
         self.assertIn('font-size:13px!important', html)
         self.assertIn('font-size:12px!important', html)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;', index_source)
         self.assertIn('await repairVisualConceptStoredImages();', index_source)
         self.assertIn('slideObj.html = stage.innerHTML;', index_source)
@@ -2001,7 +2029,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('إيجار يومي', notes)
         self.assertIn('بيع وحدات', notes)
         self.assertNotIn('تجاري ترفيهي خدمات مواقف', notes)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("control.selectedOptions?.[0]", index_source)
         self.assertNotIn("control.type !== 'hidden' && !control.disabled", index_source)
         self.assertNotIn("el.type === 'file' || el.type === 'hidden' || el.disabled", index_source)
@@ -2572,7 +2600,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(invalid.status_code, 400)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("generateButton.textContent = 'توليد عرض القسم'", index_source)
         self.assertIn('async function generateProjectSectionPresentation(sectionKey, sectionLabel = \'\')', index_source)
         self.assertIn('if (sectionKey) requestBody.sectionKey = sectionKey;', index_source)
@@ -2685,7 +2713,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """There was no way back from the slides page to بيانات المشروع: the only navigation was
         the dashboard, and from there "عرض جديد" calls startTenantProject(), which resets the
         state and shows a blank form as if the project were gone."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         toolbar = index_source.split('<section id="tenantSlidesPage"')[1].split('</div>\n\n      <!-- Live')[0]
         self.assertIn("navigateTenantWorkflow('tenantProjectPage')", toolbar)
         self.assertIn('بيانات المشروع', toolbar)
@@ -2699,7 +2727,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('loadTenantProjectForm', nav)
 
     def test_slides_page_can_regenerate_one_slide_without_rebuilding_the_deck(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('إعادة توليد هذه الشريحة فقط', index_source)
         self.assertIn('async function regenerateTenantSlide(index)', index_source)
         replacement_body = index_source.split('async function generateTenantSlideFromSnapshot(snapshot, slideIndex, totalSlides, generationImages, current = {}) {', 1)[1]
@@ -2713,7 +2741,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('لن تتأثر بقية الشرائح', regenerate_body)
 
     def test_designer_chat_can_regenerate_only_the_requested_section(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('detectTenantSectionRegenerationRequest', index_source)
         self.assertIn(".replace(/ة/g, 'ه')", index_source)
         self.assertIn('تصميم|تنسيق', index_source)
@@ -2804,7 +2832,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                             json={'presentationId': presentation_id})
         self.assertEqual(cross.status_code, 404)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('/api/project-drafts/recovery', index_source)
         self.assertIn('async function restoreProjectDraft(draftId, presentationId)', index_source)
         self.assertIn('حقل ممتلئ', index_source)
@@ -3000,7 +3028,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('اشتراطات المداخل والمخارج', restrictions)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("resp_json.pop('approved_floor_count', None)", app_source)
         self.assertIn("resp_json.pop('approved_coverage_ratio', None)", app_source)
         self.assertIn('parking_requirements', app_source)
@@ -3010,7 +3038,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("'approved_floor_count'", index_source)
 
     def test_direction_and_coordinate_tables_are_separate_ai_outputs(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('surveyCoordinatesPanel', index_source)
         self.assertIn('surveyDirectionsPanel', index_source)
         self.assertNotIn('addSurveyCoordinateButton', index_source)
@@ -3028,7 +3056,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_land_tables_survive_draft_round_trip_without_being_wiped(self):
         """The coordinate/direction tables live in hidden inputs as JSON strings, so the
         renderers must parse them back instead of replacing stored rows with empty ones."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function parseStoredLandTable(value)', index_source)
         self.assertIn('const parsed = parseStoredLandTable(rows);', index_source)
         self.assertIn('if (hadValue && parsed === null) return;', index_source)
@@ -3058,7 +3086,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because
         the directions table falls back to parcels[0].directions on reload."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function storeLandDocumentAnalysis(', index_source)
         self.assertIn('landDocumentsAnalysisData', index_source)
         self.assertIn('parseStoredLandTable(source.land_documents_analysis)', index_source)
@@ -3153,7 +3181,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_project_form_blanks_are_not_collected_before_it_is_filled(self):
         """The form is built empty and filled afterwards, so its blank inputs must not be
         reported as the project's values while hydration has not completed."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function tenantProjectFormIsFilled()', index_source)
         self.assertIn("form.dataset.projectFormFilled = ''", index_source)
         self.assertIn('markTenantProjectFormFilled();', index_source)
@@ -3264,7 +3292,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             404)
         self.assertIn(client.get(f'/api/project-files/{file_id}').status_code, (401, 403))
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('async function openProjectFilePreview(', index_source)
         self.assertIn("'/api/project-files/' + encodeURIComponent(fileId)", index_source)
         self.assertIn('onclick="openProjectFilePreview(', index_source)
@@ -3309,7 +3337,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 {'coverImage': 'blob:https://example.test/abc', 'coverFileId': file_id})
         self.assertTrue(fallback.startswith('data:image/'), fallback[:32])
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("'/api/project-files/' + encodeURIComponent(fileId) + '/publish-image'", index_source)
         self.assertIn('liveSlot().imageUrl = await publishProjectFileImageUrl(fileId);', index_source)
         self.assertIn('imageUrl: await publishProjectFileImageUrl(file.id)', index_source)
@@ -3348,7 +3376,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         draft_data = client.get('/api/project-draft', headers=self._headers(self.token_a)).get_json()['draft']['draft_data']
         self.assertEqual(draft_data['land_photos_file_meta'][0]['description'], 'الواجهة الشمالية')
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('const LAND_PHOTOS_MAX = 4;', index_source)
         self.assertIn('function renderLandPhotos(', index_source)
         self.assertIn("input.dataset.projectFileType = 'land_image'", index_source)
@@ -3383,7 +3411,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(by_key['max_floors_height']['fieldType'], 'textarea')
         self.assertEqual(by_key['allowed_uses']['fieldLabel'], 'الاستخدامات المسموحة')
         self.assertEqual(by_key['regulatory_constraints']['fieldLabel'], 'القيود التنظيمية')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('locationAddressMirror', index_source)
         self.assertNotIn('syncLocationAddressMirror', index_source)
         self.assertIn('geocodeTenantLocationLink', index_source)
@@ -3418,7 +3446,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(draft_data['land_documents_files_file_meta'], metadata)
 
     def test_browser_history_tracks_pages_sections_and_internal_tabs(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function syncTenantBrowserHistory', index_source)
         self.assertIn('function showSection(sectionKey, fromHistory = false)', index_source)
         self.assertIn('function setGlobalRailTab(tab, fromHistory = false)', index_source)
@@ -3426,13 +3454,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("window.history[method](state, '', url)", index_source)
 
     def test_location_analysis_runs_only_from_explicit_button(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("btn.onclick = () => analyzeTenantSite();", index_source)
         self.assertNotIn("addressInput.addEventListener('paste'", index_source)
         self.assertNotIn("addressInput.addEventListener('blur'", index_source)
 
     def test_financial_visibility_has_native_hidden_guard_for_optional_sections(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('element.hidden = !visible', index_source)
         self.assertIn("setConditionalVisibility('graceDetails', graceOn)", index_source)
         self.assertIn("setConditionalVisibility('graceScheduleWrap', scheduledGrace)", index_source)
@@ -3460,7 +3488,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn("'croquis_validity_dates'", app_source)
 
         # The validity badge and its date parsing went with the field.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('croquis_expiry_date', index_source)
         self.assertNotIn('croquisExpiryBadge', index_source)
 
@@ -3468,7 +3496,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """The upload used to run inside collectTenantFormData, which only executed from the
         autosave. Once autosave was removed the files sat on "saving" forever and the analyse
         button saw no file ids to send."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         # Choosing a file must upload it, the way land photos already did.
         self.assertIn('uploadLandDocuments(input);', index_source)
@@ -3486,7 +3514,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_uploaded_land_documents_can_be_removed(self):
         """A wrongly uploaded deed or croquis had no way out: the card offered preview only."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         self.assertIn('function removeLandDocument(fileId)', index_source)
         self.assertIn("onclick=\"removeLandDocument(\\'", index_source)
@@ -3537,7 +3565,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(broken['error_code'], 'GOOGLE_PLACES_INVALID_RESPONSE')
 
         # The reason must survive on screen, not only in a toast that disappears.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('id="siteAnalysisWarnings"', index_source)
         self.assertIn('const reasons = [data.landmarksWarning, data.cityLandmarksWarning].filter(Boolean);',
                       index_source)
@@ -3639,7 +3667,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Text that happens to start with a figure stays in the cell's own direction.
         self.assertIn('<td>4 سنة</td>', html)
         self.assertIn('<td>مستأجرة ولا تدخل ضمن تكلفة المشروع</td>', html)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('unicode-bidi: plaintext;', index_source)
         self.assertIn('td{unicode-bidi:plaintext}', index_source)
 
@@ -3713,7 +3741,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 self.assertIn(expected, text)
             self.assertNotIn('2,027', text)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function roundFinancialResult(value)', index_source)
         self.assertIn('maximumFractionDigits: hasFraction ? 1 : 0', index_source)
         self.assertIn('roundFinancialSavedResults(window.__financialProjection || {})', index_source)
@@ -3769,7 +3797,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                     document.close()
                 self.assertIn('CLIENT-NOTE-731', text)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('<textarea id="financialClarifications"', index_source)
         self.assertIn('#section-financial-calc #financialClarifications {', index_source)
         self.assertIn('font-size: 13px !important;', index_source.split('#section-financial-calc #financialClarifications {', 1)[1].split('}', 1)[0])
@@ -3842,7 +3870,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertNotIn('LINKED-COMPONENT-HIDDEN', normalized_text)
             self.assertIn('TOTAL 1,234,567.3', normalized_text)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("<h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable'", index_source)
         self.assertIn("'مرتبط بمكون'", index_source.split('FINANCIAL_REPORT_SKIP_COLUMNS', 1)[1][:180])
 
@@ -3850,7 +3878,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
         An unscoped class rule outranks "#section-financial-calc th" on specificity, which left
         those headers tinted with white text on them."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         for group in ('sales', 'rental', 'grace', 'fund', 'finance'):
             self.assertNotIn(f'#section-financial-calc .cf-{group} {{', index_source,
                              f'.cf-{group} must be scoped to td')
@@ -3870,7 +3898,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         div, and a flex item shrinks to fit, so the dropdown's `width:100%` resolved against that
         shrunken box: «الأنواع الفرعية للمشروع» and «الفئة المستهدفة» rendered as a narrow box and
         their menus broke every option onto two lines."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('.project-choice-grid>div {\n      flex: 1 1 100%;', index_source)
         # Those are the wrappers that need it, and the dropdown still spans whatever holds it.
         self.assertIn("'<div style=\"margin-top:10px\"><label>' + (showSubtypeLabels", index_source)
@@ -3883,20 +3911,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         """Generated slides use semantic main elements for absolute content frames. A global
         `main { width:100% }` rule makes frames with right/left insets overflow in the preview,
         even though the export has no application stylesheet and remains correct."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('\n    main {', index_source)
         self.assertIn('.tenant-app > main {\n      width: 100%', index_source)
 
     def test_slide_preview_tables_do_not_inherit_the_app_table_minimum(self):
         """Generated slide tables can sit in a narrow column. The app-wide 850px minimum made
         those tables overflow the preview and clip content, while exports remained correct."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('.tenant-slide-stage .slide table {\n      min-width: 0;', index_source)
 
     def test_slide_preview_uses_one_canvas_scale_only(self):
         """The preview stage scales the complete slide canvas. A second content transform
         made some slides visibly shorter than their exported versions and clipped headings."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         start = index_source.index('function autoFitSlideContent(stage)')
         end = index_source.index('function collectSlideTextNodes(root)', start)
         fit_source = index_source[start:end]
@@ -3917,18 +3945,23 @@ class MeetingRequirementsTests(unittest.TestCase):
             '[\u2190-\u21ff\u2300-\u23ff\u25a0-\u27bf\u2b00-\u2bff\ufe0f'
             '\U0001f000-\U0001faff]'
         )
-        # index.html is the whole UI; the prompt files tell the model what to produce, so an emoji
-        # there teaches it to emit one.
-        for name in ('index.html', 'slide_engine.py', 'design_templates.py', 'app.py'):
+        # The shell plus its styles and scripts is the whole UI; the prompt files tell the
+        # model what to produce, so an emoji there teaches it to emit one.
+        frontend_names = (
+            ['index.html', 'assets/css/base.css', 'assets/css/project-form.css']
+            + [f'assets/js/{name}' for name in FRONTEND_JS_ORDER])
+        for name in frontend_names + ['slide_engine.py', 'design_templates.py', 'app.py']:
             source = (ROOT / name).read_text(encoding='utf-8')
             found = sorted({match.group() for match in pictographs.finditer(source)})
             self.assertEqual(found, [], f'{name} still contains icon glyphs: {found}')
 
         # No icon libraries, and the only inline SVG is the map polygon overlay.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # The <svg count stays shell-only: scripts build overlay markup in strings.
+        index_source = read_frontend_text()
+        shell_source = read_shell_text()
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
-        self.assertEqual(index_source.count('<svg'), 2, 'only the favicon and the map overlay may use SVG')
+        self.assertEqual(shell_source.count('<svg'), 2, 'only the favicon and the map overlay may use SVG')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 
         # Missing logos fall back to a text monogram rather than a building glyph.
@@ -3992,7 +4025,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(client.delete('/api/team-entities/' + entity['id'], headers=headers).status_code, 404)
 
         # No category UI survives in the settings page.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         for gone in ('teamCategoryLabel', 'teamEntityCategory', 'tenantTeamCategories',
                      'submitTeamCategory', 'teamEntityBlocked', 'team-categories'):
             self.assertNotIn(gone, index_source, f'{gone} should have been removed')
@@ -4065,7 +4098,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('), 503', app_source)
 
         # The land-analysis reason must survive on screen, not only in a toast.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function showLandAnalysisFailure(reason, providerError)', index_source)
         self.assertIn('showLandAnalysisFailure(reason, res.providerError);', index_source)
         self.assertIn('clearLandAnalysisFailure();', index_source)
@@ -4161,7 +4194,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_project_team_section_scopes_choices_to_one_file(self):
         """A file may drop a library entity, override its role, or add an entity of its own —
         none of which may leak into other projects."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         self.assertIn("div.dataset.section = 'section-team'", index_source)
         self.assertIn("createProjectSectionHeader('section-team', 'فريق العمل')", index_source)
@@ -4286,7 +4319,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('/uploads/creative/competitor-1.png', finished)
         self.assertIn('/uploads/creative/competitor-2.png', finished)
         self.assertNotIn('##COMPETITOR_LOGO_', finished)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("formData.append('fileType', 'competitor_logo')", index_source)
         self.assertIn('data-field="logo_cell"', index_source)
         self.assertIn('استيراد رسمي', index_source)
@@ -4560,7 +4593,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_drafts_are_saved_only_on_request(self):
         """Edits stay local until the explicit save action is requested."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         self.assertNotIn('draftAutoSaveTimer', index_source)
         self.assertNotIn('[DRAFT AUTOSAVE]', index_source)
@@ -4584,7 +4617,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_project_form_action_bar_stays_visible_while_scrolling_every_section(self):
         """Save/back stay on screen while the user is inside a long section, then settle at the
         natural page end. The bar is shared by every project-form section, including floor design."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('.tenant-form-actions {', index_source)
         actions_start = index_source.index('.tenant-form-actions {')
         actions_end = index_source.index('}', actions_start)
@@ -4625,7 +4658,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         fallback = db.tenant_slug({'id': 'ABCDEF12-3456', 'subdomain': None, 'username': None})
         self.assertTrue(fallback.startswith('t-'))
         self.assertNotIn(' ', fallback)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         for token in ('TENANT_ROUTE_SUFFIXES', 'tenantPathPrefix', 'tenantCanonicalRoute',
                       'resolveTenantRoutePath', 'enforceTenantRouteGuard',
                       'canonicalizeTenantUrl', '/superadmin', "'/c/' + slug"):
@@ -4637,7 +4670,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_back_navigation_never_leaves_the_app(self):
         """"/" and unmapped paths fell through popstate, so the view and the URL disagreed and the
         next Back exited the site."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn(
             "else if (tenantToken && window.location.pathname.startsWith('/app/')) showTenantPage('tenantDashboardPage', true);",
             index_source)
@@ -4654,14 +4687,14 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_project_refresh_reopens_the_saved_draft(self):
         """Refreshing the project form must reopen the remembered draft, not a blank project."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('const savedDraftId = navigation && navigation.draftId &&', index_source)
         self.assertIn('if (!(savedDraftId && await openProjectDraftById(savedDraftId)))', index_source)
         self.assertIn('await startTenantProject()', index_source)
 
     def test_timeline_is_the_only_source_of_dev_duration_and_stages(self):
         """The financial study mirrors the timeline read-only so the two cannot disagree."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         self.assertIn('function syncFinancialFromTimeline()', index_source)
 
@@ -4682,7 +4715,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         source does not have is invented data the user cannot correct. The study used to open on
         70,000 م², 35% تغطية, دور واحد and 4 سنوات that nobody entered, and clearing a source left
         the previous number behind because the mirror only wrote when the source was non-zero."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         for element in ('id="landArea" type="number" value=""',
                         'id="coverageRate" type="number" value=""',
                         'id="floorCount" type="number" min="1" value=""',
@@ -4738,7 +4771,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_financial_study_mirrors_approved_build_inputs_from_land(self):
         """Approved area, floor count and coverage are owned by land/croquis and read-only here."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         self.assertIn('function syncFinancialFromLand()', index_source)
 
@@ -4761,7 +4794,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
         """Phases are client data, so the table must not seed invented stages."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         # The seeding table and its quarter-advancing loop are gone. (The unrelated `timeline`
         # sample *text* field may still mention phase names; only the table must not seed rows.)
@@ -4830,7 +4863,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """The standalone components section duplicated id="componentsTable", and duplicate ids
         make querySelector return only the first — so the financial readers were bound to the
         wizard table and its mismatched columns."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         # Exactly one element may own the id.
         self.assertEqual(len(re.findall(r'id="componentsTable"', index_source)), 1)
@@ -4914,7 +4947,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('90', html)
         self.assertIn('12%', html)
         self.assertNotIn('ترتيب / حذف', html)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function persistFinancialStudyDraftState()', index_source)
         self.assertIn("data-key=\"financial_study_model\"", index_source)
         self.assertIn('sensitivity: collectSensitivityVariables()', index_source)
@@ -4975,7 +5008,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         be configured on a project that has no sellable units and stayed silently zero; and no
         screen stated how any derived figure had been arrived at.
         """
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
 
         # 1. Both percentage columns of the stage table state their sum and what is unassigned.
         self.assertIn('id="scheduleCostPctTotal"', index_source)
@@ -5024,7 +5057,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             "if (fundTb) fundTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td>", index_source)
 
     def test_location_roads_timestamp_and_financial_schedule_guards(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn("infoBtn.textContent = 'جلب معلومات المسافة والمدة'", index_source)
         self.assertIn('location_data_fetched_at', index_source)
         self.assertIn('formatLocationDataFetchedAt', index_source)
@@ -5119,7 +5152,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # (croquis_expiry_date was retired, and the client-side date parser went with its badge.)
         self.assertEqual(next(f for f in db.PREBUILT_FIELDS if f['key'] == 'deed_date')['type'], 'text')
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('const expDate = new Date(input.value);', index_source)
         self.assertNotIn('parseDocumentDate', index_source)
 
@@ -5136,7 +5169,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_building_rules_are_split_into_ratio_and_setbacks_fields(self):
         """The visible form separates ratios from setbacks without losing legacy payload support."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('building_ratio_setbacks: parcel.building_ratio || parcel.setbacks', index_source)
         self.assertIn('building_ratio_coverage: parcel.building_ratio_coverage || buildingRatioCoverageText', index_source)
         self.assertIn('setbacks: parcel.setbacks || setbacksText', index_source)
@@ -5291,7 +5324,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(f"'failureReason': '{reason}'", source)
         self.assertIn('ولهذا لم تتغير البيانات', source)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("'لم يتم تحديث أي حقل: ' + reason", index_source)
         self.assertIn('res.failureReason', index_source)
         self.assertIn("' حقلًا. راجع النتائج قبل الاعتماد.'", index_source)
@@ -5474,7 +5507,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         foreign = client.get('/api/extract-croquis/' + job_id, headers=self._headers(self.token_b))
         self.assertEqual(foreign.status_code, 404)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId))", index_source)
         self.assertIn('res.jobId', index_source)
 
@@ -5913,7 +5946,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                          ['معلم 2', 'معلم 4'])
         self.assertEqual(len(self.application_module.maps_service.select_map_landmark_rows(
             [{'name': f'معلم {index}'} for index in range(1, 10)])), 7)
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         analyze_body = source.split('async function analyzeTenantSiteOnce()', 1)[1].split('const MAP_PREVIEW_VIEW_DEFS', 1)[0]
         self.assertIn('generateMaps: false', analyze_body)
         self.assertNotIn('await previewProjectMap(', analyze_body)
@@ -5950,7 +5983,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
     def test_map_gallery_respects_approval_stages_and_editable_saved_maps(self):
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         self.assertIn('function mapPreviewStoredUrl(view)', source)
         self.assertIn("...(view.editableKeys || [])", source)
         self.assertIn('function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {})', source)
@@ -5966,7 +5999,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const generated = mapPreviewIsGenerated(view);', source)
 
     def test_overview_map_has_dedicated_generation_and_edit_modes(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         approval_panel = index_source.split('id="locationAnalysisApprovalPanel"', 1)[1].split('</div>', 1)[0]
         self.assertIn('id="generateOverviewMapButton"', approval_panel)
         self.assertIn('onclick="generateOverviewMap()"', approval_panel)
@@ -6056,7 +6089,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(composed['placeholders']['##MAP_OVERVIEW##'], final_path)
         self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
 
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         drawing_start = source.split('async function toggleTenantPolygonMode()', 1)[1].split('function cancelTenantPolygonMode()', 1)[0]
         boundary_confirm = source.split('async function confirmTenantPolygon()', 1)[1].split('async function startTenantMapPinMode()', 1)[0]
         pin_start = source.split('async function startTenantMapPinMode()', 1)[1].split('function undoTenantMapPin()', 1)[0]
@@ -6128,7 +6161,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(composed['access_roads'][0]['label_scale'], 0.8)
         self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
 
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
         for label in ('إعادة توليد الخريطة', 'اعتماد الخريطة', 'إضافة / تعديل الطرق', 'رسم مسار الطرق'):
             self.assertIn(label, workflow)
@@ -6239,7 +6272,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len({tuple(item['label_point']) for item in composed['catchment_landmarks']}), 3)
         self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
 
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
         self.assertIn("view.mapType === 'catchment' && tenantCatchmentEditMode", workflow)
         self.assertIn("view.mapType === 'catchment' && generated", workflow)
@@ -6347,7 +6380,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(composed['landmark_map_items']), 2)
         self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
 
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
         self.assertIn("view.mapType === 'landmarks' && tenantLandmarksEditMode", workflow)
         self.assertIn("view.mapType === 'landmarks' && generated", workflow)
@@ -6377,7 +6410,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("project_data.get('landmark_label_positions')", maps_source)
 
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         self.assertNotIn('lt-location-input', source)
         self.assertNotIn('location_url', source)
         self.assertNotIn('<th>رابط الموقع</th>', source)
@@ -6411,7 +6444,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
@@ -6440,7 +6473,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
     def test_map_section_has_no_regeneration_controls(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('data-map-action="regenerate"', index_source)
         self.assertNotIn(
             "closeTenantDropdown(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false})",
@@ -6452,7 +6485,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
 
     def test_client_entered_land_fields_are_highlighted(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'])", index_source)
         self.assertIn('tenant-client-required-field', index_source)
         self.assertIn('tenant-client-complete-field', index_source)
@@ -6465,7 +6498,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey)", index_source)
 
     def test_client_entered_land_fields_validation_and_placeholders(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         db_source = (ROOT / 'db.py').read_text(encoding='utf-8')
 
         # DB prebuilt field placeholders
@@ -6486,7 +6519,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const errors = validateLandCroquisClientFields();', index_source)
 
     def test_financial_schedule_percentages_and_sales_exit_hiding(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         proto_source = (ROOT / 'THE-VIEW-Financial-Model-FINAL-v2.html').read_text(encoding='utf-8')
 
         # Schedule table percentage clamping
@@ -6610,7 +6643,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         approval = client.post('/api/project-draft/request-approval', headers=headers, json={})
         self.assertEqual(approval.status_code, 200, approval.get_json())
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # A section nobody opened had no stored status, and the approval gate walks the stored
         # map, so the file could be submitted with that section never approved.
         self.assertIn('applySectionStatuses(initialStatuses);', index_source)
@@ -6618,7 +6651,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('def update_draft_section_statuses(', (ROOT / 'db.py').read_text(encoding='utf-8'))
 
     def test_components_block_shows_the_regulated_uses(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # The activities are chosen in the components table, so the regulated list belongs there.
         self.assertIn('id="componentsAllowedUsesNote"', index_source)
         self.assertIn('function renderComponentsAllowedUsesNote(allowedUses, status)', index_source)
@@ -6709,7 +6742,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         ))
 
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('def survey_polygon_from_project(', source)
         self.assertIn('Using croquis survey polygon with', source)
         self.assertIn('def _google_bounds_polygon(', source)
@@ -6725,7 +6758,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         import maps_service
 
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # Clicks were converted against the site pin while the image is centred on the plot,
         # which put every manually drawn boundary off by that distance.
         self.assertIn("result['centers'] = {", source)
@@ -6780,7 +6813,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(shaped[-1], '\ufec3')
 
     def test_progress_bars_never_jump_backward(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);', index_source)
         self.assertIn('const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;', index_source)
         self.assertIn('const value = Math.max(genProgressValue, requested);', index_source)
@@ -6901,7 +6934,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('timeout=600', app_source)
         self.assertNotIn('شريحة كحد أقصى)', app_source)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # Regeneration always re-plans, and the previous deck is never displayed while it runs.
         self.assertIn("clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض')", index_source)
         self.assertIn('const planResponse = await requestTenantSlidePlan(tenantProjectData', index_source)
@@ -6953,7 +6986,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(renumbered, engine.renumber_presentation_slides(
             renumbered, branding=branding, project_data=project))
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function renumberTenantSlides()', index_source)
         self.assertIn('renumberTenantSlides();\n      renderTenantSlides();', index_source)
         create_source = index_source.split('async function saveTenantPresentation', 1)[1].split('async function openExistingPresentation', 1)[0]
@@ -7053,7 +7086,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_the_slide_structure_is_not_client_facing(self):
         """Owner rule: the client never operates the structure — no plan panel, no editable plan
         titles, and no button that builds or rebuilds it outside «توليد العرض»."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         for gone in (
             'تحديث الهيكل المقترح',
             'إعداد الهيكل المقترح',
@@ -7162,7 +7195,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             stored = db.get_presentation(presentation_ids[0], tenant_id=self.tenant_a)
             self.assertEqual(stored['draft_id'], draft_alpha)
 
-        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_html = read_frontend_text()
         archive_source = index_html[
             index_html.index('async function openTenantPresentations'):
             index_html.index('async function restoreProjectDraft')
@@ -7235,7 +7268,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         denied = client.get(f'/api/usage-totals?draftIds={draft_id}')
         self.assertEqual(denied.status_code, 401)
 
-        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_html = read_frontend_text()
         self.assertIn("'/api/usage-totals?draftIds='", index_html)
         self.assertIn("'/api/usage-totals?presentationIds='", index_html)
         self.assertIn('function formatUsageCost(usd)', index_html)
@@ -7365,7 +7398,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(by_draft['unresolved'], 1)
         self.assertEqual(by_draft['state'], 'pending')
         self.assertEqual(by_draft['state_label'], 'قيد الاستكمال')
-        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_html = read_frontend_text()
         self.assertIn('aiReconcileStatusText', index_html)
         self.assertIn('قيد الاستكمال', index_html)
         self.assertIn('تحتاج مطابقة', index_html)
@@ -7462,7 +7495,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('أضف سطر الواجهة البحرية', saved_contents)
         self.assertIn('واجهة بحرية', saved_presentation['slidesData'][0]['html'])
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function renderChangeLogEntry(entry)', index_source)
         self.assertIn('async function showDraftEditLog(draftId)', index_source)
         self.assertIn('showDraftEditLog(', index_source)
@@ -7488,7 +7521,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(chat.call_count, 1)
         self.assertEqual(reply['slidesData'], slides)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # One chat line: attach, write, send. The suggestions drawer is gone.
         self.assertNotIn('اقتراحات سريعة', index_source)
         self.assertNotIn('function setTenantChatExample', index_source)
@@ -7502,7 +7535,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('trainingChatImageFile', composer)
 
     def test_refresh_on_the_slides_route_reopens_its_presentation(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # The route carries no identity, and it used to be shown as-is: an empty workspace.
         self.assertIn('} else if (TENANT_NAVIGATION_CONTEXT_PAGES.has(requestedPage)) {', index_source)
         self.assertIn('if (!(await restoreTenantNavigation(requestedPage))) {', index_source)
@@ -7656,7 +7689,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("preferred_indexes = list(focus_indexes)", app_source)
         self.assertIn("'memory': chat_memory", app_source)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('memory: tenantDesignerChatMemory,', index_source)
         self.assertIn('focusIndexes: tenantChatFocusIndexes,', index_source)
         self.assertIn('function applyDesignerChatMemory(reply)', index_source)
@@ -7857,7 +7890,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(os.path.exists(module._job_path(
             '.designer_chat_jobs', self.tenant_a, request_id) + '.claim'))
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         poll_body = index_source.split('async function requestTenantDesignerChat(', 1)[1]
         poll_body = poll_body.split('\n    function applyTenantDesignerChatResult', 1)[0]
         self.assertIn('T_DESIGNER_JOBS_KEY', index_source)
@@ -8021,7 +8054,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("_merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)", app_source)
         self.assertIn("'chatHistory': persisted_project_data['designerChat']['messages']", app_source)
         self.assertIn('function applyDesignerChatHistory(reply)', index_source)
@@ -8385,7 +8418,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                              dynamicRows={'components': [{'name': 'شقق سكنية', 'builtArea': 24000}]})
         self.assertTrue(engine.financial_study_has_real_input(by_components))
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("if (key === 'financial_study_model') {", index_source)
         self.assertIn('const report = tenantFinancialPresentationReport', index_source)
         self.assertIn("tenantFinancialPresentationReport = financialStudyHasRealInput", index_source)
@@ -8422,7 +8455,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                              headers=self._headers(self.token_a))
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.get_json()['failureReason'], 'job_not_found')
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('started < 2 * 60 * 1000', index_source)
         self.assertIn('if (completed?.plan || !res.fallbackPlan) return completed;', index_source)
         self.assertIn("plan: { ...res.fallbackPlan, source: 'fallback'", index_source)
@@ -8660,7 +8693,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('maps.googleapis.com/maps/api/directions/json', maps_source)
 
     def test_visual_concept_replaces_legacy_image_workflow_pages(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('id="section-visual-concept"', index_source)
         self.assertIn("createProjectSectionHeader('section-visual-concept', 'التصور البصري')", index_source)
         self.assertIn('function addVisualConceptSection(form', index_source)
@@ -8730,7 +8763,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantMoodboardPreview', index_source)
 
     def test_ui_carries_no_static_how_to_hints(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         # Owner rule: the screen states what a thing is, never how to operate it.
         for instruction in (
             'ولّد الصورة الرئيسية أولًا من بيانات المشروع',
@@ -8755,7 +8788,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(kept, index_source, kept)
 
     def test_visual_concept_approval_is_one_toggle_per_image(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         start = index_source.index('function renderVisualConceptSlot(slotDef, locked)')
         body = index_source[start:index_source.index('function visualConceptImageUrl(url)')]
         # Same rule as a section: one button, status مسودة / معتمد, card frozen while approved.
@@ -8774,7 +8807,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("if (slotId === 'cover' && tenantCreativeImages) tenantCreativeImages.cover = '';", index_source)
 
     def test_visual_concept_generation_writes_to_the_live_slot(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         start = index_source.index('async function generateVisualConceptImage(slotId)')
         body = index_source[start:index_source.index('function approveVisualConceptImage(slotId)')]
         # renderVisualConceptPage reassigns tenantVisualConceptState, so a slot captured
@@ -8908,7 +8941,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('cover.png', str(references[0]))
         self.assertTrue(any('ref-a' in str(item) for item in references))
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('visualConceptInteriorComponentSelect', index_source)
         self.assertIn('function visualConceptInteriorSlotId', index_source)
         self.assertNotIn("function addConceptualPlansSection(form, before)", index_source)
@@ -8976,7 +9009,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(summary_ready)
         self.assertEqual(summary_missing, [])
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         module_source = (ROOT / 'executive_content.py').read_text(encoding='utf-8')
         self.assertIn("function addExecutiveContentSection(form, before)", index_source)
@@ -9047,7 +9080,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('مشروع ذا فيو في جدة', summary_raw.get_json()['text'])
 
     def test_market_study_fields_and_section_are_wired(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("function addMarketStudySection(form, before)", index_source)
         self.assertIn("addMarketStudySection(form);", index_source)
         self.assertIn("id = 'section-market-study'", index_source)
@@ -9304,7 +9337,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(cleaned['price_value'], '1500000')
         self.assertEqual(cleaned['source_urls'], [])
         self.assertEqual(cleaned['field_sources'], {})
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         area_source = index_source[index_source.index('function renderCompetitorAreaInputs'):
                                    index_source.index('function competitorLogoPath')]
         for expected in ('data-field="area_mode"', 'data-field="area_sqm"', 'data-field="area_from"',
@@ -9364,7 +9397,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('"area_from"', prompt)
         self.assertIn('"area_to"', prompt)
         self.assertIn('املأ الحقول الناقصة فقط', prompt)
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('cacheCompetitorPriceInputs', index_source)
         self.assertIn('price_cache: competitorPriceCache(tr)', index_source)
         self.assertIn('data-field="classification"', index_source)
@@ -9376,7 +9409,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(market_study.resolve_competitor_radius_km('auto'), 10)
         self.assertEqual(market_study.resolve_competitor_radius_km('custom', 7), 7)
         self.assertIsNone(market_study.resolve_competitor_radius_km('city'))
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertNotIn('تلقائي حسب نوع المشروع', index_source)
         self.assertIn('<option value="10" selected>10 كم</option>', index_source)
 
@@ -9716,7 +9749,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('استخدم الصورة الرئيسية بوضوح', closing_msg)
 
         # Form renders contact section at the end of the form and sidebar
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("renderFormSection('contact')", index_source)
         exec_pos = index_source.index('addExecutiveContentSection(form);')
         contact_pos = index_source.index("renderFormSection('contact')", exec_pos)
@@ -9915,7 +9948,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """Selecting a linked component in table 4 (بنود الإيرادات) must remain editable:
         changing to another component or choosing 'غير مرتبط بمكون' must not revert to
         the previously saved componentId."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('const compSelect = tr.querySelector(\'[data-field="component"] select\');', index_source)
         self.assertIn('compSelect.addEventListener(\'change\', onCompChange);', index_source)
         self.assertIn('tr.dataset.componentId = compSelect.value || \'\';', index_source)
@@ -9948,7 +9981,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Slides must be unchanged
         self.assertEqual(data['slidesData'], slides)
         # Client must handle ask/chat_only without navigating
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn("if (reply.action === 'ask' || reply.action === 'chat_only') {", index_source)
 
     def test_designer_chat_chat_only_returns_no_mutation(self):
@@ -9994,7 +10027,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """A bare number in the message must not cause the client to navigate to that
         slide index before the server responds. The client sends it as-is and lets the
         model interpret context."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]
         chat_body = chat_body.split('\n    async function ', 1)[0]
         # The old client-side regex that detected slide numbers and called selectTenantSlide
@@ -10008,7 +10041,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_executor_navigation_only_on_editing_phase_signal(self):
         """The client must navigate to a slide only when the polling response carries
         phase='editing' with a valid activeSlideIndex, and must deduplicate."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         poll_body = index_source.split('async function requestTenantDesignerChat(', 1)[1]
         poll_body = poll_body.split('\n    async function ', 1)[0]
         self.assertIn("result?.phase === 'editing'", poll_body)
@@ -10032,7 +10065,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_watermark_overlay_does_not_block_manual_slide_editing(self):
         """Only the visible watermark logo may receive pointer events in edit mode."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         watermark_css = index_source.split(
             '/* Keep the full-slide watermark overlay click-through while editing;', 1
         )[1].split('.slide-resize-handle', 1)[0]
@@ -10174,7 +10207,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(expected_filter, renumbered[0]['html'])
 
         # The preview carries the same display-time healing for draft-held slides.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn(expected_filter, index_source)
 
     def test_watermark_idempotent_on_repeated_normalization(self):
@@ -10354,7 +10387,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('data-slide-watermark="true"', data['slidesData'][0]['html'])
 
     def test_manual_slide_watermark_control_tracks_html_and_edit_history(self):
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('id="settingsWatermarkPreview"', index_source)
         self.assertIn('id="watermarkFileInput"', index_source)
         self.assertIn("api('POST', '/api/upload/watermark', form, true)", index_source)
@@ -10502,7 +10535,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(new_src, reshown)
         self.assertIn('translate(40px, 30px)', reshown)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function refreshWatermarkSrc(html, newUrl)', index_source)
 
     def test_watermark_deterministic_verbs_scope_and_no_size_up_on_show(self):
@@ -10564,7 +10597,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_presentation_sync_failure_is_reported_not_swallowed(self):
         """saveProjectAsDraftNow must report a presentation PUT failure instead of
         silently claiming full success. The JS must not mark the draft clean on failure."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         save_body = index_source.split('async function saveProjectAsDraftNow(', 1)[1]
         save_body = save_body.split('\n    async function ', 1)[0]
         # The snapshot is taken before the async save so both records see the same data.

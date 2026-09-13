@@ -63,7 +63,12 @@ the very next line then stripped. Do not wire it back in.
 ## Stack
 
 - Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
-- Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
+- Frontend: one single-page app. `index.html` is a slim shell (~1.2k lines: markup plus
+  resource references). Styles live in `assets/css/` (`base.css`, `project-form.css`) and code in
+  `assets/js/` (`00-core.js` … `17-admin-boot.js`, ~1–1.5k lines each, ordered classic
+  `<script src>` tags so every function still shares one global scope — no `async`, no
+  `type=module`). Edit the part file, never re-inline the code. `node scripts/verify-frontend.js`
+  guards the shell wiring (order, no orphans, no inline blocks, `node --check` per file).
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter for all text/image generation — see `.env`.
 - Spend metering: every OpenRouter call lands in `ai_usage_events` (tokens verbatim, dollars via
   `/generation`), every billable Maps call in `map_usage_events` (units × `MAPS_SKU_UNIT_PRICES`,
@@ -207,18 +212,16 @@ Python syntax check:
 D:\workflow\.venv\Scripts\python.exe -c "import ast; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py')]"
 ```
 
-Frontend JS syntax check (extract the inline script and run `node --check`). Locate the block
-dynamically — its start line moves whenever markup is added above it:
+Frontend JS check (shell wiring + `node --check` per file):
 ```powershell
-$open = (Select-String -Path D:\workflow\index.html -Pattern '^\s*<script>\s*$' | Select-Object -Last 1).LineNumber
-$close = (Select-String -Path D:\workflow\index.html -Pattern '</script>' -SimpleMatch | Select-Object -Last 1).LineNumber
-(Get-Content D:\workflow\index.html)[$open..($close-2)] -join "`n" | Set-Content "$env:TEMP\wf_check.js" -Encoding UTF8
-node --check "$env:TEMP\wf_check.js"
+node D:\workflow\scripts\verify-frontend.js
 ```
 
-Note: many tests assert against **literal source strings** in `index.html` / `app.py`. Renaming a
+Note: many tests assert against **literal source strings** in the frontend / `app.py`. Renaming a
 function or changing prompt wording can fail a test even when behaviour is correct — update the
-assertion deliberately, not reflexively.
+assertion deliberately, not reflexively. Frontend assertions must read the combined client source
+via the `read_frontend_text()` helper in each suite (shell + `assets/css` + `assets/js` in load
+order, mirroring `FRONTEND_JS_ORDER`), never `index.html` alone — the shell carries no code.
 
 ## Land / croquis subsystem gotchas
 
@@ -1200,15 +1203,15 @@ instead of adding more literals:
   (JSON-compatible blocks between the `I18N_*_BEGIN/END` markers — edit the text, never the
   markers) plus the runtime (`WFI18n.getLang/setLang/toggle/t/applyI18nToDOM`, storage key
   `wf.lang`, default `ar`). It loads from `/assets/i18n.js` with an absolute path before the
-  main inline script; a relative URL would 404 against client routes (`/app/...`, `/c/<slug>`).
+  application scripts; a relative URL would 404 against client routes (`/app/...`, `/c/<slug>`).
 - JS uses the `WFT('section.key', 'Arabic fallback')` global — never a bare `t()`, which would
-  collide with locals in the one shared inline-script scope. Static HTML uses `data-i18n` /
+  collide with locals in the one shared script scope. Static HTML uses `data-i18n` /
   `data-i18n-ph` / `data-i18n-title` / `data-i18n-aria` and keeps its Arabic text content as the
   no-JS fallback. The switch is the text-only `#langToggleBtn` (`toggleAppLanguage()`); it flips
   `document.dir` and fires `wf:lang` so dynamic views re-apply. Text-only per the no-icons rule.
 - `tests/test_i18n.py` guards all of it: dict key-set sync, real English on the en side (no Arabic
   script outside `lang.*`), the `EN_AUTO` map (1000+ exact-match legacy strings, same no-Arabic
-  rule, product-glossary anchors like `كروكي` → `Croquis`), load order before the inline script,
+   rule, product-glossary anchors like `كروكي` → `Croquis`), load order before the app scripts,
   known-key bindings, `node --check`, the skip list (generated slides, chat logs, textarea,
   select/option stay Arabic — the offer language is separate from the UI language), and a ratchet
   (`tests/i18n_hardcoded_baseline.txt` — the legacy toast / confirm / placeholder / loader

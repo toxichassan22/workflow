@@ -21,6 +21,25 @@ import auth
 import db
 from design_templates import build_design_rules
 
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+
+def read_frontend_text():
+    """The full client source: shell + styles + scripts in load order."""
+    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
+        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for name in FRONTEND_JS_ORDER:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
 
 def _reply_with(actions, text='تم'):
     blocks = '\n'.join('```action\n' + json.dumps(action, ensure_ascii=False) + '\n```'
@@ -379,7 +398,7 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('/tenant-assets/company.png', fallback)
 
     def test_presentation_preview_exposes_text_and_element_editing(self):
-        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        source = read_frontend_text()
         self.assertIn('toggleSlideInlineEditing', source)
         self.assertIn('toggleSlideElementEditing', source)
         self.assertIn('commitSlideElementMove', source)

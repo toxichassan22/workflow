@@ -20,6 +20,25 @@ import auth
 import db
 from design_templates import build_font_css
 
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+
+def read_frontend_text():
+    """The full client source: shell + styles + scripts in load order."""
+    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
+        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for name in FRONTEND_JS_ORDER:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
 
 class FontWorkflowTests(unittest.TestCase):
     @classmethod
@@ -234,7 +253,7 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertIn('padding:10px', cleaned)
         self.assertIn('font-size:48px', cleaned)
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('function stripSlideFontDeclarations(html)', index_source)
         self.assertIn('let cleanHtml = stripSlideFontDeclarations(html);', index_source)
 
@@ -282,7 +301,7 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertTrue(status['scripts']['latin']['chosen'])
         self.assertEqual(status['scripts']['arabic']['font'], status['scripts']['latin']['font'])
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('async function selectPresentationFont(familyName)', index_source)
         self.assertIn("for (const script of ['arabic', 'latin'])", index_source)
         # The two-selector version is gone: the owner asked for one font for everything.
@@ -334,7 +353,7 @@ class FontWorkflowTests(unittest.TestCase):
         # The other script is untouched, and the reader is told so instead of guessing.
         self.assertFalse(status['scripts']['latin']['chosen'])
 
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        index_source = read_frontend_text()
         self.assertIn('id="presentationFontSelect"', index_source)
         self.assertIn('async function renderPresentationFontStatus()', index_source)
         self.assertIn('المطبَّق الآن', index_source)

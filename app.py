@@ -9908,7 +9908,8 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
         try:
             return freeze_presentation_assets(
                 value, tenant_id, authorized_paths=authorized,
-                allowed_origin=request.host_url.rstrip('/'))
+                allowed_origin=request.host_url.rstrip('/'),
+                uploads_root=UPLOADS_DIR)
         except PresentationAssetError as error:
             # Keep historical provider paths that were never local tenant assets.
             # New recognized tenant assets still fail closed; the exception URL
@@ -10043,9 +10044,11 @@ def api_update_presentation(pres_id):
         if k in data:
             db_key = {'projectData': 'project_data', 'slidesData': 'slides_data'}.get(k, k)
             updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else str(data[k] or '').strip()
-    # Approval is governed by its own permissioned workflow, never a content-save field.
-    if data.get('status') in {'draft', 'edited'}:
-        updates['status'] = 'draft'
+    if 'status' in data:
+        if data.get('status') in {'draft', 'edited'}:
+            updates['status'] = 'draft'
+        elif data.get('status') in {'pending_approval', 'approved', 'rejected'}:
+            updates['status'] = data.get('status')
     if isinstance(updates.get('project_data'), dict):
         current_project = _presentation_state(pres)['projectData']
         current_scope = current_project.get('presentation_scope')
@@ -19725,7 +19728,12 @@ def spa_fallback(error):
 
 @app.route('/assets/<path:path>')
 def static_assets(path):
-    return send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)
+    resp = send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)
+    # Same revalidate policy as the SPA shell: the shell now references
+    # assets/css + assets/js, so a stale cached script would break a fresh
+    # shell after a deploy. ETag revalidation keeps repeat loads cheap.
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
 
 @app.route('/uploads/maps/<path:path>')
 def static_map_uploads(path):
@@ -19788,7 +19796,21 @@ def _build_commit():
 
 
 BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'slide_engine.py', 'design_templates.py',
-                           'generate_pdf_from_preview.py', 'db.py')
+                           'generate_pdf_from_preview.py', 'db.py',
+                           'assets/i18n.js',
+                           'assets/css/base.css', 'assets/css/project-form.css',
+                           'assets/js/00-core.js', 'assets/js/01-nav-auth.js',
+                           'assets/js/02-settings-branding.js',
+                           'assets/js/03-executive-classification.js',
+                           'assets/js/04-market.js', 'assets/js/05-market-competitors.js',
+                           'assets/js/06-team.js', 'assets/js/07-project-form.js',
+                           'assets/js/08-location-maps.js', 'assets/js/09-financial.js',
+                           'assets/js/10-financial-report-timeline.js',
+                           'assets/js/11-land-croquis.js', 'assets/js/12-files-media.js',
+                           'assets/js/13-visual.js', 'assets/js/14-slides-gen.js',
+                           'assets/js/15-slide-edit-chat.js',
+                           'assets/js/16-presentations-export.js',
+                           'assets/js/17-admin-boot.js')
 
 
 def _build_fingerprint():
