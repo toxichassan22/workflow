@@ -485,6 +485,20 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_mapusage_presentation ON map_usage_events(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_mapusage_created ON map_usage_events(created_at);
 
+    -- Persistent Google discovery cache. Roads, landmarks, geocodes and matrix
+    -- answers for one rounded coordinate do not change between analyses, so a
+    -- re-analysis of the same site must not pay Google a second time. Rows are
+    -- tenant-scoped and carry an expiry. Cached hits record no spend.
+    CREATE TABLE IF NOT EXISTS maps_discovery_cache (
+        cache_key TEXT PRIMARY KEY,
+        tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_maps_cache_tenant ON maps_discovery_cache(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_maps_cache_expiry ON maps_discovery_cache(expires_at);
+
     CREATE TABLE IF NOT EXISTS tenant_ledger (
         id TEXT PRIMARY KEY,
         tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
@@ -4523,7 +4537,8 @@ def get_maps_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit
     by_sku = [dict(r) for r in conn.execute(
         'SELECT sku, COUNT(*) AS calls, '
         'COALESCE(SUM(units), 0) AS units, '
-        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd, '
+        'COALESCE(MAX(unit_price_usd), 0) AS unit_price_usd '
         f'FROM map_usage_events {where} GROUP BY sku ORDER BY cost_usd DESC',
         params
     ).fetchall()]
@@ -4534,6 +4549,44 @@ def get_maps_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit
         params + [int(limit)]
     ).fetchall()]
     return {'totals': totals, 'by_flow': by_flow, 'by_sku': by_sku, 'recent': recent}
+
+
+def get_maps_discovery_cache(tenant_id, cache_key):
+    """Cached Google discovery payload, or None on miss/expiry. Never raises."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT payload_json FROM maps_discovery_cache '
+            "WHERE cache_key = ? AND expires_at > datetime('now')",
+            (str(cache_key),)
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(dict(row).get('payload_json') or 'null')
+    except Exception:
+        return None
+
+
+def set_maps_discovery_cache(tenant_id, cache_key, payload, ttl_days=30):
+    """Store one Google discovery payload. Never raises."""
+    try:
+        from datetime import timedelta
+        days = max(1, int(ttl_days or 30))
+        expires_at = (datetime.utcnow() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        conn = get_db()
+        conn.execute(
+            'INSERT INTO maps_discovery_cache (cache_key, tenant_id, payload_json, expires_at) '
+            'VALUES (?, ?, ?, ?) '
+            'ON CONFLICT (cache_key) DO UPDATE SET tenant_id = excluded.tenant_id, '
+            "payload_json = excluded.payload_json, created_at = datetime('now'), "
+            "expires_at = excluded.expires_at",
+            (str(cache_key), tenant_id, json.dumps(payload, ensure_ascii=False), expires_at)
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        print(f"[MAPS CACHE] store failed: {exc}")
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

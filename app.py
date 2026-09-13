@@ -1427,6 +1427,7 @@ def api_ai_usage():
             'success': True,
             'usage': ai_usage,
             'maps': maps_usage,
+            'mapsSkuPrices': dict(maps_service.MAPS_SKU_UNIT_PRICES),
             'combined': {
                 'calls': int(ai_usage['totals'].get('calls') or 0) + int(maps_usage['totals'].get('calls') or 0),
                 'cost_usd': ai_cost + maps_cost,
@@ -9140,8 +9141,13 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         )
     if not city_items and not city_error:
         city_warning = 'لم تُرجع Google Places أي معالم للمدينة ضمن النطاق المحدد'
-    roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=6)
-    enrich_road_metrics(roads)
+    # One Google discovery per analysis: the main and secondary road lists are
+    # split locally from the same probes instead of paying for a second
+    # 8-probe discovery. Previously every analysis burned ~16 Roads plus
+    # ~16 Directions calls here alone.
+    all_roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=10)
+    enrich_road_metrics(all_roads)
+    roads = all_roads[:6]
 
     polygon = None
     raw_polygon = project_data.get('location_polygon')
@@ -9189,16 +9195,15 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
 
-    secondary_roads = maps_service.discover_nearby_roads(
-        lat, lng, tenant_id=tenant_id, max_results=4, lat_step=0.0006, lng_step=0.0008
-    )
     secondary_names = []
     filtered_secondary_roads = []
-    for road in secondary_roads:
+    for road in all_roads[6:]:
         name = road.get('name')
         if name and name not in road_names and name not in secondary_names:
             secondary_names.append(name)
             filtered_secondary_roads.append(road)
+        if len(filtered_secondary_roads) >= 4:
+            break
     if filtered_secondary_roads:
         enrich_road_metrics(filtered_secondary_roads)
         fields['main_roads'] = '\n'.join(road_names)

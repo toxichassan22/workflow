@@ -306,21 +306,23 @@ def _check_maps_rate_limit(tenant_id):
 # ─────────────────────────────────────────────────────────────────────────────
 # Maps spend metering: Google returns no per-call cost, so every billable
 # request is counted here with its SKU and a unit price in dollars. Prices are
-# ceiling estimates from the public Maps Platform price list (global, 2026)
-# covering the highest tier each call can land in. Distance Matrix always sends
-# traffic parameters so it bills as Advanced. Places calls use the New API
-# where the nearby search field mask can reach the Enterprise tier. Static
-# Maps follows the current price list, not the legacy one. Verify them against
-# Cloud Billing and override with the MAPS_SKU_PRICES env var (a JSON object
-# mapping SKU names to dollars). The unit price is stored on each row, so a
-# later price change never rewrites history. Only completed provider requests
-# are recorded: served-from-cache reads and failed calls carry no spend.
-# Google free usage caps are intentionally NOT subtracted: the recorded cost
-# is the billable figure and any free allowance stays a platform margin.
+# the first-tier list prices from the public Maps Platform price list
+# (global, updated 2026-09-01) at dollars per billable event, matching the
+# SKU ids on the invoice: Directions 28A8-3EB4-4595 at $5.00/1000,
+# Distance Matrix Advanced DFAE-763F-CF6E at $10.00/1000 elements,
+# Static Maps 3C2D-B525-2E5F at $2.00/1000, Roads Nearest Road at
+# $10.00/1000. Free usage caps (10,000 Essentials, 5,000 Pro, 1,000
+# Enterprise) and the monthly credit are NOT subtracted: verify prices
+# against Cloud Billing and override with the MAPS_SKU_PRICES env var (a JSON
+# object mapping SKU names to dollars). The unit price is stored on each row,
+# so a later price change never rewrites history. Only completed provider
+# requests are recorded: served-from-cache reads and failed calls carry no
+# spend. Google free usage caps are intentionally NOT subtracted: the recorded
+# cost is the billable figure and any free allowance stays a platform margin.
 # ─────────────────────────────────────────────────────────────────────────────
 MAPS_SKU_UNIT_PRICES = {
     'geocode': 0.005,
-    'staticmap': 0.014,
+    'staticmap': 0.002,
     'places_text': 0.035,
     'places_nearby': 0.040,
     'distance_matrix': 0.010,
@@ -421,6 +423,56 @@ def _record_maps_usage(usage_ctx, sku, units=1):
 
 def _get_api_key():
     return os.environ.get('GOOGLE_MAPS_API_KEY', '') or GOOGLE_API_KEY
+
+
+def _discovery_cache_key(tenant_id, kind, lat=None, lng=None, extra=''):
+    """Stable key for one Google discovery answer. None when unkeyable."""
+    try:
+        lat_part = f"{round(float(lat), 4):.4f}" if lat is not None else '-'
+        lng_part = f"{round(float(lng), 4):.4f}" if lng is not None else '-'
+    except (TypeError, ValueError):
+        return None
+    return f"maps:{kind}:{str(tenant_id or 'shared')}:{lat_part}:{lng_part}:{extra}"
+
+
+def _in_flask_context():
+    try:
+        from flask import has_app_context
+        return bool(has_app_context())
+    except Exception:
+        return False
+
+
+def _with_flask_context(func, *args, **kwargs):
+    """Run a db helper with a Flask context, borrowing the app in workers."""
+    if _in_flask_context():
+        return func(*args, **kwargs)
+    import app as _flask_app
+    with _flask_app.app.app_context():
+        return func(*args, **kwargs)
+
+
+def _discovery_cache_get(tenant_id, cache_key):
+    """Cached discovery payload, or None. A hit must skip Google entirely."""
+    if not cache_key:
+        return None
+    try:
+        import db as _db
+        return _with_flask_context(_db.get_maps_discovery_cache, tenant_id, cache_key)
+    except Exception:
+        return None
+
+
+def _discovery_cache_put(tenant_id, cache_key, payload, ttl_days=30):
+    """Persist one discovery payload for later runs. Never raises."""
+    if not cache_key:
+        return False
+    try:
+        import db as _db
+        return bool(_with_flask_context(
+            _db.set_maps_discovery_cache, tenant_id, cache_key, payload, ttl_days))
+    except Exception:
+        return False
 
 
 def _has_api_key():
@@ -539,6 +591,12 @@ def geocode_address(address, tenant_id=None, usage_ctx=None):
         if limit_error:
             return limit_error
 
+    normalized = re.sub(r'\s+', ' ', str(address or '').strip().casefold())
+    cache_key = _discovery_cache_key(tenant_id, 'geocode', extra=normalized)
+    cached = _discovery_cache_get(tenant_id, cache_key)
+    if isinstance(cached, dict) and cached.get('success'):
+        return cached
+
     url = 'https://maps.googleapis.com/maps/api/geocode/json'
     params = {'address': address, 'key': _get_api_key()}
     try:
@@ -570,7 +628,7 @@ def geocode_address(address, tenant_id=None, usage_ctx=None):
         _record_maps_usage(
             usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
             'geocode', 1)
-        return {
+        resolved = {
             'success': True,
             'lat': loc['lat'],
             'lng': loc['lng'],
@@ -580,6 +638,8 @@ def geocode_address(address, tenant_id=None, usage_ctx=None):
             'location_type': location_type,
             'precision': 'high' if location_type == 'ROOFTOP' else 'medium' if location_type == 'RANGE_INTERPOLATED' else 'low',
         }
+        _discovery_cache_put(tenant_id, cache_key, resolved, ttl_days=30)
+        return resolved
     except Exception as e:
         return {'error': f"Geocoding request failed: {str(e)}"}
 
@@ -600,6 +660,10 @@ def _normalize_city_name(value):
 def reverse_geocode_location(lat, lng, tenant_id=None, language='en', usage_ctx=None):
     if not _has_api_key():
         return {}
+    cache_key = _discovery_cache_key(tenant_id, 'revgeo', lat, lng, extra=str(language or 'en'))
+    cached = _discovery_cache_get(tenant_id, cache_key)
+    if isinstance(cached, dict) and cached.get('formatted_address'):
+        return cached
     try:
         response = requests.get(
             'https://maps.googleapis.com/maps/api/geocode/json',
@@ -615,11 +679,14 @@ def reverse_geocode_location(lat, lng, tenant_id=None, language='en', usage_ctx=
         _record_maps_usage(
             usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
             'geocode', 1)
-        return {
+        resolved = {
             'formatted_address': result.get('formatted_address', ''),
             'place_id': result.get('place_id'),
             'address_components': result.get('address_components', []),
         }
+        if resolved.get('formatted_address'):
+            _discovery_cache_put(tenant_id, cache_key, resolved, ttl_days=30)
+        return resolved
     except Exception as error:
         print(f'[REVERSE GEOCODE] failed: {error}')
         return {}
@@ -1209,6 +1276,13 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
     query = str(name or '').strip()
     if not query or not _has_api_key():
         return None
+    place_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
+    cache_key = _discovery_cache_key(
+        place_tenant, 'place', lat, lng,
+        extra=f"{query.casefold()}:{radius_m}:{language}")
+    cached = _discovery_cache_get(place_tenant, cache_key)
+    if isinstance(cached, dict) and cached.get('lat') is not None:
+        return cached
     try:
         response = requests.post(
             'https://places.googleapis.com/v1/places:searchText',
@@ -1242,11 +1316,13 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
         if latitude is None or longitude is None:
             return None
         _record_maps_usage(usage_ctx, 'places_text', 1)
-        return {
+        resolved_place = {
             'lat': float(latitude),
             'lng': float(longitude),
             'name': ((places[0].get('displayName') or {}).get('text') or query),
         }
+        _discovery_cache_put(place_tenant, cache_key, resolved_place, ttl_days=30)
+        return resolved_place
     except Exception as error:
         print(f'[PLACES TEXT ERROR] {query}: {error}')
         return None
@@ -1257,6 +1333,13 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
         return _api_key_error()
+    nearby_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
+    nearby_key = _discovery_cache_key(
+        nearby_tenant, 'nearby', lat, lng,
+        extra=f"{radius}:{max_results}:{bool(include_all)}:{','.join(sorted(included_types or []))}")
+    nearby_hit = _discovery_cache_get(nearby_tenant, nearby_key)
+    if isinstance(nearby_hit, dict) and nearby_hit.get('success'):
+        return nearby_hit
     IRRELEVANT_TYPES = {
         'gas_station', 'parking', 'atm', 'bank', 'post_office', 'courier',
         'laundry', 'dry_cleaning', 'hair_care', 'beauty_salon', 'barber_shop',
@@ -1351,7 +1434,9 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
                     'error_code': 'GOOGLE_PLACES_INVALID_RESPONSE',
                     'http_status': response.status_code,
                 }
-            return {'success': True, 'landmarks': []}
+            empty_result = {'success': True, 'landmarks': []}
+            _discovery_cache_put(nearby_tenant, nearby_key, empty_result, ttl_days=7)
+            return empty_result
 
         places = []
         for p in data.get('places', []):
@@ -1386,8 +1471,10 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         
         places.sort(key=lambda x: (not x.get('preferred', False), x.get('distance_meters', float('inf')), -(x.get('rating') or 0)))
         places = places[:max_results]
-        
-        return {'success': True, 'landmarks': places}
+
+        nearby_result = {'success': True, 'landmarks': places}
+        _discovery_cache_put(nearby_tenant, nearby_key, nearby_result, ttl_days=7)
+        return nearby_result
     except requests.exceptions.Timeout:
         print('[GOOGLE PLACES ERROR] request timed out after 15 seconds')
         return {
@@ -1476,6 +1563,14 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
     if not points:
         return []
 
+    matrix_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
+    matrix_key = _discovery_cache_key(
+        matrix_tenant, 'matrix', None, None,
+        extra=f"{origin_str}|{'|'.join(points)}")
+    matrix_hit = _discovery_cache_get(matrix_tenant, matrix_key)
+    if isinstance(matrix_hit, list) and len(matrix_hit) == len(points):
+        return matrix_hit
+
     url = 'https://maps.googleapis.com/maps/api/distancematrix/json'
     params = {
         'origins': origin_str,
@@ -1523,6 +1618,10 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
                 'distance_text': f"{distance_km} كم" if distance_km is not None else None,
                 'in_traffic': in_traffic,
             })
+        # Google bills one element per origin-destination pair; a single origin
+        # keeps elements equal to destinations, and the cached answer is reused
+        # for the same pairs instead of paying per re-analysis.
+        _discovery_cache_put(matrix_tenant, matrix_key, result, ttl_days=7)
         return result
     except Exception as e:
         print(f"[DRIVE MATRIX] request failed: {e}")
@@ -2664,6 +2763,12 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
     """Return verified nearby road names from Google Roads + Directions."""
     route_origin_lat = origin_lat if origin_lat is not None else center_lat
     route_origin_lng = origin_lng if origin_lng is not None else center_lng
+    roads_key = _discovery_cache_key(
+        tenant_id, 'roads', route_origin_lat, route_origin_lng,
+        extra=f"{max_results}:{lat_step}:{lng_step}")
+    roads_hit = _discovery_cache_get(tenant_id, roads_key)
+    if isinstance(roads_hit, list):
+        return roads_hit
     probes = _fixed_road_probe_points(route_origin_lat, route_origin_lng, lat_step, lng_step)
 
     def fetch(probe):
@@ -2715,6 +2820,7 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         roads.append(road)
         if len(roads) >= max(1, int(max_results)):
             break
+    _discovery_cache_put(tenant_id, roads_key, roads, ttl_days=30)
     return roads
 
 
