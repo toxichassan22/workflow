@@ -240,6 +240,20 @@ db.init_db()
 # strip(): a stray \r (CRLF endings) or spaces in .env would corrupt auth headers
 OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
+# Management key for per-tenant OpenRouter provisioning. It only manages other
+# keys (create/list/update/delete) and can never make inference calls. When it
+# is set, every company gets its own dashboard-visible key with a spend limit.
+# When it is missing, all traffic falls back to OPENROUTER_KEY as before.
+OPENROUTER_MANAGEMENT_KEY = (os.environ.get("OPENROUTER_MANAGEMENT_KEY") or "").strip() or None
+try:
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = float(os.environ.get('TENANT_OPENROUTER_DEFAULT_LIMIT_USD') or 10.0)
+except (TypeError, ValueError):
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 10.0
+if TENANT_OPENROUTER_DEFAULT_LIMIT_USD <= 0:
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 10.0
+TENANT_OPENROUTER_DEFAULT_RESET = (os.environ.get('TENANT_OPENROUTER_DEFAULT_RESET') or 'monthly').strip().lower()
+if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly'):
+    TENANT_OPENROUTER_DEFAULT_RESET = 'monthly'
 GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
@@ -259,6 +273,7 @@ if not os.path.exists(OUTPUT_DIR):
 
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
 print(f"[CONFIG] OPENROUTER_KEY: {'SET' if OPENROUTER_KEY else 'MISSING'}")
+print(f"[CONFIG] OPENROUTER_MANAGEMENT_KEY: {'SET' if OPENROUTER_MANAGEMENT_KEY else 'MISSING'}")
 print(f"[CONFIG] GOOGLE_MAPS_API_KEY: {'SET' if GOOGLE_MAPS_API_KEY else 'MISSING'}")
 print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
 
@@ -274,16 +289,213 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
-    if not OPENROUTER_KEY:
-        return {"error": {"message": "OPENROUTER_KEY is missing"}}
-    model_name = model or GLM_OPENROUTER_MODEL
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
+def _tenant_id_from_usage_ctx(usage_ctx):
+    """Tenant id for key selection. Never raises, even outside a request."""
+    try:
+        if isinstance(usage_ctx, dict) and usage_ctx.get('tenant_id'):
+            return usage_ctx.get('tenant_id')
+    except Exception:
+        pass
+    try:
+        return getattr(g, 'tenant_id', None)
+    except Exception:
+        return None
+
+
+def _resolve_openrouter_key(usage_ctx=None, tenant_id=None):
+    """Provider key for one call: the company key first, global fallback after.
+
+    Returns the raw bearer string or None. Never raises: metering and tests
+    run outside requests too, and a missing key must surface as a normal
+    provider error, not a 500.
+    """
+    tid = tenant_id
+    if tid is None:
+        tid = _tenant_id_from_usage_ctx(usage_ctx)
+    if tid:
+        try:
+            raw = db.get_tenant_openrouter_key_raw(tid)
+            if raw:
+                return raw
+        except Exception as exc:
+            print(f"[OPENROUTER KEY] tenant lookup failed: {exc}")
+    return OPENROUTER_KEY
+
+
+def _openrouter_headers(usage_ctx=None, tenant_id=None, title='Real Estate Proposal Generator'):
+    return {
+        "Authorization": f"Bearer {_resolve_openrouter_key(usage_ctx, tenant_id)}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com",
-        "X-Title": "Real Estate Proposal Generator"
+        "X-Title": title,
     }
+
+
+def _has_any_openrouter_key(usage_ctx=None, tenant_id=None):
+    return bool(_resolve_openrouter_key(usage_ctx, tenant_id))
+
+
+# ── Per-tenant managed keys (OpenRouter Management API) ────────────────
+# One dashboard-visible key per company with its own spend limit. The
+# management key never leaves the server; tenant secrets are stored
+# encrypted and metadata reads never return them.
+
+def _openrouter_management_key():
+    return OPENROUTER_MANAGEMENT_KEY
+
+
+def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
+    """Provision a dashboard-visible key. Returns the parsed JSON body."""
+    mgmt = _openrouter_management_key()
+    if not mgmt:
+        return {'error': 'OPENROUTER_MANAGEMENT_KEY is not configured'}
+    try:
+        response = requests.post(
+            f"{OPENROUTER_BASE}/keys",
+            headers={"Authorization": f"Bearer {mgmt}", "Content-Type": "application/json"},
+            json={"name": name, "limit": float(limit_usd), "limit_reset": limit_reset},
+            timeout=30,
+        )
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] create failed: {exc}")
+        return {'error': str(exc)}
+    try:
+        body = response.json()
+    except Exception:
+        body = {}
+    if response.status_code >= 400:
+        err = (body.get('error') if isinstance(body, dict) else None) or f'HTTP {response.status_code}'
+        print(f"[OPENROUTER KEYS] create refused: {err}")
+        return {'error': str(err) if not isinstance(err, dict) else json.dumps(err, ensure_ascii=False)}
+    data = body.get('data') if isinstance(body, dict) else None
+    return data if isinstance(data, dict) else body
+
+
+def _openrouter_update_managed_key(key_hash, limit_usd=None, disabled=None):
+    """Best-effort limit/disable sync to the dashboard. Never raises."""
+    mgmt = _openrouter_management_key()
+    if not mgmt or not key_hash:
+        return {'skipped': True}
+    payload = {}
+    if limit_usd is not None:
+        try:
+            payload['limit'] = float(limit_usd)
+        except (TypeError, ValueError):
+            pass
+    if disabled is not None:
+        payload['disabled'] = bool(disabled)
+    if not payload:
+        return {'skipped': True}
+    try:
+        response = requests.patch(
+            f"{OPENROUTER_BASE}/keys/{key_hash}",
+            headers={"Authorization": f"Bearer {mgmt}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            print(f"[OPENROUTER KEYS] patch refused for {str(key_hash)[:8]}: {response.status_code}")
+            return {'ok': False, 'status': response.status_code}
+        return {'ok': True}
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] patch failed: {exc}")
+        return {'ok': False, 'error': str(exc)}
+
+
+def _openrouter_delete_managed_key(key_hash):
+    """Best-effort dashboard delete. Never raises."""
+    mgmt = _openrouter_management_key()
+    if not mgmt or not key_hash:
+        return {'skipped': True}
+    try:
+        response = requests.delete(
+            f"{OPENROUTER_BASE}/keys/{key_hash}",
+            headers={"Authorization": f"Bearer {mgmt}"},
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            print(f"[OPENROUTER KEYS] delete refused for {str(key_hash)[:8]}: {response.status_code}")
+            return {'ok': False, 'status': response.status_code}
+        return {'ok': True}
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] delete failed: {exc}")
+        return {'ok': False, 'error': str(exc)}
+
+
+def _openrouter_key_status(api_key, timeout=20):
+    """Validate a key and read its limit/usage. Returns dict or {'error': ...}."""
+    try:
+        response = requests.get(
+            f"{OPENROUTER_BASE}/key",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+    except Exception as exc:
+        return {'error': str(exc)}
+    try:
+        body = response.json()
+    except Exception:
+        return {'error': f'HTTP {response.status_code}'}
+    if response.status_code >= 400:
+        err = (body.get('error') if isinstance(body, dict) else None) or f'HTTP {response.status_code}'
+        return {'error': str(err) if not isinstance(err, dict) else json.dumps(err, ensure_ascii=False)}
+    data = body.get('data') if isinstance(body, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
+    """Auto-provision a managed key for a company. Best-effort, never raises.
+
+    Skips super-admin accounts, tenants that already have a key, and setups
+    without a management key. The new secret is stored encrypted immediately
+    and never logged.
+    """
+    try:
+        if not tenant_id or not _openrouter_management_key():
+            return None
+        try:
+            tenant = db.get_tenant_by_id(tenant_id)
+        except Exception:
+            tenant = None
+        if tenant and tenant.get('is_admin'):
+            return None
+        try:
+            existing = db.get_tenant_openrouter_key_meta(tenant_id)
+        except Exception:
+            existing = {'has_key': False}
+        if existing.get('has_key') and existing.get('is_active'):
+            return existing
+        slug = ''
+        try:
+            slug = (db.tenant_slug(tenant) if tenant else '') or str(tenant_id)[:8]
+        except Exception:
+            slug = str(tenant_id)[:8]
+        created = _openrouter_create_managed_key(
+            f"tenant-{slug}",
+            limit_usd or TENANT_OPENROUTER_DEFAULT_LIMIT_USD,
+            limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
+        )
+        if not isinstance(created, dict) or not created.get('key'):
+            return None
+        return db.set_tenant_openrouter_key(
+            tenant_id, created.get('key'),
+            key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
+            limit_usd=(created.get('limit') if created.get('limit') is not None
+                       else (limit_usd or TENANT_OPENROUTER_DEFAULT_LIMIT_USD)),
+            limit_reset=created.get('limit_reset') or (limit_reset or TENANT_OPENROUTER_DEFAULT_RESET),
+            provenance='auto',
+            openrouter_key_hash=created.get('hash'),
+        )
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] auto-provision failed: {exc}")
+        return None
+
+
+def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
+    if not _has_any_openrouter_key(usage_ctx):
+        return {"error": {"message": "OPENROUTER_KEY is missing"}}
+    model_name = model or GLM_OPENROUTER_MODEL
+    headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
     if image_references:
         user_message_content = [{"type": "text", "text": str(user_content)}]
@@ -360,7 +572,7 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
                   reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None):
     """Compatibility wrapper: text/design work uses configured models through OpenRouter."""
-    if not OPENROUTER_KEY:
+    if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
     return call_openrouter_chat(
         system_prompt,
@@ -424,15 +636,10 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     same {"error": ...} shape; only on_token is new, and it must never raise.
     """
     import time as _time
-    if not OPENROUTER_KEY:
+    if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com",
-        "X-Title": "Real Estate Proposal Generator"
-    }
+    headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
     if image_references:
         user_message_content = [{"type": "text", "text": str(user_content)}]
@@ -587,7 +794,7 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
 
 def call_zai_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None, on_token=None):
     """Streaming twin of call_zai_chat: same defaults, tokens via on_token."""
-    if not OPENROUTER_KEY:
+    if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
     return call_openrouter_chat_stream(
         system_prompt,
@@ -904,11 +1111,12 @@ def _query_openrouter_generation(generation_id, timeout=15):
     all checked before any figure is accepted.
     """
     try:
-        if not OPENROUTER_KEY or not generation_id:
+        lookup_key = OPENROUTER_KEY or _openrouter_management_key()
+        if not lookup_key or not generation_id:
             return None, None, 'missing_key'
         response = requests.get(
             f"{OPENROUTER_BASE}/generation?id={generation_id}",
-            headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
+            headers={"Authorization": f"Bearer {lookup_key}"},
             timeout=timeout,
         )
         if response.status_code == 404:
@@ -1444,18 +1652,13 @@ def _image_response_url(data):
 
 def call_image_api(prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
-    if not OPENROUTER_KEY:
+    ctx = usage_ctx or _usage_ctx('image')
+    if not _has_any_openrouter_key(ctx):
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
-    ctx = usage_ctx or _usage_ctx('image')
     attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com",
-            "X-Title": "Real Estate Proposal Generator"
-        }
+        headers = _openrouter_headers(ctx)
         payload = {
             "model": IMAGE_MODEL,
             "messages": [{"role": "user", "content": [{"type": "text", "text": prompt + " --aspect 16:9"}]}],
@@ -1541,22 +1744,17 @@ def _prepare_image_reference_for_model(reference):
 
 def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
-    if not OPENROUTER_KEY:
+    ctx = usage_ctx or _usage_ctx('image')
+    if not _has_any_openrouter_key(ctx):
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
-    ctx = usage_ctx or _usage_ctx('image')
     attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
         reference_for_model = _prepare_image_reference_for_model(reference_image_base64)
         if not reference_for_model:
             _settle_ai_attempt_record(attempt_id, 'error', {}, None)
             return None
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com",
-            "X-Title": "Real Estate Proposal Generator"
-        }
+        headers = _openrouter_headers(ctx)
         user_content = [
             {"type": "text", "text": prompt + " --aspect 16:9"},
             {"type": "image_url", "image_url": {"url": reference_for_model}}
@@ -2111,10 +2309,10 @@ def _visual_concept_sanitize_prompt(prompt):
 
 
 def call_image_api_with_references(prompt, references=None, usage_ctx=None):
-    if not OPENROUTER_KEY:
+    ctx = usage_ctx or _usage_ctx('image')
+    if not _has_any_openrouter_key(ctx):
         print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
         return None
-    ctx = usage_ctx or _usage_ctx('image')
     prepared = []
     for reference in references or []:
         item = _prepare_image_reference_for_model(reference) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
@@ -2130,12 +2328,7 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
         return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
     multi_attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
-        headers = {
-            'Authorization': f'Bearer {OPENROUTER_KEY}',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com',
-            'X-Title': 'Real Estate Proposal Generator'
-        }
+        headers = _openrouter_headers(ctx)
         user_content = [{'type': 'text', 'text': prompt + ' --aspect 16:9'}]
         for image_url in prepared[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]:
             user_content.append({'type': 'image_url', 'image_url': {'url': image_url}})
@@ -3309,7 +3502,7 @@ def api_generate_images():
     requested_cover = include_cover
     # Only fail if nothing usable came back; otherwise preserve partial results with a warning.
     if requested_cover and not has_cover and not has_moodboard:
-        if not OPENROUTER_KEY:
+        if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد الصور — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'}), 400
     warning = None
@@ -3446,7 +3639,7 @@ def api_generate_main_image():
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             # AI4: Return descriptive Arabic error based on config state
-            if not OPENROUTER_KEY:
+            if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
@@ -3471,7 +3664,7 @@ def api_generate_slide_image():
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
-            if not OPENROUTER_KEY:
+            if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
@@ -3495,11 +3688,12 @@ def api_generate_image_single():
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
-            if not OPENROUTER_KEY:
+            if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 @app.route('/api/get-image-prompts', methods=['POST'])
@@ -3691,7 +3885,7 @@ def api_visual_concept_generate():
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     image = call_image_api_with_references(prompt, references, usage_ctx=_usage_ctx('image', data))
     if not image:
-        if not OPENROUTER_KEY:
+        if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد صورة التصور البصري', 'error_code': 'IMAGE_FAILED'}), 503
     return jsonify({
@@ -8760,9 +8954,10 @@ def _map_image_point_to_coords(x, y, width, height, center_lat, center_lng, zoom
 
 def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zoom, usage_ctx=None):
     """Ask the vision model for a conservative building-only polygon estimate."""
-    if not OPENROUTER_KEY or not image_path or not os.path.isfile(image_path):
+    vision_ctx = usage_ctx or _usage_ctx('site')
+    if not _has_any_openrouter_key(vision_ctx) or not image_path or not os.path.isfile(image_path):
         return None
-    site_attempt_id = _begin_ai_attempt_record(usage_ctx or _usage_ctx('site'), IMAGE_MODEL)
+    site_attempt_id = _begin_ai_attempt_record(vision_ctx, IMAGE_MODEL)
     try:
         from reference_analyzer import encode_image_to_base64
         from PIL import Image
@@ -8778,12 +8973,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         )
         response = requests.post(
             f'{OPENROUTER_BASE}/chat/completions',
-            headers={
-                'Authorization': f'Bearer {OPENROUTER_KEY}',
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://github.com',
-                'X-Title': 'Real Estate Proposal Generator - Site Boundary',
-            },
+            headers=_openrouter_headers(vision_ctx, title='Real Estate Proposal Generator - Site Boundary'),
             json={
                 'model': IMAGE_MODEL,
                 'messages': [{'role': 'user', 'content': [
@@ -9198,7 +9388,7 @@ def api_site_analysis():
                 reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
             analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
         except Exception as primary_error:
-            if not OPENROUTER_KEY:
+            if not _has_any_openrouter_key(_usage_ctx('site', data)):
                 raise
             print(f'[SITE ANALYSIS PRIMARY ERROR] {primary_error}. Trying direct OpenRouter fallback...')
             fallback = call_openrouter_chat(
@@ -15326,7 +15516,7 @@ def api_generate_executive_content():
                 break
             except Exception as primary_error:
                 last_error = primary_error
-                if not OPENROUTER_KEY:
+                if not _has_any_openrouter_key(_usage_ctx('executive', data)):
                     raise
                 print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
                 fallback = call_openrouter_chat(
@@ -15793,7 +15983,7 @@ def _execute_extract_croquis():
         vision_warnings = list(site_context_warnings)
         document_processing = []
         regulation_evidence_metadata = []
-        if OPENROUTER_KEY:
+        if _has_any_openrouter_key(_usage_ctx('land', data)):
             vision_parts = []
             document_descriptions = []
             per_document_budget = PDF_VISION_MAX_TOTAL_BYTES // max(1, len(documents))
@@ -17328,7 +17518,9 @@ def api_analyze_reference():
             except Exception as exc:
                 print(f"[AI-USAGE] reference metering failed: {exc}")
 
-        analysis, metering = analyze_reference_image(abs_path, OPENROUTER_KEY, on_metering=_record_reference_metering)
+        analysis, metering = analyze_reference_image(
+            abs_path, _resolve_openrouter_key(tenant_id=g.tenant_id),
+            on_metering=_record_reference_metering)
         metering = metering or {}
         if not recorded.get('done'):
             _record_reference_metering(metering)
@@ -17503,6 +17695,12 @@ def api_admin_tenants():
             email_sent = _send_company_welcome_email(
                 email, company_name, manager_name, username, setup_url
             )
+        # Best-effort managed OpenRouter key so the company spends on its own
+        # dashboard-visible limit from day one. Never fails tenant creation.
+        try:
+            _ensure_tenant_openrouter_key(tenant_id)
+        except Exception as exc:
+            print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
         return jsonify({
             'success': True,
@@ -17617,6 +17815,225 @@ def api_admin_delete_tenant(tenant_id):
         return jsonify({'error': 'Cannot delete yourself'}), 400
     db.delete_tenant(tenant_id)
     return jsonify({'success': True})
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Per-tenant OpenRouter keys (super admin only).
+# Managed keys are provisioned through the OpenRouter Management API, so every
+# key appears in the owner dashboard with its own spend limit. The raw secret
+# is stored encrypted and is never returned by any endpoint below.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _admin_key_target(tenant_id):
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return None, (jsonify({'error': 'Tenant not found'}), 404)
+    if tenant.get('is_admin'):
+        return None, (jsonify({'error': 'Super admin accounts use the global key'}), 400)
+    return tenant, None
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key', methods=['GET'])
+@require_admin
+def api_admin_tenant_key_status(tenant_id):
+    """Public key status for one company. Never includes the secret."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    return jsonify({
+        'success': True,
+        'key': db.get_tenant_openrouter_key_meta(tenant_id),
+        'managedProvisioning': bool(_openrouter_management_key()),
+        'defaults': {
+            'limitUsd': TENANT_OPENROUTER_DEFAULT_LIMIT_USD,
+            'limitReset': TENANT_OPENROUTER_DEFAULT_RESET,
+        },
+    })
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key/provision', methods=['POST'])
+@require_admin
+def api_admin_tenant_key_provision(tenant_id):
+    """Create a dashboard-visible managed key for one company."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    data = request.json or {}
+    if not _openrouter_management_key():
+        return jsonify({'error': 'OPENROUTER_MANAGEMENT_KEY is not configured'}), 503
+    try:
+        limit_usd = float(data.get('limitUsd') or data.get('limit_usd')
+                          or TENANT_OPENROUTER_DEFAULT_LIMIT_USD)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid limitUsd'}), 400
+    if limit_usd <= 0:
+        return jsonify({'error': 'Invalid limitUsd'}), 400
+    limit_reset = str(data.get('limitReset') or data.get('limit_reset')
+                      or TENANT_OPENROUTER_DEFAULT_RESET).strip().lower()
+    if limit_reset not in ('daily', 'weekly', 'monthly'):
+        return jsonify({'error': 'Invalid limitReset'}), 400
+    force = bool(data.get('force') or data.get('rotate'))
+    existing = db.get_tenant_openrouter_key_meta(tenant_id)
+    if existing.get('has_key') and not force:
+        return jsonify({'error': 'Company already has a key. Pass force=true to rotate it.',
+                        'key': existing}), 409
+    if existing.get('has_key') and force and existing.get('openrouter_key_hash'):
+        _openrouter_delete_managed_key(existing.get('openrouter_key_hash'))
+    try:
+        slug = db.tenant_slug(db.get_tenant_by_id(tenant_id)) or str(tenant_id)[:8]
+    except Exception:
+        slug = str(tenant_id)[:8]
+    created = _openrouter_create_managed_key(f"tenant-{slug}", limit_usd, limit_reset)
+    if not isinstance(created, dict) or not created.get('key'):
+        return jsonify({'error': created.get('error') if isinstance(created, dict) else 'Provisioning failed'}), 503
+    try:
+        meta = db.set_tenant_openrouter_key(
+            tenant_id, created.get('key'),
+            key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
+            limit_usd=created.get('limit') if created.get('limit') is not None else limit_usd,
+            limit_reset=created.get('limit_reset') or limit_reset,
+            provenance='auto',
+            openrouter_key_hash=created.get('hash'),
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'key': meta}), 201
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key/manual', methods=['POST'])
+@require_admin
+def api_admin_tenant_key_manual(tenant_id):
+    """Attach a super-admin-supplied key (created in the dashboard by hand)."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    data = request.json or {}
+    raw_key = str(data.get('apiKey') or data.get('key') or '').strip()
+    if len(raw_key) < 16:
+        return jsonify({'error': 'Invalid apiKey'}), 400
+    label = str(data.get('label') or data.get('key_label') or '').strip() or None
+    limit_reset = data.get('limitReset') or data.get('limit_reset')
+    if limit_reset is not None:
+        limit_reset = str(limit_reset).strip().lower()
+        if limit_reset not in ('daily', 'weekly', 'monthly'):
+            return jsonify({'error': 'Invalid limitReset'}), 400
+    limit_usd = data.get('limitUsd', data.get('limit_usd'))
+    if limit_usd is not None:
+        try:
+            limit_usd = float(limit_usd)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid limitUsd'}), 400
+        if limit_usd <= 0:
+            return jsonify({'error': 'Invalid limitUsd'}), 400
+    status = _openrouter_key_status(raw_key)
+    if isinstance(status, dict) and status.get('error'):
+        return jsonify({'error': 'The key was rejected by OpenRouter: ' + str(status.get('error'))}), 400
+    live_hash = status.get('hash') if isinstance(status, dict) else None
+    try:
+        meta = db.set_tenant_openrouter_key(
+            tenant_id, raw_key, key_label=label,
+            limit_usd=limit_usd if limit_usd is not None
+            else (status.get('limit') if isinstance(status, dict) else None),
+            limit_reset=limit_reset or (status.get('limit_reset') if isinstance(status, dict) else None),
+            provenance='manual',
+            openrouter_key_hash=live_hash,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    try:
+        db.update_tenant_openrouter_key_meta(
+            tenant_id,
+            last_limit_remaining=(status.get('limit_remaining') if isinstance(status, dict) else None),
+            last_usage=(status.get('usage') if isinstance(status, dict) else None),
+        )
+        meta = db.get_tenant_openrouter_key_meta(tenant_id)
+    except Exception:
+        pass
+    return jsonify({'success': True, 'key': meta}), 201
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key', methods=['PUT'])
+@require_admin
+def api_admin_tenant_key_update(tenant_id):
+    """Update limit/reset/active flag. Syncs the dashboard limit best-effort."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    data = request.json or {}
+    existing = db.get_tenant_openrouter_key_meta(tenant_id)
+    if not existing.get('has_key'):
+        return jsonify({'error': 'Company has no key yet'}), 404
+    limit_usd = data.get('limitUsd', data.get('limit_usd'))
+    if limit_usd is not None:
+        try:
+            limit_usd = float(limit_usd)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid limitUsd'}), 400
+        if limit_usd <= 0:
+            return jsonify({'error': 'Invalid limitUsd'}), 400
+    limit_reset = data.get('limitReset', data.get('limit_reset'))
+    if limit_reset is not None:
+        limit_reset = str(limit_reset).strip().lower()
+        if limit_reset not in ('daily', 'weekly', 'monthly'):
+            return jsonify({'error': 'Invalid limitReset'}), 400
+    is_active = data.get('isActive', data.get('is_active'))
+    if is_active is not None:
+        is_active = bool(is_active)
+    try:
+        meta = db.update_tenant_openrouter_key_meta(
+            tenant_id, limit_usd=limit_usd, limit_reset=limit_reset,
+            is_active=is_active)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if limit_usd is not None and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
+        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), limit_usd=limit_usd)
+    if is_active is False and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
+        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), disabled=True)
+    if is_active is True and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
+        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), disabled=False)
+    return jsonify({'success': True, 'key': meta})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key', methods=['DELETE'])
+@require_admin
+def api_admin_tenant_key_delete(tenant_id):
+    """Disable a company key locally and remove it from the dashboard best-effort."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    existing = db.get_tenant_openrouter_key_meta(tenant_id)
+    if not existing.get('has_key'):
+        return jsonify({'error': 'Company has no key yet'}), 404
+    if existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
+        _openrouter_delete_managed_key(existing.get('openrouter_key_hash'))
+    meta = db.deactivate_tenant_openrouter_key(tenant_id)
+    return jsonify({'success': True, 'key': meta})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/openrouter-key/refresh', methods=['POST'])
+@require_admin
+def api_admin_tenant_key_refresh(tenant_id):
+    """Read live limit/usage from OpenRouter and cache it on the key row."""
+    _tenant, error = _admin_key_target(tenant_id)
+    if error is not None:
+        return error
+    raw = db.get_tenant_openrouter_key_raw(tenant_id)
+    if not raw:
+        return jsonify({'error': 'Company has no active key'}), 404
+    status = _openrouter_key_status(raw)
+    if isinstance(status, dict) and status.get('error'):
+        return jsonify({'error': 'OpenRouter refused the key: ' + str(status.get('error'))}), 503
+    meta = db.update_tenant_openrouter_key_meta(
+        tenant_id,
+        last_limit_remaining=status.get('limit_remaining'),
+        last_usage=status.get('usage'),
+        openrouter_key_hash=status.get('hash') or None,
+    )
+    live = {'limit': status.get('limit'), 'limitRemaining': status.get('limit_remaining'),
+            'limitReset': status.get('limit_reset'), 'usage': status.get('usage'),
+            'usageDaily': status.get('usage_daily'), 'usageWeekly': status.get('usage_weekly'),
+            'usageMonthly': status.get('usage_monthly'), 'label': status.get('label')}
+    return jsonify({'success': True, 'key': meta, 'live': live})
 
 
 @app.route('/api/admin/stats', methods=['GET'])
@@ -18083,7 +18500,7 @@ def api_upload_training_image():
 
 اكتب التحليل بالعربية بشكل منظم وواضح."""
 
-        if not OPENROUTER_KEY:
+        if not _has_any_openrouter_key(tenant_id=g.tenant_id):
             analysis_text = 'The image was stored, but automatic analysis is unavailable because the AI key is not configured.'
         else:
             vision_payload = {
@@ -18102,15 +18519,9 @@ def api_upload_training_image():
                 "modalities": ["text"],
                 "max_tokens": 2000,
             }
-            vision_headers = {
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com",
-                # A deterministic tenant context is kept in application storage; this
-                # label prevents operational logs from mixing an image workflow with
-                # general generation traffic. It is not used as an authorization key.
-                "X-Title": f"Real Estate Proposal Generator - Tenant Training ({g.tenant_id[:8]})"
-            }
+            vision_headers = _openrouter_headers(
+                tenant_id=g.tenant_id,
+                title=f"Real Estate Proposal Generator - Tenant Training ({g.tenant_id[:8]})")
             import requests as _req
             training_attempt_id = _begin_ai_attempt_record(
                 _usage_ctx('training_chat', tenant_id=g.tenant_id), LUNA_TEXT_MODEL)
