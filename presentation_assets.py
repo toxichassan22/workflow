@@ -123,12 +123,13 @@ def _decoded_path(path, original):
 
 
 class _Freezer:
-    def __init__(self, tenant_id, root, allowed_origin, authorized_paths):
+    def __init__(self, tenant_id, root, allowed_origin, authorized_paths, uploads_root=None):
         tenant = str(tenant_id) if tenant_id is not None else ''
         if not _TENANT_RE.fullmatch(tenant):
             raise PresentationAssetError('has an invalid tenant identifier')
         self.tenant = tenant
         self.root = Path(os.path.abspath(root if root is not None else ROOT))
+        self.uploads_root = Path(os.path.abspath(uploads_root)) if uploads_root else (self.root / 'uploads')
         self.origin = _origin(allowed_origin) if allowed_origin else _request_origin()
         if allowed_origin and not self.origin:
             raise PresentationAssetError('has an invalid allowed origin')
@@ -193,10 +194,16 @@ class _Freezer:
     def checked_path(self, path, url, *, allow_missing=False):
         """Reject symlinks/junctions at every component, not just path escapes."""
         path = Path(os.path.abspath(path))
-        try:
-            path.relative_to(self.root)
-        except ValueError as exc:
-            raise PresentationAssetError('is outside the asset root', url) from exc
+        inside = False
+        for base in (self.root, self.uploads_root):
+            try:
+                path.relative_to(base)
+                inside = True
+                break
+            except ValueError:
+                pass
+        if not inside:
+            raise PresentationAssetError('is outside the asset root', url)
         # Include root's ancestors: a symlinked uploads root is not an exception.
         for component in (*reversed(path.parents), path):
             try:
@@ -230,20 +237,28 @@ class _Freezer:
         elif pieces[:3] == ['uploads', 'creative', self.tenant]:
             if len(pieces) != 4 and not (len(pieces) == 5 and pieces[3] == 'revisions'):
                 raise PresentationAssetError('is not an authorized creative path', url)
-            path = self.root.joinpath(*pieces)
+            path = self.uploads_root.joinpath(*pieces[1:])
         elif pieces[:3] == ['tenant-assets', self.tenant, 'fonts'] and len(pieces) == 4:
-            path = self.root / 'uploads' / self.tenant / 'fonts' / pieces[3]
+            path = self.uploads_root / self.tenant / 'fonts' / pieces[3]
         elif pieces[:2] == ['uploads', self.tenant] and pieces[1] not in ('maps', 'creative') and (
                 len(pieces) == 3 and Path(pieces[-1]).stem in ('logo', 'watermark')
                 or len(pieces) == 4 and pieces[2] == 'fonts'):
-            path = self.root.joinpath(*pieces)
+            path = self.uploads_root.joinpath(*pieces[1:])
         else:
             raise PresentationAssetError('requires explicit tenant authorization', url)
         return self.check_source_scope(path, url, explicit=False)
 
     def check_source_scope(self, path, url, *, explicit):
         path = self.checked_path(path, url)
-        relative = path.relative_to(self.root).parts
+        relative = None
+        for base, prefix in ((self.root, ()), (self.uploads_root, ('uploads',))):
+            try:
+                relative = prefix + path.relative_to(base).parts
+                break
+            except ValueError:
+                pass
+        if relative is None:
+            raise PresentationAssetError('source is outside the authorized tenant media directories', url)
         if any(part.startswith('.') or ':' in part or part.endswith((' ', '.')) for part in relative):
             raise PresentationAssetError('source contains an unsafe path', url)
         public = len(relative) >= 2 and relative[0] == 'assets'
@@ -282,7 +297,7 @@ class _Freezer:
     def publish(self, data, suffix, url):
         digest = hashlib.sha256(data).hexdigest()
         relative = f'uploads/creative/{self.tenant}/revisions/{digest}{suffix}'
-        target = self.root / relative
+        target = self.uploads_root / 'creative' / self.tenant / 'revisions' / f'{digest}{suffix}'
         self.checked_path(target, url, allow_missing=True)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +396,7 @@ class _Freezer:
 
 
 def freeze_presentation_assets(value, tenant_id, *, root=None, allowed_origin=None,
-                               authorized_paths=None):
+                               authorized_paths=None, uploads_root=None):
     """Return immutable tenant media references; fail closed for local errors.
 
     ``authorized_paths`` is trusted application input, not part of ``value``.
@@ -389,4 +404,4 @@ def freeze_presentation_assets(value, tenant_id, *, root=None, allowed_origin=No
     containers are never mutated. Failure may leave already-created immutable
     revisions, but never a partially rewritten return value or partial file.
     """
-    return _Freezer(tenant_id, root, allowed_origin, authorized_paths).walk(value)
+    return _Freezer(tenant_id, root, allowed_origin, authorized_paths, uploads_root=uploads_root).walk(value)
