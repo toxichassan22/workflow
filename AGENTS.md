@@ -593,6 +593,33 @@ that same file — complete **and** smaller than the old raw dump.
 - `test_slide_prompt_carries_every_section_instead_of_a_truncated_dump` and
   `test_generated_slide_request_sends_the_sections_and_not_the_previous_deck` guard both ends.
 
+## Offer language follows the data
+
+Owner's rule: English data in → English deck out, with nothing translated by hand; Arabic or
+mixed data → the historical Arabic deck, byte for byte. There is no per-deck setting and no UI
+language involved: the UI language is never sent to generation endpoints.
+
+- `slide_engine.detect_offer_lang()` is the single authority: machine keys (ids, URLs, tokens,
+  files, coordinates) are skipped, then `'en'` requires ≥30 Latin letters with <40 Arabic ones —
+  auto-filled city/district fragments can never flip a deck, and any real Arabic content (or an
+  empty draft) stays Arabic. Every builder takes `offer_lang=None` meaning "detect, default ar".
+- Deterministic chrome is emitted via `section_title()` / `offer_chrome()` (dividers, index,
+  closing, cover, fallback plan/media titles, financial deterministic titles, chart/diagram notes
+  that order text or physical sides). Prompt bodies stay Arabic scaffolding; only the output
+  contract changes via `OFFER_LANGUAGE_DIRECTIVE_EN` (plan, slide, system, executive, market
+  summary prompts), plus `dir="ltr"` on deterministic roots and mirrored chart/divider layouts.
+- `normalize_presentation_plan()` stores `offer_lang` on the plan; `refresh_index_entries()` and
+  section filtering read it back. `renumber_presentation_slides()` preserves dividers already
+  canonical in either language, resolves junk titles in the deck language, and falls back to
+  Arabic when the slides themselves carry Arabic prose but the data is thin.
+- Deliberately untouched: canonical stored enums (competitor type/status, decision list, missing
+  sentinel), financial matching logic, map labels/overlays, designer chat, admin agent, training
+  chats, and the financial `report.parts` pipeline (which follows the UI language, not the data).
+  Reference-table cells therefore stay Arabic canonicals even in an English deck.
+- `tests/test_offer_language.py` guards detection thresholds, EN-map completeness, the Arabic
+  byte-identical path, and the EN directive wiring. If a literal assertion fails after touching a
+  prompt or title, update it deliberately — the Arabic side must never change.
+
 ## Slide count is not capped
 
 Owner's rule: the planner decides how many slides a project needs, and the only hard rule is a

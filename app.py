@@ -2670,14 +2670,15 @@ def _get_images_info(images, project_data=None):
     
     return info
 
-def build_system_prompt(project_data, images_info, design_rules=None):
+def build_system_prompt(project_data, images_info, design_rules=None, offer_lang=None):
     """Build the shared system prompt ONCE for all slides."""
     if design_rules is None:
         design_rules = build_design_rules({})
+    lang = slide_engine.resolve_offer_lang(project_data, offer_lang)
     project_json = slide_engine.build_project_facts(project_data, getattr(g, 'tenant_id', None))
     timeline_note = slide_engine._timeline_data_note(project_data)
     financial_note = slide_engine._financial_data_note(project_data)
-    return f"""{design_rules}
+    prompt = f"""{design_rules}
 
 ## بيانات المشروع
 {project_json}
@@ -2686,6 +2687,9 @@ def build_system_prompt(project_data, images_info, design_rules=None):
 {images_info}
 {timeline_note}
 {financial_note}"""
+    if lang == slide_engine.OFFER_LANG_ENGLISH:
+        prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
+    return prompt
 
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
@@ -2788,9 +2792,10 @@ def postprocess_slide(html, slide_num=None, tenant_id=None, slide_title=None, to
         branding=branding,
     )
 
-def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None, usage_ctx=None):
+def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None, usage_ctx=None, offer_lang=None):
     """Generate one complete slide, retrying with a stricter prompt when needed."""
-    slide_title = title or f'شريحة {slide_num}'
+    deck_en = (offer_lang == slide_engine.OFFER_LANG_ENGLISH)
+    slide_title = title or (f'Slide {slide_num}' if deck_en else f'شريحة {slide_num}')
     style = _suggest_design_style(slide_title, slide_type='content')
     slide = {
         'title': slide_title,
@@ -2805,7 +2810,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
         _min_s, _max_s, total = resolve_slide_bounds(branding)
         total = max(_min_s, min(total, _max_s))
     total = int(total)
-    base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding, project_data=None)
+    base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding, project_data=None, offer_lang=offer_lang)
 
     for attempt in range(1, max_retries + 2):
         try:
@@ -2847,7 +2852,7 @@ def build_glm_prompt(project_data, images, branding=None):
     dynamic_rules = build_design_rules(branding)
     min_s, max_s, default_count = resolve_slide_bounds(branding)
     slide_count = max(min_s, min(default_count, max_s))
-    fallback_plan = build_fallback_plan(branding)
+    fallback_plan = build_fallback_plan(branding, project_data)
     slides = fallback_plan.get('slides', [])
     generic_slide = {
         'title': 'تفاصيل إضافية',
@@ -2857,10 +2862,13 @@ def build_glm_prompt(project_data, images, branding=None):
         'requires_image': False,
         'bullets': []
     }
+    if slide_engine.resolve_offer_lang(project_data) == slide_engine.OFFER_LANG_ENGLISH:
+        generic_slide['title'] = 'Additional details'
+        generic_slide['design_style'] = _suggest_design_style('Additional details', slide_type='content')
 
     sys_prompt = build_system_prompt(project_data, images_info, dynamic_rules)
     return sys_prompt + '\n\n'.join(
-        slide_engine.build_slide_user_msg(slides[i] if i < len(slides) else generic_slide, i + 1, slide_count, branding)
+        slide_engine.build_slide_user_msg(slides[i] if i < len(slides) else generic_slide, i + 1, slide_count, branding, project_data=project_data)
         for i in range(slide_count)
     )
 
@@ -3538,7 +3546,7 @@ def api_designer_generate():
             future_to_idx = {}
             for i in range(slide_count):
                 slide_title = outline[i].get('title') if i < len(outline) else None
-                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count, title=slide_title, usage_ctx=designer_slide_ctx)
+                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count, title=slide_title, usage_ctx=designer_slide_ctx, offer_lang=slide_engine.resolve_offer_lang(project_data))
                 future_to_idx[future] = i
 
             for future in concurrent.futures.as_completed(future_to_idx):
@@ -3566,11 +3574,12 @@ def api_designer_generate():
         print(f"[DESIGNER] Done in {elapsed}s — {total_slides} slides total")
 
         # Build dynamic fallback titles from the fallback plan, padded to slide_count
-        fallback_slides = build_fallback_plan(branding).get('slides', [])
-        DEFAULT_TITLES = [s.get('title', f'شريحة {i + 1}') for i, s in enumerate(fallback_slides)]
+        fallback_slides = build_fallback_plan(branding, project_data).get('slides', [])
+        _designer_deck_en = slide_engine.resolve_offer_lang(project_data) == slide_engine.OFFER_LANG_ENGLISH
+        DEFAULT_TITLES = [s.get('title', (f'Slide {i + 1}' if _designer_deck_en else f'شريحة {i + 1}')) for i, s in enumerate(fallback_slides)]
         if len(DEFAULT_TITLES) < slide_count:
             for i in range(len(DEFAULT_TITLES), slide_count):
-                DEFAULT_TITLES.append(f'شريحة {i + 1}')
+                DEFAULT_TITLES.append(f'Slide {i + 1}' if _designer_deck_en else f'شريحة {i + 1}')
 
         def extract_slide_title(s_html, def_title):
             for pattern in [r'<h[1-6][^>]*>([\s\S]*?)</h[1-6]>',
@@ -7915,10 +7924,12 @@ def _ensure_required_location_slides(plan, project_data):
         return plan
     slides = plan['slides']
     existing_types = {slide.get('type') for slide in slides if isinstance(slide, dict)}
+    offer_lang = slide_engine.resolve_offer_lang(project_data)
+    deck_en = offer_lang == slide_engine.OFFER_LANG_ENGLISH
     required = []
     if project_data.get('location_lat') and project_data.get('location_lng'):
         required.append({
-            'title': 'بيانات الموقع والإحداثيات',
+            'title': 'Location Data & Coordinates' if deck_en else 'بيانات الموقع والإحداثيات',
             'type': 'site_specs',
             'section_key': 'location',
             'design_style': 'table',
@@ -7928,10 +7939,10 @@ def _ensure_required_location_slides(plan, project_data):
             'content_source': 'location_detail',
         })
         for slide_type, title, source in (
-            ('map_overview', 'خريطة الأرض والموقع', 'location_polygon'),
-            ('map_access', 'خريطة الطرق الرئيسية', 'main_roads'),
-            ('map_catchment', 'خريطة المنطقة ونطاق التأثير', 'catchment_areas'),
-            ('map_landmarks', 'خريطة المعالم القريبة', 'nearby_landmarks'),
+            ('map_overview', 'Site & Location Map' if deck_en else 'خريطة الأرض والموقع', 'location_polygon'),
+            ('map_access', 'Main Roads Map' if deck_en else 'خريطة الطرق الرئيسية', 'main_roads'),
+            ('map_catchment', 'Area & Catchment Map' if deck_en else 'خريطة المنطقة ونطاق التأثير', 'catchment_areas'),
+            ('map_landmarks', 'Nearby Landmarks Map' if deck_en else 'خريطة المعالم القريبة', 'nearby_landmarks'),
         ):
             if project_data.get(source) or slide_type == 'map_overview':
                 required.append({
@@ -7946,13 +7957,15 @@ def _ensure_required_location_slides(plan, project_data):
                     'image_tokens': [f'##{slide_type.upper()}##'],
                 })
         required.append({
-            'title': 'ملخص الموقع الجغرافي',
+            'title': 'Location Summary' if deck_en else 'ملخص الموقع الجغرافي',
             'type': 'content',
             'section_key': 'location',
             'design_style': 'map',
             'requires_image': True,
             'content_density': 'medium',
-            'bullets': ['طبيعة الموقع وموقعه الاستراتيجي', 'الاتصال بالطرق والمعالم المحيطة', 'المزايا المستندة إلى بيانات الموقع'],
+            'bullets': (['Site character and strategic position', 'Road and landmark connectivity', 'Evidence-based site advantages']
+                        if deck_en else
+                        ['طبيعة الموقع وموقعه الاستراتيجي', 'الاتصال بالطرق والمعالم المحيطة', 'المزايا المستندة إلى بيانات الموقع']),
             'content_source': 'site_analysis',
             'image_tokens': ['##MAP_OVERVIEW##'],
         })
@@ -8017,8 +8030,9 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
         effective_branding['default_slide_count'] = effective_max_slides
 
     prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id, images=images)
+    offer_lang = slide_engine.resolve_offer_lang(project_data)
     if section_mode:
-        target_titles = '، '.join(slide_engine.PRESENTATION_SECTION_TITLES[key] for key in target_section_keys)
+        target_titles = '، '.join(slide_engine.section_title(key, offer_lang) for key in target_section_keys)
         prompt = (
             "## نطاق العرض المستقل\n"
             f"أنشئ خطة للغلاف والفهرس والأقسام التالية فقط ثم الخاتمة: {target_titles}.\n"
@@ -8073,7 +8087,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     plan_error = ''
     if not plan:
         print(f"[SLIDE-PLAN FALLBACK] Using fallback plan after {max_attempts} attempts. Last error: {last_error}")
-        plan = build_fallback_plan(effective_branding)
+        plan = build_fallback_plan(effective_branding, project_data)
         plan_source = 'fallback'
         plan_error = str(last_error or '')
 
@@ -8091,13 +8105,23 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     if len(slides) < effective_min_slides:
         print(f"[SLIDE-PLAN ENFORCE] Plan returned {len(slides)} slides, auto-padding to effective_min_slides ({effective_min_slides})")
         needed_extra = effective_min_slides - len(slides)
-        extra_topics = [
-            {'title': 'المواصفات الفنية وجودة المواد', 'style': 'cards', 'bullets': ['جودة التشطيبات والمواد المستخدمة', 'أنظمة التكييف والعزل الحراري', 'الضمانات وخدمات ما بعد البيع']},
-            {'title': 'التحليل البيئي والمحيط المباشر', 'style': 'text', 'bullets': ['سهولة الوصول والمحاور الرئيسية', 'قرب المشروع من المرافق والمراكز الحيوية', 'جودة البيئة العمرانية المحيطة']},
-            {'title': 'الخطة الزمنية ومراحل التطوير', 'style': 'timeline', 'bullets': ['مرحلة التخطيط والدراسات الأولية', 'مرحلة التنفيذ والإنشاءات', 'مرحلة التسليم والتشغيل']},
-        ]
+        if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+            extra_topics = [
+                {'title': 'Technical Specifications & Material Quality', 'style': 'cards', 'bullets': ['Finishing quality and materials used', 'HVAC and thermal insulation systems', 'Warranties and after-sales services']},
+                {'title': 'Environmental Analysis & Immediate Surroundings', 'style': 'text', 'bullets': ['Accessibility and key arterials', 'Proximity to amenities and vital centers', 'Quality of the surrounding built environment']},
+                {'title': 'Timeline & Development Phases', 'style': 'timeline', 'bullets': ['Planning and initial studies phase', 'Execution and construction phase', 'Handover and operation phase']},
+            ]
+        else:
+            extra_topics = [
+                {'title': 'المواصفات الفنية وجودة المواد', 'style': 'cards', 'bullets': ['جودة التشطيبات والمواد المستخدمة', 'أنظمة التكييف والعزل الحراري', 'الضمانات وخدمات ما بعد البيع']},
+                {'title': 'التحليل البيئي والمحيط المباشر', 'style': 'text', 'bullets': ['سهولة الوصول والمحاور الرئيسية', 'قرب المشروع من المرافق والمراكز الحيوية', 'جودة البيئة العمرانية المحيطة']},
+                {'title': 'الخطة الزمنية ومراحل التطوير', 'style': 'timeline', 'bullets': ['مرحلة التخطيط والدراسات الأولية', 'مرحلة التنفيذ والإنشاءات', 'مرحلة التسليم والتشغيل']},
+            ]
         if has_financial:
-            extra_topics.insert(0, {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']})
+            if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+                extra_topics.insert(0, {'title': 'Performance Metrics & Added Value', 'style': 'dashboard', 'bullets': ['Expected investment return analysis', 'Occupancy and sustainability rate', 'Long-term asset value']})
+            else:
+                extra_topics.insert(0, {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']})
         insert_idx = max(1, len(slides) - 1)
         if len(slides) >= 2 and slides[-2].get('type') == 'moodboard':
             insert_idx = max(1, len(slides) - 2)
@@ -8162,7 +8186,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
 
 
 def _emergency_slide_plan(project_data, branding, images, tenant_id, target_section_keys=None):
-    plan = build_fallback_plan(branding)
+    plan = build_fallback_plan(branding, project_data)
     plan = _ensure_required_location_slides(plan, project_data)
     plan = slide_engine.strip_financial_slides(plan, project_data)
     plan = slide_engine.strip_street_view_slides(plan)
@@ -14798,10 +14822,15 @@ def _execute_market_summary(data):
     current_summary = raw_current if isinstance(raw_current, (dict, str)) else None
     current_sources = data.get('currentSources') if isinstance(data.get('currentSources'), list) else None
     current_swot = data.get('currentSwot') if isinstance(data.get('currentSwot'), dict) else None
-    system_prompt = market_study.build_consultant_system_prompt()
+    offer_lang = slide_engine.resolve_offer_lang(data)
+    system_prompt = market_study.build_consultant_system_prompt(offer_lang=offer_lang)
     user_prompt = market_study.build_summary_user_prompt(
-        payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot
+        payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot,
+        offer_lang=offer_lang,
     )
+    if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+        system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
+        user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
                                                        usage_ctx=_usage_ctx('market', data))
     parsed, parse_error = _parse_market_model_json(res)
@@ -14918,15 +14947,21 @@ def api_generate_executive_content():
             'missing': missing,
         }), 400
     current = data.get('currentText')
-    prompt = executive_content.build_user_prompt(key, facts, current)
+    offer_lang = slide_engine.resolve_offer_lang(facts)
+    prompt = executive_content.build_user_prompt(key, facts, current, offer_lang=offer_lang)
+    if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+        prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     cap = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
     raw = None
     last_error = None
     try:
         for attempt in range(3):
             try:
+                system_prompt = executive_content.SYSTEM_PROMPT
+                if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+                    system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
                 response = call_zai_chat(
-                    executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
+                    system_prompt, prompt, temperature=0.2,
                     max_tokens=cap,
                     reasoning_effort='low',
                     response_format={'type': 'json_object'},

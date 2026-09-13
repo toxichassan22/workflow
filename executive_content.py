@@ -334,8 +334,15 @@ def block_ready(key, facts):
     return bool(readiness['blocks'].get(key)), _missing_groups(key, readiness)
 
 
-def instruction_for(key):
+def instruction_for(key, offer_lang=None):
     headings = '، '.join(SUMMARY_HEADINGS)
+    summary_instruction = (
+        'اكتب الملخص التنفيذي الشامل كوثيقة عربية رسمية مسترسلة تغطي بيانات المشروع '
+        f'كلها من الأقسام السابقة حسب ما يتوفر من هذه العناوين: {headings}. '
+        if offer_lang != 'en' else
+        'Write the comprehensive executive summary as a formal flowing English document covering '
+        f'all project data from the previous sections under these headings as available: {headings}. '
+    )
     return {
         'brief': (
             'اكتب نبذة مختصرة وفقرة وصف تفصيلي للمشروع من فكرة المشروع ونوعه ومستواه '
@@ -355,8 +362,7 @@ def instruction_for(key):
             'أو اللازمة منطقيًا منها. لا تضف خطرًا عامًا بلا سند، ولا معالجة عامة بلا صلة بالخطر.'
         ),
         'summary': (
-            'اكتب الملخص التنفيذي الشامل كوثيقة عربية رسمية مسترسلة تغطي بيانات المشروع '
-            f'كلها من الأقسام السابقة حسب ما يتوفر من هذه العناوين: {headings}. '
+            summary_instruction +
             'المصدر هو حقائق المشروع المعتمدة من كل الأقسام، وليس نصوص المحتوى التنفيذي الأخرى. '
             'استرسل داخل كل قسم بالأرقام والأسماء والقيود والمؤشرات الموجودة. لا تختصر اختصارًا مخلًا. '
             'لا تُنشئ قسم تحليل SWOT مستقلًا؛ أدمج ما ورد من دراسة السوق داخل قسمها. '
@@ -386,10 +392,11 @@ def _sections_to_text(sections):
     return '\n\n'.join(parts)
 
 
-def build_user_prompt(key, facts, current_text=''):
+def build_user_prompt(key, facts, current_text='', offer_lang=None):
     spec = block_spec(key)
     if not spec:
         return ''
+    lang = 'en' if offer_lang == 'en' else 'ar'
     payload = {
         'block': key,
         'label': spec['label'],
@@ -416,7 +423,7 @@ def build_user_prompt(key, facts, current_text=''):
             'موجودة أصلًا في المدخلات.'
         )
     return (
-        f'{instruction_for(key)}\n'
+        f'{instruction_for(key, offer_lang=lang)}\n'
         'أعد JSON فقط بالشكل التالي دون أي نص خارجه:\n'
         f'{shape}\n'
         f'{extra}\n\n'

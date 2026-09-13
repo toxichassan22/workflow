@@ -1018,7 +1018,8 @@ def _format_list(items, numbered=True):
     return '\n'.join(lines)
 
 
-def build_consultant_system_prompt():
+def build_consultant_system_prompt(offer_lang=None):
+    en = (offer_lang == 'en')
     source_blocks = []
     labels = {
         1: 'المستوى الأول: المصادر الحكومية الرسمية — استخدمها أولًا للأرقام والمؤشرات والصفقات والاشتراطات',
@@ -1060,6 +1061,28 @@ def build_consultant_system_prompt():
         f'- {item["label"]}: {SUMMARY_SECTION_HINTS[item["key"]]}'
         for item in SUMMARY_SECTIONS
     )
+    if en:
+        axes_sentence = ('\nWrite each axis in clear analytical prose; short bullets inside an axis value '
+                         'are allowed when needed. Never compress the axes into one paragraph or merge them '
+                         'into a single field.\n')
+        one_block_sentence = (
+            f'Field one_block_summary is {SUMMARY_TITLE} itself: one cohesive, polished English paragraph '
+            f'about this project\'s market, about {SUMMARY_WORD_TARGET} words, never fewer than {SUMMARY_MIN_WORDS} '
+            'words and no more than 400 words. Cover the market, city, sector, supply, demand, competition, '
+            'gap, recommendation and decision conditions with sufficient detail in one flow, with no subheadings, '
+            'numbering or lists. Make it a complete summary, not a short abstract, with no SWOT list and no '
+            'sources list.\n\n'
+        )
+    else:
+        axes_sentence = ('\nاكتب كل محور بصياغة تحليلية واضحة، ويمكن تنظيم التفاصيل داخله في نقاط قصيرة عند الحاجة. '
+                         'لا تختصر المحاور في فقرة واحدة ولا تدمجها في حقل واحد.\n')
+        one_block_sentence = (
+            f'حقل one_block_summary هو {SUMMARY_TITLE} نفسه: فقرة عربية واحدة متماسكة ومحترمة عن سوق هذا المشروع، '
+            f'في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. '
+            'اشرح السوق والمدينة والقطاع والعرض والطلب والمنافسة والفجوة والتوصية وشروط القرار بتفصيل كافٍ داخل '
+            'سياق واحد، بلا عناوين فرعية ولا ترقيم ولا نقاط. اجعلها ملخصًا كاملًا لا مجرد خلاصة قصيرة، ولا تضع '
+            'فيها قائمة SWOT أو قائمة مصادر.\n\n'
+        )
 
     return (
         'أنت مستشار متخصص في دراسات السوق العقاري في المملكة العربية السعودية.\n'
@@ -1094,9 +1117,9 @@ def build_consultant_system_prompt():
         'يجب أن يكون التحليل مخصصًا لنوع المشروع وليس وصفًا عامًا للمدينة.\n'
         'حقل summary هو تحليل السوق التفصيلي المنظم، وأعد فيه كل محور في قيمة مستقلة حسب الترتيب التالي:\n'
         + summary_spec
-        + '\nاكتب كل محور بصياغة تحليلية واضحة، ويمكن تنظيم التفاصيل داخله في نقاط قصيرة عند الحاجة. لا تختصر المحاور في فقرة واحدة ولا تدمجها في حقل واحد.\n'
-        f'حقل one_block_summary هو {SUMMARY_TITLE} نفسه: فقرة عربية واحدة متماسكة ومحترمة عن سوق هذا المشروع، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. اشرح السوق والمدينة والقطاع والعرض والطلب والمنافسة والفجوة والتوصية وشروط القرار بتفصيل كافٍ داخل سياق واحد، بلا عناوين فرعية ولا ترقيم ولا نقاط. اجعلها ملخصًا كاملًا لا مجرد خلاصة قصيرة، ولا تضع فيها قائمة SWOT أو قائمة مصادر.\n\n'
-        'بعد التحليل أعد تحليل SWOT مستقلًا للمشروع في السوق المحدد، من أربع خانات:\n'
+        + axes_sentence
+        + one_block_sentence
+        + 'بعد التحليل أعد تحليل SWOT مستقلًا للمشروع في السوق المحدد، من أربع خانات:\n'
         + '\n'.join(f'- {item["label"]}: {SWOT_SECTION_HINTS[item["key"]]}' for item in SWOT_SECTIONS)
         + '\nلا تخلط SWOT مع تحليل السوق. كل خانة نقاط قصيرة خاصة بهذا المشروع وهذا النوع.\n'
         'لا تستخدم وصفًا عامًا للمدينة بدل تحليل المشروع.\n\n'
@@ -1254,25 +1277,68 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
 
 
-def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None, current_swot=None):
+def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None, current_swot=None, offer_lang=None):
+    en = (offer_lang == 'en')
     today = date.today().isoformat()
     section_keys = ', '.join(item['key'] for item in SUMMARY_SECTIONS)
     swot_keys = ', '.join(item['key'] for item in SWOT_SECTIONS)
+    if en:
+        shape_example = (
+            '  "summary": {\n'
+            '    "market_definition": "Market-definition axis analysis",\n'
+            '    "city_position": "City-position axis analysis",\n'
+            '    "sector_performance": "Sector-performance axis analysis",\n'
+            '    "supply": "Supply axis analysis",\n'
+            '    "demand": "Demand axis analysis",\n'
+            '    "competition": "Competition axis analysis",\n'
+            '    "market_gap": "Market-gap axis analysis",\n'
+            '    "recommendation": "Recommendation axis analysis",\n'
+            '    "risks": "Risks axis analysis"\n'
+            '  },\n'
+        )
+        decision_example = '"decision": "A value from the decision list",\n'
+        disclaimer_example = '"disclaimer": "This is a preliminary indicative study, not a certified valuation appraisal",\n'
+        one_block_example = '"one_block_summary": "One cohesive English paragraph covering the full project market, no headings, numbering or lists"\n'
+    else:
+        shape_example = (
+            '  "summary": {\n'
+            '    "market_definition": "تحليل محور تعريف السوق",\n'
+            '    "city_position": "تحليل محور وضع المدينة",\n'
+            '    "sector_performance": "تحليل محور أداء القطاع",\n'
+            '    "supply": "تحليل محور العرض",\n'
+            '    "demand": "تحليل محور الطلب",\n'
+            '    "competition": "تحليل محور المنافسة",\n'
+            '    "market_gap": "تحليل محور الفجوة السوقية",\n'
+            '    "recommendation": "تحليل محور التوصية",\n'
+            '    "risks": "تحليل محور المخاطر"\n'
+            '  },\n'
+        )
+        decision_example = '"decision": "قيمة من قائمة القرار",\n'
+        disclaimer_example = '"disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
+        one_block_example = '"one_block_summary": "فقرة عربية واحدة متماسكة تلخص سوق المشروع كاملًا بلا عناوين ولا ترقيم ولا نقاط"\n'
     return (
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
         f'ابدأ المخرجات بعنوان: {SUMMARY_TITLE}.\n'
-        'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n'
-        f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
-        'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n'
-        'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
+        + ('Write the detailed market analysis inside summary as organized axes, one independent value per axis, specific to this project — not a generic city description.\n'
+           if en else
+           'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n')
+        + f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
+        + ('Cover each axis with the brief elements, using short bullets inside an axis value when needed. Never put the detailed analysis in one paragraph or mix its axes.\n'
+           if en else
+           'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
+        + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
         f'إذا لم تتوفر معلومة فاكتب داخل المحور: {MISSING_VALUE_PHRASE}.\n'
         'حقل القرار يجب أن يكون قيمة واحدة فقط من: '
         + '، '.join(DECISION_OPTIONS)
         + '.\n'
-        'بعد محاور تحليل السوق اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
-        'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر التحليل حرفيًا.\n'
-        f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. لا تكتب خلاصة قصيرة من عدة جمل؛ اشرح داخل الفقرة تعريف السوق ووضع المدينة وأداء القطاع والمعروض والطلب والمنافسة والفجوة السوقية والتوصية وشروط القرار، واربطها بتحليل متسلسل. بلا عناوين فرعية ولا ترقيم ولا نقاط، واستخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n'
-        'بيانات المشروع:\n'
+        + ('After the market-analysis axes, write an independent SWOT in four cells: Strengths, Weaknesses, Opportunities, Threats.\n'
+           if en else
+           'بعد محاور تحليل السوق اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n')
+        + 'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر التحليل حرفيًا.\n'
+        + (f'Write one_block_summary as {SUMMARY_TITLE}: one cohesive, polished English paragraph covering the full project market in about {SUMMARY_WORD_TARGET} words, never fewer than {SUMMARY_MIN_WORDS} words and no more than 400 words. Not a short multi-sentence abstract; cover market definition, city position, sector performance, supply, demand, competition, market gap, recommendation and decision conditions in a sequenced analysis. No subheadings, numbering or lists; use only the existing facts, figures and sources, with no SWOT and no sources list.\n\n'
+           if en else
+           f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. لا تكتب خلاصة قصيرة من عدة جمل؛ اشرح داخل الفقرة تعريف السوق ووضع المدينة وأداء القطاع والمعروض والطلب والمنافسة والفجوة السوقية والتوصية وشروط القرار، واربطها بتحليل متسلسل. بلا عناوين فرعية ولا ترقيم ولا نقاط، واستخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n')
+        + 'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'
         f'{json.dumps(competitors or [], ensure_ascii=False, indent=2)}\n\n'
@@ -1285,25 +1351,15 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         'أرجع JSON فقط بهذا الشكل:\n'
         '{\n'
         f'  "title": "{SUMMARY_TITLE}",\n'
-        '  "summary": {\n'
-        '    "market_definition": "تحليل محور تعريف السوق",\n'
-        '    "city_position": "تحليل محور وضع المدينة",\n'
-        '    "sector_performance": "تحليل محور أداء القطاع",\n'
-        '    "supply": "تحليل محور العرض",\n'
-        '    "demand": "تحليل محور الطلب",\n'
-        '    "competition": "تحليل محور المنافسة",\n'
-        '    "market_gap": "تحليل محور الفجوة السوقية",\n'
-        '    "recommendation": "تحليل محور التوصية",\n'
-        '    "risks": "تحليل محور المخاطر"\n'
-        '  },\n'
-        f'  "swot": {{ مفاتيح إلزامية: {swot_keys} }},\n'
-        '  "decision": "قيمة من قائمة القرار",\n'
-        '  "sources": [\n'
+        + shape_example
+        + f'  "swot": {{ مفاتيح إلزامية: {swot_keys} }},\n'
+        + decision_example
+        + '  "sources": [\n'
         '    {"name": "", "url": "", "data_date": "", "accessed_at": "' + today + '", "reliability": "", "note": ""}\n'
         '  ],\n'
-        '  "disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
-        '  "one_block_summary": "فقرة عربية واحدة متماسكة تلخص سوق المشروع كاملًا بلا عناوين ولا ترقيم ولا نقاط"\n'
-        '}\n'
+        + disclaimer_example
+        + one_block_example
+        + '}\n'
         'في url ضع رابط الصفحة المحددة التي ظهر فيها الرقم أو المعلومة، وليس رابط الصفحة الرئيسية للموقع.\n'
     )
 

@@ -72,6 +72,132 @@ PRESENTATION_SECTION_TITLES = {
     'closing': 'الخاتمة',
 }
 
+OFFER_LANG_ARABIC = 'ar'
+OFFER_LANG_ENGLISH = 'en'
+
+PRESENTATION_SECTION_TITLES_EN = {
+    'overview': 'Project Overview',
+    'components': 'Project Components',
+    'land': 'Land Analysis',
+    'location': 'Location Analysis',
+    'market': 'Market Analysis',
+    'timeline': 'Project Timeline',
+    'financial': 'Financial Study',
+    'swot_risks': 'SWOT & Risk Analysis',
+    'team': 'Project Team',
+    'plans': 'Drawings & Plans',
+    'exterior': 'Exterior Visualizations',
+    'interior': 'Interior Visualizations',
+    'executive_summary': 'Executive Summary',
+    'closing': 'Conclusion',
+}
+
+# Fixed deck-chrome labels that are not project data (cover/index/closing markers).
+OFFER_CHROME_AR = {
+    'cover': 'الغلاف',
+    'index': 'محتويات العرض',
+    'index_heading': 'محتويات العرض',
+}
+OFFER_CHROME_EN = {
+    'cover': 'Cover',
+    'index': 'Table of Contents',
+    'index_heading': 'Table of Contents',
+}
+
+OFFER_LANGUAGE_DIRECTIVE_EN = (
+    "OUTPUT LANGUAGE — ENGLISH:\n"
+    "Author every generated word — titles, headings, paragraphs, lists, captions, table notes, "
+    "summaries — in clear professional English. Copy every source value (names, figures, labels, "
+    "dates, URLs) VERBATIM; never translate proper names and never recompute or reformat numbers. "
+    "Keep the brief, rules and data above exactly as given; only the authored output language changes. "
+    'Set dir="ltr" on generated slide roots.'
+)
+
+_ARABIC_SCRIPT_RE = re.compile(r'[\u0600-\u06FF]')
+_LATIN_LETTER_RE = re.compile(r'[A-Za-z]')
+
+
+# Draft keys that carry machine noise (ids, URLs, tokens, files, coordinates)
+# rather than human prose. Skipped during offer-language detection so a short
+# Arabic text can never be drowned by Latin identifiers.
+_MACHINE_OFFER_KEY_RE = re.compile(
+    r'(?:^map_|^regen_|^_|^image|^logo|^file|^http|^tenant|section_?status|page_?draft'
+    r'|_id$|^id$|_url$|^url$|_path$|_token$|_file$|_meta$|_slug$|^slug$|_email$|^email$'
+    r'|_hash$|^phone$|^username$|^domain$|^latitude$|^longitude$|^lat$|^lng$'
+    r'|^draftid$|^draft_id$)',
+    re.IGNORECASE,
+)
+
+
+def _iter_offer_text_values(value, budget, _key=''):
+    """Yield human string values for offer-language detection.
+
+    Detection is intentionally conservative: genuine Arabic content wins, while
+    machine identifiers and small auto-filled fragments (city, road names) can
+    never flip an English project.
+    """
+    if budget[0] <= 0:
+        return
+    if isinstance(value, str):
+        chunk = value[:budget[0]]
+        budget[0] -= len(chunk)
+        yield chunk
+    elif isinstance(value, dict):
+        for item_key, item in value.items():
+            if isinstance(item_key, str) and _MACHINE_OFFER_KEY_RE.search(item_key):
+                continue
+            yield from _iter_offer_text_values(item, budget, item_key)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_offer_text_values(item, budget, _key)
+
+
+def detect_offer_lang(project_data):
+    """Detect the deck language from the project data itself.
+
+    Returns 'en' only for substantial Latin data with at most fragmentary
+    Arabic (auto-filled city/district, a road name); everything else —
+    including empty drafts and mixed content — stays 'ar', which preserves
+    the historical behavior exactly.
+    """
+    if not isinstance(project_data, dict):
+        return OFFER_LANG_ARABIC
+    budget = [50000]
+    arabic = 0
+    latin = 0
+    for text in _iter_offer_text_values(project_data, budget):
+        arabic += len(_ARABIC_SCRIPT_RE.findall(text))
+        if arabic >= 40:
+            return OFFER_LANG_ARABIC
+        latin += len(_LATIN_LETTER_RE.findall(text))
+    if latin >= 30:
+        return OFFER_LANG_ENGLISH
+    return OFFER_LANG_ARABIC
+
+
+def resolve_offer_lang(project_data, offer_lang=None):
+    """Normalize an explicit language or detect it from the project data."""
+    if offer_lang == OFFER_LANG_ENGLISH:
+        return OFFER_LANG_ENGLISH
+    if offer_lang == OFFER_LANG_ARABIC:
+        return OFFER_LANG_ARABIC
+    return detect_offer_lang(project_data)
+
+
+def section_title(section_key, offer_lang=OFFER_LANG_ARABIC):
+    """Canonical deck-chrome title for a section in the deck language."""
+    if offer_lang == OFFER_LANG_ENGLISH:
+        return PRESENTATION_SECTION_TITLES_EN.get(section_key,
+                                                  PRESENTATION_SECTION_TITLES.get(section_key, section_key))
+    return PRESENTATION_SECTION_TITLES.get(section_key, section_key)
+
+
+def offer_chrome(key, offer_lang=OFFER_LANG_ARABIC):
+    """Fixed non-data deck label (cover/index markers) in the deck language."""
+    if offer_lang == OFFER_LANG_ENGLISH:
+        return OFFER_CHROME_EN.get(key, OFFER_CHROME_AR.get(key, key))
+    return OFFER_CHROME_AR.get(key, key)
+
 _SECTION_KEY_ALIASES = {
     'project': 'overview', 'project_overview': 'overview', 'project_idea': 'overview',
     'project_components': 'components', 'land_analysis': 'land', 'site': 'location',
@@ -224,28 +350,29 @@ def _normalize_legacy_single_slide(slide, project_data=None):
 
     if section == 'market':
         market = _market_state(project)
+        deck_en = resolve_offer_lang(project) == OFFER_LANG_ENGLISH
         if re.search(r'(?:مقارنة\s+المنافسين|منافس|competitor)', title, flags=re.IGNORECASE):
             if isinstance(market.get('competitors'), list) and any(_competitor_name(row) for row in market.get('competitors') or []):
                 item.update({
-                    'title': 'مقارنة المنافسين', 'design_style': 'chart',
+                    'title': 'Competitor Comparison' if deck_en else 'مقارنة المنافسين', 'design_style': 'chart',
                     'chart_type': 'horizontal_bar', 'requires_image': False,
                     'content_source': 'market_study_data.competitors',
                     'source_table': 'competitors', 'image_tokens': [],
                 })
-        elif re.search(r'نطاق', title, flags=re.IGNORECASE) and _market_scope_rows(market):
+        elif re.search(r'نطاق' if not deck_en else r'نطاق|scope', title, flags=re.IGNORECASE) and _market_scope_rows(market):
             item.update({'content_source': 'market_study_data.scope', 'source_table': 'market_scope',
                          'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
-        elif re.search(r'مصادر|مراجع', title, flags=re.IGNORECASE) and _market_source_rows(market):
+        elif re.search(r'مصادر|مراجع' if not deck_en else r'مصادر|مراجع|sources?|references?', title, flags=re.IGNORECASE) and _market_source_rows(market):
             item.update({'content_source': 'market_study_data.sources', 'source_table': 'market_sources',
                          'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
-        elif re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)', lower_title, flags=re.IGNORECASE):
+        elif re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)' if not deck_en else r'(?:swot|strengths|weaknesses|opportunities|threats)', lower_title, flags=re.IGNORECASE):
             if isinstance(market.get('swot'), dict) and any(str(value or '').strip() for value in market.get('swot', {}).values()):
                 item.update({'content_source': 'market_study_data.swot', 'design_style': 'swot',
                              'requires_image': False, 'image_tokens': []})
-        elif re.search(r'تحليل\s+السوق|دراسة\s+السوق', title, flags=re.IGNORECASE) and _market_summary_rows(market):
+        elif re.search(r'تحليل\s+السوق|دراسة\s+السوق' if not deck_en else r'market\s+analysis|market\s+overview', title, flags=re.IGNORECASE) and _market_summary_rows(market):
             item.update({'content_source': 'market_study_data.summary', 'source_table': 'market_summary',
                          'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
-        elif re.search(r'ملخص\s+دراسة\s+سوق\s+العمل', title, flags=re.IGNORECASE) and _market_one_block_paragraph(market):
+        elif re.search(r'ملخص\s+دراسة\s+سوق\s+العمل' if not deck_en else r'market\s+study\s+summary', title, flags=re.IGNORECASE) and _market_one_block_paragraph(market):
             item.update({'content_source': 'market_study_data.one_block_summary', 'design_style': 'text',
                          'requires_image': False, 'image_tokens': []})
         if str(item.get('content_source') or '').strip():
@@ -446,12 +573,20 @@ def _deduplicate_plan_media(groups):
     return used
 
 
-def _drop_redundant_generic_slides(groups):
+def _drop_redundant_generic_slides(groups, offer_lang=None):
     generic = {
         'المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
         'الملخص النهائي دون تكرار', 'تعريف المشروع من البيانات المعتمدة',
         'الفكرة والاستخدامات المعتمدة', 'ملخص موجز دون تكرار',
     }
+    if offer_lang == OFFER_LANG_ENGLISH:
+        generic |= {
+            'Approved content for this section', 'Available details from the project data',
+            'Final summary without repetition', 'Project definition from approved data',
+            'Approved concept and uses', 'Concise summary without repetition',
+            'Additional detail from the project data',
+            'Concise wording', 'Without inventing information',
+        }
     for section_key, slides in groups.items():
         concrete = any(slide.get('content_source') or slide.get('source_table') or slide.get('image_tokens')
                        for slide in slides)
@@ -689,7 +824,7 @@ _FINANCIAL_PACK_ROW_BUDGET = 21.5
 _FINANCIAL_PACK_MAX_TABLES = 8
 
 
-def _pack_financial_table_slices(items):
+def _pack_financial_table_slices(items, offer_lang=None):
     """Pack consecutive narrow financial table slices into slides that stack them vertically.
 
     The client shrinks the tables, so one small table per slide wasted the deck with
@@ -697,6 +832,7 @@ def _pack_financial_table_slices(items):
     caller flushes them as single slides because two six-column tables stacked
     vertically do not fit the slide height.
     """
+    lang = OFFER_LANG_ENGLISH if offer_lang == OFFER_LANG_ENGLISH else OFFER_LANG_ARABIC
     groups = []
     current = None
     for item in items:
@@ -725,14 +861,15 @@ def _pack_financial_table_slices(items):
             })
             continue
         titles = list(dict.fromkeys(str(item['title']) for item in group_items))
+        sensitivity_word = 'sensitivity' if lang == OFFER_LANG_ENGLISH else 'حساسية'
         if len(titles) == 1:
             title = titles[0]
-        elif any('حساسية' in t for t in titles):
-            title = next((t for t in titles if 'حساسية' in t), titles[0])
+        elif any(sensitivity_word in t.lower() for t in titles):
+            title = next((t for t in titles if sensitivity_word in t.lower()), titles[0])
         elif len(titles) == 2:
             title = ' + '.join(titles)
         else:
-            title = f'{titles[0]} + جداول أخرى'
+            title = f'{titles[0]} + {"other tables" if lang == OFFER_LANG_ENGLISH else "جداول أخرى"}'
         slides.append({
             'title': title, 'type': 'content', 'design_style': 'table',
             'chart_type': '', 'content_density': 'high', 'requires_image': False,
@@ -833,7 +970,7 @@ def _merge_sparse_plan_slides(groups):
         groups[section_key] = merged
 
 
-def _merge_adjacent_table_slides(groups):
+def _merge_adjacent_table_slides(groups, offer_lang=None):
     """Combine adjacent ordinary table slides when their data can share a page.
 
     Financial report tables are packed from their canonical report below, but
@@ -899,7 +1036,8 @@ def _merge_adjacent_table_slides(groups):
                     for item in group if str(item.get('content_source') or '').strip()
                 ]
             slide['table_group_titles'] = titles
-            slide['title'] = titles[0] if titles else slide.get('title') or 'جداول البيانات'
+            slide['title'] = (titles[0] if titles else slide.get('title')
+                              or ('Data Tables' if offer_lang == OFFER_LANG_ENGLISH else 'جداول البيانات'))
         groups[section_key] = merged
 
 
@@ -1022,6 +1160,29 @@ _FINANCIAL_PLAN_TABLES = (
     ('sensitivityAssumptionsTable', 'افتراضات تحليل الحساسية', 'table'),
     ('sensitivityTable', 'نتائج تحليل الحساسية', 'chart'),
 )
+
+_FINANCIAL_PLAN_TABLES_EN = (
+    ('componentsTable', 'Project Components', 'table'),
+    ('revenueTable', 'Revenue Line Items', 'table'),
+    ('costTable', 'Project Costs', 'chart'),
+    ('scheduleTable', 'Financial Development Phases', 'flow'),
+    ('opexTable', 'Operating Expenses', 'table'),
+    ('graceScheduleTable', 'Grace Period Schedule', 'table'),
+    ('financeDrawTable', 'Financing Drawdown Schedule', 'flow'),
+    ('financeRepaymentTable', 'Financing Repayment Schedule', 'flow'),
+    ('fundAdditionalFeesTable', 'Additional Fund Fees', 'table'),
+    ('externalTable', 'External Line Items', 'table'),
+    ('cashflowTable', 'Annual Cash Flow', 'chart'),
+    ('sensitivityAssumptionsTable', 'Sensitivity Analysis Assumptions', 'table'),
+    ('sensitivityTable', 'Sensitivity Analysis Results', 'chart'),
+)
+
+
+def _financial_plan_tables(offer_lang=OFFER_LANG_ARABIC):
+    """Legacy-model financial table titles in the deck language (keys unchanged)."""
+    if offer_lang == OFFER_LANG_ENGLISH:
+        return _FINANCIAL_PLAN_TABLES_EN
+    return _FINANCIAL_PLAN_TABLES
 
 USE_TYPE_LABELS = {
     'retail': 'تجاري / تجزئة',
@@ -1440,13 +1601,14 @@ def _market_plan_slide(title, content_source, design_style='table', source_table
     }
 
 
-def _normalize_market_group_slides(existing, market):
+def _normalize_market_group_slides(existing, market, offer_lang=None):
     """Normalize market data sources while leaving SOL's visual design open.
 
     The competitor comparison is the only market page with a fixed visual
     renderer.  The remaining entries are only normalized for source coverage;
     their HTML is still designed by SOL.
     """
+    lang = OFFER_LANG_ENGLISH if offer_lang == OFFER_LANG_ENGLISH else OFFER_LANG_ARABIC
     if not _market_has_required_data(market):
         return list(existing or [])
 
@@ -1485,10 +1647,10 @@ def _normalize_market_group_slides(existing, market):
     result = []
     scope_rows = _market_scope_rows(market)
     if scope_rows:
-        result.append(take('market_study_data.scope', 'نطاق الدراسة', 'editorial', 'market_scope'))
+        result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
-        competitor_slide = take('market_study_data.competitors', 'مقارنة المنافسين', 'chart', 'competitors')
+        competitor_slide = take('market_study_data.competitors', 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين', 'chart', 'competitors')
         competitor_slide.update({
             'design_style': 'chart',
             'chart_type': 'horizontal_bar',
@@ -1500,7 +1662,7 @@ def _normalize_market_group_slides(existing, market):
         if not page_rows:
             continue
         content_source = 'market_study_data.summary'
-        title = 'تحليل السوق'
+        title = section_title('market', lang)
         if len(summary_pages) > 1:
             if start:
                 content_source = f'market_study_data.summary:{start}:{start + len(page_rows)}'
@@ -1516,7 +1678,7 @@ def _normalize_market_group_slides(existing, market):
         chunk_cursor = 0
         for chunk_index, _chunk in enumerate(block_chunks, 1):
             content_source = 'market_study_data.one_block_summary'
-            title = 'ملخص دراسة سوق العمل'
+            title = 'Market Study Summary' if lang == OFFER_LANG_ENGLISH else 'ملخص دراسة سوق العمل'
             if len(block_chunks) > 1:
                 # Keep a stable source name for the single-slide case and a
                 # bounded slice only when two slides are actually required.
@@ -1533,7 +1695,7 @@ def _normalize_market_group_slides(existing, market):
         if not page_rows:
             continue
         content_source = 'market_study_data.sources'
-        title = 'مصادر دراسة السوق'
+        title = 'Market Study Data Sources' if lang == OFFER_LANG_ENGLISH else 'مصادر دراسة السوق'
         if len(source_pages) > 1:
             if start:
                 content_source = f'market_study_data.sources:{start}:{start + len(page_rows)}'
@@ -1550,10 +1712,11 @@ def _normalize_market_group_slides(existing, market):
     return result
 
 
-def normalize_market_section_plan(plan, project_data=None):
+def normalize_market_section_plan(plan, project_data=None, offer_lang=None):
     """Repair a client/stored plan without rebuilding unrelated sections."""
     if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
         return plan
+    lang = resolve_offer_lang(project_data, offer_lang)
     market = _market_state(project_data)
     if not _market_has_required_data(market):
         return plan
@@ -1574,7 +1737,7 @@ def normalize_market_section_plan(plan, project_data=None):
             market_indexes.append(index)
 
     existing = [source_slides[index] for index in market_indexes]
-    normalized_market = _normalize_market_group_slides(existing, market)
+    normalized_market = _normalize_market_group_slides(existing, market, offer_lang=lang)
     if not normalized_market and not market_indexes:
         return plan
 
@@ -1646,8 +1809,9 @@ def _filter_substantive_financial_rows(rows, part_type='table'):
     return filtered
 
 
-def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None):
+def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None, offer_lang=None):
     source = project_data if isinstance(project_data, dict) else {}
+    lang = resolve_offer_lang(source, offer_lang)
     images = images if isinstance(images, dict) else {}
     map_placeholders = images.get('map_placeholders') if isinstance(images.get('map_placeholders'), dict) else {}
     has_map_context = any(str(source.get(key) or '').strip() for key in (
@@ -1678,12 +1842,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     moodboard_tokens = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in _available_asset_items(images.get('moodboard'))]
     if not groups.get('overview') and source:
         add('overview', {
-            'title': 'نبذة عن المشروع', 'type': 'content', 'design_style': 'text',
+            'title': section_title('overview', lang), 'type': 'content', 'design_style': 'text',
             'content_density': 'medium', 'requires_image': False,
             'content_source': 'project_overview', 'image_tokens': [], 'bullets': [],
         })
     elif groups.get('overview'):
-        groups['overview'][0]['title'] = 'نبذة عن المشروع'
+        groups['overview'][0]['title'] = section_title('overview', lang)
         groups['overview'][0]['content_source'] = groups['overview'][0].get('content_source') or 'project_overview'
 
     # Ensure all 4 canonical location maps (Overview, Access, Catchment, Landmarks) are mandatorily present
@@ -1704,7 +1868,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
     required_map_specs = [
         ('overview', {
-            'title': 'الموقع العام وحدود الأرض',
+            'title': 'Site Location & Plot Boundary' if lang == OFFER_LANG_ENGLISH else 'الموقع العام وحدود الأرض',
             'type': 'map_overview',
             'section_key': 'location',
             'design_style': 'map',
@@ -1712,10 +1876,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'requires_image': True,
             'content_source': 'location_polygon',
             'image_tokens': ['##MAP_OVERVIEW##'],
-            'bullets': ['موقع المشروع الاستراتيجي وحدود الأرض', 'الربط المباشر مع النسيج الحضري المحيط'],
+            'bullets': (['Strategic site location and plot boundary', 'Direct link to the surrounding urban fabric']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['موقع المشروع الاستراتيجي وحدود الأرض', 'الربط المباشر مع النسيج الحضري المحيط']),
         }),
         ('access', {
-            'title': 'شبكة الطرق وسهولة الوصول',
+            'title': 'Road Network & Accessibility' if lang == OFFER_LANG_ENGLISH else 'شبكة الطرق وسهولة الوصول',
             'type': 'map_access',
             'section_key': 'location',
             'design_style': 'map',
@@ -1723,10 +1889,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'requires_image': True,
             'content_source': 'main_roads',
             'image_tokens': ['##MAP_ACCESS##'],
-            'bullets': ['المحاور الرئيسية والشوارع المؤدية للموقع', 'سهولة وانسيابية الحركة المرورية'],
+            'bullets': (['Key arterials and streets serving the site', 'Smooth and fluid traffic movement']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['المحاور الرئيسية والشوارع المؤدية للموقع', 'سهولة وانسيابية الحركة المرورية']),
         }),
         ('catchment', {
-            'title': 'نطاق الخدمة والتأثير الجغرافي',
+            'title': 'Catchment & Area of Influence' if lang == OFFER_LANG_ENGLISH else 'نطاق الخدمة والتأثير الجغرافي',
             'type': 'map_catchment',
             'section_key': 'location',
             'design_style': 'map',
@@ -1734,10 +1902,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'requires_image': True,
             'content_source': 'catchment_areas',
             'image_tokens': ['##MAP_CATCHMENT##'],
-            'bullets': ['نطاقات الوصول الزمني والسكاني حول المشروع', 'الكتلة السكانية والطلب في النطاق المستهدف'],
+            'bullets': (['Drive-time and population reach around the project', 'Population mass and demand in the target catchment']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['نطاقات الوصول الزمني والسكاني حول المشروع', 'الكتلة السكانية والطلب في النطاق المستهدف']),
         }),
         ('landmarks', {
-            'title': 'المعالم الحيوية والمرافق المجاورة',
+            'title': 'Landmarks & Nearby Amenities' if lang == OFFER_LANG_ENGLISH else 'المعالم الحيوية والمرافق المجاورة',
             'type': 'map_landmarks',
             'section_key': 'location',
             'design_style': 'map',
@@ -1745,7 +1915,9 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'requires_image': True,
             'content_source': 'nearby_landmarks',
             'image_tokens': ['##MAP_LANDMARKS##'],
-            'bullets': ['أهم المرافق والخدمات والوجهات المحيطة', 'المسافات وأزمنة الوصول التقديرية بالسيارة'],
+            'bullets': (['Key facilities, services and nearby destinations', 'Distances and estimated drive times']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['أهم المرافق والخدمات والوجهات المحيطة', 'المسافات وأزمنة الوصول التقديرية بالسيارة']),
         }),
     ]
 
@@ -1776,10 +1948,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     if len(moodboard_items) > 1:
         for group_number, chunk in enumerate(_pair_media_chunks(moodboard_items), 1):
             tokens = [f'##MOODBOARD_IMAGE_{idx}##' for idx, _ in chunk]
-            titles = [str(moodboard_meta[idx - 1].get('label') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('label') or f'التصور الخارجي {idx}').strip() for idx, it in chunk]
+            titles = [str(moodboard_meta[idx - 1].get('label') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('label') or (f'Exterior Concept {idx}' if lang == OFFER_LANG_ENGLISH else f'التصور الخارجي {idx}')).strip() for idx, it in chunk]
             combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
             if len(moodboard_items) > 2:
-                combined_title = f'التصورات الخارجية — {group_number}'
+                combined_title = (f'Exterior Concepts — {group_number}' if lang == OFFER_LANG_ENGLISH
+                                  else f'التصورات الخارجية — {group_number}')
             bullets = [str(moodboard_meta[idx - 1].get('caption') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('caption') or '').strip() for idx, it in chunk]
             add('exterior', {
                 'title': combined_title, 'type': 'content', 'design_style': 'image',
@@ -1792,7 +1965,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     else:
         for index, item in uncovered_ext:
             meta = moodboard_meta[index - 1] if index <= len(moodboard_meta) and isinstance(moodboard_meta[index - 1], dict) else {}
-            title = str(meta.get('label') or item.get('label') or f'التصور الخارجي {index}').strip()
+            title = str(meta.get('label') or item.get('label') or (f'Exterior Concept {index}' if lang == OFFER_LANG_ENGLISH else f'التصور الخارجي {index}')).strip()
             caption = str(meta.get('caption') or item.get('caption') or '').strip()
             add('exterior', {
                 'title': title, 'type': 'content', 'design_style': 'image',
@@ -1810,10 +1983,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     if len(land_items) > 1:
         for group_number, chunk in enumerate(_balanced_media_chunks(land_items), 1):
             tokens = [f'##LAND_PHOTO_{idx}##' for idx, _ in chunk]
-            titles = [str(it.get('name') or f'صورة الأرض {idx}').strip() for idx, it in chunk]
+            titles = [str(it.get('name') or (f'Site Photo {idx}' if lang == OFFER_LANG_ENGLISH else f'صورة الأرض {idx}')).strip() for idx, it in chunk]
             combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
             if len(land_items) > 2:
-                combined_title = f'صور الأرض — {group_number}'
+                combined_title = (f'Site Photos — {group_number}' if lang == OFFER_LANG_ENGLISH
+                                  else f'صور الأرض — {group_number}')
             bullets = [str(it.get('description') or it.get('caption') or '').strip() for _, it in chunk]
             add('land', {
                 'title': combined_title, 'type': 'content', 'design_style': 'image',
@@ -1825,7 +1999,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     else:
         for index, item in uncovered_land:
             description = str(item.get('description') or item.get('caption') or '').strip()
-            title = str(item.get('name') or f'صورة الأرض {index}').strip()
+            title = str(item.get('name') or (f'Site Photo {index}' if lang == OFFER_LANG_ENGLISH else f'صورة الأرض {index}')).strip()
             add('land', {
                 'title': title, 'type': 'content', 'design_style': 'image',
                 'content_density': 'low', 'requires_image': True,
@@ -1839,11 +2013,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         directional = [slide for slide in groups.get('land', [])
                        if slide.get('content_source') == 'land_boundary_diagram'
                        or slide.get('design_style') == 'diagram'
-                       or re.search(r'(?:مخطط اتجاهي|حدود الأرض والواجهات)', str(slide.get('title') or ''))]
+                       or re.search(r'(?:مخطط اتجاهي|حدود الأرض والواجهات|directional|plot boundary|boundary diagram)', str(slide.get('title') or ''), re.IGNORECASE)]
         groups['land'] = [slide for slide in groups.get('land', []) if slide not in directional]
         canonical = dict(directional[0]) if directional else {}
         canonical.update({
-            'title': 'مخطط اتجاهي لحدود الأرض',
+            'title': 'Directional Plot Boundary Diagram' if lang == OFFER_LANG_ENGLISH else 'مخطط اتجاهي لحدود الأرض',
             'type': 'content',
             'design_style': 'diagram',
             'content_density': 'medium',
@@ -1859,7 +2033,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                        if not any(token.startswith('##PLAN_IMAGE_') for token in (slide.get('image_tokens') or []))]
     for index, item in plans:
         meta = plan_meta[index - 1] if index <= len(plan_meta) and isinstance(plan_meta[index - 1], dict) else {}
-        title = str(meta.get('title') or meta.get('name') or item.get('title') or f'المخطط {index}').strip()
+        title = str(meta.get('title') or meta.get('name') or item.get('title') or (f'Plan {index}' if lang == OFFER_LANG_ENGLISH else f'المخطط {index}')).strip()
         description = str(meta.get('description') or item.get('description') or '').strip()
         add('plans', {
             'title': title, 'type': 'content', 'design_style': 'image',
@@ -1876,7 +2050,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     for component_index, component in enumerate(interior_components, 1):
         if not isinstance(component, dict):
             continue
-        component_name = str(component.get('name') or f'المكون {component_index}').strip()
+        component_name = str(component.get('name') or (f'Component {component_index}' if lang == OFFER_LANG_ENGLISH else f'المكون {component_index}')).strip()
         comp_items = _available_asset_items(component.get('images'))
         uncovered_comp_items = comp_items
         if len(comp_items) > 1:
@@ -1918,7 +2092,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             chunk = components[start:start + 6]
             number = start // 6 + 1
             add('components', {
-                'title': 'مكونات المشروع' + (f' — {number}' if len(components) > 6 else ''),
+                'title': section_title('components', lang) + (f' — {number}' if len(components) > 6 else ''),
                 'type': 'content', 'design_style': 'table', 'content_density': 'high',
                 'requires_image': False, 'content_source': f'project_components:{start}:{start + len(chunk)}',
                 'bullets': [],
@@ -1927,7 +2101,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     phases = parse_timeline_phases(source)
     if phases and not groups.get('timeline'):
         add('timeline', {
-            'title': 'الجدول الزمني ومراحل التطوير', 'type': 'content',
+            'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير', 'type': 'content',
             'design_style': 'timeline', 'content_density': 'high', 'requires_image': False,
             'content_source': 'timeline_table_data', 'bullets': [],
         })
@@ -1939,12 +2113,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         report_parts = report.get('parts') if isinstance(report.get('parts'), list) else []
         groups['financial'] = []
         if report_parts:
-            heading = 'الدراسة المالية'
+            heading = 'Financial Study' if lang == OFFER_LANG_ENGLISH else 'الدراسة المالية'
             subheading = ''
             pending_tables = []
 
             def flush_pending_tables():
-                for packed_slide in _pack_financial_table_slices(pending_tables):
+                for packed_slide in _pack_financial_table_slices(pending_tables, offer_lang=lang):
                     add('financial', packed_slide)
                 pending_tables.clear()
 
@@ -1994,11 +2168,18 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         and chart_cand != 'heatmap'
                         and _can_chart_financial_part(chart_cand, part, model, project_data)):
                     flush_pending_tables()
-                    chart_titles = {
-                        'combo': 'التدفقات النقدية السنوية والتراكمية',
-                        'waterfall': 'تكوين إجمالي تكلفة المشروع',
-                        'heatmap': 'مقارنة السيناريوهات المالية',
-                    }
+                    if lang == OFFER_LANG_ENGLISH:
+                        chart_titles = {
+                            'combo': 'Annual & Cumulative Cash Flow',
+                            'waterfall': 'Investment Cost Waterfall',
+                            'heatmap': 'Financial Scenarios Heatmap',
+                        }
+                    else:
+                        chart_titles = {
+                            'combo': 'التدفقات النقدية السنوية والتراكمية',
+                            'waterfall': 'تكوين إجمالي تكلفة المشروع',
+                            'heatmap': 'مقارنة السيناريوهات المالية',
+                        }
                     add(target_section, {
                         'title': chart_titles.get(chart_cand, part_title),
                         'type': 'content',
@@ -2031,7 +2212,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                             if len(row_ranges) > 1:
                                 title_suffixes.append(str(row_number))
                             if len(column_ranges) > 1:
-                                title_suffixes.append(f'جزء {column_number}')
+                                title_suffixes.append((f'Part {column_number}' if lang == OFFER_LANG_ENGLISH
+                                                       else f'جزء {column_number}'))
                             add(target_section, {
                                 'title': part_title + (f" — {' / '.join(title_suffixes)}" if title_suffixes else ''),
                                 'type': 'content', 'design_style': 'chart' if chartable else 'table',
@@ -2054,7 +2236,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if not any(canonicalize_chart_type(s.get('chart_type')) == 'combo' for s in fin_slides) and (tables.get('cashflowTable') or tables.get('cashflow')):
                 cf_rows = tables.get('cashflowTable') or tables.get('cashflow') or []
                 add('financial', {
-                    'title': 'التدفقات النقدية السنوية والتراكمية',
+                    'title': 'Annual & Cumulative Cash Flow' if lang == OFFER_LANG_ENGLISH else 'التدفقات النقدية السنوية والتراكمية',
                     'type': 'content',
                     'design_style': 'chart',
                     'chart_type': 'combo',
@@ -2069,7 +2251,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if not any(canonicalize_chart_type(s.get('chart_type')) == 'waterfall' for s in fin_slides) and (tables.get('costTable') or tables.get('costs')):
                 ct_rows = tables.get('costTable') or tables.get('costs') or []
                 add('financial', {
-                    'title': 'تكوين إجمالي تكلفة المشروع',
+                    'title': 'Investment Cost Waterfall' if lang == OFFER_LANG_ENGLISH else 'تكوين إجمالي تكلفة المشروع',
                     'type': 'content',
                     'design_style': 'chart',
                     'chart_type': 'waterfall',
@@ -2084,7 +2266,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if not any(canonicalize_chart_type(s.get('chart_type')) == 'heatmap' for s in fin_slides) and (tables.get('sensitivityTable') or tables.get('sensitivity')):
                 st_rows = tables.get('sensitivityTable') or tables.get('sensitivity') or []
                 add('financial', {
-                    'title': 'مقارنة السيناريوهات المالية',
+                    'title': 'Financial Scenarios Heatmap' if lang == OFFER_LANG_ENGLISH else 'مقارنة السيناريوهات المالية',
                     'type': 'content',
                     'design_style': 'chart',
                     'chart_type': 'heatmap',
@@ -2109,13 +2291,13 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     text += ' ' + _financial_report_part_title(model, int(source_match.group(1))).lower()
                 return (
                     'sensitivityassumptionstable' in text
-                    or bool(re.search(r'افتراضات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*افتراضات', text))
+                    or bool(re.search(r'افتراضات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*افتراضات|sensitivity assumptions|assumptions.*sensitivity', text))
                 )
 
             has_assumptions = any(is_assumptions_slide(s) for s in groups.get('financial', []))
             if assumption_rows and not has_assumptions:
                 add('financial', {
-                    'title': 'افتراضات تحليل الحساسية', 'type': 'content',
+                    'title': 'Sensitivity Analysis Assumptions' if lang == OFFER_LANG_ENGLISH else 'افتراضات تحليل الحساسية', 'type': 'content',
                     'design_style': 'table', 'chart_type': '', 'content_density': 'high',
                     'requires_image': False,
                     'content_source': f'financial_table:sensitivityAssumptionsTable:0:{len(assumption_rows)}',
@@ -2126,11 +2308,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             pending_tables = []
 
             def flush_pending_tables():
-                for packed_slide in _pack_financial_table_slices(pending_tables):
+                for packed_slide in _pack_financial_table_slices(pending_tables, offer_lang=lang):
                     add('financial', packed_slide)
                 pending_tables.clear()
 
-            for table_key, title, style in _FINANCIAL_PLAN_TABLES:
+            for table_key, title, style in _financial_plan_tables(lang):
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
                 if not rows and table_key == 'componentsTable':
                     rows = _project_component_rows(source)
@@ -2174,7 +2356,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         for index, entry in enumerate(team_entries, 1):
             bullets = [str(entry.get(key) or '').strip() for key in ('الدور', 'نبذة', 'سنوات الخبرة', 'أعمال سابقة')]
             add('team', {
-                'title': str(entry.get('الجهة') or f'الجهة {index}').strip(),
+                'title': str(entry.get('الجهة') or (f'Entity {index}' if lang == OFFER_LANG_ENGLISH else f'الجهة {index}')).strip(),
                 'type': 'content', 'design_style': 'image' if entry.get('_logo_file_id') else 'text',
                 'content_density': 'medium', 'requires_image': bool(entry.get('_logo_file_id')),
                 'content_source': f'team_member:{index}',
@@ -2189,10 +2371,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     if named_competitors:
         existing_comp = next((s for s in groups.get('market', [])
                               if s.get('content_source') == 'market_study_data.competitors'
-                              or re.search(r'منافس', str(s.get('title') or ''))), None)
+                              or re.search(r'منافس|competitor', str(s.get('title') or ''), re.IGNORECASE)), None)
         if existing_comp:
             existing_comp.update({
-                'title': 'مقارنة المنافسين',
+                'title': 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين',
                 'type': 'content',
                 'design_style': 'chart',
                 'chart_type': 'horizontal_bar',
@@ -2201,7 +2383,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             })
         else:
             add('market', {
-                'title': 'مقارنة المنافسين',
+                'title': 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين',
                 'type': 'content',
                 'design_style': 'chart',
                 'chart_type': 'horizontal_bar',
@@ -2218,13 +2400,13 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     groups['swot_risks'] = []
     if any(str(value or '').strip() for value in swot.values()):
         add('swot_risks', {
-            'title': 'تحليل SWOT', 'type': 'content', 'design_style': 'swot',
+            'title': 'SWOT Analysis' if lang == OFFER_LANG_ENGLISH else 'تحليل SWOT', 'type': 'content', 'design_style': 'swot',
             'content_density': 'high', 'requires_image': False,
             'content_source': 'market_study_data.swot', 'bullets': [],
         })
     if risk_items:
         add('swot_risks', {
-            'title': 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'risk',
+            'title': 'Risk Analysis & Mitigation' if lang == OFFER_LANG_ENGLISH else 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'risk',
             'content_density': 'high', 'requires_image': False,
             'content_source': risk_source, 'bullets': [],
         })
@@ -2236,22 +2418,31 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         summary_tokens = [summary_ext_token] if summary_ext_token else []
         summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
         summary_slide.update({
-            'title': 'الملخص التنفيذي', 'type': 'content', 'design_style': summary_style,
+            'title': section_title('executive_summary', lang), 'type': 'content', 'design_style': summary_style,
             'content_density': 'high', 'requires_image': bool(summary_tokens),
             'content_source': 'executive_content.summary', 'image_tokens': summary_tokens, 'bullets': [],
         })
         add('executive_summary', summary_slide)
 
-    summaries = (
-        ('land', 'ملخص تحليل الأرض', 'land_and_building_summary', str(source.get('land_and_building_summary') or '').strip()),
-        ('location', 'ملخص الموقع الجغرافي', 'site_analysis', str(source.get('site_analysis') or '').strip()),
-        ('market', 'الملخص التنفيذي لسوق المشروع', 'market_study_data.one_block_summary', _market_one_block_paragraph(market)),
-    )
+    if lang == OFFER_LANG_ENGLISH:
+        summaries = (
+            ('land', 'Land Analysis Summary', 'land_and_building_summary', str(source.get('land_and_building_summary') or '').strip()),
+            ('location', 'Location Summary', 'site_analysis', str(source.get('site_analysis') or '').strip()),
+            ('market', 'Project Market Executive Summary', 'market_study_data.one_block_summary', _market_one_block_paragraph(market)),
+        )
+        summary_match = re.compile(r'summary', re.IGNORECASE).search
+    else:
+        summaries = (
+            ('land', 'ملخص تحليل الأرض', 'land_and_building_summary', str(source.get('land_and_building_summary') or '').strip()),
+            ('location', 'ملخص الموقع الجغرافي', 'site_analysis', str(source.get('site_analysis') or '').strip()),
+            ('market', 'الملخص التنفيذي لسوق المشروع', 'market_study_data.one_block_summary', _market_one_block_paragraph(market)),
+        )
+        summary_match = re.compile(r'ملخص').search
     for section_key, title, content_source, value in summaries:
         if not value:
             continue
         existing = next((slide for slide in groups.get(section_key, [])
-                         if slide.get('content_source') == content_source or 'ملخص' in str(slide.get('title') or '')), None)
+                         if slide.get('content_source') == content_source or summary_match(str(slide.get('title') or ''))), None)
         summary_tokens = overview_map_tokens if section_key == 'location' else []
         summary_style = 'map' if summary_tokens else 'text'
         if existing:
@@ -2270,9 +2461,9 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     # The market section has a stricter contract than the other sections:
     # canonical tables and the single approved chart are rendered from the
     # stored market data, while stale map/image requests are repaired here.
-    groups['market'] = _normalize_market_group_slides(groups.get('market', []), market)
+    groups['market'] = _normalize_market_group_slides(groups.get('market', []), market, offer_lang=lang)
     _merge_sparse_plan_slides(groups)
-    _merge_adjacent_table_slides(groups)
+    _merge_adjacent_table_slides(groups, offer_lang=lang)
     _limit_presentation_charts(groups)
     _deduplicate_plan_media(groups)
 
@@ -2310,9 +2501,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             groups[section_key] = []
 
 
-def refresh_index_entries(plan):
+def refresh_index_entries(plan, offer_lang=None):
     if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
         return plan
+    lang = resolve_offer_lang(None, offer_lang if offer_lang is not None else (plan.get('offer_lang') if isinstance(plan, dict) else None))
     entries = []
     seen = set()
     for page, slide in enumerate(plan['slides'], 1):
@@ -2324,10 +2516,10 @@ def refresh_index_entries(plan):
                 continue
             seen.add(section_key)
             entries.append({'section_key': section_key,
-                            'title': PRESENTATION_SECTION_TITLES[section_key], 'page': page})
+                            'title': section_title(section_key, lang), 'page': page})
     for slide in plan['slides']:
         if isinstance(slide, dict) and slide.get('type') == 'index':
-            slide['title'] = 'محتويات العرض'
+            slide['title'] = offer_chrome('index_heading', lang)
             slide['design_style'] = 'text'
             slide['index_entries'] = entries
             slide['bullets'] = []
@@ -2388,9 +2580,10 @@ def filter_presentation_plan_sections(plan, section_keys):
     return refresh_index_entries(filtered)
 
 
-def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=None):
+def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=None, offer_lang=None):
     if not isinstance(plan, dict):
         plan = {}
+    lang = resolve_offer_lang(project_data, offer_lang)
     source_slides = plan.get('slides') if isinstance(plan.get('slides'), list) else []
     source_slides = [_canonicalize_slide_image_tokens(dict(slide))
                      for slide in source_slides if isinstance(slide, dict)]
@@ -2398,19 +2591,19 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     if cover is None and source_slides:
         cover = source_slides[0]
     cover = dict(cover or {})
-    cover.update({'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover',
+    cover.update({'title': offer_chrome('cover', lang), 'type': 'cover', 'section_key': 'cover',
                   'design_style': 'image', 'requires_image': True,
                   'image_tokens': ['##IMAGE_COVER##'], 'image_layout': None})
     index = next((slide for slide in source_slides if slide.get('type') == 'index'), None)
     index = dict(index or {})
-    index.update({'title': 'محتويات العرض', 'type': 'index', 'section_key': 'index',
+    index.update({'title': offer_chrome('index', lang), 'type': 'index', 'section_key': 'index',
                   'design_style': 'text', 'requires_image': False, 'bullets': []})
     closing = next((slide for slide in reversed(source_slides) if slide.get('type') == 'closing'), None)
     if closing is None and source_slides:
         closing = source_slides[-1]
     closing = dict(closing or {})
     has_cover_image = bool((images or {}).get('cover')) if isinstance(images, dict) else False
-    closing.update({'title': PRESENTATION_SECTION_TITLES['closing'], 'type': 'closing',
+    closing.update({'title': section_title('closing', lang), 'type': 'closing',
                     'section_key': 'closing', 'design_style': 'image' if has_cover_image else 'minimal',
                     'requires_image': has_cover_image, 'content_source': 'contact_closing',
                     'image_tokens': ['##IMAGE_COVER##'] if has_cover_image else [], 'bullets': []})
@@ -2448,16 +2641,19 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         signatures.add(signature)
         groups.setdefault(section_key, []).append(item)
 
-    _ensure_required_plan_content(groups, project_data, images, tenant_id)
-    _drop_redundant_generic_slides(groups)
+    _ensure_required_plan_content(groups, project_data, images, tenant_id, offer_lang=lang)
+    _drop_redundant_generic_slides(groups, offer_lang=lang)
 
     if not any(groups.values()) and project_data:
         groups['overview'].append({
-            'title': PRESENTATION_SECTION_TITLES['overview'], 'type': 'content',
+            'title': section_title('overview', lang), 'type': 'content',
             'section_key': 'overview', 'design_style': 'text', 'content_density': 'medium',
             'requires_image': False,
-            'bullets': ['تعريف المشروع من البيانات المعتمدة', 'الفكرة والاستخدامات المعتمدة',
-                        'ملخص موجز دون تكرار'],
+            'bullets': (['Project definition from approved data', 'Approved concept and uses',
+                         'Concise summary without repetition']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['تعريف المشروع من البيانات المعتمدة', 'الفكرة والاستخدامات المعتمدة',
+                         'ملخص موجز دون تكرار']),
         })
 
     slides = [cover, index]
@@ -2465,7 +2661,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         if section_key == 'closing' or not groups.get(section_key):
             continue
         slides.append({
-            'title': PRESENTATION_SECTION_TITLES[section_key], 'type': 'section_divider',
+            'title': section_title(section_key, lang), 'type': 'section_divider',
             'section_key': section_key, 'design_style': 'divider', 'content_density': 'low',
             'requires_image': section_key != 'market', 'bullets': [],
         })
@@ -2473,7 +2669,8 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     slides.append(closing)
     normalized = dict(plan)
     normalized['slides'] = slides
-    return refresh_index_entries(normalized)
+    normalized['offer_lang'] = lang
+    return refresh_index_entries(normalized, offer_lang=lang)
 
 
 def _suggest_design_style(title, bullets=None, slide_type='content'):
@@ -3373,39 +3570,48 @@ def resolve_slide_bounds(branding):
     return min(min_slides, SLIDE_COUNT_OPEN), SLIDE_COUNT_OPEN, default_count
 
 
-def build_fallback_plan(branding):
+def build_fallback_plan(branding, project_data=None, offer_lang=None):
     """Build a default slide plan when AI slide planning fails.
 
     Uses the tenant's min/max/default slide count bounds.
     """
+    lang = resolve_offer_lang(project_data, offer_lang)
     min_s, max_s, default_count = resolve_slide_bounds(branding)
     count = max(min_s, min(default_count, max_s))
+    fallback_bullets = (['Approved content for this section', 'Available details from the project data',
+                         'Final summary without repetition']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
+                         'الملخص النهائي دون تكرار'])
+    extra_bullets = (['Additional detail from the project data', 'Concise wording',
+                      'Without inventing information']
+                     if lang == OFFER_LANG_ENGLISH else
+                     ['تفصيل إضافي من بيانات المشروع', 'صياغة موجزة', 'دون اختراع معلومات'])
     slides = [
-        {'title': 'الغلاف', 'type': 'cover', 'design_style': 'image', 'requires_image': True, 'bullets': [], 'content_density': 'low'},
-        {'title': 'محتويات العرض', 'type': 'index', 'design_style': 'text', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
+        {'title': offer_chrome('cover', lang), 'type': 'cover', 'design_style': 'image', 'requires_image': True, 'bullets': [], 'content_density': 'low'},
+        {'title': offer_chrome('index', lang), 'type': 'index', 'design_style': 'text', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
     ]
     content_sections = PRESENTATION_SECTION_ORDER[:-1]
     needed = max(0, count - 3)
     for section_key in content_sections[:needed]:
-        title = PRESENTATION_SECTION_TITLES[section_key]
+        title = section_title(section_key, lang)
         slides.append({
             'title': title,
             'type': 'content',
             'section_key': section_key,
             'design_style': _suggest_design_style(title, slide_type='content'),
             'requires_image': section_key in {'plans', 'exterior', 'interior'},
-            'bullets': ['المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
-                        'الملخص النهائي دون تكرار'],
+            'bullets': list(fallback_bullets),
             'content_density': 'medium',
         })
     while len(slides) < count - 1:
         slides.append({
-            'title': PRESENTATION_SECTION_TITLES['overview'], 'type': 'content',
+            'title': section_title('overview', lang), 'type': 'content',
             'section_key': 'overview', 'design_style': 'text', 'requires_image': False,
-            'bullets': ['تفصيل إضافي من بيانات المشروع', 'صياغة موجزة', 'دون اختراع معلومات'],
+            'bullets': list(extra_bullets),
             'content_density': 'medium',
         })
-    slides.append({'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
+    slides.append({'title': section_title('closing', lang), 'type': 'closing', 'section_key': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
     return {'proposed_count': len(slides), 'slides': slides}
 
 
@@ -3443,13 +3649,14 @@ def _plan_asset_note(images):
     return '\n\n## وسائط العرض المتوفرة وتوزيعها الإلزامي\n' + json.dumps(summary, ensure_ascii=False, indent=2)
 
 
-def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None):
+def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None, offer_lang=None):
     """Build the prompt for AI to propose a slide plan.
 
     The plan decides which slides exist, so it has to see every section. Cutting the payload at
     6,000 characters meant the market study, the executive content and the team never reached the
     planner, and it could not propose slides for facts it was never shown.
     """
+    lang = resolve_offer_lang(project_data, offer_lang)
     project_json = build_project_facts(project_data, tenant_id)
 
     min_slides, max_slides, _default_count = resolve_slide_bounds(branding)
@@ -3461,6 +3668,26 @@ def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None)
         distribution_rules=CONTENT_DISTRIBUTION_RULES,
         no_street_view=NO_STREET_VIEW_RULE,
     )
+    if lang == OFFER_LANG_ENGLISH:
+        prompt = prompt.replace(
+            '- section_divider: صفحة بداية قسم تحمل الاسم العربي وحده بلا وصف أو ترجمة',
+            '- section_divider: a section opener carrying the approved English section name alone, no description or translation')
+        prompt = prompt.replace(
+            '"title": "عنوان الشريحة بالعربي"',
+            '"title": "Slide title in English"')
+        prompt = prompt.replace(
+            '"bullets": ["نقطة 1", "نقطة 2", "نقطة 3"]',
+            '"bullets": ["Point 1", "Point 2", "Point 3"]')
+        prompt = prompt.replace(
+            'عنوانه هو اسم القسم العربي المعتمد فقط',
+            'its title is the approved English section name only')
+        prompt = prompt.replace(
+            'يتم تضمين شريحة «مخطط اتجاهي لحدود الأرض» بنمط diagram',
+            'include a "Directional Plot Boundary Diagram" slide with the diagram style')
+        prompt = prompt.replace(
+            'وتمنع عبارات «فرصة واعدة بشروط» أو أي تقييم مشروط مشابه',
+            'and never write investment verdicts or similar conditional assessments')
+        prompt += '\n\n' + OFFER_LANGUAGE_DIRECTIVE_EN
     asset_note = _plan_asset_note(images)
     if asset_note:
         prompt += asset_note
@@ -3532,12 +3759,13 @@ def _extract_json_from_text(response_text):
     return None
 
 
-def _enforce_slide_count(slides, target_count):
+def _enforce_slide_count(slides, target_count, offer_lang=None, project_data=None):
     """Trim or pad a slide list to exactly target_count, keeping fixed slides intact.
 
     The cover, index and closing slides keep their reserved positions;
     only content slides are removed or appended.
     """
+    lang = resolve_offer_lang(project_data, offer_lang)
     if target_count < 1 or len(slides) == target_count:
         return slides
 
@@ -3553,7 +3781,8 @@ def _enforce_slide_count(slides, target_count):
     tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
     body = slides[:len(slides) - len(tail)]
     while len(body) + len(tail) < target_count:
-        title = f'تفاصيل إضافية {len(body)}'
+        title = (f'Additional details {len(body)}' if lang == OFFER_LANG_ENGLISH
+                 else f'تفاصيل إضافية {len(body)}')
         style = _suggest_design_style(title, slide_type='content')
         if body and body[-1].get('design_style') == style and style == 'cards':
             style = 'text'
@@ -3563,7 +3792,9 @@ def _enforce_slide_count(slides, target_count):
             'design_style': style,
             'content_density': 'medium',
             'requires_image': False,
-            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+            'bullets': (['First key point', 'Second key point', 'Third key point']
+                        if lang == OFFER_LANG_ENGLISH else
+                        ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة']),
         })
     return body + tail
 
@@ -3590,7 +3821,7 @@ def parse_slide_plan(response_text, branding=None, project_data=None):
         if len(plan['slides']) != default_count:
             print(f"[SLIDE-PLAN] lock_slide_count active: reshaping "
                   f"{len(plan['slides'])} -> {default_count} slides")
-            plan['slides'] = _enforce_slide_count(plan['slides'], default_count)
+            plan['slides'] = _enforce_slide_count(plan['slides'], default_count, project_data=project_data)
 
     plan['proposed_count'] = len(plan['slides'])
 
@@ -4837,7 +5068,8 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
     }
 
 
-def _slide_source_data_note(slide, project_data):
+def _slide_source_data_note(slide, project_data, offer_lang=None):
+    lang = resolve_offer_lang(project_data if isinstance(project_data, dict) else None, offer_lang)
     content_sources = (slide or {}).get('content_sources') if isinstance(slide, dict) else None
     if isinstance(content_sources, list) and content_sources:
         fin_sources = [str(source) for source in content_sources
@@ -4853,7 +5085,7 @@ def _slide_source_data_note(slide, project_data):
             item = dict(slide)
             item.pop('content_sources', None)
             item['content_source'] = content_source
-            note = _slide_source_data_note(item, project_data)
+            note = _slide_source_data_note(item, project_data, lang)
             if note:
                 notes.append(note)
         return '\n\n'.join(notes)
@@ -4979,8 +5211,12 @@ def _slide_source_data_note(slide, project_data):
     if source == 'contact_closing':
         contact = _contact_facts(project_data)
         if contact:
+            if lang == OFFER_LANG_ENGLISH:
+                return contact + '\nShow only the listed fields, with the project hero image and the company and project logos.'
             return contact + '\nاعرض جميع الحقول المذكورة فقط، مع صورة المشروع الرئيسية وشعاري الشركة والمشروع.'
-        project_name = str(project_data.get('project_name') or project_data.get('projectName') or 'المشروع').strip()
+        project_name = str(project_data.get('project_name') or project_data.get('projectName') or ('Project' if lang == OFFER_LANG_ENGLISH else 'المشروع')).strip()
+        if lang == OFFER_LANG_ENGLISH:
+            return f'No contact data entered. Show only a brief thanks and the project name: {project_name}.'
         return f'لا توجد بيانات تواصل مدخلة. اعرض شكرًا موجزًا واسم المشروع فقط: {project_name}.'
     match = re.fullmatch(r'financial_report:(\d+):(\d+):(\d+)(?::(\d+):(\d+))?', source)
     if match:
@@ -5346,9 +5582,10 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
 </div>'''
 
 
-def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None):
+def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None, offer_lang=None):
     """Build the user message for generating a single slide."""
-    title = slide.get('title', f'شريحة {slide_num}')
+    lang = resolve_offer_lang(project_data, offer_lang)
+    title = slide.get('title', (f'Slide {slide_num}' if lang == OFFER_LANG_ENGLISH else f'شريحة {slide_num}'))
     slide_type = slide.get('type', 'content')
     design_style = slide.get('design_style', 'cards')
     chart_type = str(slide.get('chart_type') or '').strip().lower()
@@ -5368,7 +5605,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     readable_body = readable_text_color(preferred_text, background)
     readable_heading = readable_text_color((branding or {}).get('primary_color'), background, (readable_body,))
 
-    bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
+    bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else (
+        '(No fixed points — extract from the project data)'
+        if lang == OFFER_LANG_ENGLISH else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)')
 
     style_instructions = {
         'dashboard': 'لوحة مؤشرات مالية تعتمد جداول HTML نظامية كاملة للتكاليف والاستثمار ومؤشرات العائد مرصوصة رأسياً تحت بعضها بنفس تصميم ومساحات تقرير PDF مع منع الكروت العائمة والمربعات الإحصائية',
@@ -5499,10 +5738,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
     if section_key == 'market' and slide_type not in ('cover', 'index', 'closing', 'section_divider'):
         if canonicalize_chart_type((slide or {}).get('chart_type')) == 'horizontal_bar':
-            placeholder_note = (
-                'هذه شريحة مقارنة المنافسين ذات التخطيط الثابت: جدول المنافسين في اليمين والرسم البياني في اليسار. '
-                'ممنوع استخدام الخرائط أو الصور أو خلفيات الصور؛ ضع شعار كل منافس داخل صفه في جدول المنافسين إذا كان الشعار متوفراً.'
-            )
+            if lang == OFFER_LANG_ENGLISH:
+                placeholder_note = (
+                    'This is the fixed-layout competitor-comparison slide: the competitors table on the LEFT and the chart on the RIGHT. '
+                    'No maps, photos or photo backgrounds; place each competitor logo inside its row in the competitors table when available.'
+                )
+            else:
+                placeholder_note = (
+                    'هذه شريحة مقارنة المنافسين ذات التخطيط الثابت: جدول المنافسين في اليمين والرسم البياني في اليسار. '
+                    'ممنوع استخدام الخرائط أو الصور أو خلفيات الصور؛ ضع شعار كل منافس داخل صفه في جدول المنافسين إذا كان الشعار متوفراً.'
+                )
         else:
             placeholder_note = (
                 'هذه شريحة من قسم دراسة السوق: ممنوع استخدام الخرائط أو الصور الفوتوغرافية أو خلفيات الصور. '
@@ -5521,9 +5766,13 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
         'الخرائط مسموحة في شرائح تحليل الموقع الجغرافي أو تحليل الأرض عند طلبها صراحة، أو في ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
-        'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
+        'التزم بأساسيات التوليد دون استثناء: ' + ('LTR' if lang == OFFER_LANG_ENGLISH else 'RTL') + '، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
         'سطح شرائح المحتوى والفهرس والتحليلات فاتح وموحد: استخدم background أبيض أو فاتح لجذر slide مع نص داكن مقروء، ولا تضع إطاراً داكناً حول صفحة بيضاء ولا تحول الشريحة إلى واجهة داكنة. الخلفية الداكنة الكاملة محجوزة للغلاف والخاتمة وفواصل الأقسام ذات الصورة، وخلفية كل شعار مستقلة حسب تباين الشعار ولا تتغير بتغيير سطح الشريحة',
-        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
+        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ' + (
+            'ثبّت في هذه الشريحة الجدول يساراً والرسم يميناً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية.'
+            if lang == OFFER_LANG_ENGLISH else
+            'ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية.'
+        ) + ' انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
@@ -5543,7 +5792,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append('شعار المشروع داكن: ضع ##PROJECT_LOGO## على خلفية #ffffff مستقلة عن شعار الشركة')
     if placeholder_note:
         notes.insert(0, placeholder_note)
-    source_note = _slide_source_data_note(slide, project_data)
+    source_note = _slide_source_data_note(slide, project_data, lang)
     if _is_visual_concept_media_slide(slide):
         notes.insert(0, 'هذه شريحة وسائط فقط: اعرض رموز الصور المحددة كما هي، بلا عنوان أو وصف أو نقاط أو جدول أو خريطة أو صورة إضافية. تُحافظ المنظومة على الهيدر والفوتر والهوية آليًا.')
     if source_note:
@@ -5572,16 +5821,28 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             + ' — '.join(group_titles)
         )
     if section_key == 'closing':
-        notes.append('استخدم الصورة الرئيسية بوضوح كخلفية كاملة أو صورة جانبية، واعرض شعاري الشركة والمشروع بالحجم الكبير نفسه. اعرض حقول التواصل المدخلة فقط كما هي؛ وإذا كانت فارغة فاقتصر على شكر موجز واسم المشروع دون أي بيانات وهمية. ممنوع كتابة «فرصة واعدة بشروط» أو أي تقييم استثماري.')
-    if design_style == 'diagram' or slide.get('content_source') == 'land_boundary_diagram' or re.search(r'(?:مخطط اتجاهي|حدود الأرض|اتجاهي)', title):
-        notes.append(
-            'في شريحة المخطط الاتجاهي لحدود الأرض: صمّم هيكلاً اتجاهياً متناسقاً وراقياً بـ HTML و CSS النقي بألوان الهوية فقط ودون أيقونات أو إيموجي. '
-            'يتوسط الشريحة صندوق عريض يمثل «أرض المشروع» مع أطوال الأضلاع الأربعة على حوافه وملخص الواجهات في وسطه، '
-            'وتحيط به بطاقات واضحة للاتجاهات الأربعة (شمال، جنوب، شرق، غرب) توضح أطوال الأضلاع والمجاورات وعروض الشوارع والواجهات مع تمييز الشوارع بلون التمييز (مثل الذهبي)، '
-            'وبطاقة بارزة ومميزة لجهة الإطلالة البحرية أو الطريق الرئيسي إن وجدت، '
-            'مع كتابة «الأبعاد بالمتر» في الزاوية العلوية المقابلة للعنوان، وملاحظة توضيحية أسفل الشريحة: «تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.»'
-        )
-    if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل)', title):
+        if lang == OFFER_LANG_ENGLISH:
+            notes.append('Use the hero image clearly as a full background or side image, and show the company and project logos at the same large size. Show only the entered contact fields as they are; if empty, show only a brief thanks and the project name with no invented data. Do not write investment verdicts.')
+        else:
+            notes.append('استخدم الصورة الرئيسية بوضوح كخلفية كاملة أو صورة جانبية، واعرض شعاري الشركة والمشروع بالحجم الكبير نفسه. اعرض حقول التواصل المدخلة فقط كما هي؛ وإذا كانت فارغة فاقتصر على شكر موجز واسم المشروع دون أي بيانات وهمية. ممنوع كتابة «فرصة واعدة بشروط» أو أي تقييم استثماري.')
+    if design_style == 'diagram' or slide.get('content_source') == 'land_boundary_diagram' or re.search(r'(?:مخطط اتجاهي|حدود الأرض|اتجاهي|directional|plot boundary|boundary diagram)', title, re.IGNORECASE):
+        if lang == OFFER_LANG_ENGLISH:
+            notes.append(
+                'For the directional plot-boundary slide: design a coherent, premium directional structure in pure HTML/CSS using brand colors only, no icons or emoji. '
+                'Center a wide box representing "Project Land" with the four side lengths on its edges and the facade summary in its middle, '
+                'surrounded by clear cards for the four directions (North, South, East, West) showing side lengths, neighbours, street widths and facades, highlighting streets in the accent color (e.g. gold), '
+                'with a prominent card for any sea view or main road, '
+                'writing "Dimensions in meters" in the top corner opposite the title, and an explanatory note at the bottom: "The reading shows boundary directions and street relations without simulating area proportions."'
+            )
+        else:
+            notes.append(
+                'في شريحة المخطط الاتجاهي لحدود الأرض: صمّم هيكلاً اتجاهياً متناسقاً وراقياً بـ HTML و CSS النقي بألوان الهوية فقط ودون أيقونات أو إيموجي. '
+                'يتوسط الشريحة صندوق عريض يمثل «أرض المشروع» مع أطوال الأضلاع الأربعة على حوافه وملخص الواجهات في وسطه، '
+                'وتحيط به بطاقات واضحة للاتجاهات الأربعة (شمال، جنوب، شرق، غرب) توضح أطوال الأضلاع والمجاورات وعروض الشوارع والواجهات مع تمييز الشوارع بلون التمييز (مثل الذهبي)، '
+                'وبطاقة بارزة ومميزة لجهة الإطلالة البحرية أو الطريق الرئيسي إن وجدت، '
+                'مع كتابة «الأبعاد بالمتر» في الزاوية العلوية المقابلة للعنوان، وملاحظة توضيحية أسفل الشريحة: «تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.»'
+            )
+    if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل|timeline|schedule|phases|plan|stages)', title, re.IGNORECASE):
         notes.append('اعرض مراحل الجدول الزمني كما وردت. أظهر الملاحظة بجانب مرحلتها فقط عندما يكون نصها موجودًا، ولا تنشئ حقل ملاحظات فارغًا لأي مرحلة.')
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
@@ -5623,12 +5884,20 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         )
         notes.append(market_design_reference)
         if chart_type == 'horizontal_bar':
-            notes.append(
-                f'هذه الشريحة مخصصة لرسم مقارنة المنافسين المعتمد ({chart_type}: {chart_note}). '
-                'التخطيط ثابت: جدول المنافسين في اليمين ورسم الأعمدة الأفقية في اليسار. '
-                'استخدم direction: rtl; grid-template-areas: "table chart"; grid-template-columns: 1fr 1fr; gap: 24px; داخل حاوية display: grid، '
-                'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
-            )
+            if lang == OFFER_LANG_ENGLISH:
+                notes.append(
+                    f'This slide is dedicated to the approved competitor-comparison chart ({chart_type}: {chart_note}). '
+                    'Fixed layout: the competitors table on the LEFT and the horizontal bar chart on the RIGHT. '
+                    'Use direction: ltr; grid-template-areas: "table chart"; grid-template-columns: 1fr 1fr; gap: 24px; inside a display: grid container, '
+                    'keeping the full readable competitors table with the chart showing all its bars and prices, highlighting our project in the brand color without inventing figures or assumed averages.'
+                )
+            else:
+                notes.append(
+                    f'هذه الشريحة مخصصة لرسم مقارنة المنافسين المعتمد ({chart_type}: {chart_note}). '
+                    'التخطيط ثابت: جدول المنافسين في اليمين ورسم الأعمدة الأفقية في اليسار. '
+                    'استخدم direction: rtl; grid-template-areas: "table chart"; grid-template-columns: 1fr 1fr; gap: 24px; داخل حاوية display: grid، '
+                    'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
+                )
         else:
             notes.append(
                 'هذه شريحة سوق غير ثابتة: صمّم التكوين البصري والهرمية والمساحات بحرية كاملة بما يخدم البيانات المعتمدة. '
@@ -5642,7 +5911,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append('الرسوم البيانية ممنوعة تماماً في هذا القسم؛ اعرض المحتوى بالجداول أو النصوص أو الصور حسب النمط المحدد.')
     notes_text = '\n'.join(f'- {n}' for n in notes)
 
-    return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
+    message = f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
 النوع: {slide_type}
 نمط التصميم: {design_style} — {style_instructions}
 {f'نوع الرسم المطلوب: {chart_type} — {chart_note}' if chart_note else ''}
@@ -5653,6 +5922,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
 
 ملاحظات:
 {notes_text}"""
+    if lang == OFFER_LANG_ENGLISH:
+        message += '\n\n' + OFFER_LANGUAGE_DIRECTIVE_EN
+    return message
 
 
 def _block_external_images(html):
@@ -7463,10 +7735,11 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
 
 def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     source = source if isinstance(source, dict) else {}
+    lang = resolve_offer_lang(source)
     model = _parse_financial_dict(source.get('financial_study_model'))
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-    title = html_lib.escape(str((slide or {}).get('title') or 'الدراسة المالية'))
+    title = html_lib.escape(str((slide or {}).get('title') or section_title('financial', lang)))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     content_sources = (slide or {}).get('content_sources') or []
 
@@ -7481,10 +7754,13 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
             sub_title = ''
             match_sum = re.fullmatch(r'financial_summary:(costs|returns):\d+:\d+', src)
             if match_sum:
-                sub_title = 'التكاليف والاستثمار' if match_sum.group(1) == 'costs' else 'مؤشرات العائد والاسترداد'
+                if lang == OFFER_LANG_ENGLISH:
+                    sub_title = 'Costs & Investment' if match_sum.group(1) == 'costs' else 'Return & Payback Indicators'
+                else:
+                    sub_title = 'التكاليف والاستثمار' if match_sum.group(1) == 'costs' else 'مؤشرات العائد والاسترداد'
             elif re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src):
                 t_key = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src).group(1)
-                sub_title = next((t[1] for t in _FINANCIAL_PLAN_TABLES if t[0] == t_key), t_key)
+                sub_title = next((t[1] for t in _financial_plan_tables(lang) if t[0] == t_key), t_key)
             elif re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src):
                 p_idx = int(re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src).group(1))
                 sub_title = _financial_report_part_title(model, p_idx)
@@ -8413,16 +8689,18 @@ def _build_visual_concept_media_slide(slide, branding=None):
 
 def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
+    lang = resolve_offer_lang(source)
+    slide_dir = 'ltr' if lang == OFFER_LANG_ENGLISH else 'rtl'
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
     secondary = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
-    title = html_lib.escape(str((slide or {}).get('title') or 'المحتوى'))
+    title = html_lib.escape(str((slide or {}).get('title') or ('Content' if lang == OFFER_LANG_ENGLISH else 'المحتوى')))
     slide_type = str((slide or {}).get('type') or 'content')
     content_source = str((slide or {}).get('content_source') or '')
     tokens = [str(token) for token in ((slide or {}).get('image_tokens') or []) if str(token or '').strip()]
     if slide_type == 'cover':
         name = html_lib.escape(str(source.get('project_name') or source.get('projectName') or title))
         project_logo = '<img src="##PROJECT_LOGO##" style="height:80px;width:auto;object-fit:contain;">' if source.get('project_logo') else ''
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
                 '<div style="position:absolute;inset:0;background-image:url(##IMAGE_COVER##);background-size:cover;background-position:center;"></div>'
                 '<div data-cover-overlay></div>'
                 f'<div style="position:absolute;z-index:2;inset:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;">'
@@ -8432,7 +8710,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         name = html_lib.escape(str(source.get('project_name') or source.get('projectName') or title))
         contact = html_lib.escape(_slide_source_data_note({'content_source': 'contact_closing'}, source)).replace('\n', '<br>')
         project_logo = '<img src="##PROJECT_LOGO##" style="height:80px;width:auto;object-fit:contain;">' if source.get('project_logo') else ''
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
                 '<div style="position:absolute;inset:0;background-image:url(##IMAGE_COVER##);background-size:cover;background-position:center;"></div>'
                 '<div data-cover-overlay></div><div style="position:absolute;z-index:2;inset:70px;display:flex;flex-direction:column;justify-content:center;">'
                 f'<div style="display:flex;gap:18px;align-items:center;"><img src="##LOGO##" style="height:80px;width:auto;object-fit:contain;">{project_logo}</div>'
@@ -8457,7 +8735,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
 
         left_column = paragraph_column(paragraphs[:split_at])
         right_column = paragraph_column(paragraphs[split_at:])
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
                 '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
                 f'<div data-map-summary-card data-site-analysis-full style="background:#ffffff;color:#172033;padding:24px;overflow:hidden;border:1px solid #d9e1ea;border-radius:10px;box-sizing:border-box;">'
                 f'<h2 style="font-size:28px;color:{primary};margin:0 0 14px;">{title}</h2>'
@@ -8483,7 +8761,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             f'<img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block;"></div>'
             if ext_token else ''
         )
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;box-sizing:border-box;padding:68px 36px 44px;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;box-sizing:border-box;padding:68px 36px 44px;">'
                 f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
                 f'<h2 style="font-size:28px;font-weight:800;color:{primary};margin:0;">{title}</h2></div>'
                 f'<div style="display:grid;grid-template-columns:{summary_columns};gap:24px;height:520px;align-items:stretch;">'
@@ -8508,27 +8786,36 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_market_risk_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if slide_type == 'map_access':
         roads = source.get('access_roads_data') if isinstance(source.get('access_roads_data'), list) else []
-        headers = ['الطريق / المحور', 'العرض (م)', 'النوع', 'المسافة']
+        if lang == OFFER_LANG_ENGLISH:
+            headers = ['Road / Artery', 'Width (m)', 'Type', 'Distance']
+        else:
+            headers = ['الطريق / المحور', 'العرض (م)', 'النوع', 'المسافة']
         rows = [[r.get('name', ''), r.get('width_m', ''), r.get('type', ''), r.get('distance', '')] for r in roads if isinstance(r, dict)]
         table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_ACCESS##" style="width:100%;height:100%;object-fit:contain;">'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_catchment':
         city_marks = source.get('city_landmarks_data') if isinstance(source.get('city_landmarks_data'), list) else []
-        headers = ['المعلم / الوجهة', 'المسافة (كم)', 'مدة الوصول (دقيقة)', 'التصنيف']
+        if lang == OFFER_LANG_ENGLISH:
+            headers = ['Landmark / Destination', 'Distance (km)', 'Drive Time (min)', 'Category']
+        else:
+            headers = ['المعلم / الوجهة', 'المسافة (كم)', 'مدة الوصول (دقيقة)', 'التصنيف']
         rows = [[r.get('name', ''), r.get('distance_km', ''), r.get('duration_min', ''), r.get('type', '')] for r in city_marks if isinstance(r, dict)]
         table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_CATCHMENT##" style="width:100%;height:100%;object-fit:contain;">'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_landmarks':
-        headers = ['المعلم', 'النوع', 'المسافة (كم)', 'المدة (دقائق)']
+        if lang == OFFER_LANG_ENGLISH:
+            headers = ['Landmark', 'Type', 'Distance (km)', 'Duration (min)']
+        else:
+            headers = ['المعلم', 'النوع', 'المسافة (كم)', 'المدة (دقائق)']
         rows = _nearby_landmark_table_rows(source)
         table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
@@ -8541,7 +8828,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             cap = str(captions[i]).strip() if i < len(captions) and str(captions[i] or '').strip() else description
             cap_html = f'<div style="margin-top:8px;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-weight:600;color:#334155;text-align:center;">{html_lib.escape(cap)}</div>' if cap else ''
             cards.append(f'<div style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;"><div style="flex:1;min-height:0;border:1px solid #d9e1ea;border-radius:10px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;"><img src="{html_lib.escape(token)}" style="width:100%;height:100%;object-fit:contain;"></div>{cap_html}</div>')
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 34px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 34px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
                 f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:16px;flex:1;min-height:0;">{"".join(cards)}</div></div>')
 
@@ -8566,7 +8853,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     note = _slide_source_data_note(slide, source) or '\n'.join(str(item) for item in ((slide or {}).get('bullets') or []))
     if note:
         content = html_lib.escape(note).replace('\n', '<br>')
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:90px 48px 60px;box-sizing:border-box;">'
+        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:90px 48px 60px;box-sizing:border-box;">'
                 f'<h2 style="font-size:28px;color:{primary};">{title}</h2><div style="font-size:16px;line-height:1.8;">{content}</div></div>')
     return None
 
@@ -8603,7 +8890,7 @@ def _validate_chart_slide_html(html, chart_type, slide, project_data=None):
         if not re.search(r'width\s*:\s*(?:\d+%\s*|calc\([^)]+\))', html, re.IGNORECASE):
             return "مخطط الأشرطة الأفقية (horizontal_bar) يتطلب عناصر أشرطة بعروض نسبية (width: ...%)."
         # Must mention project or comparison
-        if not any(kw in html for kw in ('المشروع', 'مشروع', 'سعر', 'المقترح', 'منافس', 'م²')):
+        if not any(kw in html for kw in ('المشروع', 'مشروع', 'سعر', 'المقترح', 'منافس', 'م²', 'project', 'Project', 'price', 'Price', 'competitor', 'Competitor')):
             return "مخطط الأشرطة الأفقية (horizontal_bar) يجب أن يتضمن أسماء المنافسين وسعر المشروع المقترح."
 
     elif chart_type == 'combo':
@@ -8624,7 +8911,8 @@ def _validate_chart_slide_html(html, chart_type, slide, project_data=None):
 
     elif chart_type == 'heatmap':
         # Must compare scenarios
-        has_scenarios = any(kw in html for kw in ('متحفظ', 'تحفظ')) and any(kw in html for kw in ('أساسي', 'اساسي', 'واقعي')) and any(kw in html for kw in ('متفائل', 'تفاؤل'))
+        has_scenarios = (any(kw in html for kw in ('متحفظ', 'تحفظ')) and any(kw in html for kw in ('أساسي', 'اساسي', 'واقعي')) and any(kw in html for kw in ('متفائل', 'تفاؤل'))) or (
+            'conservative' in html_lower and 'optimistic' in html_lower and any(kw in html_lower for kw in ('base', 'baseline', 'moderate')))
         if not has_scenarios:
             return "الخريطة الحرارية (heatmap) يجب أن تعرض سيناريوهات الحساسية الثلاثة (متحفظ، أساسي، متفائل)."
         # Must have visual color shading / highlight
@@ -8672,7 +8960,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or re.search(r'(?:منافس|competitor)', title_text, flags=re.IGNORECASE)
         ):
             slide.update({
-                'title': 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
+                'title': 'Competitor Comparison' if resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH else 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
                 'design_style': 'chart', 'chart_type': 'horizontal_bar',
                 'requires_image': False, 'image_tokens': [],
                 'content_source': 'market_study_data.competitors', 'source_table': 'competitors',
@@ -9034,9 +9322,10 @@ def _hex_to_rgba(color, alpha):
     return f'rgba({red},{green},{blue},{alpha})'
 
 
-def build_index_slide(slide, slide_num, total_slides, branding=None, project_data=None):
+def build_index_slide(slide, slide_num, total_slides, branding=None, project_data=None, offer_lang=None):
     branding = branding or {}
     slide = slide or {}
+    lang = resolve_offer_lang(project_data, offer_lang)
     background = normalize_hex_color(branding.get('background_color'), '#f8fafc')
     if contrast_ratio('#1e293b', background) < 4.5:
         background = '#ffffff'
@@ -9068,11 +9357,12 @@ def build_index_slide(slide, slide_num, total_slides, branding=None, project_dat
         return ''.join(rows)
 
     columns = [entries[:midpoint], entries[midpoint:]]
+    slide_dir = 'ltr' if lang == OFFER_LANG_ENGLISH else 'rtl'
     return (
-        f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
+        f'<div class="slide" dir="{slide_dir}" style="width:{width}px;height:{height}px;position:relative;'
         f'overflow:hidden;box-sizing:border-box;background:{background};color:{text_color};">'
         f'<div style="position:absolute;top:82px;right:52px;left:52px;bottom:58px;box-sizing:border-box;">'
-        f'<div style="font-size:30px;font-weight:700;color:{primary};margin-bottom:24px;">محتويات العرض</div>'
+        f'<div style="font-size:30px;font-weight:700;color:{primary};margin-bottom:24px;">{html_lib.escape(offer_chrome("index_heading", lang))}</div>'
         f'<div style="width:86px;height:3px;background:{accent};margin-bottom:24px;"></div>'
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:26px 54px;align-items:start;">'
         f'<div>{column(columns[0])}</div><div>{column(columns[1])}</div>'
@@ -9151,7 +9441,7 @@ def _force_section_divider_background(html, cover_url):
     )
 
 
-def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None):
+def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None, offer_lang=None):
     """Render a section divider: the main image, darkened, with the section name over it.
 
     The layout is identical on every divider and only the text changes, so it is built here
@@ -9161,13 +9451,18 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     branding = branding or {}
     project_data = project_data or {}
     slide = slide or {}
+    lang = resolve_offer_lang(project_data, offer_lang)
+    ltr = lang == OFFER_LANG_ENGLISH
+    slide_dir = 'ltr' if ltr else 'rtl'
+    align = 'left' if ltr else 'right'
+    fore, aft = ('left', 'right') if ltr else ('right', 'left')
     primary = normalize_hex_color(branding.get('primary_color'), '#0b1f33')
     divider_background = dark_surface_color(primary, branding.get('secondary_color'))
     accent = readable_text_color(branding.get('accent_color'), divider_background, ('#ffffff',))
     slide_ratio = branding.get('slide_ratio', '16:9')
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
 
-    title = html_lib.escape(str(slide.get('title') or 'القسم').strip())
+    title = html_lib.escape(str(slide.get('title') or ('Section' if ltr else 'القسم')).strip())
     project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
     project_logo = str(project_data.get('project_logo') or '').strip()
 
@@ -9178,11 +9473,11 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
             '<img src="##PROJECT_LOGO##" alt="" style="height:80px;width:auto;object-fit:contain;" />'
         )
 
-    rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
+    rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px {"auto 0 0" if ltr else "0 0 auto"};"></div>'
     footer_number = f'{slide_num:02d} — {int(total_slides or slide_num):02d}' if slide_num else ''
 
     return (
-        f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
+        f'<div class="slide" dir="{slide_dir}" style="width:{width}px;height:{height}px;position:relative;'
         f'overflow:hidden;box-sizing:border-box;background:{divider_background};">'
         # The approved main image, full bleed.
         '<div data-section-divider-background="1" style="position:absolute;top:0;right:0;left:0;bottom:0;'
@@ -9191,17 +9486,17 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;background:linear-gradient(160deg,'
         f'{_hex_to_rgba(divider_background, "0.94")} 0%,{_hex_to_rgba(divider_background, "0.82")} 45%,'
         f'{_hex_to_rgba(divider_background, "0.62")} 100%);"></div>'
-        f'<div style="position:absolute;top:0;bottom:0;left:0;width:10px;background:{accent};"></div>'
-        f'<div style="position:absolute;top:44px;left:48px;display:flex;align-items:center;">{logos}</div>'
+        f'<div style="position:absolute;top:0;bottom:0;{aft}:0;width:10px;background:{accent};"></div>'
+        f'<div style="position:absolute;top:44px;{aft}:48px;display:flex;align-items:center;">{logos}</div>'
         # padding-bottom biases the block slightly above the optical centre, as in the reference.
-        '<div style="position:absolute;top:0;bottom:0;right:64px;width:58%;display:flex;flex-direction:column;'
-        'justify-content:center;text-align:right;padding-bottom:56px;box-sizing:border-box;">'
+        f'<div style="position:absolute;top:0;bottom:0;{fore}:64px;width:58%;display:flex;flex-direction:column;'
+        f'justify-content:center;text-align:{align};padding-bottom:56px;box-sizing:border-box;">'
         f'<div style="font-size:58px;line-height:1.15;font-weight:700;color:#ffffff;">{title}</div>'
         f'{rule}'
         '</div>'
-        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
+        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;{aft}:48px;font-size:13px;letter-spacing:1px;'
         f'color:rgba(255,255,255,0.55);">{footer_number}</div>'
-        f'<div style="position:absolute;bottom:34px;right:48px;font-size:13px;font-weight:700;'
+        f'<div style="position:absolute;bottom:34px;{fore}:48px;font-size:13px;font-weight:700;'
         f'letter-spacing:1.5px;color:{accent};">{project_name}</div>'
         '</div>'
     )
@@ -10047,10 +10342,12 @@ def _normalize_light_content_surface(html, slide_type='content'):
 
 def _presentation_chrome_html(title, project_title, company_name, primary, accent,
                               footer_background, footer_text, footer_accent, counter,
-                              project_logo=False, slide_surface=None):
+                              project_logo=False, slide_surface=None, offer_lang=None):
     """Return the single canonical light header and footer for content slides."""
     # Content chrome stays light regardless of any stale/model-authored root fill.
     # Logo backing is applied independently later by _apply_logo_contrast_styles.
+    lang = OFFER_LANG_ENGLISH if offer_lang == OFFER_LANG_ENGLISH else OFFER_LANG_ARABIC
+    chrome_dir = 'ltr' if lang == OFFER_LANG_ENGLISH else 'rtl'
     chrome_text = primary
     chrome_accent = accent
     header_style = f'position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
@@ -10067,7 +10364,7 @@ def _presentation_chrome_html(title, project_title, company_name, primary, accen
         f'style="{logo_style}" />'
     ) if project_logo else ''
     header = (
-        f'<header class="slide-header" data-slide-header="1" dir="rtl" '
+        f'<header class="slide-header" data-slide-header="1" dir="{chrome_dir}" '
         f'style="{header_style}'
         'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
         'box-sizing:border-box;z-index:10;overflow:hidden;">'
@@ -10075,11 +10372,11 @@ def _presentation_chrome_html(title, project_title, company_name, primary, accen
         f'<img class="presentation-chrome-logo" src="##LOGO##" alt="" style="{logo_style}" />'
         f'{project_logo_html}'
         f'<span style="width:3px;height:28px;background:{chrome_accent};display:inline-block;flex:0 0 auto;"></span>'
-        f'<span style="font-size:16px;font-weight:700;color:{chrome_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
+        f'<span style="font-size:16px;font-weight:700;color:{chrome_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:{chrome_dir};">{title}</span>'
         '</div></header>'
     )
     footer = (
-        f'<footer class="slide-footer" data-slide-footer="1" dir="rtl" '
+        f'<footer class="slide-footer" data-slide-footer="1" dir="{chrome_dir}" '
         f'style="position:absolute;bottom:0;right:0;left:0;height:36px;{footer_style}'
         f'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
         'box-sizing:border-box;z-index:10;overflow:hidden;">'
@@ -10099,7 +10396,13 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
     predate it, so old and new decks converge on one header and footer.
     Callers must strip any stale chrome first via _strip_existing_slide_chrome.
     """
-    title = html_lib.escape(str(slide_title or (f'شريحة {slide_num}' if slide_num else 'العنوان')))
+    lang = resolve_offer_lang(project_data if isinstance(project_data, dict) else None)
+    if slide_title:
+        title = html_lib.escape(str(slide_title))
+    elif lang == OFFER_LANG_ENGLISH:
+        title = html_lib.escape(f'Slide {slide_num}' if slide_num else 'Title')
+    else:
+        title = html_lib.escape(f'شريحة {slide_num}' if slide_num else 'العنوان')
     primary = '#7A0C0C'
     accent = '#C4A35A'
     company_name = 'منافع الاقتصادية للعقار'
@@ -10129,6 +10432,7 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         footer_background, footer_text, footer_accent, footer_number,
         project_logo=bool(_project_logo_reference(project_source)),
         slide_surface=_slide_root_surface(html),
+        offer_lang=lang,
     )
     html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
     html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
@@ -10715,7 +11019,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
         if 'data-competitor-table' not in str(html or '').lower() and (has_named_competitors or not creative_images):
             html = _build_sol_horizontal_bar_slide(
                 {
-                    'title': slide_title or 'مقارنة المنافسين',
+                    'title': slide_title or ('Competitor Comparison' if resolve_offer_lang(project_data if isinstance(project_data, dict) else None) == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'),
                     'type': 'content',
                     'section_key': 'market',
                     'design_style': 'chart',
@@ -10830,17 +11134,47 @@ def _normalize_watermark_ink(html):
     )
 
 
+def _slides_carry_arabic(slides, limit=20000):
+    """True when the deck's own text holds real Arabic content.
+
+    Backstop for mutation paths that arrive with thin project data: a deck
+    carrying Arabic prose keeps Arabic chrome even if detection on the
+    accompanying data is inconclusive.
+    """
+    budget = [limit]
+    arabic = 0
+    strip_tags = re.compile(r'<[^>]*>')
+    for slide in slides if isinstance(slides, list) else []:
+        if budget[0] <= 0 or arabic >= 40:
+            break
+        item = slide if isinstance(slide, dict) else {}
+        for key in ('title', 'html'):
+            text = strip_tags.sub(' ', str(item.get(key) or ''))
+            chunk = text[:budget[0]]
+            budget[0] -= len(chunk)
+            arabic += len(_ARABIC_SCRIPT_RE.findall(chunk))
+            if arabic >= 40 or budget[0] <= 0:
+                break
+    return arabic >= 40
+
+
 def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None,
-                                 allow_all_maps=False, creative_images=None, preserve_html=False):
+                                 allow_all_maps=False, creative_images=None, preserve_html=False,
+                                 offer_lang=None):
     """Renumber a deck; designer/structural edits retain HTML across later saves.
 
     ``preserve_html`` marks every source slide, not just the edited selection.
     Generation's legacy migrations remain the default for unmarked slides.
+    Divider titles already canonical in either deck language are preserved;
+    only missing or non-canonical ones are reset in the resolved language.
     """
     source = slides if isinstance(slides, list) else []
     total = len(source)
     if not total:
         return []
+    lang = resolve_offer_lang(project_data, offer_lang)
+    if lang == OFFER_LANG_ENGLISH and _slides_carry_arabic(source):
+        lang = OFFER_LANG_ARABIC
     branding = dict(branding or (db.get_branding(tenant_id) if tenant_id else {}) or {})
     project_data = dict(project_data or {})
     if not isinstance(creative_images, dict):
@@ -10917,9 +11251,13 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             section_key = _slide_section_key(item, current_section)
             if _is_fixed_section_divider(item, section_key):
                 slide_type = 'section_divider'
+                current_title = str(item.get('title') or '').strip()
+                keep_title = (lang == OFFER_LANG_ENGLISH
+                              and current_title == PRESENTATION_SECTION_TITLES_EN.get(section_key, ''))
                 item.update({
                     'type': slide_type,
-                    'title': PRESENTATION_SECTION_TITLES[section_key],
+                    'title': (current_title if keep_title
+                              else section_title(section_key, lang)),
                     'design_style': 'divider',
                     'section_key': section_key,
                     'bullets': [],
@@ -10929,7 +11267,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 current_section = section_key
         normalized.append(item)
 
-    refresh_index_entries({'slides': normalized})
+    refresh_index_entries({'slides': normalized}, offer_lang=lang)
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
         if _designer_preserves_html(item):
