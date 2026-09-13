@@ -1370,8 +1370,8 @@
     }
 
     .auth-logo {
-      width: 120px;
-      max-height: 90px;
+      width: min(220px, 70%);
+      height: auto;
       object-fit: contain;
       display: block;
       margin: 0 auto 14px;
