@@ -1575,7 +1575,7 @@
       align-items: center;
       gap: 14px;
       min-width: 0;
-      text-align: right;
+      text-align: start;
     }
 
     .slide-toolbar-title>div {
@@ -1595,7 +1595,12 @@
       white-space: nowrap;
     }
 
-    .slide-toolbar-title h2 {
+    /* Scoped under the page id on purpose: the generic `.tenant-page h2`
+       rule below carries the same specificity and comes later in the file,
+       so the bare selector lost and the toolbar title rendered in the brand
+       color on the brand background (invisible) with a dead 18px margin,
+       sinking the whole topbar content. */
+    #tenantSlidesPage .slide-toolbar-title h2 {
       margin: 0;
       font-size: 18px;
       color: #fff;
@@ -1617,6 +1622,12 @@
     .slide-toolbar-title span span {
       display: inline;
       margin-top: 0;
+    }
+
+    /* The pill owns its own display: `.slide-toolbar-title span` above is
+       more specific than the pill class and silently blockified it. */
+    .slide-toolbar-title > .slide-toolbar-chat-context {
+      display: inline-flex;
     }
 
     .slide-toolbar-actions {
