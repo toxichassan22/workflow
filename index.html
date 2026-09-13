@@ -50,17 +50,11 @@
   <div id="tenantAuthPage" class="tenant-auth">
     <div class="auth-card">
       <h2>منصة العروض التقديمية</h2>
-      <p>سجّل دخول شركتك أو أنشئ حساباً جديداً</p>
-
-      <div class="auth-tabs">
-        <button class="auth-tab active" onclick="switchAuthTab('login')" id="loginTab">دخول الشركة</button>
-        <button class="auth-tab" onclick="switchAuthTab('employee')" id="employeeTab">دخول الموظف</button>
-        <button class="auth-tab" onclick="switchAuthTab('register')" id="registerTab">إنشاء شركة</button>
-      </div>
+      <p>تسجيل الدخول</p>
 
       <div id="loginError" class="auth-error"></div>
       <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
-        <label>البريد الإلكتروني أو اسم المستخدم (أدمن الشركة)</label>
+        <label>البريد الإلكتروني أو اسم المستخدم</label>
         <input type="text" id="loginEmail" autocomplete="username" required>
         <label>كلمة المرور</label>
         <div style="position:relative">
@@ -68,36 +62,6 @@
           <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
         </div>
         <button type="submit" class="auth-btn">دخول</button>
-      </form>
-
-      <div id="employeeError" class="auth-error"></div>
-      <form id="employeeForm" class="auth-form" onsubmit="handleEmployeeLogin(event)">
-        <label>البريد الإلكتروني أو اسم المستخدم (موظف)</label>
-        <input type="text" id="employeeEmail" autocomplete="username" required>
-        <label>كلمة المرور</label>
-        <div style="position:relative">
-          <input type="password" id="employeePassword" placeholder="كلمة المرور" required style="padding-left:64px">
-          <button type="button" onclick="togglePasswordVisibility('employeePassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
-        </div>
-        <button type="submit" class="auth-btn">دخول الموظف</button>
-      </form>
-
-      <div id="registerError" class="auth-error"></div>
-      <form id="registerForm" class="auth-form" onsubmit="handleRegister(event)">
-        <label>اسم الشركة</label>
-        <input type="text" id="registerCompany" placeholder="مثال: منافع الاقتصادية" required>
-        <label>البريد الإلكتروني (للأدمن)</label>
-        <input type="email" id="registerEmail" placeholder="admin@company.com" required>
-        <label>كلمة المرور (10 أحرف على الأقل)</label>
-        <div style="position:relative">
-          <input type="password" id="registerPassword" placeholder="كلمة المرور" required minlength="10" style="padding-left:64px">
-          <button type="button" onclick="togglePasswordVisibility('registerPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
-        </div>
-        <label>دومين الشركة (اختياري)</label>
-        <input type="text" id="registerDomain" placeholder="company.com">
-        <label>النطاق الفرعي (اختياري)</label>
-        <input type="text" id="registerSubdomain" placeholder="manafe">
-        <button type="submit" class="auth-btn">إنشاء حساب شركة</button>
       </form>
     </div>
   </div>

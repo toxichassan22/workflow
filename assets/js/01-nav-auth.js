@@ -964,25 +964,17 @@
 
     // Auth UI
 
-    function switchAuthTab(tab) {
-      document.getElementById('loginTab').classList.toggle('active', tab === 'login');
-      document.getElementById('employeeTab').classList.toggle('active', tab === 'employee');
-      document.getElementById('registerTab').classList.toggle('active', tab === 'register');
-      document.getElementById('loginForm').classList.toggle('active', tab === 'login');
-      document.getElementById('employeeForm').classList.toggle('active', tab === 'employee');
-      document.getElementById('registerForm').classList.toggle('active', tab === 'register');
-      const hintEl = document.getElementById('authTabHint');
-      if (hintEl && AUTH_TAB_HINTS[tab]) hintEl.innerHTML = AUTH_TAB_HINTS[tab];
-      showTenantError('loginError', '');
-      showTenantError('employeeError', '');
-      showTenantError('registerError', '');
-    }
-
     function showAuthPage() {
       const app = document.querySelector('.app');
       if (app) app.style.display = 'none';
       document.getElementById('tenantAppPage').classList.remove('active');
       document.getElementById('tenantAuthPage').classList.add('active');
+      // The login screen owns the bare domain: it never carries an /app/...
+      // path, so a logged-out deep link or an expired session lands on '/'
+      // instead of showing the login card under a workspace address.
+      if (window.location.pathname !== '/') {
+        window.history.replaceState({}, '', '/');
+      }
     }
 
     function showTenantApp() {

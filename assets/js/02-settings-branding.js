@@ -580,43 +580,6 @@
       }
     }
 
-    async function handleEmployeeLogin(e) {
-      e.preventDefault();
-      showTenantError('employeeError', '');
-      const email = document.getElementById('employeeEmail').value.trim();
-      const password = document.getElementById('employeePassword').value;
-      const data = await api('POST', '/api/auth/login', { email, password });
-      if (data.success && data.token) {
-        if (data.user && data.user.role === 'employee') {
-          setTenantToken(data.token);
-          setTenantUser(data.tenant);
-          await bootstrapTenant();
-        } else {
-          showTenantError('employeeError', 'هذا الحساب ليس حساب موظف. استخدم تبويب دخول الشركة.');
-        }
-      } else {
-        showTenantError('employeeError', data.error || 'فشل تسجيل الدخول');
-      }
-    }
-
-    async function handleRegister(e) {
-      e.preventDefault();
-      showTenantError('registerError', '');
-      const companyName = document.getElementById('registerCompany').value.trim();
-      const email = document.getElementById('registerEmail').value.trim().toLowerCase();
-      const password = document.getElementById('registerPassword').value;
-      const subdomain = document.getElementById('registerSubdomain').value.trim().toLowerCase() || null;
-      const domain = document.getElementById('registerDomain').value.trim().toLowerCase() || null;
-      const data = await api('POST', '/api/auth/register', { companyName, email, password, subdomain, domain });
-      if (data.success && data.token) {
-        setTenantToken(data.token);
-        setTenantUser(data.tenant);
-        await bootstrapTenant();
-      } else {
-        showTenantError('registerError', data.error || 'فشل إنشاء الحساب');
-      }
-    }
-
     function tenantLogout() {
       removeTenantToken();
       localStorage.removeItem(T_TENANT_KEY);
