@@ -2143,9 +2143,8 @@ def get_presentation(pres_id, tenant_id=None):
     return dict(row) if row else None
 
 
-def get_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', limit=200, offset=0):
-    """Get tenant presentations with optional project and archive filters."""
-    conn = get_db()
+def _presentation_list_clauses(tenant_id, draft_id=None, search='', status='', date_from='', date_to=''):
+    """Shared WHERE clauses for the presentation list and its total count."""
     clauses = ['tenant_id = ?']
     params = [tenant_id]
     if draft_id:
@@ -2165,15 +2164,65 @@ def get_presentations(tenant_id, draft_id=None, search='', status='', date_from=
     if date_to:
         clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) <= ?')
         params.append(str(date_to)[:10])
+    return clauses, params
+
+
+def count_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to=''):
+    """Cheap total for a presentation list without touching any payload column."""
+    conn = get_db()
+    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to)
+    row = conn.execute(
+        'SELECT COUNT(*) AS c FROM presentations WHERE ' + ' AND '.join(clauses),
+        params,
+    ).fetchone()
+    return int((dict(row) if row else {}).get('c') or 0)
+
+
+def get_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', limit=200, offset=0):
+    """Get tenant presentations with optional project and archive filters.
+
+    List-only: selects metadata columns, never project_data/slides_data. Those
+    payloads are kilobytes-to-megabytes per row and the dashboard used to fetch
+    (and JSON-parse twice) up to 200 of them just to render five titles.
+    presentation_scope and the legacy draft fallback are extracted in SQL.
+    """
+    conn = get_db()
+    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to)
     limit = max(1, min(int(limit or 200), 500))
     offset = max(0, int(offset or 0))
     params.extend([limit, offset])
-    rows = conn.execute(
-        'SELECT * FROM presentations WHERE ' + ' AND '.join(clauses)
-        + ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? OFFSET ?',
-        params,
-    ).fetchall()
-    return [dict(r) for r in rows]
+    try:
+        rows = conn.execute(
+            'SELECT id, tenant_id, title, '
+            "COALESCE(NULLIF(draft_id, ''), "
+            "json_extract(project_data, '$.draftId'), "
+            "json_extract(project_data, '$.draft_id')) AS draft_id, "
+            'revision, slide_count, status, created_at, updated_at, '
+            "json_extract(project_data, '$.presentation_scope') AS presentation_scope "
+            'FROM presentations WHERE ' + ' AND '.join(clauses)
+            + ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? OFFSET ?',
+            params,
+        ).fetchall()
+    except Exception:
+        # SQLite without the JSON1 extension: fall back to metadata columns only.
+        rows = conn.execute(
+            'SELECT id, tenant_id, title, draft_id, revision, slide_count, status, '
+            'created_at, updated_at FROM presentations WHERE ' + ' AND '.join(clauses)
+            + ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? OFFSET ?',
+            params,
+        ).fetchall()
+    result = []
+    for r in rows:
+        item = dict(r)
+        scope = item.get('presentation_scope')
+        if isinstance(scope, str) and scope.strip().startswith(('{', '[')):
+            try:
+                scope = json.loads(scope)
+            except (TypeError, ValueError):
+                scope = None
+        item['presentation_scope'] = scope
+        result.append(item)
+    return result
 
 
 def update_presentation(pres_id, tenant_id=None, **fields):

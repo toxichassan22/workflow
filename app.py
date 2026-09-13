@@ -9715,34 +9715,28 @@ def api_get_presentations():
         limit=limit,
         offset=offset,
     )
+    total = db.count_presentations(
+        g.tenant_id,
+        draft_id=(request.args.get('draftId') or '').strip() or None,
+        search=(request.args.get('search') or '').strip(),
+        status=(request.args.get('status') or '').strip(),
+        date_from=(request.args.get('from') or '').strip(),
+        date_to=(request.args.get('to') or '').strip(),
+    )
     result = []
     for p in presentations:
-        draft_id = p.get('draft_id')
-        if not draft_id and p.get('project_data'):
-            try:
-                project_data = json.loads(p['project_data']) if isinstance(p['project_data'], str) else p['project_data']
-            except (TypeError, ValueError):
-                project_data = {}
-            if isinstance(project_data, dict):
-                draft_id = project_data.get('draftId') or project_data.get('draft_id')
-        scope_data = p.get('project_data') or {}
-        if isinstance(scope_data, str):
-            try:
-                scope_data = json.loads(scope_data)
-            except (TypeError, ValueError):
-                scope_data = {}
         result.append({
             'id': p['id'],
             'title': p['title'],
-            'draftId': draft_id,
+            'draftId': p.get('draft_id'),
             'revision': int(p.get('revision') or 0),
-            'presentationScope': scope_data.get('presentation_scope') if isinstance(scope_data, dict) else None,
+            'presentationScope': p.get('presentation_scope'),
             'slideCount': p.get('slide_count', 0),
             'status': p.get('status', 'draft'),
             'createdAt': p.get('created_at'),
             'updatedAt': p.get('updated_at'),
         })
-    return jsonify({'success': True, 'presentations': result})
+    return jsonify({'success': True, 'presentations': result, 'total': total})
 
 
 @app.route('/api/presentations/<pres_id>', methods=['DELETE'])
@@ -17522,18 +17516,10 @@ def api_admin_tenant_presentations(tenant_id):
     presentations = db.get_presentations(tenant_id, limit=200)
     result = []
     for p in presentations:
-        draft_id = p.get('draft_id')
-        if not draft_id and p.get('project_data'):
-            try:
-                project_data = json.loads(p['project_data']) if isinstance(p['project_data'], str) else p['project_data']
-            except (TypeError, ValueError):
-                project_data = {}
-            if isinstance(project_data, dict):
-                draft_id = project_data.get('draftId') or project_data.get('draft_id')
         result.append({
             'id': p['id'],
             'title': p['title'],
-            'draftId': draft_id,
+            'draftId': p.get('draft_id'),
             'slideCount': p.get('slide_count', 0),
             'status': p.get('status', 'draft'),
             'createdAt': p.get('created_at'),

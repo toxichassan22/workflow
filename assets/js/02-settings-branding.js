@@ -534,13 +534,15 @@
       const list = document.getElementById('dashboardRecentList');
       if (!list) return;
       list.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      // The dashboard renders five recent titles only, so fetch five metadata
+      // rows instead of the default page of full presentation payloads.
       const [presData, approvalsData] = await Promise.all([
-        api('GET', '/api/presentations'),
+        api('GET', '/api/presentations?limit=5'),
         api('GET', '/api/approvals').catch(() => ({ success: false }))
       ]);
       const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
       const approvals = (approvalsData.success && approvalsData.approvals) ? approvalsData.approvals : [];
-      if (totalEl) totalEl.textContent = presentations.length;
+      if (totalEl) totalEl.textContent = (presData.success && Number.isFinite(Number(presData.total))) ? presData.total : presentations.length;
       if (pendingEl) pendingEl.textContent = approvals.length;
       const recent = presentations.slice().sort((a, b) => {
         const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
@@ -910,11 +912,13 @@
     }
 
     async function loadTenantBranding() {
-      const data = await api('GET', '/api/branding');
+      // The font CSS is served from the stored branding, not from this response,
+      // so both requests run together instead of costing two sequential round trips
+      // on every refresh.
+      const [data] = await Promise.all([api('GET', '/api/branding'), loadTenantFontCss()]);
       if (!data.success || !data.branding) return;
       tenantBranding = data.branding;
       const b = data.branding;
-      await loadTenantFontCss();
       // Apply CSS variables
       const root = document.documentElement;
       if (b.primary_color) {
