@@ -31,6 +31,7 @@ import concurrent.futures
 import copy
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
@@ -50,6 +51,10 @@ from auth import require_auth, require_admin, require_company_admin, require_per
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
 app = Flask(__name__, static_folder=None)
+# Apache proxies public traffic to gunicorn on 127.0.0.1, so without this the
+# app sees the internal host (127.0.0.1:800x) instead of lab.landloom.ai.
+# Trust the proxy headers for host/proto only; the proxy itself is local.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 app.teardown_appcontext(db.close_db)
 
@@ -12304,24 +12309,42 @@ def _identity_conflict(email, username, tenant_id=None, user_id=None):
     return None
 
 
+def _is_public_base_url(url):
+    if not url or 'sagdemos.store' in url:
+        return False
+    return not re.search(r'localhost|127\.0\.0\.1|0\.0\.0\.0', url)
+
+
 def _password_setup_url(raw_token):
     try:
         req_base = (request.host_url or '').strip().rstrip('/')
     except Exception:
         req_base = ''
+    try:
+        fwd_host = (request.headers.get('X-Forwarded-Host', '') or '').split(',')[0].strip()
+        fwd_proto = (request.headers.get('X-Forwarded-Proto', '') or '').split(',')[0].strip()
+    except Exception:
+        fwd_host = ''
+        fwd_proto = ''
+    fwd_base = ''
+    if fwd_host:
+        scheme = fwd_proto if fwd_proto in ('http', 'https') else 'https'
+        fwd_base = f'{scheme}://{fwd_host}'.rstrip('/')
     env_base = (os.environ.get('APP_BASE_URL') or '').strip().rstrip('/')
-    # The setup link must match the domain the admin is actually working on
-    # (lab host vs main host). Prefer the live request host and only fall back
-    # to the configured base URL outside a request context. The legacy host is
-    # dead: never emit it even if an old server .env still carries it.
+    # Each server carries its own public URL in APP_BASE_URL (staging =
+    # lab host, production = main host), while gunicorn behind Apache only
+    # sees 127.0.0.1. Prefer the configured public URL, then the proxy
+    # headers, then the live request host. A loopback address is only a last
+    # resort: it is unreachable from any other machine. The legacy host is
+    # dead and is never emitted.
     base_url = ''
-    for candidate in (req_base, env_base):
-        if candidate and 'sagdemos.store' not in candidate:
+    for candidate in (env_base, fwd_base, req_base):
+        if _is_public_base_url(candidate):
             base_url = candidate
             break
     if not base_url:
-        base_url = req_base or env_base
-    if base_url.startswith('http://') and not re.search(r'localhost|127\.0\.0\.1', base_url):
+        base_url = fwd_base or req_base or env_base
+    if base_url.startswith('http://') and _is_public_base_url(base_url):
         base_url = 'https://' + base_url[len('http://'):]
     return f'{base_url}/set-password/{raw_token}'
 
