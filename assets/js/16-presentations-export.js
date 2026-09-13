@@ -613,7 +613,7 @@
       document.getElementById('sagCreatePasswordMode').value = 'set_link';
       document.getElementById('sagCreatePassword').type = 'password';
       document.getElementById('sagCreateWelcomeEmail').checked = true;
-      document.getElementById('sagCompanyCreateError').textContent = '';
+      showSagCompanyCreateError('');
       document.getElementById('sagCompanyCreateResult').style.display = 'none';
       form.style.display = 'block';
       toggleSagCompanyPassword();
@@ -690,10 +690,45 @@
       host.querySelector('[data-copy-setup-url]').addEventListener('click', () => copySagText(setupUrl || ''));
     }
 
+    function sagCompanyErrorArabic(raw) {
+      const text = String(raw || '');
+      const map = {
+        'Email already registered': 'البريد الإلكتروني مسجل بالفعل لشركة أخرى',
+        'Username already registered': 'اسم المستخدم مسجل بالفعل، اختر اسم مستخدم آخر',
+        'Email or username already registered': 'البريد الإلكتروني أو اسم المستخدم مسجل بالفعل',
+        'All company and account fields are required': 'جميع حقول الشركة والحساب مطلوبة',
+        'Company or account manager name is too long': 'اسم الشركة أو اسم مدير الحساب طويل جدا',
+        'Invalid email address': 'البريد الإلكتروني غير صالح',
+        'Invalid username': 'اسم المستخدم غير صالح',
+        'Invalid phone number': 'رقم الجوال غير صالح',
+        'Invalid plan': 'الخطة غير صالحة',
+        'Invalid password mode': 'طريقة إعداد كلمة المرور غير صالحة',
+        'Credit balance must be a valid number': 'الرصيد الائتماني يجب أن يكون رقما صالحا',
+        'Credit balance cannot be negative': 'الرصيد الائتماني لا يمكن أن يكون سالبا',
+        'Password must be at least 10 characters': 'كلمة المرور يجب أن تكون 10 أحرف على الأقل',
+        'Password must include letters and numbers': 'كلمة المرور يجب أن تحتوي على حروف وأرقام'
+      };
+      if (map[text]) return map[text];
+      const lower = text.toLowerCase();
+      if (lower.includes('email') && lower.includes('already')) return map['Email already registered'];
+      if (lower.includes('username') && lower.includes('already')) return map['Username already registered'];
+      return text || 'تعذر إنشاء حساب الشركة';
+    }
+
+    function showSagCompanyCreateError(msg) {
+      const el = document.getElementById('sagCompanyCreateError');
+      if (!el) return;
+      if (typeof showTenantError === 'function') {
+        showTenantError('sagCompanyCreateError', msg);
+        return;
+      }
+      el.textContent = msg;
+      el.style.display = msg ? 'block' : 'none';
+    }
+
     async function createSagCompany(event) {
       event.preventDefault();
       const submit = document.getElementById('sagCreateCompanySubmit');
-      const errorHost = document.getElementById('sagCompanyCreateError');
       const payload = {
         companyName: document.getElementById('sagCreateCompanyName').value.trim(),
         accountManagerName: document.getElementById('sagCreateManagerName').value.trim(),
@@ -705,13 +740,13 @@
         password: document.getElementById('sagCreatePassword').value,
         sendWelcomeEmail: document.getElementById('sagCreateWelcomeEmail').checked
       };
-      errorHost.textContent = '';
+      showSagCompanyCreateError('');
       submit.disabled = true;
       showLoader('جاري إنشاء حساب الشركة', 'إنشاء الشركة والمستخدم الرئيسي', 12);
       try {
         const data = await api('POST', '/api/admin/tenants', payload);
         if (!data.success) {
-          errorHost.textContent = data.error || 'تعذر إنشاء حساب الشركة';
+          showSagCompanyCreateError(sagCompanyErrorArabic(data.error));
           return;
         }
         document.getElementById('sagCompanyCreateForm').style.display = 'none';
