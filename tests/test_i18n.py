@@ -164,25 +164,48 @@ class I18nFoundationTests(unittest.TestCase):
             bare_scripts, [],
             'index.html must not carry an inline <script> block anymore; '
             'put the code in assets/js/')
+        # The shell references server-built bundles, never part files: twenty
+        # part requests per refresh became two. The bundle order authority is
+        # app.py (FRONTEND_*_ORDER) and must match this suite's pin exactly.
+        self.assertIn(
+            'href="/assets/app.bundle.css"', html,
+            'index.html must link /assets/app.bundle.css')
+        self.assertNotIn(
+            '/assets/css/base.css', html,
+            'index.html must not reference part CSS files directly')
+        bundle_tags = re.findall(
+            r'<script src="/assets/app\.bundle\.js"></script>', html)
+        self.assertEqual(
+            len(bundle_tags), 1,
+            'index.html must load /assets/app.bundle.js exactly once')
+        self.assertNotIn(
+            '/assets/js/', html,
+            'index.html must not reference part JS files directly')
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+
+        def _order(name):
+            match = re.search(name + r'\s*=\s*\((.*?)\)', app_source, re.S)
+            self.assertIsNotNone(match, 'app.py must define %s' % name)
+            return tuple(re.findall(r"'([^']+)'", match.group(1)))
+
+        self.assertEqual(
+            _order('FRONTEND_JS_ORDER'), FRONTEND_JS_ORDER,
+            'app.py bundle order drifted from the pinned FRONTEND_JS_ORDER')
+        self.assertEqual(
+            _order('FRONTEND_CSS_ORDER'), FRONTEND_CSS_ORDER,
+            'app.py bundle order drifted from the pinned FRONTEND_CSS_ORDER')
         for name in FRONTEND_CSS_ORDER:
-            self.assertIn(
-                'href="/assets/css/%s"' % name, html,
-                'index.html must link assets/css/%s' % name)
             self.assertTrue(
                 (ROOT / 'assets' / 'css' / name).exists(),
                 'assets/css/%s is missing' % name)
-        referenced = re.findall(r'<script src="/assets/js/([^"]+)"></script>', html)
-        self.assertEqual(
-            referenced, list(FRONTEND_JS_ORDER),
-            'index.html must load every assets/js file exactly once, in order')
         for name in FRONTEND_JS_ORDER:
             self.assertTrue(
                 (ROOT / 'assets' / 'js' / name).exists(),
                 'assets/js/%s is missing' % name)
-        first_app = html.find('/assets/js/')
+        first_app = html.find('/assets/app.bundle.js')
         self.assertLess(
             tag, first_app,
-            'assets/i18n.js must load BEFORE the application scripts so '
+            'assets/i18n.js must load BEFORE the application bundle so '
             'WFI18n/WFT exist when application code runs')
 
     def test_runtime_api_is_present(self):

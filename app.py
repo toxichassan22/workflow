@@ -19747,6 +19747,99 @@ def spa_fallback(error):
         return jsonify({'success': False, 'error': 'Not found'}), 404
     return index()
 
+# The SPA shell references two bundles instead of twenty part files, so a cold
+# load costs four static requests (shell, i18n, one JS bundle, one CSS bundle)
+# instead of twenty-two. The part files stay the source of truth: edit them,
+# never the bundle, and never reference a part file from the shell. This tuple
+# is the single order authority shared with scripts/verify-frontend.js and the
+# test suites that pin FRONTEND_JS_ORDER.
+FRONTEND_CSS_ORDER = ('base.css', 'project-form.css')
+FRONTEND_JS_ORDER = (
+    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
+    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export.js', '17-admin-boot.js',
+)
+
+_FRONTEND_BUNDLE_CACHE = {}
+
+
+def _build_frontend_bundle(kind):
+    """Concatenate part files in load order with markers, cached by content.
+
+    The cache key is the per-file size/mtime signature, so editing a part file
+    rebuilds the bundle on the next request with no build step and no restart.
+    Returns (etag, raw_bytes, gzipped_bytes, content_type).
+    """
+    import gzip as _gzip
+    import hashlib as _hashlib
+    root = os.path.dirname(os.path.abspath(__file__))
+    if kind == 'js':
+        names, subdir, content_type = FRONTEND_JS_ORDER, 'js', 'application/javascript'
+    else:
+        names, subdir, content_type = FRONTEND_CSS_ORDER, 'css', 'text/css'
+    paths = [os.path.join(root, 'assets', subdir, name) for name in names]
+    try:
+        sig = tuple((name, os.path.getsize(path), os.path.getmtime(path))
+                    for name, path in zip(names, paths))
+    except OSError:
+        return None
+    cached = _FRONTEND_BUNDLE_CACHE.get(kind)
+    if cached and cached[0] == sig:
+        return cached[1]
+    chunks = []
+    for name, path in zip(names, paths):
+        with open(path, 'r', encoding='utf-8') as fh:
+            content = fh.read()
+        if kind == 'js':
+            # A leading semicolon keeps a file ending without one from merging
+            # into the next file's first expression. The marker names the part
+            # for stack traces and for the bundle-composition checks.
+            chunks.append('\n;\n/*__PART:' + name + '*/\n' + content)
+        else:
+            chunks.append('\n/*__PART:' + name + '*/\n' + content)
+    raw = (''.join(chunks)).encode('utf-8')
+    etag = '"' + _hashlib.sha1(raw).hexdigest() + '"'
+    bundle = (etag, raw, _gzip.compress(raw, 6), content_type)
+    _FRONTEND_BUNDLE_CACHE[kind] = (sig, bundle)
+    return bundle
+
+
+def _serve_frontend_bundle(kind):
+    bundle = _build_frontend_bundle(kind)
+    if bundle is None:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    etag, raw, gzipped, content_type = bundle
+    if request.headers.get('If-None-Match') == etag:
+        resp = app.response_class('', status=304, mimetype=content_type)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+    use_gzip = 'gzip' in (request.headers.get('Accept-Encoding') or '').lower()
+    body = gzipped if use_gzip else raw
+    resp = app.response_class(body, mimetype=content_type)
+    resp.headers['ETag'] = etag
+    # Same revalidate policy as the shell and the former part files: a deploy
+    # changes the bytes, the ETag changes with them, and repeat loads are 304s.
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers.add('Vary', 'Accept-Encoding')
+    if use_gzip:
+        resp.headers['Content-Encoding'] = 'gzip'
+    return resp
+
+
+@app.route('/assets/app.bundle.js')
+def frontend_js_bundle():
+    return _serve_frontend_bundle('js')
+
+
+@app.route('/assets/app.bundle.css')
+def frontend_css_bundle():
+    return _serve_frontend_bundle('css')
+
+
 @app.route('/assets/<path:path>')
 def static_assets(path):
     resp = send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)

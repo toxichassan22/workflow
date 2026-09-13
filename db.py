@@ -196,6 +196,8 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_fields_tenant_active ON tenant_input_fields(tenant_id, is_active, sort_order);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_fields_tenant_key ON tenant_input_fields(tenant_id, field_key);
     CREATE INDEX IF NOT EXISTS idx_presentations_tenant ON presentations(tenant_id);
+    -- The presentation list filters by tenant and shows newest first.
+    CREATE INDEX IF NOT EXISTS idx_presentations_tenant_recent ON presentations(tenant_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_exports_tenant ON exports(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_templates_tenant ON tenant_slide_templates(tenant_id);
 

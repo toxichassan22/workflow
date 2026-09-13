@@ -66,9 +66,13 @@ the very next line then stripped. Do not wire it back in.
 - Frontend: one single-page app. `index.html` is a slim shell (~1.2k lines: markup plus
   resource references). Styles live in `assets/css/` (`base.css`, `project-form.css`) and code in
   `assets/js/` (`00-core.js` … `17-admin-boot.js`, ~1–1.5k lines each, ordered classic
-  `<script src>` tags so every function still shares one global scope — no `async`, no
-  `type=module`). Edit the part file, never re-inline the code. `node scripts/verify-frontend.js`
-  guards the shell wiring (order, no orphans, no inline blocks, `node --check` per file).
+  scripts so every function still shares one global scope — no `async`, no
+  `type=module`). The shell loads them as two server-built bundles
+  (`/assets/app.bundle.js`, `/assets/app.bundle.css`, concatenated in `FRONTEND_*_ORDER`
+  in `app.py` with an ETag and no build step). Edit the part file, never re-inline the code
+  and never reference a part file from the shell. `node scripts/verify-frontend.js`
+  guards the shell wiring (bundles, order, no orphans, no inline blocks, `node --check`
+  per file and on the concatenated bundle).
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter for all text/image generation — see `.env`.
 - Spend metering: every OpenRouter call lands in `ai_usage_events` (tokens verbatim, dollars via
   `/generation`), every billable Maps call in `map_usage_events` (units × `MAPS_SKU_UNIT_PRICES`,

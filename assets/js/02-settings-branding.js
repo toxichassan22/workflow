@@ -535,10 +535,12 @@
       if (!list) return;
       list.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       // The dashboard renders five recent titles only, so fetch five metadata
-      // rows instead of the default page of full presentation payloads.
+      // rows instead of the default page of full presentation payloads. When
+      // boot already started these requests, reuse them instead of refetching.
+      const boot = (typeof consumeTenantBootPrefetch === 'function') ? consumeTenantBootPrefetch() : null;
       const [presData, approvalsData] = await Promise.all([
-        api('GET', '/api/presentations?limit=5'),
-        api('GET', '/api/approvals').catch(() => ({ success: false }))
+        (boot && boot.pres) || api('GET', '/api/presentations?limit=5'),
+        (boot && boot.appr) || api('GET', '/api/approvals').catch(() => ({ success: false }))
       ]);
       const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
       const approvals = (approvalsData.success && approvalsData.approvals) ? approvalsData.approvals : [];
@@ -738,8 +740,24 @@
       }
     }
 
+    // One-shot dashboard prefetch started during boot so the list requests fly
+    // while the shell renders instead of after. Consumed once by loadDashboard.
+    let tenantBootPrefetch = null;
+
+    function consumeTenantBootPrefetch() {
+      const prefetch = tenantBootPrefetch;
+      tenantBootPrefetch = null;
+      return prefetch;
+    }
+
     async function bootstrapTenant() {
-      const me = await api('GET', '/api/auth/me');
+      // me, branding and the font CSS depend on the token only, so they run
+      // as one wave instead of three sequential round trips on every refresh.
+      const [me, brandingData] = await Promise.all([
+        api('GET', '/api/auth/me'),
+        api('GET', '/api/branding'),
+        loadTenantFontCss(),
+      ]);
       if (!me.success || !me.tenant) {
         showAuthPage();
         return;
@@ -754,13 +772,21 @@
       setTenantUser(tenantUser);
       updateTenantTopbar();
       applyRolePermissions();
-      await loadTenantBranding();
-      showTenantApp();
+      applyTenantBrandingData(brandingData);
       // A path the user actually asked for wins over the last-visited page, so deep links and
       // refreshes land where the URL says instead of somewhere remembered in localStorage.
       const resolvedRequested = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(window.location.pathname) : null;
       const requestedPage = (resolvedRequested && resolvedRequested.pageId) || TENANT_ROUTE_PAGES[window.location.pathname];
       const requestedSection = new URLSearchParams(window.location.search).get('section');
+      // The dashboard list is tiny now, so start it while the route resolves
+      // instead of waiting for the page to ask for it.
+      if (!requestedPage || requestedPage === 'tenantDashboardPage') {
+        tenantBootPrefetch = {
+          pres: api('GET', '/api/presentations?limit=5'),
+          appr: api('GET', '/api/approvals').catch(() => ({ success: false })),
+        };
+      }
+      showTenantApp();
       if (resolvedRequested && typeof enforceTenantRouteGuard === 'function') {
         const guard = enforceTenantRouteGuard(requestedPage, resolvedRequested.urlSlug);
         if (guard === 'TENANT_SLUG_MISMATCH' || guard === 'TENANT_ADMIN_FORBIDDEN') {
@@ -912,11 +938,12 @@
     }
 
     async function loadTenantBranding() {
-      // The font CSS is served from the stored branding, not from this response,
-      // so both requests run together instead of costing two sequential round trips
-      // on every refresh.
-      const [data] = await Promise.all([api('GET', '/api/branding'), loadTenantFontCss()]);
-      if (!data.success || !data.branding) return;
+      const data = await api('GET', '/api/branding');
+      applyTenantBrandingData(data);
+    }
+
+    function applyTenantBrandingData(data) {
+      if (!data || !data.success || !data.branding) return false;
       tenantBranding = data.branding;
       const b = data.branding;
       // Apply CSS variables
@@ -943,6 +970,7 @@
         logoEl.src = logoSrc;
       }
       if (logoEl && !b.logo_path) logoEl.src = 'assets/logo.png';
+      return true;
     }
 
     const MANAGED_FONT_WEIGHTS = ['light', 'regular', 'medium', 'bold', 'black'];
