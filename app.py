@@ -12305,7 +12305,24 @@ def _identity_conflict(email, username, tenant_id=None, user_id=None):
 
 
 def _password_setup_url(raw_token):
-    base_url = (os.environ.get('APP_BASE_URL') or request.host_url).rstrip('/')
+    try:
+        req_base = (request.host_url or '').strip().rstrip('/')
+    except Exception:
+        req_base = ''
+    env_base = (os.environ.get('APP_BASE_URL') or '').strip().rstrip('/')
+    # The setup link must match the domain the admin is actually working on
+    # (lab host vs main host). Prefer the live request host and only fall back
+    # to the configured base URL outside a request context. The legacy host is
+    # dead: never emit it even if an old server .env still carries it.
+    base_url = ''
+    for candidate in (req_base, env_base):
+        if candidate and 'sagdemos.store' not in candidate:
+            base_url = candidate
+            break
+    if not base_url:
+        base_url = req_base or env_base
+    if base_url.startswith('http://') and not re.search(r'localhost|127\.0\.0\.1', base_url):
+        base_url = 'https://' + base_url[len('http://'):]
     return f'{base_url}/set-password/{raw_token}'
 
 
