@@ -10215,12 +10215,17 @@ def _presentation_save_failure(stage, exc):
     """
     app.logger.exception(
         '[PRESENTATION SAVE] Failed at stage %s: %s: %s', stage, type(exc).__name__, exc)
+    detail = f'{type(exc).__name__}: {exc}'
+    for private in (os.path.dirname(__file__), UPLOADS_DIR):
+        if private:
+            detail = detail.replace(str(private), '[app]')
     return jsonify({
         'success': False,
         'error': 'تعذر حفظ العرض بسبب خطأ داخلي؛ تعديلاتك ما زالت مفتوحة في المتصفح ولم تُفقد',
         'error_code': 'PRESENTATION_SAVE_FAILED',
         'stage': stage,
         'reason': type(exc).__name__,
+        'detail': detail[:200],
     }), 500
 
 
