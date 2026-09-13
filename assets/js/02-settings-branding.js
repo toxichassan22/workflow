@@ -251,32 +251,50 @@
       const presentations = response?.success && Array.isArray(response.presentations)
         ? response.presentations.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
         : [];
-      let costByPresentation = {};
+      // Render the groups from the presentations query alone, then patch the
+      // per-file cost lines when usage-totals answers. Waiting for the totals
+      // kept this list on its loader while the server reconciled costs.
+      const renderPresentationCard = (item, itemCost, itemReconcile) => {
+        const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
+        const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
+        return '<div class="tenant-presentation-card" data-presentation-id="' + item.id + '"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
+          '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
+          '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
+          '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
+      };
+      const renderPresentationGroups = (costByPresentation, reconcileByPresentation) => {
+        const groups = [
+          { key: 'draft', label: 'مسودة', items: presentations.filter(item => !['pending_approval', 'approved'].includes(item.status)) },
+          { key: 'pending_approval', label: 'بانتظار التعميد', items: presentations.filter(item => item.status === 'pending_approval') },
+          { key: 'approved', label: 'معتمد', items: presentations.filter(item => item.status === 'approved') }
+        ].filter(group => group.items.length);
+        return groups.length ? groups.map(group =>
+          '<section style="margin:0 0 22px"><h3 style="margin-bottom:10px;color:var(--p)">' + group.label + '</h3>' +
+          group.items.map(item => renderPresentationCard(
+            item, costByPresentation[item.id],
+            aiReconcileStatusText(reconcileByPresentation[item.id]))).join('') + '</section>'
+        ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة مطابقة.</p>';
+      };
+      const presStamp = String(Date.now()) + Math.random().toString(16).slice(2);
+      host.dataset.presentationsStamp = presStamp;
+      host.innerHTML = renderPresentationGroups({}, {});
       const presentationIds = presentations.map(item => item.id).filter(Boolean);
-      let reconcileByPresentation = {};
       if (presentationIds.length) {
         const totalsData = await api('GET', '/api/usage-totals?presentationIds=' + encodeURIComponent(presentationIds.join(','))).catch(() => null);
+        if (host.dataset.presentationsStamp !== presStamp || !document.contains(host)) return;
+        let costByPresentation = {};
+        let reconcileByPresentation = {};
         if (totalsData?.success && totalsData.presentations) costByPresentation = totalsData.presentations;
         if (totalsData?.reconcile_by_scope?.by_presentation) reconcileByPresentation = totalsData.reconcile_by_scope.by_presentation;
+        if (!totalsData?.success) return;
+        presentations.forEach(item => {
+          const node = host.querySelector('[data-presentation-id="' + item.id + '"]');
+          if (!node) return;
+          const next = renderPresentationCard(item, costByPresentation[item.id],
+            aiReconcileStatusText(reconcileByPresentation[item.id]));
+          if (node.outerHTML !== next) node.outerHTML = next;
+        });
       }
-      const groups = [
-        { key: 'draft', label: 'مسودة', items: presentations.filter(item => !['pending_approval', 'approved'].includes(item.status)) },
-        { key: 'pending_approval', label: 'بانتظار التعميد', items: presentations.filter(item => item.status === 'pending_approval') },
-        { key: 'approved', label: 'معتمد', items: presentations.filter(item => item.status === 'approved') }
-      ].filter(group => group.items.length);
-      host.innerHTML = groups.length ? groups.map(group =>
-        '<section style="margin:0 0 22px"><h3 style="margin-bottom:10px;color:var(--p)">' + group.label + '</h3>' +
-        group.items.map(item => {
-          const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
-          const itemCost = costByPresentation[item.id];
-          const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
-          const itemReconcile = aiReconcileStatusText(reconcileByPresentation[item.id]);
-          return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
-            '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
-            '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
-        }).join('') + '</section>'
-      ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة مطابقة.</p>';
     }
 
     function appendWorkflowNavigation(sidebar, activePageId, includeProject) {

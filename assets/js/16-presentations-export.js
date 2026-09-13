@@ -92,40 +92,19 @@
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      showInlineLoader(list, 'جاري تحميل المشاريع...');
-      const [draftsData, recoveryData] = await Promise.all([
-        api('GET', '/api/project-drafts?' + query.toString()).catch(() => ({ success: false })),
-        api('GET', '/api/project-drafts/recovery').catch(() => ({ success: false }))
-      ]);
-      const recoveryByDraft = {};
-      if (recoveryData?.success) {
-        (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
-      }
-      const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
-      let costByProject = {};
-      const projectIds = drafts.map(d => d.id).filter(Boolean);
-      let reconcileByDraft = {};
-      if (projectIds.length) {
-        const totalsData = await api('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => null);
-        if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
-        if (totalsData?.reconcile_by_scope?.by_draft) reconcileByDraft = totalsData.reconcile_by_scope.by_draft;
-      }
-      const html = drafts.length ? drafts.map(d => {
+      const renderDraftCard = (d, recovery, projectCost, projectReconcile) => {
         const title = d.title || 'مشروع بدون عنوان';
         const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
-        const projectCost = costByProject[d.id];
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
-        const projectReconcile = aiReconcileStatusText(reconcileByDraft[d.id]);
         const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') + (projectReconcile ? ' | <span>' + projectReconcile + '</span>' : '') : '—');
-        const recovery = recoveryByDraft[d.id] || null;
         const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
         const snapshot = recovery?.snapshot;
         const restorable = Boolean(snapshot?.recoverable);
         const note = restorable
           ? '<div class="meta" style="color:#92400e"><span>نسخة محفوظة في العرض</span> «' + escapeHtml(snapshot.title || '') + '» <span>تحتوي</span> <span>' + snapshot.fieldCount + '</span> <span>حقلًا</span></div>'
           : '';
-        return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
+        return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
           '<div><h3>' + escapeHtml(title) + '</h3><div class="meta"><span>' + statusText + '</span> | ' + escapeHtml(date) +
           (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div>' + note + '</div><div class="tenant-actions">' +
@@ -134,9 +113,55 @@
           (restorable ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' + d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>' : '') +
           '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المشروع</button>' +
           '</div></div>';
-      }).join('') : '<p class="tenant-hint">لا توجد مشاريع مطابقة.</p>';
-      list.innerHTML = html;
-      tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html };
+      };
+      showInlineLoader(list, 'جاري تحميل المشاريع...');
+      // Render the list from the lightweight drafts query alone, then enrich each
+      // card with recovery and cost data in the background. Waiting for all three
+      // calls kept the spinner up for seconds on two rows because usage-totals
+      // held the response for a provider reconcile and recovery parsed every
+      // presentation payload of the tenant.
+      const draftsData = await api('GET', '/api/project-drafts?' + query.toString()).catch(() => ({ success: false }));
+      const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+      const projectIds = drafts.map(d => d.id).filter(Boolean);
+      const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
+      list.dataset.archiveStamp = stamp;
+      if (!drafts.length) {
+        const emptyHtml = '<p class="tenant-hint">لا توجد مشاريع مطابقة.</p>';
+        if (list.dataset.archiveStamp === stamp) {
+          list.innerHTML = emptyHtml;
+          tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: emptyHtml };
+        }
+        return;
+      }
+      list.innerHTML = drafts.map(d => renderDraftCard(d, null, null, '')).join('');
+      tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
+      if (!projectIds.length) return;
+      const [recoveryData, totalsData] = await Promise.all([
+        api('GET', '/api/project-drafts/recovery?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => ({ success: false })),
+        api('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => null)
+      ]);
+      if (list.dataset.archiveStamp !== stamp) return;
+      if (!document.contains(list) || !list.querySelector('[data-draft-id]')) return;
+      const recoveryByDraft = {};
+      if (recoveryData?.success) {
+        (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
+      }
+      let costByProject = {};
+      let reconcileByDraft = {};
+      if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
+      if (totalsData?.reconcile_by_scope?.by_draft) reconcileByDraft = totalsData.reconcile_by_scope.by_draft;
+      let patched = false;
+      drafts.forEach(d => {
+        const node = list.querySelector('[data-draft-id="' + d.id + '"]');
+        if (!node) return;
+        const projectCost = costByProject[d.id];
+        const projectReconcile = aiReconcileStatusText(reconcileByDraft[d.id]);
+        const next = renderDraftCard(d, recoveryByDraft[d.id] || null, projectCost, projectReconcile);
+        if (node.outerHTML !== next) { node.outerHTML = next; patched = true; }
+      });
+      if (patched || recoveryData?.success || totalsData?.success) {
+        tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
+      }
     }
 
     async function restoreProjectDraft(draftId, presentationId) {

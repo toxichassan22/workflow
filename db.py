@@ -3561,18 +3561,46 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     return draft_id
 
 
-def find_draft_snapshots(tenant_id):
+def find_draft_snapshots(tenant_id, draft_ids=None):
     """Snapshots of project data that survive an emptied draft, newest first.
 
     Every generated presentation stored the whole ``tenantProjectData`` of the moment, and it
     carries its own draft id, so a draft that lost its fields can be read back from here.
+
+    When ``draft_ids`` is given, only presentations linked to those drafts are
+    read and parsed, so a list screen showing a page of drafts does not pay for
+    parsing every presentation payload of the tenant.
     """
     conn = get_db()
-    rows = conn.execute(
-        '''SELECT id, title, project_data, slide_count, created_at, updated_at
-           FROM presentations WHERE tenant_id = ? ORDER BY created_at DESC''',
-        (tenant_id,)
-    ).fetchall()
+    wanted = None
+    if draft_ids is not None:
+        wanted = {str(d) for d in (draft_ids or []) if str(d or '').strip()}
+        if not wanted:
+            return []
+        marks = ', '.join(['?'] * len(wanted))
+        rows = conn.execute(
+            '''SELECT id, title, draft_id, project_data, slide_count, created_at, updated_at
+               FROM presentations WHERE tenant_id = ? AND draft_id IN (%s)
+               ORDER BY created_at DESC''' % marks,
+            [tenant_id] + sorted(wanted),
+        ).fetchall()
+        legacy = conn.execute(
+            '''SELECT id, title, draft_id, project_data, slide_count, created_at, updated_at
+               FROM presentations WHERE tenant_id = ? AND (draft_id IS NULL OR draft_id = '')
+               ORDER BY created_at DESC''',
+            (tenant_id,),
+        ).fetchall()
+        rows = list(rows) + [r for r in legacy if _snapshot_draft_id(r) in wanted]
+        try:
+            rows.sort(key=lambda r: str(r['created_at'] or ''), reverse=True)
+        except Exception:
+            pass
+    else:
+        rows = conn.execute(
+            '''SELECT id, title, project_data, slide_count, created_at, updated_at
+               FROM presentations WHERE tenant_id = ? ORDER BY created_at DESC''',
+            (tenant_id,),
+        ).fetchall()
     snapshots = []
     for row in rows:
         payload = _json_object(row['project_data'])
@@ -3588,6 +3616,41 @@ def find_draft_snapshots(tenant_id):
             'project_data': payload,
         })
     return snapshots
+
+
+def _snapshot_draft_id(row):
+    """Draft id carried by a presentation row, via column or legacy payload."""
+    try:
+        direct = (row['draft_id'] if 'draft_id' in row.keys() else '') or ''
+    except Exception:
+        direct = ''
+    if direct:
+        return str(direct)
+    try:
+        payload = _json_object(row['project_data'])
+    except Exception:
+        return ''
+    return str(payload.get('draftId') or payload.get('draft_id') or '')
+
+
+def get_draft_field_counts(tenant_id, draft_ids):
+    """Filled-field counts for a page of drafts with one query and no hydration."""
+    wanted = [str(d) for d in (draft_ids or []) if str(d or '').strip()][:200]
+    if not wanted:
+        return {}
+    conn = get_db()
+    marks = ', '.join(['?'] * len(wanted))
+    counts = {}
+    for row in conn.execute(
+        'SELECT id, draft_data FROM project_drafts WHERE tenant_id = ? AND id IN (%s)' % marks,
+        [tenant_id] + wanted,
+    ).fetchall():
+        try:
+            payload = _json_object(row['draft_data'])
+        except Exception:
+            payload = {}
+        counts[str(row['id'])] = len(_draft_content_keys(payload))
+    return counts
 
 
 def restore_draft_from_snapshot(tenant_id, draft_id, snapshot_data):

@@ -1251,7 +1251,14 @@ def api_usage_totals():
         return [part.strip() for part in (value or '').split(',') if part.strip()][:200]
 
     try:
-        _backfill_missing_ai_costs(max_events=5, time_budget_seconds=3, tenant_id=g.tenant_id)
+        # List screens must answer from stored rows only. A synchronous provider
+        # reconcile holds this response for its whole time budget (up to 3s of
+        # OpenRouter calls) on every list open, which is the delay seen on the
+        # projects page even with two rows. Reconcile only on explicit opt-in
+        # (?reconcile=1); the dedicated /api/ai-usage view still reconciles.
+        _reconcile_flag = str(request.args.get('reconcile') or '').strip().lower()
+        if _reconcile_flag in ('1', 'true', 'yes'):
+            _backfill_missing_ai_costs(max_events=5, time_budget_seconds=3, tenant_id=g.tenant_id)
         draft_ids = _ids(request.args.get('draftIds') or request.args.get('draft_ids'))
         presentation_ids = _ids(request.args.get('presentationIds') or request.args.get('presentation_ids'))
         totals = db.get_usage_totals(
@@ -10637,17 +10644,35 @@ def api_project_draft_recovery():
     A save with no readable payload used to overwrite a draft with "{}" and answer success, so
     drafts were emptied silently. Every generated presentation kept a full snapshot of the project
     data of its moment, which is what makes those drafts recoverable.
+
+    Accepts an optional ?draftIds=a,b filter so a list screen showing one page
+    does not pay for hydrating every draft payload and parsing every
+    presentation payload of the tenant. Without the filter the full report is
+    returned, as before.
     """
-    snapshots = db.find_draft_snapshots(g.tenant_id)
+    _wanted = [part.strip() for part in (request.args.get('draftIds') or request.args.get('draft_ids') or '').split(',') if part.strip()][:200]
+    _wanted_set = set(_wanted) or None
+    snapshots = db.find_draft_snapshots(g.tenant_id, draft_ids=_wanted_set)
     by_draft = {}
     for snapshot in snapshots:
         key = snapshot['draft_id']
-        if key and (key not in by_draft or snapshot['field_count'] > by_draft[key]['field_count']):
+        if key and (_wanted_set is None or key in _wanted_set) and (key not in by_draft or snapshot['field_count'] > by_draft[key]['field_count']):
             by_draft[key] = snapshot
+    if _wanted_set is not None:
+        summaries = [s for s in db.get_all_project_draft_summaries(g.tenant_id, limit=200) if s['id'] in _wanted_set]
+        # Preserve the requested order for a stable progressive patch on the client.
+        summaries.sort(key=lambda s: _wanted.index(s['id']) if s['id'] in _wanted else 0)
+        field_counts = db.get_draft_field_counts(g.tenant_id, [s['id'] for s in summaries])
+    else:
+        summaries = db.get_all_project_draft_summaries(g.tenant_id, limit=200)
+        field_counts = {}
     report = []
-    for draft in db.get_all_project_draft_summaries(g.tenant_id, limit=200):
-        stored = db.get_project_draft_by_id(g.tenant_id, draft['id'])
-        field_count = len(db._draft_content_keys((stored or {}).get('draft_data') or {}))
+    for draft in summaries:
+        if draft['id'] in field_counts:
+            field_count = field_counts[draft['id']]
+        else:
+            stored = db.get_project_draft_by_id(g.tenant_id, draft['id'])
+            field_count = len(db._draft_content_keys((stored or {}).get('draft_data') or {}))
         snapshot = by_draft.get(draft['id'])
         report.append({
             'draftId': draft['id'],
