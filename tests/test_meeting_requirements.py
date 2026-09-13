@@ -7051,6 +7051,77 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('03 — 05', exported_html)
         self.assertIn('04 — 05', exported_html)
 
+    def test_presentation_update_never_answers_a_bare_500(self):
+        """A PUT the server cannot honor must answer JSON, never a bare HTML 500.
+
+        The workspace lives only in the browser until the save lands, so an
+        unreadable failure both hides the cause and looks like lost work.
+        """
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'عرض الحماية', 'projectData': {'project_name': 'عرض الحماية'},
+            'slidesData': [{'title': 'الغلاف', 'type': 'cover',
+                            'html': '<div class="slide">غلاف</div>'}],
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        presentation_id = created.get_json()['presentationId']
+        revision = created.get_json()['presentation']['revision']
+
+        base_project = {'project_name': 'عرض الحماية'}
+        base_slides = [{'title': 'محتوى', 'type': 'content',
+                        'html': '<div class="slide"><p>نص عربي</p></div>'}]
+        adversarial = [
+            ('blob-url', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><img src="blob:https://example.test/abc"></div>'}]}),
+            ('missing-local-file', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><img src="/uploads/maps/gone.png"></div>'}]}),
+            ('foreign-tenant-path', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><img src="/uploads/creative/other-tenant/a.png"></div>'}]}),
+            ('unsupported-data-uri', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><img src="data:image/gif;base64,R0lGODdhAQABAIAAAP///////ywAAAAAAQABAAACAkQBADs="></div>'}]}),
+            ('nested-slides-in-project', {
+                'projectData': {**base_project, 'tenantSlidesData': base_slides * 20}}),
+            ('huge-html', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><p>' + 'نص طويل جدا ' * 20000 + '</p></div>'}]}),
+            ('lone-surrogate', {'slidesData': [
+                {'title': 'x', 'type': 'content',
+                 'html': '<div class="slide"><p>test \ud83d end</p></div>'}]}),
+            ('garbage-provenance', {'changeSource': 'ai', 'provenance': {'token': 'garbage'}}),
+            ('index-entries-mismatch', {'slidesData': [
+                {'title': 'محتويات العرض', 'type': 'index',
+                 'html': '<div class="slide">فهرس</div>',
+                 'index_entries': [{'section_key': 'x', 'page': 'not-a-number'}]}]}),
+        ]
+        for name, extra in adversarial:
+            payload = {'title': 'عرض الحماية', 'projectData': dict(base_project),
+                       'slidesData': [dict(slide) for slide in base_slides],
+                       'expectedRevision': revision}
+            payload.update(extra)
+            response = client.put('/api/presentations/' + presentation_id,
+                                  headers=headers, json=payload)
+            data = response.get_json()
+            self.assertIsNotNone(data, f'{name}: expected a JSON answer')
+            self.assertNotEqual(response.status_code, 500, f'{name}: bare 500')
+            if response.status_code == 200:
+                self.assertTrue(data.get('success'), f'{name}: {str(data)[:300]}')
+                revision = data['presentation']['revision']
+            else:
+                self.assertIn(response.status_code, (400, 409),
+                              f'{name}: unexpected HTTP {response.status_code}: {str(data)[:300]}')
+                self.assertIn('error', data, f'{name}: error answer carries no message')
+
+        index_source = read_frontend_text()
+        update_source = index_source.split('async function saveExistingPresentation', 1)[1].split(
+            'async function regeneratePresentationMaps', 1)[0]
+        self.assertLess(update_source.index('saveProjectAsDraftNow(true, false)'),
+                        update_source.index('renumberTenantSlides();'))
+
     def test_export_rebuilds_legacy_plan_without_image_tokens(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)

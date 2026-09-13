@@ -1142,12 +1142,17 @@ def api_ai_usage():
     draft_id = (request.args.get('draftId') or request.args.get('draft_id') or '').strip() or None
     presentation_id = (request.args.get('presentationId') or request.args.get('presentation_id') or '').strip() or None
     try:
-        try:
-            _reconcile_ai_scope(limit=5, time_budget_seconds=3, tenant_id=g.tenant_id,
-                                draft_id=draft_id, presentation_id=presentation_id)
-        except Exception as exc:
-            import traceback as _tb
-            print(f"[AI-USAGE] scoped reconcile failed: {exc}\n{_tb.format_exc(limit=5)}")
+        # Same rule as /api/usage-totals: a view must answer from stored rows.
+        # The live provider check held this response up to 3s on every open;
+        # it now runs only on explicit ?reconcile=1 or via POST /api/ai-usage/reconcile.
+        _usage_reconcile = str(request.args.get('reconcile') or '').strip().lower()
+        if _usage_reconcile in ('1', 'true', 'yes'):
+            try:
+                _reconcile_ai_scope(limit=5, time_budget_seconds=3, tenant_id=g.tenant_id,
+                                    draft_id=draft_id, presentation_id=presentation_id)
+            except Exception as exc:
+                import traceback as _tb
+                print(f"[AI-USAGE] scoped reconcile failed: {exc}\n{_tb.format_exc(limit=5)}")
         ai_usage = db.get_ai_usage_summary(
             g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
         maps_usage = db.get_maps_usage_summary(
@@ -7640,10 +7645,20 @@ def api_branding_font_css():
     The rules are scoped to .slide only, so the site UI font is unaffected.
     """
     from design_templates import build_font_css
+    import hashlib as _hashlib
     branding = db.get_branding(g.tenant_id) or {}
     css, _family = build_font_css(branding, g.tenant_id, embed=False)
-    response = app.response_class(css or '/* no tenant font */', mimetype='text/css')
+    body = (css or '/* no tenant font */').encode('utf-8')
+    etag = '"' + _hashlib.sha1(body).hexdigest() + '"'
+    if request.headers.get('If-None-Match') == etag:
+        response = app.response_class('', status=304, mimetype='text/css')
+        response.headers['ETag'] = etag
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+    response = app.response_class(body, mimetype='text/css')
+    response.headers['ETag'] = etag
     response.headers['Cache-Control'] = 'no-cache'
+    response.headers.add('Vary', 'Accept-Encoding')
     return response
 
 
@@ -10190,6 +10205,25 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
     return db.commit_presentation_revision(tenant_id, presentation_id, **kwargs)
 
 
+def _presentation_save_failure(stage, exc):
+    """Answer a presentation-save crash as JSON naming the failed stage.
+
+    The workspace lives only in the browser until the save succeeds, so a bare
+    HTML 500 hides both the cause and the fact that the edits are still open.
+    The exception type (never its message or the payload) travels with the
+    response; the full traceback stays in the server log.
+    """
+    app.logger.exception(
+        '[PRESENTATION SAVE] Failed at stage %s: %s: %s', stage, type(exc).__name__, exc)
+    return jsonify({
+        'success': False,
+        'error': 'تعذر حفظ العرض بسبب خطأ داخلي؛ تعديلاتك ما زالت مفتوحة في المتصفح ولم تُفقد',
+        'error_code': 'PRESENTATION_SAVE_FAILED',
+        'stage': stage,
+        'reason': type(exc).__name__,
+    }), 500
+
+
 @app.route('/api/presentations', methods=['POST'])
 @require_permission('create_presentation')
 def api_save_presentation():
@@ -10202,25 +10236,28 @@ def api_save_presentation():
     except ValueError as error:
         return jsonify({'error': str(error)}), 400
     title = str(data.get('title') or 'عرض بدون عنوان').strip()
-    project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
-    slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
-    branding = db.get_branding(g.tenant_id) or {}
-    render_project_data = copy.deepcopy(project_data)
-    _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
-    slides_data = slide_engine.renumber_presentation_slides(
-        slides_data, branding=branding, project_data=render_project_data,
-        tenant_id=g.tenant_id,
-        creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
-    )
-    slide_count = len(slides_data)
-
-    scope = project_data.get('presentation_scope')
-    draft_id = project_data.get('draftId') or project_data.get('draft_id')
-    creation_key = None
-    if draft_id and isinstance(scope, str) and (scope == 'full' or re.fullmatch(r'(?:section|copy):[A-Za-z0-9_-]+', scope)):
-        creation_key = json.dumps([str(draft_id), scope], separators=(',', ':'))
-    source, provenance_details = _verified_presentation_provenance(data, None, 0)
+    save_stage = 'normalize'
     try:
+        project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
+        slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
+        branding = db.get_branding(g.tenant_id) or {}
+        render_project_data = copy.deepcopy(project_data)
+        _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
+        save_stage = 'renumber'
+        slides_data = slide_engine.renumber_presentation_slides(
+            slides_data, branding=branding, project_data=render_project_data,
+            tenant_id=g.tenant_id,
+            creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
+        )
+        slide_count = len(slides_data)
+
+        scope = project_data.get('presentation_scope')
+        draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        creation_key = None
+        if draft_id and isinstance(scope, str) and (scope == 'full' or re.fullmatch(r'(?:section|copy):[A-Za-z0-9_-]+', scope)):
+            creation_key = json.dumps([str(draft_id), scope], separators=(',', ':'))
+        source, provenance_details = _verified_presentation_provenance(data, None, 0)
+        save_stage = 'commit'
         result = _commit_presentation_state(
             g.tenant_id, title=title, project_data=project_data, slides_data=slides_data,
             draft_id=draft_id, creation_key=creation_key,
@@ -10229,6 +10266,8 @@ def api_save_presentation():
         )
     except (LookupError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
+    except Exception as exc:
+        return _presentation_save_failure(save_stage, exc)
     pres_id = result['presentation_id']
     if not result.get('created', True):
         return jsonify({
@@ -10299,74 +10338,80 @@ def api_update_presentation(pres_id):
     except ValueError as error:
         return jsonify({'error': str(error)}), 400
     source, provenance_details = _verified_presentation_provenance(data, pres_id, expected_revision)
-    updates = {}
-    for k in ['title', 'projectData', 'slidesData']:
-        if k in data:
-            db_key = {'projectData': 'project_data', 'slidesData': 'slides_data'}.get(k, k)
-            updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else str(data[k] or '').strip()
-    if 'status' in data:
-        if data.get('status') in {'draft', 'edited'}:
-            updates['status'] = 'draft'
-        elif data.get('status') in {'pending_approval', 'approved', 'rejected'}:
-            updates['status'] = data.get('status')
-    if isinstance(updates.get('project_data'), dict):
-        current_project = _presentation_state(pres)['projectData']
-        current_scope = current_project.get('presentation_scope')
-        incoming_scope = updates['project_data'].get('presentation_scope')
-        if current_scope and incoming_scope and current_scope != incoming_scope:
-            return jsonify({'error': 'Presentation scope does not match', 'error_code': 'PRESENTATION_SCOPE_MISMATCH'}), 409
-        if current_scope:
-            updates['project_data']['presentation_scope'] = current_scope
-        if pres.get('draft_id'):
-            updates['draft_id'] = pres['draft_id']
-            updates['project_data']['draftId'] = pres['draft_id']
-            updates['project_data']['draft_id'] = pres['draft_id']
-        else:
-            updates['draft_id'] = (updates['project_data'].get('draftId')
-                                   or updates['project_data'].get('draft_id'))
-
-    if 'slides_data' in updates:
-        project_data = updates.get('project_data')
-        if not isinstance(project_data, dict):
-            try:
-                project_data = json.loads(pres.get('project_data') or '{}')
-            except (TypeError, ValueError):
-                project_data = {}
-        update_branding = db.get_branding(g.tenant_id) or {}
-        render_project_data = copy.deepcopy(project_data)
-        _prepare_generation_logo_context(render_project_data, update_branding, g.tenant_id)
-        updates['slides_data'] = slide_engine.renumber_presentation_slides(
-            updates['slides_data'], branding=update_branding,
-            project_data=render_project_data, tenant_id=g.tenant_id,
-            creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
-        )
-        updates['slide_count'] = len(updates['slides_data'])
-
-    details = []
-    action = 'تعديل العرض'
-    if 'title' in updates and updates['title'] != pres.get('title'):
-        details.append(f'عنوان العرض: من «{pres.get("title") or "بدون"}» إلى «{updates["title"]}»')
-    if 'project_data' in updates:
-        try:
-            old_project_data = json.loads(pres.get('project_data') or '{}')
-        except (TypeError, ValueError):
-            old_project_data = {}
-        details.extend(change_tracking.describe_draft_changes(old_project_data, updates['project_data']))
-    if 'slides_data' in updates:
-        current_slides = change_tracking.parse_slides(pres.get('slides_data'))
-        details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
-        action = 'تعديل الشرائح'
-    if 'status' in updates and updates['status'] != pres.get('status'):
-        details.append(f'حالة العرض: من «{pres.get("status") or "مسودة"}» إلى «{updates["status"]}»')
-    updates.pop('slide_count', None)
-    if data.get('operation') == 'generation':
-        action = 'توليد العرض'
+    save_stage = 'normalize'
     try:
+        updates = {}
+        for k in ['title', 'projectData', 'slidesData']:
+            if k in data:
+                db_key = {'projectData': 'project_data', 'slidesData': 'slides_data'}.get(k, k)
+                updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else str(data[k] or '').strip()
+        if 'status' in data:
+            if data.get('status') in {'draft', 'edited'}:
+                updates['status'] = 'draft'
+            elif data.get('status') in {'pending_approval', 'approved', 'rejected'}:
+                updates['status'] = data.get('status')
+        if isinstance(updates.get('project_data'), dict):
+            current_project = _presentation_state(pres)['projectData']
+            current_scope = current_project.get('presentation_scope')
+            incoming_scope = updates['project_data'].get('presentation_scope')
+            if current_scope and incoming_scope and current_scope != incoming_scope:
+                return jsonify({'error': 'Presentation scope does not match', 'error_code': 'PRESENTATION_SCOPE_MISMATCH'}), 409
+            if current_scope:
+                updates['project_data']['presentation_scope'] = current_scope
+            if pres.get('draft_id'):
+                updates['draft_id'] = pres['draft_id']
+                updates['project_data']['draftId'] = pres['draft_id']
+                updates['project_data']['draft_id'] = pres['draft_id']
+            else:
+                updates['draft_id'] = (updates['project_data'].get('draftId')
+                                       or updates['project_data'].get('draft_id'))
+
+        if 'slides_data' in updates:
+            project_data = updates.get('project_data')
+            if not isinstance(project_data, dict):
+                try:
+                    project_data = json.loads(pres.get('project_data') or '{}')
+                except (TypeError, ValueError):
+                    project_data = {}
+            update_branding = db.get_branding(g.tenant_id) or {}
+            render_project_data = copy.deepcopy(project_data)
+            _prepare_generation_logo_context(render_project_data, update_branding, g.tenant_id)
+            save_stage = 'renumber'
+            updates['slides_data'] = slide_engine.renumber_presentation_slides(
+                updates['slides_data'], branding=update_branding,
+                project_data=render_project_data, tenant_id=g.tenant_id,
+                creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
+            )
+            updates['slide_count'] = len(updates['slides_data'])
+
+        save_stage = 'history'
+        details = []
+        action = 'تعديل العرض'
+        if 'title' in updates and updates['title'] != pres.get('title'):
+            details.append(f'عنوان العرض: من «{pres.get("title") or "بدون"}» إلى «{updates["title"]}»')
+        if 'project_data' in updates:
+            try:
+                old_project_data = json.loads(pres.get('project_data') or '{}')
+            except (TypeError, ValueError):
+                old_project_data = {}
+            details.extend(change_tracking.describe_draft_changes(old_project_data, updates['project_data']))
+        if 'slides_data' in updates:
+            current_slides = change_tracking.parse_slides(pres.get('slides_data'))
+            details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
+            action = 'تعديل الشرائح'
+        if 'status' in updates and updates['status'] != pres.get('status'):
+            details.append(f'حالة العرض: من «{pres.get("status") or "مسودة"}» إلى «{updates["status"]}»')
+        updates.pop('slide_count', None)
+        if data.get('operation') == 'generation':
+            action = 'توليد العرض'
+        save_stage = 'commit'
         result = _commit_presentation_state(
             g.tenant_id, pres_id, expected_revision=expected_revision,
             source=source, action=action, details=details + provenance_details, **updates)
     except (LookupError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
+    except Exception as exc:
+        return _presentation_save_failure(save_stage, exc)
     return jsonify(_presentation_revision_response(result))
 
 

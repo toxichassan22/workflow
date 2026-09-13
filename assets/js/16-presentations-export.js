@@ -299,6 +299,11 @@
 
     async function saveExistingPresentation() {
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return false; }
+      // The draft carries the same snapshot including the slides, so back it up
+      // first: a presentation-save failure must never lose the open workspace.
+      try { await saveProjectAsDraftNow(true, false); } catch (backupError) {
+        console.error('[DRAFT BACKUP]', backupError);
+      }
       renumberTenantSlides();
       // api('PUT', '/api/presentations/'
       const saved = await saveTenantPresentation();
