@@ -12333,7 +12333,7 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
     port = int(os.environ.get('SMTP_PORT') or 587)
     smtp_user = (os.environ.get('SMTP_USER') or '').strip()
     smtp_password = os.environ.get('SMTP_PASSWORD') or ''
-    sender = (os.environ.get('SMTP_FROM') or smtp_user or '').strip()
+    sender = (os.environ.get('SMTP_FROM') or smtp_user or 'noreply@landloom.ai').strip()
     if not sender:
         return False
     message = EmailMessage()
