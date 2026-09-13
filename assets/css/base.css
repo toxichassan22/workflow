@@ -1341,11 +1341,13 @@
     }
 
     .tenant-auth {
+      --login-navy: #07182C;
+      --login-turq: #03E1CE;
       display: none;
       position: fixed;
       inset: 0;
       z-index: 1000;
-      background: linear-gradient(135deg, var(--p), var(--pd));
+      background: var(--login-navy);
       align-items: center;
       justify-content: center;
       padding: 22px;
@@ -1362,18 +1364,29 @@
       padding: 38px 34px;
       width: 100%;
       max-width: 440px;
-      box-shadow: 0 24px 70px rgba(37, 75, 102, .25);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
       text-align: center;
+      border-top: 6px solid var(--login-turq);
+    }
+
+    .auth-logo {
+      width: 120px;
+      max-height: 90px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto 14px;
     }
 
     .auth-card h2 {
       margin: 0 0 6px;
-      color: var(--p);
+      color: #07182C;
       font-size: 28px;
     }
 
     .auth-card p {
-      color: var(--muted);
+      color: #07182C;
+      font-weight: 800;
+      font-size: 20px;
       margin: 0 0 24px;
     }
 
@@ -1399,7 +1412,7 @@
 
     .auth-tab.active {
       background: #fff;
-      color: var(--p);
+      color: #07182C;
       box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
     }
 
@@ -1415,14 +1428,14 @@
     .auth-form label {
       display: block;
       font-size: 13px;
-      color: var(--muted);
+      color: rgba(7, 24, 44, .65);
       font-weight: 900;
       margin-bottom: 6px;
     }
 
     .auth-form input {
       width: 100%;
-      border: 1px solid var(--line);
+      border: 1px solid rgba(7, 24, 44, .2);
       border-radius: 13px;
       background: #fff;
       padding: 12px;
@@ -1433,8 +1446,8 @@
     }
 
     .auth-form input:focus {
-      border-color: var(--p);
-      box-shadow: 0 0 0 3px rgba(0, 0, 0, .08);
+      border-color: #03E1CE;
+      box-shadow: 0 0 0 3px rgba(3, 225, 206, .25);
     }
 
     .auth-btn {
@@ -1445,8 +1458,8 @@
       font-size: 16px;
       font-weight: 800;
       cursor: pointer;
-      background: linear-gradient(135deg, var(--p), var(--pd));
-      color: #fff;
+      background: #03E1CE;
+      color: #07182C;
       font-family: inherit;
       transition: .2s;
     }
