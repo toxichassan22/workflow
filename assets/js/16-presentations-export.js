@@ -115,16 +115,22 @@
           '</div></div>';
       };
       showInlineLoader(list, 'جاري تحميل المشاريع...');
+      const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
+      list.dataset.archiveStamp = stamp;
       // Render the list from the lightweight drafts query alone, then enrich each
       // card with recovery and cost data in the background. Waiting for all three
       // calls kept the spinner up for seconds on two rows because usage-totals
       // held the response for a provider reconcile and recovery parsed every
       // presentation payload of the tenant.
-      const draftsData = await api('GET', '/api/project-drafts?' + query.toString()).catch(() => ({ success: false }));
-      const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+      const draftsData = await apiWithTimeout('GET', '/api/project-drafts?' + query.toString(), null, 25000).catch(() => ({ success: false }));
+      if (!draftsData || !draftsData.success) {
+        if (list.dataset.archiveStamp === stamp) {
+          renderListLoadError(list, 'openTenantPresentations(true)');
+        }
+        return;
+      }
+      const drafts = Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
       const projectIds = drafts.map(d => d.id).filter(Boolean);
-      const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
-      list.dataset.archiveStamp = stamp;
       if (!drafts.length) {
         const emptyHtml = '<p class="tenant-hint">لا توجد مشاريع مطابقة.</p>';
         if (list.dataset.archiveStamp === stamp) {
@@ -138,7 +144,7 @@
       if (!projectIds.length) return;
       const [recoveryData, totalsData] = await Promise.all([
         api('GET', '/api/project-drafts/recovery?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => ({ success: false })),
-        api('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => null)
+        apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(',')), null, 25000).catch(() => null)
       ]);
       if (list.dataset.archiveStamp !== stamp) return;
       if (!document.contains(list) || !list.querySelector('[data-draft-id]')) return;

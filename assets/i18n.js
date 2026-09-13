@@ -59,7 +59,9 @@
     "financial.warn_sale_exit_outside_roi": "التخارج البيعي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
     "financial.warn_operating_exit_outside_roi": "التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
     "financial.warn_sale_exit_outside_irr": "التخارج البيعي في السنة {year} خارج فترة IRR المختارة.",
-    "financial.warn_operating_exit_outside_irr": "التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة."
+    "financial.warn_operating_exit_outside_irr": "التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة.",
+    "list.load_failed": "تعذر تحميل القائمة",
+    "list.retry": "إعادة المحاولة"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -87,7 +89,9 @@
     "financial.warn_sale_exit_outside_roi": "Sale exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
     "financial.warn_operating_exit_outside_roi": "Operating exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
     "financial.warn_sale_exit_outside_irr": "Sale exit in year {year} is outside the selected IRR window.",
-    "financial.warn_operating_exit_outside_irr": "Operating exit in year {year} is outside the selected IRR window."
+    "financial.warn_operating_exit_outside_irr": "Operating exit in year {year} is outside the selected IRR window.",
+    "list.load_failed": "Failed to load the list",
+    "list.retry": "Retry"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old

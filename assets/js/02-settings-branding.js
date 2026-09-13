@@ -242,9 +242,13 @@
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       host.innerHTML = '<p class="tenant-hint">جاري تحميل العروض...</p>';
       const [response, draftResponse] = await Promise.all([
-        api('GET', '/api/presentations?' + query.toString()).catch(() => ({ success: false })),
+        apiWithTimeout('GET', '/api/presentations?' + query.toString(), null, 25000).catch(() => ({ success: false })),
         api('GET', '/api/project-draft/' + encodeURIComponent(draftId)).catch(() => ({ success: false }))
       ]);
+      if (!response || !response.success) {
+        renderListLoadError(host, 'loadProjectPresentationsPage()');
+        return;
+      }
       const title = draftResponse?.success && draftResponse.draft?.title ? draftResponse.draft.title : '';
       const titleNode = document.getElementById('projectPresentationsPageTitle');
       if (titleNode) titleNode.innerHTML = title ? '<span>العروض السابقة</span> — ' + escapeHtml(title) : 'العروض السابقة';
@@ -280,7 +284,7 @@
       host.innerHTML = renderPresentationGroups({}, {});
       const presentationIds = presentations.map(item => item.id).filter(Boolean);
       if (presentationIds.length) {
-        const totalsData = await api('GET', '/api/usage-totals?presentationIds=' + encodeURIComponent(presentationIds.join(','))).catch(() => null);
+        const totalsData = await apiWithTimeout('GET', '/api/usage-totals?presentationIds=' + encodeURIComponent(presentationIds.join(',')), null, 25000).catch(() => null);
         if (host.dataset.presentationsStamp !== presStamp || !document.contains(host)) return;
         let costByPresentation = {};
         let reconcileByPresentation = {};
@@ -557,9 +561,13 @@
       // boot already started these requests, reuse them instead of refetching.
       const boot = (typeof consumeTenantBootPrefetch === 'function') ? consumeTenantBootPrefetch() : null;
       const [presData, approvalsData] = await Promise.all([
-        (boot && boot.pres) || api('GET', '/api/presentations?limit=5'),
-        (boot && boot.appr) || api('GET', '/api/approvals').catch(() => ({ success: false }))
+        withBootTimeout((boot && boot.pres) || apiWithTimeout('GET', '/api/presentations?limit=5', null, 25000)),
+        withBootTimeout((boot && boot.appr) || api('GET', '/api/approvals').catch(() => ({ success: false })))
       ]);
+      if (!presData || !presData.success) {
+        renderListLoadError(list, 'loadDashboard()');
+        return;
+      }
       const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
       const approvals = (approvalsData.success && approvalsData.approvals) ? approvalsData.approvals : [];
       if (totalEl) totalEl.textContent = (presData.success && Number.isFinite(Number(presData.total))) ? presData.total : presentations.length;
@@ -731,6 +739,31 @@
       return prefetch;
     }
 
+    // A boot promise started with the plain api() helper waits forever when the
+    // server holds the connection without answering. Race it so a wedged list
+    // request fails fast into the retry state instead of a permanent loader.
+    function withBootTimeout(promise, ms = 25000) {
+      if (!promise || typeof promise.then !== 'function') {
+        return Promise.resolve({ success: false, error_code: 'CLIENT_REQUEST_TIMEOUT' });
+      }
+      let timer = null;
+      const timeout = new Promise(resolve => {
+        timer = setTimeout(() => resolve({ success: false, error_code: 'CLIENT_REQUEST_TIMEOUT' }), ms);
+      });
+      return Promise.race([
+        promise.then(
+          value => { if (timer) clearTimeout(timer); return value; },
+          () => { if (timer) clearTimeout(timer); return { success: false }; }
+        ),
+        timeout
+      ]);
+    }
+
+    function renderListLoadError(host, retryCall) {
+      if (!host) return;
+      host.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('list.load_failed', 'تعذر تحميل القائمة')) + '</p>' +
+        '<button type="button" class="btn small ghost" onclick="' + retryCall + '">' + escapeHtml(WFT('list.retry', 'إعادة المحاولة')) + '</button>';
+    }
     async function bootstrapTenant() {
       // me, branding and the font CSS depend on the token only, so they run
       // as one wave instead of three sequential round trips on every refresh.
