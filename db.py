@@ -4241,10 +4241,21 @@ def get_ai_events_needing_reconcile(limit=10, tenant_id=None, draft_id=None,
         if has_status:
             clauses.append("(attempt_status IS NULL OR attempt_status != 'needs_review')")
     else:
-        clauses.append('cost_usd IS NULL')
         clauses.append('generation_id IS NOT NULL')
+        has_verify_cols = {'cost_source', 'generation_cost_usd'} <= cols
+        if has_verify_cols:
+            # /generation total_cost is the source of truth. Rows settled from
+            # the chat response keep their provisional figure until one
+            # generation lookup overwrites it, so the stored total converges
+            # to the dashboard figure instead of sticking at a stale value.
+            clauses.append("(cost_usd IS NULL OR (cost_source = 'response' AND generation_cost_usd IS NULL))")
+        else:
+            clauses.append('cost_usd IS NULL')
         if has_status:
-            clauses.append("(attempt_status IS NULL OR attempt_status NOT IN ('settled', 'needs_review'))")
+            if has_verify_cols:
+                clauses.append("(attempt_status IS NULL OR attempt_status NOT IN ('settled', 'needs_review') OR (attempt_status = 'settled' AND cost_source = 'response' AND generation_cost_usd IS NULL))")
+            else:
+                clauses.append("(attempt_status IS NULL OR attempt_status NOT IN ('settled', 'needs_review'))")
             clauses.append("(next_retry_at IS NULL OR next_retry_at <= datetime('now'))")
     where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
     select_cols = ('id, tenant_id, draft_id, presentation_id, flow, model, status, '

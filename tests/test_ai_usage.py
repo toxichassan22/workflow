@@ -252,7 +252,10 @@ class AiUsageTests(unittest.TestCase):
                     usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-direct',
                                'flow': 'slide'})
             self.assertIn('choices', data)
-            backfill.assert_not_called()
+            # The response figure is saved immediately but stays provisional:
+            # one delayed verification against /generation total_cost follows.
+            backfill.assert_called_once()
+            self.assertEqual(backfill.call_args.kwargs.get('delay_seconds'), 20)
             summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-direct')
         self.assertEqual(summary['totals']['calls'], 1)
         self.assertAlmostEqual(summary['totals']['cost_usd'], 0.0123)
@@ -274,7 +277,8 @@ class AiUsageTests(unittest.TestCase):
                 module.call_openrouter_chat(
                     'sys', 'hi', max_tokens=10,
                     usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-zero', 'flow': 'slide'})
-            backfill.assert_not_called()
+            backfill.assert_called_once()
+            self.assertEqual(backfill.call_args.kwargs.get('delay_seconds'), 20)
             summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-zero')
         self.assertEqual(summary['recent'][0]['cost_usd'], 0)
         self.assertEqual(summary['recent'][0]['cost_source'], 'response')
@@ -356,7 +360,8 @@ class AiUsageTests(unittest.TestCase):
                     usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-paid-err',
                                'flow': 'market'})
             self.assertIn('error', data)
-            backfill.assert_not_called()
+            backfill.assert_called_once()
+            self.assertEqual(backfill.call_args.kwargs.get('delay_seconds'), 20)
             summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-paid-err')
         self.assertEqual(summary['recent'][0]['status'], 'error')
         self.assertAlmostEqual(summary['recent'][0]['cost_usd'], 0.004)

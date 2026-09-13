@@ -1053,8 +1053,14 @@ def _settle_ai_attempt_record(event_id, status, usage, generation_id):
                 attempt_status=attempt_status,
                 clear_next_retry=(attempt_status == 'settled'),
             )
-        if generation_id and coerced is None:
-            _backfill_ai_usage_cost_async(event_id, generation_id)
+        if generation_id and (coerced is None or attempt_status == 'settled'):
+            # Pending rows resolve off the request path as before. Rows settled
+            # from the chat response carry a provisional figure, so they get
+            # one delayed verification against /generation total_cost (usually
+            # ready by then) instead of keeping a stale value forever.
+            _backfill_ai_usage_cost_async(
+                event_id, generation_id,
+                delay_seconds=0 if coerced is None else 20)
     except Exception as exc:
         print(f"[AI-USAGE] settle attempt failed: {exc}")
 
@@ -1095,8 +1101,14 @@ def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=No
                 presentation_id=presentation_id,
                 generation_id=generation_id,
             )
-        if generation_id and coerced is None:
-            _backfill_ai_usage_cost_async(event_id, generation_id)
+        if generation_id and (coerced is None or source == 'response'):
+            # Pending rows resolve off the request path as before. Rows settled
+            # from the chat response carry a provisional figure, so they get
+            # one delayed verification against /generation total_cost (usually
+            # ready by then) instead of keeping a stale value forever.
+            _backfill_ai_usage_cost_async(
+                event_id, generation_id,
+                delay_seconds=0 if coerced is None else 20)
         return event_id
     except Exception as exc:
         print(f"[AI-USAGE] record failed: {exc}")
@@ -1202,7 +1214,10 @@ def _reconcile_single_ai_event(event_id, generation_id, timeout=15, is_review=Fa
         except (TypeError, ValueError):
             attempts = 0
         if outcome == 'ok' and cost is not None:
-            source = 'review' if (is_review or current.get('cost_usd') is not None) else 'generation'
+            # /generation total_cost is the source of truth: an automatic run
+            # overwrites even a response-settled figure with it, while an
+            # explicit review keeps the 'review' source for the audit trail.
+            source = 'review' if is_review else 'generation'
             db.update_ai_usage_attempt(
                 event_id, cost_usd=cost, cost_source=source, cost_raw=raw,
                 generation_cost_usd=cost, attempt_status='settled',
@@ -1250,6 +1265,7 @@ def _reconcile_ai_scope(limit=10, time_budget_seconds=8, tenant_id=None, draft_i
     reconciled = 0
     checked = 0
     needs_review = 0
+    verified = 0
     for row in pending:
         remaining = time_budget_seconds - (time.monotonic() - started)
         if remaining <= 0:
@@ -1261,28 +1277,36 @@ def _reconcile_ai_scope(limit=10, time_budget_seconds=8, tenant_id=None, draft_i
             is_review=bool(include_settled and row.get('cost_usd') is not None))
         if result.get('ok'):
             reconciled += 1
+            if row.get('cost_source') == 'response' and result.get('cost_source') == 'generation':
+                verified += 1
         if result.get('needs_review'):
             needs_review += 1
-    return {'reconciled': reconciled, 'checked': checked, 'needs_review': needs_review}
+    return {'reconciled': reconciled, 'checked': checked, 'needs_review': needs_review,
+            'verified': verified}
 
 
-def _backfill_ai_usage_cost(event_id, generation_id):
+def _backfill_ai_usage_cost(event_id, generation_id, delay_seconds=0):
     """Resolve one event's dollar cost inside a worker thread."""
     try:
         with app.app_context():
             if app.config.get('TESTING'):
                 return
+            if delay_seconds:
+                try:
+                    time.sleep(min(120, max(0, int(delay_seconds))))
+                except (TypeError, ValueError):
+                    pass
             _reconcile_single_ai_event(event_id, generation_id)
     except Exception as exc:
         print(f"[AI-USAGE] cost backfill failed: {exc}")
 
 
-def _backfill_ai_usage_cost_async(event_id, generation_id):
+def _backfill_ai_usage_cost_async(event_id, generation_id, delay_seconds=0):
     """Resolve the dollar cost off the request path."""
     try:
         thread = threading.Thread(
             target=_backfill_ai_usage_cost,
-            args=(event_id, generation_id),
+            args=(event_id, generation_id, delay_seconds),
             daemon=True,
         )
         thread.start()
