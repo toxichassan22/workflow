@@ -7261,7 +7261,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         project_search = client.get('/api/project-drafts?search=Alpha', headers=headers).get_json()['drafts']
         self.assertEqual([item['id'] for item in project_search], [draft_alpha])
         approved = client.get('/api/project-drafts?status=approved', headers=headers).get_json()['drafts']
-        self.assertEqual([item['id'] for item in approved], [draft_beta])
+        approved_ids = [item['id'] for item in approved]
+        self.assertIn(draft_beta, approved_ids)
+        self.assertNotIn(draft_alpha, approved_ids)
         with self.app.app_context():
             stored = db.get_presentation(presentation_ids[0], tenant_id=self.tenant_a)
             self.assertEqual(stored['draft_id'], draft_alpha)

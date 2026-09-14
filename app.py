@@ -30,7 +30,7 @@ import db_driver
 import concurrent.futures
 import copy
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app
+from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -2791,12 +2791,51 @@ def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=N
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: record who changed what, on a presentation or a project file
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _record_audit_event(action, entity_type, entity_id, entity_name=None,
+                        old_value=None, new_value=None, metadata=None):
+    """Write an immutable audit log entry. Never fails a request."""
+    try:
+        tenant_id = getattr(g, 'tenant_id', None)
+        if not tenant_id:
+            return None
+        meta = dict(metadata or {}) if isinstance(metadata, dict) else {'info': metadata}
+        if has_request_context():
+            if getattr(request, 'remote_addr', None) and 'ip' not in meta:
+                meta['ip'] = request.remote_addr
+            if getattr(request, 'user_agent', None) and 'user_agent' not in meta:
+                meta['user_agent'] = str(request.user_agent)[:120]
+        return db.record_audit_event(
+            tenant_id=tenant_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            user_id=getattr(g, 'user_id', None),
+            user_name=getattr(g, 'user_name', None) or 'مستخدم غير معروف',
+            user_role=getattr(g, 'user_role', None),
+            entity_name=entity_name,
+            old_value=old_value,
+            new_value=new_value,
+            metadata=meta,
+        )
+    except Exception as exc:
+        print(f'[AUDIT LOG] Could not record {action} on {entity_type} {entity_id}: {exc}')
+        return None
+
+
 def _record_change(target_type, target_id, action, details, source='manual', summary=''):
     """Write one history entry with its individual differences. Never fails a request."""
     try:
         lines = [line for line in (details or []) if str(line or '').strip()]
         if not lines and not summary:
             return None
+        _record_audit_event(
+            action=action,
+            entity_type=target_type,
+            entity_id=target_id,
+            entity_name=summary or None,
+            new_value=lines,
+            metadata={'source': source, 'summary': summary} if summary else {'source': source},
+        )
         return db.log_change(
             g.tenant_id, target_type, target_id,
             getattr(g, 'user_id', None),
@@ -11917,6 +11956,14 @@ def api_send_section_for_approval():
         return jsonify({'error': 'Unable to store the section snapshot'}), 400
     _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
                    [f'القسم {_section_version_label(section_key)}: لقطة رقم {version["version_number"]} بانتظار القرار'])
+    _record_audit_event(
+        action='section_version_submitted',
+        entity_type='section_version',
+        entity_id=version['id'],
+        entity_name=f'القسم {_section_version_label(section_key)} (إصدار {version["version_number"]})',
+        new_value=version.get('snapshot'),
+        metadata={'draft_id': draft['id'], 'section_key': section_key, 'version_number': version['version_number']},
+    )
     return jsonify({'success': True, 'version': version})
 
 
@@ -11985,6 +12032,15 @@ def api_decide_section_version():
     if (version.get('created_by') or '') == actor_id:
         detail += ' (اعتماد ذاتي)'
     _record_change('draft', draft['id'], action, [detail])
+    _record_audit_event(
+        action=f'section_version_{decision}',
+        entity_type='section_version',
+        entity_id=version_id,
+        entity_name=f'القسم {_section_version_label(version["section_key"])} (إصدار {version["version_number"]})',
+        old_value={'status': 'pending'},
+        new_value={'status': decided.get('status'), 'decision_note': data.get('note')},
+        metadata={'draft_id': draft['id'], 'section_key': version['section_key'], 'version_number': version['version_number']},
+    )
     return jsonify({'success': True, 'version': decided})
 
 
@@ -12027,6 +12083,15 @@ def api_cancel_section_version():
         return jsonify({'error': 'Unable to cancel the section version'}), 400
     _record_change('draft', draft['id'], 'إلغاء طلب اعتماد قسم',
                    [f'القسم {_section_version_label(version["section_key"])}: لقطة رقم {version["version_number"]} أُلغيت'])
+    _record_audit_event(
+        action='section_version_cancelled',
+        entity_type='section_version',
+        entity_id=version_id,
+        entity_name=f'القسم {_section_version_label(version["section_key"])} (إصدار {version["version_number"]})',
+        old_value={'status': 'pending'},
+        new_value={'status': 'cancelled'},
+        metadata={'draft_id': draft['id'], 'section_key': version['section_key']},
+    )
     return jsonify({'success': True, 'version': cancelled})
 
 
@@ -12072,6 +12137,15 @@ def api_restore_section_version():
     _record_change('draft', draft['id'], 'الرجوع لنسخة قسم سابقة',
                    [f'القسم {_section_version_label(version["section_key"])}: '
                     f'لقطة رقم {version["version_number"]} عادت كلقطة رقم {restored["version_number"]} بانتظار القرار'])
+    _record_audit_event(
+        action='section_version_restored',
+        entity_type='section_version',
+        entity_id=restored['id'],
+        entity_name=f'القسم {_section_version_label(version["section_key"])} (إصدار {restored["version_number"]})',
+        old_value={'restored_from_version_id': data['versionId'], 'restored_from_version_number': version['version_number']},
+        new_value=snapshot,
+        metadata={'draft_id': draft['id'], 'section_key': version['section_key']},
+    )
     return jsonify({'success': True, 'version': restored})
 
 
@@ -17528,6 +17602,84 @@ def api_log_presentation_edit(pres_id):
     lines = details if isinstance(details, list) else [details]
     _record_change('presentation', pres_id, action, lines, source='manual')
     return jsonify({'success': True})
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PLATFORM AUDIT LOG (AuditEvent) - Immutable unified audit ledger
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route('/api/audit-log', methods=['GET'])
+@require_auth
+def api_list_audit_log():
+    """Query immutable audit events with filtering and pagination."""
+    entity_type = request.args.get('entityType') or request.args.get('entity_type') or None
+    entity_id = request.args.get('entityId') or request.args.get('entity_id') or None
+    action = request.args.get('action') or None
+    user_id = request.args.get('userId') or request.args.get('user_id') or None
+    from_date = request.args.get('fromDate') or request.args.get('from_date') or None
+    to_date = request.args.get('toDate') or request.args.get('to_date') or None
+    limit = request.args.get('limit', 50)
+    offset = request.args.get('offset', 0)
+
+    result = db.list_audit_events(
+        tenant_id=g.tenant_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+    )
+    return jsonify({'success': True, **result})
+
+
+@app.route('/api/audit-log/<event_id>', methods=['GET'])
+@require_auth
+def api_get_audit_event(event_id):
+    """Fetch a single immutable audit event."""
+    event = db.get_audit_event(g.tenant_id, event_id)
+    if not event:
+        return jsonify({'error': 'Audit event not found'}), 404
+    return jsonify({'success': True, 'event': event})
+
+
+@app.route('/api/audit-log/export', methods=['GET'])
+@require_auth
+def api_export_audit_log():
+    """Export corporate audit events report as UTF-8 CSV with BOM."""
+    entity_type = request.args.get('entityType') or request.args.get('entity_type') or None
+    entity_id = request.args.get('entityId') or request.args.get('entity_id') or None
+    action = request.args.get('action') or None
+    user_id = request.args.get('userId') or request.args.get('user_id') or None
+    from_date = request.args.get('fromDate') or request.args.get('from_date') or None
+    to_date = request.args.get('toDate') or request.args.get('to_date') or None
+
+    csv_data = db.export_audit_events_csv(
+        tenant_id=g.tenant_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return Response(
+        csv_data,
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=audit-log.csv'}
+    )
+
+
+@app.route('/api/audit-log', methods=['POST', 'PUT', 'PATCH', 'DELETE'])
+@app.route('/api/audit-log/<path:sub>', methods=['POST', 'PUT', 'PATCH', 'DELETE'])
+def api_audit_log_immutable(sub=None):
+    """Refuse any modification or deletion of immutable audit events."""
+    return jsonify({
+        'error': 'Audit log is strictly immutable and cannot be modified or deleted',
+        'error_code': 'AUDIT_LOG_IMMUTABLE'
+    }), 405
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -420,6 +420,29 @@ def _create_tables(conn):
     CREATE UNIQUE INDEX IF NOT EXISTS idx_section_versions_number ON section_versions(draft_id, section_key, version_number);
     CREATE INDEX IF NOT EXISTS idx_section_versions_lookup ON section_versions(tenant_id, draft_id, section_key, created_at DESC);
 
+    -- AuditEvent: Unified immutable audit log (Omran spec sections 6, 15, 18).
+    -- Captures user, time, action, entity, old_value, new_value, and metadata.
+    -- Append-only ledger: modifications and deletions are strictly forbidden.
+    -- Keep every comment here free of the statement separator.
+    CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id TEXT,
+        user_name TEXT,
+        user_role TEXT,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        entity_name TEXT,
+        old_value TEXT,
+        new_value TEXT,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_events_tenant ON audit_events(tenant_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(tenant_id, entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(tenant_id, action);
+
     CREATE TABLE IF NOT EXISTS ai_rules_log (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -607,6 +630,7 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_tenant_or_keys_tenant ON tenant_openrouter_keys(tenant_id);
     """)
 
+    _ensure_audit_events_triggers(conn)
     _migrate_presentation_revision_schema(conn)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
@@ -788,6 +812,30 @@ def _migrate_ai_usage_attempt_columns(conn):
             print(f'[DB] Migration: added {column} column to ai_usage_events')
     try:
         conn.execute('CREATE INDEX IF NOT EXISTS idx_aiusage_reconcile ON ai_usage_events(tenant_id, attempt_status, next_retry_at)')
+    except Exception:
+        pass
+
+
+def _ensure_audit_events_triggers(conn):
+    """Enforce immutability on audit_events at database level via SQLite triggers.
+
+    Audit events must be strictly append-only. Updates and deletes are blocked.
+    """
+    try:
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_update
+            BEFORE UPDATE ON audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'audit_events are immutable and cannot be updated');
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_delete
+            BEFORE DELETE ON audit_events
+            BEGIN
+                SELECT RAISE(ABORT, 'audit_events are immutable and cannot be deleted');
+            END
+        """)
     except Exception:
         pass
 
@@ -3091,6 +3139,194 @@ def _json_list(value):
     except (TypeError, ValueError):
         return []
     return decoded if isinstance(decoded, list) else []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AuditEvent: Immutable unified audit log (Omran spec sections 6, 15, 18).
+#
+# Captures user, timestamp, action/operation, affected entity, old_value,
+# new_value, and contextual metadata. Strictly append-only.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _serialize_audit_value(value):
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _deserialize_audit_value(text):
+    if not text or not isinstance(text, str):
+        return text
+    stripped = text.strip()
+    if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+        try:
+            return json.loads(stripped)
+        except (ValueError, TypeError):
+            return text
+    return text
+
+
+def _audit_event_public(row):
+    if not row:
+        return None
+    item = dict(row)
+    item['old_value_raw'] = item.get('old_value')
+    item['new_value_raw'] = item.get('new_value')
+    item['old_value'] = _deserialize_audit_value(item.get('old_value'))
+    item['new_value'] = _deserialize_audit_value(item.get('new_value'))
+    item['metadata'] = _deserialize_audit_value(item.get('metadata')) or {}
+    return item
+
+
+def record_audit_event(tenant_id, action, entity_type, entity_id,
+                       user_id=None, user_name=None, user_role=None,
+                       entity_name=None, old_value=None, new_value=None,
+                       metadata=None, created_at=None):
+    """Record one immutable audit event into the platform audit log."""
+    if not tenant_id or not action or not entity_type or not entity_id:
+        raise ValueError('tenant_id, action, entity_type, and entity_id are required for audit events')
+    conn = get_db()
+    event_id = str(uuid.uuid4())
+    ts = created_at or datetime.now().isoformat()
+    old_str = _serialize_audit_value(old_value)
+    new_str = _serialize_audit_value(new_value)
+    meta_str = _serialize_audit_value(metadata)
+
+    conn.execute(
+        '''INSERT INTO audit_events
+           (id, tenant_id, user_id, user_name, user_role, action,
+            entity_type, entity_id, entity_name, old_value, new_value,
+            metadata, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (event_id, tenant_id, user_id, user_name, user_role, str(action).strip(),
+         str(entity_type).strip(), str(entity_id).strip(), entity_name,
+         old_str, new_str, meta_str, ts)
+    )
+    conn.commit()
+    row = conn.execute('SELECT * FROM audit_events WHERE id = ?', (event_id,)).fetchone()
+    return _audit_event_public(row)
+
+
+def get_audit_event(tenant_id, event_id):
+    """Fetch a single audit event with tenant isolation."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM audit_events WHERE id = ? AND tenant_id = ?',
+        (str(event_id), tenant_id)
+    ).fetchone()
+    return _audit_event_public(row)
+
+
+def list_audit_events(tenant_id, entity_type=None, entity_id=None,
+                      action=None, user_id=None, from_date=None,
+                      to_date=None, limit=50, offset=0):
+    """Query audit events with filtering and pagination, sorted newest first."""
+    conn = get_db()
+    conditions = ['tenant_id = ?']
+    params = [tenant_id]
+
+    if entity_type:
+        conditions.append('entity_type = ?')
+        params.append(str(entity_type).strip())
+    if entity_id:
+        conditions.append('entity_id = ?')
+        params.append(str(entity_id).strip())
+    if action:
+        conditions.append('action = ?')
+        params.append(str(action).strip())
+    if user_id:
+        conditions.append('user_id = ?')
+        params.append(str(user_id).strip())
+    if from_date:
+        conditions.append('created_at >= ?')
+        params.append(str(from_date).strip())
+    if to_date:
+        conditions.append('created_at <= ?')
+        params.append(str(to_date).strip())
+
+    where_clause = ' AND '.join(conditions)
+
+    count_row = conn.execute(
+        f'SELECT COUNT(*) AS total FROM audit_events WHERE {where_clause}',
+        params
+    ).fetchone()
+    total = count_row['total'] if count_row else 0
+
+    lim = max(1, min(int(limit or 50), 500))
+    off = max(0, int(offset or 0))
+
+    query_params = list(params) + [lim, off]
+    rows = conn.execute(
+        f'''SELECT * FROM audit_events
+            WHERE {where_clause}
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT ? OFFSET ?''',
+        query_params
+    ).fetchall()
+
+    return {
+        'events': [_audit_event_public(r) for r in rows],
+        'total': total,
+        'limit': lim,
+        'offset': off,
+    }
+
+
+def export_audit_events_csv(tenant_id, entity_type=None, entity_id=None,
+                            action=None, user_id=None, from_date=None,
+                            to_date=None, limit=5000):
+    """Export audit events as a UTF-8 BOM CSV text for corporate compliance and reporting."""
+    result = list_audit_events(
+        tenant_id=tenant_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=0,
+    )
+    import csv
+    import io
+    output = io.StringIO()
+    output.write('\ufeff')
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([
+        'معرف الحدث',
+        'التاريخ والوقت',
+        'معرف المستخدم',
+        'اسم المستخدم',
+        'الدور',
+        'نوع العملية',
+        'نوع الكيان',
+        'معرف الكيان',
+        'اسم الكيان',
+        'القيمة السابقة',
+        'القيمة الجديدة',
+        'بيانات إضافية',
+    ])
+    for event in result.get('events', []):
+        old_val = event.get('old_value')
+        new_val = event.get('new_value')
+        meta = event.get('metadata')
+        writer.writerow([
+            event.get('id') or '',
+            event.get('created_at') or '',
+            event.get('user_id') or '',
+            event.get('user_name') or '',
+            event.get('user_role') or '',
+            event.get('action') or '',
+            event.get('entity_type') or '',
+            event.get('entity_id') or '',
+            event.get('entity_name') or '',
+            json.dumps(old_val, ensure_ascii=False) if isinstance(old_val, (dict, list)) else str(old_val or ''),
+            json.dumps(new_val, ensure_ascii=False) if isinstance(new_val, (dict, list)) else str(new_val or ''),
+            json.dumps(meta, ensure_ascii=False) if isinstance(meta, (dict, list)) else str(meta or ''),
+        ])
+    return output.getvalue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
