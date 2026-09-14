@@ -1135,6 +1135,7 @@
   "تعذر إنشاء الرابط": "Failed to create link",
   "تعذر إنشاء الوصف": "Failed to generate description",
   "تعذر إنشاء حساب الشركة": "Failed to create company account",
+  "تعذر إرسال طلب الاعتماد": "Failed to send approval request",
   "تعذر استخراج إحداثيات الموقع من رابط Google Maps؛ لم يبدأ تحليل الاشتراطات": "Could not extract site coordinates from Google Maps link; Regulations analysis did not start",
   "تعذر استرجاع البيانات": "Failed to retrieve data",
   "تعذر استعادة مهمة تعديل العرض.": "Failed to restore presentation edit task.",
