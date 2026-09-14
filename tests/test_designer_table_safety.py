@@ -411,6 +411,20 @@ class TableDeletionSafetyTests(unittest.TestCase):
         self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المصدر والملاحظات')['changed'])
         self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود مصدر وملاحظات')['changed'])
 
+    def test_redesign_instructions_with_preservation_phrases_are_not_table_deletes(self):
+        source = slide()
+        for phrase in [
+            'اعد تصميم شريحه 4',
+            'أعد تصميم الشريحة 4 مع الحفاظ على بيانات الجدول دون حذف أي تفصيل',
+            'اعد تصميم الشريحة وتنسيق الجدول دون حذف',
+            'اعد تصميم الشريحة مع توزيع البيانات في كروت دون حذف',
+            'غير تصميم الشريحة 5 مع الحفاظ على الجدول بدون مسح أي بيانات',
+        ]:
+            with self.subTest(phrase=phrase):
+                result = reliability.apply_table_delete_request(source, phrase)
+                self.assertFalse(result['handled'], f"Phrase '{phrase}' should not be handled as table delete")
+                self.assertEqual(result['status'], 'not_applicable')
+
 
 if __name__ == '__main__':
     unittest.main()

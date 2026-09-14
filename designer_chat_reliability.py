@@ -589,13 +589,18 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     text = re.sub(r"^(?:لو\s*(?:سمحت|تكرمت|ممكن|تفضلت)|من\s*فضلك|بعد\s*اذنك|ممكن|تقدر|ياريت|يا\s*ريت|فضلا|فضلاً)\s*", "", text)
     # Words in quoted labels cannot introduce a second operation or axis.
     masked = _TABLE_QUOTES_RE.sub(lambda match: " " * len(match.group()), text)
+    # Preservation phrases (e.g. "دون حذف", "بدون مسح") state what NOT to delete and must not count as deletion verbs
+    verbs_scan = re.sub(r"(?<!\w)(?:بدون|دون|عدم|من\s*غير|بلا)\s+(?:اي\s+|أي\s+)?(?:حذف|مسح|ازالة|إزالة|إسقاط|اسقاط)(?!\w)", " ", masked)
     axes = list(_TABLE_AXIS_RE.finditer(masked))
     if any(word in masked.split() for word in ("والصف", "والعمود", "وصفوف", "وأعمدة", "واعمدة")):
         axes.append(None)
-    verbs = list(_TABLE_DELETE_RE.finditer(masked))
+    verbs = list(_TABLE_DELETE_RE.finditer(verbs_scan))
     cell = re.search(r"(?<!\w)(?:الخليه|الخلية|خليه|خلية|الخلايا|خلايا|cells?)(?!\w)", masked)
     edit = re.search(r"(?<!\w)(?:و)?(?:اضف|اضافة|عدل|تعديل|غير|استبدل|add|edit|replace|change)(?!\w)", masked)
     whole_table = _TABLE_SCOPE_RE.search(masked)
+    is_slide_redesign = bool(re.search(r"(?<!\w)(?:اعد\s*تصميم|إعادة\s*تصميم|غير\s*تصميم|تصميم\s*الشريح|تنسيق\s*الشريح)(?!\w)", text))
+    if is_slide_redesign and not verbs:
+        return {"handled": False, "operation": "edit", "supported": False, "reason": "not_a_table_edit", "request": None}
     handled = bool((verbs or edit or re.search(r"تحذف|تمسح|تشيل", masked)) and (axes or cell or whole_table))
     result = {"handled": handled, "operation": "delete" if verbs else "edit",
               "supported": False, "reason": "not_a_table_edit", "request": None}

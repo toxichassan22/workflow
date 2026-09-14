@@ -6327,7 +6327,11 @@ def _is_openrouter_credit_error(exc_or_msg):
         return False
     if 'insufficient_credits' in text or 'user credits exceeded' in text or 'key has insufficient credits' in text:
         return True
+    if 'key limit exceeded' in text or 'monthly limit' in text or 'credit limit' in text or 'key limit' in text:
+        return True
     if '402' in text and any(m in text for m in ('credit', 'balance', 'payment required', 'insufficient')) and not ('>' in text or 'can only afford' in text or 'tokens limit' in text):
+        return True
+    if '403' in text and any(m in text for m in ('limit', 'key', 'credit', 'monthly')):
         return True
     return False
 
@@ -6595,7 +6599,12 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     table_edit = designer_chat_reliability.apply_table_delete_request(html, instruction)
     if table_edit['changed']:
         return table_edit['html'], table_edit['description']
-    if table_edit['handled'] and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request'):
+    is_slide_redesign = bool(re.search(
+        r'(?:اعد\s*تصميم|إعادة\s*تصميم|غير\s*تصميم|تصميم|تنسيق|شريحة|سلايد|redesign|layout|style)',
+        str(instruction or ''),
+        re.IGNORECASE
+    ))
+    if not is_slide_redesign and table_edit['handled'] and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request'):
         reason_text = _TABLE_PRECHECK_ARABIC_REASONS.get(table_edit['reason'], table_edit['reason'])
         return html, (table_edit['description'] or f'تعذر تحديد تعديل الجدول بأمان: {reason_text}')
     if designer_chat_colors.is_color_only_request(instruction):
@@ -6873,7 +6882,9 @@ HTML الحالي:
                 return output, response_text
             failure_reasons.append('invalid_html')
             print(f'[DESIGNER-EDIT] invalid HTML on attempt {attempt}')
-        except Exception:
+        except Exception as edit_exc:
+            if _is_openrouter_credit_error(edit_exc):
+                return html, 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.'
             failure_reasons.append('provider_error')
             app.logger.exception('[DESIGNER-EDIT] attempt %s failed for slide %s', attempt, slide_index + 1)
 
@@ -7521,7 +7532,7 @@ def api_designer_chat():
             except Exception as _planner_exc:
                 if _is_openrouter_credit_error(_planner_exc):
                     return jsonify({'success': False,
-                                    'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ لإتمام العملية (HTTP 402)؛ يرجى شحن الرصيد في حسابك.',
+                                    'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.',
                                     'error_code': 'INSUFFICIENT_CREDITS'}), 402
                 if not _is_designer_prompt_token_error(_planner_exc):
                     raise
@@ -7599,7 +7610,7 @@ def api_designer_chat():
                     except Exception as _slim_exc:
                         if _is_openrouter_credit_error(_slim_exc):
                             return jsonify({'success': False,
-                                            'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ لإتمام العملية (HTTP 402)؛ يرجى شحن الرصيد في حسابك.',
+                                            'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.',
                                             'error_code': 'INSUFFICIENT_CREDITS'}), 402
                         if _is_designer_prompt_token_error(_slim_exc):
                             _detail = f' {table_failure_note}' if table_failure_note else ''
