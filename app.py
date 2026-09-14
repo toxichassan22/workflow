@@ -539,11 +539,22 @@ def _managed_orphan_keys():
         return None, listed.get('error')
     try:
         conn = db.get_db()
-        known = {str(row[0]) for row in conn.execute(
-            'SELECT openrouter_key_hash FROM tenant_openrouter_keys '
-            'WHERE openrouter_key_hash IS NOT NULL').fetchall() if row[0]}
+        known = set()
+        live_labels = set()
+        for record in conn.execute(
+                'SELECT openrouter_key_hash, key_label, is_active '
+                'FROM tenant_openrouter_keys').fetchall():
+            try:
+                record = dict(record)
+            except Exception:
+                continue
+            if record.get('openrouter_key_hash'):
+                known.add(str(record.get('openrouter_key_hash')))
+            if record.get('is_active') and record.get('key_label'):
+                live_labels.add(str(record.get('key_label')))
     except Exception:
         known = set()
+        live_labels = set()
     orphans = []
     for item in listed:
         key_hash = item.get('hash')
@@ -551,6 +562,8 @@ def _managed_orphan_keys():
             continue
         name = str(item.get('label') or item.get('name') or '')
         if not (name.startswith('landloom-') or name.startswith('tenant-')):
+            continue
+        if name in live_labels:
             continue
         orphans.append({
             'name': name,
@@ -638,6 +651,13 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
                 except Exception:
                     pass
                 return None, 'OpenRouter did not honor a zero limit; nothing was activated'
+            try:
+                live_hash = _live.get('hash') if isinstance(_live, dict) else None
+                if live_hash and live_hash != meta.get('openrouter_key_hash'):
+                    meta = db.update_tenant_openrouter_key_meta(
+                        tenant_id, openrouter_key_hash=live_hash)
+            except Exception:
+                pass
         return meta, None
     except Exception as exc:
         print(f"[OPENROUTER KEYS] provision failed: {exc}")

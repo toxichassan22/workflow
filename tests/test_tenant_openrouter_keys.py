@@ -239,6 +239,52 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                 db.get_tenant_openrouter_key_raw(tenant_id),
                 'sk-or-v1-managed-key-eeeeeeeeeeeeeeee')
 
+    def test_zero_limit_provision_backfills_live_hash(self):
+        """A zero-limit key keeps the dashboard hash read during verification."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Hash Co', 'hash-live@example.test', 'hash-live-co')
+        created_body = {'key': 'sk-or-v1-hash-key-qqqqqqqqqqqqqqqq',
+                        'label': 'landloom-hash', 'limit': 0.0, 'limit_reset': 'monthly'}
+        live_status = {'label': 'landloom-hash', 'limit': 0.0, 'limit_reset': 'monthly',
+                       'limit_remaining': 0.0, 'usage': 0.0, 'hash': 'livehash01'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_openrouter_key_status',
+                             return_value=dict(live_status)):
+            done = client.post(
+                f'/api/admin/tenants/{tenant_id}/openrouter-key/provision',
+                headers=self._admin_headers(), json={'limitUsd': 0})
+        self.assertEqual(done.status_code, 201, done.get_json())
+        key = done.get_json()['key']
+        self.assertTrue(key['has_key'])
+        self.assertTrue(key['is_active'])
+        self.assertEqual(key['openrouter_key_hash'], 'livehash01')
+
+    def test_orphan_sweep_spares_live_label_without_hash(self):
+        """A live company label is never swept even when its hash was never stored."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Guarded Co', 'guarded@example.test', 'guarded-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-guarded-key-rrrrrrrrrrrrrrrr', provenance='auto',
+                key_label='landloom-guarded', limit_usd=0.0)
+        dashboard = [
+            {'label': 'landloom-guarded', 'hash': 'unknownhash01', 'limit': 0.0,
+             'limit_reset': 'monthly', 'usage': 0.0, 'disabled': False},
+            {'label': 'landloom-stray', 'hash': 'strayhash02', 'limit': 0.0,
+             'limit_reset': 'monthly', 'usage': 0.0, 'disabled': False},
+        ]
+        with patch.object(module, '_openrouter_list_managed_keys',
+                          return_value=[dict(item) for item in dashboard]):
+            report = client.get('/api/admin/openrouter-keys/orphans',
+                                headers=self._admin_headers()).get_json()
+        self.assertTrue(report['success'])
+        self.assertEqual(report['count'], 1)
+        self.assertEqual(report['orphans'][0]['hash'], 'strayhash02')
+
     def test_provision_names_keyless_provider_response(self):
         """A 2xx body without a key must name the status instead of a bare failure."""
         module = self.application_module
