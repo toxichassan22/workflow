@@ -324,6 +324,25 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                     usage_ctx={'tenant_id': tenant_id, 'flow': 'other'})
                 self.assertIn('choices', resp)
 
+    def test_deleting_tenant_removes_its_dashboard_key(self):
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Gone Co', 'gone-key@example.test', 'gone-key-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-gone-key-kkkkkkkkkkkkkkkk', provenance='auto',
+                openrouter_key_hash='gonehash55', limit_usd=5.0)
+        with patch.object(module, '_openrouter_delete_managed_key',
+                          return_value={'ok': True}) as deleted:
+            resp = client.delete(f'/api/admin/tenants/{tenant_id}',
+                                 headers=self._admin_headers())
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        deleted.assert_called_once_with('gonehash55')
+        with self.app.app_context():
+            self.assertIsNone(db.get_tenant_by_id(tenant_id))
+            self.assertFalse(
+                db.get_tenant_openrouter_key_meta(tenant_id).get('has_key'))
+
     def test_zero_provision_rolls_back_when_provider_ignores_limit(self):
         module = self.application_module
         client = self.app.test_client()

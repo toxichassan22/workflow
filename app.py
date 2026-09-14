@@ -18354,9 +18354,20 @@ def api_admin_update_tenant(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>', methods=['DELETE'])
 @require_admin
 def api_admin_delete_tenant(tenant_id):
-    """Delete a tenant (admin only)."""
+    """Delete a tenant (admin only).
+
+    The company's dashboard key is removed upstream first so no orphaned
+    credential survives; the local key row then cascades with the tenant.
+    """
     if tenant_id == g.tenant_id:
         return jsonify({'error': 'Cannot delete yourself'}), 400
+    try:
+        meta = db.get_tenant_openrouter_key_meta(tenant_id)
+    except Exception:
+        meta = {'has_key': False}
+    if meta.get('has_key') and meta.get('provenance') == 'auto' \
+            and meta.get('openrouter_key_hash'):
+        _openrouter_delete_managed_key(meta.get('openrouter_key_hash'))
     db.delete_tenant(tenant_id)
     return jsonify({'success': True})
 
