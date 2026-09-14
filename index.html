@@ -579,8 +579,13 @@
                 PDF</button>
               <button type="button" class="btn ghost" onclick="exportTenantSlides('pptx'); closeTenantDropdown()">تصدير
                 PPTX</button>
+              <div class="slide-toolbar-menu-divider"></div>
+              <button type="button" class="btn ghost" onclick="showFinalApprovalModal(); closeTenantDropdown()">اعتماد الملف النهائي</button>
+              <button type="button" class="btn ghost" onclick="showDownloadsLibraryModal(); closeTenantDropdown()">مكتبة التنزيلات</button>
             </div>
           </div>
+          <button type="button" class="btn slide-toolbar-btn ghost tenant-admin-only" data-permission="approvals" onclick="showFinalApprovalModal()">اعتماد الملف النهائي</button>
+          <button type="button" class="btn slide-toolbar-btn ghost" onclick="showDownloadsLibraryModal()">مكتبة التنزيلات</button>
         </div>
       </div>
 
@@ -807,6 +812,10 @@
             <label>الدور</label>
             <select id="newUserRole">
               <option value="employee">موظف</option>
+              <option value="section_editor">محرر أقسام</option>
+              <option value="section_approver">معتمد أقسام</option>
+              <option value="generation_approver">معتمد بدء التوليد</option>
+              <option value="final_file_approver">معتمد الملف النهائي</option>
               <option value="company_admin">أدمن شركة</option>
             </select>
           </div>
@@ -1008,6 +1017,12 @@
       <!-- Tenants List -->
       <div id="sagTenantsList"></div>
 
+      <!-- Recharge Requests (SAG Admin) -->
+      <div style="margin-top:28px">
+        <h3 style="margin-bottom:12px">طلبات شحن الرصيد من الشركات</h3>
+        <div id="sagRechargeRequestsList"></div>
+      </div>
+
       <!-- Tenant Details Modal -->
       <div id="sagTenantModal" style="display:none"></div>
 
@@ -1172,8 +1187,55 @@
       </div>
 
       <h3 class="dash-section-title">تذاكر الدعم</h3>
-      <div id="omTicketsList"></div>
-      <div id="omTicketDetail" style="display:none;margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>
+      <div id="omTicketsList" style="margin-bottom:24px"></div>
+      <div id="omTicketDetail" style="display:none;margin-top:16px;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>
+
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:15px">طلب شحن رصيد جديد</h3>
+        <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div class="tenant-field"><label>الباقة</label>
+            <select id="omRechargePackage">
+              <option value="باقة نمو">باقة نمو (100 دولار - 375 ريال)</option>
+              <option value="باقة شركات">باقة شركات (250 دولار - 937.5 ريال)</option>
+              <option value="باقة احترافية">باقة احترافية (500 دولار - 1875 ريال)</option>
+            </select>
+          </div>
+          <div class="tenant-field"><label>رقم الحوالة البنكية</label><input type="text" id="omRechargeRef"
+              placeholder="المرجع البنكي للتحويل"></div>
+        </div>
+        <div class="tenant-btns" style="margin-top:12px">
+          <button class="btn primary" onclick="omCreateRechargeRequest()">إرسال طلب الشحن</button>
+          <span id="omRechargeError" style="color:var(--danger,#c0392b);font-size:12px"></span>
+        </div>
+      </div>
+
+      <h3 class="dash-section-title">طلبات الشحن</h3>
+      <div id="omRechargeList" style="margin-bottom:24px"></div>
+
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:15px">تسجيل عقد أو اتفاقية سرية</h3>
+        <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div class="tenant-field"><label>مسمى الوثيقة</label><input type="text" id="omContractTitle"
+              placeholder="اتفاقية سرية المعلومات"></div>
+          <div class="tenant-field"><label>نوع الوثيقة</label>
+            <select id="omContractKind">
+              <option value="nda">اتفاقية سرية المعلومات (NDA)</option>
+              <option value="framework">عقد إطاري رئيسي</option>
+            </select>
+          </div>
+          <div class="tenant-field"><label>تاريخ الانتهاء</label><input type="date" id="omContractExpires"></div>
+        </div>
+        <div class="tenant-btns" style="margin-top:12px">
+          <button class="btn primary" onclick="omCreateContract()">حفظ الوثيقة</button>
+          <span id="omContractError" style="color:var(--danger,#c0392b);font-size:12px"></span>
+        </div>
+      </div>
+
+      <h3 class="dash-section-title">العقود والاتفاقيات</h3>
+      <div id="omContractsList" style="margin-bottom:24px"></div>
+
+      <h3 class="dash-section-title">سجل أنواع الملفات المعتمدة</h3>
+      <div id="omFileTypesList" style="margin-bottom:24px"></div>
     </section>
   </div><!-- close tenantAppPage -->
 

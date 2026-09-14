@@ -100,7 +100,23 @@
     "lifecycle.generated_draft": "مسودة ملف مولد",
     "lifecycle.final_approval_pending": "بانتظار اعتماد الملف النهائي",
     "lifecycle.approved": "معتمد نهائيًا",
-    "lifecycle.archived": "مؤرشف"
+    "lifecycle.archived": "مؤرشف",
+    "proposal.archive_confirm": "هل تريد أرشفة هذا العرض؟ سيتم حفظه في الأرشيف لمدة 365 يوماً مع إمكانية استعادته.",
+    "proposal.open_first_for_final": "افتح عرضاً أولاً لطلب الاعتماد النهائي",
+    "downloads.load_failed": "تعذر تحميل الملف",
+    "proposal.final_approval_requested": "تم إرسال طلب اعتماد الملف النهائي",
+    "recharge.request_sent": "تم إرسال طلب الشحن بنجاح",
+    "recharge.approved": "تم اعتماد الشحن وتوليد الرقم المرجعي المالي",
+    "recharge.rejected": "تم رفض طلب الشحن",
+    "recharge.decision_failed": "تعذر تسجيل القرار",
+    "proposal.final_approval_sealed": "تم اعتماد وختم الملف النهائي بنجاح",
+    "downloads.download_started": "تم بدء التحميل",
+    "file_types.updated": "تم تحديث حد نوع الملف",
+    "contracts.saved": "تم حفظ العقد بنجاح",
+    "proposal.cloned_with_name": "تم نسخ العرض بنجاح باسم:",
+    "proposal.archived": "تم نقل العرض إلى الأرشيف",
+    "proposal.restored": "تمت استعادة العرض من الأرشيف",
+    "common.invalid_value": "قيمة غير صالحة"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -169,7 +185,23 @@
     "lifecycle.generated_draft": "Generated draft",
     "lifecycle.final_approval_pending": "Final approval pending",
     "lifecycle.approved": "Fully approved",
-    "lifecycle.archived": "Archived"
+    "lifecycle.archived": "Archived",
+    "proposal.archive_confirm": "Do you want to archive this proposal? It will be kept in archives for 365 days with recovery capability.",
+    "proposal.open_first_for_final": "Open a presentation first to request final approval",
+    "downloads.load_failed": "Unable to download file",
+    "proposal.final_approval_requested": "Final file approval request submitted",
+    "recharge.request_sent": "Recharge request submitted successfully",
+    "recharge.approved": "Recharge request approved and reference number generated",
+    "recharge.rejected": "Recharge request rejected",
+    "recharge.decision_failed": "Failed to record decision",
+    "proposal.final_approval_sealed": "Final file approved and sealed successfully",
+    "downloads.download_started": "Download started",
+    "file_types.updated": "File type limit updated",
+    "contracts.saved": "Contract saved successfully",
+    "proposal.cloned_with_name": "Proposal cloned successfully as:",
+    "proposal.archived": "Proposal moved to archive",
+    "proposal.restored": "Proposal restored from archive",
+    "common.invalid_value": "Invalid value"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old

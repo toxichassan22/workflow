@@ -580,10 +580,30 @@
       const list = document.getElementById('tenantUsersList');
       if (!list) return;
       showInlineLoader(list, 'جاري التحميل...');
-      const data = await api('GET', '/api/users');
+      const [data, reportData] = await Promise.all([
+        api('GET', '/api/users'),
+        api('GET', '/api/users/report').catch(() => null)
+      ]);
       if (!data.success || !data.users) { list.innerHTML = '<p>لا يوجد موظفين</p>'; return; }
-      if (!data.users.length) { list.innerHTML = '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>'; return; }
-      list.innerHTML = data.users.map(u => {
+      const counts = reportData?.report?.counts || {
+        active: data.users.filter(u => u.is_active).length,
+        invited: 0,
+        disabled: data.users.filter(u => !u.is_active).length,
+        total: data.users.length
+      };
+      const reportBanner = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px;">' +
+        '<div style="font-weight:700;color:#1a3a52;">تقرير المستخدمين:</div>' +
+        '<div><span>نشط:</span> <strong style="color:var(--green);">' + (counts.active || 0) + '</strong></div>' +
+        '<div><span>مدعو:</span> <strong style="color:#2563eb;">' + (counts.invited || 0) + '</strong></div>' +
+        '<div><span>معطل:</span> <strong style="color:#c33;">' + (counts.disabled || 0) + '</strong></div>' +
+        '<div><span>الإجمالي:</span> <strong>' + (counts.total || data.users.length) + '</strong></div>' +
+        '<button type="button" class="btn small ghost" style="margin-right:auto;" onclick="showSodMatrixModal()">مصفوفة الفصل بين المهام</button>' +
+        '</div>';
+      if (!data.users.length) {
+        list.innerHTML = reportBanner + '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
+        return;
+      }
+      list.innerHTML = reportBanner + data.users.map(u => {
         const roleLabel = u.role === 'company_admin' ? 'أدمن' : 'موظف';
         const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
@@ -626,6 +646,67 @@
       const data = await api('DELETE', '/api/users/' + userId);
       if (data.success) { toast('تم الحذف'); openTenantUsers(); }
       else { toast(data.error || 'فشل الحذف'); }
+    }
+
+    async function showSodMatrixModal() {
+      let matrix = null;
+      try {
+        const resp = await api('GET', '/api/approvals/sod-matrix');
+        if (resp && resp.success) matrix = resp.matrix;
+      } catch (err) {
+        console.warn('SoD matrix error:', err);
+      }
+
+      const modal = document.createElement('div');
+      modal.id = 'sodMatrixModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      const selfCount = matrix?.self_approvals_count || 0;
+      const selfApprovals = matrix?.self_approvals || [];
+      const violationsRows = selfApprovals.length
+        ? selfApprovals.map(item => {
+            const date = (item.decided_at || '').slice(0, 16).replace('T', ' ');
+            return '<tr style="border-bottom:1px solid #e2e8f0;">' +
+              '<td style="padding:8px;font-weight:600;">' + escapeHtml(item.section_key || '') + '</td>' +
+              '<td style="padding:8px;">إصدار ' + (item.version_number || 1) + '</td>' +
+              '<td style="padding:8px;">' + escapeHtml(item.decided_by_name || '') + '</td>' +
+              '<td style="padding:8px;color:#64748b;font-size:12px;">' + escapeHtml(date) + '</td>' +
+              '<td style="padding:8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;background:#fff3bf;color:#8a6d00;">تنبيه: تعميد ذاتي للمحرر</span></td>' +
+              '</tr>';
+          }).join('')
+        : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#1c7a2e;">لا توجد مخالفات في الفصل بين المهام</td></tr>';
+
+      modal.innerHTML =
+        '<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+        '<h3 style="margin:0;color:#1a3a52;font-size:18px;">مصفوفة الفصل بين المهام</h3>' +
+        '<button type="button" id="closeSodModalBtn" class="btn ghost small" style="padding:4px 12px;">إغلاق</button>' +
+        '</div>' +
+        '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">حوكمة الاعتمادات وفصل المسؤوليات وفق القرارين d01 و d02</p>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
+        '<strong>اعتماد المحرر لقسمه (d01):</strong>' +
+        '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">سماح مع التنبيه والتوثيق التلقائي في سجل التدقيق</p>' +
+        '<div style="margin-top:8px;">إجمالي التعميد الذاتي: <strong style="color:' + (selfCount > 0 ? '#a67c00' : '#1c7a2e') + ';">' + selfCount + '</strong></div>' +
+        '</div>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
+        '<strong>معتمد التوليد والملف (d02):</strong>' +
+        '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">فصل إلزامي في مصفوفة الأدوار؛ الجمع مقتصر على مدير الشركة</p>' +
+        '<div style="margin-top:8px;">حالة الحوكمة: <strong style="color:#1c7a2e;">منضبطة</strong></div>' +
+        '</div></div>' +
+        '<div style="flex:1;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
+        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
+        '<th style="padding:8px;">القسم</th>' +
+        '<th style="padding:8px;">الإصدار</th>' +
+        '<th style="padding:8px;">المعتمد</th>' +
+        '<th style="padding:8px;">التاريخ</th>' +
+        '<th style="padding:8px;">الحالة الرقابية</th>' +
+        '</tr></thead><tbody>' + violationsRows + '</tbody></table>' +
+        '</div></div>';
+
+      document.body.appendChild(modal);
+      const closeBtn = modal.querySelector('#closeSodModalBtn');
+      if (closeBtn) closeBtn.onclick = () => { if (modal.parentNode) modal.parentNode.removeChild(modal); };
     }
 
     let editingUserPermissions = null;
@@ -679,6 +760,16 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
         '<h3><span>صلاحيات:</span> ' + escapeHtml(userName) + '</h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'userPermissionsModal\').remove()">إغلاق</button></div>' +
+        '<div style="margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">' +
+        '<div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px;">تطبيق قالب دور قياسي:</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'editor\')">محرر</button>' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'section_approver\')">معتمد قسم</button>' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'generation_approver\')">معتمد توليد</button>' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'final_file_approver\')">معتمد ملف</button>' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'profile\')">بروفايل</button>' +
+        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'support\')">دعم</button>' +
+        '</div></div>' +
         '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
         '' +
         permRows +
@@ -689,6 +780,22 @@
         '<button class="btn primary" onclick="saveUserPermissions()">حفظ الصلاحيات</button>' +
         '</div></div>';
       document.body.appendChild(modal);
+    }
+
+    function applyRoleTemplateQuick(templateKey) {
+      const templates = {
+        editor: ['create_presentation', 'view_presentations'],
+        section_approver: ['create_presentation', 'view_presentations', 'approvals'],
+        generation_approver: ['create_presentation', 'generate_images', 'generate_maps'],
+        final_file_approver: ['approvals', 'export_files'],
+        profile: ['company_settings', 'custom_fields'],
+        support: ['dashboard', 'view_presentations']
+      };
+      const allowed = templates[templateKey] || [];
+      Object.keys(PERMISSION_LABELS).forEach(key => {
+        const cb = document.getElementById('perm_' + key);
+        if (cb) cb.checked = allowed.includes(key);
+      });
     }
 
     async function saveUserPermissions() {

@@ -477,6 +477,21 @@
         const totalSlides = (tenantSlidePlan.slides || []).length;
         if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
 
+        if (!options.approvalGranted && !options.resume) {
+          if (typeof showGenerationApprovalModal === 'function') {
+            isGeneratingTenantSlides = false;
+            const approved = await showGenerationApprovalModal({
+              draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
+              slidesCount: totalSlides,
+              projectName: options.presentationTitle || tenantPresentationTitle || tenantProjectData.project_name || 'عرض بدون عنوان'
+            });
+            if (!approved) {
+              return;
+            }
+            isGeneratingTenantSlides = true;
+          }
+        }
+
         const planSignature = tenantSlidePlanFingerprint(tenantSlidePlan);
         const savedCheckpoint = tenantSlideGenerationCheckpoint || tenantProjectData.slide_generation_checkpoint;
         const resumeRequested = options.resume === true;
@@ -831,9 +846,25 @@
 
         pumpSlideLaunches();
         await generationDone;
-        if (generationFailure) return;
+        if (generationFailure) {
+          if (window.currentGenerationApprovalId) {
+            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
+              consumed: false,
+              note: 'فشل التوليد'
+            }).catch(err => console.warn('Settlement release error:', err));
+            window.currentGenerationApprovalId = null;
+          }
+          return;
+        }
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
+          if (window.currentGenerationApprovalId) {
+            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
+              consumed: false,
+              note: 'لم يكتمل التوليد'
+            }).catch(err => console.warn('Settlement release error:', err));
+            window.currentGenerationApprovalId = null;
+          }
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
@@ -848,6 +879,13 @@
         if (!presentationSaved) {
           setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
           return;
+        }
+        if (window.currentGenerationApprovalId) {
+          api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
+            consumed: true,
+            jobId: tenantPresentationId || 'presentation-job'
+          }).catch(err => console.warn('Settlement error:', err));
+          window.currentGenerationApprovalId = null;
         }
         if (options.markDraftDirty !== false) triggerAutoSaveDraft();
         selectTenantSlide(0);

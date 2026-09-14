@@ -109,15 +109,24 @@
           : '<button class="btn small green" onclick="' +
           (canReview ? 'approveProjectDraftById' : 'requestProjectDraftApprovalById') +
           '(\'' + d.id + '\')">اعتماد</button>';
-        const statusBadgeHtml = '<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>';
-        return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:#f8fafc;border:1px solid ' +
-          (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
+        const isArchived = d.status === 'archived';
+        const archiveBadge = isArchived
+          ? '<span class="proposal-status-badge status-archived" title="محفوظ لمدة 365 يوماً وفق سياسة الحفظ">أرشيف (محفوظ 365 يوماً)</span>'
+          : '';
+        const statusBadgeHtml = archiveBadge || ('<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>');
+        const actionsHtml = isArchived
+          ? '<button class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">استعادة</button>' +
+            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>'
+          : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
+            '<button class="btn small ghost" onclick="copyProjectDraftById(\'' + d.id + '\')">نسخ العرض</button>' +
+            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
+            approveBtn +
+            '<button class="btn small ghost danger" onclick="archiveProposalById(\'' + d.id + '\')">أرشفة</button>';
+        return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:' + (isArchived ? '#f1f5f9' : '#f8fafc') + ';border:1px solid ' +
+          (isArchived ? '#94a3b8' : (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1')) + ';margin-bottom:12px">' +
           '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusBadgeHtml + ' | ' + escapeHtml(date) +
           (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div></div><div class="tenant-actions">' +
-          '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
-          '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-          approveBtn +
-          '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المشروع</button>' +
+          actionsHtml +
           '</div></div>';
       };
       showInlineLoader(list, 'جاري تحميل المشاريع...');
@@ -317,6 +326,51 @@
         hideLoader();
         toast('خطأ في تحميل المسودة');
         return false;
+      }
+    }
+
+    async function copyProjectDraftById(draftId) {
+      if (!draftId) return;
+      const newTitle = prompt('اسم العرض الجديد:');
+      if (!newTitle || !newTitle.trim()) return;
+      const res = await api('POST', '/api/project-draft/copy', { draftId, newTitle: newTitle.trim() });
+      if (res && res.success) {
+        toast(WFT('proposal.cloned_with_name', 'تم نسخ العرض بنجاح باسم:') + ' ' + (res.copy?.title || newTitle));
+        tenantArchiveCache = null;
+        openTenantPresentations(true);
+      } else {
+        toast(res?.error || 'فشل نسخ العرض');
+      }
+    }
+
+    async function archiveProposalById(draftId) {
+      if (!draftId) return;
+      if (!confirm(WFT('proposal.archive_confirm', 'هل تريد أرشفة هذا العرض؟ سيتم حفظه في الأرشيف لمدة 365 يوماً مع إمكانية استعادته.'))) return;
+      const res = await api('POST', '/api/project-draft/' + encodeURIComponent(draftId) + '/transition-status', {
+        targetStatus: 'archived',
+        reason: 'أرشفة العرض من قائمة المشاريع'
+      });
+      if (res && res.success) {
+        toast(WFT('proposal.archived', 'تم نقل العرض إلى الأرشيف'));
+        tenantArchiveCache = null;
+        openTenantPresentations(true);
+      } else {
+        toast(res?.error || 'فشل أرشفة العرض');
+      }
+    }
+
+    async function restoreProposalById(draftId) {
+      if (!draftId) return;
+      const res = await api('POST', '/api/project-draft/' + encodeURIComponent(draftId) + '/transition-status', {
+        targetStatus: 'draft',
+        reason: 'استعادة العرض من الأرشيف'
+      });
+      if (res && res.success) {
+        toast(WFT('proposal.restored', 'تمت استعادة العرض من الأرشيف'));
+        tenantArchiveCache = null;
+        openTenantPresentations(true);
+      } else {
+        toast(res?.error || 'فشل استعادة العرض');
       }
     }
 
@@ -624,6 +678,21 @@
           return;
         }
         updateLoaderProgress(82, 'تم إنشاء الملف، جاري بدء التحميل...');
+        const fileName = data.url.split('/').pop() || ('presentation.' + format);
+        let downloadRecord = null;
+        try {
+          const recResp = await api('POST', '/api/downloads', {
+            fileName,
+            presentationId: tenantPresentationId,
+            draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
+            format,
+            versionLabel: 'v' + (tenantPresentationRevision || 1)
+          });
+          if (recResp && recResp.success) downloadRecord = recResp.download;
+        } catch (recErr) {
+          console.warn('Download ledger record error:', recErr);
+        }
+
         const token = getTenantToken();
         const resp = await fetch(data.url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
         if (!resp.ok) throw new Error('Download failed');
@@ -631,11 +700,16 @@
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = data.url.split('/').pop() || ('presentation.' + format);
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
+
+        if (downloadRecord && downloadRecord.id) {
+          api('POST', '/api/downloads/' + encodeURIComponent(downloadRecord.id) + '/delivered').catch(() => {});
+        }
+
         updateLoaderProgress(100, 'اكتمل تحميل الملف');
         toast('تم تحميل الملف');
       } catch (e) {
@@ -648,6 +722,175 @@
         }
       } finally {
         hideLoader();
+      }
+    }
+
+    async function showFinalApprovalModal() {
+      if (!tenantPresentationId) {
+        toast(WFT('proposal.open_first_for_final', 'افتح عرضاً أولاً لطلب الاعتماد النهائي'));
+        return;
+      }
+      let approvals = [];
+      try {
+        const resp = await api('GET', '/api/final-file-approvals?presentationId=' + encodeURIComponent(tenantPresentationId));
+        if (resp && resp.success) approvals = resp.approvals || [];
+      } catch (err) {
+        console.warn('Final file approvals fetch:', err);
+      }
+
+      const pendingApproval = approvals.find(a => a.status === 'pending');
+      const latestApproved = approvals.find(a => a.status === 'approved');
+      const canApprove = hasPermission('approvals');
+
+      const modal = document.createElement('div');
+      modal.id = 'finalApprovalModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      modal.innerHTML =
+        '<div style="background:#fff;border-radius:16px;max-width:540px;width:100%;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
+        '<h3 style="margin:0 0 8px;color:#1a3a52;font-size:18px;">اعتماد الملف النهائي</h3>' +
+        '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">بوابة الاعتماد الثالثة — قفل إصدار العرض وختم البصمة الرقمية للملف</p>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8;">' +
+        '<div><span style="color:#64748b;">العرض الحالي:</span> <strong>' + escapeHtml(tenantPresentationTitle || 'عرض بدون عنوان') + '</strong></div>' +
+        '<div><span style="color:#64748b;">رقم الإصدار:</span> <strong>v' + (tenantPresentationRevision || 1) + '</strong></div>' +
+        (latestApproved
+          ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;color:#1c7a2e;">' +
+            '<strong>معتمد نهائياً:</strong> معتمد بواسطة ' + escapeHtml(latestApproved.decided_by_name || '') +
+            (latestApproved.stamped_file ? '<br><span style="font-size:11px;color:#475569;">البصمة الرقمية: ' + escapeHtml(latestApproved.stamped_file) + '</span>' : '') +
+            '</div>'
+          : '') +
+        (pendingApproval
+          ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;color:#a67c00;">' +
+            'يوجد طلب اعتماد قيد المراجعة مقدم من ' + escapeHtml(pendingApproval.requested_by_name || '') +
+            '</div>'
+          : '') +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+        '<button type="button" id="closeFinalApproveBtn" class="btn ghost" style="padding:8px 18px;">إغلاق</button>' +
+        (pendingApproval && canApprove
+          ? '<button type="button" id="decideFinalApproveBtn" class="btn primary green" style="padding:8px 20px;">اعتماد وختم الملف</button>'
+          : (!pendingApproval && !latestApproved
+            ? '<button type="button" id="requestFinalApproveBtn" class="btn primary" style="padding:8px 20px;">إرسال طلب الاعتماد</button>'
+            : '')) +
+        '</div></div>';
+
+      document.body.appendChild(modal);
+
+      const close = () => { if (modal.parentNode) modal.parentNode.removeChild(modal); };
+      const closeBtn = modal.querySelector('#closeFinalApproveBtn');
+      if (closeBtn) closeBtn.onclick = close;
+
+      const reqBtn = modal.querySelector('#requestFinalApproveBtn');
+      if (reqBtn) {
+        reqBtn.onclick = async () => {
+          reqBtn.disabled = true;
+          const res = await api('POST', '/api/presentations/' + encodeURIComponent(tenantPresentationId) + '/final-approval/request', {
+            revision: tenantPresentationRevision || 1
+          });
+          if (res && res.success) {
+            toast(WFT('proposal.final_approval_requested', 'تم إرسال طلب اعتماد الملف النهائي'));
+            close();
+          } else {
+            toast(res?.error || 'فشل إرسال طلب الاعتماد');
+            reqBtn.disabled = false;
+          }
+        };
+      }
+
+      const decideBtn = modal.querySelector('#decideFinalApproveBtn');
+      if (decideBtn) {
+        decideBtn.onclick = async () => {
+          decideBtn.disabled = true;
+          const res = await api('POST', '/api/final-file-approvals/' + encodeURIComponent(pendingApproval.id) + '/decision', {
+            decision: 'approved'
+          });
+          if (res && res.success) {
+            toast(WFT('proposal.final_approval_sealed', 'تم اعتماد وختم الملف النهائي بنجاح'));
+            close();
+          } else {
+            toast(res?.error || 'فشل الاعتماد');
+            decideBtn.disabled = false;
+          }
+        };
+      }
+    }
+
+    async function showDownloadsLibraryModal() {
+      let downloads = [];
+      try {
+        const query = tenantPresentationId ? '?presentationId=' + encodeURIComponent(tenantPresentationId) : '';
+        const resp = await api('GET', '/api/downloads' + query);
+        if (resp && resp.success) downloads = resp.downloads || [];
+      } catch (err) {
+        console.warn('Load downloads error:', err);
+      }
+
+      const modal = document.createElement('div');
+      modal.id = 'downloadsLibraryModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      const rows = downloads.length
+        ? downloads.map(d => {
+            const date = (d.downloaded_at || d.created_at || '').slice(0, 16).replace('T', ' ');
+            const statusLabel = d.downloaded_at ? 'تم التحميل' : 'متاح للتحميل';
+            const safeName = escapeHtml(d.file_name || 'ملف');
+            const safeUrl = d.file_name ? ('/outputs/' + encodeURIComponent(d.file_name)) : '';
+            return '<tr style="border-bottom:1px solid #e2e8f0;">' +
+              '<td style="padding:10px 8px;font-weight:600;">' + safeName + '</td>' +
+              '<td style="padding:10px 8px;text-transform:uppercase;">' + escapeHtml(d.format || '') + '</td>' +
+              '<td style="padding:10px 8px;">' + escapeHtml(d.version_label || 'v1') + '</td>' +
+              '<td style="padding:10px 8px;color:#64748b;font-size:12px;">' + escapeHtml(date) + '</td>' +
+              '<td style="padding:10px 8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;background:#eef7ee;color:#1c7a2e;">' + statusLabel + '</span></td>' +
+              '<td style="padding:10px 8px;">' +
+              (safeUrl
+                ? '<button type="button" class="btn small primary" onclick="downloadLibraryFile(\'' + safeUrl + '\', \'' + safeName + '\', \'' + d.id + '\')">تحميل</button>'
+                : '—') +
+              '</td></tr>';
+          }).join('')
+        : '<tr><td colspan="6" style="padding:24px;text-align:center;color:#64748b;">لا توجد ملفات مصدرة في السجل</td></tr>';
+
+      modal.innerHTML =
+        '<div style="background:#fff;border-radius:16px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+        '<h3 style="margin:0;color:#1a3a52;font-size:18px;">مكتبة التنزيلات وسجل الملفات المصدرة</h3>' +
+        '<button type="button" id="closeDownloadsModalBtn" class="btn ghost small" style="padding:4px 12px;">إغلاق</button>' +
+        '</div>' +
+        '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">تنزيل مجاني مكرر للملفات المعتمدة طالما لم يتغير المحتوى أو الإصدار</p>' +
+        '<div style="flex:1;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
+        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
+        '<th style="padding:10px 8px;">اسم الملف</th>' +
+        '<th style="padding:10px 8px;">الصيغة</th>' +
+        '<th style="padding:10px 8px;">الإصدار</th>' +
+        '<th style="padding:10px 8px;">التاريخ</th>' +
+        '<th style="padding:10px 8px;">الحالة</th>' +
+        '<th style="padding:10px 8px;">الإجراء</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div></div>';
+
+      document.body.appendChild(modal);
+      const closeBtn = modal.querySelector('#closeDownloadsModalBtn');
+      if (closeBtn) closeBtn.onclick = () => { if (modal.parentNode) modal.parentNode.removeChild(modal); };
+    }
+
+    async function downloadLibraryFile(url, fileName, downloadId) {
+      try {
+        const token = getTenantToken();
+        const resp = await fetch(url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+        if (!resp.ok) throw new Error('Download failed');
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        if (downloadId) {
+          api('POST', '/api/downloads/' + encodeURIComponent(downloadId) + '/delivered').catch(() => {});
+        }
+        toast(WFT('downloads.download_started', 'تم بدء التحميل'));
+      } catch (err) {
+        toast(WFT('downloads.load_failed', 'تعذر تحميل الملف'));
       }
     }
 
@@ -841,6 +1084,9 @@
       const stats = (statsData.success && statsData.stats) ? statsData.stats : {};
       renderSagStats(stats);
       renderSagTenants(sagAllTenants);
+      if (typeof omLoadRechargeRequests === 'function') {
+        omLoadRechargeRequests('sagRechargeRequestsList');
+      }
     }
 
     async function sagEnsureAllKeys() {
@@ -1192,7 +1438,12 @@
         '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagNewUserUsername" minlength="3" maxlength="40" required></div>' +
         '<div class="tenant-field"><label>رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
         '<div class="tenant-field full"><label>الدور</label><select id="sagNewUserRole">' +
-        '<option value="employee">موظف</option><option value="company_admin">أدمن شركة</option></select></div>' +
+        '<option value="employee">موظف</option>' +
+        '<option value="section_editor">محرر أقسام</option>' +
+        '<option value="section_approver">معتمد أقسام</option>' +
+        '<option value="generation_approver">معتمد بدء التوليد</option>' +
+        '<option value="final_file_approver">معتمد الملف النهائي</option>' +
+        '<option value="company_admin">أدمن شركة</option></select></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
         '</div>' +

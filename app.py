@@ -13985,9 +13985,9 @@ def _password_setup_url(raw_token):
     return f'{base_url}/set-password/{raw_token}'
 
 
-def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url):
+def send_platform_email(recipient, subject, body):
     host = (os.environ.get('SMTP_HOST') or '').strip()
-    if not host:
+    if not host or not recipient:
         return False
     port = int(os.environ.get('SMTP_PORT') or 587)
     smtp_user = (os.environ.get('SMTP_USER') or '').strip()
@@ -13996,16 +13996,10 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
     if not sender:
         return False
     message = EmailMessage()
-    message['Subject'] = f'مرحبًا بك في LandLoom AI - {company_name}'
+    message['Subject'] = subject
     message['From'] = sender
     message['To'] = recipient
-    message.set_content(
-        f'مرحبًا {account_name}\n\n'
-        f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
-        f'اسم المستخدم: {username}\n'
-        f'رابط تعيين كلمة المرور: {setup_url}\n\n'
-        'هذا الرابط صالح للاستخدام مرة واحدة.'
-    )
+    message.set_content(body)
     try:
         if str(os.environ.get('SMTP_SSL') or '').lower() in {'1', 'true', 'yes'}:
             with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as client:
@@ -14021,8 +14015,20 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
                 client.send_message(message)
         return True
     except Exception:
-        app.logger.exception('Company welcome email could not be sent')
+        app.logger.exception('Platform email could not be sent')
         return False
+
+
+def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url):
+    subject = f'مرحبًا بك في LandLoom AI - {company_name}'
+    body = (
+        f'مرحبًا {account_name}\n\n'
+        f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
+        f'اسم المستخدم: {username}\n'
+        f'رابط تعيين كلمة المرور: {setup_url}\n\n'
+        'هذا الرابط صالح للاستخدام مرة واحدة.'
+    )
+    return send_platform_email(recipient, subject, body)
 
 
 def _company_payload(tenant):
@@ -17661,8 +17667,18 @@ def api_create_invite():
         return jsonify({'error': 'Valid email required'}), 400
 
     token = db.create_invite(g.tenant_id, email)
-    # In production, send email here. For now, return the link.
     invite_url = f"/invite/{token}"
+    tenant = db.get_tenant_by_id(g.tenant_id)
+    company_name = (tenant and tenant.get('company_name')) or 'الشركة'
+    base_url = _current_base_url().rstrip('/')
+    full_invite_url = f"{base_url}{invite_url}"
+    send_platform_email(
+        email,
+        f'دعوة للانضمام إلى {company_name}',
+        f'مرحبًا،\n\nتمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
+        f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
+        'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
+    )
     return jsonify({'success': True, 'inviteUrl': invite_url, 'token': token})
 
 

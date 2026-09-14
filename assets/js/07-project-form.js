@@ -520,6 +520,14 @@
             && String(version.created_by) === String(version.decided_by)) {
           text += ' — ' + WFT('sectionver.self_approval', 'اعتماد ذاتي');
         }
+        // القرار d05: مدة اعتماد القسم قبل اعتباره قديماً (30 يوماً)
+        if (version.status === 'approved' && version.decided_at) {
+          const decidedTime = new Date(version.decided_at).getTime();
+          const ageDays = (Date.now() - decidedTime) / (1000 * 60 * 60 * 24);
+          if (ageDays > 30) {
+            text += ' — ' + WFT('sectionver.stale', 'اعتماد قديم (>30 يوم)');
+          }
+        }
         meta.textContent = text;
         row.appendChild(meta);
         const addBtn = (arText, onClick) => {

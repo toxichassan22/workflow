@@ -18,7 +18,14 @@
 
     async function openOmranOpsPage() {
       showTenantPage('tenantOmranOpsPage');
-      await Promise.all([omLoadEventTasks(), omLoadNotifications(), omLoadTickets()]);
+      await Promise.all([
+        omLoadEventTasks(),
+        omLoadNotifications(),
+        omLoadTickets(),
+        omLoadRechargeRequests(),
+        omLoadContracts(),
+        omLoadFileTypes()
+      ]);
     }
 
     // ── Event tasks ──────────────────────────────────────────────────────
@@ -117,11 +124,13 @@
         box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
         return;
       }
-      box.innerHTML = tickets.map(t =>
-        '<div class="tenant-presentation-card" style="cursor:pointer" onclick="omOpenTicket(\'' + t.id + '\')">' +
-        '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
-        '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية: ' + omEscape(t.priority) + '</span></div></div></div>'
-      ).join('');
+      box.innerHTML = tickets.map(t => {
+        const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
+        const sla = t.sla_due_at ? (' | <span>استحقاق SLA: ' + omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')) + '</span>') : '';
+        return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="omOpenTicket(\'' + t.id + '\')">' +
+          '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
+          '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية: ' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla + '</div></div></div>';
+      }).join('');
     }
 
     async function omOpenTicket(id) {
@@ -174,4 +183,188 @@
       document.getElementById('omTicketSubject').value = '';
       document.getElementById('omTicketBody').value = '';
       await omLoadTickets();
+    }
+
+    // ── Recharge requests (t33, d09) ──────────────────────────────────────
+    async function omLoadRechargeRequests(targetBoxId) {
+      const box = document.getElementById(targetBoxId || 'omRechargeList');
+      if (!box) return;
+      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) || targetBoxId === 'sagRechargeRequestsList';
+      const url = isAdmin ? '/api/admin/recharge-requests' : '/api/recharge-requests';
+      const data = await api('GET', url).catch(() => null);
+      if (!data || !data.success) {
+        box.innerHTML = '<p class="tenant-hint">تعذر تحميل طلبات الشحن.</p>';
+        return;
+      }
+      const requests = data.requests || [];
+      if (!requests.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد طلبات شحن بعد.</p>';
+        return;
+      }
+      box.innerHTML = requests.map(r => {
+        const date = (r.created_at || '').slice(0, 16).replace('T', ' ');
+        const tenantInfo = (isAdmin && (r.tenant_name || r.company_name)) ? ('<span>الشركة: ' + omEscape(r.tenant_name || r.company_name) + '</span> | ') : '';
+        const ref = r.transfer_reference ? (' | <span>المرجع البنكي: ' + omEscape(r.transfer_reference) + '</span>') : '';
+        const inv = r.reference_number ? (' | <span style="color:#1c7a2e;font-weight:600;">سند مالي: ' + omEscape(r.reference_number) + '</span>') : '';
+        const actions = (isAdmin && r.status === 'pending')
+          ? '<div style="display:flex;gap:6px;margin-top:6px;">' +
+            '<button type="button" class="btn small green" onclick="omDecideRecharge(\'' + r.id + '\', \'approved\')">اعتماد الطلب</button>' +
+            '<button type="button" class="btn small danger" onclick="omDecideRecharge(\'' + r.id + '\', \'rejected\')">رفض</button>' +
+            '</div>'
+          : '';
+        return '<div class="tenant-presentation-card">' +
+          '<div><h3>' + omEscape(r.package_name) + ' — ' + (r.price_sar ? r.price_sar + ' ريال' : (r.amount_usd + ' دولار')) + '</h3>' +
+          '<div class="meta">' + tenantInfo + '<span>' + omStatus(r.status) + '</span> | <span>' + omEscape(date) + '</span>' + ref + inv + '</div>' +
+          actions +
+          '</div></div>';
+      }).join('');
+    }
+
+    async function omCreateRechargeRequest() {
+      const pkg = (document.getElementById('omRechargePackage') || {}).value || 'باقة نمو';
+      const ref = (document.getElementById('omRechargeRef') || {}).value || '';
+      const errBox = document.getElementById('omRechargeError');
+      if (errBox) errBox.textContent = '';
+      const amounts = {
+        'باقة نمو': { usd: 100, sar: 375 },
+        'باقة شركات': { usd: 250, sar: 937.5 },
+        'باقة احترافية': { usd: 500, sar: 1875 }
+      };
+      const sel = amounts[pkg] || { usd: 100, sar: 375 };
+      const data = await api('POST', '/api/recharge-requests', {
+        packageName: pkg,
+        amountUsd: sel.usd,
+        priceSar: sel.sar,
+        referenceNumber: ref.trim()
+      }).catch(e => e);
+      if (!data || !data.success) {
+        if (errBox) errBox.textContent = (data && data.error) || 'تعذر إرسال الطلب.';
+        return;
+      }
+      if (document.getElementById('omRechargeRef')) document.getElementById('omRechargeRef').value = '';
+      toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
+      await omLoadRechargeRequests();
+    }
+
+    async function omDecideRecharge(requestId, decision) {
+      const data = await api('POST', '/api/admin/recharge-requests/' + encodeURIComponent(requestId) + '/decision', {
+        decision: decision
+      }).catch(e => e);
+      if (data && data.success) {
+        toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
+        if (typeof omLoadRechargeRequests === 'function') {
+          await omLoadRechargeRequests('omRechargeList');
+          await omLoadRechargeRequests('sagRechargeRequestsList');
+        }
+      } else {
+        toast(WFT('recharge.decision_failed', 'تعذر تسجيل القرار'));
+      }
+    }
+
+    // ── Contracts & NDAs (t52, d06) ──────────────────────────────────────
+    async function omLoadContracts() {
+      const box = document.getElementById('omContractsList');
+      if (!box) return;
+      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const data = await api('GET', '/api/contracts').catch(() => null);
+      if (!data || !data.success) {
+        box.innerHTML = '<p class="tenant-hint">تعذر تحميل العقود.</p>';
+        return;
+      }
+      const contracts = data.contracts || [];
+      if (!contracts.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد عقود مسجلة بعد.</p>';
+        return;
+      }
+      box.innerHTML = contracts.map(c => {
+        const expires = c.expires_at ? (' | <span>ينتهي: ' + omEscape(c.expires_at) + '</span>') : '';
+        const kindLabel = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد رئيسي';
+        const isExpired = c.status === 'expired' || (c.expires_at && new Date(c.expires_at) < new Date());
+        const statusLabel = isExpired ? '<span style="color:#c33;">منتهي (محفوظ 365 يوماً)</span>' : '<span style="color:var(--green);">سارٍ</span>';
+        return '<div class="tenant-presentation-card">' +
+          '<div><h3>' + omEscape(c.title) + ' (' + kindLabel + ')</h3>' +
+          '<div class="meta">' + statusLabel + expires + '</div></div></div>';
+      }).join('');
+    }
+
+    async function omCreateContract() {
+      const title = (document.getElementById('omContractTitle') || {}).value || '';
+      const kind = (document.getElementById('omContractKind') || {}).value || 'nda';
+      const expiresAt = (document.getElementById('omContractExpires') || {}).value || '';
+      const errBox = document.getElementById('omContractError');
+      if (errBox) errBox.textContent = '';
+      if (!title.trim()) {
+        if (errBox) errBox.textContent = 'مسمى العقد مطلوب.';
+        return;
+      }
+      const data = await api('POST', '/api/contracts', {
+        title: title.trim(),
+        kind: kind,
+        expiresAt: expiresAt || null
+      }).catch(e => e);
+      if (!data || !data.success) {
+        if (errBox) errBox.textContent = (data && data.error) || 'تعذر حفظ العقد.';
+        return;
+      }
+      if (document.getElementById('omContractTitle')) document.getElementById('omContractTitle').value = '';
+      if (document.getElementById('omContractExpires')) document.getElementById('omContractExpires').value = '';
+      toast(WFT('contracts.saved', 'تم حفظ العقد بنجاح'));
+      await omLoadContracts();
+    }
+
+    // ── File types registry (t62, d10) ───────────────────────────────────
+    async function omLoadFileTypes() {
+      const box = document.getElementById('omFileTypesList');
+      if (!box) return;
+      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const data = await api('GET', '/api/file-types').catch(() => null);
+      if (!data || !data.success) {
+        box.innerHTML = '<p class="tenant-hint">تعذر تحميل سجل أنواع الملفات.</p>';
+        return;
+      }
+      const types = data.fileTypes || [];
+      if (!types.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد أنواع ملفات مسجلة.</p>';
+        return;
+      }
+      box.innerHTML =
+        '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
+        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
+        '<th style="padding:10px 8px;">نوع الملف</th>' +
+        '<th style="padding:10px 8px;">المفتاح</th>' +
+        '<th style="padding:10px 8px;">الحد الأقصى</th>' +
+        '<th style="padding:10px 8px;">الامتدادات المسموحة</th>' +
+        '<th style="padding:10px 8px;">الإجراء</th>' +
+        '</tr></thead><tbody>' +
+        types.map(t =>
+          '<tr style="border-bottom:1px solid #e2e8f0;">' +
+          '<td style="padding:10px 8px;font-weight:600;">' + omEscape(t.label_ar) + '</td>' +
+          '<td style="padding:10px 8px;font-family:monospace;font-size:12px;">' + omEscape(t.key) + '</td>' +
+          '<td style="padding:10px 8px;">' + (t.max_size_mb || 25) + ' ميجابايت</td>' +
+          '<td style="padding:10px 8px;font-size:12px;color:#64748b;">' + omEscape(t.allowed_extensions || 'جميع الامتدادات المدعومة') + '</td>' +
+          '<td style="padding:10px 8px;">' +
+          '<button type="button" class="btn small ghost" onclick="omUpdateFileTypePrompt(\'' + omEscape(t.key) + '\', \'' + omEscape(t.label_ar) + '\', ' + (t.max_size_mb || 25) + ', \'' + omEscape(t.allowed_extensions || '') + '\')">تعديل الحد</button>' +
+          '</td></tr>'
+        ).join('') +
+        '</tbody></table></div>';
+    }
+
+    async function omUpdateFileTypePrompt(key, label, currentMaxMb, currentExts) {
+      const newMbStr = prompt('الحد الأقصى بالـ MB لنوع (' + label + '):', currentMaxMb);
+      if (!newMbStr) return;
+      const newMb = parseInt(newMbStr, 10);
+      if (isNaN(newMb) || newMb <= 0) { toast(WFT('common.invalid_value', 'قيمة غير صالحة')); return; }
+      const res = await api('POST', '/api/file-types/' + encodeURIComponent(key), {
+        labelAr: label,
+        maxSizeMb: newMb,
+        allowedExtensions: currentExts
+      }).catch(e => e);
+      if (res && res.success) {
+        toast(WFT('file_types.updated', 'تم تحديث حد نوع الملف'));
+        await omLoadFileTypes();
+      } else {
+        toast((res && res.error) || 'تعذر التحديث');
+      }
     }
