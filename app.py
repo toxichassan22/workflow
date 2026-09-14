@@ -12103,6 +12103,27 @@ def api_cancel_section_version():
     return jsonify({'success': True, 'version': cancelled})
 
 
+@app.route('/api/project-draft/section-versions/<version_id>/diff', methods=['GET'])
+@require_auth
+def api_diff_section_version(version_id):
+    """Compare one sent version against its predecessor for the approver's review."""
+    version = db.get_section_version(g.tenant_id, version_id, include_snapshot=False)
+    if not version:
+        return jsonify({'error': 'Section version not found'}), 404
+    _draft, error = _versioned_draft_for_read(version.get('draft_id'))
+    if error:
+        return jsonify({'error': 'Section version not found'}), 404
+    base_id = (request.args.get('baseVersionId') or '').strip() or None
+    diff = db.diff_section_versions(g.tenant_id, version_id, base_version_id=base_id)
+    if diff.get('error') == 'version_not_found':
+        return jsonify({'error': 'Section version not found'}), 404
+    if diff.get('error') == 'base_version_not_found':
+        return jsonify({'error': 'Base version not found for this section'}), 404
+    if diff.get('error'):
+        return jsonify({'error': 'Unable to compare the section versions'}), 400
+    return jsonify({'success': True, 'diff': diff})
+
+
 @app.route('/api/project-draft/section-version/restore', methods=['POST'])
 @require_auth
 def api_restore_section_version():

@@ -515,6 +515,11 @@
         const decider = version.decided_by_name || version.created_by_name || '';
         if (decider) text += ' — ' + decider;
         if (version.decision_note) text += ' — ' + version.decision_note;
+        // مصفوفة الفصل بين المهام: اعتماد المحرر لقسم شارك فيه يبقى مسموحًا لكنه يُسجل كتنبيه تدقيقي.
+        if (version.decided_at && version.created_by && version.decided_by
+            && String(version.created_by) === String(version.decided_by)) {
+          text += ' — ' + WFT('sectionver.self_approval', 'اعتماد ذاتي');
+        }
         meta.textContent = text;
         row.appendChild(meta);
         const addBtn = (arText, onClick) => {
@@ -527,6 +532,7 @@
           row.appendChild(btn);
           return btn;
         };
+        addBtn('مقارنة', () => toggleSectionVersionDiff(version.id, sectionKey));
         if (version.status === 'pending') {
           addBtn('اعتماد', () => decideSectionVersion(version.id, sectionKey, 'approved'));
           addBtn('إعادة للتعديل', () => decideSectionVersion(version.id, sectionKey, 'returned'));
@@ -537,6 +543,7 @@
         }
         history.appendChild(row);
       });
+      renderSectionDiffPanel(sectionKey);
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
         try { window.WFI18n.autoTranslate(history); } catch (e) {}
       }
@@ -651,6 +658,126 @@
         sectionVersionsOpen[sectionKey] = true;
         toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
         await loadAllSectionVersions();
+      } finally {
+        try { hideLoader(); } catch (e) {}
+      }
+    }
+
+    // ── Section version comparison (t13): what changed between two snapshots ──
+    // The approver opens the differences of a sent version against its
+    // predecessor (or an explicit one) before deciding. One cached diff per
+    // section stays visible until it is closed or another version is compared.
+    const sectionVersionDiffCache = {};
+
+    function diffValueText(value) {
+      if (value === null || value === undefined || value === '') return '—';
+      if (typeof value === 'boolean') return value ? 'نعم' : 'لا';
+      if (typeof value === 'object') {
+        try { return JSON.stringify(value); } catch (e) { return String(value); }
+      }
+      return String(value);
+    }
+
+    function sectionVersionDiffStatusText(status) {
+      if (status === 'added') return WFT('sectionver.diff_added', 'مضاف');
+      if (status === 'removed') return WFT('sectionver.diff_removed', 'محذوف');
+      if (status === 'modified') return WFT('sectionver.diff_modified', 'معدل');
+      return WFT('sectionver.diff_unchanged', 'بدون تغيير');
+    }
+
+    function renderSectionDiffPanel(sectionKey) {
+      const history = document.getElementById('section-version-history-' + sectionKey);
+      if (!history) return;
+      let panel = history.querySelector(':scope > .section-version-diff');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'section-version-diff';
+        history.insertBefore(panel, history.firstChild);
+      }
+      const diff = sectionVersionDiffCache[sectionKey];
+      if (!diff) { panel.hidden = true; panel.innerHTML = ''; return; }
+      panel.hidden = false;
+      panel.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'section-version-diff-head';
+      const title = document.createElement('strong');
+      title.textContent = diff.base_version_number
+        ? WFT('sectionver.diff_title_between', 'مقارنة الإصدار {n} مع الإصدار {b}', { n: diff.version_number, b: diff.base_version_number })
+        : WFT('sectionver.diff_title_first', 'مقارنة الإصدار {n}', { n: diff.version_number });
+      head.appendChild(title);
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'section-approve-btn';
+      closeBtn.dataset.sectionLockIgnore = '1';
+      setSectionVersionChrome(closeBtn, 'إغلاق');
+      closeBtn.addEventListener('click', () => {
+        delete sectionVersionDiffCache[sectionKey];
+        renderSectionDiffPanel(sectionKey);
+      });
+      head.appendChild(closeBtn);
+      panel.appendChild(head);
+      const summary = diff.summary || {};
+      const counts = document.createElement('p');
+      counts.className = 'tenant-hint';
+      counts.textContent = WFT('sectionver.diff_counts', 'تعديلات {m} — إضافات {a} — حذف {r}',
+        { m: summary.modified || 0, a: summary.added || 0, r: summary.removed || 0 });
+      panel.appendChild(counts);
+      const attachments = Array.isArray(diff.attachments) ? diff.attachments : [];
+      const changed = (Array.isArray(diff.fields) ? diff.fields : [])
+        .concat(attachments)
+        .filter(item => item && item.status !== 'unchanged');
+      if (!changed.length) {
+        const empty = document.createElement('p');
+        empty.className = 'tenant-hint';
+        empty.textContent = WFT('sectionver.diff_none', 'لا توجد تغييرات بين الإصدارين');
+        panel.appendChild(empty);
+        return;
+      }
+      changed.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'section-version-diff-row diff-' + item.status;
+        const isAttachment = attachments.some(att => att && att.key === item.key);
+        const label = document.createElement('span');
+        label.className = 'section-version-diff-label';
+        label.textContent = (isAttachment ? WFT('sectionver.diff_attachment', 'مرفق') + ': ' : '') + (item.label || item.key);
+        row.appendChild(label);
+        const status = document.createElement('span');
+        status.className = 'section-version-diff-status';
+        status.textContent = sectionVersionDiffStatusText(item.status);
+        row.appendChild(status);
+        const oldValue = document.createElement('span');
+        oldValue.className = 'section-version-diff-old';
+        oldValue.textContent = WFT('sectionver.diff_old', 'القيمة السابقة: {v}', { v: diffValueText(item.old_value) });
+        row.appendChild(oldValue);
+        const newValue = document.createElement('span');
+        newValue.className = 'section-version-diff-new';
+        newValue.textContent = WFT('sectionver.diff_new', 'القيمة الجديدة: {v}', { v: diffValueText(item.new_value) });
+        row.appendChild(newValue);
+        panel.appendChild(row);
+      });
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+        try { window.WFI18n.autoTranslate(panel); } catch (e) {}
+      }
+    }
+
+    async function toggleSectionVersionDiff(versionId, sectionKey) {
+      const cached = sectionVersionDiffCache[sectionKey];
+      if (cached && cached.version_id === versionId) {
+        delete sectionVersionDiffCache[sectionKey];
+        renderSectionDiffPanel(sectionKey);
+        return;
+      }
+      showLoader(WFT('sectionver.diff_loading', 'جلب المقارنة'), '', 10);
+      try {
+        const result = await api('GET', '/api/project-draft/section-versions/' + encodeURIComponent(versionId) + '/diff');
+        hideLoader();
+        if (!result || !result.success) {
+          toast((result && result.error) || WFT('sectionver.diff_failed', 'تعذر جلب المقارنة'));
+          return;
+        }
+        sectionVersionDiffCache[sectionKey] = result.diff;
+        sectionVersionsOpen[sectionKey] = true;
+        renderSectionVersionBlock(sectionKey);
       } finally {
         try { hideLoader(); } catch (e) {}
       }

@@ -119,6 +119,49 @@ class SectionVersionDbTests(unittest.TestCase):
             db.section_snapshot_hash({'a': 3}),
         )
 
+    def test_diff_against_predecessor_names_changed_fields(self):
+        """The approver's comparison names every changed field between snapshots."""
+        first = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic',
+            {'project_name': 'برج المشرق', 'project_type': 'سكني'}, 'user-1', 'User One')
+        second = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic',
+            {'project_name': 'برج المشرق الثاني', 'project_type': 'سكني', 'city': 'الرياض'},
+            'user-1', 'User One')
+
+        diff = db.diff_section_versions('tenant-1', second['id'])
+        self.assertNotIn('error', diff)
+        self.assertEqual(diff['version_number'], 2)
+        self.assertEqual(diff['base_version_number'], 1)
+        by_key = {item['key']: item for item in diff['fields']}
+        self.assertEqual(by_key['project_name']['status'], 'modified')
+        self.assertEqual(by_key['project_name']['old_value'], 'برج المشرق')
+        self.assertEqual(by_key['project_name']['new_value'], 'برج المشرق الثاني')
+        self.assertEqual(by_key['city']['status'], 'added')
+        self.assertEqual(diff['summary']['modified'], 1)
+        self.assertEqual(diff['summary']['added'], 1)
+        self.assertEqual(diff['summary']['unchanged'], 1)
+
+    def test_diff_missing_required_fields_are_reported(self):
+        """The comparison carries the completeness verdict of the sent snapshot."""
+        version = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic', {'city': 'الرياض'}, 'user-1', 'User One')
+        diff = db.diff_section_versions('tenant-1', version['id'])
+        self.assertFalse(diff['validation']['is_complete'])
+        self.assertIn('اسم المشروع', diff['validation']['missing_fields'])
+
+    def test_diff_refuses_a_base_version_from_another_section(self):
+        """An explicit base must belong to the same section as the target."""
+        basic = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic', {'project_name': 'A'}, 'user-1', 'User One')
+        land = db.create_section_version(
+            'tenant-1', 'draft-1', 'land_croquis', {'croquis_land_area': 500}, 'user-1', 'User One')
+        self.assertEqual(
+            db.diff_section_versions(
+                'tenant-1', basic['id'], base_version_id=land['id']).get('error'),
+            'base_version_not_found',
+        )
+
 
 class SectionVersionApiTests(unittest.TestCase):
     @classmethod
@@ -346,6 +389,130 @@ class SectionVersionApiTests(unittest.TestCase):
             f'/api/project-draft/section-versions?draftId={owner_draft_id}&sectionKey=basic',
             headers=approver_headers)
         self.assertEqual(listed.status_code, 200, listed.get_json())
+
+
+class SectionVersionDiffApiTests(unittest.TestCase):
+    """GET /api/project-draft/section-versions/<id>/diff (t13 comparison)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.original_db_path = db.DB_PATH
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'section-version-diff-api.db')
+        # The app module is already imported by the first suite in this process,
+        # so its one-time init will not run again: create the tables explicitly.
+        db.init_db()
+
+        import app as application_module
+
+        cls.application_module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        cls.application_module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
+
+        with cls.app.app_context():
+            cls.tenant = db.create_tenant('Diff Co', 'diff@example.test', 'hash-diff', 'diff-co')
+            cls.other_tenant = db.create_tenant('Other Co', 'other@example.test', 'hash-other', 'other-co')
+        cls.token = auth.create_token(
+            cls.tenant, 'diff@example.test', user_id=None, user_name='Diff Co', user_role='company_admin'
+        )
+        cls.other_token = auth.create_token(
+            cls.other_tenant, 'other@example.test', user_id=None, user_name='Other Co', user_role='company_admin'
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        with cls.app.app_context():
+            db.close_db()
+        db.DB_PATH = cls.original_db_path
+        cls.temp_dir.cleanup()
+
+    def headers(self):
+        return {'Authorization': f'Bearer {self.token}'}
+
+    def other_headers(self):
+        return {'Authorization': f'Bearer {self.other_token}'}
+
+    def setUp(self):
+        client = self.app.test_client()
+        with self.app.app_context():
+            for row in db.get_db().execute('SELECT id FROM project_drafts').fetchall():
+                db.get_db().execute('DELETE FROM section_versions WHERE draft_id = ?', (row['id'],))
+                db.get_db().execute('DELETE FROM project_drafts WHERE id = ?', (row['id'],))
+            db.get_db().commit()
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftData': {'project_name': 'برج المقارنة', 'project_type': 'سكني', 'city': 'الرياض'},
+            'sectionStatuses': {'basic': 'draft'}, 'status': 'draft',
+        })
+
+    def _send_and_decide(self, client, decision='approved'):
+        sent = client.post('/api/project-draft/section-version', headers=self.headers(),
+                           json={'sectionKey': 'basic'})
+        version = sent.get_json()['version']
+        if decision:
+            client.post('/api/project-draft/section-version/decision', headers=self.headers(),
+                        json={'versionId': version['id'], 'decision': decision})
+        return version
+
+    def test_diff_lists_modified_fields_between_versions(self):
+        client = self.app.test_client()
+        self._send_and_decide(client)
+        draft = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
+        changed = dict(draft['draft_data'])
+        changed['project_name'] = 'برج المقارنة الثاني'
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'], 'draftData': changed,
+            'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
+        second = self._send_and_decide(client, decision=None)
+
+        diff = client.get(f"/api/project-draft/section-versions/{second['id']}/diff",
+                          headers=self.headers())
+        self.assertEqual(diff.status_code, 200, diff.get_json())
+        body = diff.get_json()['diff']
+        self.assertEqual(body['version_number'], 2)
+        self.assertEqual(body['base_version_number'], 1)
+        self.assertEqual(body['summary']['modified'], 1)
+        modified = [item for item in body['fields'] if item['status'] == 'modified']
+        self.assertEqual(modified[0]['key'], 'project_name')
+        self.assertEqual(modified[0]['old_value'], 'برج المقارنة')
+        self.assertEqual(modified[0]['new_value'], 'برج المقارنة الثاني')
+        self.assertTrue(body['validation']['is_complete'])
+
+    def test_first_version_diffs_against_empty(self):
+        client = self.app.test_client()
+        version = self._send_and_decide(client)
+        diff = client.get(f"/api/project-draft/section-versions/{version['id']}/diff",
+                          headers=self.headers())
+        self.assertEqual(diff.status_code, 200, diff.get_json())
+        body = diff.get_json()['diff']
+        self.assertIsNone(body['base_version_number'])
+        self.assertEqual(body['summary']['added'], len(body['fields']) + len(body['attachments']))
+
+    def test_explicit_base_is_accepted_and_unknown_base_is_refused(self):
+        client = self.app.test_client()
+        first = self._send_and_decide(client)
+        second = self._send_and_decide(client)
+
+        explicit = client.get(
+            f"/api/project-draft/section-versions/{second['id']}/diff"
+            f"?baseVersionId={first['id']}", headers=self.headers())
+        self.assertEqual(explicit.status_code, 200, explicit.get_json())
+        self.assertEqual(explicit.get_json()['diff']['base_version_number'], 1)
+
+        unknown_base = client.get(
+            f"/api/project-draft/section-versions/{second['id']}/diff"
+            f"?baseVersionId=no-such-id", headers=self.headers())
+        self.assertEqual(unknown_base.status_code, 404, unknown_base.get_json())
+
+    def test_diff_is_scoped_to_the_tenant_and_unknown_versions_404(self):
+        client = self.app.test_client()
+        version = self._send_and_decide(client)
+        missing = client.get('/api/project-draft/section-versions/no-such-id/diff',
+                             headers=self.headers())
+        self.assertEqual(missing.status_code, 404)
+        cross = client.get(f"/api/project-draft/section-versions/{version['id']}/diff",
+                           headers=self.other_headers())
+        self.assertEqual(cross.status_code, 404, cross.get_json())
 
 
 if __name__ == '__main__':
