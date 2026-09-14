@@ -525,14 +525,14 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
             slug = (db.tenant_slug(tenant) if isinstance(tenant, dict) else '') or str(tenant_id)[:8]
         except Exception:
             slug = str(tenant_id)[:8]
-        created = _openrouter_create_managed_key(f"tenant-{slug}", limit_usd, limit_reset)
+        created = _openrouter_create_managed_key(f"landloom-{slug}", limit_usd, limit_reset)
         if not isinstance(created, dict) or not created.get('key'):
             reason = created.get('error') if isinstance(created, dict) else 'Provisioning failed'
             return None, str(reason)
         try:
             meta = db.set_tenant_openrouter_key(
                 tenant_id, created.get('key'),
-                key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
+                key_label=created.get('label') or created.get('name') or f"landloom-{slug}",
                 limit_usd=(created.get('limit') if created.get('limit') is not None else limit_usd),
                 limit_reset=created.get('limit_reset') or limit_reset,
                 provenance='auto',
