@@ -412,6 +412,15 @@ def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
         print(f"[OPENROUTER KEYS] create refused: {err}")
         return {'error': str(err) if not isinstance(err, dict) else json.dumps(err, ensure_ascii=False)}
     data = body.get('data') if isinstance(body, dict) else None
+    res = {}
+    if isinstance(data, dict):
+        res.update(data)
+    if isinstance(body, dict):
+        for k, v in body.items():
+            if k != 'data':
+                res[k] = v
+    if res.get('key'):
+        return res
     if isinstance(data, dict) and data.get('key'):
         return data
     if isinstance(body, dict) and body.get('key'):
@@ -427,7 +436,7 @@ def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
     return {'error': f'Provider returned HTTP {response.status_code} without a key'}
 
 
-def _openrouter_update_managed_key(key_hash, limit_usd=None, disabled=None):
+def _openrouter_update_managed_key(key_hash, limit_usd=None, limit_reset=None, disabled=None):
     """Best-effort limit/disable sync to the dashboard. Never raises."""
     mgmt = _openrouter_management_key()
     if not mgmt or not key_hash:
@@ -438,6 +447,8 @@ def _openrouter_update_managed_key(key_hash, limit_usd=None, disabled=None):
             payload['limit'] = float(limit_usd)
         except (TypeError, ValueError):
             pass
+    if limit_reset is not None:
+        payload['limit_reset'] = str(limit_reset).strip().lower()
     if disabled is not None:
         payload['disabled'] = bool(disabled)
     if not payload:
@@ -450,8 +461,8 @@ def _openrouter_update_managed_key(key_hash, limit_usd=None, disabled=None):
             timeout=30,
         )
         if response.status_code >= 400:
-            print(f"[OPENROUTER KEYS] patch refused for {str(key_hash)[:8]}: {response.status_code}")
-            return {'ok': False, 'status': response.status_code}
+            print(f"[OPENROUTER KEYS] patch refused for {str(key_hash)[:8]}: {response.status_code} - {response.text}")
+            return {'ok': False, 'status': response.status_code, 'error': response.text}
         return {'ok': True}
     except Exception as exc:
         print(f"[OPENROUTER KEYS] patch failed: {exc}")
@@ -704,6 +715,69 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
         return None
 
 
+def _find_managed_key_hash_for_tenant(tenant_id, tenant=None, existing_meta=None):
+    """Find and cache the OpenRouter key hash for a tenant from the dashboard. Never raises."""
+    if not tenant_id or not _openrouter_management_key():
+        return None
+    try:
+        if tenant is None:
+            tenant = db.get_tenant_by_id(tenant_id)
+    except Exception:
+        tenant = None
+    if not tenant:
+        return None
+    try:
+        if existing_meta is None:
+            existing_meta = db.get_tenant_openrouter_key_meta(tenant_id)
+    except Exception:
+        existing_meta = {}
+
+    slug = db.tenant_slug(tenant)
+    candidate_names = set()
+    if slug:
+        candidate_names.add(f"landloom-{slug}")
+    if tenant.get('username'):
+        u_slug = db._normalize_slug(tenant.get('username'))
+        if u_slug:
+            candidate_names.add(f"landloom-{u_slug}")
+    if existing_meta.get('key_label'):
+        candidate_names.add(str(existing_meta.get('key_label')))
+
+    keys = _openrouter_list_managed_keys()
+    if not isinstance(keys, list):
+        return None
+
+    raw_key = None
+    try:
+        raw_key = db.get_tenant_openrouter_key_raw(tenant_id)
+    except Exception:
+        pass
+
+    matched_hash = None
+    for item in keys:
+        if not isinstance(item, dict):
+            continue
+        h = item.get('hash')
+        if not h:
+            continue
+        name = str(item.get('name') or item.get('label') or '')
+        if name in candidate_names:
+            matched_hash = h
+            break
+        if raw_key and len(raw_key) >= 8:
+            lbl = str(item.get('label') or '')
+            if lbl.endswith(raw_key[-4:]) or (len(raw_key) >= 12 and raw_key[-8:] in lbl):
+                matched_hash = h
+                break
+
+    if matched_hash:
+        try:
+            db.update_tenant_openrouter_key_meta(tenant_id, openrouter_key_hash=matched_hash)
+        except Exception:
+            pass
+    return matched_hash
+
+
 def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
     """Sync a tenant's credit balance to its OpenRouter key limit (best-effort). Never raises."""
     if not tenant_id:
@@ -713,7 +787,7 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
         if tenant and tenant.get('is_admin'):
             return None
     except Exception:
-        pass
+        tenant = None
     try:
         new_limit = max(0.0, float(new_limit_usd if new_limit_usd is not None else 0.0))
     except (TypeError, ValueError):
@@ -722,8 +796,17 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
         existing = db.get_tenant_openrouter_key_meta(tenant_id)
         if existing and existing.get('has_key'):
             db.update_tenant_openrouter_key_meta(tenant_id, limit_usd=new_limit)
-            if existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
-                _openrouter_update_managed_key(existing.get('openrouter_key_hash'), limit_usd=new_limit)
+            key_hash = existing.get('openrouter_key_hash')
+            if not key_hash and existing.get('provenance') == 'auto':
+                key_hash = _find_managed_key_hash_for_tenant(tenant_id, tenant=tenant, existing_meta=existing)
+            if key_hash:
+                res = _openrouter_update_managed_key(
+                    key_hash,
+                    limit_usd=new_limit,
+                    limit_reset=existing.get('limit_reset') or 'monthly'
+                )
+                if not res.get('ok') and not res.get('skipped'):
+                    print(f"[OPENROUTER KEYS] update key limit returned {res}")
             return db.get_tenant_openrouter_key_meta(tenant_id)
         else:
             return _ensure_tenant_openrouter_key(tenant_id, limit_usd=new_limit)
@@ -19269,8 +19352,13 @@ def api_admin_update_tenant(tenant_id):
         if primary_user_id and primary_user_id != tenant.get('primary_user_id'):
             if not db.set_primary_company_admin(tenant_id, primary_user_id):
                 return jsonify({'error': 'User not found'}), 404
-        if synced_credit_balance is not None:
-            _sync_tenant_credit_to_openrouter(tenant_id, synced_credit_balance)
+        balance_to_sync = synced_credit_balance
+        if balance_to_sync is None:
+            t_row = db.get_tenant_by_id(tenant_id)
+            if t_row and t_row.get('credit_balance') is not None:
+                balance_to_sync = t_row.get('credit_balance')
+        if balance_to_sync is not None:
+            _sync_tenant_credit_to_openrouter(tenant_id, balance_to_sync)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or username already registered'}), 409
     return jsonify({
@@ -19625,12 +19713,16 @@ def api_admin_tenant_key_update(tenant_id):
             is_active=is_active)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
-    if limit_usd is not None and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
-        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), limit_usd=limit_usd)
-    if is_active is False and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
-        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), disabled=True)
-    if is_active is True and existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
-        _openrouter_update_managed_key(existing.get('openrouter_key_hash'), disabled=False)
+    key_hash = existing.get('openrouter_key_hash')
+    if not key_hash and existing.get('provenance') == 'auto':
+        key_hash = _find_managed_key_hash_for_tenant(tenant_id)
+    if key_hash:
+        if limit_usd is not None:
+            _openrouter_update_managed_key(key_hash, limit_usd=limit_usd, limit_reset=limit_reset)
+        if is_active is False:
+            _openrouter_update_managed_key(key_hash, disabled=True)
+        elif is_active is True:
+            _openrouter_update_managed_key(key_hash, disabled=False)
     return jsonify({'success': True, 'key': meta})
 
 
@@ -19946,6 +20038,11 @@ def api_admin_tenant_details(tenant_id):
     tenant = db.get_tenant_by_id(tenant_id)
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
+    if not tenant.get('is_admin') and _openrouter_management_key() and tenant.get('credit_balance') is not None:
+        try:
+            _sync_tenant_credit_to_openrouter(tenant_id, tenant.get('credit_balance'))
+        except Exception as exc:
+            print(f"[OPENROUTER KEYS] tenant details auto-sync failed: {exc}")
     users = db.get_users_by_tenant(tenant_id)
     branding = db.get_branding(tenant_id)
     counts = db.get_tenant_profile_counts(tenant_id)

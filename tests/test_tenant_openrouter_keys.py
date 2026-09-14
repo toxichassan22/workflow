@@ -637,13 +637,60 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                               headers=self._admin_headers(),
                               json={'creditBalance': 75.5})
             self.assertEqual(resp.status_code, 200, resp.get_json())
-            patched_update.assert_called_once_with('synchash123', limit_usd=75.5)
+            patched_update.assert_called_once_with('synchash123', limit_usd=75.5, limit_reset='monthly')
 
         with self.app.app_context():
             meta = db.get_tenant_openrouter_key_meta(tenant_id)
             self.assertEqual(meta['limit_usd'], 75.5)
             balance = db.get_tenant_balance(tenant_id)
             self.assertEqual(balance, 75.5)
+
+    def test_sync_recovers_missing_openrouter_key_hash_from_dashboard(self):
+        """When tenant key has NULL openrouter_key_hash, sync must discover and cache it from dashboard keys."""
+        module = self.application_module
+        tenant_id = self._fresh_tenant('Missing Hash Co', 'missing-hash@example.test', 'missing-hash-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-missing-hash-key-1111111111',
+                provenance='auto', openrouter_key_hash=None, limit_usd=0.0)
+
+        fake_dashboard_keys = [
+            {'hash': 'discovered_hash_999', 'name': 'landloom-missing-hash-co', 'label': 'sk-or-v1-...1111'}
+        ]
+
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_list_managed_keys', return_value=fake_dashboard_keys), \
+                patch.object(module, '_openrouter_update_managed_key', return_value={'ok': True}) as patched_update, \
+                self.app.app_context():
+            synced = module._sync_tenant_credit_to_openrouter(tenant_id, 200.0)
+            self.assertIsNotNone(synced)
+            self.assertEqual(synced['limit_usd'], 200.0)
+            patched_update.assert_called_once_with('discovered_hash_999', limit_usd=200.0, limit_reset='monthly')
+
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+            self.assertEqual(meta['openrouter_key_hash'], 'discovered_hash_999')
+            self.assertEqual(meta['limit_usd'], 200.0)
+
+    def test_create_managed_key_flattens_data_envelope(self):
+        """_openrouter_create_managed_key must flatten key and data so hash is accessible at top level."""
+        module = self.application_module
+        fake_response = _FakeResponse({
+            'key': 'sk-or-v1-newly-created-secret',
+            'data': {
+                'hash': 'envelope_hash_777',
+                'name': 'landloom-test',
+                'limit': 50.0,
+                'limit_reset': 'monthly'
+            }
+        })
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch('requests.post', return_value=fake_response):
+            created = module._openrouter_create_managed_key('landloom-test', 50.0)
+            self.assertIsInstance(created, dict)
+            self.assertEqual(created.get('key'), 'sk-or-v1-newly-created-secret')
+            self.assertEqual(created.get('hash'), 'envelope_hash_777')
+            self.assertEqual(created.get('limit'), 50.0)
 
     def test_client_overview_falls_back_to_wallet_balance_when_no_package(self):
         """When no billing package is assigned, /api/client/overview should use wallet credit_balance."""
