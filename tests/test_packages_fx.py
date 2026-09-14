@@ -175,6 +175,53 @@ class PackagesFxTests(unittest.TestCase):
             self.assertEqual(db.usd_to_sar(10.0, 3.5), 35.0)
             self.assertEqual(db.usd_to_sar(0.374, 3.75), 1.4)
 
+    # ── Forced reset ───────────────────────────────────────────────────
+
+    def test_reset_all_requires_confirm_and_spares_admins(self):
+        client = self.app.test_client()
+        with self.app.app_context():
+            company = db.create_tenant('Reset Co', 'reset-fx@example.test', 'hash', 'reset-fx')
+            db.update_tenant(company, credit_balance=5.0)
+            package = db.create_billing_package('باقة تصفير', credit_usd=5.0)
+            db.assign_tenant_package(company, package['id'])
+            db.record_ai_usage_event(
+                company, 'model-r', flow='slide', total_tokens=10,
+                cost_usd=1.0, generation_id='gen-reset-1')
+            db.record_ledger_credit(company, 5.0)
+            admin_wallet_before = db.get_tenant_balance(self.admin_tenant)
+
+        refused = client.post('/api/admin/billing/reset-all',
+                              headers=self._admin_headers(), json={})
+        self.assertEqual(refused.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(db.get_tenant_balance(company), 10.0)
+
+        company_token = auth.create_token(
+            company, 'reset-fx@example.test', user_id=None,
+            user_name='Reset Admin', user_role='company_admin')
+        forbidden = client.post(
+            '/api/admin/billing/reset-all',
+            headers={'Authorization': f'Bearer {company_token}'},
+            json={'confirm': True})
+        self.assertEqual(forbidden.status_code, 403)
+
+        done = client.post('/api/admin/billing/reset-all',
+                           headers=self._admin_headers(),
+                           json={'confirm': True})
+        self.assertEqual(done.status_code, 200, done.get_json())
+        body = done.get_json()
+        self.assertTrue(body['success'])
+        self.assertGreaterEqual(body['tenants_reset'], 1)
+        self.assertGreaterEqual(body['ai_deleted'], 1)
+        with self.app.app_context():
+            self.assertEqual(db.get_tenant_balance(company), 0.0)
+            self.assertIsNone(db.get_tenant_by_id(company).get('package_id'))
+            self.assertEqual(db.get_tenant_balance(self.admin_tenant), admin_wallet_before)
+            remaining = db.get_db().execute(
+                'SELECT COUNT(*) AS n FROM ai_usage_events WHERE tenant_id = ?',
+                (company,)).fetchone()['n']
+        self.assertEqual(remaining, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

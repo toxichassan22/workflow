@@ -1590,6 +1590,28 @@ def api_billing_checkout():
                     'balance_usd': result.get('balance_usd')})
 
 
+@app.route('/api/admin/billing/reset-all', methods=['POST'])
+@require_admin
+def api_admin_billing_reset_all():
+    """Forced fresh start for every company: zero wallets, unassign packages,
+    and (by default) wipe spend history. Super admins are never touched.
+    Requires an explicit {"confirm": true} body."""
+    data = request.json or {}
+    if data.get('confirm') is not True:
+        return jsonify({'success': False,
+                        'error': 'أرسل confirm=true لتنفيذ التصفير',
+                        'error_code': 'CONFIRM_REQUIRED'}), 400
+    clear_usage = data.get('clearUsage', data.get('clear_usage', True))
+    clear_usage = bool(clear_usage)
+    try:
+        result = db.reset_all_company_balances(clear_usage=clear_usage)
+    except Exception as exc:
+        print(f"[BILLING] reset-all failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تنفيذ التصفير'}), 500
+    result['success'] = True
+    return jsonify(result)
+
+
 @app.route('/api/billing/topup', methods=['POST'])
 @require_company_admin
 def api_billing_topup():

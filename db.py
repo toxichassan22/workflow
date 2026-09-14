@@ -4908,6 +4908,32 @@ def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None)
             'balance_usd': get_tenant_balance(tenant_id)}
 
 
+def reset_all_company_balances(clear_usage=True):
+    """Forced fresh start: zero wallets and unassign packages, optionally
+    wiping spend history too. Super-admin tenants are never touched.
+    Provider key rows stay (identity only); limits re-sync on next assign."""
+    conn = get_db()
+    scope = 'COALESCE(is_admin, 0) != 1'
+    wallets = conn.execute(
+        f'UPDATE tenants SET credit_balance = 0, package_id = NULL WHERE {scope}')
+    result = {'tenants_reset': wallets.rowcount or 0, 'ai_deleted': 0,
+              'maps_deleted': 0, 'history_deleted': 0, 'ledger_deleted': 0}
+    if clear_usage:
+        for table, key in (('ai_usage_events', 'ai_deleted'),
+                           ('map_usage_events', 'maps_deleted'),
+                           ('tenant_package_history', 'history_deleted'),
+                           ('tenant_ledger', 'ledger_deleted')):
+            try:
+                cur = conn.execute(
+                    f'DELETE FROM {table} WHERE tenant_id IN '
+                    f'(SELECT id FROM tenants WHERE {scope})')
+                result[key] = cur.rowcount or 0
+            except Exception:
+                pass
+    conn.commit()
+    return result
+
+
 def get_ledger_entries(tenant_id, limit=50):
     """Newest ledger entries for a tenant."""
     conn = get_db()
