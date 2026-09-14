@@ -59,6 +59,11 @@ def init_db():
         _migrate_project_file_table(conn)
         _migrate_location_fields(conn)
         _migrate_font_system(conn)
+        _create_omran_tables(conn)
+        _create_omran_role_tables(conn)
+        _create_omran_event_tables(conn)
+        _seed_file_type_registry(conn)
+        _ensure_omran_columns(conn)
 
         try:
             conn.commit()
@@ -6936,3 +6941,1591 @@ def get_ai_reconcile_by_scope(tenant_id, draft_ids=(), presentation_ids=()):
         entry['state'] = state
         entry['state_label'] = label
     return {'by_draft': by_draft, 'by_presentation': by_presentation}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Omran platform tasks (t14-t63): generation approvals, final approvals,
+# downloads, proposal copies, notification tasks, invites, users report,
+# approval tasks, points reservations, recharge requests, support tickets,
+# contracts and the file-type registry. Money stays USD in tenant_ledger;
+# these tables track workflow state, not money.
+# ═════════════════════════════════════════════════════════════════════════════
+
+GENERATION_APPROVAL_STATUSES = ('pending', 'approved', 'rejected', 'cancelled', 'consumed')
+SUPPORT_TICKET_STATUSES = ('open', 'in_progress', 'waiting_customer', 'resolved', 'closed')
+SUPPORT_TICKET_PRIORITIES = ('low', 'normal', 'high', 'urgent')
+RECHARGE_REQUEST_STATUSES = ('pending', 'approved', 'rejected')
+
+
+def _create_omran_tables(conn):
+    """Tables added by the Omran platform tasks. Every statement is IF NOT EXISTS."""
+    # t14: one explicit approval to start generation, carrying the cost
+    # estimate and the reserved points the job will consume.
+    conn.execute('''CREATE TABLE IF NOT EXISTS generation_approvals (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT,
+        presentation_id TEXT,
+        estimated_cost_usd REAL NOT NULL DEFAULT 0,
+        estimated_points INTEGER NOT NULL DEFAULT 0,
+        slides_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        requested_by TEXT,
+        requested_by_name TEXT,
+        requested_at TEXT DEFAULT (datetime('now')),
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        job_id TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_generation_approvals_tenant ON generation_approvals(tenant_id, status, requested_at DESC)')
+
+    # t15: the final-file approval locks one presentation revision and stamps
+    # it; the downloads library records every generated or downloaded file.
+    conn.execute('''CREATE TABLE IF NOT EXISTS final_file_approvals (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        presentation_id TEXT NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        requested_by TEXT,
+        requested_by_name TEXT,
+        requested_at TEXT DEFAULT (datetime('now')),
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        content_hash TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_final_approvals_tenant ON final_file_approvals(tenant_id, presentation_id, status)')
+
+    conn.execute('''CREATE TABLE IF NOT EXISTS presentation_downloads (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        presentation_id TEXT,
+        draft_id TEXT,
+        file_name TEXT NOT NULL,
+        format TEXT NOT NULL DEFAULT 'pdf',
+        version_label TEXT,
+        approval_status TEXT NOT NULL DEFAULT 'pending',
+        generated_by TEXT,
+        generated_by_name TEXT,
+        approved_by_name TEXT,
+        generated_at TEXT DEFAULT (datetime('now')),
+        downloaded_at TEXT,
+        downloaded_by_name TEXT,
+        file_size INTEGER DEFAULT 0
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_downloads_tenant ON presentation_downloads(tenant_id, generated_at DESC)')
+
+    # t17/t18: a copy is an independent proposal; archiving never deletes.
+    conn.execute('''CREATE TABLE IF NOT EXISTS proposal_copies (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        source_draft_id TEXT NOT NULL,
+        new_draft_id TEXT NOT NULL,
+        new_title TEXT NOT NULL,
+        copied_by TEXT,
+        copied_by_name TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_proposal_copies_tenant ON proposal_copies(tenant_id, created_at DESC)')
+
+    # t41: in-app notification feed; every row is user- or tenant-scoped and
+    # carries the exact payload a screen needs to render the event.
+    conn.execute('''CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id TEXT,
+        category TEXT NOT NULL DEFAULT 'general',
+        title TEXT NOT NULL,
+        body TEXT,
+        entity_type TEXT,
+        entity_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        read_at TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_feed ON notifications(tenant_id, user_id, created_at DESC)')
+
+    # t24/t42: tasks that stay open until the approver or editor acts.
+    conn.execute('''CREATE TABLE IF NOT EXISTS approval_tasks (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'section_approval',
+        title TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        section_key TEXT,
+        assignee_id TEXT,
+        assignee_name TEXT,
+        payload TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        opened_at TEXT DEFAULT (datetime('now')),
+        due_at TEXT,
+        reminded_at TEXT,
+        escalated_at TEXT,
+        closed_at TEXT,
+        closed_by_name TEXT,
+        cancel_reason TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_approval_tasks_feed ON approval_tasks(tenant_id, status, opened_at DESC)')
+
+    # t30/t31: atomic reservations, one active per operation, consumed once.
+    conn.execute('''CREATE TABLE IF NOT EXISTS point_reservations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        generation_approval_id TEXT,
+        draft_id TEXT,
+        points INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'reserved',
+        reserved_by TEXT,
+        reserved_by_name TEXT,
+        reserved_at TEXT DEFAULT (datetime('now')),
+        settled_at TEXT,
+        settled_by TEXT,
+        note TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_point_reservations_tenant ON point_reservations(tenant_id, status)')
+
+    # t32/t33: client recharge (package purchase) requests reviewed by the
+    # super-admin within 24 hours; the approved request mints a reference
+    # number and the ledger credit stays in record_ledger_credit.
+    conn.execute('''CREATE TABLE IF NOT EXISTS recharge_requests (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        package_id TEXT,
+        package_name TEXT NOT NULL,
+        amount_usd REAL NOT NULL DEFAULT 0,
+        price_sar REAL,
+        transfer_reference TEXT,
+        receipt_file_id TEXT,
+        requested_by TEXT,
+        requested_by_name TEXT,
+        requested_at TEXT DEFAULT (datetime('now')),
+        reviewed_by TEXT,
+        reviewed_by_name TEXT,
+        reviewed_at TEXT,
+        decision_note TEXT,
+        reference_number TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_recharge_requests_tenant ON recharge_requests(tenant_id, status, requested_at DESC)')
+
+    # t40: support tickets with statuses, categories, SLA due times and one
+    # linear comment thread per ticket.
+    conn.execute('''CREATE TABLE IF NOT EXISTS support_tickets (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        number INTEGER,
+        subject TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        priority TEXT NOT NULL DEFAULT 'normal',
+        status TEXT NOT NULL DEFAULT 'open',
+        created_by TEXT,
+        created_by_name TEXT,
+        assigned_to TEXT,
+        sla_due_at TEXT,
+        first_response_at TEXT,
+        resolved_at TEXT,
+        closed_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_support_tickets_tenant ON support_tickets(tenant_id, status, updated_at DESC)')
+
+    conn.execute('''CREATE TABLE IF NOT EXISTS support_ticket_messages (
+        id TEXT PRIMARY KEY,
+        ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        author_id TEXT,
+        author_name TEXT NOT NULL,
+        author_role TEXT NOT NULL DEFAULT 'customer',
+        body TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_ticket_messages(ticket_id, created_at)')
+
+    # t52: contracts and NDAs with expiry dates the admin screens watch.
+    conn.execute('''CREATE TABLE IF NOT EXISTS tenant_contracts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'contract',
+        title TEXT NOT NULL,
+        file_id TEXT,
+        starts_at TEXT,
+        expires_at TEXT,
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_contracts_tenant ON tenant_contracts(tenant_id, expires_at)')
+
+    # t62: versioned registry of allowed file types and their limits.
+    conn.execute('''CREATE TABLE IF NOT EXISTS file_type_registry (
+        key TEXT PRIMARY KEY,
+        label_ar TEXT NOT NULL,
+        label_en TEXT,
+        kind TEXT NOT NULL DEFAULT 'document',
+        max_size_mb INTEGER NOT NULL DEFAULT 25,
+        allowed_extensions TEXT NOT NULL DEFAULT '[]',
+        version INTEGER NOT NULL DEFAULT 1,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )''')
+
+
+def _ensure_omran_columns(conn):
+    """Additive migrations on existing installs: last_login on users/tenants."""
+    def _columns(table):
+        return {row[1] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
+
+    try:
+        if 'last_login_at' not in _columns('users'):
+            conn.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT')
+    except Exception:
+        pass
+    try:
+        if 'last_login_at' not in _columns('tenants'):
+            conn.execute('ALTER TABLE tenants ADD COLUMN last_login_at TEXT')
+    except Exception:
+        pass
+
+
+FILE_TYPE_REGISTRY_DEFAULTS = [
+    {'key': 'deed_file', 'label_ar': 'صك الملكية', 'label_en': 'Ownership deed', 'kind': 'document',
+     'max_size_mb': 25, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
+    {'key': 'croquis_file', 'label_ar': 'الكروكي', 'label_en': 'Croquis survey', 'kind': 'document',
+     'max_size_mb': 25, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
+    {'key': 'land_documents_files', 'label_ar': 'رخصة البناء والكروكي', 'label_en': 'Building licence and croquis',
+     'kind': 'document', 'max_size_mb': 40, 'allowed_extensions': ['.pdf']},
+    {'key': 'land_photos', 'label_ar': 'صور الأرض', 'label_en': 'Land photos', 'kind': 'image',
+     'max_size_mb': 10, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
+    {'key': 'project_logo', 'label_ar': 'شعار المشروع', 'label_en': 'Project logo', 'kind': 'image',
+     'max_size_mb': 5, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
+    {'key': 'team_logo', 'label_ar': 'شعار الجهة', 'label_en': 'Team logo', 'kind': 'image',
+     'max_size_mb': 5, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
+    {'key': 'competitor_logo', 'label_ar': 'شعار المنافس', 'label_en': 'Competitor logo', 'kind': 'image',
+     'max_size_mb': 5, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
+    {'key': 'recharge_receipt', 'label_ar': 'إيصال تحويل شحن الرصيد', 'label_en': 'Recharge transfer receipt',
+     'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
+    {'key': 'contract_file', 'label_ar': 'العقد أو اتفاقية السرية', 'label_en': 'Contract or NDA', 'kind': 'document',
+     'max_size_mb': 25, 'allowed_extensions': ['.pdf']},
+]
+
+
+def _seed_file_type_registry(conn):
+    for item in FILE_TYPE_REGISTRY_DEFAULTS:
+        conn.execute(
+            '''INSERT INTO file_type_registry (key, label_ar, label_en, kind, max_size_mb, allowed_extensions, version)
+               VALUES (?, ?, ?, ?, ?, ?, 1)
+               ON CONFLICT(key) DO NOTHING''',
+            (item['key'], item['label_ar'], item['label_en'], item['kind'],
+             item['max_size_mb'], json.dumps(item['allowed_extensions'])),
+        )
+
+
+def _json_or(value, fallback):
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed is not None else fallback
+
+
+def record_login(tenant_id, user_id=None):
+    """Stamp last_login_at on the tenant row or the user row after a login."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    if user_id:
+        conn.execute('UPDATE users SET last_login_at = ? WHERE id = ?', (now, user_id))
+    else:
+        conn.execute('UPDATE tenants SET last_login_at = ? WHERE id = ?', (now, tenant_id))
+    conn.commit()
+    return now
+
+
+def tenant_users_report(tenant_id):
+    """t22: active, invited, disabled users plus the newest invite links."""
+    conn = get_db()
+    users = []
+    for row in conn.execute(
+        'SELECT id, name, email, username, role, is_active, require_password_change, '
+        'last_login_at, created_at FROM users WHERE tenant_id = ? ORDER BY created_at DESC',
+        (tenant_id,),
+    ).fetchall():
+        users.append(dict(row))
+    invites = []
+    try:
+        for row in conn.execute(
+            'SELECT id, email, token, expires_at, used_at FROM invite_links '
+            'WHERE tenant_id = ? ORDER BY expires_at DESC LIMIT 25',
+            (tenant_id,),
+        ).fetchall():
+            invite = dict(row)
+            try:
+                invite['is_expired'] = bool(invite['expires_at']) and datetime.fromisoformat(invite['expires_at']) < datetime.now()
+            except (TypeError, ValueError):
+                invite['is_expired'] = False
+            invite['is_used'] = bool(invite.get('used_at'))
+            invites.append(invite)
+    except Exception:
+        invites = []
+    active = [u for u in users if u['is_active']]
+    return {
+        'users': users,
+        'invites': invites,
+        'counts': {
+            'active': len(active),
+            'disabled': len(users) - len(active),
+            'pending_invites': len([i for i in invites if not i['is_used'] and not i['is_expired']]),
+        },
+    }
+
+
+def expire_stale_invites(tenant_id):
+    """t21: invites past their expiry can no longer be accepted."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cursor = conn.execute(
+        'UPDATE invite_links SET used_at = ? WHERE tenant_id = ? AND used_at IS NULL AND expires_at < ?',
+        (now, tenant_id, now),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
+def get_file_type_registry(active_only=True):
+    """t62: the versioned registry of allowed file types."""
+    conn = get_db()
+    query = ('SELECT key, label_ar, label_en, kind, max_size_mb, allowed_extensions, '
+             'version, is_active, updated_at FROM file_type_registry')
+    if active_only:
+        query += ' WHERE is_active = 1'
+    query += ' ORDER BY key'
+    rows = conn.execute(query).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item['allowed_extensions'] = _json_or(item.get('allowed_extensions'), [])
+        result.append(item)
+    return result
+
+
+def upsert_file_type(key, label_ar, kind='document', max_size_mb=25,
+                     allowed_extensions=None, label_en=None, is_active=True):
+    """Create or evolve one registry entry; a content-affecting change bumps version."""
+    if not key or not label_ar:
+        return {'error': 'key_and_label_required'}
+    conn = get_db()
+    existing = conn.execute('SELECT * FROM file_type_registry WHERE key = ?', (key,)).fetchone()
+    extensions_json = json.dumps(list(allowed_extensions or []))
+    now = datetime.now().isoformat()
+    if existing:
+        changed = (
+            existing['label_ar'] != label_ar or existing['kind'] != kind
+            or int(existing['max_size_mb'] or 0) != int(max_size_mb)
+            or existing['allowed_extensions'] != extensions_json
+        )
+        version = int(existing['version'] or 1) + (1 if changed else 0)
+        conn.execute(
+            '''UPDATE file_type_registry SET label_ar = ?, label_en = ?, kind = ?, max_size_mb = ?,
+               allowed_extensions = ?, version = ?, is_active = ?, updated_at = ? WHERE key = ?''',
+            (label_ar, label_en, kind, int(max_size_mb), extensions_json,
+             version, 1 if is_active else 0, now, key),
+        )
+    else:
+        conn.execute(
+            '''INSERT INTO file_type_registry (key, label_ar, label_en, kind, max_size_mb, allowed_extensions, version, is_active, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)''',
+            (key, label_ar, label_en, kind, int(max_size_mb), extensions_json,
+             1 if is_active else 0, now),
+        )
+    conn.commit()
+    row = conn.execute('SELECT * FROM file_type_registry WHERE key = ?', (key,)).fetchone()
+    item = dict(row)
+    item['allowed_extensions'] = _json_or(item.get('allowed_extensions'), [])
+    return item
+
+
+# ── t14/t30: generation approval + atomic points reservation ────────────────
+
+def estimate_generation_cost(tenant_id, draft_id=None, slides_count=0, presentation_id=None):
+    """Estimate one generation run from the tenant's ledger history."""
+    conn = get_db()
+    avg = conn.execute(
+        "SELECT AVG(amount_usd) AS avg_cost FROM tenant_ledger "
+        "WHERE tenant_id = ? AND kind = 'debit' AND amount_usd > 0",
+        (tenant_id,),
+    ).fetchone()
+    per_run = float((avg['avg_cost'] if avg else 0) or 0)
+    slides = max(1, int(slides_count or 0))
+    per_slide = per_run / 40.0 if per_run else 0
+    estimated = round(per_slide * slides, 4) if per_run else 0
+    return {
+        'estimated_cost_usd': estimated,
+        'estimated_points': int(round(estimated * 1000)),
+        'slides_count': slides,
+        'draft_id': draft_id,
+        'presentation_id': presentation_id,
+    }
+
+
+def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requested_by_name, presentation_id=None):
+    """Open a generation approval carrying the estimate shown to the approver."""
+    conn = get_db()
+    if not get_project_draft_by_id(tenant_id, draft_id):
+        return {'error': 'draft_not_found'}
+    approval_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO generation_approvals
+           (id, tenant_id, draft_id, presentation_id, estimated_cost_usd, estimated_points,
+            slides_count, status, requested_by, requested_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)''',
+        (approval_id, tenant_id, draft_id, presentation_id,
+         float(estimate.get('estimated_cost_usd') or 0), int(estimate.get('estimated_points') or 0),
+         int(estimate.get('slides_count') or 0), requested_by, requested_by_name),
+    )
+    conn.commit()
+    row = conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone()
+    return dict(row)
+
+
+def decide_generation_approval(tenant_id, approval_id, decision, decided_by, decided_by_name, note=None):
+    """Approve, reject or cancel. Approval reserves the points atomically."""
+    if decision not in {'approved', 'rejected', 'cancelled'}:
+        return {'error': 'invalid_decision'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM generation_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'approval_not_found'}
+    if row['status'] != 'pending':
+        return {'error': 'approval_not_pending'}
+    if decision == 'cancelled' and row['requested_by'] and str(row['requested_by']) != str(decided_by):
+        return {'error': 'cancel_not_allowed'}
+    conn.execute(
+        '''UPDATE generation_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
+           decided_at = ?, decision_note = ? WHERE id = ?''',
+        (decision, decided_by, decided_by_name, datetime.now().isoformat(), str(note or '').strip() or None, approval_id),
+    )
+    conn.commit()
+    updated = dict(conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone())
+    if decision == 'approved':
+        if int(updated.get('estimated_points') or 0) <= 0:
+            # A zero-cost estimate needs no reservation; the approval stands alone.
+            return updated
+        reservation = reserve_points(
+            tenant_id, updated['estimated_points'], updated['estimated_cost_usd'],
+            reserved_by=decided_by, reserved_by_name=decided_by_name,
+            generation_approval_id=approval_id, draft_id=row['draft_id'],
+        )
+        if reservation.get('error'):
+            conn.execute(
+                "UPDATE generation_approvals SET status = 'pending', decided_by = NULL, "
+                'decided_by_name = NULL, decided_at = NULL WHERE id = ?',
+                (approval_id,),
+            )
+            conn.commit()
+            return {'error': reservation['error']}
+        updated['reservation_id'] = reservation['id']
+    return updated
+
+
+def settle_generation_approval(tenant_id, approval_id, job_id, consumed=True, settled_by=None, note=None):
+    """After the generation job finishes: consume the reservation once, or release it."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM generation_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'approval_not_found'}
+    if row['status'] != 'approved':
+        return {'error': 'approval_not_approved'}
+    reservations = conn.execute(
+        "SELECT * FROM point_reservations WHERE generation_approval_id = ? AND status = 'reserved'",
+        (approval_id,),
+    ).fetchall()
+    settled = []
+    for reservation in reservations:
+        if consumed:
+            result = consume_points(tenant_id, reservation['id'], settled_by=settled_by, note=note or job_id)
+        else:
+            result = release_points(tenant_id, reservation['id'], settled_by=settled_by, note=note or job_id)
+        if result.get('error'):
+            return result
+        settled.append(result['id'])
+    conn.execute(
+        'UPDATE generation_approvals SET status = ?, job_id = ? WHERE id = ?',
+        ('consumed' if consumed else 'rejected', job_id, approval_id),
+    )
+    conn.commit()
+    return {'id': approval_id, 'status': 'consumed' if consumed else 'rejected', 'reservations': settled}
+
+
+def reserve_points(tenant_id, points, cost_usd=0, reserved_by=None, reserved_by_name=None,
+                   generation_approval_id=None, draft_id=None):
+    """t31: reserve points against the wallet balance before a generation run."""
+    points = int(points or 0)
+    if points <= 0:
+        return {'error': 'nothing_to_reserve'}
+    conn = get_db()
+    balance = get_tenant_balance(tenant_id)
+    if balance < float(cost_usd or 0):
+        return {'error': 'insufficient_balance'}
+    reservation_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO point_reservations
+           (id, tenant_id, generation_approval_id, draft_id, points, cost_usd, status, reserved_by, reserved_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)''',
+        (reservation_id, tenant_id, generation_approval_id, draft_id, points,
+         float(cost_usd or 0), reserved_by, reserved_by_name),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM point_reservations WHERE id = ?', (reservation_id,)).fetchone())
+
+
+def consume_points(tenant_id, reservation_id, settled_by=None, note=None):
+    """Settle a reservation exactly once; a second call is refused."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM point_reservations WHERE id = ? AND tenant_id = ?',
+        (reservation_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'reservation_not_found'}
+    if row['status'] != 'reserved':
+        return {'error': 'reservation_not_reserved'}
+    conn.execute(
+        "UPDATE point_reservations SET status = 'consumed', settled_at = ?, settled_by = ?, note = ? WHERE id = ?",
+        (datetime.now().isoformat(), settled_by, str(note or '').strip() or None, reservation_id),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM point_reservations WHERE id = ?', (reservation_id,)).fetchone())
+
+
+def release_points(tenant_id, reservation_id, settled_by=None, note=None):
+    """Free a reservation after a failed generation; nothing is consumed."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM point_reservations WHERE id = ? AND tenant_id = ?',
+        (reservation_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'reservation_not_found'}
+    if row['status'] != 'reserved':
+        return {'error': 'reservation_not_reserved'}
+    conn.execute(
+        "UPDATE point_reservations SET status = 'released', settled_at = ?, settled_by = ?, note = ? WHERE id = ?",
+        (datetime.now().isoformat(), settled_by, str(note or '').strip() or None, reservation_id),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM point_reservations WHERE id = ?', (reservation_id,)).fetchone())
+
+
+def list_point_reservations(tenant_id, status=None, limit=100):
+    conn = get_db()
+    if status:
+        rows = conn.execute(
+            'SELECT * FROM point_reservations WHERE tenant_id = ? AND status = ? ORDER BY reserved_at DESC LIMIT ?',
+            (tenant_id, status, int(limit)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM point_reservations WHERE tenant_id = ? ORDER BY reserved_at DESC LIMIT ?',
+            (tenant_id, int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_generation_approval(tenant_id, approval_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM generation_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_generation_approvals(tenant_id, status=None, limit=50):
+    conn = get_db()
+    if status:
+        rows = conn.execute(
+            'SELECT * FROM generation_approvals WHERE tenant_id = ? AND status = ? ORDER BY requested_at DESC LIMIT ?',
+            (tenant_id, status, int(limit)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM generation_approvals WHERE tenant_id = ? ORDER BY requested_at DESC LIMIT ?',
+            (tenant_id, int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ── t15: final approval, digital stamp and the downloads library ────────────
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    try:
+        with open(path, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(65536), b''):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def stamp_final_file(app_root, tenant_id, presentation_id, revision=0):
+    """A stamp is not a decoration: the sha256 of the file bytes plus who decided."""
+    conn = get_db()
+    approval = conn.execute(
+        "SELECT * FROM final_file_approvals WHERE tenant_id = ? AND presentation_id = ? AND status = 'approved' "
+        'ORDER BY decided_at DESC LIMIT 1',
+        (tenant_id, presentation_id),
+    ).fetchone()
+    if not approval:
+        return {'error': 'not_approved'}
+    row = conn.execute(
+        'SELECT file_path FROM exports WHERE presentation_id = ? ORDER BY created_at DESC LIMIT 1',
+        (presentation_id,),
+    ).fetchone()
+    if not row or not row['file_path']:
+        return {'error': 'no_export_file'}
+    path = row['file_path']
+    if not os.path.isabs(path):
+        path = os.path.join(app_root, path)
+    digest = _file_sha256(path)
+    if not digest:
+        return {'error': 'stamp_failed'}
+    conn.execute('UPDATE final_file_approvals SET content_hash = ? WHERE id = ?', (digest, approval['id']))
+    conn.commit()
+    return {
+        'approval_id': approval['id'],
+        'content_hash': digest,
+        'decided_by_name': approval['decided_by_name'],
+        'decided_at': approval['decided_at'],
+        'revision': int(revision or 0),
+        'algorithm': 'sha256',
+    }
+
+
+def request_final_file_approval(tenant_id, presentation_id, requested_by, requested_by_name, revision=0):
+    conn = get_db()
+    presentation = get_presentation(presentation_id, tenant_id=tenant_id)
+    if not presentation:
+        return {'error': 'presentation_not_found'}
+    pending = conn.execute(
+        "SELECT id FROM final_file_approvals WHERE tenant_id = ? AND presentation_id = ? AND status = 'pending'",
+        (tenant_id, presentation_id),
+    ).fetchone()
+    if pending:
+        return {'error': 'approval_already_pending', 'approval_id': pending['id']}
+    approval_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO final_file_approvals
+           (id, tenant_id, presentation_id, revision, status, requested_by, requested_by_name)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?)''',
+        (approval_id, tenant_id, presentation_id, int(revision or 0), requested_by, requested_by_name),
+    )
+    conn.commit()
+    try:
+        transition_project_draft_status(
+            tenant_id, presentation.get('draft_id'), 'final_approval_pending',
+            actor_id=requested_by, actor_name=requested_by_name,
+            reason='إرسال الملف النهائي للاعتماد',
+        )
+    except Exception:
+        pass
+    row = conn.execute('SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone()
+    return dict(row)
+
+
+def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, decided_by_name, note=None):
+    if decision not in {'approved', 'rejected'}:
+        return {'error': 'invalid_decision'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM final_file_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'approval_not_found'}
+    if row['status'] != 'pending':
+        return {'error': 'approval_not_pending'}
+    conn.execute(
+        '''UPDATE final_file_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
+           decided_at = ?, decision_note = ? WHERE id = ?''',
+        (decision, decided_by, decided_by_name, datetime.now().isoformat(),
+         str(note or '').strip() or None, approval_id),
+    )
+    if decision == 'approved':
+        conn.execute(
+            "UPDATE presentations SET status = 'approved' WHERE id = ? AND tenant_id = ?",
+            (row['presentation_id'], tenant_id),
+        )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone())
+
+
+def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limit=50):
+    conn = get_db()
+    query = 'SELECT * FROM final_file_approvals WHERE tenant_id = ?'
+    params = [tenant_id]
+    if presentation_id:
+        query += ' AND presentation_id = ?'
+        params.append(presentation_id)
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    query += ' ORDER BY requested_at DESC LIMIT ?'
+    params.append(int(limit))
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def record_download(tenant_id, file_name, presentation_id=None, draft_id=None, format='pdf',
+                    version_label=None, approval_status='pending', generated_by=None,
+                    generated_by_name=None, file_size=0):
+    """t15: every generated file enters the library with who made and approved it."""
+    conn = get_db()
+    row_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO presentation_downloads
+           (id, tenant_id, presentation_id, draft_id, file_name, format, version_label,
+            approval_status, generated_by, generated_by_name, file_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (row_id, tenant_id, presentation_id, draft_id, file_name, format, version_label,
+         approval_status, generated_by, generated_by_name, int(file_size or 0)),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM presentation_downloads WHERE id = ?', (row_id,)).fetchone())
+
+
+def mark_download_downloaded(tenant_id, download_id, downloaded_by_name=None):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cursor = conn.execute(
+        'UPDATE presentation_downloads SET downloaded_at = ?, downloaded_by_name = ? '
+        'WHERE id = ? AND tenant_id = ? AND downloaded_at IS NULL',
+        (now, downloaded_by_name, download_id, tenant_id),
+    )
+    conn.commit()
+    if cursor.rowcount:
+        return dict(conn.execute('SELECT * FROM presentation_downloads WHERE id = ?', (download_id,)).fetchone())
+    return None
+
+
+def list_downloads(tenant_id, presentation_id=None, limit=100):
+    conn = get_db()
+    if presentation_id:
+        rows = conn.execute(
+            'SELECT * FROM presentation_downloads WHERE tenant_id = ? AND presentation_id = ? ORDER BY generated_at DESC LIMIT ?',
+            (tenant_id, presentation_id, int(limit)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM presentation_downloads WHERE tenant_id = ? ORDER BY generated_at DESC LIMIT ?',
+            (tenant_id, int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ── t17/t18: copy a proposal, archive and restore ───────────────────────────
+
+def copy_project_draft(tenant_id, source_draft_id, new_title, copied_by, copied_by_name, actor_user_id=None):
+    """Copy inputs and attachments under a new mandatory unique name.
+
+    Approvals, section statuses, lifecycle history, audit trail and the ledger
+    are never copied: the copy is an independent proposal starting as a draft.
+    """
+    conn = get_db()
+    source = get_project_draft_by_id(tenant_id, source_draft_id)
+    if not source:
+        return {'error': 'draft_not_found'}
+    title = str(new_title or '').strip()
+    if not title:
+        return {'error': 'title_required'}
+    normalized = title.lower()
+    for row in conn.execute('SELECT title FROM project_drafts WHERE tenant_id = ?', (tenant_id,)).fetchall():
+        if str(row['title'] or '').strip().lower() == normalized:
+            return {'error': 'title_exists'}
+    data = source.get('draft_data') if isinstance(source.get('draft_data'), dict) else {}
+    data = json.loads(json.dumps(data, ensure_ascii=False)) if data else {}
+    new_draft_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO project_drafts
+           (id, tenant_id, user_id, title, draft_data, section_statuses, status, revision, data_bytes, has_slides, has_maps)
+           VALUES (?, ?, ?, ?, ?, '{}', 'draft', 1, ?, 0, 0)''',
+        (new_draft_id, tenant_id, actor_user_id or source.get('user_id'), title,
+         json.dumps(data, ensure_ascii=False), len(json.dumps(data, ensure_ascii=False))),
+    )
+    conn.execute(
+        '''INSERT INTO proposal_copies (id, tenant_id, source_draft_id, new_draft_id, new_title, copied_by, copied_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (str(uuid.uuid4()), tenant_id, source_draft_id, new_draft_id, title, copied_by, copied_by_name),
+    )
+    try:
+        for file_row in conn.execute(
+            'SELECT * FROM project_files WHERE tenant_id = ? AND draft_id = ?',
+            (tenant_id, source_draft_id),
+        ).fetchall():
+            conn.execute(
+                '''INSERT INTO project_files
+                   (id, tenant_id, draft_id, project_id, file_type, original_name, storage_path,
+                    mime_type, file_size, sha256, uploaded_by, uploaded_by_name)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (str(uuid.uuid4()), tenant_id, new_draft_id, file_row['project_id'], file_row['file_type'],
+                 file_row['original_name'], file_row['storage_path'], file_row['mime_type'],
+                 file_row['file_size'], file_row['sha256'], copied_by, copied_by_name),
+            )
+    except Exception:
+        pass
+    conn.commit()
+    return {
+        'draft_id': new_draft_id,
+        'title': title,
+        'source_draft_id': source_draft_id,
+        'copied_fields': len(data),
+    }
+
+
+def list_proposal_copies(tenant_id, limit=50):
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT pc.id, pc.source_draft_id, pc.new_draft_id, pc.new_title, pc.copied_by_name, pc.created_at,
+                  d.title AS source_title
+           FROM proposal_copies pc LEFT JOIN project_drafts d ON d.id = pc.source_draft_id
+           WHERE pc.tenant_id = ? ORDER BY pc.created_at DESC LIMIT ?''',
+        (tenant_id, int(limit)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def archive_presentation(tenant_id, presentation_id, archived_by, archived_by_name):
+    """Archive: inactive with the full record kept; never a delete."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id FROM presentations WHERE id = ? AND tenant_id = ?',
+        (presentation_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'presentation_not_found'}
+    conn.execute("UPDATE presentations SET status = 'archived', updated_at = datetime('now') WHERE id = ?", (presentation_id,))
+    conn.commit()
+    return {'id': presentation_id, 'status': 'archived', 'archived_by_name': archived_by_name}
+
+
+def restore_presentation(tenant_id, presentation_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id FROM presentations WHERE id = ? AND tenant_id = ? AND status = 'archived'",
+        (presentation_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'presentation_not_archived'}
+    conn.execute("UPDATE presentations SET status = 'draft', updated_at = datetime('now') WHERE id = ?", (presentation_id,))
+    conn.commit()
+    return {'id': presentation_id, 'status': 'draft'}
+
+
+# ── t41/t24/t42: notifications and the approval task center ─────────────────
+
+NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge', 'support', 'general')
+
+
+def create_notification(tenant_id, title, body=None, category='general', user_id=None,
+                        entity_type=None, entity_id=None):
+    conn = get_db()
+    row_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO notifications (id, tenant_id, user_id, category, title, body, entity_type, entity_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+        (row_id, tenant_id, user_id, category if category in NOTIFICATION_CATEGORIES else 'general',
+         title, body, entity_type, entity_id),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM notifications WHERE id = ?', (row_id,)).fetchone())
+
+
+def list_notifications(tenant_id, user_id=None, unread_only=False, limit=50):
+    conn = get_db()
+    query = 'SELECT * FROM notifications WHERE tenant_id = ?'
+    params = [tenant_id]
+    if user_id:
+        query += ' AND (user_id IS NULL OR user_id = ?)'
+        params.append(user_id)
+    if unread_only:
+        query += ' AND read_at IS NULL'
+    query += ' ORDER BY created_at DESC LIMIT ?'
+    params.append(int(limit))
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def mark_notifications_read(tenant_id, user_id, notification_ids=None):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    if notification_ids:
+        placeholders = ','.join('?' for _ in notification_ids)
+        cursor = conn.execute(
+            f'UPDATE notifications SET read_at = ? WHERE tenant_id = ? AND read_at IS NULL AND id IN ({placeholders})',
+            [now, tenant_id, *notification_ids],
+        )
+    else:
+        cursor = conn.execute(
+            'UPDATE notifications SET read_at = ? WHERE tenant_id = ? AND read_at IS NULL AND (user_id IS NULL OR user_id = ?)',
+            (now, tenant_id, user_id),
+        )
+    conn.commit()
+    return cursor.rowcount
+
+
+APPROVAL_TASK_KINDS = ('section_approval', 'generation_approval', 'final_approval', 'recharge', 'support')
+
+
+def create_approval_task(tenant_id, kind, title, entity_type=None, entity_id=None,
+                         section_key=None, assignee_id=None, assignee_name=None,
+                         payload=None, due_hours=None):
+    """t24: a task stays open until the approver or editor resolves it."""
+    conn = get_db()
+    row_id = str(uuid.uuid4())
+    from datetime import timedelta
+    due_at = (datetime.now() + timedelta(hours=int(due_hours or 48))).isoformat() if due_hours else None
+    conn.execute(
+        '''INSERT INTO approval_tasks
+           (id, tenant_id, kind, title, entity_type, entity_id, section_key, assignee_id, assignee_name, payload, due_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (row_id, tenant_id, kind if kind in APPROVAL_TASK_KINDS else 'general', title,
+         entity_type, entity_id, section_key, assignee_id, assignee_name,
+         json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else None, due_at),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (row_id,)).fetchone())
+
+
+def list_approval_tasks(tenant_id, status='open', kind=None, limit=100):
+    conn = get_db()
+    query = 'SELECT * FROM approval_tasks WHERE tenant_id = ?'
+    params = [tenant_id]
+    if status and status != 'all':
+        query += ' AND status = ?'
+        params.append(status)
+    if kind:
+        query += ' AND kind = ?'
+        params.append(kind)
+    query += ' ORDER BY opened_at DESC LIMIT ?'
+    params.append(int(limit))
+    rows = [dict(row) for row in conn.execute(query, params).fetchall()]
+    now = datetime.now()
+    for item in rows:
+        try:
+            item['is_overdue'] = bool(item.get('due_at')) and datetime.fromisoformat(item['due_at']) < now
+        except (TypeError, ValueError):
+            item['is_overdue'] = False
+    return rows
+
+
+def close_approval_task(tenant_id, task_id, closed_by_name=None, cancel_reason=None):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'task_not_found'}
+    if row['status'] != 'open':
+        return {'error': 'task_not_open'}
+    cancel_reason = str(cancel_reason or '').strip() or None
+    conn.execute(
+        'UPDATE approval_tasks SET status = ?, closed_at = ?, closed_by_name = ?, cancel_reason = ? WHERE id = ?',
+        ('cancelled' if cancel_reason else 'done', datetime.now().isoformat(), closed_by_name,
+         cancel_reason, task_id),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (task_id,)).fetchone())
+
+
+def remind_approval_task(tenant_id, task_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'task_not_found'}
+    if row['status'] != 'open':
+        return {'error': 'task_not_open'}
+    conn.execute('UPDATE approval_tasks SET reminded_at = ? WHERE id = ?', (datetime.now().isoformat(), task_id))
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (task_id,)).fetchone())
+
+
+def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
+    """t24: tasks open past their due time escalate once."""
+    conn = get_db()
+    from datetime import timedelta
+    threshold = (datetime.now() - timedelta(hours=int(overdue_hours))).isoformat()
+    rows = conn.execute(
+        "SELECT id FROM approval_tasks WHERE tenant_id = ? AND status = 'open' "
+        'AND escalated_at IS NULL AND due_at IS NOT NULL AND due_at < ?',
+        (tenant_id, threshold),
+    ).fetchall()
+    escalated = []
+    for row in rows:
+        conn.execute('UPDATE approval_tasks SET escalated_at = ? WHERE id = ?', (datetime.now().isoformat(), row['id']))
+        escalated.append(row['id'])
+    conn.commit()
+    return escalated
+
+
+# ── t32/t33: recharge (package purchase) requests ───────────────────────────
+
+def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=None,
+                            transfer_reference=None, requested_by=None, requested_by_name=None,
+                            package_id=None, receipt_file_id=None):
+    if not str(package_name or '').strip():
+        return {'error': 'package_name_required'}
+    conn = get_db()
+    row_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO recharge_requests
+           (id, tenant_id, package_id, package_name, amount_usd, price_sar, transfer_reference,
+            receipt_file_id, requested_by, requested_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (row_id, tenant_id, package_id, str(package_name).strip(), float(amount_usd or 0),
+         float(price_sar) if price_sar is not None else None, transfer_reference, receipt_file_id,
+         requested_by, requested_by_name),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM recharge_requests WHERE id = ?', (row_id,)).fetchone())
+
+
+def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, reviewed_by_name,
+                            note=None, reference_number=None):
+    """Approve or reject a recharge request; approval credits the ledger wallet."""
+    if decision not in {'approved', 'rejected'}:
+        return {'error': 'invalid_decision'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM recharge_requests WHERE id = ? AND tenant_id = ?', (request_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'request_not_found'}
+    if row['status'] != 'pending':
+        return {'error': 'request_not_pending'}
+    reference = str(reference_number or '').strip()
+    if decision == 'approved' and not reference:
+        reference = 'RCH-' + datetime.now().strftime('%Y%m%d') + '-' + request_id[:8].upper()
+    conn.execute(
+        '''UPDATE recharge_requests SET status = ?, reviewed_by = ?, reviewed_by_name = ?,
+           reviewed_at = ?, decision_note = ?, reference_number = ? WHERE id = ?''',
+        (decision, reviewed_by, reviewed_by_name, datetime.now().isoformat(),
+         str(note or '').strip() or None, reference if decision == 'approved' else row['reference_number'],
+         request_id),
+    )
+    conn.commit()
+    if decision == 'approved' and float(row['amount_usd'] or 0) > 0:
+        try:
+            record_ledger_credit(
+                tenant_id, float(row['amount_usd']),
+                note='شحن رصيد بالمرجع ' + reference,
+                idempotency_key='recharge:' + request_id,
+            )
+        except Exception:
+            pass
+    return dict(conn.execute('SELECT * FROM recharge_requests WHERE id = ?', (request_id,)).fetchone())
+
+
+def list_recharge_requests(tenant_id=None, status=None, limit=100):
+    conn = get_db()
+    query = 'SELECT * FROM recharge_requests'
+    clauses = []
+    params = []
+    if tenant_id:
+        clauses.append('tenant_id = ?')
+        params.append(tenant_id)
+    if status:
+        clauses.append('status = ?')
+        params.append(status)
+    if clauses:
+        query += ' WHERE ' + ' AND '.join(clauses)
+    query += ' ORDER BY requested_at DESC LIMIT ?'
+    params.append(int(limit))
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+# ── t40: support tickets ────────────────────────────────────────────────────
+
+SLA_HOURS_BY_PRIORITY = {'urgent': 4, 'high': 8, 'normal': 24, 'low': 72}
+
+
+def create_support_ticket(tenant_id, subject, category='general', priority='normal',
+                          created_by=None, created_by_name=None, body=None):
+    subject = str(subject or '').strip()
+    if not subject:
+        return {'error': 'subject_required'}
+    if priority not in SLA_HOURS_BY_PRIORITY:
+        priority = 'normal'
+    conn = get_db()
+    ticket_id = str(uuid.uuid4())
+    from datetime import timedelta
+    sla_due = (datetime.now() + timedelta(hours=SLA_HOURS_BY_PRIORITY[priority])).isoformat()
+    number = conn.execute(
+        'SELECT COALESCE(MAX(number), 0) + 1 AS next FROM support_tickets WHERE tenant_id = ?',
+        (tenant_id,),
+    ).fetchone()
+    conn.execute(
+        '''INSERT INTO support_tickets
+           (id, tenant_id, number, subject, category, priority, status, created_by, created_by_name, sla_due_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)''',
+        (ticket_id, tenant_id, int(number['next']), subject, category, priority, created_by, created_by_name, sla_due),
+    )
+    if body:
+        conn.execute(
+            '''INSERT INTO support_ticket_messages (id, ticket_id, tenant_id, author_id, author_name, author_role, body)
+               VALUES (?, ?, ?, ?, ?, 'customer', ?)''',
+            (str(uuid.uuid4()), ticket_id, tenant_id, created_by, created_by_name or 'عميل', body),
+        )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
+
+
+def list_support_tickets(tenant_id, status=None, limit=100):
+    conn = get_db()
+    if status:
+        rows = conn.execute(
+            'SELECT * FROM support_tickets WHERE tenant_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?',
+            (tenant_id, status, int(limit)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM support_tickets WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?',
+            (tenant_id, int(limit)),
+        ).fetchall()
+    now = datetime.now()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item['sla_overdue'] = bool(item.get('sla_due_at')) and item['status'] not in {'resolved', 'closed'} \
+                and datetime.fromisoformat(item['sla_due_at']) < now
+        except (TypeError, ValueError):
+            item['sla_overdue'] = False
+        result.append(item)
+    return result
+
+
+def get_support_ticket(tenant_id, ticket_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?', (ticket_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return None
+    ticket = dict(row)
+    ticket['messages'] = [dict(m) for m in conn.execute(
+        'SELECT * FROM support_ticket_messages WHERE ticket_id = ? ORDER BY created_at', (ticket_id,),
+    ).fetchall()]
+    return ticket
+
+
+def add_support_message(tenant_id, ticket_id, body, author_id=None, author_name=None, author_role='customer'):
+    body = str(body or '').strip()
+    if not body:
+        return {'error': 'body_required'}
+    conn = get_db()
+    ticket = conn.execute(
+        'SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?', (ticket_id, tenant_id),
+    ).fetchone()
+    if not ticket:
+        return {'error': 'ticket_not_found'}
+    now = datetime.now().isoformat()
+    message_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO support_ticket_messages (id, ticket_id, tenant_id, author_id, author_name, author_role, body)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (message_id, ticket_id, tenant_id, author_id, author_name or 'مستخدم', author_role, body),
+    )
+    updates = ['updated_at = ?']
+    params = [now]
+    if author_role != 'customer' and not ticket['first_response_at']:
+        updates.append('first_response_at = ?')
+        params.append(now)
+    if ticket['status'] == 'resolved' and author_role == 'customer':
+        updates.append("status = 'open'")
+    conn.execute(
+        'UPDATE support_tickets SET ' + ', '.join(updates) + ' WHERE id = ?',
+        [*params, ticket_id],
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM support_ticket_messages WHERE id = ?', (message_id,)).fetchone())
+
+
+def update_support_ticket_status(tenant_id, ticket_id, new_status, actor_name=None):
+    if new_status not in SUPPORT_TICKET_STATUSES:
+        return {'error': 'invalid_status'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?', (ticket_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'ticket_not_found'}
+    now = datetime.now().isoformat()
+    updates = ["status = ?", "updated_at = ?"]
+    params = [new_status, now]
+    if new_status == 'resolved':
+        updates.append('resolved_at = ?')
+        params.append(now)
+    if new_status == 'closed':
+        updates.append('closed_at = ?')
+        params.append(now)
+    conn.execute(
+        'UPDATE support_tickets SET ' + ', '.join(updates) + ' WHERE id = ?',
+        [*params, ticket_id],
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
+
+
+# ── t52: contracts and NDAs ─────────────────────────────────────────────────
+
+def create_tenant_contract(tenant_id, title, kind='contract', file_id=None, starts_at=None,
+                           expires_at=None, notes=None, created_by=None, created_by_name=None):
+    if not str(title or '').strip():
+        return {'error': 'title_required'}
+    if kind not in {'contract', 'nda'}:
+        kind = 'contract'
+    conn = get_db()
+    row_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO tenant_contracts
+           (id, tenant_id, kind, title, file_id, starts_at, expires_at, notes, status, created_by, created_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)''',
+        (row_id, tenant_id, kind, str(title).strip(), file_id, starts_at, expires_at, notes, created_by, created_by_name),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM tenant_contracts WHERE id = ?', (row_id,)).fetchone())
+
+
+def list_tenant_contracts(tenant_id, include_expired=True):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM tenant_contracts WHERE tenant_id = ? ORDER BY expires_at IS NULL, expires_at',
+        (tenant_id,),
+    ).fetchall()
+    now = datetime.now()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item['is_expired'] = bool(item.get('expires_at')) and datetime.fromisoformat(item['expires_at']) < now
+        except (TypeError, ValueError):
+            item['is_expired'] = False
+        if include_expired or not item['is_expired']:
+            result.append(item)
+    return result
+
+
+# ── t54: operational monitoring that never exposes client content ───────────
+
+def operational_overview():
+    """Counts only: the super-admin sees the shape of activity, never the content."""
+    conn = get_db()
+    def count(table, where='1 = 1', params=()):
+        try:
+            row = conn.execute('SELECT COUNT(*) AS n FROM ' + table + ' WHERE ' + where, params).fetchone()
+            return int(row['n'] or 0)
+        except Exception:
+            return 0
+    return {
+        'tenants': {
+            'total': count('tenants'),
+            'active': count('tenants', 'is_active = 1'),
+        },
+        'users': {'total': count('users'), 'active': count('users', 'is_active = 1')},
+        'drafts': {'total': count('project_drafts')},
+        'presentations': {'total': count('presentations'), 'approved': count('presentations', "status = 'approved'")},
+        'workflows': {
+            'pending_generation_approvals': count('generation_approvals', "status = 'pending'"),
+            'pending_final_approvals': count('final_file_approvals', "status = 'pending'"),
+            'pending_recharges': count('recharge_requests', "status = 'pending'"),
+            'open_support_tickets': count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
+            'open_tasks': count('approval_tasks', "status = 'open'"),
+        },
+        'generated_at': datetime.now().isoformat(),
+    }
+
+# ═════════════════════════════════════════════════════════════════════════════
+# t20 roles: a tenant may clone the built-in defaults into an editable role
+# template. The built-ins themselves stay code-defined (DEFAULT_PERMISSIONS).
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _create_omran_role_tables(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS tenant_roles (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        base_role TEXT DEFAULT 'employee',
+        permissions_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_tenant_roles ON tenant_roles(tenant_id, name)')
+
+
+def list_tenant_role_templates(tenant_id):
+    """Return every grantable permission with default state for a new template."""
+    conn = get_db()
+    employee_defaults = DEFAULT_PERMISSIONS.get('employee', {})
+    keys = []
+    for key in PERMISSION_KEYS:
+        keys.append({'key': key, 'default_granted': bool(employee_defaults.get(key, False))})
+    custom = conn.execute(
+        'SELECT id, name, base_role, permissions_json, created_at, updated_at '
+        'FROM tenant_roles WHERE tenant_id = ? ORDER BY created_at', (tenant_id,)
+    ).fetchall()
+    return {
+        'permission_keys': keys,
+        'roles': [dict(r) for r in custom],
+    }
+
+
+def create_tenant_role(tenant_id, name, base_role, permissions):
+    conn = get_db()
+    if not name or not str(name).strip():
+        return {'error': 'name_required'}
+    clean = {k: bool(v) for k, v in (permissions or {}).items() if k in PERMISSION_KEYS}
+    role_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    existing = conn.execute(
+        'SELECT id FROM tenant_roles WHERE tenant_id = ? AND name = ?',
+        (tenant_id, str(name).strip())
+    ).fetchone()
+    if existing:
+        return {'error': 'role_name_exists'}
+    try:
+        conn.execute(
+            '''INSERT INTO tenant_roles (id, tenant_id, name, base_role, permissions_json,
+               created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (role_id, tenant_id, str(name).strip(), base_role if base_role in DEFAULT_PERMISSIONS else 'employee',
+             json.dumps(clean), now, now)
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return {'error': 'role_name_exists'}
+    return get_tenant_role(tenant_id, role_id)
+
+
+def get_tenant_role(tenant_id, role_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        result['permissions'] = json.loads(result.pop('permissions_json') or '{}')
+    except (ValueError, TypeError):
+        result['permissions'] = {}
+    return result
+
+
+def update_tenant_role(tenant_id, role_id, name=None, permissions=None):
+    conn = get_db()
+    role = conn.execute(
+        'SELECT id FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id)
+    ).fetchone()
+    if not role:
+        return None
+    if name is not None:
+        if not str(name).strip():
+            return {'error': 'name_required'}
+        conn.execute('UPDATE tenant_roles SET name = ?, updated_at = ? WHERE id = ?',
+                     (str(name).strip(), datetime.now().isoformat(), role_id))
+    if permissions is not None:
+        clean = {k: bool(v) for k, v in permissions.items() if k in PERMISSION_KEYS}
+        conn.execute('UPDATE tenant_roles SET permissions_json = ?, updated_at = ? WHERE id = ?',
+                     (json.dumps(clean), datetime.now().isoformat(), role_id))
+    conn.commit()
+    return get_tenant_role(tenant_id, role_id)
+
+
+def delete_tenant_role(tenant_id, role_id):
+    conn = get_db()
+    cursor = conn.execute('DELETE FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def assign_tenant_role_to_user(tenant_id, user_id, role_id):
+    """Clone the template onto the user's per-key permission overrides."""
+    role = get_tenant_role(tenant_id, role_id)
+    if not role:
+        return None
+    for key in PERMISSION_KEYS:
+        if key in role['permissions']:
+            set_user_permission(user_id, key, role['permissions'][key])
+    return get_user_permissions(user_id)
+
+
+def separation_of_duties_matrix(tenant_id):
+    """t21: flag self-approvals and decisions without a mandatory reason."""
+    conn = get_db()
+    matrix = {'tenant_id': tenant_id, 'self_approvals': [], 'missing_reason_decisions': []}
+    rows = conn.execute(
+        'SELECT * FROM section_versions WHERE tenant_id = ? AND decided_at IS NOT NULL',
+        (tenant_id,)
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        if item.get('decided_by') and item.get('created_by') == item.get('decided_by'):
+            matrix['self_approvals'].append({
+                'kind': 'section_version', 'entity_id': item['id'],
+                'draft_id': item.get('draft_id'), 'section_key': item.get('section_key'),
+                'version_number': item.get('version_number'),
+                'sent_by': item.get('created_by'), 'decided_by': item.get('decided_by'),
+                'decision': item.get('status'), 'decided_at': item.get('decided_at'),
+            })
+        # A reason is mandatory for return/reject; approval may stand without one.
+        if item.get('status') in ('returned', 'rejected') and not item.get('decision_note'):
+            matrix['missing_reason_decisions'].append({
+                'kind': 'section_version', 'entity_id': item['id'],
+                'decision': item.get('status'), 'decided_by': item.get('decided_by'),
+                'decided_at': item.get('decided_at'),
+            })
+    try:
+        drafts = conn.execute(
+            'SELECT id, title, requested_by, requested_by_name, reviewed_by, reviewed_by_name,'
+            ' review_note, status, reviewed_at FROM project_drafts'
+            ' WHERE tenant_id = ? AND reviewed_at IS NOT NULL',
+            (tenant_id,)
+        ).fetchall()
+        for row in drafts:
+            item = dict(row)
+            if item.get('reviewed_by') and item.get('requested_by') == item.get('reviewed_by'):
+                matrix['self_approvals'].append({
+                    'kind': 'overall_draft', 'entity_id': item['id'],
+                    'requested_by': item.get('requested_by_name'), 'decided_by': item.get('reviewed_by_name'),
+                    'decision': item.get('status'), 'decided_at': item.get('reviewed_at'),
+                })
+            if item.get('status') in ('rejected', 'returned') and not item.get('review_note'):
+                matrix['missing_reason_decisions'].append({
+                    'kind': 'overall_draft', 'entity_id': item['id'],
+                    'decision': item.get('status'), 'decided_by': item.get('reviewed_by'),
+                    'decided_at': item.get('reviewed_at'),
+                })
+    except sqlite3.OperationalError:
+        pass
+    matrix['self_approvals_count'] = len(matrix['self_approvals'])
+    matrix['missing_reason_count'] = len(matrix['missing_reason_decisions'])
+    return matrix
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# t40: event tasks — one-off or recurring checklist items attached to
+# presentations, drafts or events, assignable to a user with a due date.
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+def _create_omran_event_tables(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS event_tasks (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        event_date TEXT,
+        due_at TEXT,
+        assignee_user_id TEXT,
+        recurrence TEXT DEFAULT 'none',
+        status TEXT DEFAULT 'open',
+        completed_at TEXT,
+        completed_by_name TEXT,
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_event_tasks ON event_tasks(tenant_id, status, due_at)')
+
+
+def create_event_task(tenant_id, title, description=None, event_date=None, due_at=None,
+                      assignee_user_id=None, recurrence='none', created_by=None, created_by_name=None):
+    if not title or not str(title).strip():
+        return {'error': 'title_required'}
+    if recurrence not in ('none', 'daily', 'weekly', 'monthly'):
+        return {'error': 'invalid_recurrence'}
+    conn = get_db()
+    task_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO event_tasks (id, tenant_id, title, description, event_date, due_at,
+           assignee_user_id, recurrence, created_by, created_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (task_id, tenant_id, str(title).strip(), description, event_date, due_at,
+         assignee_user_id, recurrence, created_by, created_by_name)
+    )
+    conn.commit()
+    return get_event_task(tenant_id, task_id)
+
+
+def get_event_task(tenant_id, task_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM event_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_event_tasks(tenant_id, status=None, assignee_user_id=None, limit=100):
+    conn = get_db()
+    query = 'SELECT * FROM event_tasks WHERE tenant_id = ?'
+    params = [tenant_id]
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if assignee_user_id:
+        query += ' AND assignee_user_id = ?'
+        params.append(assignee_user_id)
+    query += ' ORDER BY COALESCE(due_at, event_date, created_at) LIMIT ?'
+    params.append(int(limit))
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def update_event_task_status(tenant_id, task_id, new_status, actor_name=None):
+    if new_status not in ('open', 'completed', 'cancelled'):
+        return {'error': 'invalid_status'}
+    conn = get_db()
+    existing = conn.execute(
+        'SELECT id, recurrence FROM event_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id)
+    ).fetchone()
+    if not existing:
+        return None
+    now = datetime.now().isoformat()
+    conn.execute(
+        'UPDATE event_tasks SET status = ?, completed_at = ?, completed_by_name = ? WHERE id = ?',
+        (new_status, now if new_status == 'completed' else None, actor_name if new_status == 'completed' else None, task_id)
+    )
+    # Recurring tasks reopen themselves with the next due date pushed forward.
+    if new_status == 'completed' and existing['recurrence'] and existing['recurrence'] != 'none':
+        from datetime import timedelta
+        base = datetime.now()
+        step = {'daily': timedelta(days=1), 'weekly': timedelta(weeks=1), 'monthly': timedelta(days=30)}[existing['recurrence']]
+        conn.execute(
+            '''INSERT INTO event_tasks (id, tenant_id, title, description, event_date, due_at,
+               assignee_user_id, recurrence, created_by, created_by_name)
+               SELECT ?, tenant_id, title, description, event_date, ?, assignee_user_id, recurrence,
+               created_by, created_by_name FROM event_tasks WHERE id = ?''',
+            (str(uuid.uuid4()), (base + step).isoformat(), task_id)
+        )
+    conn.commit()
+    return get_event_task(tenant_id, task_id)
+
+
+def _omran_ready():
+    """True once the t14+ Omran tables exist in the current database."""
+    conn = get_db()
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_approvals'"
+    ).fetchall()}
+    return 'generation_approvals' in names and 'final_file_approvals' in names

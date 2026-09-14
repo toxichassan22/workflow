@@ -264,6 +264,8 @@ LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
 GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-5.6-sol')
+DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
+DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
@@ -6291,7 +6293,7 @@ def _designer_boundary_facts_note(project_data):
     )
 
 
-def _designer_project_context(project_data, creative_images=None, tenant_id=None):
+def _designer_project_context(project_data, creative_images=None, tenant_id=None, max_deck_chars=60000):
     """Give the planner and every slide edit the complete project source of truth."""
     source = project_data if isinstance(project_data, dict) else {}
     parts = [
@@ -6309,15 +6311,33 @@ def _designer_project_context(project_data, creative_images=None, tenant_id=None
     asset_note = _get_images_info(creative_images or {}, source)
     if str(asset_note or '').strip():
         parts.append("## الأصول والخرائط والصور المتاحة فعليًا\n" + asset_note.strip())
-    if source.get('_designer_deck_context'):
-        parts.append('## العرض الحالي الكامل: مرجع للسياق وليس إذنًا بتعديل الشرائح الأخرى\n' + source['_designer_deck_context'])
+    deck_context = source.get('_designer_deck_context')
+    if deck_context:
+        if len(deck_context) <= max_deck_chars:
+            parts.append('## العرض الحالي الكامل: مرجع للسياق وليس إذنًا بتعديل الشرائح الأخرى\n' + deck_context)
+        else:
+            print(f"[DESIGNER-CHAT] skipping oversized deck context in planner ({len(deck_context)} chars > {max_deck_chars})")
     return '\n\n'.join(parts)
 
 
-def _is_designer_prompt_token_error(exc_or_msg):
-    """True when an LLM failure is a prompt/context token limit, not a real model error."""
+def _is_openrouter_credit_error(exc_or_msg):
+    """True when an LLM failure is strictly due to lack of credits/funds or key limits in OpenRouter."""
     text = str(exc_or_msg or '').lower()
     if not text:
+        return False
+    if 'insufficient_credits' in text or 'user credits exceeded' in text or 'key has insufficient credits' in text:
+        return True
+    if '402' in text and any(m in text for m in ('credit', 'balance', 'payment required', 'insufficient')) and not ('>' in text or 'can only afford' in text or 'tokens limit' in text):
+        return True
+    return False
+
+
+def _is_designer_prompt_token_error(exc_or_msg):
+    """True when an LLM failure is a prompt/context token limit, not a real model or credit error."""
+    text = str(exc_or_msg or '').lower()
+    if not text:
+        return False
+    if _is_openrouter_credit_error(text):
         return False
     markers = (
         'prompt tokens limit exceeded',
@@ -6333,8 +6353,8 @@ def _is_designer_prompt_token_error(exc_or_msg):
     )
     if any(marker in text for marker in markers):
         return True
-    # OpenRouter quotes the cap as [402] / 402 with a token comparison (427914 > 307449).
-    if '402' in text and ('>' in text or 'token' in text or 'credit' in text):
+    # OpenRouter quotes the cap as [402] / 402 with a token comparison (427914 > 307449) or "can only afford".
+    if '402' in text and ('>' in text or 'can only afford' in text or 'tokens' in text):
         return True
     return False
 
@@ -6751,7 +6771,7 @@ HTML الحالي:
             except Exception as progress_error:
                 app.logger.warning('[DESIGNER-EDIT] progress callback failed: %s', progress_error)
         try:
-            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
+            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if not output and raw and '<div' in raw and 'slide' in raw:
@@ -7475,6 +7495,18 @@ def api_designer_chat():
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
 {memory_note}{history_note}{focus_note}{explicit_scope_note}"""
+        if len(slides) > 10:
+            _explicit_targets = designer_chat_targets.explicit_slide_numbers(message) or ([current_index + 1] if 0 <= current_index < len(slides) else [])
+            _explicit_snippets = []
+            for _t_num in (_explicit_targets or [])[:5]:
+                try:
+                    _t_idx = designer_chat_targets.slide_number(_t_num, len(slides)) - 1
+                    _t_slide = slides[_t_idx] if isinstance(slides[_t_idx], dict) else {}
+                    _explicit_snippets.append(f"### محتوى الشريحة {_t_idx + 1} المستهدفة:\n" + str(_t_slide.get('html', ''))[:15000])
+                except Exception:
+                    pass
+            if _explicit_snippets:
+                planner_prompt += "\n\n## الشرائح المستهدفة في الطلب:\n" + "\n\n".join(_explicit_snippets)
         if user_image_refs and not chat_attached_urls:
             planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
                               " واضحًا فاسأل عنه بأداة ask.")
@@ -7484,9 +7516,13 @@ def api_designer_chat():
         else:
             try:
                 planner_raw = extract_chat_content(
-                    call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                    call_zai_chat(planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                     'DESIGNER-PLANNER')
             except Exception as _planner_exc:
+                if _is_openrouter_credit_error(_planner_exc):
+                    return jsonify({'success': False,
+                                    'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ لإتمام العملية (HTTP 402)؛ يرجى شحن الرصيد في حسابك.',
+                                    'error_code': 'INSUFFICIENT_CREDITS'}), 402
                 if not _is_designer_prompt_token_error(_planner_exc):
                     raise
                 print(f"[DESIGNER-CHAT] planner prompt exceeded token cap ({len(planner_prompt)} chars): {_planner_exc}")
@@ -7558,13 +7594,23 @@ def api_designer_chat():
                             history_note, focus_note, explicit_scope_note)
                         print(f"[DESIGNER-CHAT] retrying planner slim ({len(slim_prompt)} chars, was {len(planner_prompt)} chars)")
                         planner_raw = extract_chat_content(
-                            call_zai_chat(slim_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                            call_zai_chat(slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                             'DESIGNER-PLANNER')
                     except Exception as _slim_exc:
+                        if _is_openrouter_credit_error(_slim_exc):
+                            return jsonify({'success': False,
+                                            'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ لإتمام العملية (HTTP 402)؛ يرجى شحن الرصيد في حسابك.',
+                                            'error_code': 'INSUFFICIENT_CREDITS'}), 402
                         if _is_designer_prompt_token_error(_slim_exc):
                             _detail = f' {table_failure_note}' if table_failure_note else ''
+                            _is_explicit = bool(designer_chat_targets.explicit_slide_numbers(message))
+                            _err_msg = (
+                                f'تعذر إتمام تعديل الشريحة ضمن حد التوكنز الحالي للنموذج.{_detail}'
+                                if _is_explicit else
+                                f'العرض كبير جدًا على حد التوكنز الحالي؛ حدّد شريحة واحدة برقمها وأعد المحاولة.{_detail}'
+                            )
                             return jsonify({'success': False,
-                                            'error': f'العرض كبير جدًا على حد التوكنز الحالي؛ حدّد شريحة واحدة برقمها وأعد المحاولة.{_detail}',
+                                            'error': _err_msg,
                                             'error_code': 'DESIGNER_PROMPT_TOO_LARGE'}), 402
                         raise
             plan = _designer_json_response(planner_raw)
@@ -22291,7 +22337,7 @@ FRONTEND_JS_ORDER = (
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js',
+    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}
@@ -22715,6 +22761,651 @@ def preview():
 
 # Install queued designer-chat execution and deterministic reliability handlers.
 designer_chat_reliability.install(app, globals())
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Omran platform APIs (t14-t63): generation and final-file approvals with
+# points reservation, downloads ledger, proposal copies, archive/restore,
+# notifications, approval tasks, event tasks, role templates, users report,
+# separation-of-duties matrix, recharge requests, support tickets, contracts
+# and the file-type registry. Money stays in tenant_ledger; these endpoints
+# track workflow state only.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_OMRAN_NOT_FOUND = {
+    'draft_not_found', 'presentation_not_found', 'request_not_found',
+    'reservation_not_found', 'ticket_not_found', 'task_not_found', 'approval_not_found',
+}
+_OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived'}
+
+# Arabic-first messages: these strings land directly in UI toasts.
+_OMRAN_ERROR_MESSAGES_AR = {
+    'draft_not_found': 'لا يوجد مشروع مطابق',
+    'presentation_not_found': 'العرض غير موجود',
+    'request_not_found': 'الطلب غير موجود',
+    'reservation_not_found': 'الحجز غير موجود',
+    'ticket_not_found': 'التذكرة غير موجودة',
+    'task_not_found': 'العنصر غير موجود',
+    'approval_not_found': 'الاعتماد غير موجود',
+    'title_exists': 'يوجد عرض بنفس الاسم',
+    'role_name_exists': 'يوجد دور بنفس الاسم',
+    'approval_already_pending': 'يوجد اعتماد قيد المراجعة بالفعل',
+    'presentation_not_archived': 'العرض ليس في الأرشيف',
+    'insufficient_balance': 'الرصيد غير كافٍ لتغطية التكلفة التقديرية',
+    'title_required': 'العنوان مطلوب',
+    'name_required': 'الاسم مطلوب',
+    'subject_required': 'موضوع التذكرة مطلوب',
+    'body_required': 'نص الرسالة مطلوب',
+    'invalid_decision': 'قرار غير معروف',
+    'invalid_status': 'حالة غير معروفة',
+    'invalid_recurrence': 'قيمة التكرار غير صحيحة',
+    'cancel_not_allowed': 'لا يمكن إلا لمقدم الطلب إلغاء الاعتماد',
+    'not_approved': 'يجب اعتماد العرض قبل طلب الملف النهائي',
+    'no_export_file': 'صدّر العرض قبل طلب الملف',
+    'approval_not_approved': 'لم يُعتمد الاعتماد بعد',
+    'approval_not_pending': 'انتهت مراجعة هذا الاعتماد بالفعل',
+    'request_not_pending': 'انتهت مراجعة هذا الطلب بالفعل',
+    'task_not_open': 'المهمة مغلقة بالفعل',
+    'key_and_label_required': 'المفتاح والتسمية العربية مطلوبان',
+    'package_name_required': 'اختر الباقة المطلوب شراؤها',
+    'stamp_failed': 'تعذر ختم الملف',
+    'nothing_to_reserve': 'لا توجد نقاط لحجزها',
+    'reservation_not_reserved': 'تم تسوية الحجز مسبقًا',
+}
+
+
+def _omran_error(result):
+    """Map a db-layer error dict to the right HTTP response, or None on success."""
+    if not isinstance(result, dict) or not result.get('error'):
+        return None
+    code = result['error']
+    default_message = _OMRAN_ERROR_MESSAGES_AR.get(code, 'حدث خطأ، أعد المحاولة')
+    if code in _OMRAN_NOT_FOUND:
+        return jsonify({'error': default_message, 'error_code': code}), 404
+    if code in _OMRAN_CONFLICT:
+        return jsonify({'error': default_message, 'error_code': code}), 409
+    if code == 'insufficient_balance':
+        return jsonify({'error': default_message, 'error_code': code}), 402
+    return jsonify({'error': default_message, 'error_code': code}), 400
+
+
+def _omran_actor_id():
+    return g.user_id or f'tenant-admin:{g.tenant_id}'
+
+
+def _omran_actor_name():
+    return g.user_name or 'Company administrator'
+
+
+# ── t14: generation approval with cost estimate and points reservation ──────
+
+@app.route('/api/generation-approvals', methods=['POST'])
+@require_auth
+def api_create_generation_approval():
+    """Open a generation approval carrying the estimate shown to the approver."""
+    data = request.json or {}
+    draft_id = data.get('draftId') or _resolve_draft_id()
+    if not draft_id:
+        return jsonify({'error': 'No project draft found', 'error_code': 'draft_not_found'}), 404
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return jsonify({'error': 'No project draft found', 'error_code': 'draft_not_found'}), 404
+    estimate = db.estimate_generation_cost(
+        g.tenant_id, draft_id=draft_id,
+        slides_count=int(data.get('slidesCount') or draft.get('slide_count') or 0),
+    )
+    approval = db.create_generation_approval(
+        g.tenant_id, draft_id, estimate, _omran_actor_id(), _omran_actor_name(),
+        presentation_id=data.get('presentationId'),
+    )
+    failure = _omran_error(approval)
+    if failure:
+        return failure
+    _record_audit_event('generation_approval.requested', 'generation_approval', approval['id'],
+                        entity_name=draft.get('title'),
+                        new_value=approval['status'],
+                        metadata={'estimated_points': approval.get('estimated_points'),
+                                  'estimated_cost_usd': approval.get('estimated_cost_usd')})
+    return jsonify({'success': True, 'approval': approval, 'estimate': estimate})
+
+
+@app.route('/api/generation-approvals', methods=['GET'])
+@require_auth
+def api_list_generation_approvals():
+    approvals = db.list_generation_approvals(g.tenant_id, status=request.args.get('status'))
+    return jsonify({'success': True, 'approvals': approvals})
+
+
+@app.route('/api/generation-approvals/<approval_id>/decision', methods=['POST'])
+@require_auth
+def api_decide_generation_approval(approval_id):
+    """Approve, reject or cancel. Approval reserves the points atomically."""
+    data = request.json or {}
+    decision = data.get('decision')
+    result = db.decide_generation_approval(
+        g.tenant_id, approval_id, decision, _omran_actor_id(), _omran_actor_name(),
+        note=data.get('note'),
+    )
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event(f'generation_approval.{decision}', 'generation_approval', approval_id,
+                        old_value='pending', new_value=decision,
+                        metadata={'note': data.get('note'), 'reservation_id': result.get('reservation_id')})
+    return jsonify({'success': True, 'approval': result})
+
+
+@app.route('/api/generation-approvals/<approval_id>/settle', methods=['POST'])
+@require_auth
+def api_settle_generation_approval(approval_id):
+    """After the generation job finishes: consume the reservation once, or release it."""
+    data = request.json or {}
+    result = db.settle_generation_approval(
+        g.tenant_id, approval_id, data.get('jobId') or 'unknown-job',
+        consumed=bool(data.get('consumed', True)), settled_by=_omran_actor_id(),
+        note=data.get('note'),
+    )
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('generation_approval.settled', 'generation_approval', approval_id,
+                        new_value=result.get('status'), metadata={'job_id': data.get('jobId')})
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/api/points/reservations', methods=['GET'])
+@require_auth
+def api_list_point_reservations():
+    reservations = db.list_point_reservations(g.tenant_id, status=request.args.get('status'))
+    return jsonify({'success': True, 'reservations': reservations})
+
+
+# ── t15: final file approval, stamping and the downloads ledger ─────────────
+
+@app.route('/api/presentations/<presentation_id>/final-approval/request', methods=['POST'])
+@require_auth
+def api_request_final_file_approval(presentation_id):
+    approval = db.request_final_file_approval(
+        g.tenant_id, presentation_id, _omran_actor_id(), _omran_actor_name(),
+        revision=int((request.json or {}).get('revision') or 0),
+    )
+    failure = _omran_error(approval)
+    if failure:
+        return failure
+    _record_audit_event('final_file_approval.requested', 'final_file_approval', approval['id'],
+                        new_value='pending', metadata={'presentation_id': presentation_id})
+    return jsonify({'success': True, 'approval': approval})
+
+
+@app.route('/api/final-file-approvals', methods=['GET'])
+@require_auth
+def api_list_final_file_approvals():
+    approvals = db.list_final_file_approvals(
+        g.tenant_id, presentation_id=request.args.get('presentationId'),
+        status=request.args.get('status'),
+    )
+    return jsonify({'success': True, 'approvals': approvals})
+
+
+@app.route('/api/final-file-approvals/<approval_id>/decision', methods=['POST'])
+@require_auth
+def api_decide_final_file_approval(approval_id):
+    data = request.json or {}
+    result = db.decide_final_file_approval(
+        g.tenant_id, approval_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
+        note=data.get('note'),
+    )
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event(f"final_file_approval.{data.get('decision')}", 'final_file_approval',
+                        approval_id, new_value=result.get('status'),
+                        metadata={'note': data.get('note'), 'stamped_file': result.get('stamped_file')})
+    return jsonify({'success': True, 'approval': result})
+
+
+@app.route('/api/downloads', methods=['POST'])
+@require_auth
+def api_record_download():
+    data = request.json or {}
+    row = db.record_download(
+        g.tenant_id, data.get('fileName') or '', presentation_id=data.get('presentationId'),
+        draft_id=data.get('draftId'), format=data.get('format') or 'pdf',
+        version_label=data.get('versionLabel'),
+        generated_by=_omran_actor_id(), generated_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('download.requested', 'presentation_download', row['id'],
+                        metadata={'file_name': row.get('file_name'), 'format': row.get('format')})
+    return jsonify({'success': True, 'download': row})
+
+
+@app.route('/api/downloads', methods=['GET'])
+@require_auth
+def api_list_downloads():
+    downloads = db.list_downloads(g.tenant_id, presentation_id=request.args.get('presentationId'))
+    return jsonify({'success': True, 'downloads': downloads})
+
+
+@app.route('/api/downloads/<download_id>/delivered', methods=['POST'])
+@require_auth
+def api_mark_download_delivered(download_id):
+    result = db.mark_download_downloaded(g.tenant_id, download_id, downloaded_by_name=_omran_actor_name())
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('download.delivered', 'presentation_download', download_id, new_value='downloaded')
+    return jsonify({'success': True, 'download': result})
+
+
+# ── t17: copy a proposal under a new mandatory unique name ──────────────────
+
+@app.route('/api/project-draft/copy', methods=['POST'])
+@require_auth
+def api_copy_project_draft():
+    data = request.json or {}
+    result = db.copy_project_draft(
+        g.tenant_id, data.get('draftId') or _resolve_draft_id(), data.get('newTitle'),
+        _omran_actor_id(), _omran_actor_name(), actor_user_id=g.user_id,
+    )
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('proposal.copied', 'project_draft', result['draft_id'],
+                        entity_name=result['title'],
+                        metadata={'source_draft_id': result['source_draft_id']})
+    return jsonify({'success': True, 'copy': result})
+
+
+@app.route('/api/project-draft/copies', methods=['GET'])
+@require_auth
+def api_list_proposal_copies():
+    return jsonify({'success': True, 'copies': db.list_proposal_copies(g.tenant_id)})
+
+
+# ── t18: archive and restore; the client never hard-deletes ─────────────────
+
+@app.route('/api/presentations/<presentation_id>/archive', methods=['POST'])
+@require_auth
+def api_archive_presentation(presentation_id):
+    result = db.archive_presentation(g.tenant_id, presentation_id, _omran_actor_id(), _omran_actor_name())
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('presentation.archived', 'presentation', presentation_id,
+                        old_value='active', new_value='archived')
+    return jsonify({'success': True, 'presentation': result})
+
+
+@app.route('/api/presentations/<presentation_id>/restore', methods=['POST'])
+@require_auth
+def api_restore_presentation(presentation_id):
+    result = db.restore_presentation(g.tenant_id, presentation_id)
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('presentation.restored', 'presentation', presentation_id,
+                        old_value='archived', new_value='draft')
+    return jsonify({'success': True, 'presentation': result})
+
+
+# ── t40: notifications ───────────────────────────────────────────────────────
+
+@app.route('/api/notifications', methods=['GET'])
+@require_auth
+def api_list_notifications():
+    items = db.list_notifications(
+        g.tenant_id, user_id=g.user_id,
+        unread_only=request.args.get('unreadOnly') == '1',
+    )
+    return jsonify({'success': True, 'notifications': items})
+
+
+@app.route('/api/notifications', methods=['POST'])
+@require_auth
+def api_create_notification():
+    """Create an in-app notification (also used by workflows to notify users)."""
+    data = request.json or {}
+    if not str(data.get('title') or '').strip():
+        return jsonify({'error': 'A title is required', 'error_code': 'title_required'}), 400
+    row = db.create_notification(
+        g.tenant_id, data.get('title'), body=data.get('body'), category=data.get('category') or 'general',
+        user_id=data.get('userId') if data.get('userId') != g.user_id else None,
+        entity_type=data.get('entityType'), entity_id=data.get('entityId'),
+    )
+    return jsonify({'success': True, 'notification': row})
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@require_auth
+def api_mark_notifications_read():
+    data = request.json or {}
+    result = db.mark_notifications_read(g.tenant_id, g.user_id, notification_ids=data.get('ids'))
+    return jsonify({'success': True, 'updated': result})
+
+
+# ── t41: approval tasks feed ─────────────────────────────────────────────────
+
+@app.route('/api/approval-tasks', methods=['GET'])
+@require_auth
+def api_list_approval_tasks():
+    tasks = db.list_approval_tasks(
+        g.tenant_id, status=request.args.get('status') or 'open', kind=request.args.get('kind'),
+    )
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/approval-tasks/<task_id>/close', methods=['POST'])
+@require_auth
+def api_close_approval_task(task_id):
+    data = request.json or {}
+    result = db.close_approval_task(g.tenant_id, task_id, closed_by_name=_omran_actor_name(),
+                                    cancel_reason=data.get('cancelReason'))
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('approval_task.closed', 'approval_task', task_id,
+                        old_value='open', new_value='closed',
+                        metadata={'cancel_reason': data.get('cancelReason')})
+    return jsonify({'success': True, 'task': result})
+
+
+@app.route('/api/approval-tasks/<task_id>/remind', methods=['POST'])
+@require_auth
+def api_remind_approval_task(task_id):
+    result = db.remind_approval_task(g.tenant_id, task_id)
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    return jsonify({'success': True, 'task': result})
+
+
+# ── t42: event tasks ─────────────────────────────────────────────────────────
+
+@app.route('/api/event-tasks', methods=['GET'])
+@require_auth
+def api_list_event_tasks():
+    tasks = db.list_event_tasks(
+        g.tenant_id, status=request.args.get('status'),
+        assignee_user_id=request.args.get('assigneeId'),
+    )
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/event-tasks', methods=['POST'])
+@require_auth
+def api_create_event_task():
+    data = request.json or {}
+    row = db.create_event_task(
+        g.tenant_id, data.get('title'), description=data.get('description'),
+        event_date=data.get('eventDate'), due_at=data.get('dueAt'),
+        assignee_user_id=data.get('assigneeId'), recurrence=data.get('recurrence') or 'none',
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('event_task.created', 'event_task', row['id'], entity_name=row['title'],
+                        metadata={'recurrence': row.get('recurrence'), 'due_at': row.get('due_at')})
+    return jsonify({'success': True, 'task': row})
+
+
+@app.route('/api/event-tasks/<task_id>/status', methods=['POST'])
+@require_auth
+def api_update_event_task_status(task_id):
+    data = request.json or {}
+    result = db.update_event_task_status(g.tenant_id, task_id, data.get('status'),
+                                         actor_name=_omran_actor_name())
+    if result is None:
+        return jsonify({'error': 'Task not found', 'error_code': 'task_not_found'}), 404
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('event_task.status', 'event_task', task_id,
+                        new_value=result.get('status'))
+    return jsonify({'success': True, 'task': result})
+
+
+# ── t20: role templates cloned onto users; built-ins stay code-defined ───────
+
+@app.route('/api/roles/template', methods=['GET'])
+@require_permission('manage_users')
+def api_role_template():
+    return jsonify({'success': True, **db.list_tenant_role_templates(g.tenant_id)})
+
+
+@app.route('/api/roles', methods=['POST'])
+@require_permission('manage_users')
+def api_create_tenant_role():
+    data = request.json or {}
+    row = db.create_tenant_role(g.tenant_id, data.get('name'), data.get('baseRole') or 'employee',
+                                data.get('permissions'))
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('role.created', 'tenant_role', row['id'], entity_name=row['name'],
+                        new_value=json.dumps(row.get('permissions') or {}, ensure_ascii=False))
+    return jsonify({'success': True, 'role': row})
+
+
+@app.route('/api/roles/<role_id>/update', methods=['POST'])
+@require_permission('manage_users')
+def api_update_tenant_role(role_id):
+    data = request.json or {}
+    row = db.update_tenant_role(g.tenant_id, role_id, name=data.get('name'),
+                                permissions=data.get('permissions'))
+    if not row:
+        return jsonify({'error': 'Role not found', 'error_code': 'task_not_found'}), 404
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('role.updated', 'tenant_role', role_id, entity_name=row.get('name'),
+                        new_value=json.dumps(row.get('permissions') or {}, ensure_ascii=False))
+    return jsonify({'success': True, 'role': row})
+
+
+@app.route('/api/roles/<role_id>/delete', methods=['POST'])
+@require_permission('manage_users')
+def api_delete_tenant_role(role_id):
+    if not db.delete_tenant_role(g.tenant_id, role_id):
+        return jsonify({'error': 'Role not found', 'error_code': 'task_not_found'}), 404
+    _record_audit_event('role.deleted', 'tenant_role', role_id)
+    return jsonify({'success': True})
+
+
+@app.route('/api/roles/<role_id>/assign', methods=['POST'])
+@require_permission('manage_users')
+def api_assign_tenant_role(role_id):
+    data = request.json or {}
+    user_id = data.get('userId')
+    user = db.get_user_by_id(user_id) if user_id else None
+    if not user or user.get('tenant_id') != g.tenant_id:
+        return jsonify({'error': 'User not found in this company', 'error_code': 'task_not_found'}), 404
+    permissions = db.assign_tenant_role_to_user(g.tenant_id, user_id, role_id)
+    if not permissions:
+        return jsonify({'error': 'Role not found', 'error_code': 'task_not_found'}), 404
+    _record_audit_event('role.assigned', 'user', user_id,
+                        metadata={'role_id': role_id, 'role_name': (db.get_tenant_role(g.tenant_id, role_id) or {}).get('name')})
+    return jsonify({'success': True, 'permissions': permissions})
+
+
+# ── t22: users report; t21: separation-of-duties matrix ─────────────────────
+
+@app.route('/api/users/report', methods=['GET'])
+@require_permission('manage_users')
+def api_tenant_users_report():
+    return jsonify({'success': True, 'report': db.tenant_users_report(g.tenant_id)})
+
+
+@app.route('/api/approvals/sod-matrix', methods=['GET'])
+@require_permission('approvals')
+def api_sod_matrix():
+    return jsonify({'success': True, 'matrix': db.separation_of_duties_matrix(g.tenant_id)})
+
+
+# ── t30: package purchase (recharge) requests ────────────────────────────────
+
+@app.route('/api/recharge-requests', methods=['POST'])
+@require_auth
+def api_create_recharge_request():
+    data = request.json or {}
+    row = db.create_recharge_request(
+        g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
+        price_sar=data.get('priceSar'), transfer_reference=data.get('referenceNumber'),
+        receipt_file_id=data.get('receiptFileId'), requested_by=_omran_actor_id(),
+        requested_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('recharge.requested', 'recharge_request', row['id'],
+                        entity_name=row.get('package_name'),
+                        metadata={'amount_usd': row.get('amount_usd')})
+    return jsonify({'success': True, 'request': row})
+
+
+@app.route('/api/recharge-requests', methods=['GET'])
+@require_auth
+def api_list_recharge_requests():
+    rows = db.list_recharge_requests(g.tenant_id, status=request.args.get('status'))
+    return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/admin/recharge-requests', methods=['GET'])
+@require_admin
+def api_admin_list_recharge_requests():
+    rows = db.list_recharge_requests(status=request.args.get('status'))
+    return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/admin/recharge-requests/<request_id>/decision', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_admin_decide_recharge_request(request_id):
+    data = request.json or {}
+    row = db.decide_recharge_request(
+        g.tenant_id, request_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
+        note=data.get('note'), reference_number=data.get('transactionReference'),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    return jsonify({'success': True, 'request': row})
+
+
+# ── t50: support tickets ─────────────────────────────────────────────────────
+
+@app.route('/api/support/tickets', methods=['POST'])
+@require_auth
+def api_create_support_ticket():
+    data = request.json or {}
+    row = db.create_support_ticket(
+        g.tenant_id, data.get('subject'), category=data.get('category') or 'general',
+        priority=data.get('priority') or 'normal', body=data.get('body'),
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    return jsonify({'success': True, 'ticket': row})
+
+
+@app.route('/api/support/tickets', methods=['GET'])
+@require_auth
+def api_list_support_tickets():
+    rows = db.list_support_tickets(g.tenant_id, status=request.args.get('status'))
+    return jsonify({'success': True, 'tickets': rows})
+
+
+@app.route('/api/support/tickets/<ticket_id>', methods=['GET'])
+@require_auth
+def api_get_support_ticket(ticket_id):
+    row = db.get_support_ticket(g.tenant_id, ticket_id)
+    if not row:
+        return jsonify({'error': 'Ticket not found', 'error_code': 'ticket_not_found'}), 404
+    return jsonify({'success': True, 'ticket': row})
+
+
+@app.route('/api/support/tickets/<ticket_id>/messages', methods=['POST'])
+@require_auth
+def api_add_support_message(ticket_id):
+    data = request.json or {}
+    row = db.add_support_message(
+        g.tenant_id, ticket_id, data.get('body'), author_id=_omran_actor_id(),
+        author_name=_omran_actor_name(), author_role=g.user_role or 'customer',
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    return jsonify({'success': True, 'message': row})
+
+
+@app.route('/api/support/tickets/<ticket_id>/status', methods=['POST'])
+@require_auth
+def api_update_support_ticket_status(ticket_id):
+    data = request.json or {}
+    row = db.update_support_ticket_status(g.tenant_id, ticket_id, data.get('status'),
+                                          actor_name=_omran_actor_name())
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
+                        new_value=row.get('status'))
+    return jsonify({'success': True, 'ticket': row})
+
+
+# ── t51: operational overview; t53: contracts; t63: file-type registry ──────
+
+@app.route('/api/admin/operational-overview', methods=['GET'])
+@require_admin
+def api_operational_overview():
+    return jsonify({'success': True, 'overview': db.operational_overview()})
+
+
+@app.route('/api/contracts', methods=['GET'])
+@require_permission('company_settings')
+def api_list_contracts():
+    include_expired = request.args.get('includeExpired') != '0'
+    return jsonify({'success': True, 'contracts': db.list_tenant_contracts(g.tenant_id, include_expired=include_expired)})
+
+
+@app.route('/api/contracts', methods=['POST'])
+@require_permission('company_settings')
+def api_create_contract():
+    data = request.json or {}
+    row = db.create_tenant_contract(
+        g.tenant_id, data.get('title'), kind=data.get('kind') or 'contract',
+        file_id=data.get('fileId'), starts_at=data.get('startsAt'), expires_at=data.get('expiresAt'),
+        notes=data.get('notes'), created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('contract.created', 'tenant_contract', row['id'], entity_name=row['title'])
+    return jsonify({'success': True, 'contract': row})
+
+
+@app.route('/api/file-types', methods=['GET'])
+@require_auth
+def api_list_file_types():
+    return jsonify({'success': True, 'fileTypes': db.get_file_type_registry()})
+
+
+@app.route('/api/file-types/<key>', methods=['POST'])
+@require_admin
+def api_upsert_file_type(key):
+    data = request.json or {}
+    row = db.upsert_file_type(key, data.get('labelAr'), kind=data.get('kind') or 'document',
+                              max_size_mb=data.get('maxSizeMb') or 25,
+                              allowed_extensions=data.get('allowedExtensions'))
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('file_type.updated', 'file_type_registry', key, entity_name=row.get('label_ar'))
+    return jsonify({'success': True, 'fileType': row})
+
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == '__main__':
