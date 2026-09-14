@@ -66,7 +66,8 @@
     "admin.keys_issuing": "جاري إصدار مفاتيح الشركات...",
     "admin.keys_done": "تم إصدار {created} من أصل {total}",
     "admin.keys_none": "كل الشركات لديها مفاتيح",
-    "admin.keys_failed": "تعذر إصدار المفاتيح"
+    "admin.keys_failed": "تعذر إصدار المفاتيح",
+    "admin.project_approved": "تم اعتماد المشروع"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -101,7 +102,8 @@
     "admin.keys_issuing": "Issuing company keys...",
     "admin.keys_done": "Issued {created} of {total}",
     "admin.keys_none": "Every company already has a key",
-    "admin.keys_failed": "Could not issue keys"
+    "admin.keys_failed": "Could not issue keys",
+    "admin.project_approved": "Project approved"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old
@@ -1141,6 +1143,7 @@
   "تعذر استعادة مهمة تعديل العرض.": "Failed to restore presentation edit task.",
   "تعذر استعادة نتيجة تعديل العرض مؤقتًا.": "Failed to restore presentation edit result temporarily.",
   "تعذر استيراد الشعار": "Failed to import logo",
+  "تعذر اعتماد المشروع": "Failed to approve project",
   "تعذر اعتماد قسم أو أكثر": "Failed to approve one or more sections",
   "تعذر اعتماد كلمة المرور": "Failed to verify password",
   "تعذر الاتصال بالسيرفر أثناء توليد الصور": "Server connection failed during image generation",
@@ -1307,6 +1310,7 @@
   "تم اعتماد الخريطة": "Map Approved",
   "تم اعتماد العرض": "Proposal approved",
   "تم اعتماد المخطط": "Layout approved",
+  "تم اعتماد المشروع": "Project approved",
   "تم اعتماد بيانات الأرض والكروكي وقفل النسخة المعتمدة": "Land and Croquis data Approved and Approved version locked",
   "تم اعتماد تحليل الموقع": "Site analysis Approved",
   "تم اعتماد تعديلات الشريحة": "Slide changes approved",

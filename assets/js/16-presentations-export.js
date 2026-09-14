@@ -99,9 +99,15 @@
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
         const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
         const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
-        const approveBtn = (d.status !== 'approved'
-          ? '<button class="btn small green" onclick="requestProjectDraftApprovalById(\'' + d.id + '\')">اعتماد</button>'
-          : '');
+        // Admins (approvals permission) approve directly whenever they want; employees
+        // only send a request and the draft stays pending until an admin approves it.
+        const canReview = hasPermission('approvals');
+        const isApproved = d.status === 'approved';
+        const isPending = d.status === 'pending_approval';
+        const approveBtn = (isApproved || (isPending && !canReview)) ? ''
+          : '<button class="btn small green" onclick="' +
+          (canReview ? 'approveProjectDraftById' : 'requestProjectDraftApprovalById') +
+          '(\'' + d.id + '\')">اعتماد</button>';
         return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
           '<div><h3>' + escapeHtml(title) + '</h3><div class="meta"><span>' + statusText + '</span> | ' + escapeHtml(date) +
@@ -192,6 +198,18 @@
       }
       tenantArchiveCache = null;
       toast('تم إرسال المسودة للاعتماد');
+      await openTenantPresentations(true);
+    }
+
+    async function approveProjectDraftById(draftId) {
+      if (!draftId) return;
+      const result = await api('POST', '/api/project-draft/review', { draftId, status: 'approved' });
+      if (!result || !result.success) {
+        toast((result && result.error) || 'تعذر اعتماد المشروع');
+        return;
+      }
+      tenantArchiveCache = null;
+      toast(WFT('admin.project_approved', 'تم اعتماد المشروع'));
       await openTenantPresentations(true);
     }
 
@@ -828,16 +846,21 @@
       if (btn) btn.disabled = true;
       showLoader(WFT('admin.keys_issuing', 'جاري إصدار مفاتيح الشركات...'), '', 5);
       try {
-        let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0;
+        let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0, firstError = '';
         while (offset < remaining && rounds < 40) {
           rounds += 1;
           const data = await api('POST', '/api/admin/openrouter-keys/ensure-all', { batch: 25, offset });
           if (!data || !data.success) {
             toast(WFT('admin.keys_failed', 'تعذر إصدار المفاتيح'));
+            if (data && data.error) toast(String(data.error).slice(0, 300));
             return;
           }
           created += data.created || 0;
           failed += data.failed || 0;
+          if (!firstError && Array.isArray(data.results)) {
+            const bad = data.results.find(r => !r.ok && r.error);
+            if (bad) firstError = String(bad.error).slice(0, 300);
+          }
           remaining = data.total_keyless || 0;
           offset += (data.results || []).length;
           updateLoaderProgress(Math.min(95, Math.round((offset / Math.max(1, remaining)) * 100)));
@@ -847,6 +870,7 @@
           toast(WFT('admin.keys_none', 'كل الشركات لديها مفاتيح'));
         } else {
           toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total: created + failed }));
+          if (firstError) toast(firstError);
         }
         const tenantsData = await api('GET', '/api/admin/tenants');
         sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
