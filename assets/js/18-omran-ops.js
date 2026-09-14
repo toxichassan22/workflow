@@ -16,15 +16,55 @@
       return labels[status] || status || '';
     }
 
+    function openOmModal(id) {
+      const m = document.getElementById(id);
+      if (m) {
+        m.style.display = 'flex';
+        const err = m.querySelector('[id$="Error"]');
+        if (err) err.textContent = '';
+      }
+    }
+
+    function closeOmModal(id) {
+      const m = document.getElementById(id);
+      if (m) m.style.display = 'none';
+    }
+
+    function showOmranOpsTab(tabKey) {
+      const tabs = ['tasks', 'recharge', 'tickets', 'contracts', 'system'];
+      tabs.forEach(t => {
+        const pane = document.getElementById('omTabPane_' + t);
+        const btn = document.getElementById('omTabBtn_' + t);
+        const isActive = (t === tabKey);
+        if (pane) pane.style.display = isActive ? 'block' : 'none';
+        if (btn) {
+          if (isActive) {
+            btn.classList.add('primary');
+            btn.classList.remove('ghost');
+          } else {
+            btn.classList.add('ghost');
+            btn.classList.remove('primary');
+          }
+        }
+      });
+    }
+
     async function openOmranOpsPage() {
       showTenantPage('tenantOmranOpsPage');
+      const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) ||
+                      Boolean((window.currentTenant || {}).is_admin);
+      const sysBtn = document.getElementById('omTabBtn_system');
+      if (sysBtn) sysBtn.style.display = isAdmin ? '' : 'none';
+
+      showOmranOpsTab('tasks');
+
       await Promise.all([
         omLoadEventTasks(),
         omLoadNotifications(),
         omLoadTickets(),
         omLoadRechargeRequests(),
         omLoadContracts(),
-        omLoadFileTypes()
+        isAdmin ? omLoadFileTypes() : Promise.resolve()
       ]);
     }
 
@@ -39,6 +79,10 @@
         return;
       }
       const tasks = data.tasks || [];
+      const openCount = tasks.filter(t => t.status === 'open').length;
+      const stat = document.getElementById('omStatTasks');
+      if (stat) stat.textContent = openCount;
+
       if (!tasks.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد مهام بعد.</p>';
         return;
@@ -76,6 +120,8 @@
       }
       document.getElementById('omTaskTitle').value = '';
       document.getElementById('omTaskDue').value = '';
+      closeOmModal('omTaskModal');
+      toast(WFT('tasks.created', 'تم إضافة المهمة بنجاح'));
       await omLoadEventTasks();
     }
 
@@ -90,6 +136,9 @@
         return;
       }
       const items = data.notifications || [];
+      const unreadCount = items.filter(n => !n.read_at).length;
+      const noteStat = document.getElementById('omStatNotifications');
+      if (noteStat) noteStat.textContent = unreadCount;
       if (!items.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد تنبيهات.</p>';
         return;
@@ -120,6 +169,10 @@
         return;
       }
       const tickets = data.tickets || [];
+      const activeCount = tickets.filter(t => t.status !== 'closed' && t.status !== 'resolved').length;
+      const tStat = document.getElementById('omStatTickets');
+      if (tStat) tStat.textContent = activeCount;
+
       if (!tickets.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
         return;
@@ -182,6 +235,8 @@
       }
       document.getElementById('omTicketSubject').value = '';
       document.getElementById('omTicketBody').value = '';
+      closeOmModal('omTicketModal');
+      toast(WFT('tickets.created', 'تم إرسال تذكرة الدعم بنجاح'));
       await omLoadTickets();
     }
 
@@ -198,6 +253,10 @@
         return;
       }
       const requests = data.requests || [];
+      const pendingCount = requests.filter(r => r.status === 'pending').length;
+      const rStat = document.getElementById('omStatRecharges');
+      if (rStat) rStat.textContent = pendingCount;
+
       if (!requests.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد طلبات شحن بعد.</p>';
         return;
@@ -243,6 +302,7 @@
         return;
       }
       if (document.getElementById('omRechargeRef')) document.getElementById('omRechargeRef').value = '';
+      closeOmModal('omRechargeModal');
       toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
       await omLoadRechargeRequests();
     }
@@ -309,6 +369,7 @@
       }
       if (document.getElementById('omContractTitle')) document.getElementById('omContractTitle').value = '';
       if (document.getElementById('omContractExpires')) document.getElementById('omContractExpires').value = '';
+      closeOmModal('omContractModal');
       toast(WFT('contracts.saved', 'تم حفظ العقد بنجاح'));
       await omLoadContracts();
     }
