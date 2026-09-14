@@ -61,7 +61,12 @@
     "financial.warn_sale_exit_outside_irr": "التخارج البيعي في السنة {year} خارج فترة IRR المختارة.",
     "financial.warn_operating_exit_outside_irr": "التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة.",
     "list.load_failed": "تعذر تحميل القائمة",
-    "list.retry": "إعادة المحاولة"
+    "list.retry": "إعادة المحاولة",
+    "admin.keys_issue": "إصدار مفاتيح الشركات",
+    "admin.keys_issuing": "جاري إصدار مفاتيح الشركات...",
+    "admin.keys_done": "تم إصدار {created} من أصل {total}",
+    "admin.keys_none": "كل الشركات لديها مفاتيح",
+    "admin.keys_failed": "تعذر إصدار المفاتيح"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -91,7 +96,12 @@
     "financial.warn_sale_exit_outside_irr": "Sale exit in year {year} is outside the selected IRR window.",
     "financial.warn_operating_exit_outside_irr": "Operating exit in year {year} is outside the selected IRR window.",
     "list.load_failed": "Failed to load the list",
-    "list.retry": "Retry"
+    "list.retry": "Retry",
+    "admin.keys_issue": "Issue company keys",
+    "admin.keys_issuing": "Issuing company keys...",
+    "admin.keys_done": "Issued {created} of {total}",
+    "admin.keys_none": "Every company already has a key",
+    "admin.keys_failed": "Could not issue keys"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old
