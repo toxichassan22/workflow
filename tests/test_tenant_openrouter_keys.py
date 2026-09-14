@@ -621,6 +621,48 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertNotIn('sk-or-v1-debug-key', dumped)
         self.assertNotIn('key_enc', dumped)
 
+    def test_tenant_update_credit_balance_syncs_openrouter_key(self):
+        """Updating tenant credit_balance via PUT /api/admin/tenants/<id> must sync OpenRouter key limit."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Sync Co', 'sync-keys@example.test', 'sync-keys-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-sync-key-qqqqqqqqqqqqqqqq', provenance='auto',
+                openrouter_key_hash='synchash123', limit_usd=10.0)
+
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_update_managed_key', return_value={'ok': True}) as patched_update:
+            resp = client.put(f'/api/admin/tenants/{tenant_id}',
+                              headers=self._admin_headers(),
+                              json={'creditBalance': 75.5})
+            self.assertEqual(resp.status_code, 200, resp.get_json())
+            patched_update.assert_called_once_with('synchash123', limit_usd=75.5)
+
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+            self.assertEqual(meta['limit_usd'], 75.5)
+            balance = db.get_tenant_balance(tenant_id)
+            self.assertEqual(balance, 75.5)
+
+    def test_client_overview_falls_back_to_wallet_balance_when_no_package(self):
+        """When no billing package is assigned, /api/client/overview should use wallet credit_balance."""
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Wallet Co', 'wallet-keys@example.test', 'wallet-keys-co')
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE tenants SET credit_balance = 50.0 WHERE id = ?', (tenant_id,))
+            conn.commit()
+        token = auth.create_token(tenant_id, 'wallet-keys@example.test', user_role='company_admin')
+        resp = client.get('/api/client/overview', headers={'Authorization': f'Bearer {token}'})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body['balance_usd'], 50.0)
+        self.assertIsNotNone(body['package'])
+        self.assertEqual(body['package']['remaining_usd'], 50.0)
+        self.assertEqual(body['package']['name'], 'رصيد المحفظة')
+
 
 if __name__ == '__main__':
     unittest.main()
+

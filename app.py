@@ -704,6 +704,34 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
         return None
 
 
+def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
+    """Sync a tenant's credit balance to its OpenRouter key limit (best-effort). Never raises."""
+    if not tenant_id:
+        return None
+    try:
+        tenant = db.get_tenant_by_id(tenant_id)
+        if tenant and tenant.get('is_admin'):
+            return None
+    except Exception:
+        pass
+    try:
+        new_limit = max(0.0, float(new_limit_usd if new_limit_usd is not None else 0.0))
+    except (TypeError, ValueError):
+        return None
+    try:
+        existing = db.get_tenant_openrouter_key_meta(tenant_id)
+        if existing and existing.get('has_key'):
+            db.update_tenant_openrouter_key_meta(tenant_id, limit_usd=new_limit)
+            if existing.get('provenance') == 'auto' and existing.get('openrouter_key_hash'):
+                _openrouter_update_managed_key(existing.get('openrouter_key_hash'), limit_usd=new_limit)
+            return db.get_tenant_openrouter_key_meta(tenant_id)
+        else:
+            return _ensure_tenant_openrouter_key(tenant_id, limit_usd=new_limit)
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] sync credit to key failed for tenant {tenant_id}: {exc}")
+        return None
+
+
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
     gate = _tenant_key_gate(usage_ctx)
     if gate is not None:
@@ -1852,6 +1880,8 @@ def api_billing_topup():
         result = db.record_ledger_credit(
             g.tenant_id, amount, note=data.get('note'),
             idempotency_key=idempotency_key)
+        if result.get('credited') and result.get('balance_usd') is not None:
+            _sync_tenant_credit_to_openrouter(g.tenant_id, result.get('balance_usd'))
     except Exception as exc:
         print(f"[BILLING] topup failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
@@ -19121,7 +19151,7 @@ def api_admin_tenants():
         # Best-effort managed OpenRouter key so the company spends on its own
         # dashboard-visible limit from day one. Never fails tenant creation.
         try:
-            _ensure_tenant_openrouter_key(tenant_id)
+            _ensure_tenant_openrouter_key(tenant_id, limit_usd=credit_balance)
         except Exception as exc:
             print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
@@ -19208,6 +19238,7 @@ def api_admin_update_tenant(tenant_id):
         if conflict:
             return jsonify({'error': conflict}), 409
 
+    synced_credit_balance = company_fields.get('credit_balance')
     for key in ['account_manager_name', 'username', 'phone', 'email', 'is_active']:
         if key in company_fields:
             account_fields[key] = company_fields.pop(key)
@@ -19222,6 +19253,8 @@ def api_admin_update_tenant(tenant_id):
         if primary_user_id and primary_user_id != tenant.get('primary_user_id'):
             if not db.set_primary_company_admin(tenant_id, primary_user_id):
                 return jsonify({'error': 'User not found'}), 404
+        if synced_credit_balance is not None:
+            _sync_tenant_credit_to_openrouter(tenant_id, synced_credit_balance)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or username already registered'}), 409
     return jsonify({
@@ -19841,11 +19874,25 @@ def api_client_overview():
         view = db.get_client_overview(g.tenant_id)
         fx = db.get_fx_rate()
         package = view.get('package')
+        balance_usd = db.get_tenant_balance(g.tenant_id)
         if package is not None:
             package = dict(package)
             package['credit_sar'] = db.usd_to_sar(package.get('credit_usd'), fx.get('rate'))
             package['consumed_sar'] = db.usd_to_sar(package.get('consumed_usd'), fx.get('rate'))
             package['remaining_sar'] = db.usd_to_sar(package.get('remaining_usd'), fx.get('rate'))
+        elif balance_usd > 0:
+            package = {
+                'id': 'wallet',
+                'name': 'رصيد المحفظة',
+                'credit_usd': balance_usd,
+                'consumed_usd': view.get('consumption_usd') or 0.0,
+                'remaining_usd': balance_usd,
+                'status': 'active',
+                'assigned_at': None,
+                'credit_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+                'consumed_sar': db.usd_to_sar(view.get('consumption_usd') or 0.0, fx.get('rate')),
+                'remaining_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+            }
         return jsonify({
             'success': True,
             'totals': {
@@ -19855,6 +19902,8 @@ def api_client_overview():
                 'consumption_sar': db.usd_to_sar(view.get('consumption_usd'), fx.get('rate')),
             },
             'package': package,
+            'balance_usd': balance_usd,
+            'balance_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
             'lifetime': {
                 'consumed_usd': view.get('lifetime_consumed_usd'),
                 'consumed_sar': db.usd_to_sar(view.get('lifetime_consumed_usd'), fx.get('rate')),
@@ -23295,13 +23344,17 @@ def api_admin_list_recharge_requests():
 @require_permission('sag_admin_panel')
 def api_admin_decide_recharge_request(request_id):
     data = request.json or {}
+    decision = data.get('decision')
     row = db.decide_recharge_request(
-        g.tenant_id, request_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
+        None, request_id, decision, _omran_actor_id(), _omran_actor_name(),
         note=data.get('note'), reference_number=data.get('transactionReference'),
     )
     failure = _omran_error(row)
     if failure:
         return failure
+    if decision == 'approved' and isinstance(row, dict) and row.get('tenant_id'):
+        new_balance = db.get_tenant_balance(row['tenant_id'])
+        _sync_tenant_credit_to_openrouter(row['tenant_id'], new_balance)
     return jsonify({'success': True, 'request': row})
 
 

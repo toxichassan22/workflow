@@ -8007,13 +8007,19 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
     if decision not in {'approved', 'rejected'}:
         return {'error': 'invalid_decision'}
     conn = get_db()
-    row = conn.execute(
-        'SELECT * FROM recharge_requests WHERE id = ? AND tenant_id = ?', (request_id, tenant_id),
-    ).fetchone()
+    if tenant_id:
+        row = conn.execute(
+            'SELECT * FROM recharge_requests WHERE id = ? AND tenant_id = ?', (request_id, tenant_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            'SELECT * FROM recharge_requests WHERE id = ?', (request_id,),
+        ).fetchone()
     if not row:
         return {'error': 'request_not_found'}
     if row['status'] != 'pending':
         return {'error': 'request_not_pending'}
+    target_tenant_id = row['tenant_id']
     reference = str(reference_number or '').strip()
     if decision == 'approved' and not reference:
         reference = 'RCH-' + datetime.now().strftime('%Y%m%d') + '-' + request_id[:8].upper()
@@ -8028,7 +8034,7 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
     if decision == 'approved' and float(row['amount_usd'] or 0) > 0:
         try:
             record_ledger_credit(
-                tenant_id, float(row['amount_usd']),
+                target_tenant_id, float(row['amount_usd']),
                 note='شحن رصيد بالمرجع ' + reference,
                 idempotency_key='recharge:' + request_id,
             )

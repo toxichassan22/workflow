@@ -531,6 +531,148 @@
       });
     }
 
+    async function validateFileInputAgainstRegistry(file, typeKey) {
+      if (!file) return true;
+      try {
+        const resp = await api('GET', '/api/file-types');
+        if (resp && resp.success && Array.isArray(resp.fileTypes)) {
+          const matched = resp.fileTypes.find(t => t.key === typeKey);
+          if (matched) {
+            const maxMb = Number(matched.max_size_mb) || 25;
+            const fileSizeMb = file.size / (1024 * 1024);
+            if (fileSizeMb > maxMb) {
+              toast('حجم الملف (' + fileSizeMb.toFixed(1) + ' ميجابايت) يتجاوز الحد المسموح (' + maxMb + ' ميجابايت)');
+              return false;
+            }
+            if (matched.allowed_extensions) {
+              const exts = matched.allowed_extensions.split(',').map(e => e.trim().toLowerCase().replace(/^\./, ''));
+              const fileExt = (file.name.split('.').pop() || '').toLowerCase();
+              if (exts.length && !exts.includes(fileExt)) {
+                toast('امتداد الملف (.' + fileExt + ') غير مدعوم');
+                return false;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('File type registry check:', err);
+      }
+      return true;
+    }
+
+    async function showGenerationApprovalModal(opts = {}) {
+      const draftId = opts.draftId || (tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id));
+      const slidesCount = opts.slidesCount || (tenantSlidePlan && (tenantSlidePlan.slides || []).length) || 10;
+      const projectName = opts.projectName || (tenantProjectData && (tenantProjectData.project_name || tenantProjectData.projectName)) || 'عرض بدون عنوان';
+
+      let estimateData = null;
+      try {
+        estimateData = await api('POST', '/api/generation-approvals', { draftId, slidesCount });
+      } catch (err) {
+        console.warn('Generation approval estimate error:', err);
+      }
+      const estimate = estimateData?.estimate || {};
+      const approval = estimateData?.approval || {};
+      const approvalId = approval.id;
+      const points = estimate.estimated_points ?? 500;
+      const costUsd = Number(estimate.estimated_cost_usd ?? 25);
+
+      let remainingUsd = 0;
+      let remainingSar = 0;
+      try {
+        const ov = await api('GET', '/api/client/overview');
+        if (ov?.package) {
+          remainingUsd = Number(ov.package.remaining_usd) || 0;
+          remainingSar = Number(ov.package.remaining_sar) || 0;
+        } else if (ov?.balance_usd) {
+          remainingUsd = Number(ov.balance_usd) || 0;
+          remainingSar = Number(ov.balance_sar) || 0;
+        }
+      } catch (err) {
+        console.warn('Overview fetch error:', err);
+      }
+
+      const isBalanceSufficient = remainingUsd >= costUsd || remainingUsd > 0;
+
+      return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.id = 'generationApprovalModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+        modal.innerHTML =
+          '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
+          '<h3 style="margin:0 0 8px;color:#1a3a52;font-size:18px;">اعتماد بدء التوليد وحجز النقاط</h3>' +
+          '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">بوابة الاعتماد الثانية — تقدير التكلفة وحجز رصيد المحفظة</p>' +
+          '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">' +
+          '<div><span style="color:#64748b;">المشروع:</span> <strong>' + escapeHtml(projectName) + '</strong></div>' +
+          '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
+          '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>' + points + ' نقطة</strong></div>' +
+          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costUsd + ' دولار</strong></div>' +
+          '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
+          '<span>رصيد المحفظة المتاح:</span><strong>' + remainingUsd.toFixed(2) + ' دولار (' + remainingSar.toFixed(2) + ' ريال)</strong>' +
+          '</div></div>' +
+          (!isBalanceSufficient
+            ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px;border-radius:8px;font-size:12px;margin-bottom:14px;">' +
+              'الرصيد المتاح في باقة الشركة غير كافٍ لتغطية التكلفة التقديرية. يرجى شحن الرصيد أولاً.' +
+              '</div>'
+            : '') +
+          '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+          '<button type="button" id="genApproveCancelBtn" class="btn ghost" style="padding:8px 18px;">إلغاء</button>' +
+          (isBalanceSufficient
+            ? '<button type="button" id="genApproveConfirmBtn" class="btn primary" style="padding:8px 20px;">تعميد وبدء التوليد</button>'
+            : '<button type="button" id="genApproveRechargeBtn" class="btn primary" style="padding:8px 20px;">شحن الرصيد</button>') +
+          '</div></div>';
+
+        document.body.appendChild(modal);
+
+        const close = (res) => {
+          if (modal.parentNode) modal.parentNode.removeChild(modal);
+          resolve(res);
+        };
+
+        const cancelBtn = modal.querySelector('#genApproveCancelBtn');
+        if (cancelBtn) {
+          cancelBtn.onclick = async () => {
+            if (approvalId) {
+              await api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/decision', { decision: 'cancelled' }).catch(() => {});
+            }
+            close(null);
+          };
+        }
+
+        const rechargeBtn = modal.querySelector('#genApproveRechargeBtn');
+        if (rechargeBtn) {
+          rechargeBtn.onclick = () => {
+            close(null);
+            showTenantPage('tenantSettingsPage');
+            if (typeof showTenantSettingsTab === 'function') showTenantSettingsTab('packages');
+          };
+        }
+
+        const confirmBtn = modal.querySelector('#genApproveConfirmBtn');
+        if (confirmBtn) {
+          confirmBtn.onclick = async () => {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'جاري الحجز...';
+            try {
+              if (approvalId) {
+                const dec = await api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/decision', { decision: 'approved' });
+                if (!dec || !dec.success) {
+                  toast(dec?.error || 'تعذر حجز النقاط');
+                  close(null);
+                  return;
+                }
+              }
+              window.currentGenerationApprovalId = approvalId;
+              close(approvalId || true);
+            } catch (err) {
+              toast('فشل اعتماد التوليد');
+              close(null);
+            }
+          };
+        }
+      });
+    }
+
     async function directGenerateProposalFile() {
       if (isGeneratingTenantSlides || tenantSlidePlanRequest || tenantPresentationSavePromise) return;
       const formData = await collectTenantFormData();
@@ -549,6 +691,14 @@
         ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
       if (!(await preparePresentationGenerationTarget('full'))) return;
+
+      // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
+      const gateApproved = await showGenerationApprovalModal({
+        draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
+        slidesCount: (tenantSlidePlan && (tenantSlidePlan.slides || []).length) || 10,
+        projectName: tenantPresentationTitle,
+      });
+      if (!gateApproved) return;
 
       // Persist the project snapshot used to create this presentation without carrying the
       // conversation from the previous presentation.
@@ -593,7 +743,7 @@
         return;
       }
 
-      await generateTenantSlides();
+      await generateTenantSlides({ approvalGranted: true });
     }
 
     async function submitTenantProject() {
