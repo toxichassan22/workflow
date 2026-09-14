@@ -924,6 +924,41 @@ class MapsUsageTests(unittest.TestCase):
         self.assertAlmostEqual(body['combined']['cost_usd'], 0.02)
         self.assertEqual(body['combined']['calls'], 2)
 
+    def test_openrouter_stream_decodes_arabic_utf8_without_mojibake(self):
+        module = self.application_module
+
+        class _FakeStreamResponse:
+            def __init__(self, sse_lines):
+                self.status_code = 200
+                self.headers = {'content-type': 'text/event-stream'}
+                self.encoding = 'ISO-8859-1'
+                self._lines = sse_lines
+
+            def iter_lines(self, decode_unicode=False):
+                if decode_unicode:
+                    enc = getattr(self, 'encoding', 'utf-8') or 'utf-8'
+                    for line in self._lines:
+                        yield line.decode(enc)
+                else:
+                    yield from self._lines
+
+            def close(self):
+                pass
+
+        arabic_text = 'عرض السعر نبذة عن المشروع'
+        chunk = json.dumps({'id': 'gen-stream-ar-1', 'choices': [{'delta': {'content': arabic_text}}], 'usage': {'total_tokens': 10}})
+        raw_sse = f'data: {chunk}\n\n'.encode('utf-8')
+
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeStreamResponse([raw_sse])):
+                result = module.call_openrouter_chat_stream(
+                    'sys', 'user',
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-stream-ar'}
+                )
+        content = result['choices'][0]['message']['content']
+        self.assertEqual(content, arabic_text)
+        self.assertNotIn('Ø¹Ø±Ø¶', content)
+
 
 if __name__ == '__main__':
     unittest.main()

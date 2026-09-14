@@ -746,6 +746,7 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
+        response.encoding = 'utf-8'
         text = response.text or ''
         if not text.strip():
             print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
@@ -914,6 +915,7 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     start = _time.monotonic()
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=(15, read_timeout), stream=True)
+        response.encoding = 'utf-8'
     except requests.exceptions.Timeout:
         print(f"[OPENROUTER STREAM TIMEOUT] model={model_name} cap={max_tokens}")
         return _fail(f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)")
