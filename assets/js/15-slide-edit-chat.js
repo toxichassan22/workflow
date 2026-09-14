@@ -1243,7 +1243,7 @@
     document.addEventListener('wf:lang', () => {
       try {
         const panel = document.getElementById('presentationFontSettingsPanel');
-        if (panel && panel.style.display !== 'none') openPresentationFontSettings();
+        if (panel && panel.style.display === 'flex') openPresentationFontSettings();
       } catch (e) { /* ignore */ }
     });
 
