@@ -92,25 +92,23 @@
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      const renderDraftCard = (d, recovery, projectCost, projectReconcile) => {
+      const renderDraftCard = (d, recovery, projectCost) => {
         const title = d.title || 'مشروع بدون عنوان';
         const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
-        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') + (projectReconcile ? ' | <span>' + projectReconcile + '</span>' : '') : '—');
+        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
         const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
-        const snapshot = recovery?.snapshot;
-        const restorable = Boolean(snapshot?.recoverable);
-        const note = restorable
-          ? '<div class="meta" style="color:#92400e"><span>نسخة محفوظة في العرض</span> «' + escapeHtml(snapshot.title || '') + '» <span>تحتوي</span> <span>' + snapshot.fieldCount + '</span> <span>حقلًا</span></div>'
-          : '';
+        const approveBtn = (d.status !== 'approved'
+          ? '<button class="btn small green" onclick="requestProjectDraftApprovalById(\'' + d.id + '\')">اعتماد</button>'
+          : '');
         return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
           '<div><h3>' + escapeHtml(title) + '</h3><div class="meta"><span>' + statusText + '</span> | ' + escapeHtml(date) +
-          (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div>' + note + '</div><div class="tenant-actions">' +
+          (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div></div><div class="tenant-actions">' +
           '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
           '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-          (restorable ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' + d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>' : '') +
+          approveBtn +
           '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المشروع</button>' +
           '</div></div>';
       };
@@ -139,7 +137,7 @@
         }
         return;
       }
-      list.innerHTML = drafts.map(d => renderDraftCard(d, null, null, '')).join('');
+      list.innerHTML = drafts.map(d => renderDraftCard(d, null, null)).join('');
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       if (!projectIds.length) return;
       const [recoveryData, totalsData] = await Promise.all([
@@ -153,16 +151,13 @@
         (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
       }
       let costByProject = {};
-      let reconcileByDraft = {};
       if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
-      if (totalsData?.reconcile_by_scope?.by_draft) reconcileByDraft = totalsData.reconcile_by_scope.by_draft;
       let patched = false;
       drafts.forEach(d => {
         const node = list.querySelector('[data-draft-id="' + d.id + '"]');
         if (!node) return;
         const projectCost = costByProject[d.id];
-        const projectReconcile = aiReconcileStatusText(reconcileByDraft[d.id]);
-        const next = renderDraftCard(d, recoveryByDraft[d.id] || null, projectCost, projectReconcile);
+        const next = renderDraftCard(d, recoveryByDraft[d.id] || null, projectCost);
         if (node.outerHTML !== next) { node.outerHTML = next; patched = true; }
       });
       if (patched || recoveryData?.success || totalsData?.success) {
@@ -184,6 +179,18 @@
       }
       toast('تم استرجاع ' + resp.restoredCount + ' حقلًا');
       await openProjectDraftById(draftId);
+    }
+
+    async function requestProjectDraftApprovalById(draftId) {
+      if (!draftId) return;
+      const result = await api('POST', '/api/project-draft/request-approval', { draftId });
+      if (!result || !result.success) {
+        toast((result && result.error) || 'تعذر إرسال طلب الاعتماد');
+        return;
+      }
+      tenantArchiveCache = null;
+      toast('تم إرسال المسودة للاعتماد');
+      await openTenantPresentations(true);
     }
 
     async function openProjectDraftById(draftId) {
@@ -812,6 +819,40 @@
       const stats = (statsData.success && statsData.stats) ? statsData.stats : {};
       renderSagStats(stats);
       renderSagTenants(sagAllTenants);
+    }
+
+    async function sagEnsureAllKeys() {
+      const btn = document.getElementById('sagEnsureKeysBtn');
+      if (btn) btn.disabled = true;
+      showLoader(WFT('admin.keys_issuing', 'جاري إصدار مفاتيح الشركات...'), '', 5);
+      try {
+        let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0;
+        while (offset < remaining && rounds < 40) {
+          rounds += 1;
+          const data = await api('POST', '/api/admin/openrouter-keys/ensure-all', { batch: 25, offset });
+          if (!data || !data.success) {
+            toast(WFT('admin.keys_failed', 'تعذر إصدار المفاتيح'));
+            return;
+          }
+          created += data.created || 0;
+          failed += data.failed || 0;
+          remaining = data.total_keyless || 0;
+          offset += (data.results || []).length;
+          updateLoaderProgress(Math.min(95, Math.round((offset / Math.max(1, remaining)) * 100)));
+          if (!data.results || !data.results.length) break;
+        }
+        if (!created && !failed) {
+          toast(WFT('admin.keys_none', 'كل الشركات لديها مفاتيح'));
+        } else {
+          toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total: created + failed }));
+        }
+        const tenantsData = await api('GET', '/api/admin/tenants');
+        sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
+        renderSagTenants(sagAllTenants);
+      } finally {
+        if (btn) btn.disabled = false;
+        hideLoader();
+      }
     }
 
     function renderSagStats(stats) {
