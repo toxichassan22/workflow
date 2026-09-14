@@ -260,6 +260,70 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                 admin_meta = module._ensure_tenant_openrouter_key(self.admin_tenant)
                 self.assertIsNone(admin_meta)
 
+    def test_strict_mode_refuses_company_without_key(self):
+        module = self.application_module
+        tenant_id = self._fresh_tenant('Strict Co', 'strict-key@example.test', 'strict-key-co')
+        with self.app.app_context():
+            with patch.object(module, 'REQUIRE_TENANT_OPENROUTER_KEY', True), \
+                    patch.object(module.requests, 'post') as fake_post:
+                resp = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': tenant_id, 'flow': 'other'})
+                self.assertIn('error', resp)
+                self.assertEqual(resp['error'].get('error_code'), 'NO_TENANT_KEY')
+                fake_post.assert_not_called()
+                self.assertIsNone(module.call_image_api(
+                    'a villa', usage_ctx={'tenant_id': tenant_id, 'flow': 'image'}))
+                fake_post.assert_not_called()
+
+    def test_strict_mode_passes_with_key_and_for_admins(self):
+        module = self.application_module
+
+        def _fake_post(url, headers=None, json=None, timeout=None):
+            return _FakeResponse({
+                'choices': [{'message': {'content': 'ok'}}],
+                'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
+                'id': 'gen-strict-1',
+            })
+
+        tenant_id = self._fresh_tenant('Strict Ok Co', 'strict-ok@example.test', 'strict-ok')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-strict-key-jjjjjjjjjjjjjjjj', provenance='manual')
+            with patch.object(module, 'REQUIRE_TENANT_OPENROUTER_KEY', True), \
+                    patch.object(module.requests, 'post', side_effect=_fake_post) as fake_post:
+                resp = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': tenant_id, 'flow': 'other'})
+                self.assertIn('choices', resp)
+                self.assertEqual(fake_post.call_count, 1)
+                admin_resp = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.admin_tenant, 'flow': 'other'})
+                self.assertIn('choices', admin_resp)
+                self.assertEqual(fake_post.call_count, 2)
+
+    def test_fallback_stays_when_strict_is_off(self):
+        module = self.application_module
+
+        def _fake_post(url, headers=None, json=None, timeout=None):
+            self.assertEqual((headers or {}).get('Authorization'),
+                             'Bearer global-fallback-key')
+            return _FakeResponse({
+                'choices': [{'message': {'content': 'ok'}}],
+                'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2},
+                'id': 'gen-fallback-1',
+            })
+
+        tenant_id = self._fresh_tenant('Fallback Co', 'fallback@example.test', 'fallback-co')
+        with self.app.app_context():
+            with patch.object(module, 'REQUIRE_TENANT_OPENROUTER_KEY', False), \
+                    patch.object(module.requests, 'post', side_effect=_fake_post):
+                resp = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': tenant_id, 'flow': 'other'})
+                self.assertIn('choices', resp)
+
     def test_zero_provision_rolls_back_when_provider_ignores_limit(self):
         module = self.application_module
         client = self.app.test_client()

@@ -254,6 +254,11 @@ if TENANT_OPENROUTER_DEFAULT_LIMIT_USD < 0:
 TENANT_OPENROUTER_DEFAULT_RESET = (os.environ.get('TENANT_OPENROUTER_DEFAULT_RESET') or 'monthly').strip().lower()
 if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly'):
     TENANT_OPENROUTER_DEFAULT_RESET = 'monthly'
+# Strict per-company spend: when 1, a company without an active key of its
+# own is refused before any provider call instead of silently burning the
+# shared global key. Super-admin operations always use the global key.
+# Default 0 keeps the historical fallback until the owner enables it.
+REQUIRE_TENANT_OPENROUTER_KEY = (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
 GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
@@ -274,6 +279,7 @@ if not os.path.exists(OUTPUT_DIR):
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
 print(f"[CONFIG] OPENROUTER_KEY: {'SET' if OPENROUTER_KEY else 'MISSING'}")
 print(f"[CONFIG] OPENROUTER_MANAGEMENT_KEY: {'SET' if OPENROUTER_MANAGEMENT_KEY else 'MISSING'}")
+print(f"[CONFIG] REQUIRE_TENANT_OPENROUTER_KEY: {'ON' if REQUIRE_TENANT_OPENROUTER_KEY else 'OFF'}")
 print(f"[CONFIG] GOOGLE_MAPS_API_KEY: {'SET' if GOOGLE_MAPS_API_KEY else 'MISSING'}")
 print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
 
@@ -333,6 +339,42 @@ def _openrouter_headers(usage_ctx=None, tenant_id=None, title='Real Estate Propo
 
 def _has_any_openrouter_key(usage_ctx=None, tenant_id=None):
     return bool(_resolve_openrouter_key(usage_ctx, tenant_id))
+
+
+def _tenant_key_gate(usage_ctx=None, tenant_id=None):
+    """Strict-mode refusal for companies without an active key of their own.
+
+    Returns None when the call may proceed, otherwise an error dict with
+    NO_TENANT_KEY. Off unless REQUIRE_TENANT_OPENROUTER_KEY=1. Super-admin
+    operations and unattributed internal calls always pass; the provider's
+    own per-key limit remains the funding backstop. Never raises.
+    """
+    try:
+        if not REQUIRE_TENANT_OPENROUTER_KEY:
+            return None
+        tid = tenant_id
+        if tid is None:
+            tid = _tenant_id_from_usage_ctx(usage_ctx)
+        if not tid:
+            return None
+        try:
+            tenant = db.get_tenant_by_id(tid)
+        except Exception:
+            tenant = None
+        if tenant and tenant.get('is_admin'):
+            return None
+        try:
+            raw = db.get_tenant_openrouter_key_raw(tid)
+        except Exception as exc:
+            print(f"[OPENROUTER KEY] gate lookup failed: {exc}")
+            return None
+        if raw:
+            return None
+        return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
+                'error_code': 'NO_TENANT_KEY'}
+    except Exception as exc:
+        print(f"[OPENROUTER KEY] gate failed open: {exc}")
+        return None
 
 
 # ── Per-tenant managed keys (OpenRouter Management API) ────────────────
@@ -548,6 +590,9 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
 
 
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
+    gate = _tenant_key_gate(usage_ctx)
+    if gate is not None:
+        return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -692,6 +737,9 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     same {"error": ...} shape; only on_token is new, and it must never raise.
     """
     import time as _time
+    gate = _tenant_key_gate(usage_ctx)
+    if gate is not None:
+        return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -1765,6 +1813,10 @@ def _image_response_url(data):
 def call_image_api(prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
     ctx = usage_ctx or _usage_ctx('image')
+    gate = _tenant_key_gate(ctx)
+    if gate is not None:
+        print(f"[IMAGE ERROR] {gate['message']}")
+        return None
     if not _has_any_openrouter_key(ctx):
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
@@ -1857,6 +1909,10 @@ def _prepare_image_reference_for_model(reference):
 def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
     ctx = usage_ctx or _usage_ctx('image')
+    gate = _tenant_key_gate(ctx)
+    if gate is not None:
+        print(f"[IMAGE ERROR] {gate['message']}")
+        return None
     if not _has_any_openrouter_key(ctx):
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
@@ -2422,6 +2478,10 @@ def _visual_concept_sanitize_prompt(prompt):
 
 def call_image_api_with_references(prompt, references=None, usage_ctx=None):
     ctx = usage_ctx or _usage_ctx('image')
+    gate = _tenant_key_gate(ctx)
+    if gate is not None:
+        print(f"[IMAGE ERROR] {gate['message']}")
+        return None
     if not _has_any_openrouter_key(ctx):
         print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
         return None
@@ -9428,6 +9488,8 @@ def _map_image_point_to_coords(x, y, width, height, center_lat, center_lng, zoom
 def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zoom, usage_ctx=None):
     """Ask the vision model for a conservative building-only polygon estimate."""
     vision_ctx = usage_ctx or _usage_ctx('site')
+    if _tenant_key_gate(vision_ctx) is not None:
+        return None
     if not _has_any_openrouter_key(vision_ctx) or not image_path or not os.path.isfile(image_path):
         return None
     site_attempt_id = _begin_ai_attempt_record(vision_ctx, IMAGE_MODEL)
@@ -11534,6 +11596,7 @@ def api_request_project_draft_approval():
     if draft.get('error') == 'sections_not_approved':
         return jsonify({
             'error': 'All project sections must be approved before requesting approval',
+            'error_code': 'SECTIONS_NOT_APPROVED',
             'sectionStatuses': draft.get('section_statuses', {})
         }), 400
     _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
@@ -17995,6 +18058,10 @@ def api_analyze_reference():
             except Exception as exc:
                 print(f"[AI-USAGE] reference metering failed: {exc}")
 
+        gate = _tenant_key_gate(tenant_id=g.tenant_id)
+        if gate is not None:
+            return jsonify({'success': False, 'error': gate['message'],
+                            'error_code': gate['error_code']}), 402
         analysis, metering = analyze_reference_image(
             abs_path, _resolve_openrouter_key(tenant_id=g.tenant_id),
             on_metering=_record_reference_metering)
@@ -19276,7 +19343,8 @@ def api_upload_training_image():
 
 اكتب التحليل بالعربية بشكل منظم وواضح."""
 
-        if not _has_any_openrouter_key(tenant_id=g.tenant_id):
+        if not _has_any_openrouter_key(tenant_id=g.tenant_id) \
+                or _tenant_key_gate(tenant_id=g.tenant_id) is not None:
             analysis_text = 'The image was stored, but automatic analysis is unavailable because the AI key is not configured.'
         else:
             vision_payload = {
