@@ -846,6 +846,14 @@
       if (btn) btn.disabled = true;
       showLoader(WFT('admin.keys_issuing', 'جاري إصدار مفاتيح الشركات...'), '', 5);
       try {
+        let cleaned = 0;
+        try {
+          const orphans = await api('GET', '/api/admin/openrouter-keys/orphans');
+          if (orphans && orphans.success && orphans.count) {
+            const swept = await api('DELETE', '/api/admin/openrouter-keys/orphans', { confirm: true });
+            cleaned = (swept && swept.deleted_count) || 0;
+          }
+        } catch (sweepError) { /* orphan sweep must never block issuance */ }
         let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0, firstError = '';
         while (offset < remaining && rounds < 40) {
           rounds += 1;
@@ -872,37 +880,12 @@
           toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total: created + failed }));
           if (firstError) toast(firstError);
         }
+        if (cleaned) {
+          toast(WFT('admin.orphans_deleted', 'تم حذف {count} مفاتيح يتيمة', { count: cleaned }));
+        }
         const tenantsData = await api('GET', '/api/admin/tenants');
         sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
         renderSagTenants(sagAllTenants);
-      } finally {
-        if (btn) btn.disabled = false;
-        hideLoader();
-      }
-    }
-
-    async function sagCleanOrphanKeys() {
-      const btn = document.getElementById('sagCleanOrphansBtn');
-      if (btn) btn.disabled = true;
-      showLoader(WFT('admin.orphans_check', 'فحص المفاتيح اليتيمة'), '', 5);
-      try {
-        const report = await api('GET', '/api/admin/openrouter-keys/orphans');
-        if (!report || !report.success) {
-          toast(WFT('admin.orphans_failed', 'تعذر حذف المفاتيح اليتيمة'));
-          return;
-        }
-        if (!report.count) {
-          toast(WFT('admin.orphans_none', 'لا توجد مفاتيح يتيمة'));
-          return;
-        }
-        const names = (report.orphans || []).map(o => o.name).filter(Boolean).join(', ');
-        if (!confirm(WFT('admin.orphans_confirm', 'حذف {count} مفاتيح يتيمة؟', { count: report.count }) + (names ? ' ' + names : ''))) return;
-        const done = await api('DELETE', '/api/admin/openrouter-keys/orphans', { confirm: true });
-        if (!done || !done.success) {
-          toast(WFT('admin.orphans_failed', 'تعذر حذف المفاتيح اليتيمة'));
-          return;
-        }
-        toast(WFT('admin.orphans_deleted', 'تم حذف {count} مفاتيح يتيمة', { count: done.deleted_count || 0 }));
       } finally {
         if (btn) btn.disabled = false;
         hideLoader();

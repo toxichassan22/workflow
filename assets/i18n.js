@@ -67,11 +67,7 @@
     "admin.keys_done": "تم إصدار {created} من أصل {total}",
     "admin.keys_none": "كل الشركات لديها مفاتيح",
     "admin.keys_failed": "تعذر إصدار المفاتيح",
-    "admin.orphans_check": "فحص المفاتيح اليتيمة",
-    "admin.orphans_none": "لا توجد مفاتيح يتيمة",
-    "admin.orphans_confirm": "حذف {count} مفاتيح يتيمة؟",
     "admin.orphans_deleted": "تم حذف {count} مفاتيح يتيمة",
-    "admin.orphans_failed": "تعذر حذف المفاتيح اليتيمة",
     "admin.project_approved": "تم اعتماد المشروع"
   }/*I18N_AR_END*/;
 
@@ -108,11 +104,7 @@
     "admin.keys_done": "Issued {created} of {total}",
     "admin.keys_none": "Every company already has a key",
     "admin.keys_failed": "Could not issue keys",
-    "admin.orphans_check": "Check orphaned keys",
-    "admin.orphans_none": "No orphaned keys",
-    "admin.orphans_confirm": "Delete {count} orphaned keys?",
     "admin.orphans_deleted": "Deleted {count} orphaned keys",
-    "admin.orphans_failed": "Could not delete orphaned keys",
     "admin.project_approved": "Project approved"
   }/*I18N_EN_END*/;
 
