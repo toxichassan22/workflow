@@ -485,6 +485,72 @@ def _openrouter_key_status(api_key, timeout=20):
     return data if isinstance(data, dict) else {}
 
 
+def _openrouter_list_managed_keys(limit_pages=100):
+    """Every dashboard key (paginated). Returns list or {'error': ...}."""
+    mgmt = _openrouter_management_key()
+    if not mgmt:
+        return {'error': 'OPENROUTER_MANAGEMENT_KEY is not configured'}
+    items = []
+    try:
+        offset = 0
+        for _page in range(max(1, int(limit_pages or 1))):
+            response = requests.get(
+                f"{OPENROUTER_BASE}/keys",
+                headers={"Authorization": f"Bearer {mgmt}"},
+                params={'offset': offset},
+                timeout=30,
+            )
+            try:
+                body = response.json()
+            except Exception:
+                body = {}
+            if response.status_code >= 400:
+                err = (body.get('error') if isinstance(body, dict) else None) or f'HTTP {response.status_code}'
+                return {'error': str(err) if not isinstance(err, dict) else json.dumps(err, ensure_ascii=False)}
+            data = (body.get('data') if isinstance(body, dict) else None) or []
+            if not isinstance(data, list) or not data:
+                break
+            items.extend(item for item in data if isinstance(item, dict))
+            if len(data) < 100:
+                break
+            offset += len(data)
+        return items
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] list failed: {exc}")
+        return {'error': str(exc)}
+
+
+def _managed_orphan_keys():
+    """Dashboard keys no company row references. Returns (orphans, error)."""
+    listed = _openrouter_list_managed_keys()
+    if isinstance(listed, dict) and listed.get('error'):
+        return None, listed.get('error')
+    try:
+        conn = db.get_db()
+        known = {str(row[0]) for row in conn.execute(
+            'SELECT openrouter_key_hash FROM tenant_openrouter_keys '
+            'WHERE openrouter_key_hash IS NOT NULL').fetchall() if row[0]}
+    except Exception:
+        known = set()
+    orphans = []
+    for item in listed:
+        key_hash = item.get('hash')
+        if not key_hash or key_hash in known:
+            continue
+        name = str(item.get('label') or item.get('name') or '')
+        if not (name.startswith('landloom-') or name.startswith('tenant-')):
+            continue
+        orphans.append({
+            'name': name,
+            'hash': key_hash,
+            'limit': item.get('limit'),
+            'limit_reset': item.get('limit_reset'),
+            'usage': item.get('usage'),
+            'disabled': bool(item.get('disabled')),
+        })
+    return orphans, None
+
+
 def _managed_key_honors_limit(raw_key, expected_limit):
     """Confirm the dashboard enforces the requested limit. Never raises.
 
@@ -516,11 +582,13 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
     """Create, store and (for zero credit) verify one managed key.
 
     Returns (meta, error): exactly one is set. The raw secret is stored
-    encrypted immediately and never logged. A zero limit the provider does
-    not honor is rolled back instead of being activated.
+    encrypted immediately and never logged. Anything that fails after the
+    upstream key exists deletes it again, so a retry never leaves a second
+    live key behind for the same company.
     """
+    created = None
+    tenant_id = tenant.get('id') if isinstance(tenant, dict) else tenant
     try:
-        tenant_id = tenant.get('id') if isinstance(tenant, dict) else tenant
         try:
             slug = (db.tenant_slug(tenant) if isinstance(tenant, dict) else '') or str(tenant_id)[:8]
         except Exception:
@@ -528,6 +596,7 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
         created = _openrouter_create_managed_key(f"landloom-{slug}", limit_usd, limit_reset)
         if not isinstance(created, dict) or not created.get('key'):
             reason = created.get('error') if isinstance(created, dict) else 'Provisioning failed'
+            created = None
             return None, str(reason)
         try:
             meta = db.set_tenant_openrouter_key(
@@ -538,13 +607,15 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
                 provenance='auto',
                 openrouter_key_hash=created.get('hash'),
             )
-        except ValueError as exc:
+        except Exception as store_exc:
             _openrouter_delete_managed_key(created.get('hash'))
-            return None, str(exc)
+            created = None
+            return None, f"Local store failed, upstream key removed: {store_exc}"
         if (limit_usd or 0) <= 0:
             honored, _live = _managed_key_honors_limit(created.get('key'), 0)
             if not honored:
                 _openrouter_delete_managed_key(created.get('hash'))
+                created = None
                 try:
                     db.deactivate_tenant_openrouter_key(tenant_id)
                 except Exception:
@@ -553,6 +624,8 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
         return meta, None
     except Exception as exc:
         print(f"[OPENROUTER KEYS] provision failed: {exc}")
+        if created and isinstance(created, dict):
+            _openrouter_delete_managed_key(created.get('hash'))
         return None, str(exc)
 
 
@@ -18509,6 +18582,44 @@ def api_admin_tenant_keys_ensure_all():
     return jsonify({'success': True, 'total_keyless': len(targets),
                     'offset': offset, 'batch': batch, 'created': created,
                     'failed': len(results) - created, 'results': results})
+
+
+@app.route('/api/admin/openrouter-keys/orphans', methods=['GET'])
+@require_admin
+def api_admin_tenant_keys_orphans():
+    """Dashboard keys no company row references (e.g. after a failed run).
+
+    These can never be recovered (the secret shows only at creation), only
+    listed here and deleted below.
+    """
+    orphans, error = _managed_orphan_keys()
+    if error is not None:
+        return jsonify({'success': False, 'error': error}), 503
+    return jsonify({'success': True, 'count': len(orphans), 'orphans': orphans})
+
+
+@app.route('/api/admin/openrouter-keys/orphans', methods=['DELETE'])
+@require_admin
+def api_admin_tenant_keys_orphans_delete():
+    """Delete orphaned dashboard keys. Requires {"confirm": true}."""
+    data = request.json or {}
+    if data.get('confirm') is not True:
+        return jsonify({'success': False,
+                        'error': 'أرسل confirm=true لحذف المفاتيح اليتيمة',
+                        'error_code': 'CONFIRM_REQUIRED'}), 400
+    orphans, error = _managed_orphan_keys()
+    if error is not None:
+        return jsonify({'success': False, 'error': error}), 503
+    deleted = []
+    failed = []
+    for item in orphans:
+        result = _openrouter_delete_managed_key(item.get('hash'))
+        if isinstance(result, dict) and (result.get('ok') or result.get('skipped')):
+            deleted.append(item.get('name'))
+        else:
+            failed.append({'name': item.get('name'), 'result': result})
+    return jsonify({'success': True, 'deleted': deleted, 'failed': failed,
+                    'deleted_count': len(deleted)})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/openrouter-key/manual', methods=['POST'])

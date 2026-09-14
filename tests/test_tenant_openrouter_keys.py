@@ -343,6 +343,67 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
             self.assertFalse(
                 db.get_tenant_openrouter_key_meta(tenant_id).get('has_key'))
 
+    def test_store_failure_deletes_upstream_key(self):
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Orphan Co', 'orphan-key@example.test', 'orphan-key-co')
+        created_body = {'key': 'sk-or-v1-orphan-key-llllllllllllllll',
+                        'label': 'landloom-orphan', 'limit': 5.0,
+                        'limit_reset': 'monthly', 'hash': 'orphanhash66'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module.db, 'set_tenant_openrouter_key',
+                             side_effect=RuntimeError('disk gone')), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            done = client.post(
+                f'/api/admin/tenants/{tenant_id}/openrouter-key/provision',
+                headers=self._admin_headers(), json={'limitUsd': 5})
+        self.assertEqual(done.status_code, 503, done.get_json())
+        deleted.assert_called_once_with('orphanhash66')
+        with self.app.app_context():
+            self.assertFalse(
+                db.get_tenant_openrouter_key_meta(tenant_id).get('has_key'))
+
+    def test_orphans_report_and_delete(self):
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Live Co', 'live-key@example.test', 'live-key-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-live-key-mmmmmmmmmmmmmmmm', provenance='auto',
+                openrouter_key_hash='livehash77', limit_usd=5.0)
+        dashboard = [
+            {'label': 'landloom-gone', 'hash': 'gonehash88', 'limit': 0.0,
+             'limit_reset': 'monthly', 'usage': 0.0, 'disabled': False},
+            {'label': 'landloom-live', 'hash': 'livehash77', 'limit': 5.0,
+             'limit_reset': 'monthly', 'usage': 0.0, 'disabled': False},
+            {'label': 'my-personal', 'hash': 'personal99', 'limit': None,
+             'limit_reset': None, 'usage': 0.0, 'disabled': False},
+        ]
+        with patch.object(module, '_openrouter_list_managed_keys',
+                          return_value=[dict(item) for item in dashboard]):
+            report = client.get('/api/admin/openrouter-keys/orphans',
+                                headers=self._admin_headers()).get_json()
+        self.assertTrue(report['success'])
+        self.assertEqual(report['count'], 1)
+        self.assertEqual(report['orphans'][0]['hash'], 'gonehash88')
+
+        refused = client.delete('/api/admin/openrouter-keys/orphans',
+                                headers=self._admin_headers(), json={})
+        self.assertEqual(refused.status_code, 400)
+        with patch.object(module, '_openrouter_list_managed_keys',
+                          return_value=[dict(item) for item in dashboard]), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            done = client.delete('/api/admin/openrouter-keys/orphans',
+                                 headers=self._admin_headers(),
+                                 json={'confirm': True})
+        self.assertEqual(done.status_code, 200, done.get_json())
+        self.assertEqual(done.get_json()['deleted'], ['landloom-gone'])
+        deleted.assert_called_once_with('gonehash88')
+
     def test_zero_provision_rolls_back_when_provider_ignores_limit(self):
         module = self.application_module
         client = self.app.test_client()
