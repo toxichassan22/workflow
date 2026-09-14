@@ -11274,6 +11274,77 @@ DRAFT_FIELD_SECTION_BLOBS = {
     'site_analysis': 'location',
 }
 
+# Widget-section blobs that belong to a section snapshot even though no input
+# field carries them. Binary image bytes are deliberately excluded: rendered
+# map and creative images stay referenced by file, while the snapshot keeps the
+# structured inputs plus the small approval flags that prove what was reviewed.
+SECTION_SNAPSHOT_BLOBS = {
+    'section-timeline': ['timeline_table_data'],
+    'section-financial-calc': ['financial_study_model'],
+    'section-team': ['team_selection'],
+    'section-market-study': ['market_study_data'],
+    'section-visual-concept': ['visual_concept'],
+    'section-executive-content': ['executive_content'],
+}
+SECTION_SNAPSHOT_LOCATION_EXTRAS = [
+    'location_analysis_approved',
+    'location_data_fetched_at',
+    'location_polygon_source',
+]
+SECTION_SNAPSHOT_EXCLUDED_KEYS = {
+    'tenantCreativeImages', 'tenantSlidesData', 'pageDrafts', 'designerChat', 'map_styles',
+}
+
+SECTION_VERSION_AR_LABELS = {
+    'basic': 'المعلومات الأساسية',
+    'location': 'الموقع والخرائط',
+    'land_croquis': 'الأرض والكروكي',
+    'contact': 'بيانات التواصل',
+    'section-timeline': 'الجدول الزمني',
+    'section-financial-calc': 'الدراسة المالية والمؤشرات',
+    'section-team': 'فريق العمل',
+    'section-market-study': 'دراسة السوق',
+    'section-visual-concept': 'التصور البصري',
+    'section-executive-content': 'المحتوى التنفيذي',
+}
+
+
+def _section_snapshot_slice(draft_data, section_key, section_map=None):
+    """Copy the inputs one section owns at this moment for an approval snapshot."""
+    data = draft_data if isinstance(draft_data, dict) else {}
+    section_map = section_map or {}
+    selected = {}
+    for key, value in data.items():
+        if key in SECTION_SNAPSHOT_EXCLUDED_KEYS:
+            continue
+        if _draft_section_of_key(section_map, key) == section_key:
+            selected[key] = value
+    for key in SECTION_SNAPSHOT_BLOBS.get(section_key, []):
+        if key in data:
+            selected[key] = data[key]
+    if section_key == 'location':
+        for key in SECTION_SNAPSHOT_LOCATION_EXTRAS:
+            if key in data:
+                selected[key] = data[key]
+        creative = data.get('tenantCreativeImages')
+        if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
+            selected['map_approvals'] = dict(creative.get('map_approvals'))
+    return selected
+
+
+def _section_version_label(section_key):
+    return SECTION_VERSION_AR_LABELS.get(section_key, section_key)
+
+
+def _versioned_draft_or_404(draft_id):
+    """The actor-owned draft version flows act on, or a not-found error dict."""
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    if not draft:
+        return None, {'error': 'No project draft found'}
+    if draft.get('user_id') != _project_draft_actor_id():
+        return None, {'error': 'No project draft found'}
+    return draft, None
+
 
 def _draft_field_section_map(tenant_id):
     """Map every draft key the section UI governs to its section key."""
@@ -11633,6 +11704,11 @@ def api_update_section_status():
         if bulk.get('location') == 'approved' and not _location_workflow_complete(before):
             return jsonify({'error': 'Location analysis and all four maps must be approved first',
                             'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
+        if draft_id:
+            blocked = db.pending_section_versions(g.tenant_id, draft_id, list(bulk))
+            if blocked:
+                return jsonify({'error': 'These sections await a version decision; decide on the sent version first',
+                                'error_code': 'SECTION_VERSION_PENDING', 'sections': blocked}), 409
         result = db.update_draft_section_statuses(
             g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
         )
@@ -11651,6 +11727,9 @@ def api_update_section_status():
     if section_key == 'location' and section_status == 'approved' and not _location_workflow_complete(before):
         return jsonify({'error': 'Location analysis and all four maps must be approved first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
+    if draft_id and db.pending_section_versions(g.tenant_id, draft_id, [section_key]):
+        return jsonify({'error': 'This section awaits a version decision; decide on the sent version first',
+                        'error_code': 'SECTION_VERSION_PENDING', 'sections': [section_key]}), 409
     result = db.update_draft_section_status(
         g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
     )
@@ -11663,11 +11742,175 @@ def api_update_section_status():
     return jsonify({'success': True})
 
 
+@app.route('/api/project-draft/section-version', methods=['POST'])
+@require_auth
+def api_send_section_for_approval():
+    """Freeze this moment's section inputs as a new pending version for approval."""
+    data = request.json or {}
+    section_key = data.get('sectionKey')
+    if not isinstance(section_key, str) or not section_key.strip():
+        return jsonify({'error': 'A valid sectionKey is required'}), 400
+    section_key = section_key.strip()
+    draft, error = _versioned_draft_or_404(_resolve_draft_id(data.get('draftId')))
+    if error:
+        return jsonify(error), 404
+    stored = draft.get('draft_data') or {}
+    snapshot = _section_snapshot_slice(stored, section_key, _draft_field_section_map(g.tenant_id))
+    version = db.create_section_version(
+        g.tenant_id, draft['id'], section_key, snapshot,
+        _project_draft_actor_id(), _project_draft_actor_name(),
+    )
+    if version.get('error') == 'draft_not_found':
+        return jsonify({'error': 'No project draft found'}), 404
+    if version.get('error') == 'unknown_section':
+        return jsonify({'error': 'Unknown project section'}), 400
+    if version.get('error'):
+        return jsonify({'error': 'Unable to store the section snapshot'}), 400
+    _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
+                   [f'القسم {_section_version_label(section_key)}: لقطة رقم {version["version_number"]} بانتظار القرار'])
+    return jsonify({'success': True, 'version': version})
+
+
+@app.route('/api/project-draft/section-versions', methods=['GET'])
+@require_auth
+def api_list_section_versions():
+    """Newest-first version history of a draft, metadata only."""
+    draft, error = _versioned_draft_or_404(_resolve_draft_id(request.args.get('draftId')))
+    if error:
+        return jsonify(error), 404
+    section_key = request.args.get('sectionKey') or None
+    versions = db.list_section_versions(g.tenant_id, draft['id'], section_key)
+    return jsonify({'success': True, 'versions': versions})
+
+
+@app.route('/api/project-draft/section-versions/<version_id>', methods=['GET'])
+@require_auth
+def api_get_section_version(version_id):
+    """One version with its immutable snapshot, for history and comparison."""
+    version = db.get_section_version(g.tenant_id, version_id, include_snapshot=True)
+    if not version:
+        return jsonify({'error': 'Section version not found'}), 404
+    return jsonify({'success': True, 'version': version})
+
+
+@app.route('/api/project-draft/section-version/decision', methods=['POST'])
+@require_auth
+def api_decide_section_version():
+    """Approve, return or reject one sent version; the decision names its number."""
+    data = request.json or {}
+    version_id = data.get('versionId')
+    decision = data.get('decision')
+    if not version_id or decision not in {'approved', 'returned', 'rejected'}:
+        return jsonify({'error': 'A valid versionId and decision are required'}), 400
+    version = db.get_section_version(g.tenant_id, version_id, include_snapshot=False)
+    if not version:
+        return jsonify({'error': 'Section version not found'}), 404
+    draft, error = _versioned_draft_or_404(version.get('draft_id'))
+    if error:
+        return jsonify(error), 404
+    decided = db.decide_section_version(
+        g.tenant_id, version_id, decision,
+        _project_draft_actor_id(), _project_draft_actor_name(), data.get('note'),
+    )
+    if decided.get('error') == 'version_not_found':
+        return jsonify({'error': 'Section version not found'}), 404
+    if decided.get('error') == 'version_not_pending':
+        return jsonify({'error': 'This version was already decided',
+                        'error_code': 'SECTION_VERSION_DECIDED'}), 409
+    if decided.get('error') == 'note_required':
+        return jsonify({'error': 'A reason is required to return or reject a version'}), 400
+    if decided.get('error'):
+        return jsonify({'error': 'Unable to record the version decision'}), 400
+    mirror = 'approved' if decision == 'approved' else 'draft'
+    db.update_draft_section_statuses(
+        g.tenant_id, _project_draft_actor_id(), {version['section_key']: mirror}, draft_id=draft['id']
+    )
+    action = {'approved': 'اعتماد نسخة قسم', 'returned': 'إعادة نسخة قسم للتعديل', 'rejected': 'رفض نسخة قسم'}[decision]
+    detail = f'القسم {_section_version_label(version["section_key"])}: لقطة رقم {version["version_number"]} — {action}'
+    if decided.get('decision_note'):
+        detail += f' (السبب: {decided["decision_note"]})'
+    _record_change('draft', draft['id'], action, [detail])
+    return jsonify({'success': True, 'version': decided})
+
+
+@app.route('/api/project-draft/section-version/restore', methods=['POST'])
+@require_auth
+def api_restore_section_version():
+    """Bring back an older version as a brand-new pending version, keeping history."""
+    data = request.json or {}
+    if not data.get('versionId'):
+        return jsonify({'error': 'A valid versionId is required'}), 400
+    version = db.get_section_version(g.tenant_id, data['versionId'], include_snapshot=True)
+    if not version:
+        return jsonify({'error': 'Section version not found'}), 404
+    draft, error = _versioned_draft_or_404(version.get('draft_id'))
+    if error:
+        return jsonify(error), 404
+    live = dict(draft.get('draft_data') or {})
+    section_map = _draft_field_section_map(g.tenant_id)
+    for key in _section_snapshot_slice(live, version['section_key'], section_map):
+        live.pop(key, None)
+    snapshot = dict(version.get('snapshot') or {})
+    map_approvals = snapshot.pop('map_approvals', None)
+    live.update(snapshot)
+    if version['section_key'] == 'location' and isinstance(map_approvals, dict):
+        creative = dict(live.get('tenantCreativeImages') or {})
+        creative['map_approvals'] = map_approvals
+        live['tenantCreativeImages'] = creative
+    try:
+        db.save_project_draft(
+            g.tenant_id, _project_draft_actor_id(), live,
+            None, draft.get('status') or 'draft', draft_id=draft['id'],
+        )
+    except db.DraftOverwriteRefused:
+        return jsonify({'error': 'Restoring this version would empty the draft'}), 400
+    except Exception:
+        return jsonify({'error': 'Unable to restore the section version'}), 400
+    restored = db.create_section_version(
+        g.tenant_id, draft['id'], version['section_key'], snapshot,
+        _project_draft_actor_id(), _project_draft_actor_name(),
+    )
+    if restored.get('error'):
+        return jsonify({'error': 'Unable to store the restored section snapshot'}), 400
+    _record_change('draft', draft['id'], 'الرجوع لنسخة قسم سابقة',
+                   [f'القسم {_section_version_label(version["section_key"])}: '
+                    f'لقطة رقم {version["version_number"]} عادت كلقطة رقم {restored["version_number"]} بانتظار القرار'])
+    return jsonify({'success': True, 'version': restored})
+
+
 @app.route('/api/project-draft/request-approval', methods=['POST'])
 @require_auth
 def api_request_project_draft_approval():
     """Request one overall approval after all tracked sections are approved."""
     data = request.json or {}
+    draft_id = _resolve_draft_id(data.get('draftId'))
+    current = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    if current and current.get('user_id') == _project_draft_actor_id():
+        # Rule 19.2: an approval names one version, so a later edit voids that
+        # section's readiness until it is sent and approved again. Sections
+        # without any version keep the legacy toggle behaviour.
+        overview = db.section_versions_overview(g.tenant_id, current['id'])
+        if overview:
+            section_map = _draft_field_section_map(g.tenant_id)
+            stored_data = current.get('draft_data') or {}
+            stored_statuses = current.get('section_statuses') or {}
+            for section_key, meta in overview.items():
+                if stored_statuses.get(section_key) != 'approved':
+                    continue
+                if meta.get('status') != 'approved':
+                    return jsonify({
+                        'error': f'Section {section_key} has a newer version awaiting a decision',
+                        'error_code': 'SECTION_VERSION_NOT_APPROVED',
+                        'section': section_key, 'version': meta.get('version_number'),
+                    }), 400
+                live_hash = db.section_snapshot_hash(
+                    _section_snapshot_slice(stored_data, section_key, section_map))
+                if live_hash != meta.get('snapshot_hash'):
+                    return jsonify({
+                        'error': f'Section {section_key} changed after its approval',
+                        'error_code': 'SECTION_VERSION_STALE',
+                        'section': section_key, 'version': meta.get('version_number'),
+                    }), 400
     draft = db.request_project_draft_approval(
         g.tenant_id, _project_draft_actor_id(), _project_draft_actor_id(), _project_draft_actor_name(),
         draft_id=data.get('draftId')
@@ -18575,12 +18818,15 @@ def api_admin_tenant_keys_ensure_all():
         if meta.get('has_key') and meta.get('is_active'):
             already_keyed += 1
             continue
-        targets.append(tenant)
+        old_hash = meta.get('openrouter_key_hash') if meta.get('has_key') else None
+        targets.append((tenant, old_hash))
     import time as _time
     page = targets[offset:offset + batch]
     results = []
     created = 0
-    for tenant in page:
+    for tenant, old_hash in page:
+        if old_hash:
+            _openrouter_delete_managed_key(old_hash)
         meta, provision_error = _provision_one_tenant_key(tenant, limit_usd, limit_reset)
         if meta is not None:
             provision_error = None
@@ -18590,10 +18836,10 @@ def api_admin_tenant_keys_ensure_all():
         results.append({
             'tenantId': tenant.get('id'),
             'companyName': tenant.get('company_name'),
-            'ok': meta is not None,
+            'ok': bool(meta is not None and meta.get('is_active', True)),
             'error': provision_error,
         })
-        if meta is not None:
+        if meta is not None and meta.get('is_active', True):
             created += 1
         _time.sleep(1)
     return jsonify({'success': True, 'total_keyless': len(targets),

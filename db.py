@@ -393,6 +393,33 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_drafts_tenant_recent ON project_drafts(tenant_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_drafts_tenant_status ON project_drafts(tenant_id, status);
 
+    -- Immutable per-section snapshots for the approval workflow. Every send for
+    -- approval copies the section inputs of that moment into a new row with the
+    -- next version number, and every approval decision names that number instead
+    -- of the live values that keep changing. Rows are never updated in place
+    -- apart from the single decision columns, so history survives intact.
+    -- Older pending rows are marked superseded when a newer send arrives.
+    -- Keep every comment here free of the statement separator.
+    CREATE TABLE IF NOT EXISTS section_versions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT NOT NULL,
+        section_key TEXT NOT NULL,
+        version_number INTEGER NOT NULL,
+        snapshot_data TEXT NOT NULL,
+        snapshot_hash TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_by TEXT,
+        created_by_name TEXT,
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decision_note TEXT,
+        decided_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_section_versions_number ON section_versions(draft_id, section_key, version_number);
+    CREATE INDEX IF NOT EXISTS idx_section_versions_lookup ON section_versions(tenant_id, draft_id, section_key, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS ai_rules_log (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -3922,6 +3949,194 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
         return True
     print(f'[DRAFT SECTIONS] gave up merging {list(updates)} after repeated concurrent writes')
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section versions: immutable per-section snapshots tied to approval.
+#
+# Spec (Omran analysis sections 6, 8.1, 19): every send for approval stores an
+# independent copy of that section's inputs under the next version number, and
+# the approval decision names that number instead of the live values. Sections
+# without any version keep the legacy toggle behaviour untouched.
+# ─────────────────────────────────────────────────────────────────────────────
+
+SECTION_VERSION_STATUSES = {'pending', 'approved', 'returned', 'rejected', 'superseded'}
+SECTION_VERSION_DECISIONS = {'approved', 'returned', 'rejected'}
+
+BASE_SECTION_KEYS = {
+    'basic', 'location', 'land_croquis', 'contact',
+    'section-timeline', 'section-financial-calc', 'section-team',
+    'section-market-study', 'section-visual-concept', 'section-executive-content',
+}
+
+
+def section_snapshot_hash(snapshot):
+    """Stable sha256 over the canonical JSON of a section snapshot."""
+    try:
+        canonical = json.dumps(snapshot if isinstance(snapshot, dict) else {}, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        canonical = '{}'
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def _known_section_keys(conn, tenant_id, draft_statuses=None):
+    """Section keys a version may be opened for: base, custom and already stored."""
+    keys = set(BASE_SECTION_KEYS)
+    try:
+        for row in conn.execute(
+            'SELECT section_key FROM tenant_custom_sections WHERE tenant_id = ? AND is_active = 1',
+            (tenant_id,),
+        ).fetchall():
+            if row['section_key']:
+                keys.add(row['section_key'])
+    except Exception:
+        pass
+    for key in (draft_statuses or {}):
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _section_version_public(row, include_snapshot=False):
+    item = dict(row)
+    raw = item.pop('snapshot_data', None)
+    if include_snapshot:
+        try:
+            item['snapshot'] = json.loads(raw or '{}')
+        except (TypeError, ValueError):
+            item['snapshot'] = {}
+        if not isinstance(item.get('snapshot'), dict):
+            item['snapshot'] = {}
+    return item
+
+
+def create_section_version(tenant_id, draft_id, section_key, snapshot, created_by, created_by_name):
+    """Store an immutable snapshot as the next version of a draft section.
+
+    Older rows with status pending become superseded, so exactly one version
+    per section awaits a decision at a time. Returns the stored row metadata,
+    or a dict with an error key when the draft or section is unknown.
+    """
+    if not isinstance(section_key, str) or not section_key.strip() or len(section_key) > 64:
+        return {'error': 'unknown_section'}
+    if not isinstance(snapshot, dict):
+        return {'error': 'invalid_snapshot'}
+    section_key = section_key.strip()
+    conn = get_db()
+    draft = conn.execute(
+        'SELECT id, section_statuses FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        (draft_id, tenant_id),
+    ).fetchone()
+    if not draft:
+        return {'error': 'draft_not_found'}
+    if section_key not in _known_section_keys(conn, tenant_id, _json_object(draft['section_statuses'])):
+        return {'error': 'unknown_section'}
+    snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+    digest = section_snapshot_hash(snapshot)
+    version_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    for _attempt in range(3):
+        current = conn.execute(
+            'SELECT COALESCE(MAX(version_number), 0) AS top FROM section_versions WHERE draft_id = ? AND section_key = ?',
+            (draft_id, section_key),
+        ).fetchone()
+        next_number = int((current['top'] if current else 0) or 0) + 1
+        try:
+            conn.execute(
+                'UPDATE section_versions SET status = ? WHERE draft_id = ? AND section_key = ? AND status = ?',
+                ('superseded', draft_id, section_key, 'pending'),
+            )
+            conn.execute(
+                '''INSERT INTO section_versions
+                   (id, tenant_id, draft_id, section_key, version_number, snapshot_data,
+                    snapshot_hash, status, created_by, created_by_name, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (version_id, tenant_id, draft_id, section_key, next_number, snapshot_json,
+                 digest, 'pending', created_by, created_by_name, now),
+            )
+            conn.commit()
+            break
+        except Exception:
+            conn.rollback()
+    else:
+        return {'error': 'version_conflict'}
+    row = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
+    return _section_version_public(row) if row else {'error': 'version_conflict'}
+
+
+def list_section_versions(tenant_id, draft_id, section_key=None):
+    """Newest-first version metadata for a draft, without snapshot payloads."""
+    conn = get_db()
+    if section_key:
+        rows = conn.execute(
+            '''SELECT * FROM section_versions WHERE tenant_id = ? AND draft_id = ? AND section_key = ?
+               ORDER BY version_number DESC''',
+            (tenant_id, draft_id, section_key),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''SELECT * FROM section_versions WHERE tenant_id = ? AND draft_id = ?
+               ORDER BY section_key ASC, version_number DESC''',
+            (tenant_id, draft_id),
+        ).fetchall()
+    return [_section_version_public(row) for row in rows]
+
+
+def get_section_version(tenant_id, version_id, include_snapshot=True):
+    """One tenant-scoped version, with its immutable snapshot on request."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM section_versions WHERE id = ? AND tenant_id = ?', (version_id, tenant_id)
+    ).fetchone()
+    return _section_version_public(row, include_snapshot=include_snapshot) if row else None
+
+
+def section_versions_overview(tenant_id, draft_id):
+    """Latest version per section: number, status and hash for gates and locks."""
+    overview = {}
+    for item in list_section_versions(tenant_id, draft_id):
+        if item['section_key'] not in overview:
+            overview[item['section_key']] = item
+    return overview
+
+
+def pending_section_versions(tenant_id, draft_id, section_keys):
+    """Subset of the given sections that currently await a version decision."""
+    wanted = [key for key in (section_keys or []) if isinstance(key, str) and key]
+    if not wanted:
+        return []
+    overview = section_versions_overview(tenant_id, draft_id)
+    return [key for key in wanted if (overview.get(key) or {}).get('status') == 'pending']
+
+
+def decide_section_version(tenant_id, version_id, decision, decided_by, decided_by_name, note=None):
+    """Record an approval decision against one immutable version.
+
+    Only a pending version can be decided. A return or rejection needs a reason,
+    because the editor must know what to fix before the next send.
+    """
+    if decision not in SECTION_VERSION_DECISIONS:
+        return {'error': 'invalid_decision'}
+    clean_note = str(note or '').strip()
+    if decision in {'returned', 'rejected'} and not clean_note:
+        return {'error': 'note_required'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM section_versions WHERE id = ? AND tenant_id = ?', (version_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return {'error': 'version_not_found'}
+    if row['status'] != 'pending':
+        return {'error': 'version_not_pending'}
+    conn.execute(
+        '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
+           decision_note = ?, decided_at = ? WHERE id = ?''',
+        (decision, decided_by, decided_by_name, clean_note or None,
+         datetime.now().isoformat(), version_id),
+    )
+    conn.commit()
+    updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
+    return _section_version_public(updated)
 
 
 def request_project_draft_approval(tenant_id, user_id, requested_by, requested_by_name, draft_id=None):
