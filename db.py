@@ -3948,14 +3948,27 @@ def request_project_draft_approval(tenant_id, user_id, requested_by, requested_b
 
 
 def review_project_draft(tenant_id, draft_id, review_status, reviewed_by, reviewed_by_name, note=None):
-    """Record a tenant-scoped approval or return a draft for correction."""
+    """Record a tenant-scoped approval or return a draft for correction.
+
+    Approval accepts any unapproved draft state: reviewers with the approvals
+    permission (company admins) may approve directly, even a draft that was
+    never submitted. Returning for correction only makes sense for a pending
+    request, so rejection still requires 'pending_approval'.
+    """
     if review_status not in {'approved', 'rejected'}:
         return False
     conn = get_db()
-    draft = conn.execute(
-        "SELECT id FROM project_drafts WHERE id = ? AND tenant_id = ? AND status = 'pending_approval'",
-        (draft_id, tenant_id)
-    ).fetchone()
+    if review_status == 'approved':
+        draft = conn.execute(
+            "SELECT id FROM project_drafts WHERE id = ? AND tenant_id = ?"
+            " AND COALESCE(status, 'draft') IN ('draft', 'edited', 'pending_approval')",
+            (draft_id, tenant_id)
+        ).fetchone()
+    else:
+        draft = conn.execute(
+            "SELECT id FROM project_drafts WHERE id = ? AND tenant_id = ? AND status = 'pending_approval'",
+            (draft_id, tenant_id)
+        ).fetchone()
     if not draft:
         return False
     final_status = 'approved' if review_status == 'approved' else 'draft'

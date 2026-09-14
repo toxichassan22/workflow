@@ -8708,6 +8708,62 @@ class MeetingRequirementsTests(unittest.TestCase):
         current = client.get('/api/project-draft', headers=headers).get_json()['draft']
         self.assertEqual(current['status'], 'draft')
 
+    def test_admin_approves_draft_directly_while_employee_request_stays_pending(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        employee_token = auth.create_token(
+            self.tenant_a, 'employee@example.test', user_id='employee-1',
+            user_name='Employee', user_role='employee')
+        employee_headers = self._headers(employee_token)
+
+        # An admin approves a draft whose sections were never approved.
+        saved = client.post('/api/project-draft', headers=headers, json={
+            'draftId': 'draft-direct-approve',
+            'draftData': {'draftId': 'draft-direct-approve', 'project_name': 'Direct'},
+            'sectionStatuses': {}, 'status': 'draft'})
+        self.assertEqual(saved.status_code, 200)
+        review = client.post('/api/project-draft/review', headers=headers, json={
+            'draftId': 'draft-direct-approve', 'status': 'approved'})
+        self.assertEqual(review.status_code, 200, review.get_json())
+        approved = client.get(
+            '/api/project-draft/draft-direct-approve', headers=headers).get_json()['draft']
+        self.assertEqual(approved['status'], 'approved')
+
+        # An employee without the approvals permission cannot use the review route.
+        denied = client.post('/api/project-draft/review', headers=employee_headers, json={
+            'draftId': 'draft-direct-approve', 'status': 'approved'})
+        self.assertEqual(denied.status_code, 403)
+
+        # The employee path still goes through pending: one approved section is
+        # enough to submit (approving location would need the full map
+        # workflow), and the request waits for an admin decision.
+        owned = client.post('/api/project-draft', headers=employee_headers, json={
+            'draftId': 'draft-employee-waiting',
+            'draftData': {'draftId': 'draft-employee-waiting', 'project_name': 'Waiting'},
+            'sectionStatuses': {}, 'status': 'draft'})
+        self.assertEqual(owned.status_code, 200)
+        sections_resp = client.post('/api/project-draft/section-status', headers=employee_headers, json={
+            'sectionKey': 'basic', 'sectionStatus': 'approved'})
+        self.assertEqual(sections_resp.status_code, 200)
+        requested = client.post('/api/project-draft/request-approval', headers=employee_headers, json={
+            'draftId': 'draft-employee-waiting'})
+        self.assertEqual(requested.status_code, 200, requested.get_json())
+        waiting = client.get(
+            '/api/project-draft/draft-employee-waiting', headers=employee_headers).get_json()['draft']
+        self.assertEqual(waiting['status'], 'pending_approval')
+
+        # And the admin decision on that pending request still lands.
+        decision = client.post('/api/project-draft/review', headers=headers, json={
+            'draftId': 'draft-employee-waiting', 'status': 'approved'})
+        self.assertEqual(decision.status_code, 200)
+        final = client.get(
+            '/api/project-draft/draft-employee-waiting', headers=headers).get_json()['draft']
+        self.assertEqual(final['status'], 'approved')
+
+        index_source = read_frontend_text()
+        self.assertIn('async function approveProjectDraftById(draftId)', index_source)
+        self.assertIn("'/api/project-draft/review'", index_source)
+
     def test_training_entries_are_tenant_isolated_and_not_public_uploads(self):
         client = self.app.test_client()
         created = client.post('/api/training', headers=self._headers(self.token_a), json={
