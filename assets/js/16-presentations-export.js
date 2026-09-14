@@ -881,6 +881,34 @@
       }
     }
 
+    async function sagCleanOrphanKeys() {
+      const btn = document.getElementById('sagCleanOrphansBtn');
+      if (btn) btn.disabled = true;
+      showLoader(WFT('admin.orphans_check', 'فحص المفاتيح اليتيمة'), '', 5);
+      try {
+        const report = await api('GET', '/api/admin/openrouter-keys/orphans');
+        if (!report || !report.success) {
+          toast(WFT('admin.orphans_failed', 'تعذر حذف المفاتيح اليتيمة'));
+          return;
+        }
+        if (!report.count) {
+          toast(WFT('admin.orphans_none', 'لا توجد مفاتيح يتيمة'));
+          return;
+        }
+        const names = (report.orphans || []).map(o => o.name).filter(Boolean).join(', ');
+        if (!confirm(WFT('admin.orphans_confirm', 'حذف {count} مفاتيح يتيمة؟', { count: report.count }) + (names ? ' ' + names : ''))) return;
+        const done = await api('DELETE', '/api/admin/openrouter-keys/orphans', { confirm: true });
+        if (!done || !done.success) {
+          toast(WFT('admin.orphans_failed', 'تعذر حذف المفاتيح اليتيمة'));
+          return;
+        }
+        toast(WFT('admin.orphans_deleted', 'تم حذف {count} مفاتيح يتيمة', { count: done.deleted_count || 0 }));
+      } finally {
+        if (btn) btn.disabled = false;
+        hideLoader();
+      }
+    }
+
     function renderSagStats(stats) {
       const el = document.getElementById('sagAdminStats');
       const cards = [
