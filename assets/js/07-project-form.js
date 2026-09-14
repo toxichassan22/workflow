@@ -257,6 +257,26 @@
           setSectionStatus(sectionKey, next);
         });
         title.appendChild(toggleButton);
+        const sendButton = document.createElement('button');
+        sendButton.type = 'button';
+        sendButton.className = 'section-approve-btn';
+        sendButton.id = 'section-send-' + sectionKey;
+        sendButton.dataset.sectionLockIgnore = '1';
+        sendButton.textContent = 'إرسال للاعتماد';
+        if (typeof tr === 'function') sendButton.textContent = tr(sendButton.textContent);
+        sendButton.dataset.arText = 'إرسال للاعتماد';
+        sendButton.addEventListener('click', () => sendSectionVersion(sectionKey));
+        title.appendChild(sendButton);
+        const versionsButton = document.createElement('button');
+        versionsButton.type = 'button';
+        versionsButton.className = 'section-approve-btn';
+        versionsButton.id = 'section-versions-toggle-' + sectionKey;
+        versionsButton.dataset.sectionLockIgnore = '1';
+        versionsButton.textContent = 'الإصدارات';
+        if (typeof tr === 'function') versionsButton.textContent = tr(versionsButton.textContent);
+        versionsButton.dataset.arText = 'الإصدارات';
+        versionsButton.addEventListener('click', () => toggleSectionVersions(sectionKey));
+        title.appendChild(versionsButton);
       }
       return title;
     }
@@ -313,6 +333,7 @@
         }
         updateProjectSidebarStatus(sectionKey, normalizedStatus);
       });
+      try { if (typeof refreshAllSectionVersionLines === 'function') refreshAllSectionVersionLines(); } catch (e) {}
     }
 
     async function setSectionStatus(sectionKey, status) {
@@ -396,6 +417,230 @@
       }
       tenantProjectDraftApproval = result.draft || null;
       toast('تم إرسال المسودة للاعتماد');
+    }
+
+    // ── Section versions (t10): immutable snapshots bound to approval ────
+    // One send freezes the section inputs of this moment under the next
+    // version number, and every decision names that number. History stays
+    // intact: restoring an old version opens a new pending version from it.
+    const sectionVersionCache = {};
+    const sectionVersionsOpen = {};
+    let sectionVersionsLoading = false;
+
+    function trSectionVersionChrome(text) {
+      try {
+        const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+        const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || window.WFI18N_EN_AUTO || null;
+        if (isEn && dict && dict[text]) return dict[text];
+      } catch (e) {}
+      return text;
+    }
+
+    function setSectionVersionChrome(el, arText) {
+      el.textContent = trSectionVersionChrome(arText);
+      el.dataset.arText = arText;
+    }
+
+    function sectionVersionLineText(version) {
+      if (!version) return WFT('sectionver.line_none', 'لا توجد إصدارات');
+      const n = version.version_number;
+      if (version.status === 'approved') return WFT('sectionver.line_approved', 'إصدار {n} معتمد', { n: n });
+      if (version.status === 'returned') return WFT('sectionver.line_returned', 'إصدار {n} معاد للتعديل', { n: n });
+      if (version.status === 'rejected') return WFT('sectionver.line_rejected', 'إصدار {n} مرفوض', { n: n });
+      if (version.status === 'cancelled') return WFT('sectionver.line_cancelled', 'إصدار {n} ملغي', { n: n });
+      if (version.status === 'superseded') return WFT('sectionver.line_superseded', 'إصدار {n} مستبدل', { n: n });
+      return WFT('sectionver.line_pending', 'إصدار {n} بانتظار القرار', { n: n });
+    }
+
+    function attachSectionVersionBlock(sectionKey) {
+      const section = getProjectSectionElement(sectionKey);
+      if (!section || section.dataset.underConstruction === '1') return null;
+      let block = section.querySelector(':scope > .section-version-block');
+      if (!block) {
+        block = document.createElement('div');
+        block.className = 'section-version-block';
+        const line = document.createElement('p');
+        line.className = 'tenant-hint';
+        line.id = 'section-version-line-' + sectionKey;
+        block.appendChild(line);
+        const history = document.createElement('div');
+        history.className = 'section-version-history';
+        history.id = 'section-version-history-' + sectionKey;
+        history.hidden = true;
+        block.appendChild(history);
+        const header = section.querySelector(':scope > h3.tenant-section-title');
+        if (header && header.nextSibling) section.insertBefore(block, header.nextSibling);
+        else section.appendChild(block);
+      }
+      return block;
+    }
+
+    function renderSectionVersionBlock(sectionKey) {
+      attachSectionVersionBlock(sectionKey);
+      const line = document.getElementById('section-version-line-' + sectionKey);
+      const history = document.getElementById('section-version-history-' + sectionKey);
+      const versions = sectionVersionCache[sectionKey] || [];
+      if (line) line.textContent = sectionVersionLineText(versions[0] || null);
+      if (!history) return;
+      if (!sectionVersionsOpen[sectionKey]) { history.hidden = true; history.innerHTML = ''; return; }
+      history.hidden = false;
+      history.innerHTML = '';
+      if (!versions.length) {
+        const empty = document.createElement('p');
+        empty.className = 'tenant-hint';
+        empty.textContent = WFT('sectionver.line_none', 'لا توجد إصدارات');
+        history.appendChild(empty);
+        return;
+      }
+      versions.forEach(version => {
+        const row = document.createElement('div');
+        row.className = 'section-version-row';
+        const meta = document.createElement('span');
+        meta.className = 'section-version-meta';
+        let text = sectionVersionLineText(version);
+        if (version.created_at) text += ' — ' + String(version.created_at).slice(0, 16).replace('T', ' ');
+        const decider = version.decided_by_name || version.created_by_name || '';
+        if (decider) text += ' — ' + decider;
+        if (version.decision_note) text += ' — ' + version.decision_note;
+        meta.textContent = text;
+        row.appendChild(meta);
+        const addBtn = (arText, onClick) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'section-approve-btn';
+          btn.dataset.sectionLockIgnore = '1';
+          setSectionVersionChrome(btn, arText);
+          btn.addEventListener('click', onClick);
+          row.appendChild(btn);
+          return btn;
+        };
+        if (version.status === 'pending') {
+          addBtn('اعتماد', () => decideSectionVersion(version.id, sectionKey, 'approved'));
+          addBtn('إعادة للتعديل', () => decideSectionVersion(version.id, sectionKey, 'returned'));
+          addBtn('رفض', () => decideSectionVersion(version.id, sectionKey, 'rejected'));
+          addBtn('إلغاء الطلب', () => cancelSectionVersion(version.id, sectionKey));
+        } else {
+          addBtn('استعادة', () => restoreSectionVersion(version.id, sectionKey));
+        }
+        history.appendChild(row);
+      });
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+        try { window.WFI18n.autoTranslate(history); } catch (e) {}
+      }
+    }
+
+    async function loadAllSectionVersions() {
+      if (!tenantProjectData || !tenantProjectData.draftId) return;
+      if (sectionVersionsLoading) return;
+      sectionVersionsLoading = true;
+      try {
+        const result = await api('GET', '/api/project-draft/section-versions?draftId=' + encodeURIComponent(tenantProjectData.draftId));
+        if (!result || !result.success) return;
+        const grouped = {};
+        (result.versions || []).forEach(version => {
+          const key = version.section_key;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(version);
+        });
+        Object.keys(grouped).forEach(key => { sectionVersionCache[key] = grouped[key]; });
+        document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]').forEach(section => {
+          const key = section.dataset.section;
+          if (!key || section.dataset.underConstruction === '1') return;
+          if (!sectionVersionCache[key]) sectionVersionCache[key] = [];
+          renderSectionVersionBlock(key);
+        });
+      } finally {
+        sectionVersionsLoading = false;
+      }
+    }
+
+    function refreshAllSectionVersionLines() {
+      if (!tenantProjectData || !tenantProjectData.draftId) return;
+      document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]').forEach(section => {
+        const key = section.dataset.section;
+        if (!key || section.dataset.underConstruction === '1') return;
+        attachSectionVersionBlock(key);
+      });
+      void loadAllSectionVersions();
+    }
+
+    function toggleSectionVersions(sectionKey) {
+      sectionVersionsOpen[sectionKey] = !sectionVersionsOpen[sectionKey];
+      if (sectionVersionsOpen[sectionKey] && !(sectionVersionCache[sectionKey] || []).length) {
+        void loadAllSectionVersions().then(() => renderSectionVersionBlock(sectionKey));
+      } else {
+        renderSectionVersionBlock(sectionKey);
+      }
+    }
+
+    async function sendSectionVersion(sectionKey) {
+      const btn = document.getElementById('section-send-' + sectionKey);
+      if (btn) btn.disabled = true;
+      showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
+      try {
+        const result = await api('POST', '/api/project-draft/section-version', { draftId: tenantProjectData.draftId, sectionKey: sectionKey });
+        hideLoader();
+        if (!result || !result.success) {
+          if (result && result.error_code === 'SECTION_VERSION_INCOMPLETE') {
+            const missing = Array.isArray(result.missing) ? result.missing.join('، ') : '';
+            toast(WFT('sectionver.incomplete', 'حقول إلزامية ناقصة') + (missing ? ': ' + missing : ''));
+          } else {
+            toast((result && result.error) || WFT('sectionver.send_failed', 'تعذر إرسال القسم للاعتماد'));
+          }
+          return;
+        }
+        sectionVersionsOpen[sectionKey] = true;
+        toast(WFT('sectionver.send_done', 'تم إرسال القسم للاعتماد'));
+        await loadAllSectionVersions();
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function decideSectionVersion(versionId, sectionKey, decision) {
+      let note = null;
+      if (decision === 'returned' || decision === 'rejected') {
+        note = prompt(WFT('sectionver.note_prompt', 'سبب الإعادة'));
+        if (!note || !String(note).trim()) { toast(WFT('sectionver.note_required', 'سبب الإعادة مطلوب')); return; }
+      }
+      showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
+      try {
+        const result = await api('POST', '/api/project-draft/section-version/decision', { versionId: versionId, decision: decision, note: note });
+        hideLoader();
+        if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.decide_failed', 'تعذر تسجيل القرار')); return; }
+        applySectionStatuses({ [sectionKey]: decision === 'approved' ? 'approved' : 'draft' });
+        toast(WFT('sectionver.decide_done', 'تم تسجيل القرار'));
+        await loadAllSectionVersions();
+      } finally {
+        try { hideLoader(); } catch (e) {}
+      }
+    }
+
+    async function cancelSectionVersion(versionId, sectionKey) {
+      showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
+      try {
+        const result = await api('POST', '/api/project-draft/section-version/cancel', { versionId: versionId });
+        hideLoader();
+        if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.cancel_failed', 'تعذر إلغاء طلب الاعتماد')); return; }
+        toast(WFT('sectionver.cancel_done', 'تم إلغاء طلب الاعتماد'));
+        await loadAllSectionVersions();
+      } finally {
+        try { hideLoader(); } catch (e) {}
+      }
+    }
+
+    async function restoreSectionVersion(versionId, sectionKey) {
+      showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
+      try {
+        const result = await api('POST', '/api/project-draft/section-version/restore', { versionId: versionId });
+        hideLoader();
+        if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.restore_failed', 'تعذر الاستعادة')); return; }
+        sectionVersionsOpen[sectionKey] = true;
+        toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
+        await loadAllSectionVersions();
+      } finally {
+        try { hideLoader(); } catch (e) {}
+      }
     }
 
     // ── Location data tables (roads / landmarks / catchment) ──────────────

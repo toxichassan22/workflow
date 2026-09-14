@@ -3951,16 +3951,59 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
     return False
 
 
+def update_draft_section_status_by_id(tenant_id, draft_id, updates):
+    """Merge section statuses into one draft by id without an owner check.
+
+    Version decisions are recorded by an approver who may not own the draft,
+    so the mirror write cannot require the actor to match the draft owner.
+    Tenant isolation still applies. The concurrent-merge guard matches
+    update_draft_section_statuses.
+    """
+    if not isinstance(updates, dict) or not updates:
+        return False
+    if any(status not in SECTION_DRAFT_STATUSES for status in updates.values()):
+        return False
+    if not draft_id:
+        return False
+    conn = get_db()
+    for _attempt in range(6):
+        draft = get_project_draft_by_id(tenant_id, draft_id)
+        if not draft:
+            return False
+        statuses = dict(draft.get('section_statuses') or {})
+        expected = json.dumps(statuses, ensure_ascii=False)
+        changed = any(statuses.get(key) != value for key, value in updates.items())
+        statuses.update(updates)
+        resets_approval = changed and draft.get('status') in {'pending_approval', 'approved'}
+        next_status = 'draft' if resets_approval else (draft.get('status') or 'draft')
+        cursor = conn.execute(
+            '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
+               WHERE id = ? AND tenant_id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',
+            (json.dumps(statuses, ensure_ascii=False), next_status, datetime.now().isoformat(),
+             draft['id'], tenant_id, expected, '' if expected == '{}' else expected)
+        )
+        if getattr(cursor, 'rowcount', 1) == 0:
+            conn.commit()
+            continue
+        if resets_approval:
+            _clear_draft_approval_fields(conn, draft['id'])
+        conn.commit()
+        return True
+    print(f'[DRAFT SECTIONS] gave up merging {list(updates)} by id after repeated concurrent writes')
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Section versions: immutable per-section snapshots tied to approval.
 #
 # Spec (Omran analysis sections 6, 8.1, 19): every send for approval stores an
-# independent copy of that section's inputs under the next version number, and
+# independent copy of that section inputs under the next version number, and
 # the approval decision names that number instead of the live values. Sections
-# without any version keep the legacy toggle behaviour untouched.
+# without any version keep the legacy toggle path, while a section that has a
+# version must be approved through its snapshot.
 # ─────────────────────────────────────────────────────────────────────────────
 
-SECTION_VERSION_STATUSES = {'pending', 'approved', 'returned', 'rejected', 'superseded'}
+SECTION_VERSION_STATUSES = {'pending', 'approved', 'returned', 'rejected', 'superseded', 'cancelled'}
 SECTION_VERSION_DECISIONS = {'approved', 'returned', 'rejected'}
 
 BASE_SECTION_KEYS = {
@@ -4132,6 +4175,32 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
            decision_note = ?, decided_at = ? WHERE id = ?''',
         (decision, decided_by, decided_by_name, clean_note or None,
+         datetime.now().isoformat(), version_id),
+    )
+    conn.commit()
+    updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
+    return _section_version_public(updated)
+
+
+def cancel_section_version(tenant_id, version_id, cancelled_by, cancelled_by_name):
+    """Withdraw a pending send so the editor can keep working on a later draft.
+
+    Only a pending version can be cancelled. The row stays in history with
+    status cancelled and the actor who withdrew it, so the request does not
+    vanish without a trace.
+    """
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM section_versions WHERE id = ? AND tenant_id = ?', (version_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return {'error': 'version_not_found'}
+    if row['status'] != 'pending':
+        return {'error': 'version_not_pending'}
+    conn.execute(
+        '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
+           decided_at = ? WHERE id = ?''',
+        ('cancelled', cancelled_by, cancelled_by_name,
          datetime.now().isoformat(), version_id),
     )
     conn.commit()

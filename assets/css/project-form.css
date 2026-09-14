@@ -695,6 +695,38 @@
       background: var(--pd);
     }
 
+    .section-version-block {
+      margin: 8px 0 4px;
+      padding: 0;
+    }
+
+    .section-version-history {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fff;
+    }
+
+    .section-version-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+    }
+
+    .section-version-row:last-child {
+      border-bottom: none;
+    }
+
+    .section-version-meta {
+      flex: 1 1 auto;
+      min-width: 180px;
+    }
+
     .tenant-form-section.section-locked input:not([type="hidden"]):not([data-section-lock-ignore]),
     .tenant-form-section.section-locked select:not([data-section-lock-ignore]),
     .tenant-form-section.section-locked textarea:not([data-section-lock-ignore]),

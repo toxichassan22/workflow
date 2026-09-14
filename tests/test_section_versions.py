@@ -154,7 +154,7 @@ class SectionVersionApiTests(unittest.TestCase):
                 db.get_db().execute('DELETE FROM project_drafts WHERE id = ?', (row['id'],))
             db.get_db().commit()
         client.post('/api/project-draft', headers=self.headers(), json={
-            'draftData': {'project_name': 'برج المشرق', 'city': 'الرياض'},
+            'draftData': {'project_name': 'برج المشرق', 'project_type': 'سكني', 'city': 'الرياض'},
             'sectionStatuses': {'basic': 'draft', 'land_croquis': 'draft'}, 'status': 'draft',
         })
 
@@ -264,6 +264,88 @@ class SectionVersionApiTests(unittest.TestCase):
         response = client.post('/api/project-draft/section-version',
                                headers=self.headers(), json={'sectionKey': 'no-such-section'})
         self.assertEqual(response.status_code, 400, response.get_json())
+
+    def test_send_requires_required_fields(self):
+        client = self.app.test_client()
+        draft = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
+        changed = dict(draft['draft_data'])
+        changed['project_type'] = ''
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'], 'draftData': changed,
+            'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
+        blocked = client.post('/api/project-draft/section-version',
+                              headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(blocked.status_code, 400, blocked.get_json())
+        self.assertEqual(blocked.get_json().get('error_code'), 'SECTION_VERSION_INCOMPLETE')
+        changed['project_type'] = 'سكني'
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'], 'draftData': changed,
+            'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
+        allowed = client.post('/api/project-draft/section-version',
+                              headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+
+    def test_cancel_pending_version(self):
+        client = self.app.test_client()
+        sent = client.post('/api/project-draft/section-version',
+                           headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        version_id = sent.get_json()['version']['id']
+        cancelled = client.post('/api/project-draft/section-version/cancel',
+                                headers=self.headers(), json={'versionId': version_id})
+        self.assertEqual(cancelled.status_code, 200, cancelled.get_json())
+        self.assertEqual(cancelled.get_json()['version']['status'], 'cancelled')
+        decided = client.post('/api/project-draft/section-version/decision', headers=self.headers(), json={
+            'versionId': version_id, 'decision': 'approved'})
+        self.assertEqual(decided.status_code, 409, decided.get_json())
+        again = client.post('/api/project-draft/section-version',
+                            headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(again.status_code, 200, again.get_json())
+        self.assertEqual(again.get_json()['version']['version_number'], 2)
+
+    def test_direct_toggle_blocked_for_versioned_section(self):
+        client = self.app.test_client()
+        sent = client.post('/api/project-draft/section-version',
+                           headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        decided = client.post('/api/project-draft/section-version/decision', headers=self.headers(), json={
+            'versionId': sent.get_json()['version']['id'], 'decision': 'approved'})
+        self.assertEqual(decided.status_code, 200, decided.get_json())
+        draft = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
+        changed = dict(draft['draft_data'])
+        changed['project_name'] = 'اسم معدل بعد الاعتماد'
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'], 'draftData': changed,
+            'sectionStatuses': {'basic': 'draft', 'land_croquis': 'draft'}, 'status': 'draft'})
+        blocked = client.post('/api/project-draft/section-status', headers=self.headers(), json={
+            'sectionKey': 'basic', 'sectionStatus': 'approved'})
+        self.assertEqual(blocked.status_code, 409, blocked.get_json())
+        self.assertIn(blocked.get_json().get('error_code'), {'SECTION_VERSION_STALE', 'SECTION_VERSION_REQUIRED'})
+
+    def test_cross_user_approver_can_decide(self):
+        client = self.app.test_client()
+        sent = client.post('/api/project-draft/section-version',
+                           headers=self.headers(), json={'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        version_id = sent.get_json()['version']['id']
+        with self.app.app_context():
+            approver_id = db.create_user(
+                self.tenant, 'Approver', 'approver@example.test', 'hash', role='employee')
+            self.assertTrue(db.set_user_permission(approver_id, 'approvals', True))
+            self.assertTrue(db.get_user_permissions(approver_id, 'employee').get('approvals'))
+        approver_token = auth.create_token(
+            self.tenant, 'approver@example.test', user_id=approver_id,
+            user_name='Approver', user_role='employee')
+        approver_headers = {'Authorization': f'Bearer {approver_token}'}
+        decided = client.post('/api/project-draft/section-version/decision', headers=approver_headers, json={
+            'versionId': version_id, 'decision': 'approved'})
+        self.assertEqual(decided.status_code, 200, decided.get_json())
+        self.assertEqual(decided.get_json()['version']['status'], 'approved')
+        owner_draft_id = sent.get_json()['version']['draft_id']
+        listed = client.get(
+            f'/api/project-draft/section-versions?draftId={owner_draft_id}&sectionKey=basic',
+            headers=approver_headers)
+        self.assertEqual(listed.status_code, 200, listed.get_json())
 
 
 if __name__ == '__main__':
