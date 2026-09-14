@@ -499,6 +499,30 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_maps_cache_tenant ON maps_discovery_cache(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_maps_cache_expiry ON maps_discovery_cache(expires_at);
 
+    -- Billing packages (bundles) sold to companies. credit_usd is the
+    -- canonical spend allowance (what the provider key limit follows);
+    -- price_sar is the selling price shown to clients. The super admin
+    -- edits both freely and adds custom packages at any time.
+    CREATE TABLE IF NOT EXISTS billing_packages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        credit_usd REAL NOT NULL DEFAULT 0,
+        price_sar REAL,
+        is_active INTEGER DEFAULT 1,
+        is_custom INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    -- USD to SAR rate used to display balances in riyals. source is auto
+    -- (fetched provider rate, refreshed daily) or manual (super-admin
+    -- override that auto-refresh never overwrites).
+    CREATE TABLE IF NOT EXISTS fx_rates (
+        pair TEXT PRIMARY KEY,
+        rate REAL NOT NULL,
+        source TEXT DEFAULT 'auto',
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS tenant_ledger (
         id TEXT PRIMARY KEY,
         tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
@@ -569,6 +593,7 @@ def _create_tables(conn):
         ('credit_balance', 'REAL DEFAULT 0'),
         ('primary_user_id', 'TEXT'),
         ('require_password_change', 'INTEGER DEFAULT 0'),
+        ('package_id', 'TEXT'),
     ):
         if column not in cols:
             conn.execute(f'ALTER TABLE tenants ADD COLUMN {column} {definition}')
@@ -893,7 +918,7 @@ def update_tenant(tenant_id, **fields):
     allowed = {
         'company_name', 'account_manager_name', 'username', 'phone', 'subdomain',
         'domain', 'email', 'password_hash', 'plan', 'credit_balance', 'is_active',
-        'primary_user_id', 'require_password_change', 'settings_json'
+        'primary_user_id', 'require_password_change', 'settings_json', 'package_id'
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -5006,7 +5031,7 @@ def set_tenant_openrouter_key(tenant_id, raw_key, key_label=None, limit_usd=None
             amount = float(limit_usd)
         except (TypeError, ValueError):
             raise ValueError('Invalid limit_usd')
-        if amount <= 0:
+        if amount < 0:
             raise ValueError('Invalid limit_usd')
     enc = encrypt_tenant_openrouter_key(raw)
     digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
@@ -5052,7 +5077,7 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
             amount = float(limit_usd)
         except (TypeError, ValueError):
             raise ValueError('Invalid limit_usd')
-        if amount <= 0:
+        if amount < 0:
             raise ValueError('Invalid limit_usd')
         assignments.append('limit_usd = ?')
         params.append(amount)
@@ -5098,6 +5123,213 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
 def deactivate_tenant_openrouter_key(tenant_id):
     """Disable a tenant key locally. Returns public metadata."""
     return update_tenant_openrouter_key_meta(tenant_id, is_active=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Billing packages and the USD to SAR rate for riyal-denominated balances.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FX_PAIR_USD_SAR = 'USD_SAR'
+FX_DEFAULT_USD_SAR = 3.75
+FX_REFRESH_SECONDS = 24 * 3600
+
+
+def list_billing_packages(active_only=False):
+    """All packages, newest last. Never raises."""
+    try:
+        conn = get_db()
+        rows = conn.execute(
+            'SELECT * FROM billing_packages '
+            + ('WHERE is_active = 1 ' if active_only else '')
+            + 'ORDER BY created_at ASC'
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_billing_package(package_id):
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def create_billing_package(name, credit_usd=0.0, price_sar=None, is_custom=True):
+    """Create a package. credit_usd may be zero (prepaid, topped up later)."""
+    label = str(name or '').strip()
+    if not label or len(label) > 120:
+        raise ValueError('Invalid package name')
+    try:
+        credit = float(credit_usd or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError('Invalid credit_usd')
+    if credit < 0:
+        raise ValueError('Invalid credit_usd')
+    price = None
+    if price_sar is not None:
+        try:
+            price = float(price_sar)
+        except (TypeError, ValueError):
+            raise ValueError('Invalid price_sar')
+        if price < 0:
+            raise ValueError('Invalid price_sar')
+    conn = get_db()
+    package_id = str(uuid.uuid4())
+    conn.execute(
+        'INSERT INTO billing_packages (id, name, credit_usd, price_sar, is_active, is_custom) '
+        'VALUES (?, ?, ?, ?, 1, ?)',
+        (package_id, label, credit, price, 1 if is_custom else 0)
+    )
+    conn.commit()
+    return get_billing_package(package_id)
+
+
+def update_billing_package(package_id, name=None, credit_usd=None, price_sar=None,
+                           is_active=None):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
+    if row is None:
+        return None
+    assignments = []
+    params = []
+    if name is not None:
+        label = str(name or '').strip()
+        if not label or len(label) > 120:
+            raise ValueError('Invalid package name')
+        assignments.append('name = ?')
+        params.append(label)
+    if credit_usd is not None:
+        try:
+            credit = float(credit_usd)
+        except (TypeError, ValueError):
+            raise ValueError('Invalid credit_usd')
+        if credit < 0:
+            raise ValueError('Invalid credit_usd')
+        assignments.append('credit_usd = ?')
+        params.append(credit)
+    if price_sar is not None:
+        try:
+            price = float(price_sar)
+        except (TypeError, ValueError):
+            raise ValueError('Invalid price_sar')
+        if price < 0:
+            raise ValueError('Invalid price_sar')
+        assignments.append('price_sar = ?')
+        params.append(price)
+    if is_active is not None:
+        assignments.append('is_active = ?')
+        params.append(1 if is_active else 0)
+    if not assignments:
+        return dict(row)
+    assignments.append("updated_at = datetime('now')")
+    params.append(str(package_id))
+    conn.execute(
+        'UPDATE billing_packages SET ' + ', '.join(assignments) + ' WHERE id = ?',
+        tuple(params)
+    )
+    conn.commit()
+    return get_billing_package(package_id)
+
+
+def delete_billing_package(package_id):
+    """Delete a package; tenants on it keep their key limit, package unset."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
+    if row is None:
+        return False
+    try:
+        conn.execute('UPDATE tenants SET package_id = NULL WHERE package_id = ?',
+                     (str(package_id),))
+    except Exception:
+        pass
+    conn.execute('DELETE FROM billing_packages WHERE id = ?', (str(package_id),))
+    conn.commit()
+    return True
+
+
+def assign_tenant_package(tenant_id, package_id):
+    """Attach a tenant to a package. Returns (tenant, package)."""
+    conn = get_db()
+    tenant = conn.execute(
+        'SELECT * FROM tenants WHERE id = ?', (str(tenant_id),)).fetchone()
+    if tenant is None:
+        raise ValueError('Tenant not found')
+    package = None
+    if package_id:
+        package = conn.execute(
+            'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
+        if package is None:
+            raise ValueError('Package not found')
+        package = dict(package)
+    try:
+        conn.execute('UPDATE tenants SET package_id = ? WHERE id = ?',
+                     (str(package_id) if package_id else None, str(tenant_id)))
+        conn.commit()
+    except Exception:
+        pass
+    return dict(tenant), package
+
+
+def get_fx_rate(pair=FX_PAIR_USD_SAR):
+    """Current stored rate with source and age. Defaults without raising."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT rate, source, updated_at FROM fx_rates WHERE pair = ?',
+            (str(pair),)).fetchone()
+        if row:
+            data = dict(row)
+            return {'pair': str(pair), 'rate': float(data.get('rate') or 0) or FX_DEFAULT_USD_SAR,
+                    'source': data.get('source') or 'auto', 'updated_at': data.get('updated_at')}
+    except Exception:
+        pass
+    try:
+        configured = float(os.environ.get('FX_USD_SAR') or 0)
+        if configured > 0:
+            return {'pair': str(pair), 'rate': configured, 'source': 'env', 'updated_at': None}
+    except (TypeError, ValueError):
+        pass
+    return {'pair': str(pair), 'rate': FX_DEFAULT_USD_SAR, 'source': 'default',
+            'updated_at': None}
+
+
+def set_fx_rate(pair, rate, source='manual'):
+    """Super-admin override (manual) or fetched value (auto)."""
+    try:
+        value = float(rate)
+    except (TypeError, ValueError):
+        raise ValueError('Invalid rate')
+    if value <= 0:
+        raise ValueError('Invalid rate')
+    if source not in ('auto', 'manual'):
+        source = 'manual'
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO fx_rates (pair, rate, source, updated_at) VALUES (?, ?, ?, ?) '
+        'ON CONFLICT (pair) DO UPDATE SET rate = excluded.rate, source = excluded.source, '
+        "updated_at = datetime('now')",
+        (str(pair), value, source, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    )
+    conn.commit()
+    return get_fx_rate(pair)
+
+
+def usd_to_sar(amount_usd, rate=None):
+    """Convert dollars to riyals for display, rounded to 2."""
+    try:
+        active = float(rate) if rate else float(get_fx_rate()['rate'])
+    except (TypeError, ValueError):
+        active = FX_DEFAULT_USD_SAR
+    try:
+        return round(float(amount_usd or 0.0) * active + 1e-9, 2)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

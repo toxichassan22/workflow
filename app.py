@@ -1407,10 +1407,16 @@ def api_ai_usage():
                 print(f"[AI-USAGE] events page failed: {exc}")
                 events_page = None
         try:
+            _refresh_fx_rate_async()
             unbilled = db.get_unbilled_usage(
                 g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+            balance_usd = db.get_tenant_balance(g.tenant_id)
+            fx = db.get_fx_rate()
             billing_info = {
-                'balance_usd': db.get_tenant_balance(g.tenant_id),
+                'balance_usd': balance_usd,
+                'balance_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+                'fx': {'rate': fx.get('rate'), 'source': fx.get('source'),
+                       'updatedAt': fx.get('updated_at')},
                 'multiplier': db.get_billing_multiplier(),
                 'enforced': db.billing_enforcement_enabled(),
                 'unbilled': unbilled,
@@ -1419,6 +1425,9 @@ def api_ai_usage():
             print(f"[BILLING] unbilled lookup failed: {billing_exc}")
             billing_info = {
                 'balance_usd': 0.0,
+                'balance_sar': 0.0,
+                'fx': {'rate': db.FX_DEFAULT_USD_SAR, 'source': 'default',
+                       'updatedAt': None},
                 'multiplier': db.get_billing_multiplier(),
                 'enforced': False,
                 'unbilled': None,
@@ -5374,6 +5383,138 @@ def _carry_slide_watermark(source_html, output_html):
     return cleaned[:closing.start()] + markup + cleaned[closing.start():]
 
 
+def _designer_attached_image_position(message, params):
+    """Resolve where an attached chat image should land, from explicit params or wording."""
+    explicit = str((params or {}).get('position') or '').strip().lower()
+    aliases = {
+        'separate_slide': 'separate_slide', 'new_slide': 'separate_slide', 'separate': 'separate_slide',
+        'slide': 'separate_slide', 'standalone': 'separate_slide',
+        'inline': 'inline', 'in_slide': 'inline', 'inside': 'inline',
+        'background': 'background', 'bg': 'background', 'cover': 'background',
+        'watermark': 'watermark', 'water_mark': 'watermark',
+        'logo': 'logo', 'extra_logo': 'logo', 'brand': 'logo',
+    }
+    if explicit in aliases:
+        return aliases[explicit]
+    text = normalize_arabic_digits_py(str(message or '').lower())
+    if re.search(r'(?:شريحة\s*(?:منفصلة|مستقلة|جديدة)|سلايد\s*(?:منفصل|جديد)|في\s*شريحة\s*(?:لوحدها|منفصلة)|separate\s*slide|new\s*slide)', text):
+        return 'separate_slide'
+    if re.search(r'(?:علامة\s*مائية|واترمارك|ووترمارك|watermark)', text):
+        return 'watermark'
+    if re.search(r'(?:لوجو\s*(?:اضافي|إضافي|جديد)|شعار\s*(?:اضافي|إضافي|جديد)|كشعار|extra\s*logo|as\s*(?:a\s*)?logo)', text):
+        return 'logo'
+    if re.search(r'(?:خلفية|كخلفية|background)', text):
+        return 'background'
+    return 'inline'
+
+
+def _append_designer_overlay(html, markup):
+    """Append an absolutely-positioned overlay inside the slide root."""
+    if not html:
+        return html
+    cleaned = str(html)
+    root_tag = re.search(r'<div\b[^>]*>', cleaned, flags=re.IGNORECASE)
+    if root_tag:
+        tag_text = root_tag.group(0)
+        class_match = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+        if class_match and 'slide' in class_match.group(1).split():
+            style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+            if style_match and 'position' not in style_match.group(1).lower():
+                fixed_tag = tag_text.replace(
+                    style_match.group(0),
+                    'style="' + 'position:relative;' + style_match.group(1) + '"',
+                    1,
+                )
+                cleaned = cleaned[:root_tag.start()] + fixed_tag + cleaned[root_tag.end():]
+    closing = re.search(r'</div>\s*$', cleaned, flags=re.IGNORECASE)
+    if not closing:
+        return cleaned + markup
+    return cleaned[:closing.start()] + markup + cleaned[closing.start():]
+
+
+def _insert_designer_attached_image(html, image_url, position='inline', opacity=1.0, width_px=None, caption=''):
+    """Deterministically embed a user-attached image; no model call, no hidden spend."""
+    safe_url = html_lib.escape(str(image_url or ''), quote=True)
+    if not safe_url:
+        return html
+    safe_caption = html_lib.escape(str(caption or '')[:160])
+    try:
+        opacity_value = float(opacity)
+    except (TypeError, ValueError):
+        opacity_value = 1.0
+    if position == 'watermark':
+        opacity_value = min(1.0, max(0.05, opacity_value if opacity_value < 1.0 else 0.12))
+        try:
+            width_value = int(width_px or 480)
+        except (TypeError, ValueError):
+            width_value = 480
+        width_value = min(900, max(200, width_value))
+        markup = (
+            '<div data-chat-watermark="true" aria-hidden="true" '
+            'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+            f'pointer-events:none;z-index:5;opacity:{opacity_value};overflow:hidden;">'
+            f'<img src="{safe_url}" alt="" style="width:{width_value}px;max-width:60%;max-height:60%;object-fit:contain;">'
+            '</div>'
+        )
+        return _append_designer_overlay(html, markup)
+    if position == 'logo':
+        try:
+            width_value = int(width_px or 140)
+        except (TypeError, ValueError):
+            width_value = 140
+        width_value = min(320, max(64, width_value))
+        markup = (
+            '<div data-chat-extra-logo="true" '
+            'style="position:absolute;top:24px;left:24px;z-index:8;'
+            'background:rgba(255,255,255,0.92);border-radius:10px;padding:6px;">'
+            f'<img src="{safe_url}" alt="" style="display:block;width:{width_value}px;max-height:90px;object-fit:contain;">'
+            '</div>'
+        )
+        return _append_designer_overlay(html, markup)
+    if position == 'background':
+        markup = (
+            '<div data-chat-background="true" aria-hidden="true" '
+            'style="position:absolute;inset:0;'
+            f'background-image:url(\'{safe_url}\');background-size:cover;background-position:center;z-index:0;"></div>'
+        )
+        return _append_designer_overlay(html, markup)
+    caption_markup = (
+        f'<div style="font-size:12px;color:#c5a059;margin-top:6px;font-weight:600;text-align:center;">{safe_caption}</div>'
+        if safe_caption else ''
+    )
+    markup = (
+        '<div data-chat-imagebox="1" style="position:absolute;top:150px;right:330px;width:620px;'
+        'box-sizing:border-box;z-index:5;background:rgba(255,255,255,0.96);border-radius:12px;padding:12px;">'
+        f'<img src="{safe_url}" alt="" style="display:block;width:100%;max-height:420px;object-fit:contain;border-radius:8px;">'
+        f'{caption_markup}</div>'
+    )
+    return _append_designer_overlay(html, markup)
+
+
+def _build_designer_attached_slide_html(image_url, title='', caption='', branding=None):
+    """Build a standalone slide that shows one attached image full-width, no model needed."""
+    safe_url = html_lib.escape(str(image_url or ''), quote=True)
+    safe_title = html_lib.escape(str(title or 'صورة مرفقة')[:160])
+    safe_caption = html_lib.escape(str(caption or '')[:300])
+    primary = '#0f2a44'
+    try:
+        primary = str((branding or {}).get('primary_color') or primary)
+    except Exception:
+        pass
+    caption_block = (
+        f'<div style="font-size:15px;color:#4a5568;line-height:1.9;text-align:center;max-width:900px;">{safe_caption}</div>'
+        if safe_caption else ''
+    )
+    return (
+        '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;box-sizing:border-box;'
+        'overflow:hidden;background:#ffffff;display:flex;flex-direction:column;align-items:center;'
+        'justify-content:center;gap:18px;padding:48px;">'
+        f'<div style="font-size:30px;font-weight:800;color:{primary};text-align:center;">{safe_title}</div>'
+        f'<img src="{safe_url}" alt="" style="max-width:960px;max-height:460px;object-fit:contain;border-radius:14px;">'
+        f'{caption_block}</div>'
+    )
+
+
 def _is_watermark_removal_instruction(instruction):
     """Check whether an edit instruction asks to remove the watermark itself."""
     normalized = normalize_arabic_digits_py(str(instruction or '').strip().lower())
@@ -6517,13 +6658,19 @@ def _designer_chat_history_lines(history):
 
 
 def _designer_chat_memory(history, memory, usage_ctx=None):
-    """Keep the conversation whole: recent turns verbatim, older ones compressed into one memory.
+    """Keep the conversation whole: recent turns verbatim, older ones kept as tail text.
 
     The chat used to receive nothing but the current message, so it asked «أي شريحة؟», the user
     answered «8», and the next turn had no idea what «8» referred to. History is now carried, and
-    once it grows past DESIGNER_CHAT_MEMORY_CHARS the older half is folded into a short Arabic
-    summary so a long session cannot push the actual request out of the context.
+    once it grows past DESIGNER_CHAT_MEMORY_CHARS the older half is folded into the memory string.
+
+    Billing rule: this helper never calls the model. A previous version summarized the older
+    turns with an extra AI call on every long-history turn, so a simple message was billed for
+    work the user never asked for. The tail of the raw conversation is kept instead, which
+    preserves slide numbers and decisions without any hidden spend. ``usage_ctx`` is kept only
+    for caller compatibility.
     """
+    _ = usage_ctx
     memory = str(memory or '').strip()
     entries = [e for e in (history if isinstance(history, list) else []) if isinstance(e, dict)]
     recent = entries[-DESIGNER_CHAT_VERBATIM_TURNS:]
@@ -6537,22 +6684,129 @@ def _designer_chat_memory(history, memory, usage_ctx=None):
         merged = (memory + '\n' + older_text).strip() if memory else older_text
         return merged[-DESIGNER_CHAT_MEMORY_CHARS:], recent
 
-    try:
-        summary = extract_chat_content(call_zai_chat(
-            "أنت تلخّص محادثة تصميم عرض تقديمي. أعد ملخصاً عربياً موجزاً يحفظ: أي شريحة كان الحديث "
-            "عنها بأرقامها، والمشاكل التي ذُكرت، والتعديلات التي نُفّذت، والقرارات وتفضيلات المستخدم، "
-            "وأي سؤال لم يُجب عليه بعد. بلا مقدمات وبلا تنسيق زائد.",
-            f"الذاكرة السابقة:\n{memory or 'لا توجد'}\n\nالمحادثة الأقدم:\n{older_text}",
-            max_tokens=700, model=SLIDE_TEXT_MODEL,
-            usage_ctx=usage_ctx or _usage_ctx('designer_chat')), 'DESIGNER-MEMORY')
-        summary = str(summary or '').strip()
-    except Exception as error:
-        print(f"[DESIGNER MEMORY] compression failed: {error}")
-        summary = ''
-    if not summary:
-        # Compression failed: keep the tail of the raw text rather than losing the conversation.
-        summary = (memory + '\n' + older_text).strip()
-    return summary[-DESIGNER_CHAT_MEMORY_MAX:], recent
+    # No model summarization here: keep the newest older text within the cap.
+    merged = (memory + '\n' + older_text).strip() if memory else older_text
+    return merged[-DESIGNER_CHAT_MEMORY_MAX:], recent
+
+
+DESIGNER_CHAT_MAX_ATTACHED_IMAGES = 3
+DESIGNER_CHAT_ATTACHED_IMAGE_LIMIT = 4 * 1024 * 1024
+
+
+def _designer_chat_free_reply(message, has_attachment=False):
+    """Deterministic no-AI reply for greetings and capability questions.
+
+    These turns used to run the full planner prompt (the whole draft as context) just to
+    answer «سلام» or «بتعمل ايه», so the tenant's provider balance moved on a message that
+    requested no work. Returning a canned answer here spends zero tokens: no planner call,
+    no edit call and no memory call. Returns the reply text, or None when the turn needs
+    the planner.
+    """
+    if has_attachment:
+        return None
+    text = normalize_arabic_digits_py(str(message or '').strip().lower())
+    if not text:
+        return None
+    if len(text) > 60:
+        return None
+    if designer_chat_targets.explicit_slide_numbers(message):
+        return None
+    edit_markers = (
+        'عدل', 'عدّل', 'غير', 'غيّر', 'احذف', 'امسح', 'ضيف', 'أضف', 'اضف', 'حط', 'ضع',
+        'انقل', 'كرر', 'ادمج', 'اقسم', 'جزئ', 'شريحة', 'شريحه', 'سلايد', 'صورة', 'صوره',
+        'خريطة', 'خريط', 'شعار', 'لوجو', 'علامة', 'watermark', 'لون', 'خط', 'جدول',
+        'صف', 'عمود', 'مخطط', 'رسم',
+    )
+    if any(marker in text for marker in edit_markers):
+        return None
+    greetings = (
+        'سلام', 'مرحبا', 'مرحب', 'اهلا', 'أهلا', 'هلا', 'هاي', 'هاى', 'ازيك', 'ازيك؟',
+        'عامل ايه', 'عامل إيه', 'صباح الخير', 'مساء الخير', 'مساء النور', 'صباح النور',
+        'شكرا', 'شكرًا', 'تسلم', 'تمام', 'ماشي', 'ماشى', 'اوك', 'أوك', 'طيب', 'اه',
+        'hello', 'hi', 'thanks', 'thank you', 'ok',
+    )
+    if any(greet in text for greet in greetings):
+        return (
+            'أهلاً بك. أخبرني بالتعديل المطلوب على العرض، وسأنفذه مباشرة. '
+            'هذه التحية لم تستهلك أي رصيد.'
+        )
+    help_markers = (
+        'بتعمل ايه', 'بتعمل إيه', 'ايه قدراتك', 'إيه قدراتك', 'ممكن تعمل ايه',
+        'تقدر تعمل ايه', 'مساعدة', 'مساعده', 'help', 'قدراتك', 'ازاي استخدم',
+        'كيف استخدم', 'بتسحب رصيد', 'الرصيد', 'بتكلف',
+    )
+    if any(marker in text for marker in help_markers):
+        return (
+            'أنا مساعد التصميم لهذا العرض. أنفذ التعديلات على الشرائح المفتوحة فقط، '
+            'ولا أقرأ المسودة ولا أستهلك رصيداً إلا بعد طلب تعديل واضح منك. '
+            'يمكنك طلب تعديل شريحة، إنشاء شريحة جديدة، أو إرفاق صورة ثم طلب وضعها '
+            'في شريحة منفصلة أو داخل شريحة أو كعلامة مائية أو كشعار إضافي.'
+        )
+    return None
+
+
+def _normalize_designer_attached_images(data):
+    """Collect user-attached chat images as data URIs, newest protocol first.
+
+    Accepts the legacy ``attachedImage`` string plus the newer ``attachedImages`` list
+    (strings or {data_uri/url, name} dicts). Only PNG/JPEG/WEBP data URIs within the
+    size limit are kept, up to DESIGNER_CHAT_MAX_ATTACHED_IMAGES, so one oversized
+    attachment cannot blow up the planner prompt.
+    """
+    uris = []
+    if not isinstance(data, dict):
+        return uris
+
+    def _take(value):
+        if not isinstance(value, str):
+            return
+        text = value.strip()
+        if not text.startswith('data:image/'):
+            return
+        header = text.split(',', 1)[0].lower()
+        if ';base64,' not in text:
+            return
+        if not any(kind in header for kind in ('image/png', 'image/jpeg', 'image/jpg', 'image/webp')):
+            return
+        try:
+            raw = base64.b64decode(text.split(',', 1)[1], validate=True)
+        except Exception:
+            return
+        if len(raw) > DESIGNER_CHAT_ATTACHED_IMAGE_LIMIT or len(raw) == 0:
+            return
+        if text not in uris:
+            uris.append(text)
+
+    legacy = data.get('attachedImage')
+    _take(legacy if isinstance(legacy, str) else '')
+    newer = data.get('attachedImages')
+    if isinstance(newer, list):
+        for item in newer:
+            if isinstance(item, str):
+                _take(item)
+            elif isinstance(item, dict):
+                candidate = item.get('data_uri') or item.get('dataUri') or item.get('url') or ''
+                _take(candidate if isinstance(candidate, str) else '')
+            if len(uris) >= DESIGNER_CHAT_MAX_ATTACHED_IMAGES:
+                break
+    return uris[:DESIGNER_CHAT_MAX_ATTACHED_IMAGES]
+
+
+def _persist_designer_attached_images(data_uris, tenant_id):
+    """Store chat attachments on disk and return durable URLs for slide HTML.
+
+    Slides must reference a server URL, never a data URI: a data URI in saved HTML
+    bloats every later planner prompt and breaks on reload. Falls back to the data
+    URI itself only when persisting fails, so the turn can still show the image.
+    """
+    urls = []
+    for uri in data_uris or []:
+        try:
+            stored = persist_generated_image(uri, tenant_id)
+        except Exception:
+            stored = uri
+        urls.append(stored if isinstance(stored, str) and stored else uri)
+    return urls
 
 
 def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data=None):
@@ -6681,6 +6935,24 @@ def api_designer_chat():
     # In particular, a number may answer a value question rather than name a slide.
     preferred_indexes = list(focus_indexes)
 
+    # Billing transparency: greetings and capability questions never reach the model.
+    # The planner prompt carries the whole draft, so even «سلام» used to move the
+    # provider balance. Answer those turns locally with zero tokens spent.
+    _free_probe_uris = _normalize_designer_attached_images(data)
+    _free_text = _designer_chat_free_reply(message, has_attachment=bool(_free_probe_uris))
+    if _free_text is not None:
+        _free_messages = list(history_for_turn)
+        if not _free_messages or _free_messages[-1].get('content') != message or _free_messages[-1].get('role') != 'user':
+            _free_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
+        _free_messages.append({'role': 'assistant', 'content': _free_text[:2000], 'slides': preferred_indexes[:]})
+        _free_trimmed = _normalize_designer_chat_messages(_free_messages)[-DESIGNER_CHAT_STORED_TURNS * 2:]
+        return jsonify({'success': True, 'data': {
+            'action': 'chat_only', 'response': _free_text, 'actions': [],
+            'memory': chat_memory, 'focusIndexes': focus_indexes,
+            'chatHistory': _free_trimmed, 'saved': False,
+            'ai_calls': 0, 'billed': False,
+        }})
+
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     training_context = db.get_training_context(g.tenant_id) or ''
@@ -6778,8 +7050,27 @@ def api_designer_chat():
     # An image the user attached in the chat: a design reference, something to insert, or the
     # problem they are pointing at. The attach button used to open the training page's file input,
     # so it never reached this endpoint at all.
-    attached_image = str(data.get('attachedImage') or '').strip()
-    user_image_refs = [{'data_uri': attached_image}] if attached_image.startswith('data:image/') else None
+    chat_attached_uris = _normalize_designer_attached_images(data)
+    try:
+        chat_attached_urls = _persist_designer_attached_images(chat_attached_uris, tenant_id)
+    except Exception as _persist_err:
+        print(f"[DESIGNER-CHAT] attached persist failed: {_persist_err}")
+        chat_attached_urls = list(chat_attached_uris)
+    user_image_refs = [{'data_uri': uri} for uri in chat_attached_uris] or None
+    if chat_attached_urls:
+        attached_note = (
+            f"\n\n## صور أرفقها المستخدم في هذه الرسالة ({len(chat_attached_urls)}):\n"
+            "الصور متاحة بصرياً كمرفقات، وعناوينها الدائمة للإدراج الحتمي هي:\n"
+            + '\n'.join(f"- الصورة {i + 1}: {url}" for i, url in enumerate(chat_attached_urls))
+            + "\nاستخدم أداة insert_attached_image حصراً لإدراج أي منها: separate_slide لشريحة منفصلة جديدة، "
+              "inline داخل شريحة، background كخلفية، watermark كعلامة مائية، logo كشعار إضافي. "
+              "لا تولّد بديلاً بالذكاء الاصطناعي لصورة مرفوعة، ولا تضعها كشعار شركة، "
+              "وإن كان دورها غير واضح فاسأل عنه بأداة ask."
+        )
+    else:
+        attached_note = ""
+    # Legacy single-image alias kept for older executors that read the first attachment.
+    attached_image = chat_attached_uris[0] if chat_attached_uris else ''
     if deterministic_plan is not None:
         pass
     elif slim_planner_only:
@@ -6804,6 +7095,8 @@ def api_designer_chat():
             branding, training_note, watermark_note, summary,
             _slim_snippets, _slim_brief, all_note, memory_note,
             history_note, focus_note, explicit_scope_note)
+        if attached_note:
+            planner_prompt += attached_note
         print(f"[DESIGNER-CHAT] table-blocked prompt goes slim directly ({len(planner_prompt)} chars)")
     else:
         planner_prompt = f"""{build_design_rules(branding)}{training_note}
@@ -6825,11 +7118,12 @@ def api_designer_chat():
 - نفّذ الطلب الواضح، واسأل سؤالاً محدداً عندما يؤثر الغموض على الإجراء أو النطاق أو القيمة. لا تخمّن تعديلاً لم يطلبه المستخدم، ولا تعتبر مجرد ذكر رقم إذناً بالتعديل.
 - الرد على سؤال سابق يكمل ذلك الطلب فقط. رسالة التصحيح أو الإلغاء تلغي الاستنتاج السابق. عند اختيار edit_slides اكتب instruction مكتملة تحمل التعديل والقيمة والقيود المفهومة من المحادثة، لا تنسخ الرد القصير وحده إلى المحرر.
 {all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_attached_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 أرقام الشرائح في كل الأدوات تشير إلى ترتيب العرض في بداية هذا الطلب، حتى عند نقل أو حذف شرائح في عملية سابقة ضمن الطلب نفسه.
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
+- insert_attached_image: params={{"image_index":1-based, "position":"separate_slide|inline|background|watermark|logo", "target":"current|all|indexes", "indexes":[1-based], "slideIndex":1, "title":"عنوان الشريحة الجديدة عند separate_slide", "caption":"تعليق تحت الصورة", "opacity":0.12, "width_px":480}} لإدراج صورة أرفقها المستخدم في هذه الرسالة فقط. separate_slide تنشئ شريحة جديدة بعد الشريحة المستهدفة وتعرض الصورة كاملة. inline تدرجها داخل الشرائح المستهدفة. background تجعلها خلفية. watermark تضعها كعلامة مائية شفافة. logo تضعها كشعار إضافي صغير أعلى الشريحة. image_index يشير لترتيب الصورة المرفقة في هذه الرسالة ويبدأ من 1. لا تستخدم هذه الأداة عند عدم وجود صور مرفقة في هذه الرسالة.
 - apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإظهار العلامة المائية المستقلة المعتمدة في إعدادات الشركة في خلفية الشرائح — صيغ فعّل/أظهر/إظهار/أضف تعني هذه الأداة، و«إظهار» تعني الرؤية فقط وليست تكبيرًا. النطاق الافتراضي current عند عدم تحديد أرقام؛ أرسل all فقط عند طلب كل الشرائح صراحة (كل/جميع/العرض كله)، وأرسل indexes مع الأرقام العربية أو الإنجليزية المذكورة. أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، والافتراضي opacity=0.045 وwidth_px=480. إذا ذكر المستخدم نسبة أو قيمة شفافية صريحة (مثل 50%) فأرسلها كما هي حتى 1.0 ونفّذها فورًا دون اقتراح بديل، وإذا رفض اقتراحًا سابقًا أو كرر قيمة صريحة فلا تعِد طرح نفس السؤال بأداة ask. أرسل width_px حتى 640 إذا طلب علامة أكبر
 - remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإخفاء العلامة المائية من الشرائح — صيغ اخف/إخفاء/عطّل/إلغاء التفعيل/احذف تعني هذه الأداة مع نفس قواعد النطاق أعلاه
 - apply_image_descriptions: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإضافة أوصاف الصور المحفوظة بالفعل دون توليد صور أو اختراع وصف
@@ -6876,13 +7170,14 @@ def api_designer_chat():
 - أنت Agent كامل الصلاحية: اختر الشريحة أو الشرائح المناسبة من قائمة الشرائح، ونفذ التقسيم والتوزيع الفاخر عبر tool="split_slide" مع تحديد slide_number و parts وتضمين تعليمات التصميم الجمالي والتوزيع المتناسق في instruction، أو ادمج بين edit_slides و create_slide.
 - احرص دائماً على الحفاظ التام على كامل الأرقام والبيانات والمؤشرات دون حذف أي تفصيل، وتوزيعها في كروت فاخرة وأقسام متوازنة مريحة بصرياً وخالية من أي إيموجي أو أيقونات.
 18. حذف صف أو عمود أو سطر من جدول داخل شريحة (مثل: «احذف الصف الثالث من الجدول» أو «شيل عمود السعر») هو تعديل داخل الشريحة عبر tool="edit_slides" فقط — وليس delete_slide ولا split_slide ولا create_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف (مثل: «احذف الشريحة 5»). قواعد الحفاظ على البيانات لا تمنع هذا الحذف: هو حذف عرضي من الشريحة فقط وبيانات المشروع الأصلية تبقى كما هي. عند اختيار edit_slides لطلب صف/عمود اكتب instruction مكتملة تحمل نوع الحذف (صف أم عمود) ورقمه أو محتواه أو اسم العمود، ولا تنسخ الرد القصير وحده.
+19. الصورة المرفقة في هذه الرسالة هي أصل لا يُستبدل: طلب وضعها في شريحة منفصلة أو داخل شريحة أو كخلفية أو كعلامة مائية أو كشعار إضافي يعني حصراً tool="insert_attached_image" مع الموضع المناسب. ممنوع توليد صورة بديلة لها بـ generate_image، وممنوع استخدام apply_watermark أو insert_team_logo لها. عند غياب صور مرفقة في هذه الرسالة لا تختر insert_attached_image أبداً.
 
-{audit_note}
+{audit_note}{attached_note}
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
 {memory_note}{history_note}{focus_note}{explicit_scope_note}"""
-        if user_image_refs:
+        if user_image_refs and not chat_attached_urls:
             planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
                               " واضحًا فاسأل عنه بأداة ask.")
     try:
@@ -18063,6 +18358,207 @@ def api_admin_tenant_key_refresh(tenant_id):
             'usageDaily': status.get('usage_daily'), 'usageWeekly': status.get('usage_weekly'),
             'usageMonthly': status.get('usage_monthly'), 'label': status.get('label')}
     return jsonify({'success': True, 'key': meta, 'live': live})
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Billing packages and the USD to SAR rate (super admin only).
+# Packages are the bundles companies subscribe to: credit_usd is the spend
+# allowance the provider key follows, price_sar is the selling price.
+# Balances display in riyals at a rate that refreshes daily on its own, with
+# a manual override that auto-refresh never overwrites.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FX_RATE_URL = 'https://open.er-api.com/v6/latest/USD'
+
+
+def _fetch_fx_usd_sar(timeout=10):
+    """Live dollars-to-riyals rate, or None. Never raises."""
+    try:
+        response = requests.get(FX_RATE_URL, timeout=timeout)
+        data = response.json() if response.status_code < 400 else {}
+        rate = float(((data or {}).get('rates') or {}).get('SAR') or 0)
+        return rate if rate > 0 else None
+    except Exception as exc:
+        print(f"[FX] fetch failed: {exc}")
+        return None
+
+
+def _fx_rate_age_seconds(fx):
+    try:
+        stamp = str((fx or {}).get('updated_at') or '').replace(' ', 'T')[:19]
+        moment = datetime.fromisoformat(stamp)
+        if moment.tzinfo is not None:
+            moment = moment.replace(tzinfo=None)
+        return (datetime.utcnow() - moment).total_seconds()
+    except Exception:
+        return float('inf')
+
+
+def _refresh_fx_rate(force=False):
+    """Fetch and store the auto rate unless a manual override or fresh value stands."""
+    try:
+        with app.app_context():
+            current = db.get_fx_rate()
+            if current.get('source') == 'manual' and not force:
+                return current
+            if not force and _fx_rate_age_seconds(current) < db.FX_REFRESH_SECONDS:
+                return current
+            rate = _fetch_fx_usd_sar()
+            if rate:
+                return db.set_fx_rate(db.FX_PAIR_USD_SAR, rate, source='auto')
+            return current
+    except Exception as exc:
+        print(f"[FX] refresh failed: {exc}")
+        try:
+            return db.get_fx_rate()
+        except Exception:
+            return {'pair': db.FX_PAIR_USD_SAR, 'rate': db.FX_DEFAULT_USD_SAR,
+                    'source': 'default', 'updated_at': None}
+
+
+def _refresh_fx_rate_async(force=False):
+    """Refresh the rate off the request path. Testing stays fully offline."""
+    try:
+        if app.config.get('TESTING') and not force:
+            return
+        thread = threading.Thread(target=_refresh_fx_rate, args=(force,), daemon=True)
+        thread.start()
+    except Exception as exc:
+        print(f"[FX] refresh thread failed: {exc}")
+
+
+@app.route('/api/admin/packages', methods=['GET'])
+@require_admin
+def api_admin_packages():
+    """List all billing packages."""
+    return jsonify({'success': True, 'packages': db.list_billing_packages()})
+
+
+@app.route('/api/admin/packages', methods=['POST'])
+@require_admin
+def api_admin_packages_create():
+    """Create a package (custom by default). credit_usd may be zero."""
+    data = request.json or {}
+    try:
+        package = db.create_billing_package(
+            data.get('name'),
+            data.get('creditUsd', data.get('credit_usd', 0)),
+            data.get('priceSar', data.get('price_sar')),
+            is_custom=bool(data.get('isCustom', data.get('is_custom', True))),
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'success': True, 'package': package}), 201
+
+
+@app.route('/api/admin/packages/<package_id>', methods=['PUT'])
+@require_admin
+def api_admin_package_update(package_id):
+    """Edit a package name, credit, price or active flag."""
+    data = request.json or {}
+    kwargs = {}
+    if 'name' in data:
+        kwargs['name'] = data.get('name')
+    if 'creditUsd' in data or 'credit_usd' in data:
+        kwargs['credit_usd'] = data.get('creditUsd', data.get('credit_usd'))
+    if 'priceSar' in data or 'price_sar' in data:
+        kwargs['price_sar'] = data.get('priceSar', data.get('price_sar'))
+    if 'isActive' in data or 'is_active' in data:
+        kwargs['is_active'] = data.get('isActive', data.get('is_active'))
+    try:
+        package = db.update_billing_package(package_id, **kwargs)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if package is None:
+        return jsonify({'error': 'Package not found'}), 404
+    return jsonify({'success': True, 'package': package})
+
+
+@app.route('/api/admin/packages/<package_id>', methods=['DELETE'])
+@require_admin
+def api_admin_package_delete(package_id):
+    """Delete a package. Companies on it keep their key limit, package unset."""
+    if not db.delete_billing_package(package_id):
+        return jsonify({'error': 'Package not found'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/package', methods=['GET'])
+@require_admin
+def api_admin_tenant_package_status(tenant_id):
+    """Which package a company is on, if any."""
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+    package = db.get_billing_package(tenant.get('package_id')) if tenant.get('package_id') else None
+    return jsonify({'success': True, 'tenantId': tenant_id,
+                    'packageId': tenant.get('package_id'), 'package': package})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/package', methods=['POST'])
+@require_admin
+def api_admin_tenant_package_assign(tenant_id):
+    """Attach a company to a package and sync its provider key limit to it."""
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+    if tenant.get('is_admin'):
+        return jsonify({'error': 'Super admin accounts use the global key'}), 400
+    data = request.json or {}
+    package_id = data.get('packageId', data.get('package_id'))
+    try:
+        _tenant, package = db.assign_tenant_package(tenant_id, package_id)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    key = db.get_tenant_openrouter_key_meta(tenant_id)
+    if package is not None:
+        try:
+            credit = float(package.get('credit_usd') or 0.0)
+        except (TypeError, ValueError):
+            credit = 0.0
+        if key.get('has_key') and key.get('is_active'):
+            try:
+                db.update_tenant_openrouter_key_meta(tenant_id, limit_usd=credit)
+                if key.get('provenance') == 'auto' and key.get('openrouter_key_hash'):
+                    _openrouter_update_managed_key(key.get('openrouter_key_hash'),
+                                                   limit_usd=credit)
+                key = db.get_tenant_openrouter_key_meta(tenant_id)
+            except (ValueError, Exception) as exc:
+                print(f"[PACKAGES] key limit sync failed: {exc}")
+        else:
+            ensured = _ensure_tenant_openrouter_key(tenant_id, limit_usd=credit)
+            if ensured:
+                key = ensured
+    return jsonify({'success': True, 'tenantId': tenant_id,
+                    'package': package, 'key': key})
+
+
+@app.route('/api/admin/fx-rate', methods=['GET'])
+@require_admin
+def api_admin_fx_rate():
+    """Current USD to SAR rate with source. Triggers a background refresh."""
+    _refresh_fx_rate_async()
+    return jsonify({'success': True, 'fx': db.get_fx_rate()})
+
+
+@app.route('/api/admin/fx-rate', methods=['PUT'])
+@require_admin
+def api_admin_fx_rate_update():
+    """Manual override (mode manual + rate) or back to auto tracking."""
+    data = request.json or {}
+    mode = str(data.get('mode') or 'manual').strip().lower()
+    if mode == 'manual':
+        try:
+            fx = db.set_fx_rate(db.FX_PAIR_USD_SAR, data.get('rate'), source='manual')
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        return jsonify({'success': True, 'fx': fx})
+    if mode == 'auto':
+        fx = _refresh_fx_rate(force=True)
+        if fx.get('source') == 'auto':
+            return jsonify({'success': True, 'fx': fx})
+        return jsonify({'error': 'Rate provider unreachable, kept stored rate',
+                        'fx': fx}), 503
+    return jsonify({'error': 'Invalid mode'}), 400
 
 
 @app.route('/api/admin/stats', methods=['GET'])

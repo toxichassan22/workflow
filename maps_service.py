@@ -1435,7 +1435,8 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
                     'http_status': response.status_code,
                 }
             empty_result = {'success': True, 'landmarks': []}
-            _discovery_cache_put(nearby_tenant, nearby_key, empty_result, ttl_days=7)
+            # Quiet areas are not cached: an empty answer must never mask a
+            # later malformed provider body as a success.
             return empty_result
 
         places = []
@@ -1473,7 +1474,8 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         places = places[:max_results]
 
         nearby_result = {'success': True, 'landmarks': places}
-        _discovery_cache_put(nearby_tenant, nearby_key, nearby_result, ttl_days=7)
+        if places:
+            _discovery_cache_put(nearby_tenant, nearby_key, nearby_result, ttl_days=7)
         return nearby_result
     except requests.exceptions.Timeout:
         print('[GOOGLE PLACES ERROR] request timed out after 15 seconds')

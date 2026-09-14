@@ -1,0 +1,180 @@
+"""Billing packages and the USD to SAR rate (super-admin part one).
+
+Packages carry a dollar spend allowance plus a riyal selling price; the rate
+refreshes on its own with a manual override auto-refresh never overwrites.
+Temporary SQLite database, no provider calls: FX fetch is always patched.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import auth
+import db
+
+
+class PackagesFxTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.uploads_temp = tempfile.TemporaryDirectory(dir=ROOT)
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'packages-fx.db')
+
+        import app as application_module
+
+        cls.application_module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
+        cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
+
+        with cls.app.app_context():
+            db.init_db()
+            cls.tenant_id = db.create_tenant('Pack Co', 'pack@example.test', 'hash', 'pack-co')
+            cls.admin_tenant = db.create_tenant('SAG Admin', 'sag-fx@example.test', 'hash', 'sag-fx')
+            db.get_db().execute(
+                'UPDATE tenants SET is_admin = 1 WHERE id = ?', (cls.admin_tenant,))
+            db.get_db().commit()
+
+        cls.admin_token = auth.create_token(
+            cls.admin_tenant, 'sag-fx@example.test', user_id=None,
+            user_name='SAG', user_role='company_admin',
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
+        cls.temp_dir.cleanup()
+        cls.uploads_temp.cleanup()
+
+    def _admin_headers(self):
+        return {'Authorization': f'Bearer {self.admin_token}'}
+
+    # ── Tables ─────────────────────────────────────────────────────────
+
+    def test_billing_tables_exist_after_init(self):
+        import sqlite3
+        conn = sqlite3.connect(db.DB_PATH)
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        conn.close()
+        self.assertIn('billing_packages', names)
+        self.assertIn('fx_rates', names)
+
+    # ── Packages ───────────────────────────────────────────────────────
+
+    def test_package_crud_and_assign(self):
+        client = self.app.test_client()
+        created = client.post(
+            '/api/admin/packages', headers=self._admin_headers(),
+            json={'name': 'باقة النمو', 'creditUsd': 25, 'priceSar': 100})
+        self.assertEqual(created.status_code, 201, created.get_json())
+        package = created.get_json()['package']
+        self.assertEqual(package['credit_usd'], 25)
+        self.assertEqual(package['price_sar'], 100)
+
+        updated = client.put(
+            f"/api/admin/packages/{package['id']}", headers=self._admin_headers(),
+            json={'creditUsd': 30})
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertEqual(updated.get_json()['package']['credit_usd'], 30)
+
+        listed = client.get('/api/admin/packages', headers=self._admin_headers()).get_json()
+        self.assertTrue(any(p['id'] == package['id'] for p in listed['packages']))
+
+        assigned = client.post(
+            f'/api/admin/tenants/{self.tenant_id}/package',
+            headers=self._admin_headers(), json={'packageId': package['id']})
+        self.assertEqual(assigned.status_code, 200, assigned.get_json())
+        self.assertEqual(assigned.get_json()['package']['id'], package['id'])
+
+        status = client.get(
+            f'/api/admin/tenants/{self.tenant_id}/package',
+            headers=self._admin_headers()).get_json()
+        self.assertEqual(status['packageId'], package['id'])
+
+        deleted = client.delete(
+            f"/api/admin/packages/{package['id']}", headers=self._admin_headers())
+        self.assertEqual(deleted.status_code, 200)
+        with self.app.app_context():
+            tenant = db.get_tenant_by_id(self.tenant_id)
+        self.assertIsNone(tenant.get('package_id'))
+
+    def test_package_endpoints_reject_bad_input(self):
+        client = self.app.test_client()
+        denied = client.get('/api/admin/packages')
+        self.assertEqual(denied.status_code, 401)
+        bad = client.post('/api/admin/packages', headers=self._admin_headers(),
+                          json={'name': '', 'creditUsd': -5})
+        self.assertEqual(bad.status_code, 400)
+        missing = client.put('/api/admin/packages/nope', headers=self._admin_headers(),
+                             json={'creditUsd': 5})
+        self.assertEqual(missing.status_code, 404)
+
+    # ── FX rate ────────────────────────────────────────────────────────
+
+    def test_manual_override_beats_auto_and_sticks(self):
+        module = self.application_module
+        client = self.app.test_client()
+        manual = client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                            json={'mode': 'manual', 'rate': 3.4})
+        self.assertEqual(manual.status_code, 200, manual.get_json())
+        self.assertEqual(manual.get_json()['fx']['rate'], 3.4)
+        self.assertEqual(manual.get_json()['fx']['source'], 'manual')
+
+        # Auto refresh must never overwrite a manual override.
+        with patch.object(module, '_fetch_fx_usd_sar', return_value=3.9) as fetch:
+            refreshed = module._refresh_fx_rate()
+            self.assertEqual(fetch.call_count, 0)
+        self.assertEqual(refreshed['rate'], 3.4)
+        self.assertEqual(refreshed['source'], 'manual')
+
+        # Back to auto tracking stores the fetched rate.
+        with patch.object(module, '_fetch_fx_usd_sar', return_value=3.9):
+            auto = client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                              json={'mode': 'auto'})
+        self.assertEqual(auto.status_code, 200, auto.get_json())
+        self.assertEqual(auto.get_json()['fx']['rate'], 3.9)
+        self.assertEqual(auto.get_json()['fx']['source'], 'auto')
+
+    def test_fx_fetch_failure_keeps_stored_rate(self):
+        module = self.application_module
+        client = self.app.test_client()
+        with patch.object(module, '_fetch_fx_usd_sar', return_value=None):
+            kept = module._refresh_fx_rate(force=True)
+        with self.app.app_context():
+            current = db.get_fx_rate()
+        self.assertEqual(kept['rate'], current['rate'])
+
+    def test_balances_display_in_sar(self):
+        client = self.app.test_client()
+        client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                   json={'mode': 'manual', 'rate': 3.5})
+        with self.app.app_context():
+            db.update_tenant(self.tenant_id, credit_balance=10.0)
+        company_token = auth.create_token(
+            self.tenant_id, 'pack@example.test', user_id=None,
+            user_name='Pack Admin', user_role='company_admin')
+        body = client.get(
+            '/api/ai-usage',
+            headers={'Authorization': f'Bearer {company_token}'}).get_json()
+        self.assertTrue(body['success'])
+        self.assertAlmostEqual(body['billing']['balance_usd'], 10.0)
+        self.assertAlmostEqual(body['billing']['balance_sar'], 35.0)
+        self.assertEqual(body['billing']['fx']['rate'], 3.5)
+
+    def test_usd_to_sar_rounding(self):
+        with self.app.app_context():
+            self.assertEqual(db.usd_to_sar(10.0, 3.5), 35.0)
+            self.assertEqual(db.usd_to_sar(0.374, 3.75), 1.4)
+
+
+if __name__ == '__main__':
+    unittest.main()
