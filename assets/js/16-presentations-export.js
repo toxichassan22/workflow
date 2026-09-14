@@ -854,30 +854,47 @@
             cleaned = (swept && swept.deleted_count) || 0;
           }
         } catch (sweepError) { /* orphan sweep must never block issuance */ }
-        let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0, firstError = '';
-        while (offset < remaining && rounds < 40) {
+        let created = 0, failed = 0, rounds = 0, firstError = '';
+        let totalKeyless = null, provisionedNames = [];
+        const isMeaningfulKeyError = (v) => {
+          if (v === undefined || v === null) return false;
+          const s = String(v).trim();
+          if (!s) return false;
+          const low = s.toLowerCase();
+          return low !== 'none' && low !== 'null' && low !== 'undefined';
+        };
+        while (rounds < 40) {
           rounds += 1;
-          const data = await api('POST', '/api/admin/openrouter-keys/ensure-all', { batch: 25, offset });
+          const data = await api('POST', '/api/admin/openrouter-keys/ensure-all', { batch: 25, offset: 0 });
           if (!data || !data.success) {
             toast(WFT('admin.keys_failed', 'تعذر إصدار المفاتيح'));
-            if (data && data.error) toast(String(data.error).slice(0, 300));
+            if (data && isMeaningfulKeyError(data.error)) toast(String(data.error).slice(0, 300));
             return;
           }
+          if (totalKeyless === null) totalKeyless = (data.total_keyless || 0);
           created += data.created || 0;
           failed += data.failed || 0;
-          if (!firstError && Array.isArray(data.results)) {
-            const bad = data.results.find(r => !r.ok && r.error);
-            if (bad) firstError = String(bad.error).slice(0, 300);
+          if (Array.isArray(data.results)) {
+            data.results.forEach((r) => {
+              if (r && r.ok && r.companyName) provisionedNames.push(String(r.companyName));
+            });
+            if (!firstError) {
+              const bad = data.results.find((r) => !r.ok && isMeaningfulKeyError(r.error));
+              if (bad) firstError = String(bad.error).slice(0, 300);
+            }
           }
-          remaining = data.total_keyless || 0;
-          offset += (data.results || []).length;
-          updateLoaderProgress(Math.min(95, Math.round((offset / Math.max(1, remaining)) * 100)));
+          const done = created + failed;
+          const target = Math.max(1, totalKeyless || done || 1);
+          updateLoaderProgress(Math.min(95, Math.round((done / target) * 100)));
           if (!data.results || !data.results.length) break;
+          if ((data.total_keyless || 0) <= 0) break;
         }
         if (!created && !failed) {
           toast(WFT('admin.keys_none', 'كل الشركات لديها مفاتيح'));
         } else {
-          toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total: created + failed }));
+          const total = (totalKeyless !== null && totalKeyless !== undefined) ? totalKeyless : (created + failed);
+          toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total }));
+          if (provisionedNames.length) toast(provisionedNames.slice(0, 10).join(', ').slice(0, 300));
           if (firstError) toast(firstError);
         }
         if (cleaned) {

@@ -595,9 +595,14 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
             slug = str(tenant_id)[:8]
         created = _openrouter_create_managed_key(f"landloom-{slug}", limit_usd, limit_reset)
         if not isinstance(created, dict) or not created.get('key'):
-            reason = created.get('error') if isinstance(created, dict) else 'Provisioning failed'
+            reason = (created.get('error') if isinstance(created, dict) else None) or 'Provisioning failed'
+            if not isinstance(reason, str):
+                reason = str(reason)
+            reason = reason.strip()
+            if not reason or reason.lower() in ('none', 'null'):
+                reason = 'Provisioning failed'
             created = None
-            return None, str(reason)
+            return None, reason
         try:
             meta = db.set_tenant_openrouter_key(
                 tenant_id, created.get('key'),
@@ -626,7 +631,10 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
         print(f"[OPENROUTER KEYS] provision failed: {exc}")
         if created and isinstance(created, dict):
             _openrouter_delete_managed_key(created.get('hash'))
-        return None, str(exc)
+        msg = str(exc).strip() if str(exc).strip() else 'Provisioning failed'
+        if msg.lower() in ('none', 'null'):
+            msg = 'Provisioning failed'
+        return None, msg
 
 
 def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
@@ -18554,14 +18562,18 @@ def api_admin_tenant_keys_ensure_all():
     except Exception as exc:
         return jsonify({'error': f'Tenant list failed: {exc}'}), 500
     targets = []
+    already_keyed = 0
+    total_companies = 0
     for tenant in tenants:
         try:
             if tenant.get('is_admin'):
                 continue
+            total_companies += 1
             meta = db.get_tenant_openrouter_key_meta(tenant.get('id'))
         except Exception:
             continue
         if meta.get('has_key') and meta.get('is_active'):
+            already_keyed += 1
             continue
         targets.append(tenant)
     import time as _time
@@ -18570,6 +18582,11 @@ def api_admin_tenant_keys_ensure_all():
     created = 0
     for tenant in page:
         meta, provision_error = _provision_one_tenant_key(tenant, limit_usd, limit_reset)
+        if meta is not None:
+            provision_error = None
+        elif not isinstance(provision_error, str) or not provision_error.strip() \
+                or provision_error.strip().lower() in ('none', 'null'):
+            provision_error = 'Provisioning failed'
         results.append({
             'tenantId': tenant.get('id'),
             'companyName': tenant.get('company_name'),
@@ -18580,6 +18597,8 @@ def api_admin_tenant_keys_ensure_all():
             created += 1
         _time.sleep(1)
     return jsonify({'success': True, 'total_keyless': len(targets),
+                    'total_companies': total_companies,
+                    'already_keyed': already_keyed,
                     'offset': offset, 'batch': batch, 'created': created,
                     'failed': len(results) - created, 'results': results})
 
