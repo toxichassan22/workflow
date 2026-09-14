@@ -88,7 +88,18 @@
     "sectionver.line_rejected": "إصدار {n} مرفوض",
     "sectionver.line_cancelled": "إصدار {n} ملغي",
     "sectionver.line_superseded": "إصدار {n} مستبدل",
-    "sectionver.line_none": "لا توجد إصدارات"
+    "sectionver.line_none": "لا توجد إصدارات",
+    "lifecycle.draft": "مسودة",
+    "lifecycle.sections_in_progress": "قيد إعداد الأقسام",
+    "lifecycle.section_approval_pending": "بانتظار اعتماد قسم",
+    "lifecycle.rejected_for_revision": "معاد للتعديل",
+    "lifecycle.sections_approved": "الأقسام معتمدة",
+    "lifecycle.generation_approval_pending": "بانتظار اعتماد التوليد",
+    "lifecycle.generating": "قيد التوليد",
+    "lifecycle.generated_draft": "مسودة ملف مولد",
+    "lifecycle.final_approval_pending": "بانتظار اعتماد الملف النهائي",
+    "lifecycle.approved": "معتمد نهائيًا",
+    "lifecycle.archived": "مؤرشف"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -145,7 +156,18 @@
     "sectionver.line_rejected": "Version {n} rejected",
     "sectionver.line_cancelled": "Version {n} cancelled",
     "sectionver.line_superseded": "Version {n} superseded",
-    "sectionver.line_none": "No versions"
+    "sectionver.line_none": "No versions",
+    "lifecycle.draft": "Draft",
+    "lifecycle.sections_in_progress": "Sections in progress",
+    "lifecycle.section_approval_pending": "Section approval pending",
+    "lifecycle.rejected_for_revision": "Returned for revision",
+    "lifecycle.sections_approved": "Sections approved",
+    "lifecycle.generation_approval_pending": "Generation approval pending",
+    "lifecycle.generating": "Generating",
+    "lifecycle.generated_draft": "Generated draft",
+    "lifecycle.final_approval_pending": "Final approval pending",
+    "lifecycle.approved": "Fully approved",
+    "lifecycle.archived": "Archived"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old

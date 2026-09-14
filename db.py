@@ -2311,8 +2311,12 @@ def _presentation_list_clauses(tenant_id, draft_id=None, search='', status='', d
         clauses.append('LOWER(title) LIKE ?')
         params.append('%' + str(search).strip().lower() + '%')
     if status == 'draft':
-        clauses.append("COALESCE(status, 'draft') IN ('draft', 'edited')")
-    elif status in {'pending_approval', 'approved'}:
+        clauses.append("COALESCE(status, 'draft') IN ('draft', 'edited', 'generated_draft')")
+    elif status in {'pending_approval', 'pending'}:
+        clauses.append("status IN ('pending_approval', 'final_approval_pending', 'generation_approval_pending', 'section_approval_pending')")
+    elif status == 'approved':
+        clauses.append("status IN ('approved', 'sections_approved')")
+    elif status in PROPOSAL_LIFECYCLE_STATES:
         clauses.append('status = ?')
         params.append(status)
     if date_from:
@@ -3709,8 +3713,157 @@ def get_approval_status(presentation_id):
 # Project Drafts
 # ─────────────────────────────────────────────────────────────────────────────
 
-PROJECT_DRAFT_STATUSES = {'draft', 'submitted', 'pending_approval', 'approved'}
+# ─────────────────────────────────────────────────────────────────────────────
+# Proposal Lifecycle: 11 official states (Omran spec section 7 & 8)
+#
+#  1. draft: مسودة (المدخلات قابلة للتعديل ولم ترسل للاعتماد)
+#  2. sections_in_progress: قيد إعداد الأقسام (يعمل المحررون على الأقسام بشكل متوازٍ)
+#  3. section_approval_pending: بانتظار اعتماد قسم (القسم مقفل مؤقتًا على الإصدار المرسل)
+#  4. rejected_for_revision: معاد للتعديل (رفض المعتمد القسم أو طلب تعديل مع ملاحظات)
+#  5. sections_approved: الأقسام معتمدة (جميع الأقسام المطلوبة معتمدة على إصدارات محددة)
+#  6. generation_approval_pending: بانتظار اعتماد التوليد (تم احتساب التكلفة التقديرية وتنتظر الموافقة)
+#  7. generating: قيد التوليد (وظيفة التوليد تعمل في الخلفية)
+#  8. generated_draft: مسودة ملف مولد (الملف قابل للتعديل بالشات أو النص وفق النطاق المنفذ)
+#  9. final_approval_pending: بانتظار اعتماد الملف النهائي (نسخة محددة مرسلة للمعتمد النهائي)
+# 10. approved: معتمد نهائيًا (نسخة رسمية مقفلة وقابلة للتنزيل)
+# 11. archived: مؤرشف (غير نشط مع الاحتفاظ الكامل بالسجل)
+# ─────────────────────────────────────────────────────────────────────────────
+
+PROPOSAL_LIFECYCLE_STATES = {
+    'draft': {
+        'label': 'مسودة',
+        'label_en': 'Draft',
+        'phase': 'inputs',
+        'description': 'المدخلات قابلة للتعديل ولم ترسل للاعتماد',
+        'is_locked': False,
+        'order': 1,
+    },
+    'sections_in_progress': {
+        'label': 'قيد إعداد الأقسام',
+        'label_en': 'Sections In Progress',
+        'phase': 'inputs',
+        'description': 'يعمل المحررون على الأقسام بشكل متوازٍ',
+        'is_locked': False,
+        'order': 2,
+    },
+    'section_approval_pending': {
+        'label': 'بانتظار اعتماد قسم',
+        'label_en': 'Section Approval Pending',
+        'phase': 'inputs',
+        'description': 'القسم مقفل مؤقتًا على الإصدار المرسل',
+        'is_locked': False,
+        'order': 3,
+    },
+    'rejected_for_revision': {
+        'label': 'معاد للتعديل',
+        'label_en': 'Returned For Revision',
+        'phase': 'inputs',
+        'description': 'رفض المعتمد القسم أو طلب تعديل مع ملاحظات',
+        'is_locked': False,
+        'order': 4,
+    },
+    'sections_approved': {
+        'label': 'الأقسام معتمدة',
+        'label_en': 'Sections Approved',
+        'phase': 'inputs',
+        'description': 'جميع الأقسام المطلوبة معتمدة على إصدارات محددة',
+        'is_locked': False,
+        'order': 5,
+    },
+    'generation_approval_pending': {
+        'label': 'بانتظار اعتماد التوليد',
+        'label_en': 'Generation Approval Pending',
+        'phase': 'generation',
+        'description': 'تم احتساب التكلفة التقديرية وتنتظر الموافقة',
+        'is_locked': True,
+        'order': 6,
+    },
+    'generating': {
+        'label': 'قيد التوليد',
+        'label_en': 'Generating',
+        'phase': 'generation',
+        'description': 'وظيفة التوليد تعمل في الخلفية',
+        'is_locked': True,
+        'order': 7,
+    },
+    'generated_draft': {
+        'label': 'مسودة ملف مولد',
+        'label_en': 'Generated Draft',
+        'phase': 'output',
+        'description': 'الملف قابل للتعديل بالشات أو النص وفق النطاق المنفذ',
+        'is_locked': False,
+        'order': 8,
+    },
+    'final_approval_pending': {
+        'label': 'بانتظار اعتماد الملف النهائي',
+        'label_en': 'Final Approval Pending',
+        'phase': 'output',
+        'description': 'نسخة محددة مرسلة للمعتمد النهائي',
+        'is_locked': True,
+        'order': 9,
+    },
+    'approved': {
+        'label': 'معتمد نهائيًا',
+        'label_en': 'Approved',
+        'phase': 'output',
+        'description': 'نسخة رسمية مقفلة وقابلة للتنزيل',
+        'is_locked': True,
+        'order': 10,
+    },
+    'archived': {
+        'label': 'مؤرشف',
+        'label_en': 'Archived',
+        'phase': 'archived',
+        'description': 'غير نشط مع الاحتفاظ الكامل بالسجل',
+        'is_locked': True,
+        'order': 11,
+    },
+}
+
+PROPOSAL_ALLOWED_TRANSITIONS = {
+    'draft': {'sections_in_progress', 'section_approval_pending', 'sections_approved', 'archived'},
+    'sections_in_progress': {'section_approval_pending', 'sections_approved', 'rejected_for_revision', 'archived'},
+    'section_approval_pending': {'sections_in_progress', 'rejected_for_revision', 'sections_approved', 'archived'},
+    'rejected_for_revision': {'sections_in_progress', 'section_approval_pending', 'archived'},
+    'sections_approved': {'generation_approval_pending', 'generating', 'sections_in_progress', 'archived'},
+    'generation_approval_pending': {'generating', 'sections_approved', 'sections_in_progress', 'archived'},
+    'generating': {'generated_draft', 'sections_approved', 'archived'},
+    'generated_draft': {'final_approval_pending', 'generating', 'sections_in_progress', 'archived'},
+    'final_approval_pending': {'approved', 'generated_draft', 'rejected_for_revision', 'archived'},
+    'approved': {'archived', 'generated_draft', 'sections_in_progress'},
+    'archived': {'draft', 'sections_in_progress'},
+}
+
+PROPOSAL_STATUS_ALIASES = {
+    'pending_approval': 'section_approval_pending',
+    'submitted': 'section_approval_pending',
+    'edited': 'sections_in_progress',
+}
+
+PROJECT_DRAFT_STATUSES = set(PROPOSAL_LIFECYCLE_STATES.keys()) | {'pending_approval', 'submitted', 'edited'}
 SECTION_DRAFT_STATUSES = {'draft', 'approved'}
+
+
+def normalize_proposal_status(status):
+    """Normalize any historical or alias status to a canonical 11-state key."""
+    if not status or not isinstance(status, str):
+        return 'draft'
+    clean = status.strip().lower()
+    if clean in PROPOSAL_LIFECYCLE_STATES:
+        return clean
+    if clean in PROPOSAL_STATUS_ALIASES:
+        return PROPOSAL_STATUS_ALIASES[clean]
+    return 'draft'
+
+
+def can_transition_proposal_status(current_status, next_status):
+    """Check if a transition from current_status to next_status is valid."""
+    curr = normalize_proposal_status(current_status)
+    target = normalize_proposal_status(next_status)
+    if curr == target:
+        return True
+    allowed = PROPOSAL_ALLOWED_TRANSITIONS.get(curr, set())
+    return target in allowed
 
 # Keys every save carries as bookkeeping: they say nothing about whether the payload still
 # holds the project itself, so they are ignored when judging a destructive overwrite.
@@ -4054,8 +4207,15 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
         clauses.append('LOWER(title) LIKE ?')
         params.append('%' + str(search).strip().lower() + '%')
     if status == 'draft':
-        clauses.append("COALESCE(status, 'draft') NOT IN ('pending_approval', 'approved')")
-    elif status in {'pending_approval', 'approved'}:
+        clauses.append("COALESCE(status, 'draft') NOT IN ('pending_approval', 'approved', 'sections_approved', 'final_approval_pending')")
+    elif status in {'pending_approval', 'pending'}:
+        clauses.append("status IN ('pending_approval', 'section_approval_pending', 'generation_approval_pending', 'final_approval_pending')")
+    elif status == 'approved':
+        clauses.append("status IN ('approved', 'sections_approved')")
+    elif status in PROPOSAL_LIFECYCLE_STATES:
+        clauses.append('status = ?')
+        params.append(status)
+    elif status:
         clauses.append('status = ?')
         params.append(status)
     if date_from:
@@ -4119,7 +4279,7 @@ def get_pending_project_drafts(tenant_id):
     """Return only this tenant's drafts awaiting overall approval."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM project_drafts WHERE tenant_id = ? AND status = 'pending_approval' ORDER BY requested_at DESC",
+        "SELECT * FROM project_drafts WHERE tenant_id = ? AND status IN ('pending_approval', 'section_approval_pending', 'generation_approval_pending', 'final_approval_pending') ORDER BY requested_at DESC",
         (tenant_id,)
     ).fetchall()
     return [_hydrate_project_draft(row) for row in rows]
@@ -4500,6 +4660,147 @@ def review_project_draft(tenant_id, draft_id, review_status, reviewed_by, review
     )
     conn.commit()
     return True
+
+
+def transition_project_draft_status(tenant_id, draft_id, target_status,
+                                    actor_id=None, actor_name=None,
+                                    actor_role=None, reason=None, metadata=None):
+    """Transition a project draft through the 11-state lifecycle with validation and immutable audit logging."""
+    if not tenant_id or not draft_id or not target_status:
+        return {'error': 'missing_arguments'}
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return {'error': 'draft_not_found'}
+
+    current_status = draft.get('status') or 'draft'
+    norm_current = normalize_proposal_status(current_status)
+    norm_target = normalize_proposal_status(target_status)
+
+    if not can_transition_proposal_status(norm_current, norm_target):
+        return {
+            'error': 'invalid_transition',
+            'current_status': norm_current,
+            'target_status': norm_target,
+            'allowed_transitions': sorted(list(PROPOSAL_ALLOWED_TRANSITIONS.get(norm_current, []))),
+        }
+
+    # Spec Section 8.4: Reopening an approved proposal requires a mandatory reason
+    if norm_current == 'approved' and norm_target != 'archived':
+        if not reason or not str(reason).strip():
+            return {'error': 'reason_required', 'message': 'سبب التعديل بعد التعميد إلزامي'}
+
+    # Spec Section 8.1 & 7: Rejection/Returning for revision requires a mandatory reason
+    if norm_target == 'rejected_for_revision':
+        if not reason or not str(reason).strip():
+            return {'error': 'reason_required', 'message': 'سبب إعادة العرض للتعديل إلزامي'}
+
+    now_iso = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute(
+        '''UPDATE project_drafts SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ?''',
+        (norm_target, now_iso, draft_id, tenant_id)
+    )
+    # Also sync associated presentation status if any
+    try:
+        conn.execute(
+            '''UPDATE presentations SET status = ?, updated_at = ?
+               WHERE tenant_id = ? AND (draft_id = ? OR json_extract(project_data, '$.draftId') = ?)''',
+            (norm_target, now_iso, tenant_id, draft_id, draft_id)
+        )
+    except Exception:
+        pass
+    conn.commit()
+
+    # Record immutable audit event (T11 integration)
+    event_meta = dict(metadata or {})
+    if reason:
+        event_meta['reason'] = str(reason).strip()
+    event_meta['from_status'] = norm_current
+    event_meta['to_status'] = norm_target
+
+    try:
+        record_audit_event(
+            tenant_id=tenant_id,
+            action='proposal_status_transition',
+            entity_type='project_draft',
+            entity_id=draft_id,
+            user_id=actor_id,
+            user_name=actor_name,
+            user_role=actor_role,
+            entity_name=draft.get('title') or 'مشروع',
+            old_value={'status': norm_current},
+            new_value={'status': norm_target, 'reason': reason},
+            metadata=event_meta,
+            created_at=now_iso,
+        )
+    except Exception as e:
+        print(f'[AUDIT LOG] Warning: failed to log status transition: {e}')
+
+    updated_draft = get_project_draft_by_id(tenant_id, draft_id)
+    return {
+        'success': True,
+        'draft': updated_draft,
+        'previous_status': norm_current,
+        'current_status': norm_target,
+        'state_info': PROPOSAL_LIFECYCLE_STATES.get(norm_target),
+    }
+
+
+def get_proposal_lifecycle_info(tenant_id, draft_id):
+    """Return current state metadata, allowed next transitions, and transition history for a draft."""
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return None
+    raw_status = draft.get('status') or 'draft'
+    norm_status = normalize_proposal_status(raw_status)
+    state_info = PROPOSAL_LIFECYCLE_STATES.get(norm_status, PROPOSAL_LIFECYCLE_STATES['draft'])
+    allowed_keys = sorted(list(PROPOSAL_ALLOWED_TRANSITIONS.get(norm_status, set())))
+    next_states = [
+        {
+            'status': k,
+            'label': PROPOSAL_LIFECYCLE_STATES[k]['label'],
+            'label_en': PROPOSAL_LIFECYCLE_STATES[k]['label_en'],
+            'phase': PROPOSAL_LIFECYCLE_STATES[k]['phase'],
+            'description': PROPOSAL_LIFECYCLE_STATES[k]['description'],
+            'is_locked': PROPOSAL_LIFECYCLE_STATES[k]['is_locked'],
+        }
+        for k in allowed_keys if k in PROPOSAL_LIFECYCLE_STATES
+    ]
+
+    # Retrieve recent transitions from audit_events
+    history = []
+    try:
+        audit_res = list_audit_events(
+            tenant_id=tenant_id,
+            entity_type='project_draft',
+            entity_id=draft_id,
+            action='proposal_status_transition',
+            limit=20,
+        )
+        for ev in audit_res.get('events', []):
+            history.append({
+                'id': ev.get('id'),
+                'created_at': ev.get('created_at'),
+                'user_id': ev.get('user_id'),
+                'user_name': ev.get('user_name'),
+                'user_role': ev.get('user_role'),
+                'from_status': (ev.get('old_value') or {}).get('status') if isinstance(ev.get('old_value'), dict) else None,
+                'to_status': (ev.get('new_value') or {}).get('status') if isinstance(ev.get('new_value'), dict) else None,
+                'reason': (ev.get('metadata') or {}).get('reason'),
+            })
+    except Exception:
+        history = []
+
+    return {
+        'draft_id': draft_id,
+        'title': draft.get('title') or 'مشروع بدون عنوان',
+        'current_status': norm_status,
+        'state_info': state_info,
+        'is_locked': state_info.get('is_locked', False),
+        'allowed_transitions': allowed_keys,
+        'next_states': next_states,
+        'history': history,
+    }
 
 
 

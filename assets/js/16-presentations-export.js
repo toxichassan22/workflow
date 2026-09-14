@@ -94,7 +94,8 @@
       }
       const renderDraftCard = (d, recovery, projectCost) => {
         const title = d.title || 'مشروع بدون عنوان';
-        const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
+        const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
+        const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status) : (stMeta.label || 'مسودة');
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
         const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
@@ -102,15 +103,16 @@
         // Admins (approvals permission) approve directly whenever they want; employees
         // only send a request and the draft stays pending until an admin approves it.
         const canReview = hasPermission('approvals');
-        const isApproved = d.status === 'approved';
-        const isPending = d.status === 'pending_approval';
+        const isApproved = d.status === 'approved' || d.status === 'sections_approved';
+        const isPending = d.status === 'pending_approval' || d.status === 'section_approval_pending' || d.status === 'generation_approval_pending' || d.status === 'final_approval_pending';
         const approveBtn = (isApproved || (isPending && !canReview)) ? ''
           : '<button class="btn small green" onclick="' +
           (canReview ? 'approveProjectDraftById' : 'requestProjectDraftApprovalById') +
           '(\'' + d.id + '\')">اعتماد</button>';
+        const statusBadgeHtml = '<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>';
         return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
-          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta"><span>' + statusText + '</span> | ' + escapeHtml(date) +
+          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusBadgeHtml + ' | ' + escapeHtml(date) +
           (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div></div><div class="tenant-actions">' +
           '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
           '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +

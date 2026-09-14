@@ -21,12 +21,24 @@
       return false;
     }
 
+    function updateProposalLifecycleBadge(status) {
+      const badge = document.getElementById('proposalLifecycleBadge');
+      if (!badge) return;
+      const s = status || (tenantProjectDraftApproval && tenantProjectDraftApproval.status) || (tenantProjectData && tenantProjectData.status) || 'draft';
+      const meta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(s) : { cls: 'status-draft', label: s };
+      const label = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(s) : (meta.label || s);
+      badge.textContent = label;
+      badge.className = 'proposal-lifecycle-badge ' + meta.cls;
+      badge.style.display = 'inline-block';
+    }
+
     function hydrateTenantProjectForm(data) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
       editingProjectLocalTeamId = null;
       projectLocalTeamDraft = null;
       const source = data || {};
+      updateProposalLifecycleBadge(source.status || (tenantProjectDraftApproval && tenantProjectDraftApproval.status) || 'draft');
       if (Array.isArray(source.nearby_landmarks_data)) {
         tenantNearbyLandmarks = source.nearby_landmarks_data;
       }
@@ -416,6 +428,7 @@
         return;
       }
       tenantProjectDraftApproval = result.draft || null;
+      updateProposalLifecycleBadge((result.draft && result.draft.status) || 'section_approval_pending');
       toast('تم إرسال المسودة للاعتماد');
     }
 

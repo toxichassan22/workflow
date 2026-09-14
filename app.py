@@ -12234,6 +12234,120 @@ def api_review_project_draft():
     return jsonify({'success': True})
 
 
+@app.route('/api/project-draft/lifecycle-states', methods=['GET'])
+@require_auth
+def api_get_proposal_lifecycle_states():
+    """Return all 11 official proposal lifecycle states, phases, and allowed transitions."""
+    states_list = [
+        {
+            'status': key,
+            'label': meta['label'],
+            'label_en': meta['label_en'],
+            'phase': meta['phase'],
+            'description': meta['description'],
+            'is_locked': meta['is_locked'],
+            'order': meta['order'],
+        }
+        for key, meta in sorted(db.PROPOSAL_LIFECYCLE_STATES.items(), key=lambda x: x[1]['order'])
+    ]
+    transitions = {k: sorted(list(v)) for k, v in db.PROPOSAL_ALLOWED_TRANSITIONS.items()}
+    return jsonify({
+        'success': True,
+        'states': states_list,
+        'statesMap': db.PROPOSAL_LIFECYCLE_STATES,
+        'transitions': transitions,
+    })
+
+
+@app.route('/api/project-draft/<draft_id>/lifecycle', methods=['GET'])
+@require_auth
+def api_get_proposal_lifecycle(draft_id):
+    """Return the current lifecycle state, metadata, and transition history for a proposal."""
+    resolved_id = _resolve_draft_id(draft_id)
+    info = db.get_proposal_lifecycle_info(g.tenant_id, resolved_id)
+    if not info:
+        return jsonify({'error': 'Project draft not found'}), 404
+    return jsonify({'success': True, 'lifecycle': info})
+
+
+@app.route('/api/project-draft/<draft_id>/transition-status', methods=['POST'])
+@require_auth
+def api_transition_proposal_status(draft_id):
+    """Execute a validated state transition for a proposal in accordance with the 11-state lifecycle."""
+    resolved_id = _resolve_draft_id(draft_id)
+    draft = db.get_project_draft_by_id(g.tenant_id, resolved_id)
+    if not draft:
+        return jsonify({'error': 'Project draft not found'}), 404
+
+    data = request.json or {}
+    target_status = data.get('targetStatus') or data.get('status')
+    reason = (data.get('reason') or data.get('note') or '').strip()
+    metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else {}
+
+    if not target_status or target_status not in db.PROPOSAL_LIFECYCLE_STATES:
+        return jsonify({
+            'error': 'Valid targetStatus is required',
+            'valid_statuses': list(db.PROPOSAL_LIFECYCLE_STATES.keys())
+        }), 400
+
+    # Permission check: regular employees can only modify their own draft unless they have approvals permission
+    actor_id = _project_draft_actor_id()
+    can_review = _has_approvals_permission()
+    if draft.get('user_id') != actor_id and not can_review:
+        return jsonify({'error': 'Not authorized to transition this project draft'}), 403
+
+    current_status = db.normalize_proposal_status(draft.get('status') or 'draft')
+    norm_target = db.normalize_proposal_status(target_status)
+
+    # Permission check for administrative transitions:
+    # 1. Direct approval to 'approved' requires approvals permission
+    if norm_target == 'approved' and not can_review:
+        return jsonify({'error': 'Approvals permission required to approve a proposal'}), 403
+
+    # 2. Reopening an approved proposal (post-approval edit, Section 8.4) requires approvals permission + reason
+    if current_status == 'approved' and norm_target != 'archived' and not can_review:
+        return jsonify({'error': 'Approvals permission required to modify an approved proposal'}), 403
+
+    res = db.transition_project_draft_status(
+        tenant_id=g.tenant_id,
+        draft_id=resolved_id,
+        target_status=norm_target,
+        actor_id=actor_id,
+        actor_name=_project_draft_actor_name(),
+        actor_role=getattr(g, 'user_role', 'employee'),
+        reason=reason,
+        metadata=metadata,
+    )
+
+    if res.get('error') == 'invalid_transition':
+        return jsonify({
+            'error': f'Invalid transition from {res.get("current_status")} to {res.get("target_status")}',
+            'error_code': 'INVALID_STATUS_TRANSITION',
+            'current_status': res.get('current_status'),
+            'target_status': res.get('target_status'),
+            'allowed_transitions': res.get('allowed_transitions', []),
+        }), 400
+
+    if res.get('error') == 'reason_required':
+        return jsonify({
+            'error': res.get('message') or 'Reason is required for this transition',
+            'error_code': 'REASON_REQUIRED',
+        }), 400
+
+    if not res.get('success'):
+        return jsonify({'error': 'Failed to transition proposal status'}), 400
+
+    # Record human-readable change log entry
+    state_label = res.get('state_info', {}).get('label', norm_target)
+    prev_label = db.PROPOSAL_LIFECYCLE_STATES.get(res.get('previous_status'), {}).get('label', res.get('previous_status'))
+    details = [f'تغيرت حالة العرض من «{prev_label}» إلى «{state_label}»']
+    if reason:
+        details.append(f'السبب: {reason}')
+    _record_change('draft', resolved_id, f'تغيير حالة العرض: {state_label}', details)
+
+    return jsonify({'success': True, 'lifecycle': res})
+
+
 
 def _financial_inputs(model):
     if not isinstance(model, dict):

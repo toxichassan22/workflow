@@ -705,3 +705,35 @@
       });
       updateDesignerChatStatus();
     }
+
+    // Proposal 11-State Lifecycle Configuration & Helpers (t12)
+    const PROPOSAL_LIFECYCLE_CONFIG = {
+      'draft': { label: 'مسودة', labelEn: 'Draft', cls: 'status-draft' },
+      'sections_in_progress': { label: 'قيد إعداد الأقسام', labelEn: 'Sections in progress', cls: 'status-sections' },
+      'section_approval_pending': { label: 'بانتظار اعتماد قسم', labelEn: 'Section approval pending', cls: 'status-pending' },
+      'rejected_for_revision': { label: 'معاد للتعديل', labelEn: 'Returned for revision', cls: 'status-revision' },
+      'sections_approved': { label: 'الأقسام معتمدة', labelEn: 'Sections approved', cls: 'status-approved-sec' },
+      'generation_approval_pending': { label: 'بانتظار اعتماد التوليد', labelEn: 'Generation approval pending', cls: 'status-pending' },
+      'generating': { label: 'قيد التوليد', labelEn: 'Generating', cls: 'status-generating' },
+      'generated_draft': { label: 'مسودة ملف مولد', labelEn: 'Generated draft', cls: 'status-generated' },
+      'final_approval_pending': { label: 'بانتظار اعتماد الملف النهائي', labelEn: 'Final approval pending', cls: 'status-pending' },
+      'approved': { label: 'معتمد نهائيًا', labelEn: 'Fully approved', cls: 'status-approved' },
+      'archived': { label: 'مؤرشف', labelEn: 'Archived', cls: 'status-archived' },
+      'pending_approval': { label: 'بانتظار التعميد', labelEn: 'Pending approval', cls: 'status-pending' },
+      'submitted': { label: 'بانتظار الاعتماد', labelEn: 'Submitted', cls: 'status-pending' },
+      'edited': { label: 'قيد إعداد الأقسام', labelEn: 'Edited', cls: 'status-sections' }
+    };
+
+    function getProposalStatusMeta(status) {
+      const s = String(status || 'draft').trim();
+      return PROPOSAL_LIFECYCLE_CONFIG[s] || { label: s || 'مسودة', labelEn: s || 'Draft', cls: 'status-draft' };
+    }
+
+    function getProposalStatusLabel(status) {
+      const meta = getProposalStatusMeta(status);
+      const s = String(status || 'draft').trim();
+      if (typeof WFT === 'function') {
+        return WFT('lifecycle.' + s, meta.label);
+      }
+      return meta.label;
+    }

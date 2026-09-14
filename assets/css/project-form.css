@@ -1884,3 +1884,78 @@
         grid-template-columns: 1fr;
       }
     }
+
+    .proposal-lifecycle-badge,
+    .proposal-status-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    .proposal-lifecycle-badge.status-draft,
+    .proposal-status-badge.status-draft {
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+    }
+
+    .proposal-lifecycle-badge.status-sections,
+    .proposal-status-badge.status-sections {
+      background: #eff6ff;
+      color: #1e40af;
+      border: 1px solid #bfdbfe;
+    }
+
+    .proposal-lifecycle-badge.status-pending,
+    .proposal-status-badge.status-pending {
+      background: #fffbeb;
+      color: #92400e;
+      border: 1px solid #fde68a;
+    }
+
+    .proposal-lifecycle-badge.status-revision,
+    .proposal-status-badge.status-revision {
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+
+    .proposal-lifecycle-badge.status-approved-sec,
+    .proposal-status-badge.status-approved-sec {
+      background: #f0fdf4;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+
+    .proposal-lifecycle-badge.status-generating,
+    .proposal-status-badge.status-generating {
+      background: #faf5ff;
+      color: #6b21a8;
+      border: 1px solid #e9d5ff;
+    }
+
+    .proposal-lifecycle-badge.status-generated,
+    .proposal-status-badge.status-generated {
+      background: #f0fdfa;
+      color: #115e59;
+      border: 1px solid #99f6e4;
+    }
+
+    .proposal-lifecycle-badge.status-approved,
+    .proposal-status-badge.status-approved {
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+
+    .proposal-lifecycle-badge.status-archived,
+    .proposal-status-badge.status-archived {
+      background: #f3f4f6;
+      color: #6b7280;
+      border: 1px solid #e5e7eb;
+    }

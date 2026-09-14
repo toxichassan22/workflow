@@ -500,6 +500,7 @@
         <div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <h2 style="margin:0;">بيانات المشروع</h2>
+            <span id="proposalLifecycleBadge" class="proposal-lifecycle-badge" style="display:none;"></span>
             <span id="draftSyncBadge"
               style="font-size:12px;padding:3px 10px;border-radius:20px;background:#e2e8f0;color:#475569;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
               جاهز للمزامنة</span>
@@ -744,7 +745,7 @@
       <h2>المشاريع</h2>
       <div class="tenant-grid" style="margin-bottom:16px">
         <div class="tenant-field full"><label>بحث</label><input type="text" id="projectArchiveSearch" placeholder="اسم المشروع"></div>
-        <div class="tenant-field"><label>الحالة</label><select id="projectArchiveStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select></div>
+        <div class="tenant-field"><label>الحالة</label><select id="projectArchiveStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="sections_in_progress">قيد إعداد الأقسام</option><option value="section_approval_pending">بانتظار اعتماد قسم</option><option value="rejected_for_revision">معاد للتعديل</option><option value="sections_approved">الأقسام معتمدة</option><option value="generation_approval_pending">بانتظار اعتماد التوليد</option><option value="generating">قيد التوليد</option><option value="generated_draft">مسودة ملف مولد</option><option value="final_approval_pending">بانتظار اعتماد الملف النهائي</option><option value="approved">معتمد نهائيًا</option><option value="archived">مؤرشف</option></select></div>
         <div class="tenant-field"><label>من تاريخ</label><input type="date" id="projectArchiveFrom"></div>
         <div class="tenant-field"><label>إلى تاريخ</label><input type="date" id="projectArchiveTo"></div>
         <div class="tenant-field"><button type="button" class="btn primary" onclick="openTenantPresentations(true)">تصفية</button></div>
@@ -762,7 +763,7 @@
       </div>
       <div class="tenant-grid" style="margin-bottom:16px">
         <div class="tenant-field full"><label>بحث</label><input type="text" id="projectPresentationsSearch" placeholder="اسم العرض" onkeydown="if(event.key==='Enter') loadProjectPresentationsPage()"></div>
-        <div class="tenant-field"><label>الحالة</label><select id="projectPresentationsStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select></div>
+        <div class="tenant-field"><label>الحالة</label><select id="projectPresentationsStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="sections_in_progress">قيد إعداد الأقسام</option><option value="section_approval_pending">بانتظار اعتماد قسم</option><option value="rejected_for_revision">معاد للتعديل</option><option value="sections_approved">الأقسام معتمدة</option><option value="generation_approval_pending">بانتظار اعتماد التوليد</option><option value="generating">قيد التوليد</option><option value="generated_draft">مسودة ملف مولد</option><option value="final_approval_pending">بانتظار اعتماد الملف النهائي</option><option value="approved">معتمد نهائيًا</option><option value="archived">مؤرشف</option></select></div>
         <div class="tenant-field"><label>من تاريخ</label><input type="date" id="projectPresentationsFrom"></div>
         <div class="tenant-field"><label>إلى تاريخ</label><input type="date" id="projectPresentationsTo"></div>
         <div class="tenant-field"><button type="button" class="btn primary" onclick="loadProjectPresentationsPage()">تصفية</button></div>
