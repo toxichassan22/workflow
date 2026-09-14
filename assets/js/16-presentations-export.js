@@ -821,6 +821,40 @@
       renderSagTenants(sagAllTenants);
     }
 
+    async function sagEnsureAllKeys() {
+      const btn = document.getElementById('sagEnsureKeysBtn');
+      if (btn) btn.disabled = true;
+      showLoader(WFT('admin.keys_issuing', 'جاري إصدار مفاتيح الشركات...'), '', 5);
+      try {
+        let offset = 0, created = 0, failed = 0, remaining = Infinity, rounds = 0;
+        while (offset < remaining && rounds < 40) {
+          rounds += 1;
+          const data = await api('POST', '/api/admin/openrouter-keys/ensure-all', { batch: 25, offset });
+          if (!data || !data.success) {
+            toast(WFT('admin.keys_failed', 'تعذر إصدار المفاتيح'));
+            return;
+          }
+          created += data.created || 0;
+          failed += data.failed || 0;
+          remaining = data.total_keyless || 0;
+          offset += (data.results || []).length;
+          updateLoaderProgress(Math.min(95, Math.round((offset / Math.max(1, remaining)) * 100)));
+          if (!data.results || !data.results.length) break;
+        }
+        if (!created && !failed) {
+          toast(WFT('admin.keys_none', 'كل الشركات لديها مفاتيح'));
+        } else {
+          toast(WFT('admin.keys_done', 'تم إصدار {created} من أصل {total}', { created, total: created + failed }));
+        }
+        const tenantsData = await api('GET', '/api/admin/tenants');
+        sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
+        renderSagTenants(sagAllTenants);
+      } finally {
+        if (btn) btn.disabled = false;
+        hideLoader();
+      }
+    }
+
     function renderSagStats(stats) {
       const el = document.getElementById('sagAdminStats');
       const cards = [
