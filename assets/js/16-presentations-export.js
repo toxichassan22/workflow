@@ -855,7 +855,7 @@
           }
         } catch (sweepError) { /* orphan sweep must never block issuance */ }
         let created = 0, failed = 0, rounds = 0, firstError = '';
-        let totalKeyless = null, provisionedNames = [];
+        let totalKeyless = null, lastKeyless = null, provisionedNames = [];
         const isMeaningfulKeyError = (v) => {
           if (v === undefined || v === null) return false;
           const s = String(v).trim();
@@ -871,7 +871,8 @@
             if (data && isMeaningfulKeyError(data.error)) toast(String(data.error).slice(0, 300));
             return;
           }
-          if (totalKeyless === null) totalKeyless = (data.total_keyless || 0);
+          const keyless = (data.total_keyless || 0);
+          if (totalKeyless === null) totalKeyless = keyless;
           created += data.created || 0;
           failed += data.failed || 0;
           if (Array.isArray(data.results)) {
@@ -887,7 +888,9 @@
           const target = Math.max(1, totalKeyless || done || 1);
           updateLoaderProgress(Math.min(95, Math.round((done / target) * 100)));
           if (!data.results || !data.results.length) break;
-          if ((data.total_keyless || 0) <= 0) break;
+          if (keyless <= 0) break;
+          if (lastKeyless !== null && keyless >= lastKeyless) break;
+          lastKeyless = keyless;
         }
         if (!created && !failed) {
           toast(WFT('admin.keys_none', 'كل الشركات لديها مفاتيح'));

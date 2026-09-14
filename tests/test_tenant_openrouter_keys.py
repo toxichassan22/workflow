@@ -474,6 +474,65 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertTrue(meta['has_key'])
         self.assertEqual(meta['limit_usd'], 0.0)
 
+    def test_ensure_all_second_run_creates_nothing(self):
+        """A repeat bulk run must not mint replacement keys for keyed companies."""
+        module = self.application_module
+        client = self.app.test_client()
+        bare_id = self._fresh_tenant('Repeat Co', 'repeat-bulk@example.test', 'repeat-bulk')
+        calls = {'n': 0}
+
+        def _fake_create(name, limit_usd, limit_reset='monthly'):
+            calls['n'] += 1
+            return {'key': f'sk-or-v1-repeat-key-{calls["n"]}-jjjjjjjjjj',
+                    'label': name, 'limit': 5.0,
+                    'limit_reset': limit_reset, 'hash': f'repeathash-{calls["n"]}'}
+
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             side_effect=_fake_create), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}):
+            first = client.post('/api/admin/openrouter-keys/ensure-all',
+                                headers=self._admin_headers(), json={'batch': 50, 'limitUsd': 5})
+            second = client.post('/api/admin/openrouter-keys/ensure-all',
+                                 headers=self._admin_headers(), json={'batch': 50, 'limitUsd': 5})
+        self.assertEqual(first.status_code, 200, first.get_json())
+        self.assertEqual(second.status_code, 200, second.get_json())
+        self.assertEqual(second.get_json()['created'], 0)
+        self.assertEqual(second.get_json()['results'], [])
+        self.assertEqual(second.get_json()['total_keyless'], 0)
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(bare_id)
+        self.assertTrue(meta['has_key'])
+        self.assertTrue(meta['is_active'])
+
+    def test_ensure_all_deletes_stale_hash_before_replacement(self):
+        """Re-provisioning an inactive row must remove its old dashboard key first."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Stale Co', 'stale-bulk@example.test', 'stale-bulk')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-stale-key-nnnnnnnnnnnnnnnn', provenance='auto',
+                openrouter_key_hash='stalehash99', limit_usd=5.0)
+            db.deactivate_tenant_openrouter_key(tenant_id)
+        created_body = {'key': 'sk-or-v1-fresh-key-oooooooooooooooo',
+                        'label': 'landloom-stale', 'limit': 5.0,
+                        'limit_reset': 'monthly', 'hash': 'freshhash00'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            done = client.post('/api/admin/openrouter-keys/ensure-all',
+                               headers=self._admin_headers(), json={'batch': 50, 'limitUsd': 5})
+        self.assertEqual(done.status_code, 200, done.get_json())
+        deleted.assert_any_call('stalehash99')
+        body = done.get_json()
+        by_tenant = {row['tenantId']: row for row in body['results']}
+        self.assertTrue(by_tenant[tenant_id]['ok'])
+        self.assertIsNone(by_tenant[tenant_id]['error'])
+
 
 if __name__ == '__main__':
     unittest.main()
