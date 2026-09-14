@@ -9412,6 +9412,75 @@ def _cover_image_url_from_html(html):
     return ''
 
 
+def _extract_cover_image_url(project_data, creative_images=None):
+    """Safely extract cover image URL from project_data, creative_images, or visual_concept.
+
+    Handles JSON strings, nested dicts, and malformed facts without raising
+    AttributeError or TypeError.
+    """
+    p_data = project_data if isinstance(project_data, dict) else {}
+    if not isinstance(creative_images, dict):
+        tci_raw = p_data.get('tenantCreativeImages')
+        if isinstance(tci_raw, str):
+            tci_raw = _decode_json_fact(tci_raw)
+        creative_images = tci_raw if isinstance(tci_raw, dict) else {}
+
+    def _resolve(val):
+        if not val:
+            return ''
+        if isinstance(val, str):
+            val_str = val.strip()
+            if val_str.startswith('{') and val_str.endswith('}'):
+                decoded = _decode_json_fact(val_str)
+                if isinstance(decoded, dict):
+                    return _resolve(decoded)
+            return _usable_slide_image_url(val_str)
+        if isinstance(val, dict):
+            for k in ('url', 'imageUrl', 'approvedImageUrl', 'dataUrl'):
+                res = _resolve(val.get(k))
+                if res:
+                    return res
+        return ''
+
+    if isinstance(creative_images, dict):
+        for k in ('cover', 'coverImage', 'cover_image', 'mainImageData', 'project_image_cover', 'imageUrl', 'url'):
+            url = _resolve(creative_images.get(k))
+            if url:
+                return url
+
+    for k in ('cover', 'coverImage', 'cover_image', 'mainImageData', 'project_image_cover'):
+        url = _resolve(p_data.get(k))
+        if url:
+            return url
+
+    tci = p_data.get('tenantCreativeImages')
+    if isinstance(tci, str):
+        tci = _decode_json_fact(tci)
+    if isinstance(tci, dict):
+        for k in ('cover', 'coverImage', 'mainImageData', 'project_image_cover', 'imageUrl', 'url'):
+            url = _resolve(tci.get(k))
+            if url:
+                return url
+
+    vc = p_data.get('visual_concept')
+    if isinstance(vc, str):
+        vc = _decode_json_fact(vc)
+    if isinstance(vc, dict):
+        slots = vc.get('slots')
+        if isinstance(slots, str):
+            slots = _decode_json_fact(slots)
+        if isinstance(slots, dict):
+            url = _resolve(slots.get('cover'))
+            if url:
+                return url
+        for k in ('cover', 'coverImage', 'mainImageData', 'approvedImageUrl', 'imageUrl', 'url'):
+            url = _resolve(vc.get(k))
+            if url:
+                return url
+
+    return ''
+
+
 def _force_section_divider_background(html, cover_url):
     """Make a divider use the deck's real cover even when its saved CSS is empty or stale."""
     cover = _usable_slide_image_url(cover_url)
@@ -11071,19 +11140,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
     creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
     if not creative_images.get('cover'):
-        p_cover = (
-            (project_data or {}).get('cover')
-            or (project_data or {}).get('coverImage')
-            or (project_data or {}).get('cover_image')
-            or (project_data or {}).get('mainImageData')
-            or (project_data or {}).get('project_image_cover')
-            or ((project_data or {}).get('tenantCreativeImages') or {}).get('cover')
-            or ((project_data or {}).get('tenantCreativeImages') or {}).get('coverImage')
-            or ((project_data or {}).get('tenantCreativeImages') or {}).get('mainImageData')
-            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('approvedImageUrl')
-            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('imageUrl')
-            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('url')
-        )
+        p_cover = _extract_cover_image_url(project_data, creative_images)
         if p_cover:
             creative_images['cover'] = p_cover
     html = _replace_creative_image_placeholders(html, creative_images, slide_type, content_source)
@@ -11179,29 +11236,11 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     project_data = dict(project_data or {})
     if not isinstance(creative_images, dict):
         creative_images = project_data.get('tenantCreativeImages')
+        if isinstance(creative_images, str):
+            creative_images = _decode_json_fact(creative_images)
     creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
     if not creative_images.get('cover'):
-        discovered_cover = (
-            creative_images.get('coverImage')
-            or creative_images.get('cover_image')
-            or creative_images.get('mainImageData')
-            or creative_images.get('project_image_cover')
-            or creative_images.get('imageUrl')
-            or creative_images.get('url')
-            or project_data.get('cover')
-            or project_data.get('coverImage')
-            or project_data.get('cover_image')
-            or project_data.get('mainImageData')
-            or project_data.get('project_image_cover')
-            or (project_data.get('tenantCreativeImages') or {}).get('cover')
-            or (project_data.get('tenantCreativeImages') or {}).get('coverImage')
-            or (project_data.get('tenantCreativeImages') or {}).get('mainImageData')
-            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('approvedImageUrl')
-            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('imageUrl')
-            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('url')
-        )
-        if isinstance(discovered_cover, dict):
-            discovered_cover = discovered_cover.get('url') or discovered_cover.get('imageUrl') or discovered_cover.get('approvedImageUrl') or ''
+        discovered_cover = _extract_cover_image_url(project_data, creative_images)
         if not discovered_cover:
             for s in source:
                 s_dict = s if isinstance(s, dict) else {}

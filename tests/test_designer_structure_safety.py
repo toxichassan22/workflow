@@ -253,6 +253,23 @@ class StructureDispatcherTests(unittest.TestCase):
         self.assertEqual(result['slidesData'], slides)
         self.assertEqual(result['actions'][0]['status'], 'failed')
 
+    def test_renumber_and_finalize_with_json_string_facts(self):
+        project_data = {
+            'visual_concept': json.dumps({'slots': {'cover': {'approvedImageUrl': 'https://example.com/vc-cover.jpg'}}}),
+            'tenantCreativeImages': json.dumps({'cover': 'https://example.com/tci-cover.jpg'}),
+        }
+        slides = [{'html': '<div class="slide">Content</div>', 'title': 'Test', 'type': 'content'}]
+        # Neither renumber nor finalize should raise AttributeError: 'str' object has no attribute 'get'
+        renumbered = self.module.slide_engine.renumber_presentation_slides(
+            slides, branding={}, project_data=project_data, preserve_html=True
+        )
+        self.assertEqual(len(renumbered), 1)
+        finalized = self.module.slide_engine.finalize_designer_slide_html(
+            slides[0]['html'], 'content', project_data, {}, slide_num=1, total_slides=1
+        )
+        self.assertIn('slide', finalized)
+
 
 if __name__ == '__main__':
     unittest.main()
+

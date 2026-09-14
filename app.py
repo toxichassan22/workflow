@@ -7158,7 +7158,13 @@ def api_designer_chat():
 
     project_data = _designer_project_data_for_request(
         request_project_data, presentation, tenant_id)
-    project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
+    tci = project_data.get('tenantCreativeImages')
+    if isinstance(tci, str):
+        try:
+            tci = json.loads(tci)
+        except Exception:
+            tci = {}
+    project_creative_images = copy.deepcopy(tci) if isinstance(tci, dict) else {}
     authoritative_project_data = copy.deepcopy(project_data)
     project_data, creative_images = _hydrate_map_assets_for_request(
         project_data, data.get('creativeImages', {}), g.tenant_id,
@@ -12118,7 +12124,13 @@ def api_restore_section_version():
     map_approvals = snapshot.pop('map_approvals', None)
     live.update(snapshot)
     if version['section_key'] == 'location' and isinstance(map_approvals, dict):
-        creative = dict(live.get('tenantCreativeImages') or {})
+        raw_creative = live.get('tenantCreativeImages')
+        if isinstance(raw_creative, str):
+            try:
+                raw_creative = json.loads(raw_creative)
+            except Exception:
+                raw_creative = {}
+        creative = dict(raw_creative) if isinstance(raw_creative, dict) else {}
         creative['map_approvals'] = map_approvals
         live['tenantCreativeImages'] = creative
     try:

@@ -3841,7 +3841,7 @@ PROPOSAL_STATUS_ALIASES = {
 }
 
 PROJECT_DRAFT_STATUSES = set(PROPOSAL_LIFECYCLE_STATES.keys()) | {'pending_approval', 'submitted', 'edited'}
-SECTION_DRAFT_STATUSES = {'draft', 'approved'}
+SECTION_DRAFT_STATUSES = {'draft', 'approved', 'pending'}
 
 
 def normalize_proposal_status(status):
@@ -4020,7 +4020,11 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         statuses_changed = statuses_json != (existing['section_statuses'] or '{}')
         old_overall_status = existing['status'] or 'draft'
 
-        if old_overall_status in {'pending_approval', 'approved'} and (data_changed or statuses_changed):
+        norm_old_status = normalize_proposal_status(old_overall_status)
+        if norm_old_status == 'section_approval_pending' and any(v == 'pending' for v in new_statuses.values()) and requested_status in {'draft', 'submitted'}:
+            next_status = old_overall_status
+            clear_approval = False
+        elif old_overall_status in {'pending_approval', 'approved'} and (data_changed or statuses_changed):
             next_status = 'draft'
             clear_approval = True
         elif old_overall_status in {'pending_approval', 'approved'} and requested_status in {'draft', 'submitted'}:
@@ -4500,7 +4504,25 @@ def create_section_version(tenant_id, draft_id, section_key, snapshot, created_b
     else:
         return {'error': 'version_conflict'}
     row = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
-    return _section_version_public(row) if row else {'error': 'version_conflict'}
+    if not row:
+        return {'error': 'version_conflict'}
+    try:
+        update_draft_section_status_by_id(tenant_id, draft_id, {section_key: 'pending'})
+    except Exception:
+        pass
+    try:
+        draft_row = get_project_draft_by_id(tenant_id, draft_id)
+        if draft_row:
+            curr_status = normalize_proposal_status(draft_row.get('status'))
+            if curr_status in {'draft', 'sections_in_progress', 'rejected_for_revision'}:
+                transition_project_draft_status(
+                    tenant_id, draft_id, 'section_approval_pending',
+                    actor_id=created_by, actor_name=created_by_name,
+                    reason=f'إرسال قسم {section_key} للاعتماد',
+                )
+    except Exception:
+        pass
+    return _section_version_public(row)
 
 
 def list_section_versions(tenant_id, draft_id, section_key=None):
@@ -4567,6 +4589,9 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
         return {'error': 'version_not_found'}
     if row['status'] != 'pending':
         return {'error': 'version_not_pending'}
+
+    is_self_approval = bool(row['created_by'] and decided_by and str(row['created_by']) == str(decided_by))
+
     conn.execute(
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
            decision_note = ?, decided_at = ? WHERE id = ?''',
@@ -4575,7 +4600,35 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
     )
     conn.commit()
     updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
-    return _section_version_public(updated)
+    res = _section_version_public(updated)
+    if is_self_approval:
+        res['is_self_approval'] = True
+
+    draft_id = row['draft_id']
+    section_key = row['section_key']
+    try:
+        mirror = 'approved' if decision == 'approved' else 'draft'
+        update_draft_section_status_by_id(tenant_id, draft_id, {section_key: mirror})
+        draft = get_project_draft_by_id(tenant_id, draft_id)
+        if draft:
+            if decision == 'approved':
+                statuses = draft.get('section_statuses') or {}
+                if statuses and all(v == 'approved' for v in statuses.values()):
+                    transition_project_draft_status(
+                        tenant_id, draft_id, 'sections_approved',
+                        actor_id=decided_by, actor_name=decided_by_name,
+                        reason='اعتماد جميع أقسام العرض',
+                    )
+            elif decision in {'returned', 'rejected'}:
+                transition_project_draft_status(
+                    tenant_id, draft_id, 'rejected_for_revision',
+                    actor_id=decided_by, actor_name=decided_by_name,
+                    reason=clean_note or f'إعادة قسم {section_key} للتعديل',
+                )
+    except Exception:
+        pass
+
+    return res
 
 
 def cancel_section_version(tenant_id, version_id, cancelled_by, cancelled_by_name):
@@ -4601,7 +4654,209 @@ def cancel_section_version(tenant_id, version_id, cancelled_by, cancelled_by_nam
     )
     conn.commit()
     updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
+
+    draft_id = row['draft_id']
+    section_key = row['section_key']
+    try:
+        update_draft_section_status_by_id(tenant_id, draft_id, {section_key: 'draft'})
+        draft = get_project_draft_by_id(tenant_id, draft_id)
+        if draft:
+            curr = normalize_proposal_status(draft.get('status'))
+            if curr == 'section_approval_pending':
+                overview = section_versions_overview(tenant_id, draft_id)
+                has_pending = any(v.get('status') == 'pending' for v in overview.values())
+                if not has_pending:
+                    transition_project_draft_status(
+                        tenant_id, draft_id, 'sections_in_progress',
+                        actor_id=cancelled_by, actor_name=cancelled_by_name,
+                        reason=f'إلغاء طلب اعتماد قسم {section_key}',
+                    )
+    except Exception:
+        pass
+
     return _section_version_public(updated)
+
+
+def diff_section_versions(tenant_id, version_id, base_version_id=None):
+    """Structured comparison between a target section version and a base version.
+
+    If base_version_id is not specified, compares against the immediately preceding
+    version number for the same section. If no previous version exists, compares against empty.
+    Returns categorized fields, attachments, validation readiness, and change counters.
+    """
+    target = get_section_version(tenant_id, version_id, include_snapshot=True)
+    if not target:
+        return {'error': 'version_not_found'}
+
+    conn = get_db()
+    draft_id = target['draft_id']
+    section_key = target['section_key']
+
+    if base_version_id:
+        base = get_section_version(tenant_id, base_version_id, include_snapshot=True)
+        if not base or base.get('draft_id') != draft_id or base.get('section_key') != section_key:
+            return {'error': 'base_version_not_found'}
+        base_snapshot = base.get('snapshot') or {}
+        base_version_number = base.get('version_number')
+        base_created_at = base.get('created_at')
+    else:
+        prev_row = conn.execute(
+            '''SELECT * FROM section_versions
+               WHERE tenant_id = ? AND draft_id = ? AND section_key = ? AND version_number < ?
+               ORDER BY version_number DESC LIMIT 1''',
+            (tenant_id, draft_id, section_key, target['version_number']),
+        ).fetchone()
+        if prev_row:
+            prev = _section_version_public(prev_row, include_snapshot=True)
+            base_version_id = prev['id']
+            base_version_number = prev['version_number']
+            base_created_at = prev.get('created_at')
+            base_snapshot = prev.get('snapshot') or {}
+        else:
+            base_version_id = None
+            base_version_number = None
+            base_created_at = None
+            base_snapshot = {}
+
+    target_snapshot = target.get('snapshot') or {}
+
+    field_labels = {}
+    for f in PREBUILT_FIELDS:
+        field_labels[f['key']] = f.get('label') or f['key']
+    try:
+        for f in get_fields(tenant_id):
+            if f.get('field_key'):
+                field_labels[f['field_key']] = f.get('field_label') or f['field_key']
+    except Exception:
+        pass
+
+    known_labels = {
+        'timeline_table_data': 'الجدول الزمني ومراحل المشروع',
+        'financial_study_model': 'الدراسة المالية والمؤشرات',
+        'team_selection': 'فريق العمل والجهات المشاركة',
+        'market_study_data': 'دراسة السوق وتحليل المنافسين',
+        'visual_concept': 'التصور البصري والمخططات',
+        'executive_content': 'المحتوى التنفيذي والملخص',
+        'location_analysis_approved': 'اعتماد تحليل الموقع',
+        'location_data_fetched_at': 'تاريخ جلب بيانات الموقع',
+        'location_polygon_source': 'مصدر مضلع الموقع',
+        'map_approvals': 'اعتمادات الخرائط',
+        'land_documents_files': 'وثائق ومستندات الأرض',
+        'land_photos': 'صور الأرض والموقع',
+        'project_logo': 'شعار المشروع',
+    }
+    field_labels.update(known_labels)
+
+    def _val_eq(v1, v2):
+        if v1 == v2:
+            return True
+        try:
+            return json.dumps(v1, ensure_ascii=False, sort_keys=True) == json.dumps(v2, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return False
+
+    def _val_has_content(v):
+        if v is None or v is False:
+            return False
+        if isinstance(v, str):
+            return bool(v.strip())
+        if isinstance(v, (int, float)):
+            return v != 0
+        if isinstance(v, dict):
+            return any(_val_has_content(item) for item in v.values())
+        if isinstance(v, (list, tuple, set)):
+            return any(_val_has_content(item) for item in v)
+        return True
+
+    all_keys = sorted(set(target_snapshot.keys()) | set(base_snapshot.keys()))
+    attachment_keys = {'land_documents_files', 'land_photos', 'project_logo', 'deed_file', 'croquis_file'}
+
+    fields = []
+    attachments = []
+    modified_count = 0
+    added_count = 0
+    removed_count = 0
+    unchanged_count = 0
+
+    for key in all_keys:
+        old_val = base_snapshot.get(key)
+        new_val = target_snapshot.get(key)
+        in_base = key in base_snapshot
+        in_target = key in target_snapshot
+
+        if not in_base and in_target:
+            c_status = 'added'
+            added_count += 1
+        elif in_base and not in_target:
+            c_status = 'removed'
+            removed_count += 1
+        elif _val_eq(old_val, new_val):
+            c_status = 'unchanged'
+            unchanged_count += 1
+        else:
+            c_status = 'modified'
+            modified_count += 1
+
+        label = field_labels.get(key) or key
+        item = {
+            'key': key,
+            'label': label,
+            'old_value': old_val,
+            'new_value': new_val,
+            'status': c_status,
+        }
+        if key in attachment_keys or 'file' in key or 'photo' in key:
+            attachments.append(item)
+        else:
+            fields.append(item)
+
+    missing_required = []
+    for f in PREBUILT_FIELDS:
+        if f.get('section_key') == section_key and f.get('required'):
+            if not _val_has_content(target_snapshot.get(f['key'])):
+                missing_required.append(f.get('label') or f['key'])
+    try:
+        for f in get_fields(tenant_id):
+            if (f.get('section_key') or '') == section_key and f.get('is_required') and f.get('is_active', 1):
+                fk = f.get('field_key')
+                if fk and not _val_has_content(target_snapshot.get(fk)):
+                    lbl = f.get('field_label') or fk
+                    if lbl not in missing_required:
+                        missing_required.append(lbl)
+    except Exception:
+        pass
+
+    return {
+        'version_id': target['id'],
+        'draft_id': draft_id,
+        'section_key': section_key,
+        'version_number': target['version_number'],
+        'status': target['status'],
+        'created_at': target['created_at'],
+        'created_by': target['created_by'],
+        'created_by_name': target['created_by_name'],
+        'decided_at': target.get('decided_at'),
+        'decided_by': target.get('decided_by'),
+        'decided_by_name': target.get('decided_by_name'),
+        'decision_note': target.get('decision_note'),
+        'is_self_approval': bool(target.get('created_by') and target.get('decided_by') and str(target['created_by']) == str(target['decided_by'])),
+        'base_version_id': base_version_id,
+        'base_version_number': base_version_number,
+        'base_created_at': base_created_at,
+        'summary': {
+            'total_changes': modified_count + added_count + removed_count,
+            'modified': modified_count,
+            'added': added_count,
+            'removed': removed_count,
+            'unchanged': unchanged_count,
+        },
+        'fields': fields,
+        'attachments': attachments,
+        'validation': {
+            'is_complete': len(missing_required) == 0,
+            'missing_fields': missing_required,
+        },
+    }
 
 
 def request_project_draft_approval(tenant_id, user_id, requested_by, requested_by_name, draft_id=None):
