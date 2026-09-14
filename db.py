@@ -522,6 +522,18 @@ def _create_tables(conn):
         source TEXT DEFAULT 'auto',
         updated_at TEXT DEFAULT (datetime('now'))
     );
+    -- Package subscription history. Every assignment snapshots the credit so
+    -- per-package consumption and the lifetime total across all packages stay
+    -- exact even after the package itself is edited or deleted.
+    CREATE TABLE IF NOT EXISTS tenant_package_history (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        package_id TEXT,
+        package_name TEXT,
+        credit_usd REAL NOT NULL DEFAULT 0,
+        assigned_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_package_history_tenant ON tenant_package_history(tenant_id, assigned_at);
 
     CREATE TABLE IF NOT EXISTS tenant_ledger (
         id TEXT PRIMARY KEY,
@@ -620,6 +632,12 @@ def _create_tables(conn):
         if _usage_cols and 'billed_ledger_id' not in _usage_cols:
             conn.execute(f'ALTER TABLE {_usage_table} ADD COLUMN billed_ledger_id TEXT')
             print(f'[DB] Migration: added billed_ledger_id column to {_usage_table}')
+        # Write-time package attribution: every spend row carries the package
+        # it was burned under, so per-package totals never depend on clock
+        # comparisons between an assignment and later usage.
+        if _usage_cols and 'package_id' not in _usage_cols:
+            conn.execute(f'ALTER TABLE {_usage_table} ADD COLUMN package_id TEXT')
+            print(f'[DB] Migration: added package_id column to {_usage_table}')
     try:
         conn.execute('CREATE INDEX IF NOT EXISTS idx_aiusage_billed ON ai_usage_events(billed_ledger_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_mapusage_billed ON map_usage_events(billed_ledger_id)')
@@ -4037,6 +4055,19 @@ def _derive_attempt_status(cost_usd, generation_id, explicit=None):
     return 'unresolved'
 
 
+def _tenant_active_package_id(conn, tenant_id):
+    """Package a new spend row burns under. None when the tenant has none."""
+    try:
+        if not tenant_id:
+            return None
+        row = conn.execute(
+            'SELECT package_id FROM tenants WHERE id = ?', (str(tenant_id),)).fetchone()
+        package_id = dict(row).get('package_id') if row else None
+        return str(package_id) if package_id else None
+    except Exception:
+        return None
+
+
 def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
                           prompt_tokens=0, completion_tokens=0, total_tokens=0,
                           cost_usd=None, generation_id=None,
@@ -4044,7 +4075,7 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
                           cost_source=None, attempt_status=None,
                           response_cost_usd=None, generation_cost_usd=None,
                           cost_raw=None, reconcile_attempts=0,
-                          next_retry_at=None):
+                          next_retry_at=None, package_id=None):
     """Persist one metered OpenRouter call.
 
     Token figures are copied verbatim from the provider response, never
@@ -4068,8 +4099,11 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
         cost_source = None
     if cost_value is None:
         cost_source = None
+    if package_id is None:
+        package_id = _tenant_active_package_id(conn, tenant_id)
     event_id = str(uuid.uuid4())
     now_text = _ai_usage_now_text()
+    has_package_col = 'package_id' in cols
     if {'cost_source', 'attempt_status', 'reconcile_attempts', 'next_retry_at',
         'updated_at', 'response_cost_usd', 'generation_cost_usd', 'cost_raw'} <= cols:
         conn.execute(
@@ -4077,13 +4111,16 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
                (id, tenant_id, draft_id, presentation_id, flow, model, status,
                 prompt_tokens, completion_tokens, total_tokens, cost_usd, generation_id,
                 cost_source, attempt_status, reconcile_attempts, next_retry_at, updated_at,
-                response_cost_usd, generation_cost_usd, cost_raw)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                response_cost_usd, generation_cost_usd, cost_raw{})
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{})'''.format(
+                ', package_id' if has_package_col else '',
+                ', ?' if has_package_col else ''),
             (event_id, tenant_id, draft_id, presentation_id, flow or 'other', model,
              status or 'ok', int(prompt_tokens or 0), int(completion_tokens or 0),
              int(total_tokens or 0), cost_value, generation_id,
              cost_source, derived, int(reconcile_attempts or 0), next_retry_at, now_text,
              response_cost_usd, generation_cost_usd, cost_raw)
+            + ((str(package_id),) if has_package_col else ())
         )
     else:
         conn.execute(
@@ -4522,13 +4559,27 @@ def record_maps_usage_event(tenant_id, sku, units, unit_price_usd,
     event_id = str(uuid.uuid4())
     units = max(0, int(units or 0))
     price = float(unit_price_usd or 0.0)
-    conn.execute(
-        '''INSERT INTO map_usage_events
-           (id, tenant_id, draft_id, presentation_id, flow, sku, units, unit_price_usd, cost_usd)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (event_id, tenant_id, draft_id, presentation_id, flow or 'other',
-         sku, units, price, units * price)
-    )
+    try:
+        cols = {row['name'] for row in conn.execute('PRAGMA table_info(map_usage_events)').fetchall()}
+    except Exception:
+        cols = set()
+    package_id = _tenant_active_package_id(conn, tenant_id)
+    if 'package_id' in cols:
+        conn.execute(
+            '''INSERT INTO map_usage_events
+               (id, tenant_id, draft_id, presentation_id, flow, sku, units, unit_price_usd, cost_usd, package_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (event_id, tenant_id, draft_id, presentation_id, flow or 'other',
+             sku, units, price, units * price, package_id)
+        )
+    else:
+        conn.execute(
+            '''INSERT INTO map_usage_events
+               (id, tenant_id, draft_id, presentation_id, flow, sku, units, unit_price_usd, cost_usd)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (event_id, tenant_id, draft_id, presentation_id, flow or 'other',
+             sku, units, price, units * price)
+        )
     conn.commit()
     return event_id
 
@@ -5273,7 +5324,101 @@ def assign_tenant_package(tenant_id, package_id):
         conn.commit()
     except Exception:
         pass
+    if package is not None:
+        try:
+            conn.execute(
+                'INSERT INTO tenant_package_history '
+                '(id, tenant_id, package_id, package_name, credit_usd) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (str(uuid.uuid4()), str(tenant_id), str(package.get('id')),
+                 package.get('name'), float(package.get('credit_usd') or 0.0))
+            )
+            conn.commit()
+        except Exception as exc:
+            print(f"[PACKAGES] history failed: {exc}")
     return dict(tenant), package
+
+
+def get_client_overview(tenant_id):
+    """Client card figures in raw USD: totals, current package, lifetime.
+
+    Every spend row carries the package it burned under at write time, so
+    per-package consumption is exact and never depends on clock comparisons.
+    Remaining is floored at zero and the package reads expired exactly when
+    nothing remains.
+    """
+    conn = get_db()
+    tenant_id = str(tenant_id)
+    counts = get_tenant_profile_counts(tenant_id)
+
+    def _tagged_sum(table, package_id):
+        try:
+            cols = {row['name'] for row in conn.execute(
+                f'PRAGMA table_info({table})').fetchall()}
+        except Exception:
+            cols = set()
+        if 'package_id' not in cols:
+            return None
+        try:
+            return float(dict(conn.execute(
+                f'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM {table} '
+                'WHERE tenant_id = ? AND package_id = ?',
+                (tenant_id, str(package_id))).fetchone()).get('total') or 0.0)
+        except Exception:
+            return 0.0
+
+    def _lifetime_sum(table):
+        try:
+            return float(dict(conn.execute(
+                f'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM {table} WHERE tenant_id = ?',
+                (tenant_id,)).fetchone()).get('total') or 0.0)
+        except Exception:
+            return 0.0
+
+    lifetime = _lifetime_sum('ai_usage_events') + _lifetime_sum('map_usage_events')
+    tenant = conn.execute(
+        'SELECT package_id FROM tenants WHERE id = ?', (tenant_id,)).fetchone()
+    package_id = dict(tenant).get('package_id') if tenant else None
+    package = get_billing_package(package_id) if package_id else None
+    assigned_at = None
+    if package is not None:
+        try:
+            row = conn.execute(
+                'SELECT assigned_at FROM tenant_package_history '
+                'WHERE tenant_id = ? ORDER BY assigned_at DESC LIMIT 1',
+                (tenant_id,)).fetchone()
+            assigned_at = dict(row).get('assigned_at') if row else None
+        except Exception:
+            assigned_at = None
+    block = None
+    if package is not None:
+        try:
+            credit = float(package.get('credit_usd') or 0.0)
+        except (TypeError, ValueError):
+            credit = 0.0
+        ai_tagged = _tagged_sum('ai_usage_events', package.get('id'))
+        maps_tagged = _tagged_sum('map_usage_events', package.get('id'))
+        if ai_tagged is None or maps_tagged is None:
+            consumed = lifetime
+        else:
+            consumed = ai_tagged + maps_tagged
+        remaining = max(0.0, credit - consumed)
+        block = {
+            'id': package.get('id'),
+            'name': package.get('name'),
+            'credit_usd': credit,
+            'consumed_usd': consumed,
+            'remaining_usd': remaining,
+            'status': 'expired' if remaining <= 0 else 'active',
+            'assigned_at': assigned_at,
+        }
+    return {
+        'projects': int(counts.get('projects') or 0),
+        'presentations': int(counts.get('presentations') or 0),
+        'consumption_usd': lifetime,
+        'package': block,
+        'lifetime_consumed_usd': lifetime,
+    }
 
 
 def get_fx_rate(pair=FX_PAIR_USD_SAR):

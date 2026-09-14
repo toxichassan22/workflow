@@ -18636,6 +18636,45 @@ def api_admin_fx_rate_update():
     return jsonify({'error': 'Invalid mode'}), 400
 
 
+@app.route('/api/client/overview', methods=['GET'])
+@require_auth
+def api_client_overview():
+    """Client card: totals, current package with remaining, lifetime spend.
+
+    Money travels in raw USD with a riyal rendering beside it at the live
+    rate. A package reads expired exactly when its remaining hits zero.
+    """
+    try:
+        _refresh_fx_rate_async()
+        view = db.get_client_overview(g.tenant_id)
+        fx = db.get_fx_rate()
+        package = view.get('package')
+        if package is not None:
+            package = dict(package)
+            package['credit_sar'] = db.usd_to_sar(package.get('credit_usd'), fx.get('rate'))
+            package['consumed_sar'] = db.usd_to_sar(package.get('consumed_usd'), fx.get('rate'))
+            package['remaining_sar'] = db.usd_to_sar(package.get('remaining_usd'), fx.get('rate'))
+        return jsonify({
+            'success': True,
+            'totals': {
+                'projects': view.get('projects'),
+                'presentations': view.get('presentations'),
+                'consumption_usd': view.get('consumption_usd'),
+                'consumption_sar': db.usd_to_sar(view.get('consumption_usd'), fx.get('rate')),
+            },
+            'package': package,
+            'lifetime': {
+                'consumed_usd': view.get('lifetime_consumed_usd'),
+                'consumed_sar': db.usd_to_sar(view.get('lifetime_consumed_usd'), fx.get('rate')),
+            },
+            'fx': {'rate': fx.get('rate'), 'source': fx.get('source'),
+                   'updatedAt': fx.get('updated_at')},
+        })
+    except Exception as exc:
+        print(f"[CLIENT] overview failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تحميل بطاقة العميل'}), 500
+
+
 @app.route('/api/admin/stats', methods=['GET'])
 @require_admin
 def api_admin_stats():
