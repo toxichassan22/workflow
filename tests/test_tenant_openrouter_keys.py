@@ -243,17 +243,92 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         module = self.application_module
         tenant_id = self._fresh_tenant('Ensure Co', 'ensure-key@example.test', 'ensure-key-co')
         created_body = {'key': 'sk-or-v1-auto-key-ffffffffffffffff',
-                        'label': 'tenant-key-co', 'limit': 10.0,
+                        'label': 'tenant-key-co', 'limit': 0.0,
                         'limit_reset': 'monthly', 'hash': 'autohash22'}
+        blocked_status = {'label': 'tenant-key-co', 'limit': 0.0, 'limit_reset': 'monthly',
+                          'limit_remaining': 0.0, 'usage': 0.0, 'hash': 'autohash22'}
         with self.app.app_context():
             with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                     patch.object(module, '_openrouter_create_managed_key',
-                                 return_value=dict(created_body)):
+                                 return_value=dict(created_body)), \
+                    patch.object(module, '_openrouter_key_status',
+                                 return_value=dict(blocked_status)):
                 meta = module._ensure_tenant_openrouter_key(tenant_id)
                 self.assertTrue(meta['has_key'])
                 self.assertEqual(meta['provenance'], 'auto')
+                self.assertEqual(meta['limit_usd'], 0.0)
                 admin_meta = module._ensure_tenant_openrouter_key(self.admin_tenant)
                 self.assertIsNone(admin_meta)
+
+    def test_zero_provision_rolls_back_when_provider_ignores_limit(self):
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Zero Co', 'zero-key@example.test', 'zero-key-co')
+        created_body = {'key': 'sk-or-v1-zero-key-gggggggggggggggg',
+                        'label': 'tenant-zero', 'limit': 0.0,
+                        'limit_reset': 'monthly', 'hash': 'zerohash33'}
+        unlimited_status = {'label': 'tenant-zero', 'limit': None,
+                            'limit_reset': 'monthly', 'limit_remaining': None,
+                            'usage': 0.0, 'hash': 'zerohash33'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_openrouter_key_status',
+                             return_value=dict(unlimited_status)), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            done = client.post(
+                f'/api/admin/tenants/{tenant_id}/openrouter-key/provision',
+                headers=self._admin_headers(), json={'limitUsd': 0})
+        self.assertEqual(done.status_code, 503, done.get_json())
+        deleted.assert_called_once()
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+        self.assertTrue(meta['has_key'])
+        self.assertFalse(meta['is_active'])
+
+    def test_ensure_all_issues_keys_to_keyless_companies_only(self):
+        module = self.application_module
+        client = self.app.test_client()
+        keyed_id = self._fresh_tenant('Keyed Co', 'keyed-bulk@example.test', 'keyed-bulk')
+        bare_id = self._fresh_tenant('Bare Co', 'bare-bulk@example.test', 'bare-bulk')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                keyed_id, 'sk-or-v1-existing-key-hhhhhhhhhhhhhhhh', provenance='manual')
+        bodies = {'n': 0}
+
+        def _fake_create(name, limit_usd, limit_reset='monthly'):
+            bodies['n'] += 1
+            tag = f"bulk{bodies['n']}"
+            return {'key': f'sk-or-v1-bulk-key-{tag}-iiiiiiiiii',
+                    'label': name, 'limit': 0.0,
+                    'limit_reset': limit_reset, 'hash': f'bulkhash-{tag}'}
+
+        def _fake_status(api_key, timeout=20):
+            return {'label': 'bulk', 'limit': 0.0, 'limit_reset': 'monthly',
+                    'limit_remaining': 0.0, 'usage': 0.0, 'hash': 'bulkhash'}
+        # Without a management key the bulk run refuses before touching anyone.
+        refused = client.post('/api/admin/openrouter-keys/ensure-all',
+                              headers=self._admin_headers(), json={})
+        self.assertEqual(refused.status_code, 503)
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             side_effect=_fake_create), \
+                patch.object(module, '_openrouter_key_status', side_effect=_fake_status):
+            done = client.post('/api/admin/openrouter-keys/ensure-all',
+                               headers=self._admin_headers(), json={'batch': 50})
+        self.assertEqual(done.status_code, 200, done.get_json())
+        body = done.get_json()
+        by_tenant = {row['tenantId']: row for row in body['results']}
+        self.assertNotIn(keyed_id, by_tenant)
+        self.assertNotIn(self.admin_tenant, by_tenant)
+        self.assertTrue(by_tenant[bare_id]['ok'])
+        self.assertGreaterEqual(body['created'], 1)
+        self.assertEqual(body['created'] + body['failed'], len(body['results']))
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(bare_id)
+        self.assertTrue(meta['has_key'])
+        self.assertEqual(meta['limit_usd'], 0.0)
 
 
 if __name__ == '__main__':

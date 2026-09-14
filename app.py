@@ -246,11 +246,11 @@ OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 # When it is missing, all traffic falls back to OPENROUTER_KEY as before.
 OPENROUTER_MANAGEMENT_KEY = (os.environ.get("OPENROUTER_MANAGEMENT_KEY") or "").strip() or None
 try:
-    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = float(os.environ.get('TENANT_OPENROUTER_DEFAULT_LIMIT_USD') or 10.0)
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = float(os.environ.get('TENANT_OPENROUTER_DEFAULT_LIMIT_USD') or 0.0)
 except (TypeError, ValueError):
-    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 10.0
-if TENANT_OPENROUTER_DEFAULT_LIMIT_USD <= 0:
-    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 10.0
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 0.0
+if TENANT_OPENROUTER_DEFAULT_LIMIT_USD < 0:
+    TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 0.0
 TENANT_OPENROUTER_DEFAULT_RESET = (os.environ.get('TENANT_OPENROUTER_DEFAULT_RESET') or 'monthly').strip().lower()
 if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly'):
     TENANT_OPENROUTER_DEFAULT_RESET = 'monthly'
@@ -443,6 +443,77 @@ def _openrouter_key_status(api_key, timeout=20):
     return data if isinstance(data, dict) else {}
 
 
+def _managed_key_honors_limit(raw_key, expected_limit):
+    """Confirm the dashboard enforces the requested limit. Never raises.
+
+    A zero-credit key must start blocked: an explicit 0 limit with nothing
+    remaining. A null limit would mean unlimited spend and must never pass
+    silently, so it fails closed with cleanup by the caller.
+    """
+    try:
+        status = _openrouter_key_status(raw_key)
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] limit confirm failed: {exc}")
+        return False, {}
+    if not isinstance(status, dict) or status.get('error'):
+        return False, status if isinstance(status, dict) else {}
+    if expected_limit is not None and expected_limit <= 0:
+        live_limit = status.get('limit')
+        if live_limit is None:
+            return False, status
+        try:
+            remaining = status.get('limit_remaining')
+            ok = float(live_limit) <= 0 and (remaining is None or float(remaining) <= 0)
+        except (TypeError, ValueError):
+            ok = False
+        return ok, status
+    return True, status
+
+
+def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
+    """Create, store and (for zero credit) verify one managed key.
+
+    Returns (meta, error): exactly one is set. The raw secret is stored
+    encrypted immediately and never logged. A zero limit the provider does
+    not honor is rolled back instead of being activated.
+    """
+    try:
+        tenant_id = tenant.get('id') if isinstance(tenant, dict) else tenant
+        try:
+            slug = (db.tenant_slug(tenant) if isinstance(tenant, dict) else '') or str(tenant_id)[:8]
+        except Exception:
+            slug = str(tenant_id)[:8]
+        created = _openrouter_create_managed_key(f"tenant-{slug}", limit_usd, limit_reset)
+        if not isinstance(created, dict) or not created.get('key'):
+            reason = created.get('error') if isinstance(created, dict) else 'Provisioning failed'
+            return None, str(reason)
+        try:
+            meta = db.set_tenant_openrouter_key(
+                tenant_id, created.get('key'),
+                key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
+                limit_usd=(created.get('limit') if created.get('limit') is not None else limit_usd),
+                limit_reset=created.get('limit_reset') or limit_reset,
+                provenance='auto',
+                openrouter_key_hash=created.get('hash'),
+            )
+        except ValueError as exc:
+            _openrouter_delete_managed_key(created.get('hash'))
+            return None, str(exc)
+        if (limit_usd or 0) <= 0:
+            honored, _live = _managed_key_honors_limit(created.get('key'), 0)
+            if not honored:
+                _openrouter_delete_managed_key(created.get('hash'))
+                try:
+                    db.deactivate_tenant_openrouter_key(tenant_id)
+                except Exception:
+                    pass
+                return None, 'OpenRouter did not honor a zero limit; nothing was activated'
+        return meta, None
+    except Exception as exc:
+        print(f"[OPENROUTER KEYS] provision failed: {exc}")
+        return None, str(exc)
+
+
 def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
     """Auto-provision a managed key for a company. Best-effort, never raises.
 
@@ -465,27 +536,12 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
             existing = {'has_key': False}
         if existing.get('has_key') and existing.get('is_active'):
             return existing
-        slug = ''
-        try:
-            slug = (db.tenant_slug(tenant) if tenant else '') or str(tenant_id)[:8]
-        except Exception:
-            slug = str(tenant_id)[:8]
-        created = _openrouter_create_managed_key(
-            f"tenant-{slug}",
-            limit_usd or TENANT_OPENROUTER_DEFAULT_LIMIT_USD,
+        meta, _error = _provision_one_tenant_key(
+            tenant or {'id': tenant_id},
+            TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
             limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
         )
-        if not isinstance(created, dict) or not created.get('key'):
-            return None
-        return db.set_tenant_openrouter_key(
-            tenant_id, created.get('key'),
-            key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
-            limit_usd=(created.get('limit') if created.get('limit') is not None
-                       else (limit_usd or TENANT_OPENROUTER_DEFAULT_LIMIT_USD)),
-            limit_reset=created.get('limit_reset') or (limit_reset or TENANT_OPENROUTER_DEFAULT_RESET),
-            provenance='auto',
-            openrouter_key_hash=created.get('hash'),
-        )
+        return meta
     except Exception as exc:
         print(f"[OPENROUTER KEYS] auto-provision failed: {exc}")
         return None
@@ -18275,19 +18331,23 @@ def api_admin_tenant_key_status(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>/openrouter-key/provision', methods=['POST'])
 @require_admin
 def api_admin_tenant_key_provision(tenant_id):
-    """Create a dashboard-visible managed key for one company."""
-    _tenant, error = _admin_key_target(tenant_id)
+    """Create a dashboard-visible managed key for one company.
+
+    limitUsd may be zero: the key is then verified blocked before it is
+    activated, so prepaid companies spend nothing until topped up.
+    """
+    tenant, error = _admin_key_target(tenant_id)
     if error is not None:
         return error
     data = request.json or {}
     if not _openrouter_management_key():
         return jsonify({'error': 'OPENROUTER_MANAGEMENT_KEY is not configured'}), 503
+    raw_limit = data.get('limitUsd', data.get('limit_usd', TENANT_OPENROUTER_DEFAULT_LIMIT_USD))
     try:
-        limit_usd = float(data.get('limitUsd') or data.get('limit_usd')
-                          or TENANT_OPENROUTER_DEFAULT_LIMIT_USD)
+        limit_usd = float(raw_limit if raw_limit is not None else TENANT_OPENROUTER_DEFAULT_LIMIT_USD)
     except (TypeError, ValueError):
         return jsonify({'error': 'Invalid limitUsd'}), 400
-    if limit_usd <= 0:
+    if limit_usd < 0:
         return jsonify({'error': 'Invalid limitUsd'}), 400
     limit_reset = str(data.get('limitReset') or data.get('limit_reset')
                       or TENANT_OPENROUTER_DEFAULT_RESET).strip().lower()
@@ -18300,25 +18360,77 @@ def api_admin_tenant_key_provision(tenant_id):
                         'key': existing}), 409
     if existing.get('has_key') and force and existing.get('openrouter_key_hash'):
         _openrouter_delete_managed_key(existing.get('openrouter_key_hash'))
-    try:
-        slug = db.tenant_slug(db.get_tenant_by_id(tenant_id)) or str(tenant_id)[:8]
-    except Exception:
-        slug = str(tenant_id)[:8]
-    created = _openrouter_create_managed_key(f"tenant-{slug}", limit_usd, limit_reset)
-    if not isinstance(created, dict) or not created.get('key'):
-        return jsonify({'error': created.get('error') if isinstance(created, dict) else 'Provisioning failed'}), 503
-    try:
-        meta = db.set_tenant_openrouter_key(
-            tenant_id, created.get('key'),
-            key_label=created.get('label') or created.get('name') or f"tenant-{slug}",
-            limit_usd=created.get('limit') if created.get('limit') is not None else limit_usd,
-            limit_reset=created.get('limit_reset') or limit_reset,
-            provenance='auto',
-            openrouter_key_hash=created.get('hash'),
-        )
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
+    meta, provision_error = _provision_one_tenant_key(tenant, limit_usd, limit_reset)
+    if meta is None:
+        return jsonify({'error': provision_error or 'Provisioning failed'}), 503
     return jsonify({'success': True, 'key': meta}), 201
+
+
+@app.route('/api/admin/openrouter-keys/ensure-all', methods=['POST'])
+@require_admin
+def api_admin_tenant_keys_ensure_all():
+    """Issue managed keys to every company that has none. Bulk, best-effort.
+
+    Body: {limitUsd (default 0, blocked until top-up), limitReset, batch
+    (default 25, max 50), offset (default 0)}. Super admins and companies
+    with an active key are skipped. Key creation is rate-limited upstream,
+    so one batch paces itself and the caller pages with offset.
+    """
+    data = request.json or {}
+    if not _openrouter_management_key():
+        return jsonify({'error': 'OPENROUTER_MANAGEMENT_KEY is not configured'}), 503
+    raw_limit = data.get('limitUsd', data.get('limit_usd', TENANT_OPENROUTER_DEFAULT_LIMIT_USD))
+    try:
+        limit_usd = float(raw_limit if raw_limit is not None else TENANT_OPENROUTER_DEFAULT_LIMIT_USD)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid limitUsd'}), 400
+    if limit_usd < 0:
+        return jsonify({'error': 'Invalid limitUsd'}), 400
+    limit_reset = str(data.get('limitReset') or data.get('limit_reset')
+                      or TENANT_OPENROUTER_DEFAULT_RESET).strip().lower()
+    if limit_reset not in ('daily', 'weekly', 'monthly'):
+        return jsonify({'error': 'Invalid limitReset'}), 400
+    try:
+        batch = max(1, min(50, int(data.get('batch') or 25)))
+    except (TypeError, ValueError):
+        batch = 25
+    try:
+        offset = max(0, int(data.get('offset') or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        tenants = db.get_all_tenants()
+    except Exception as exc:
+        return jsonify({'error': f'Tenant list failed: {exc}'}), 500
+    targets = []
+    for tenant in tenants:
+        try:
+            if tenant.get('is_admin'):
+                continue
+            meta = db.get_tenant_openrouter_key_meta(tenant.get('id'))
+        except Exception:
+            continue
+        if meta.get('has_key') and meta.get('is_active'):
+            continue
+        targets.append(tenant)
+    import time as _time
+    page = targets[offset:offset + batch]
+    results = []
+    created = 0
+    for tenant in page:
+        meta, provision_error = _provision_one_tenant_key(tenant, limit_usd, limit_reset)
+        results.append({
+            'tenantId': tenant.get('id'),
+            'companyName': tenant.get('company_name'),
+            'ok': meta is not None,
+            'error': provision_error,
+        })
+        if meta is not None:
+            created += 1
+        _time.sleep(1)
+    return jsonify({'success': True, 'total_keyless': len(targets),
+                    'offset': offset, 'batch': batch, 'created': created,
+                    'failed': len(results) - created, 'results': results})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/openrouter-key/manual', methods=['POST'])
@@ -18344,7 +18456,7 @@ def api_admin_tenant_key_manual(tenant_id):
             limit_usd = float(limit_usd)
         except (TypeError, ValueError):
             return jsonify({'error': 'Invalid limitUsd'}), 400
-        if limit_usd <= 0:
+        if limit_usd < 0:
             return jsonify({'error': 'Invalid limitUsd'}), 400
     status = _openrouter_key_status(raw_key)
     if isinstance(status, dict) and status.get('error'):
@@ -18376,7 +18488,10 @@ def api_admin_tenant_key_manual(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>/openrouter-key', methods=['PUT'])
 @require_admin
 def api_admin_tenant_key_update(tenant_id):
-    """Update limit/reset/active flag. Syncs the dashboard limit best-effort."""
+    """Update limit/reset/active flag. Syncs the dashboard limit best-effort.
+
+    Setting limitUsd to zero blocks the company until the next top-up.
+    """
     _tenant, error = _admin_key_target(tenant_id)
     if error is not None:
         return error
@@ -18390,7 +18505,7 @@ def api_admin_tenant_key_update(tenant_id):
             limit_usd = float(limit_usd)
         except (TypeError, ValueError):
             return jsonify({'error': 'Invalid limitUsd'}), 400
-        if limit_usd <= 0:
+        if limit_usd < 0:
             return jsonify({'error': 'Invalid limitUsd'}), 400
     limit_reset = data.get('limitReset', data.get('limit_reset'))
     if limit_reset is not None:
