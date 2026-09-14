@@ -98,7 +98,7 @@
             <button class="btn ghost" data-permission="approvals"
               onclick="openTenantApprovals(); closeTenantDropdown()" data-i18n="nav.approve_offers">تعميد العروض</button>
             <button class="btn ghost"
-              onclick="openOmranOpsPage(); closeTenantDropdown()">العمليات</button>
+              onclick="openOmranOpsPage(); closeTenantDropdown()" data-i18n="nav.operations">العمليات</button>
             <button class="btn ghost tenant-hidden" data-permission="sag_admin_panel" id="tenantAdminBtn"
               onclick="openTenantAdmin(); closeTenantDropdown()" data-i18n="nav.admin">لوحة المدير</button>
           </div>
@@ -1132,7 +1132,7 @@
         <h3 style="margin:0 0 12px;font-size:15px">مهمة جديدة</h3>
         <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div class="tenant-field"><label>عنوان المهمة</label><input type="text" id="omTaskTitle"
-              placeholder="مثال: اجتماع تسليم المعرض"></div>
+              placeholder="اجتماع تسليم المعرض"></div>
           <div class="tenant-field"><label>موعد الاستحقاق</label><input type="datetime-local" id="omTaskDue"></div>
           <div class="tenant-field"><label>التكرار</label>
             <select id="omTaskRecurrence">
@@ -1163,7 +1163,7 @@
           <div class="tenant-field full"><label>الموضوع</label><input type="text" id="omTicketSubject"
               placeholder="ملخص المشكلة"></div>
           <div class="tenant-field full"><label>التفاصيل</label><textarea id="omTicketBody" rows="3"
-              placeholder="اشرح المشكلة بالتفصيل"></textarea></div>
+              placeholder="تفاصيل المشكلة"></textarea></div>
         </div>
         <div class="tenant-btns" style="margin-top:12px">
           <button class="btn primary" onclick="omCreateTicket()">إرسال التذكرة</button>

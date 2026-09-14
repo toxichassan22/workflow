@@ -147,7 +147,7 @@
         '<button class="btn ghost" onclick="document.getElementById(\'omTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         (t.status !== 'closed'
-          ? '<div style="display:flex;gap:8px"><input type="text" id="omReplyBody" placeholder="اكتب ردك هنا" style="flex:1">' +
+          ? '<div style="display:flex;gap:8px"><input type="text" id="omReplyBody" style="flex:1">' +
             '<button class="btn primary" onclick="omReplyTicket(\'' + id + '\')">إرسال</button></div>'
           : '');
     }
