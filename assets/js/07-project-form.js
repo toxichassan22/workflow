@@ -388,7 +388,12 @@
 
     async function requestProjectDraftApproval() {
       const result = await api('POST', '/api/project-draft/request-approval', { draftId: tenantProjectData.draftId });
-      if (!result.success) { toast(result.error || 'لا يمكن طلب الاعتماد الآن'); return; }
+      if (!result.success) {
+        toast(result.error_code === 'SECTIONS_NOT_APPROVED'
+          ? 'يجب اعتماد جميع أقسام المشروع قبل طلب الاعتماد'
+          : (result.error || 'لا يمكن طلب الاعتماد الآن'));
+        return;
+      }
       tenantProjectDraftApproval = result.draft || null;
       toast('تم إرسال المسودة للاعتماد');
     }

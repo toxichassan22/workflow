@@ -185,7 +185,9 @@
       if (!draftId) return;
       const result = await api('POST', '/api/project-draft/request-approval', { draftId });
       if (!result || !result.success) {
-        toast((result && result.error) || 'تعذر إرسال طلب الاعتماد');
+        toast(result && result.error_code === 'SECTIONS_NOT_APPROVED'
+          ? 'يجب اعتماد جميع أقسام المشروع قبل طلب الاعتماد'
+          : ((result && result.error) || 'تعذر إرسال طلب الاعتماد'));
         return;
       }
       tenantArchiveCache = null;

@@ -2795,6 +2795,7 @@
   "يتم حساب المسافة ومدة القيادة من Google Maps...": "Calculating distance and drive time from Google Maps...",
   "يتم حفظ": "Saving",
   "يتم قراءة بيانات المشروع والصور المرجعية...": "Reading project parameters and reference assets...",
+  "يجب اعتماد جميع أقسام المشروع قبل طلب الاعتماد": "All project sections must be approved before requesting approval",
   "يجب حذف الصورة الحالية أولاً لتغيير النمط.": "Delete the current image first to change the style.",
   "يجب حفظ المشروع قبل عرض عروضه السابقة": "Save the project before viewing its previous proposals",
   "يحتاج مراجعة": "Requires Review",
