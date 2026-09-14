@@ -449,13 +449,17 @@
         updateDesignerChatStatus();
         return;
       }
-      messages.innerHTML = tenantDesignerMessages.map(message =>
-        '<div class="tenant-chat-message ' + (message.role === 'user' ? 'user' : 'assistant') + '">' +
-        (message.image
-          ? '<button type="button" class="tenant-chat-message-image-button" data-chat-image-src="' + escapeHtml(message.image) + '" onclick="openTenantChatImagePreview(this.dataset.chatImageSrc)" aria-label="فتح الصورة المرفقة"><img src="' + escapeHtml(message.image) + '" alt="صورة مرفقة" class="tenant-chat-message-image"></button>'
-          : '') +
-        escapeHtml(message.content) + '</div>'
-      ).join('');
+      messages.innerHTML = tenantDesignerMessages.map(message => {
+        const gallery = (Array.isArray(message.images) && message.images.length ? message.images : (message.image ? [message.image] : []))
+          .filter(src => typeof src === 'string' && src.startsWith('data:image/'))
+          .slice(0, 3);
+        const galleryHtml = gallery.map(src =>
+          '<button type="button" class="tenant-chat-message-image-button" data-chat-image-src="' + escapeHtml(src) + '" onclick="openTenantChatImagePreview(this.dataset.chatImageSrc)" aria-label="فتح الصورة المرفقة"><img src="' + escapeHtml(src) + '" alt="صورة مرفقة" class="tenant-chat-message-image"></button>'
+        ).join('');
+        return '<div class="tenant-chat-message ' + (message.role === 'user' ? 'user' : 'assistant') + '">' +
+          galleryHtml +
+          escapeHtml(message.content) + '</div>';
+      }).join('');
       restoreDesignerChatBusyIndicator();
       messages.scrollTop = messages.scrollHeight;
       updateDesignerChatStatus();
@@ -503,18 +507,21 @@
     }
 
     let tenantChatAttachedImage = null;
+    let tenantChatAttachedImages = [];
     const TENANT_CHAT_IMAGE_LIMIT = 4 * 1024 * 1024;
+    const TENANT_CHAT_MAX_IMAGES = 3;
 
     function renderTenantChatAttachment() {
       const box = document.getElementById('tenantChatAttachment');
       const name = document.getElementById('tenantChatAttachmentName');
       if (!box) return;
-      box.hidden = !tenantChatAttachedImage;
-      if (!tenantChatAttachedImage) {
+      const list = tenantChatAttachedImages.length ? tenantChatAttachedImages : (tenantChatAttachedImage ? [tenantChatAttachedImage] : []);
+      box.hidden = !list.length;
+      if (!list.length) {
         if (name) name.textContent = '';
         return;
       }
-      if (name) name.textContent = tenantChatAttachedImage.name;
+      if (name) name.textContent = list.map(item => item.name).join('، ');
     }
 
     function openTenantChatImagePreview(src) {
@@ -536,6 +543,7 @@
 
     function clearTenantChatAttachment() {
       tenantChatAttachedImage = null;
+      tenantChatAttachedImages = [];
       const input = document.getElementById('tenantChatImageFile');
       if (input) input.value = '';
       renderTenantChatAttachment();
@@ -544,28 +552,37 @@
     // The attach button used to open the training page's file input, and the designer never
     // received the image: the picked file was only ever read by the training chat.
     function attachTenantChatImage(input) {
-      const file = input && input.files && input.files[0];
-      if (!file) return;
-      if (!file.type.startsWith('image/')) {
-        toast('الملف ليس صورة');
-        clearTenantChatAttachment();
-        return;
+      const picked = input && input.files ? Array.from(input.files).slice(0, TENANT_CHAT_MAX_IMAGES) : [];
+      if (!picked.length) return;
+      for (const file of picked) {
+        if (!String(file.type || '').startsWith('image/')) {
+          toast('الملف ليس صورة');
+          clearTenantChatAttachment();
+          return;
+        }
+        if (file.size > TENANT_CHAT_IMAGE_LIMIT) {
+          toast('حجم الصورة أكبر من 4 م.ب');
+          clearTenantChatAttachment();
+          return;
+        }
       }
-      if (file.size > TENANT_CHAT_IMAGE_LIMIT) {
-        toast('حجم الصورة أكبر من 4 م.ب');
-        clearTenantChatAttachment();
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        tenantChatAttachedImage = { name: file.name, dataUri: String(reader.result || '') };
+      const reads = picked.map(file => new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, dataUri: String(reader.result || '') });
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      }));
+      Promise.all(reads).then(results => {
+        const valid = results.filter(item => item && String(item.dataUri || '').startsWith('data:image/'));
+        if (!valid.length) {
+          toast('تعذر قراءة الصورة');
+          clearTenantChatAttachment();
+          return;
+        }
+        tenantChatAttachedImages = valid.slice(0, TENANT_CHAT_MAX_IMAGES);
+        tenantChatAttachedImage = tenantChatAttachedImages[0] || null;
         renderTenantChatAttachment();
-      };
-      reader.onerror = () => {
-        toast('تعذر قراءة الصورة');
-        clearTenantChatAttachment();
-      };
-      reader.readAsDataURL(file);
+      });
     }
 
     // The server compresses the older turns into one memory string and reports which slides the
@@ -600,11 +617,13 @@
           const key = String(item.role || 'assistant') + '\u0000' + String(item.content || '');
           const queue = localByKey.get(key) || [];
           const local = queue.shift();
+          const localGallery = Array.isArray(local?.images) && local.images.length ? local.images : (local?.image ? [local.image] : []);
           return {
             role: item.role === 'user' ? 'user' : 'assistant',
             content: String(item.content || '').slice(0, 2000),
             slides: Array.isArray(item.slides) ? item.slides : [],
-            image: local?.image || ''
+            image: local?.image || '',
+            images: localGallery.filter(src => typeof src === 'string').slice(0, 3)
           };
         });
     }
@@ -641,7 +660,7 @@
         indexes: Array.isArray(resumedJob?.indexes) ? resumedJob.indexes
           : (Array.isArray(payload?.indexes) ? payload.indexes : []),
         slideIndex: Number(resumedJob?.slideIndex ?? payload?.slideIndex ?? 0),
-        hadAttachment: !!(resumedJob?.hadAttachment || payload?.attachedImage),
+        hadAttachment: !!(resumedJob?.hadAttachment || payload?.attachedImage || (Array.isArray(payload?.attachedImages) && payload.attachedImages.length)),
         workspaceSignature: String(
           resumedJob?.workspaceSignature || designerChatWorkspaceSignature()),
         startedAt: Number(resumedJob?.startedAt || Date.now()),
@@ -1033,6 +1052,9 @@
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
       const attachedImage = tenantChatAttachedImage;
+      const attachedGallery = (tenantChatAttachedImages.length ? tenantChatAttachedImages : (attachedImage ? [attachedImage] : []))
+        .filter(item => item && String(item.dataUri || '').startsWith('data:image/'))
+        .slice(0, TENANT_CHAT_MAX_IMAGES);
       if (!message) { toast('التعديل المطلوب فارغ'); return; }
       if (!tenantSlidesData.length && !tenantPresentationId) {
         toast('لا يوجد عرض مفتوح للتعديل');
@@ -1068,6 +1090,7 @@
         role: 'user',
         content: message,
         image: attachedImage ? attachedImage.dataUri : '',
+        images: attachedGallery.map(item => item.dataUri),
         slides: target1BasedIndexes
       });
       if (input) { input.value = ''; growTenantChatInput(input); }
@@ -1101,7 +1124,8 @@
         presentationId: tenantPresentationId,
         projectData: buildDesignerChatProjectData(tenantProjectData),
         creativeImages: buildPresentationGenerationImages(),
-        attachedImage: attachedImage ? attachedImage.dataUri : ''
+        attachedImage: attachedImage ? attachedImage.dataUri : '',
+        attachedImages: attachedGallery.map(item => item.dataUri)
       };
       // Once the workspace is dirty, send the in-memory copy as the source for the next turn.
       // The server must not reload the last saved presentation and discard an earlier unsaved

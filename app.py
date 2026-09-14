@@ -7450,6 +7450,75 @@ def api_designer_chat():
                     assistant_messages.append(
                         f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة مع الحفاظ الكامل على النصوص والتصميم."
                     )
+            elif tool == 'insert_attached_image':
+                # Deterministic insertion of a user-uploaded chat image: no model call.
+                try:
+                    _image_index = int(params.get('image_index') or params.get('imageIndex') or 1)
+                except (TypeError, ValueError):
+                    _image_index = 1
+                if not chat_attached_urls or _image_index < 1 or _image_index > len(chat_attached_urls):
+                    assistant_messages.append(
+                        'لا توجد صورة مرفقة بهذه الرسالة بالترتيب المطلوب؛ أرفق الصورة مع نفس الرسالة ثم أعد الطلب.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'attached_image_missing'})
+                    continue
+                _image_url = chat_attached_urls[_image_index - 1]
+                _position = _designer_attached_image_position(message, params)
+                try:
+                    _opacity = float(params.get('opacity', 0.12 if _position == 'watermark' else 1.0))
+                except (TypeError, ValueError):
+                    _opacity = 0.12 if _position == 'watermark' else 1.0
+                try:
+                    _width = int(params.get('width_px', params.get('widthPx', 480 if _position == 'watermark' else 140)))
+                except (TypeError, ValueError):
+                    _width = 480 if _position == 'watermark' else 140
+                _caption = str(params.get('caption') or '')[:160]
+                _title = str(params.get('title') or message or 'صورة مرفقة')[:160]
+                if _position == 'separate_slide':
+                    try:
+                        _targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                    except designer_chat_targets.TargetError:
+                        _targets = [current_index] if 0 <= current_index < len(slides) else [len(slides) - 1]
+                    _insert_at = max(_targets) + 1 if _targets else len(slides)
+                    _new_html = _build_designer_attached_slide_html(_image_url, title=_title, caption=_caption, branding=branding)
+                    try:
+                        _new_html = resolve_designer_chat_placeholders(
+                            _new_html, project_data, presentation_id, tenant_id, creative_images)
+                        _new_html = slide_engine.finalize_designer_slide_html(
+                            _new_html, 'content', project_data, branding,
+                            creative_images=creative_images, tenant_id=tenant_id,
+                            slide_num=_insert_at + 1, slide_title=_title,
+                            total_slides=len(slides) + 1, content_source='designer_attached_image',
+                            allow_all_maps=True)
+                    except Exception as _fin_err:
+                        print(f"[DESIGNER-CHAT] attached slide finalize failed: {_fin_err}")
+                    _new_slide = {'html': _new_html, 'title': _title, 'type': 'content',
+                                  'content_source': 'designer_attached_image',
+                                  'section_key': '', '_designer_keep_html': True, 'is_custom': True}
+                    slides.insert(min(_insert_at, len(slides)), _new_slide)
+                    report_designer_progress(60, f'تم إنشاء شريحة جديدة للصورة المرفقة بعد الشريحة {_insert_at}...')
+                    executed.append({'tool': tool, 'status': 'success', 'position': _position,
+                                     'image_index': _image_index, 'inserted_at': _insert_at + 1})
+                    assistant_messages.append(f'تم وضع الصورة المرفقة في شريحة منفصلة جديدة رقم {_insert_at + 1}.')
+                else:
+                    _indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                    for _i, _idx in enumerate(_indexes):
+                        _slide = slides[_idx] if isinstance(slides[_idx], dict) else {}
+                        _slide['html'] = _insert_designer_attached_image(
+                            _slide.get('html', ''), _image_url, position=_position,
+                            opacity=_opacity, width_px=_width, caption=_caption)
+                        _slide['_designer_keep_html'] = True
+                        _slide['is_custom'] = True
+                        slides[_idx] = _slide
+                        report_designer_progress(
+                            int(20 + 60 * ((_i + 1) / max(1, len(_indexes)))),
+                            f'تم إدراج الصورة المرفقة في الشريحة {_idx + 1}...')
+                    executed.append({'tool': tool, 'status': 'success', 'position': _position,
+                                     'image_index': _image_index, 'indexes': _indexes})
+                    _pos_names = {'inline': 'داخل الشريحة', 'background': 'كخلفية للشريحة',
+                                  'watermark': 'كعلامة مائية', 'logo': 'كشعار إضافي'}
+                    assistant_messages.append(
+                        f"تم وضع الصورة المرفقة {_pos_names.get(_position, 'داخل الشريحة')} "
+                        f"في {len(_indexes)} شريحة.")
             elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
@@ -7846,6 +7915,10 @@ def api_designer_chat():
                             'error_code': 'DESIGNER_ATOMIC_EDIT_FAILED', 'actions': executed, 'slidesData': slides_before}), 422
         structural_change = any(item.get('tool') in designer_chat_targets.STRUCTURAL_TOOLS
                                 and item.get('status') == 'success' for item in executed)
+        structural_change = structural_change or any(
+            isinstance(item, dict) and item.get('tool') == 'insert_attached_image'
+            and item.get('status') == 'success' and item.get('position') == 'separate_slide'
+            for item in executed)
         if structural_change:
             slides = slide_engine.renumber_presentation_slides(
                 slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
@@ -7859,6 +7932,8 @@ def api_designer_chat():
                    if isinstance(item, dict) and isinstance(item.get('index'), int)]
         touched += [n + 1 for item in executed if isinstance(item, dict)
                     for n in (item.get('indexes') or []) if isinstance(n, int)]
+        touched += [int(item.get('inserted_at')) for item in executed
+                    if isinstance(item, dict) and isinstance(item.get('inserted_at'), int)]
         turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
         successful_execution = any(
             isinstance(item, dict) and item.get('status') == 'success'

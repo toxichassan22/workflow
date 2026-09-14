@@ -7744,13 +7744,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         lines = module._designer_chat_history_lines(recent)
         self.assertIn('المستخدم [شرائح: 8]: الشريحة 8 فيها مشكلة', lines[0])
 
-        # A long conversation is compressed once, not carried whole.
+        # A long conversation is truncated locally, never summarized by the model:
+        # a hidden summarization call billed the tenant for work nobody requested.
         long_history = [{'role': 'user', 'content': 'ك' * 900, 'slides': [3]} for _ in range(20)]
         with patch.object(module, 'call_zai_chat',
                           return_value={'choices': [{'message': {'content': 'ملخص: الحديث عن الشريحة 3.'}}]}) as chat:
             compressed, kept = module._designer_chat_memory(long_history, '')
-        self.assertTrue(chat.called)
-        self.assertIn('الشريحة 3', compressed)
+        self.assertFalse(chat.called)
+        self.assertIn('[شرائح: 3]', compressed)
         self.assertEqual(len(kept), module.DESIGNER_CHAT_VERBATIM_TURNS)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -7786,6 +7787,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('aria-label="إضافة صورة"', index_source)
         self.assertNotIn('id="tenantChatAttachmentPreview"', index_source)
         self.assertIn('.ge-thumb-actions > button', index_source)
+        # Billing transparency: greetings cost zero tokens, attachments are first-class tools.
+        self.assertIn('_designer_chat_free_reply', app_source)
+        self.assertIn("'billed': False", app_source)
+        self.assertIn('insert_attached_image', app_source)
+        self.assertIn('DESIGNER_CHAT_MAX_ATTACHED_IMAGES', app_source)
+        self.assertIn('attachedImages', index_source)
         # The conversation is restored with the file instead of being wiped on open.
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
         self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
