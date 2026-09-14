@@ -888,7 +888,9 @@
           const target = Math.max(1, totalKeyless || done || 1);
           updateLoaderProgress(Math.min(95, Math.round((done / target) * 100)));
           if (!data.results || !data.results.length) break;
-          if (keyless <= 0) break;
+          const remaining = (data.remaining_keyless !== undefined && data.remaining_keyless !== null)
+            ? data.remaining_keyless : keyless;
+          if (remaining <= 0) break;
           if (lastKeyless !== null && keyless >= lastKeyless) break;
           lastKeyless = keyless;
         }

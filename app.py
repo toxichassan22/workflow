@@ -18842,7 +18842,12 @@ def api_admin_tenant_keys_ensure_all():
         if meta is not None and meta.get('is_active', True):
             created += 1
         _time.sleep(1)
+    # Post-provision count from the same snapshot: every ok row just turned
+    # active, every failed row is still keyless. The caller stops when this
+    # reaches zero instead of paying for a confirmatory round per press.
+    remaining_keyless = len(targets) - created
     return jsonify({'success': True, 'total_keyless': len(targets),
+                    'remaining_keyless': remaining_keyless,
                     'total_companies': total_companies,
                     'already_keyed': already_keyed,
                     'offset': offset, 'batch': batch, 'created': created,

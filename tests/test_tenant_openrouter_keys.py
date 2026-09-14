@@ -498,6 +498,7 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                                  headers=self._admin_headers(), json={'batch': 50, 'limitUsd': 5})
         self.assertEqual(first.status_code, 200, first.get_json())
         self.assertEqual(second.status_code, 200, second.get_json())
+        self.assertEqual(first.get_json()['remaining_keyless'], 0)
         self.assertEqual(second.get_json()['created'], 0)
         self.assertEqual(second.get_json()['results'], [])
         self.assertEqual(second.get_json()['total_keyless'], 0)
