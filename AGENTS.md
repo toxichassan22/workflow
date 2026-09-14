@@ -8,6 +8,9 @@ This is a standing owner rule. After a requested change is done and verified:
 
 - Commit only the files that belong to that change. Do not commit local leftovers
   (`*.png`, PDFs, `model_benchmark/`, `sandbox/`, `الطلوبات لليوم.md`, etc.).
+- `task.html` is a local-only owner tracker: never commit it and never push it to
+  any branch (`lab` or `main`), even as part of another change. No AI agent may
+  upload it by mistake.
 - Push `lab` to `github/lab` in the same turn. Do not wait to be asked again.
   Never push `main` unless the owner explicitly asks for it in that turn.
 - If the user asked to implement something, shipping means commit **and** push.
@@ -1256,3 +1259,27 @@ instead of adding more literals:
 - Per-operation loader titles at call sites are still legacy baseline entries; migrate them when
   touching that operation. Full-site English and per-tenant offer language are separate staged
   work built on this foundation, not part of it.
+
+## Omran task pick-and-track workflow (`tasks/task.html`)
+
+When the owner asks the agent to look at `task.html`, follow this fixed sequence with no shortcuts
+(actual paths live under `tasks/`, there is no repo-root `agent.md` or `task.html`):
+
+1. **Read `tasks/task.html` and pick exactly one unfinished task.** Parse the `.task` items and
+   their `data-state` (`todo` / `doing` / `done`). Consider only `todo` and `doing` as unfinished.
+   Choose one task the agent will work on, and announce its `data-id` plus its Arabic title before
+   doing anything else. Never start two tasks at once and never silently switch tasks mid-turn.
+2. **Read `tasks/Omran_AI_System_Analysis_AR.pdf` to understand the chosen task.** The one line in
+   `tasks/task.html` is only the title; the PDF is the binding spec (requirements, roles, states,
+   acceptance criteria). Quote the PDF section the task maps to when announcing the plan.
+3. **Create a folder named after the task inside `tasks/`.** Form: `tasks/<data-id>-<short-slug>/`
+   (for example `tasks/t11-audit-log/`). The slug is a short filesystem-safe name derived from the
+   Arabic title; keep the `data-id` prefix so folders sort and map 1:1 to `tasks/task.html` rows.
+4. **Create `<taskname>.html` inside that folder breaking the task into ordered steps.** Same base
+   name as the folder (for example `tasks/t11-audit-log/t11-audit-log.html`). It must list the
+   sub-steps in execution order, each with a state (`لم تبدأ` / `تحت العمل` / `مكتملة`), plus what
+   counts as done and how the owner tests/verifies each step — so the owner can follow along what
+   was accomplished and test it. Update the step states in that file as work progresses.
+5. **Tracking files stay local-only.** `tasks/task.html`, `tasks/Omran_AI_System_Analysis_AR.pdf`
+   and every `tasks/<task>/...html` breakdown are owner trackers like the root `task.html` rule
+   above: never commit them and never push them to any branch, even as part of another change.
