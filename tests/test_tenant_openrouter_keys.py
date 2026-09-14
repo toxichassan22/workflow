@@ -534,6 +534,29 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertTrue(by_tenant[tenant_id]['ok'])
         self.assertIsNone(by_tenant[tenant_id]['error'])
 
+    def test_keys_debug_reports_state_without_secrets(self):
+        client = self.app.test_client()
+        denied = client.get('/api/admin/openrouter-keys/debug', headers=self._headers())
+        self.assertEqual(denied.status_code, 403)
+        tenant_id = self._fresh_tenant('Debug Co', 'debug-keys@example.test', 'debug-keys-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-debug-key-pppppppppppppppp', provenance='manual',
+                limit_usd=7.0)
+        report = client.get('/api/admin/openrouter-keys/debug',
+                            headers=self._admin_headers()).get_json()
+        self.assertTrue(report['success'])
+        self.assertEqual(report['db_backend'], 'sqlite')
+        self.assertIn('total_companies', report)
+        self.assertIn('keyed_active', report)
+        by_tenant = {row['tenantId']: row for row in report['tenants']}
+        self.assertTrue(by_tenant[tenant_id]['has_key'])
+        self.assertTrue(by_tenant[tenant_id]['is_active'])
+        self.assertNotIn(self.admin_tenant, by_tenant)
+        dumped = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn('sk-or-v1-debug-key', dumped)
+        self.assertNotIn('key_enc', dumped)
+
 
 if __name__ == '__main__':
     unittest.main()

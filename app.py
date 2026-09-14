@@ -18892,6 +18892,47 @@ def api_admin_tenant_keys_orphans_delete():
                     'deleted_count': len(deleted)})
 
 
+@app.route('/api/admin/openrouter-keys/debug', methods=['GET'])
+@require_admin
+def api_admin_tenant_keys_debug():
+    """Diagnose bulk-issuance repeats: key state per company plus backend facts.
+
+    Presence/state metadata only. Never includes secrets or key hashes.
+    """
+    try:
+        tenants = db.get_all_tenants()
+    except Exception as exc:
+        return jsonify({'success': False, 'error': f'Tenant list failed: {exc}'}), 500
+    rows = []
+    for tenant in tenants:
+        try:
+            if tenant.get('is_admin'):
+                continue
+            meta = db.get_tenant_openrouter_key_meta(tenant.get('id'))
+        except Exception:
+            continue
+        rows.append({
+            'tenantId': tenant.get('id'),
+            'companyName': tenant.get('company_name'),
+            'has_key': bool(meta.get('has_key')),
+            'is_active': bool(meta.get('is_active')),
+            'provenance': meta.get('provenance'),
+            'limit_usd': meta.get('limit_usd'),
+            'updated_at': meta.get('updated_at'),
+        })
+    db_path = str(db.DB_PATH)
+    return jsonify({
+        'success': True,
+        'db_path': db_path,
+        'db_backend': 'postgres' if db_path.startswith(('postgres://', 'postgresql://')) else 'sqlite',
+        'default_limit_usd': TENANT_OPENROUTER_DEFAULT_LIMIT_USD,
+        'management_key_configured': bool(_openrouter_management_key()),
+        'total_companies': len(rows),
+        'keyed_active': sum(1 for row in rows if row['has_key'] and row['is_active']),
+        'tenants': rows,
+    })
+
+
 @app.route('/api/admin/tenants/<tenant_id>/openrouter-key/manual', methods=['POST'])
 @require_admin
 def api_admin_tenant_key_manual(tenant_id):
