@@ -239,6 +239,24 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                 db.get_tenant_openrouter_key_raw(tenant_id),
                 'sk-or-v1-managed-key-eeeeeeeeeeeeeeee')
 
+    def test_provision_names_keyless_provider_response(self):
+        """A 2xx body without a key must name the status instead of a bare failure."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Shapeless Co', 'shapeless-key@example.test', 'shapeless-key-co')
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module.requests, 'post',
+                             return_value=_FakeResponse({}, 200)):
+            done = client.post(
+                f'/api/admin/tenants/{tenant_id}/openrouter-key/provision',
+                headers=self._admin_headers(), json={'limitUsd': 5})
+        self.assertEqual(done.status_code, 503, done.get_json())
+        error = str(done.get_json().get('error') or '')
+        self.assertIn('without a key', error)
+        with self.app.app_context():
+            self.assertFalse(
+                db.get_tenant_openrouter_key_meta(tenant_id).get('has_key'))
+
     def test_ensure_provisions_for_company_but_skips_admin(self):
         module = self.application_module
         tenant_id = self._fresh_tenant('Ensure Co', 'ensure-key@example.test', 'ensure-key-co')

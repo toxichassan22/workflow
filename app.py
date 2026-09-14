@@ -400,7 +400,7 @@ def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
         )
     except Exception as exc:
         print(f"[OPENROUTER KEYS] create failed: {exc}")
-        return {'error': str(exc)}
+        return {'error': str(exc) or type(exc).__name__}
     try:
         body = response.json()
     except Exception:
@@ -410,7 +410,19 @@ def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
         print(f"[OPENROUTER KEYS] create refused: {err}")
         return {'error': str(err) if not isinstance(err, dict) else json.dumps(err, ensure_ascii=False)}
     data = body.get('data') if isinstance(body, dict) else None
-    return data if isinstance(data, dict) else body
+    if isinstance(data, dict) and data.get('key'):
+        return data
+    if isinstance(body, dict) and body.get('key'):
+        return body
+    try:
+        if isinstance(body, dict):
+            shape = 'keys=' + ','.join(sorted(str(k) for k in body.keys())[:20])
+        else:
+            shape = 'type=' + type(body).__name__
+    except Exception:
+        shape = 'unknown'
+    print(f"[OPENROUTER KEYS] create returned HTTP {response.status_code} without a key ({shape})")
+    return {'error': f'Provider returned HTTP {response.status_code} without a key'}
 
 
 def _openrouter_update_managed_key(key_hash, limit_usd=None, disabled=None):
@@ -631,9 +643,9 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
         print(f"[OPENROUTER KEYS] provision failed: {exc}")
         if created and isinstance(created, dict):
             _openrouter_delete_managed_key(created.get('hash'))
-        msg = str(exc).strip() if str(exc).strip() else 'Provisioning failed'
-        if msg.lower() in ('none', 'null'):
-            msg = 'Provisioning failed'
+        msg = str(exc).strip()
+        if not msg or msg.lower() in ('none', 'null'):
+            msg = type(exc).__name__ or 'Provisioning failed'
         return None, msg
 
 
