@@ -6817,14 +6817,17 @@ def points_overview(tenant_id):
                for row in rows}
     reserved_usd = buckets.get('reserved', {}).get('usd', 0.0)
     expired_usd = buckets.get('expired', {}).get('usd', 0.0)
+    total_usd = balance + reserved_usd
     return {
-        'balance_usd': round(balance, 2),
-        'balance_points': int(round(balance * POINTS_PER_USD)),
+        'balance_usd': round(total_usd, 2),
+        'balance_points': int(round(total_usd * POINTS_PER_USD)),
+        'current_points': int(round(total_usd * POINTS_PER_USD)),
         'reserved_usd': round(reserved_usd, 2),
         'reserved_points': int(round(reserved_usd * POINTS_PER_USD)),
         'available_usd': round(balance, 2),
         'available_points': int(round(balance * POINTS_PER_USD)),
         'expired_usd': round(expired_usd, 2),
+        'expired_points': int(round(expired_usd * POINTS_PER_USD)),
         'consumed_usd': round(buckets.get('consumed', {}).get('usd', 0.0), 2),
         'released_usd': round(buckets.get('released', {}).get('usd', 0.0), 2),
         'reservations': buckets,
@@ -10063,6 +10066,7 @@ def get_users_with_permission(tenant_id, permission_key):
 
 
 def remind_approval_task(tenant_id, task_id):
+    """t24: remind the assignee — stamps reminded_at AND notifies them."""
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id),
@@ -10073,16 +10077,22 @@ def remind_approval_task(tenant_id, task_id):
         return {'error': 'task_not_open'}
     conn.execute('UPDATE approval_tasks SET reminded_at = ? WHERE id = ?', (datetime.now().isoformat(), task_id))
     conn.commit()
+    if row['assignee_id']:
+        create_notification(
+            tenant_id, 'تذكير بمهمة معلقة', body=row['title'], category='task',
+            entity_type='approval_task', entity_id=task_id,
+            user_id=row['assignee_id'])
     return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (task_id,)).fetchone())
 
 
 def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
-    """t24: tasks open past their due time escalate once."""
+    """t24: tasks open past their due time escalate once — stamped and the
+    company admin is notified so the escalation reaches a human."""
     conn = get_db()
     from datetime import timedelta
     threshold = (datetime.now() - timedelta(hours=int(overdue_hours))).isoformat()
     rows = conn.execute(
-        "SELECT id FROM approval_tasks WHERE tenant_id = ? AND status = 'open' "
+        "SELECT id, title, created_by FROM approval_tasks WHERE tenant_id = ? AND status = 'open' "
         'AND escalated_at IS NULL AND due_at IS NOT NULL AND due_at < ?',
         (tenant_id, threshold),
     ).fetchall()
@@ -10091,6 +10101,11 @@ def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
         conn.execute('UPDATE approval_tasks SET escalated_at = ? WHERE id = ?', (datetime.now().isoformat(), row['id']))
         escalated.append(row['id'])
     conn.commit()
+    for row in rows:
+        create_notification(
+            tenant_id, 'مهمة اعتماد متأخرة صعّدت',
+            body=row['title'], category='task',
+            entity_type='approval_task', entity_id=row['id'])
     return escalated
 
 

@@ -1433,6 +1433,28 @@
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">الباقات والأسعار</h3>
+        </div>
+        <div id="adminPackagesList"></div>
+        <form onsubmit="adminSavePackage(event)" style="margin-top:12px"><div class="tenant-grid">
+          <div class="tenant-field">
+            <label>اسم الباقة</label>
+            <input type="text" id="adminPackageName" maxlength="80" required>
+          </div>
+          <div class="tenant-field">
+            <label>السعر بالريال</label>
+            <input type="number" id="adminPackagePrice" min="0" step="0.01" required dir="ltr">
+          </div>
+          <div class="tenant-field">
+            <label>الرصيد بالدولار</label>
+            <input type="number" id="adminPackageCredit" min="0" step="0.01" required dir="ltr">
+          </div>
+        </div><div class="sag-modal-actions">
+          <button type="submit" class="btn primary">حفظ الباقة</button></div>
+        </form>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
           <h3 class="dash-section-title">سجل أنواع الملفات المعتمدة</h3>
         </div>
         <div id="adminFileTypesList"></div>
@@ -1529,6 +1551,7 @@
 
       <!-- Tab 2: Recharge & Wallet -->
       <div id="omTabPane_recharge" style="display:none">
+        <div id="omPointsOverview" style="margin-bottom:16px"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <h3 class="dash-section-title" style="margin:0">طلبات الشحن</h3>
           <button type="button" class="btn primary small" id="omRechargeNewBtn" onclick="openOmModal('omRechargeModal');omLoadRechargePackages()">طلب شحن جديد</button>

@@ -546,7 +546,11 @@ class OmranDbTests(unittest.TestCase):
             'tenant-1', approval['id'], 'approved', 'boss-1', 'المدير', allow_self=True)
         overview = db.points_overview('tenant-1')
         self.assertGreater(overview['reserved_usd'], 0)
-        self.assertLess(overview['balance_usd'], 100.0)
+        # The hold is escrow: spendable drops, total owned stays whole.
+        self.assertLess(overview['available_usd'], 100.0)
+        self.assertEqual(overview['balance_usd'], 100.0)
+        self.assertEqual(overview['available_usd'] + overview['reserved_usd'],
+                         overview['balance_usd'])
 
     def test_ledger_adjustment_kinds_and_reversal(self):
         credit = db.record_ledger_credit('tenant-1', 25, note='شحن', actor='platform_admin')

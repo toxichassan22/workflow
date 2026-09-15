@@ -59,47 +59,70 @@
         omLoadEventTasks(),
         omLoadNotifications(),
         omLoadTickets(),
+        omLoadPointsOverview(),
         omLoadRechargeRequests(),
         omLoadContracts()
       ]);
     }
 
-    // ── Event tasks ──────────────────────────────────────────────────────
+    // ── Event tasks + approver task center (t24/t42) ───────────────────────
     async function omLoadEventTasks() {
       const box = document.getElementById('omTasksList');
       if (!box) return;
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      const data = await api('GET', '/api/event-tasks').catch(() => null);
+      const [data, approvals] = await Promise.all([
+        api('GET', '/api/event-tasks').catch(() => null),
+        api('GET', '/api/approval-tasks').catch(() => null),
+      ]);
       if (!data || !data.success) {
         box.innerHTML = '<p class="tenant-hint">تعذر تحميل المهام.</p>';
         return;
       }
-      const tasks = data.tasks || [];
-      const openCount = tasks.filter(t => t.status === 'open').length;
+      const tasks = (data.tasks || []).map(t => Object.assign({}, t, { _kind: 'event' }));
+      const approvalTasks = ((approvals && approvals.tasks) || []).map(t => Object.assign({}, t, { _kind: 'approval' }));
+      const all = tasks.concat(approvalTasks).sort((a, b) =>
+        String(a.due_at || a.event_date || '').localeCompare(String(b.due_at || b.event_date || '')));
+      const openCount = all.filter(t => t.status === 'open').length;
       const stat = document.getElementById('omStatTasks');
       if (stat) stat.textContent = openCount;
 
-      if (!tasks.length) {
+      if (!all.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد مهام بعد.</p>';
         return;
       }
       const myUserId = String((tenantUser && tenantUser._userId) || '');
       const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
       const canManageTasks = hasPermission('manage_users');
-      box.innerHTML = tasks.map(t => {
+      const kindLabel = { section_approval: 'اعتماد قسم', generation_approval: 'اعتماد توليد',
+        final_file_approval: 'اعتماد ملف نهائي', recharge_request: 'طلب شحن',
+        support_ticket: 'تذكرة دعم', contract_review: 'عقد' };
+      box.innerHTML = all.map(t => {
         const due = (t.due_at || t.event_date || '').slice(0, 16).replace('T', ' ');
         const recurring = t.recurrence && t.recurrence !== 'none'
           ? ' | <span>متكررة:</span> ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
           : '';
+        const prio = t.priority && t.priority !== 'normal'
+          ? ' | <span>الأولوية:</span> ' + omEscape(({ high: 'عالية', urgent: 'عاجلة', low: 'منخفضة' }[t.priority] || t.priority))
+          : '';
+        const kind = t._kind === 'approval'
+          ? ' | <span style="color:#8a5a00;">' + omEscape(kindLabel[t.kind] || 'اعتماد') + '</span>' : '';
+        const assignee = t.assignee_name ? ' | <span>المكلف:</span> ' + omEscape(t.assignee_name) : '';
         const action = t.status === 'open' &&
-          (canManageTasks || String(t.assignee_user_id || '') === myUserId || String(t.created_by || '') === myActorId)
-          ? '<button class="btn ghost" onclick="omCompleteTask(\'' + t.id + '\')">إتمام</button>'
+          (canManageTasks || String(t.assignee_user_id || t.assignee_id || '') === myUserId || String(t.created_by || '') === myActorId)
+          ? (t._kind === 'approval'
+            ? '<button class="btn ghost" onclick="omCloseApprovalTask(\'' + t.id + '\')">إغلاق</button>'
+            : '<button class="btn ghost" onclick="omCompleteTask(\'' + t.id + '\')">إتمام</button>')
           : '';
         return '<div class="tenant-presentation-card"><div><h3>' + omEscape(t.title) + '</h3>' +
-          '<div class="meta"><span>' + omStatus(t.status) + '</span>' +
-          (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + '</div></div>' +
+          '<div class="meta"><span>' + omStatus(t.status) + '</span>' + kind +
+          (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + prio + assignee + '</div></div>' +
           '<div>' + action + '</div></div>';
       }).join('');
+    }
+
+    async function omCloseApprovalTask(id) {
+      await api('POST', '/api/approval-tasks/' + id + '/close', {}).catch(() => null);
+      await omLoadEventTasks();
     }
 
     async function omCompleteTask(id) {
@@ -264,6 +287,27 @@
       closeOmModal('omTicketModal');
       toast(WFT('tickets.created', 'تم إرسال تذكرة الدعم بنجاح'));
       await omLoadTickets();
+    }
+
+    // ── Points overview (t30) ─────────────────────────────────────────────
+    async function omLoadPointsOverview() {
+      const box = document.getElementById('omPointsOverview');
+      if (!box) return;
+      const data = await api('GET', '/api/points/overview').catch(() => null);
+      if (!data || !data.success || !data.points) {
+        box.innerHTML = '';
+        return;
+      }
+      const p = data.points;
+      const card = (label, value, suffix) =>
+        '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + omEscape(String(value)) +
+        ' <span style="font-size:12px;font-weight:400;color:#64748b;">' + suffix + '</span></h3></div>';
+      box.innerHTML = '<div class="tenant-dashboard-stats">' +
+        card('الرصيد الحالي', p.current_points, 'نقطة') +
+        card('المحجوز', p.reserved_points, 'نقطة') +
+        card('المتاح', p.available_points, 'نقطة') +
+        card('المنتهي', p.expired_points, 'نقطة') +
+        '</div>';
     }
 
     // ── Recharge requests (t33, d09) ──────────────────────────────────────
@@ -598,10 +642,35 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
         '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — <span>' + omStatus(t.status) + '</span></h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'adminTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
-        '<div class="meta" style="margin-top:4px"><span>الشركة:</span> ' + omEscape(t.tenant_name || '') + '</div>' +
+        '<div class="meta" style="margin-top:4px"><span>الشركة:</span> ' + omEscape(t.tenant_name || '') +
+        ' | <span>الفئة:</span> ' + omEscape(t.category || 'عامة') +
+        ' | <span>المكلف:</span> <span id="adminTicketAssignee">' + omEscape(t.assignee_name || '—') + '</span></div>' +
+        '<div id="adminTicketAssignRow" style="display:flex;gap:8px;margin:10px 0;align-items:center"></div>' +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         statusActions;
       detail.scrollIntoView({ block: 'nearest' });
+      const tenantUsers = await api('GET', '/api/admin/tenants/' + t.tenant_id + '/users').catch(() => null);
+      const assignRow = document.getElementById('adminTicketAssignRow');
+      const users = (tenantUsers && tenantUsers.success && tenantUsers.users) ? tenantUsers.users : [];
+      if (assignRow && users.length && t.status !== 'closed') {
+        assignRow.innerHTML = '<select id="adminTicketAssignSelect" style="flex:1">' +
+          users.map(u => '<option value="' + omEscape(u.id) + '"' +
+            (String(u.id) === String(t.assigned_to) ? ' selected' : '') + '>' +
+            omEscape(u.name || u.email) + '</option>').join('') + '</select>' +
+          '<button type="button" class="btn small ghost" onclick="adminAssignTicket(\'' + id + '\')">إسناد</button>';
+      } else if (assignRow) {
+        assignRow.innerHTML = '';
+      }
+    }
+
+    async function adminAssignTicket(id) {
+      const select = document.getElementById('adminTicketAssignSelect');
+      const assigneeId = (select || {}).value || '';
+      const res = await api('POST', '/api/admin/support/tickets/' + id + '/assign', { assigneeId }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر إسناد التذكرة'); return; }
+      toast(WFT('tickets.assigned', 'تم إسناد التذكرة'));
+      await adminOpenTicket(id);
+      await adminLoadTickets();
     }
 
     async function adminReplyTicket(id) {
@@ -623,7 +692,48 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([omLoadFileTypes(), adminLoadSlaPolicies(), adminLoadFeatureFlags()]);
+      await Promise.all([omLoadFileTypes(), adminLoadSlaPolicies(), adminLoadFeatureFlags(), adminLoadPackages()]);
+    }
+
+    // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──
+    async function adminLoadPackages() {
+      const box = document.getElementById('adminPackagesList');
+      if (!box) return;
+      const data = await api('GET', '/api/admin/packages').catch(() => null);
+      const packages = (data && data.success && data.packages) ? data.packages : [];
+      if (!packages.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد باقات مسجلة.</p>';
+        return;
+      }
+      box.innerHTML = packages.map(p =>
+        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(p.name) + '</h3>' +
+        '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' ريال' : 'بلا سعر') + '</span>' +
+        ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' دولار رصيد</span>' +
+        ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
+        '<div class="tenant-actions"><button type="button" class="btn small ' + (p.is_active ? 'danger' : 'green') +
+        '" onclick="adminTogglePackage(\'' + omEscape(p.id) + '\', ' + (p.is_active ? 0 : 1) + ')">' +
+        (p.is_active ? 'إيقاف' : 'تفعيل') + '</button></div></div>'
+      ).join('');
+    }
+
+    async function adminSavePackage(event) {
+      event.preventDefault();
+      const res = await api('POST', '/api/admin/packages', {
+        name: document.getElementById('adminPackageName').value.trim(),
+        priceSar: Number(document.getElementById('adminPackagePrice').value),
+        creditUsd: Number(document.getElementById('adminPackageCredit').value),
+        isCustom: true
+      }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر حفظ الباقة'); return; }
+      document.getElementById('adminPackageName').value = '';
+      toast(WFT('packages.saved', 'تم حفظ الباقة'));
+      await adminLoadPackages();
+    }
+
+    async function adminTogglePackage(packageId, active) {
+      const res = await api('PUT', '/api/admin/packages/' + packageId, { isActive: !!active }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الباقة'); return; }
+      await adminLoadPackages();
     }
 
     // ── SLA policies (d08): response/resolve targets per priority ──
