@@ -2091,10 +2091,29 @@ def api_admin_billing_reset_all():
 
 
 @app.route('/api/billing/topup', methods=['POST'])
-@require_company_admin
+@require_admin
 def api_billing_topup():
-    """Charge the tenant wallet (manual top-up recorded in the ledger)."""
+    """Charge a company wallet by hand (manual top-up recorded in the ledger).
+
+    Platform-admin only: wallet credit must never be minted by the company
+    that spends it — client funding flows exclusively through recharge
+    requests against catalog packages, approved by the platform desk.
+    ``tenantId`` names the company to credit; the platform tenant itself can
+    never receive wallet balance.
+    """
     data = request.json or {}
+    tenant_id = str(data.get('tenantId') or data.get('tenant_id') or '').strip()
+    if not tenant_id:
+        return jsonify({'success': False, 'error': 'الشركة مطلوبة',
+                        'error_code': 'tenant_required'}), 400
+    target = db.get_tenant_by_id(tenant_id)
+    if not target:
+        return jsonify({'success': False, 'error': 'الشركة غير موجودة',
+                        'error_code': 'tenant_not_found'}), 404
+    if target.get('is_admin'):
+        return jsonify({'success': False,
+                        'error': _OMRAN_ERROR_MESSAGES_AR['platform_tenant_recharge_forbidden'],
+                        'error_code': 'platform_tenant_recharge_forbidden'}), 403
     try:
         amount = float(data.get('amount_usd') or data.get('amount') or 0.0)
     except (TypeError, ValueError):
@@ -2107,9 +2126,8 @@ def api_billing_topup():
     ).strip() or None
     try:
         result = db.record_ledger_credit(
-            g.tenant_id, amount, note=data.get('note'),
-            idempotency_key=idempotency_key,
-            actor='platform_admin' if getattr(g, 'is_admin', False) else 'client_admin')
+            tenant_id, amount, note=data.get('note'),
+            idempotency_key=idempotency_key, actor='platform_admin')
     except Exception as exc:
         print(f"[BILLING] topup failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
@@ -2117,7 +2135,7 @@ def api_billing_topup():
         try:
             entry = result.get('entry') or {}
             _notify_tenant_billing(
-                g.tenant_id, 'أُضيف رصيد إلى المحفظة',
+                tenant_id, 'أُضيف رصيد إلى المحفظة',
                 f'${amount:.2f} — الرصيد الحالي ${float(result.get("balance_usd") or 0):.2f}',
                 entity_type='wallet', entity_id='topup:' + str(entry.get('id') or ''))
         except Exception:
@@ -21139,8 +21157,40 @@ def _refresh_fx_rate_async(force=False):
 @app.route('/api/admin/packages', methods=['GET'])
 @require_admin
 def api_admin_packages():
-    """List all billing packages."""
-    return jsonify({'success': True, 'packages': db.list_billing_packages()})
+    """List all billing packages with the margin figures the catalog owner
+    tunes against — admin-only, never exposed on the client purchase feed.
+
+    A purchased package lands as wallet credit (billed dollars): the holder
+    burns it at raw provider cost x BILLING_MULTIPLIER, so the provider-side
+    cost of a fully consumed package is credit_usd / multiplier. The margin
+    is the SAR price converted to USD minus that estimate.
+    """
+    packages = db.list_billing_packages()
+    try:
+        multiplier = float(db.get_billing_multiplier() or 0.0)
+    except (TypeError, ValueError):
+        multiplier = 0.0
+    if multiplier <= 0:
+        multiplier = 1.0
+    try:
+        fx_rate = float((db.get_fx_rate() or {}).get('rate') or 0.0)
+    except (TypeError, ValueError):
+        fx_rate = 0.0
+    for package in packages:
+        try:
+            credit = float(package.get('credit_usd') or 0.0)
+        except (TypeError, ValueError):
+            credit = 0.0
+        cost = credit / multiplier
+        package['est_cost_usd'] = round(cost, 2)
+        price_sar = package.get('price_sar')
+        if price_sar is not None and fx_rate > 0:
+            margin_usd = float(price_sar) / fx_rate - cost
+            package['est_margin_usd'] = round(margin_usd, 2)
+            package['est_margin_sar'] = round(margin_usd * fx_rate, 2)
+    return jsonify({'success': True, 'packages': packages,
+                    'billingMultiplier': multiplier,
+                    'fxRate': fx_rate or None})
 
 
 @app.route('/api/admin/packages', methods=['POST'])
@@ -24467,7 +24517,7 @@ designer_chat_reliability.install(app, globals())
 _OMRAN_NOT_FOUND = {
     'draft_not_found', 'presentation_not_found', 'request_not_found',
     'reservation_not_found', 'ticket_not_found', 'task_not_found', 'approval_not_found',
-    'user_not_found', 'tenant_not_found', 'job_not_found',
+    'user_not_found', 'tenant_not_found', 'job_not_found', 'package_not_found',
 }
 _OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived',
                    'invalid_transition', 'approval_not_pending', 'request_not_pending', 'reservation_not_reserved',
@@ -24512,6 +24562,8 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'task_not_open': 'المهمة مغلقة بالفعل',
     'key_and_label_required': 'المفتاح والتسمية العربية مطلوبان',
     'package_name_required': 'اختر الباقة المطلوب شراؤها',
+    'package_required': 'اختر الباقة المطلوب شراؤها',
+    'package_not_found': 'الباقة غير موجودة أو موقوفة',
     'reference_or_receipt_required': 'رقم الحوالة أو إيصال التحويل مطلوب',
     'stamp_failed': 'تعذر ختم الملف',
     'nothing_to_reserve': 'لا توجد نقاط لحجزها',
@@ -25471,10 +25523,17 @@ def api_create_recharge_request():
     if not _omran_can('billing'):
         return _omran_forbidden('رفع طلبات الشحن يتطلب صلاحية الفوترة')
     data = request.json or {}
+    # The catalog owns the numbers: a purchase request must point at an active
+    # billing_packages row — client-supplied names, amounts and prices are
+    # never trusted (they only reach the db layer through admin tooling).
+    package_id = data.get('packageId') or data.get('package_id')
+    if not str(package_id or '').strip():
+        return jsonify({'error': 'اختر الباقة المطلوب شراؤها',
+                        'error_code': 'package_required'}), 400
     row = db.create_recharge_request(
         g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
         price_sar=data.get('priceSar'), transfer_reference=data.get('referenceNumber'),
-        package_id=data.get('packageId'),
+        package_id=package_id,
         receipt_file_id=data.get('receiptFileId'), requested_by=_omran_actor_id(),
         requested_by_name=_omran_actor_name(),
     )

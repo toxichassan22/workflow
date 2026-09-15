@@ -311,10 +311,39 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertEqual(after['entries'][0]['kind'], 'debit')
         self.assertEqual(after['unbilled']['ai_calls'], 0)
 
-    def test_topup_endpoint_requires_company_admin(self):
+    def test_topup_endpoint_requires_platform_admin(self):
         client = self.app.test_client()
         denied = client.post('/api/billing/topup', json={'amount_usd': 5.0})
         self.assertEqual(denied.status_code, 401)
+        # A company admin can never mint wallet credit — funding flows through
+        # package purchases approved by the platform desk.
+        denied_client = client.post(
+            '/api/billing/topup', json={'amount_usd': 5.0},
+            headers=self._headers())
+        self.assertEqual(denied_client.status_code, 403)
+
+    def test_topup_endpoint_credits_named_tenant_as_admin(self):
+        tenant_id = self._fresh_tenant('topup-target', balance=1.0)
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute(
+                "INSERT INTO tenants (id, company_name, email, password_hash, is_active, is_admin) "
+                "VALUES ('platform-admin', 'المنصة', 'root@x.test', 'hash', 1, 1)")
+            conn.commit()
+        admin_token = auth.create_token(
+            'platform-admin', 'root@x.test', is_admin=True, user_name='مدير المنصة')
+        client = self.app.test_client()
+        missing_target = client.post(
+            '/api/billing/topup', json={'amount_usd': 5.0},
+            headers={'Authorization': f'Bearer {admin_token}'})
+        self.assertEqual(missing_target.status_code, 400)
+        response = client.post(
+            '/api/billing/topup', json={'tenantId': tenant_id, 'amount_usd': 7.5},
+            headers={'Authorization': f'Bearer {admin_token}'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['credited'])
+        with self.app.app_context():
+            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 8.5)
 
 
 if __name__ == '__main__':

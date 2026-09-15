@@ -99,8 +99,17 @@ the very next line then stripped. Do not wire it back in.
   and each generation-approval/job settlement fires
   `_bill_tenant_unbilled_usage_async`. `POST /api/billing/checkout` (idempotent
   via `X-Idempotency-Key`) stays as the manual path; top-up is
-  `POST /api/billing/topup` (`require_company_admin`), history is
-  `GET /api/billing/ledger`.
+  `POST /api/billing/topup` — **super-admin only**, with a required `tenantId`
+  naming the company to credit — history is `GET /api/billing/ledger`.
+- Client funding is package-only: `POST /api/recharge-requests` requires a
+  `packageId` pointing at an active `billing_packages` row, and the catalog
+  row owns `amount_usd`/`price_sar`/`package_name` — client-supplied numbers
+  are ignored. A company can never mint its own credit. The super admin owns
+  the catalog under platform settings (`/api/admin/packages` CRUD): name,
+  `price_sar` (what the client pays) and `credit_usd` (wallet dollars it
+  lands). `GET /api/admin/packages` returns `est_cost_usd`/`est_margin_*`
+  (cost = credit ÷ `BILLING_MULTIPLIER`) so the price can be tuned to the
+  margin — those figures are admin-only, never on the client catalog feed.
 - Only settled rows bill: the claim requires `package_id IS NULL` (package
   usage is consumed from package credit, not the wallet) and, for AI rows, a
   billable `attempt_status` — legacy rows with a recorded cost count as

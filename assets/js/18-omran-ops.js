@@ -817,36 +817,74 @@
     }
 
     // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──
+    let omAdminPackages = [];
+    let omEditingPackageId = null;
+
     async function adminLoadPackages() {
       const box = document.getElementById('adminPackagesList');
       if (!box) return;
       const data = await api('GET', '/api/admin/packages').catch(() => null);
-      const packages = (data && data.success && data.packages) ? data.packages : [];
-      if (!packages.length) {
+      omAdminPackages = (data && data.success && data.packages) ? data.packages : [];
+      if (!omAdminPackages.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد باقات مسجلة.</p>';
         return;
       }
-      box.innerHTML = packages.map(p =>
-        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(p.name) + '</h3>' +
-        '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
-        ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' <span>دولار رصيد</span></span>' +
-        ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
-        '<div class="tenant-actions"><button type="button" class="btn small ' + (p.is_active ? 'danger' : 'green') +
-        '" onclick="adminTogglePackage(\'' + omEscape(p.id) + '\', ' + (p.is_active ? 0 : 1) + ')">' +
-        (p.is_active ? 'إيقاف' : 'تفعيل') + '</button></div></div>'
-      ).join('');
+      box.innerHTML = omAdminPackages.map(p => {
+        const cost = (p.est_cost_usd != null)
+          ? ' | <span>التكلفة التقديرية: ' + omEscape(String(p.est_cost_usd)) + ' <span>دولار</span></span>' : '';
+        const margin = (p.est_margin_sar != null)
+          ? ' | <span>الربح التقديري: ' + omEscape(String(p.est_margin_sar)) + ' <span>ريال</span></span>' : '';
+        return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(p.name) + '</h3>' +
+          '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
+          ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' <span>دولار رصيد</span></span>' + cost + margin +
+          ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
+          '<div class="tenant-actions">' +
+          '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' + omEscape(p.id) + '\')">تعديل</button>' +
+          '<button type="button" class="btn small ' + (p.is_active ? 'danger' : 'green') +
+          '" onclick="adminTogglePackage(\'' + omEscape(p.id) + '\', ' + (p.is_active ? 0 : 1) + ')">' +
+          (p.is_active ? 'إيقاف' : 'تفعيل') + '</button>' +
+          '<button type="button" class="btn small danger" onclick="adminDeletePackage(\'' + omEscape(p.id) + '\')">حذف</button>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    function adminEditPackage(packageId) {
+      const p = omAdminPackages.find(item => item.id === packageId);
+      if (!p) return;
+      omEditingPackageId = packageId;
+      document.getElementById('adminPackageName').value = p.name || '';
+      document.getElementById('adminPackagePrice').value = (p.price_sar != null ? p.price_sar : '');
+      document.getElementById('adminPackageCredit').value = (p.credit_usd != null ? p.credit_usd : '');
+      const submit = document.getElementById('adminPackageSubmit');
+      if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
+      const cancel = document.getElementById('adminPackageCancel');
+      if (cancel) cancel.style.display = '';
+      document.getElementById('adminPackageName').focus();
+    }
+
+    function adminCancelPackageEdit() {
+      omEditingPackageId = null;
+      document.getElementById('adminPackageName').value = '';
+      document.getElementById('adminPackagePrice').value = '';
+      document.getElementById('adminPackageCredit').value = '';
+      const submit = document.getElementById('adminPackageSubmit');
+      if (submit) submit.textContent = WFT('admin.package_save', 'حفظ الباقة');
+      const cancel = document.getElementById('adminPackageCancel');
+      if (cancel) cancel.style.display = 'none';
     }
 
     async function adminSavePackage(event) {
       event.preventDefault();
-      const res = await api('POST', '/api/admin/packages', {
+      const payload = {
         name: document.getElementById('adminPackageName').value.trim(),
         priceSar: Number(document.getElementById('adminPackagePrice').value),
-        creditUsd: Number(document.getElementById('adminPackageCredit').value),
-        isCustom: false
-      }).catch(e => e);
+        creditUsd: Number(document.getElementById('adminPackageCredit').value)
+      };
+      const res = omEditingPackageId
+        ? await api('PUT', '/api/admin/packages/' + omEditingPackageId, payload).catch(e => e)
+        : await api('POST', '/api/admin/packages', Object.assign({ isCustom: false }, payload)).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر حفظ الباقة'); return; }
-      document.getElementById('adminPackageName').value = '';
+      adminCancelPackageEdit();
       toast(WFT('packages.saved', 'تم حفظ الباقة'));
       await adminLoadPackages();
     }
@@ -854,5 +892,15 @@
     async function adminTogglePackage(packageId, active) {
       const res = await api('PUT', '/api/admin/packages/' + packageId, { isActive: !!active }).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الباقة'); return; }
+      await adminLoadPackages();
+    }
+
+    async function adminDeletePackage(packageId) {
+      const p = omAdminPackages.find(item => item.id === packageId);
+      if (!confirm('سيتم حذف باقة «' + (p ? p.name : '') + '» نهائيًا. هل تريد المتابعة؟')) return;
+      const res = await api('DELETE', '/api/admin/packages/' + packageId).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر حذف الباقة'); return; }
+      if (omEditingPackageId === packageId) adminCancelPackageEdit();
+      toast(WFT('packages.deleted', 'تم حذف الباقة'));
       await adminLoadPackages();
     }

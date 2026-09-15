@@ -1456,7 +1456,8 @@
             <input type="number" id="adminPackageCredit" min="0" step="0.01" required dir="ltr">
           </div>
         </div><div class="sag-modal-actions">
-          <button type="submit" class="btn primary" data-i18n="admin.package_save">حفظ الباقة</button></div>
+          <button type="submit" class="btn primary" id="adminPackageSubmit" data-i18n="admin.package_save">حفظ الباقة</button>
+          <button type="button" class="btn ghost" id="adminPackageCancel" style="display:none" onclick="adminCancelPackageEdit()">إلغاء</button></div>
         </form>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">

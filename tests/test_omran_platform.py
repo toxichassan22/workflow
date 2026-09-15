@@ -1085,11 +1085,22 @@ class OmranApiTests(unittest.TestCase):
         self.assertGreaterEqual(read.get_json()['updated'], 1)
 
     def test_recharge_request_tenant_scoped(self):
-        created = self.client.post(
+        package = db.create_billing_package('باقة نمو', credit_usd=100, price_sar=375)
+        missing = self.client.post(
             '/api/recharge-requests', headers=self.headers(self.token),
             json={'packageName': 'باقة نمو', 'amountUsd': 100,
+                  'referenceNumber': 'TRX-TENANT-0'})
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.get_json()['error_code'], 'package_required')
+        created = self.client.post(
+            '/api/recharge-requests', headers=self.headers(self.token),
+            json={'packageId': package['id'], 'packageName': 'اسم مزوّر',
+                  'amountUsd': 9999, 'priceSar': 1,
                   'referenceNumber': 'TRX-TENANT-1'})
         self.assertEqual(created.status_code, 200)
+        # The catalog row owns the numbers — client-supplied fields are ignored.
+        self.assertEqual(created.get_json()['request']['amount_usd'], 100)
+        self.assertEqual(created.get_json()['request']['package_name'], 'باقة نمو')
         listed = self.client.get('/api/recharge-requests', headers=self.headers(self.token))
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.get_json()['requests']), 1)
