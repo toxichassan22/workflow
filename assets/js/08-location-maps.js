@@ -1489,7 +1489,7 @@
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
             otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';
-            otherInput.style.cssText = 'margin-top:10px;display:none;width:100%;padding:10px 14px;border:1px solid #3b6e91;border-radius:10px;background:#f8fafc;font-family:inherit;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,0.05);';
+            otherInput.style.cssText = 'margin-top:10px;display:none;width:100%;padding:10px 14px;border:1px solid var(--p);border-radius:10px;background:#f8fafc;font-family:inherit;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,0.05);';
             otherInput.dataset.key = f.fieldKey + '_other';
             otherInput.dataset.type = 'text';
             if (tenantProjectData && tenantProjectData[f.fieldKey + '_other']) {

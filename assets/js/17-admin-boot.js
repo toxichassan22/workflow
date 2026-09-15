@@ -266,7 +266,7 @@
       el.addEventListener('dragover', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        el.style.borderColor = '#3B6E91';
+        el.style.borderColor = 'var(--p)';
         el.style.background = '#f0f7fc';
       });
       el.addEventListener('dragleave', function (e) {

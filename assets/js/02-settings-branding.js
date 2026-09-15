@@ -1173,9 +1173,10 @@
       if (b.accent_color) root.style.setProperty('--g', b.accent_color);
       if (b.background_color) root.style.setProperty('--bg', b.background_color);
       if (b.text_color) root.style.setProperty('--txt', b.text_color);
-      // The workspace is white-labeled: the sidebar keeps a dark dominant
-      // surface (its navy share) but tinted by the company primary; a light
-      // primary is deepened so the chrome never turns pale.
+      // The workspace is white-labeled on the platform's 50/45/5 split:
+      // the company's primary fills the dark sidebar share, its secondary
+      // is the 5% accent, and content stays white. A light primary is
+      // deepened so the chrome never turns pale.
       if (b.primary_color && primaryRgb) {
         const sideA = brandingLuminance(primaryRgb) > 0.30 ? brandingShade(b.primary_color, -62) : b.primary_color;
         root.style.setProperty('--sidebar-bg', sideA);
@@ -1184,11 +1185,12 @@
           brandingLuminance(primaryRgb) > 0.45 ? '#0f2333' : b.primary_color);
       }
       // The accent stays a deliberate 5%: CTA, active marker, small details.
-      // Dark accents are lifted so they still read on the dark sidebar.
-      if (b.accent_color) {
-        const accentRgb = brandingHexRgb(b.accent_color);
+      // Dark secondaries are lifted so they still read on the dark sidebar.
+      const accentColor = b.secondary_color || b.accent_color;
+      if (accentColor) {
+        const accentRgb = brandingHexRgb(accentColor);
         if (accentRgb) {
-          const accent = brandingLuminance(accentRgb) < 0.07 ? brandingShade(b.accent_color, 55) : b.accent_color;
+          const accent = brandingLuminance(accentRgb) < 0.07 ? brandingShade(accentColor, 55) : accentColor;
           root.style.setProperty('--sidebar-accent', accent);
           const accentSafe = brandingHexRgb(accent) || accentRgb;
           root.style.setProperty('--on-accent',
@@ -1403,8 +1405,8 @@
       const b = data.branding;
       setValue('settingsCompanyName', b.company_name || '');
       setValue('settingsTagline', b.tagline || '');
-      setValue('settingsPrimaryColor', b.primary_color || '#3B6E91');
-      setValue('settingsSecondaryColor', b.secondary_color || '#254B66');
+      setValue('settingsPrimaryColor', b.primary_color || '#07182C');
+      setValue('settingsSecondaryColor', b.secondary_color || '#03E1CE');
       setValue('settingsAccentColor', b.accent_color || '#6DA3C3');
       setValue('settingsBackgroundColor', b.background_color || '#F4F9FC');
       setValue('settingsTextColor', b.text_color || '#333333');

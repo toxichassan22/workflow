@@ -733,9 +733,9 @@
     }
 
     :root {
-      --p: #3B6E91;
-      --pd: #254B66;
-      --g: #a7a9ac;
+      --p: #07182C;
+      --pd: #04101F;
+      --g: #03E1CE;
       --bg: #F0F7FB;
       --card: #fff;
       --txt: #252525;
@@ -1557,7 +1557,7 @@
     }
 
     .slide-toolbar {
-      background: #3B6E91;
+      background: var(--p);
       color: #fff;
       border-radius: 12px;
       padding: 10px 16px;
@@ -1659,12 +1659,12 @@
     .slide-toolbar-btn.slide-toolbar-primary {
       background: #fff;
       border-color: #fff;
-      color: #3B6E91;
+      color: var(--p);
     }
 
     .slide-toolbar-btn.slide-toolbar-primary:hover {
       background: #f0f7ff;
-      color: #254B66;
+      color: var(--pd);
     }
 
     .slide-toolbar-btn.slide-toolbar-approve {
@@ -1744,7 +1744,7 @@
 
     .presentation-font-head h3 {
       margin: 0;
-      color: #3B6E91;
+      color: var(--p);
       font-size: 18px;
     }
 
@@ -3699,21 +3699,21 @@
       --surface-subtle: #f6f8fb;
       --ui-border: #e2e8f0;
       --ui-border-strong: #cbd5e1;
-      --ink: #0f2333;
+      --ink: #07182c;
       --ink-muted: #64798c;
-      --sidebar-bg: #102b3d;
-      --sidebar-bg-deep: #0b2232;
+      --sidebar-bg: #07182c;
+      --sidebar-bg-deep: #050f18;
       --sidebar-text: #c8d6df;
       --sidebar-muted: #8fa5b5;
       --sidebar-active: rgba(255, 255, 255, .09);
-      --sidebar-accent: #37d6c6;
+      --sidebar-accent: #03e1ce;
       --on-accent: #07182c;
       --brand-ink: #ffffff;
       --brand-ink-muted: rgba(255, 255, 255, .72);
       --brand-badge: rgba(255, 255, 255, .16);
       --brand-mark: var(--p);
-      --p-soft: rgba(59, 110, 145, .10);
-      --focus-ring: rgba(59, 110, 145, .16);
+      --p-soft: rgba(7, 24, 44, .08);
+      --focus-ring: rgba(7, 24, 44, .16);
       --danger: #b33a3a;
       --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 8px 24px rgba(16, 24, 40, .06);
       --shadow-lift: 0 2px 6px rgba(16, 24, 40, .06), 0 16px 36px rgba(16, 24, 40, .10);
