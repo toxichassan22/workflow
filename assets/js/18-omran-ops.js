@@ -9,7 +9,7 @@
 
     function omStatus(status) {
       const labels = {
-        open: 'مفتوحة', completed: 'منجزة', cancelled: 'ملغاة',
+        open: 'مفتوحة', done: 'مغلقة', completed: 'منجزة', cancelled: 'ملغاة',
         pending: 'قيد المراجعة', approved: 'معتمد', rejected: 'مرفوض',
         in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلقة',
         waiting_customer: 'بانتظار العميل', escalated: 'مصعّدة', reopened: 'معاد فتحها',
@@ -66,13 +66,15 @@
     }
 
     // ── Event tasks + approver task center (t24/t42) ───────────────────────
+    let omAllTasks = [];
+
     async function omLoadEventTasks() {
       const box = document.getElementById('omTasksList');
       if (!box) return;
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const [data, approvals] = await Promise.all([
         api('GET', '/api/event-tasks').catch(() => null),
-        api('GET', '/api/approval-tasks').catch(() => null),
+        api('GET', '/api/approval-tasks?status=all').catch(() => null),
       ]);
       if (!data || !data.success) {
         box.innerHTML = '<p class="tenant-hint">تعذر تحميل المهام.</p>';
@@ -80,23 +82,41 @@
       }
       const tasks = (data.tasks || []).map(t => Object.assign({}, t, { _kind: 'event' }));
       const approvalTasks = ((approvals && approvals.tasks) || []).map(t => Object.assign({}, t, { _kind: 'approval' }));
-      const all = tasks.concat(approvalTasks).sort((a, b) =>
+      omAllTasks = tasks.concat(approvalTasks).sort((a, b) =>
         String(a.due_at || a.event_date || '').localeCompare(String(b.due_at || b.event_date || '')));
-      const openCount = all.filter(t => t.status === 'open').length;
+      const openCount = omAllTasks.filter(t => t.status === 'open').length;
       const stat = document.getElementById('omStatTasks');
       if (stat) stat.textContent = openCount;
+      omRenderTasks();
+    }
 
-      if (!all.length) {
+    function omRenderTasks() {
+      const box = document.getElementById('omTasksList');
+      if (!box) return;
+      const kindFilter = (document.getElementById('omTasksKindFilter') || {}).value || '';
+      const prioFilter = (document.getElementById('omTasksPriorityFilter') || {}).value || '';
+      const statusFilter = (document.getElementById('omTasksStatusFilter') || {}).value || 'open';
+      const filtered = omAllTasks.filter(t => {
+        const kind = t._kind === 'approval' ? (t.kind || 'approval') : 'manual';
+        if (kindFilter && kind !== kindFilter) return false;
+        if (prioFilter && (t.priority || 'normal') !== prioFilter) return false;
+        if (statusFilter === 'open' && t.status !== 'open') return false;
+        if (statusFilter === 'done' && ['done', 'completed', 'cancelled'].indexOf(t.status) === -1) return false;
+        return true;
+      });
+      if (!filtered.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد مهام بعد.</p>';
         return;
       }
       const myUserId = String((tenantUser && tenantUser._userId) || '');
       const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
       const canManageTasks = hasPermission('manage_users');
+      const isApprover = hasPermission('approvals') || hasPermission('approve_generation') ||
+        hasPermission('approve_final_file');
       const kindLabel = { section_approval: 'اعتماد قسم', generation_approval: 'اعتماد توليد',
-        final_file_approval: 'اعتماد ملف نهائي', recharge_request: 'طلب شحن',
-        support_ticket: 'تذكرة دعم', contract_review: 'عقد' };
-      box.innerHTML = all.map(t => {
+        final_approval: 'اعتماد ملف نهائي', recharge: 'طلب شحن',
+        support: 'تذكرة دعم', revision: 'مراجعة', manual: 'مهمة يدوية' };
+      box.innerHTML = filtered.map(t => {
         const due = (t.due_at || t.event_date || '').slice(0, 16).replace('T', ' ');
         const recurring = t.recurrence && t.recurrence !== 'none'
           ? ' | <span>متكررة:</span> ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
@@ -107,17 +127,28 @@
         const kind = t._kind === 'approval'
           ? ' | <span style="color:#8a5a00;">' + omEscape(kindLabel[t.kind] || 'اعتماد') + '</span>' : '';
         const assignee = t.assignee_name ? ' | <span>المكلف:</span> ' + omEscape(t.assignee_name) : '';
-        const action = t.status === 'open' &&
-          (canManageTasks || String(t.assignee_user_id || t.assignee_id || '') === myUserId || String(t.created_by || '') === myActorId)
+        const escalated = t.escalated_at ? ' | <span style="color:#c33;font-weight:700">مصعّدة</span>' : '';
+        const overdue = t.is_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '';
+        const isMine = canManageTasks || String(t.assignee_user_id || t.assignee_id || '') === myUserId ||
+          String(t.created_by || '') === myActorId;
+        const remindBtn = t.status === 'open' && t._kind === 'approval' && (isMine || isApprover)
+          ? '<button class="btn ghost" onclick="omRemindApprovalTask(\'' + t.id + '\')">تذكير</button>' : '';
+        const action = t.status === 'open' && isMine
           ? (t._kind === 'approval'
             ? '<button class="btn ghost" onclick="omCloseApprovalTask(\'' + t.id + '\')">إغلاق</button>'
             : '<button class="btn ghost" onclick="omCompleteTask(\'' + t.id + '\')">إتمام</button>')
           : '';
         return '<div class="tenant-presentation-card"><div><h3>' + omEscape(t.title) + '</h3>' +
           '<div class="meta"><span>' + omStatus(t.status) + '</span>' + kind +
-          (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + prio + assignee + '</div></div>' +
-          '<div>' + action + '</div></div>';
+          (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + prio + assignee + escalated + overdue + '</div></div>' +
+          '<div style="display:flex;gap:6px">' + remindBtn + action + '</div></div>';
       }).join('');
+    }
+
+    async function omRemindApprovalTask(id) {
+      const data = await api('POST', '/api/approval-tasks/' + id + '/remind', {}).catch(() => null);
+      if (data && data.success) toast('أُرسل التذكير');
+      await omLoadEventTasks();
     }
 
     async function omCloseApprovalTask(id) {
@@ -363,6 +394,23 @@
         ' (' + (p.credit_usd || 0) + ' <span>دولار</span>' +
         (p.price_sar ? ' — ' + p.price_sar + ' <span>ريال</span>' : '') + ')</option>'
       ).join('');
+      omShowPackageInfo();
+    }
+
+    function omShowPackageInfo() {
+      const box = document.getElementById('omRechargePackageInfo');
+      const select = document.getElementById('omRechargePackage');
+      if (!box || !select) return;
+      const pkg = omRechargePackages.find(p => p.id === select.value);
+      if (!pkg) { box.style.display = 'none'; box.textContent = ''; return; }
+      const parts = [pkg.duration_days
+        ? 'الصلاحية: ' + pkg.duration_days + ' يومًا'
+        : 'الصلاحية: بلا انتهاء محدد'];
+      (Array.isArray(pkg.features) ? pkg.features : []).forEach(f => {
+        if (f) parts.push(String(f));
+      });
+      box.textContent = parts.join(' — ');
+      box.style.display = '';
     }
 
     async function omUploadRechargeReceipt() {

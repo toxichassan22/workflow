@@ -1540,6 +1540,30 @@
           <h3 class="dash-section-title" style="margin:0">المهام</h3>
           <button type="button" class="btn primary small" onclick="openOmModal('omTaskModal')">مهمة جديدة</button>
         </div>
+        <div class="sag-filters" style="margin-bottom:12px">
+          <select id="omTasksKindFilter" onchange="omRenderTasks()" class="tenant-filter-select">
+            <option value="">كل الأنواع</option>
+            <option value="manual">مهام يدوية</option>
+            <option value="section_approval">اعتماد قسم</option>
+            <option value="generation_approval">اعتماد توليد</option>
+            <option value="final_approval">اعتماد ملف نهائي</option>
+            <option value="recharge">طلب شحن</option>
+            <option value="support">تذكرة دعم</option>
+            <option value="revision">مراجعة</option>
+          </select>
+          <select id="omTasksPriorityFilter" onchange="omRenderTasks()" class="tenant-filter-select">
+            <option value="">كل الأولويات</option>
+            <option value="low">منخفضة</option>
+            <option value="normal">عادية</option>
+            <option value="high">عالية</option>
+            <option value="urgent">عاجلة</option>
+          </select>
+          <select id="omTasksStatusFilter" onchange="omRenderTasks()" class="tenant-filter-select">
+            <option value="open">المفتوحة</option>
+            <option value="done">المغلقة</option>
+            <option value="all">الكل</option>
+          </select>
+        </div>
         <div id="omTasksList" style="margin-bottom:24px"></div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -1580,9 +1604,9 @@
 
       <!-- Modal 1: New Task -->
       <div id="omTaskModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omTaskModal')">
-        <div class="om-modal-card">
+        <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omTaskModalTitle">
           <div class="sag-modal-head">
-            <h2>مهمة جديدة</h2>
+            <h2 id="omTaskModalTitle">مهمة جديدة</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omTaskModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
@@ -1607,18 +1631,19 @@
 
       <!-- Modal 2: Recharge Request -->
       <div id="omRechargeModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omRechargeModal')">
-        <div class="om-modal-card">
+        <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omRechargeModalTitle">
           <div class="sag-modal-head">
-            <h2>طلب شحن رصيد جديد</h2>
+            <h2 id="omRechargeModalTitle">طلب شحن رصيد جديد</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omRechargeModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
             <div class="tenant-field"><label>الباقة</label>
-              <select id="omRechargePackage">
+              <select id="omRechargePackage" onchange="omShowPackageInfo()">
                 <option value="باقة نمو">باقة نمو (100 دولار - 375 ريال)</option>
                 <option value="باقة شركات">باقة شركات (250 دولار - 937.5 ريال)</option>
                 <option value="باقة احترافية">باقة احترافية (500 دولار - 1875 ريال)</option>
               </select>
+              <div id="omRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
             </div>
             <div class="tenant-field"><label>رقم الحوالة البنكية</label><input type="text" id="omRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
             <div class="tenant-field"><label>إيصال التحويل</label><input type="file" id="omRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
@@ -1633,9 +1658,9 @@
 
       <!-- Modal 3: New Support Ticket -->
       <div id="omTicketModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omTicketModal')">
-        <div class="om-modal-card">
+        <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omTicketModalTitle">
           <div class="sag-modal-head">
-            <h2>تذكرة دعم جديدة</h2>
+            <h2 id="omTicketModalTitle">تذكرة دعم جديدة</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omTicketModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
@@ -1671,9 +1696,9 @@
 
       <!-- Modal 4: New Contract / NDA -->
       <div id="omContractModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omContractModal')">
-        <div class="om-modal-card">
+        <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omContractModalTitle">
           <div class="sag-modal-head">
-            <h2>تسجيل عقد أو اتفاقية سرية</h2>
+            <h2 id="omContractModalTitle">تسجيل عقد أو اتفاقية سرية</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omContractModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">

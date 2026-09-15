@@ -1561,7 +1561,7 @@ def _reconcile_single_ai_event(event_id, generation_id, timeout=15, is_review=Fa
         delay = _ai_reconcile_delay_seconds(attempts, outcome)
         try:
             from datetime import timedelta as _td
-            nxt = (datetime.utcnow() + _td(seconds=delay)).strftime('%Y-%m-%d %H:%M:%S')
+            nxt = (datetime.now(timezone.utc) + _td(seconds=delay)).strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             nxt = None
         db.update_ai_usage_attempt(event_id, next_retry_at=nxt)
@@ -1652,7 +1652,7 @@ def _ai_usage_event_age_hours(created_at):
         moment = datetime.fromisoformat(stamp)
         if moment.tzinfo is not None:
             moment = moment.replace(tzinfo=None)
-        return (datetime.utcnow() - moment).total_seconds() / 3600.0
+        return (datetime.now(timezone.utc).replace(tzinfo=None) - moment).total_seconds() / 3600.0
     except Exception:
         return 0.0
 
@@ -14591,6 +14591,93 @@ def send_platform_email(recipient, subject, body):
         return False
 
 
+# ── Housekeeping: periodic sweeps that used to wait for a human request ──────
+
+_HOUSEKEEPING_LOCK = threading.Lock()
+_HOUSEKEEPING_STARTED = False
+
+
+def _drain_email_outbox(limit=20):
+    """t41/t61: the outbox only matters if something sends it — claim due rows,
+    push them through SMTP, and record the outcome on the message and on the
+    notification's delivery row."""
+    sent = failed = 0
+    for row in db.claim_due_emails(limit=limit):
+        ok = send_platform_email(row.get('to_email'), row.get('subject'),
+                                 row.get('body_text') or '')
+        if ok:
+            db.mark_email_sent(row['id'])
+            db.mark_email_delivery(row.get('notification_id'), 'sent')
+            sent += 1
+        else:
+            db.mark_email_failed(row['id'], error='smtp_send_failed')
+            db.mark_email_delivery(row.get('notification_id'), 'failed',
+                                   error='smtp_send_failed')
+            failed += 1
+    return {'sent': sent, 'failed': failed}
+
+
+def _run_housekeeping_tick():
+    """One bounded pass over every standing sweep: outbound mail, approval-task
+    reminders and escalations, pre-breach SLA warnings, stale point holds and
+    silent generation jobs. Each step is isolated so one failure never stops
+    the rest."""
+    summary = {}
+    steps = (
+        ('email', _drain_email_outbox),
+        ('reminders', db.send_due_approval_reminders),
+        ('escalations', db.escalate_overdue_approval_tasks),
+        ('sla_warnings', db.warn_tickets_approaching_sla),
+        ('stale_reservations', db.release_stale_reservations),
+        ('stale_generation_jobs', db.sweep_stale_generation_jobs),
+    )
+    for name, fn in steps:
+        try:
+            summary[name] = fn()
+        except Exception as exc:
+            summary[name] = {'error': str(exc)}
+    return summary
+
+
+def _housekeeping_loop():
+    interval = max(60, int(os.environ.get('HOUSEKEEPING_INTERVAL_SECONDS') or 300))
+    while True:
+        try:
+            with app.app_context():
+                _run_housekeeping_tick()
+        except Exception as exc:
+            print(f'[HOUSEKEEPING] tick failed: {exc}')
+        try:
+            time.sleep(interval)
+        except Exception:
+            pass
+
+
+def _ensure_housekeeping_started():
+    """Start the single sweeper thread once, on the first request — works under
+    app.run and any WSGI runner, and stays off for tests and CLI imports."""
+    global _HOUSEKEEPING_STARTED
+    if _HOUSEKEEPING_STARTED:
+        return
+    try:
+        if app.config.get('TESTING'):
+            return
+    except Exception:
+        pass
+    if str(os.environ.get('HOUSEKEEPING_DISABLED') or '').lower() in {'1', 'true', 'yes'}:
+        return
+    with _HOUSEKEEPING_LOCK:
+        if _HOUSEKEEPING_STARTED:
+            return
+        _HOUSEKEEPING_STARTED = True
+        threading.Thread(target=_housekeeping_loop, daemon=True, name='housekeeping').start()
+
+
+@app.before_request
+def start_housekeeping_once():
+    _ensure_housekeeping_started()
+
+
 def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url):
     subject = f'مرحبًا بك في LandLoom AI - {company_name}'
     body = (
@@ -20768,7 +20855,7 @@ def _fx_rate_age_seconds(fx):
         moment = datetime.fromisoformat(stamp)
         if moment.tzinfo is not None:
             moment = moment.replace(tzinfo=None)
-        return (datetime.utcnow() - moment).total_seconds()
+        return (datetime.now(timezone.utc).replace(tzinfo=None) - moment).total_seconds()
     except Exception:
         return float('inf')
 
@@ -25663,6 +25750,17 @@ def api_admin_email_outbox():
     return jsonify({'success': True,
                     'emails': db.list_email_outbox(status=request.args.get('status')),
                     'stats': db.email_outbox_stats()})
+
+
+@app.route('/api/admin/housekeeping/run', methods=['POST'])
+@require_admin
+def api_admin_housekeeping_run():
+    """t24/t41: run one housekeeping pass on demand — the same tick the
+    background thread performs, so an operator or a cron can force it."""
+    summary = _run_housekeeping_tick()
+    _record_audit_event('housekeeping.run', 'housekeeping', 'manual',
+                        metadata={'summary': summary})
+    return jsonify({'success': True, 'summary': summary})
 
 
 @app.route('/api/admin/backups', methods=['GET', 'POST'])

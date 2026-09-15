@@ -8,7 +8,7 @@ import re
 import uuid
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import g
 
 import db_driver as sqlite3
@@ -5804,7 +5804,7 @@ AI_COST_SOURCES = ('response', 'generation', 'review')
 
 
 def _ai_usage_now_text():
-    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _ai_usage_columns(conn):
@@ -6077,7 +6077,7 @@ def claim_ai_usage_reconcile_row(event_id, delay_seconds=300):
     cols = _ai_usage_columns(conn)
     if {'reconcile_attempts', 'next_retry_at', 'updated_at'} <= cols:
         from datetime import timedelta
-        next_text = (datetime.utcnow() + timedelta(seconds=max(1, int(delay_seconds or 0)))).strftime('%Y-%m-%d %H:%M:%S')
+        next_text = (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(delay_seconds or 0)))).strftime('%Y-%m-%d %H:%M:%S')
         cursor = conn.execute(
             'UPDATE ai_usage_events SET reconcile_attempts = COALESCE(reconcile_attempts, 0) + 1, '
             'next_retry_at = ?, updated_at = ? WHERE id = ? '
@@ -6446,7 +6446,7 @@ def set_maps_discovery_cache(tenant_id, cache_key, payload, ttl_days=30):
     try:
         from datetime import timedelta
         days = max(1, int(ttl_days or 30))
-        expires_at = (datetime.utcnow() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         conn = get_db()
         conn.execute(
             'INSERT INTO maps_discovery_cache (cache_key, tenant_id, payload_json, expires_at) '
@@ -7061,7 +7061,7 @@ def set_tenant_openrouter_key(tenant_id, raw_key, key_label=None, limit_usd=None
     enc = encrypt_tenant_openrouter_key(raw)
     digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
     conn = get_db()
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     existing = conn.execute(
         'SELECT id FROM tenant_openrouter_keys WHERE tenant_id = ?', (tenant_id,)
     ).fetchone()
@@ -7131,11 +7131,11 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
         params.append(str(openrouter_key_hash or None))
     if last_limit_remaining is not None or last_usage is not None:
         assignments.append('last_checked_at = ?')
-        params.append(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+        params.append(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
     if not assignments:
         return get_tenant_openrouter_key_meta(tenant_id)
     assignments.append('updated_at = ?')
-    params.append(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    params.append(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
     params.append(str(tenant_id))
     conn.execute(
         'UPDATE tenant_openrouter_keys SET ' + ', '.join(assignments) + ' WHERE tenant_id = ?',
@@ -7160,15 +7160,26 @@ FX_REFRESH_SECONDS = 24 * 3600
 
 
 def list_billing_packages(active_only=False):
-    """All packages, newest last. Never raises."""
+    """All packages, newest last, each carrying the current active version's
+    validity window and feature terms for the purchase screen. Never raises."""
     try:
         conn = get_db()
         rows = conn.execute(
-            'SELECT * FROM billing_packages '
-            + ('WHERE is_active = 1 ' if active_only else '')
-            + 'ORDER BY created_at ASC'
+            'SELECT p.*, v.duration_days, v.features_json '
+            'FROM billing_packages p '
+            'LEFT JOIN billing_package_versions v ON v.id = ('
+            '  SELECT id FROM billing_package_versions '
+            '  WHERE package_id = p.id AND is_active = 1 '
+            '  ORDER BY version DESC LIMIT 1) '
+            + ('WHERE p.is_active = 1 ' if active_only else '')
+            + 'ORDER BY p.created_at ASC'
         ).fetchall()
-        return [dict(r) for r in rows]
+        items = []
+        for r in rows:
+            item = dict(r)
+            item['features'] = _json_or(item.get('features_json'), [])
+            items.append(item)
+        return items
     except Exception:
         return []
 
@@ -7433,7 +7444,7 @@ def set_fx_rate(pair, rate, source='manual'):
         'INSERT INTO fx_rates (pair, rate, source, updated_at) VALUES (?, ?, ?, ?) '
         'ON CONFLICT (pair) DO UPDATE SET rate = excluded.rate, source = excluded.source, '
         "updated_at = datetime('now')",
-        (str(pair), value, source, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+        (str(pair), value, source, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
     )
     conn.commit()
     return get_fx_rate(pair)
@@ -8469,6 +8480,9 @@ def _ensure_platform_columns(conn):
     _add('support_tickets', 'project_id', 'TEXT')
     _add('support_tickets', 'sla_resolve_due_at', 'TEXT')
     _add('support_tickets', 'reopened_count', 'INTEGER DEFAULT 0')
+    # t40/d08: stamped once the pre-breach warning has reached the tenant so
+    # the housekeeping pass notifies each ticket exactly once.
+    _add('support_tickets', 'sla_warned_at', 'TEXT')
 
     # t42: event tasks link back to the object that raised them and carry a
     # priority so the board can escalate what matters first.
@@ -9888,7 +9902,7 @@ def purge_expired_archives(tenant_id=None, retention_days=None):
 
 # ── t41/t24/t42: notifications and the approval task center ─────────────────
 
-NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge', 'support', 'general')
+NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge', 'support', 'task', 'general')
 
 
 def create_notification(tenant_id, title, body=None, category='general', user_id=None,
@@ -10065,6 +10079,32 @@ def get_users_with_permission(tenant_id, permission_key):
     return users
 
 
+def _user_email(user_id):
+    """Resolve a notification recipient's mailbox; None when unknown."""
+    if not user_id:
+        return None
+    try:
+        row = get_user_by_id(user_id)
+    except Exception:
+        return None
+    email = (row or {}).get('email')
+    return str(email).strip() if email else None
+
+
+def tenant_admin_contacts(tenant_id):
+    """Active company admins — the human escalation target per company."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, name, email FROM users WHERE tenant_id = ? "
+            "AND role = 'company_admin' AND COALESCE(is_active, 1) = 1",
+            (tenant_id,),
+        ).fetchall()
+    except Exception:
+        return []
+    return [{'id': r['id'], 'name': r['name'], 'email': r['email']} for r in rows]
+
+
 def remind_approval_task(tenant_id, task_id):
     """t24: remind the assignee — stamps reminded_at AND notifies them."""
     conn = get_db()
@@ -10081,20 +10121,64 @@ def remind_approval_task(tenant_id, task_id):
         create_notification(
             tenant_id, 'تذكير بمهمة معلقة', body=row['title'], category='task',
             entity_type='approval_task', entity_id=task_id,
-            user_id=row['assignee_id'])
+            user_id=row['assignee_id'],
+            email_to=_user_email(row['assignee_id']))
     return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (task_id,)).fetchone())
 
 
-def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
+def send_due_approval_reminders(tenant_id=None, due_window_hours=12, cooldown_hours=24):
+    """t24: automatic reminder pass — open tasks whose due time is near or past
+    get reminded once per cooldown window; the assignee is notified in-app and
+    by email when they have a mailbox."""
+    conn = get_db()
+    from datetime import timedelta
+    now = datetime.now()
+    due_limit = (now + timedelta(hours=int(due_window_hours))).isoformat()
+    cooldown = (now - timedelta(hours=int(cooldown_hours))).isoformat()
+    clauses = [
+        "status = 'open'", 'due_at IS NOT NULL', 'due_at <= ?',
+        '(reminded_at IS NULL OR reminded_at < ?)',
+    ]
+    params = [due_limit, cooldown]
+    if tenant_id:
+        clauses.insert(0, 'tenant_id = ?')
+        params.insert(0, tenant_id)
+    rows = conn.execute(
+        'SELECT * FROM approval_tasks WHERE ' + ' AND '.join(clauses), params,
+    ).fetchall()
+    reminded = []
+    for row in rows:
+        conn.execute(
+            'UPDATE approval_tasks SET reminded_at = ? WHERE id = ?',
+            (now.isoformat(), row['id']),
+        )
+        reminded.append(row['id'])
+    conn.commit()
+    for row in rows:
+        create_notification(
+            row['tenant_id'], 'تذكير بمهمة معلقة', body=row['title'], category='task',
+            entity_type='approval_task', entity_id=row['id'],
+            user_id=row['assignee_id'],
+            email_to=_user_email(row['assignee_id']))
+    return reminded
+
+
+def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
     """t24: tasks open past their due time escalate once — stamped and the
-    company admin is notified so the escalation reaches a human."""
+    company admin is notified so the escalation reaches a human. With no
+    tenant_id the pass covers every company."""
     conn = get_db()
     from datetime import timedelta
     threshold = (datetime.now() - timedelta(hours=int(overdue_hours))).isoformat()
+    clauses = ["status = 'open'", 'escalated_at IS NULL',
+               'due_at IS NOT NULL', 'due_at < ?']
+    params = [threshold]
+    if tenant_id:
+        clauses.insert(0, 'tenant_id = ?')
+        params.insert(0, tenant_id)
     rows = conn.execute(
-        "SELECT id, title, created_by FROM approval_tasks WHERE tenant_id = ? AND status = 'open' "
-        'AND escalated_at IS NULL AND due_at IS NOT NULL AND due_at < ?',
-        (tenant_id, threshold),
+        'SELECT id, tenant_id, title, assignee_id FROM approval_tasks WHERE '
+        + ' AND '.join(clauses), params,
     ).fetchall()
     escalated = []
     for row in rows:
@@ -10102,11 +10186,67 @@ def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
         escalated.append(row['id'])
     conn.commit()
     for row in rows:
-        create_notification(
-            tenant_id, 'مهمة اعتماد متأخرة صعّدت',
-            body=row['title'], category='task',
-            entity_type='approval_task', entity_id=row['id'])
+        notified = set()
+        recipients = [row['assignee_id']] + [a['id'] for a in tenant_admin_contacts(row['tenant_id'])]
+        admin_emails = {a['id']: a['email'] for a in tenant_admin_contacts(row['tenant_id'])}
+        for user_id in recipients:
+            if not user_id or user_id in notified:
+                continue
+            notified.add(user_id)
+            create_notification(
+                row['tenant_id'], 'مهمة اعتماد متأخرة صعّدت',
+                body=row['title'], category='task',
+                entity_type='approval_task', entity_id=row['id'],
+                user_id=user_id,
+                email_to=admin_emails.get(user_id) or _user_email(user_id))
     return escalated
+
+
+def warn_tickets_approaching_sla(tenant_id=None, window_hours=4):
+    """t40/d08: proactive SLA warning — an open ticket whose response or
+    resolve deadline lands inside the window notifies the tenant once
+    (sla_warned_at), reaching the assignee and company admins by email."""
+    conn = get_db()
+    from datetime import timedelta
+    now = datetime.now()
+    horizon = (now + timedelta(hours=int(window_hours))).isoformat()
+    clauses = [
+        "status NOT IN ('resolved', 'closed')", 'sla_warned_at IS NULL',
+        "((sla_due_at IS NOT NULL AND sla_due_at <= ?)"
+        " OR (sla_resolve_due_at IS NOT NULL AND sla_resolve_due_at <= ?))",
+    ]
+    params = [horizon, horizon]
+    if tenant_id:
+        clauses.insert(0, 'tenant_id = ?')
+        params.insert(0, tenant_id)
+    rows = conn.execute(
+        'SELECT * FROM support_tickets WHERE ' + ' AND '.join(clauses), params,
+    ).fetchall()
+    warned = []
+    for row in rows:
+        conn.execute(
+            'UPDATE support_tickets SET sla_warned_at = ? WHERE id = ?',
+            (now.isoformat(), row['id']),
+        )
+        warned.append(row['id'])
+    conn.commit()
+    for row in rows:
+        title = 'تذكرة تقترب من تجاوز زمن الاستجابة'
+        body = f"{row['subject']} (#{row['number'] or row['id']})"
+        notified = set()
+        recipients = [row['assigned_to'], row['created_by']]
+        recipients += [a['id'] for a in tenant_admin_contacts(row['tenant_id'])]
+        admin_emails = {a['id']: a['email'] for a in tenant_admin_contacts(row['tenant_id'])}
+        for user_id in recipients:
+            if not user_id or user_id in notified:
+                continue
+            notified.add(user_id)
+            create_notification(
+                row['tenant_id'], title, body=body, category='support',
+                entity_type='support_ticket', entity_id=row['id'],
+                user_id=user_id,
+                email_to=admin_emails.get(user_id) or _user_email(user_id))
+    return warned
 
 
 # ── t32/t33: recharge (package purchase) requests ───────────────────────────
@@ -13069,13 +13209,17 @@ def claim_due_emails(limit=20):
            ORDER BY created_at LIMIT ?""",
         (int(limit),),
     ).fetchall()
+    claimed = []
     for row in rows:
-        conn.execute(
-            "UPDATE email_outbox SET status = 'sending', attempts = attempts + 1 WHERE id = ?",
+        cursor = conn.execute(
+            "UPDATE email_outbox SET status = 'sending', attempts = attempts + 1 "
+            "WHERE id = ? AND status = 'queued'",
             (row['id'],),
         )
+        if cursor.rowcount:
+            claimed.append(row)
     conn.commit()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in claimed]
 
 
 def mark_email_sent(email_id):
@@ -13083,6 +13227,25 @@ def mark_email_sent(email_id):
     conn.execute(
         "UPDATE email_outbox SET status = 'sent', sent_at = ? WHERE id = ?",
         (datetime.now().isoformat(), str(email_id)),
+    )
+    conn.commit()
+
+
+def mark_email_delivery(notification_id, status, error=None):
+    """Reflect an outbox send result on the notification's email delivery row."""
+    if not notification_id:
+        return
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """UPDATE notification_deliveries
+           SET status = ?, attempts = attempts + 1, last_attempt_at = ?,
+               last_error = ?,
+               sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END,
+               delivered_at = CASE WHEN ? = 'sent' THEN ? ELSE delivered_at END
+           WHERE notification_id = ? AND channel = 'email'""",
+        (status, now, str(error or '')[:2000] or None,
+         status, now, status, now, str(notification_id)),
     )
     conn.commit()
 
