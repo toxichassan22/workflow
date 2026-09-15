@@ -383,6 +383,74 @@ class IdentityApiTests(unittest.TestCase):
         direct_me = self.client.get('/api/auth/me', headers=direct_headers)
         self.assertTrue(direct_me.get_json()['tenant']['isAdmin'])
 
+    # ── Session revocation (logout + password change) ────────────────────
+
+    def test_logout_revokes_only_the_presented_token(self):
+        uid = self._employee('sess@x.test')
+        first = auth.create_token(
+            self.tenant_id, 'sess@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        second = auth.create_token(
+            self.tenant_id, 'sess@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        self.assertNotEqual(first, second)
+
+        ok = self.client.get('/api/auth/me', headers=self.headers(first))
+        self.assertEqual(ok.status_code, 200)
+
+        out = self.client.post('/api/auth/logout', headers=self.headers(first))
+        self.assertEqual(out.status_code, 200, out.get_json())
+
+        dead = self.client.get('/api/auth/me', headers=self.headers(first))
+        self.assertEqual(dead.status_code, 401)
+        # The session cannot be refreshed once revoked.
+        dead_refresh = self.client.post('/api/auth/refresh', headers=self.headers(first))
+        self.assertEqual(dead_refresh.status_code, 401)
+        # A second session of the same account survives the first one's logout.
+        alive = self.client.get('/api/auth/me', headers=self.headers(second))
+        self.assertEqual(alive.status_code, 200)
+
+    def test_password_change_kills_user_sessions_and_refresh(self):
+        uid = self._employee('pw@x.test')
+        token = auth.create_token(
+            self.tenant_id, 'pw@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
+
+        db.update_user(uid, password_hash=auth.hash_password('NewPass12345'))
+
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 401)
+        self.assertEqual(
+            self.client.post('/api/auth/refresh', headers=self.headers(token)).status_code, 401)
+        # A session minted after the change works.
+        fresh = auth.create_token(
+            self.tenant_id, 'pw@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(fresh)).status_code, 200)
+
+    def test_tenant_password_change_kills_tenant_direct_sessions(self):
+        token = auth.create_token(
+            self.tenant_id, 'co@x.test', user_name='شركة', user_role='company_admin')
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
+
+        db.update_tenant(self.tenant_id, password_hash=auth.hash_password('Changed12345'))
+
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 401)
+
+    def test_non_password_user_update_keeps_sessions_alive(self):
+        uid = self._employee('keep@x.test')
+        token = auth.create_token(
+            self.tenant_id, 'keep@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        db.update_user(uid, name='موظف معدل')
+        self.assertEqual(
+            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
+
     def _employee(self, email='emp@x.test', role='employee'):
         uid = db.create_user(
             self.tenant_id, 'موظف', email, self.application_module.hash_password('secret123'),
