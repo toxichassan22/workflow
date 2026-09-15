@@ -59,7 +59,7 @@
     async function renderNotificationsDropdown() {
       const list = document.getElementById('tenantNotifDropdownList');
       if (!list) return;
-      const data = await api('GET', '/api/notifications?limit=8').catch(() => null);
+      const data = await api('GET', '/api/notifications?limit=5').catch(() => null);
       if (!data || !data.success) {
         list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
         return;
@@ -81,7 +81,12 @@
         ' onclick="notificationOpen(\'' + omEscape(n.id) + '\')"' +
         ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + omEscape(n.id) + '\')">' +
         '<div class="tenant-notif-item-head"><strong>' + omEscape(n.title) + '</strong>' +
-        (unread ? '<span class="tenant-notif-dot" title="' + omEscape(WFT('notif.new', 'جديد')) + '"></span>' : '') + '</div>' +
+        '<span class="tenant-notif-head-side">' +
+        (unread ? '<span class="tenant-notif-dot" title="' + omEscape(WFT('notif.new', 'جديد')) + '"></span>' : '') +
+        '<button type="button" class="tenant-notif-del"' +
+        ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')"' +
+        ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
+        '</span></div>' +
         (n.body ? '<p>' + omEscape(n.body) + '</p>' : '') +
         '<div class="tenant-notif-meta">' + cat + '<span>' + omEscape(when) + '</span></div></div>';
     }
@@ -135,6 +140,26 @@
       if (document.getElementById('omNotificationsList')) omLoadNotifications();
     }
 
+    // One delete per row, on every surface the feed renders on. The server
+    // scopes the delete to rows this actor can see (broadcasts + their own).
+    async function notificationDelete(ev, id) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      const data = await api('POST', '/api/notifications/delete', { ids: [id] }).catch(() => null);
+      if (!data || !data.success) {
+        toast(WFT('notif.delete_failed', 'تعذر حذف الإشعار'));
+        return;
+      }
+      notifLastItems = (notifLastItems || []).filter(x => String(x.id) !== String(id));
+      refreshNotificationBadge();
+      if (notifDropdownOpen) renderNotificationsDropdown();
+      if (document.getElementById('tenantNotificationsPage')
+          && document.getElementById('tenantNotificationsPage').classList.contains('active')) {
+        renderNotificationsPage();
+      }
+      if (document.getElementById('omNotificationsList')) omLoadNotifications();
+      if (document.getElementById('adminNotificationsList')) omLoadNotifications('adminNotificationsList');
+    }
+
     // ── Full notifications page ──────────────────────────────────────────
     async function openNotificationsPage() {
       closeNotificationsDropdown();
@@ -180,7 +205,12 @@
         '<span class="tenant-notif-cat">' + omEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
         (n.body ? ' | <span>' + omEscape(n.body) + '</span>' : '') +
         ' | ' + omEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) +
-        '</div></div></div>').join('');
+        '</div></div>' +
+        '<div class="tenant-actions">' +
+        '<button type="button" class="btn small ghost"' +
+        ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')"' +
+        ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
+        '</div></div>').join('');
     }
 
     // ── Per-user category preferences ────────────────────────────────────

@@ -25193,6 +25193,19 @@ def api_mark_notifications_read():
     return jsonify({'success': True, 'updated': result})
 
 
+@app.route('/api/notifications/delete', methods=['POST'])
+@require_auth
+def api_delete_notifications():
+    data = request.json or {}
+    ids = data.get('ids')
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'error': 'Notification ids are required',
+                        'error_code': 'ids_required'}), 400
+    result = db.delete_notifications(
+        g.tenant_id, _notification_recipient_key(), ids[:200])
+    return jsonify({'success': True, 'deleted': result})
+
+
 # ── t41: approval tasks feed ─────────────────────────────────────────────────
 
 _APPROVAL_TASK_KIND_PERMISSION = {

@@ -10286,6 +10286,30 @@ def mark_notifications_read(tenant_id, user_id, notification_ids=None):
     return cursor.rowcount
 
 
+def delete_notifications(tenant_id, user_id, notification_ids):
+    """Remove feed rows the actor can see — broadcasts plus rows addressed to
+    them, never another user's mail. Same visibility scope as the read path."""
+    ids = [str(i) for i in (notification_ids or []) if i]
+    if not ids:
+        return 0
+    conn = get_db()
+    placeholders = ','.join('?' for _ in ids)
+    cursor = conn.execute(
+        f'DELETE FROM notifications WHERE tenant_id = ? '
+        f'AND (user_id IS NULL OR user_id = ?) AND id IN ({placeholders})',
+        [tenant_id, user_id, *ids],
+    )
+    # A queued email for a deleted notification must not still leave.
+    conn.execute(
+        "DELETE FROM email_outbox WHERE tenant_id = ? AND status = 'queued' "
+        'AND notification_id IS NOT NULL '
+        'AND notification_id NOT IN (SELECT id FROM notifications WHERE tenant_id = ?)',
+        (tenant_id, tenant_id),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 APPROVAL_TASK_KINDS = ('section_approval', 'generation_approval', 'final_approval', 'revision',
                        'recharge', 'support')
 

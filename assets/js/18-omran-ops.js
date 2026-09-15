@@ -260,7 +260,11 @@
         const when = (n.created_at || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card" style="' + (unread ? 'border-color:var(--p);' : 'opacity:.75;') + '">' +
           '<div><h3>' + omEscape(n.title) + (unread ? ' <span style="color:var(--p);font-size:11px">(جديد)</span>' : '') + '</h3>' +
-          '<div class="meta">' + (n.body ? '<span>' + omEscape(n.body) + '</span> | ' : '') + omEscape(when) + '</div></div></div>';
+          '<div class="meta">' + (n.body ? '<span>' + omEscape(n.body) + '</span> | ' : '') + omEscape(when) + '</div></div>' +
+          '<div class="tenant-actions">' +
+          '<button type="button" class="btn small ghost"' +
+          ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')">' +
+          omEscape(WFT('common.delete', 'حذف')) + '</button></div></div>';
       }).join('') +
       '<button class="btn ghost" onclick="omMarkAllRead()">تحديد الكل كمقروء</button>';
     }

@@ -1168,6 +1168,25 @@ class OmranApiTests(unittest.TestCase):
             json={'title': 'لآخر', 'userId': emp_id})
         self.assertEqual(foreign.status_code, 403)
 
+    def test_notification_delete_scopes_like_the_feed(self):
+        emp_id, emp_token = self._user_token('موظف', 'emp-del@x.test', 'employee')
+        own = db.create_notification(self.tenant_id, 'لي', user_id=emp_id)
+        other = db.create_notification(self.tenant_id, 'لزميله', user_id='someone-else')
+        empty = self.client.post(
+            '/api/notifications/delete', headers=self.headers(emp_token), json={})
+        self.assertEqual(empty.status_code, 400)
+        gone = self.client.post(
+            '/api/notifications/delete', headers=self.headers(emp_token),
+            json={'ids': [own['id'], other['id']]})
+        self.assertEqual(gone.status_code, 200)
+        self.assertEqual(gone.get_json()['deleted'], 1)
+        feed = self.client.get('/api/notifications', headers=self.headers(emp_token))
+        self.assertFalse(any(n['id'] == own['id']
+                             for n in feed.get_json()['notifications']))
+        row = db.get_db().execute(
+            'SELECT 1 AS x FROM notifications WHERE id = ?', (other['id'],)).fetchone()
+        self.assertIsNotNone(row)
+
     def test_event_task_assignment_notifies_assignee(self):
         assignee_id, assignee_token = self._user_token('مكلف', 'assignee@x.test', 'employee')
         created = self.client.post(
