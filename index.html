@@ -161,8 +161,11 @@
                 data-nav-page="tenantTeamPage" onclick="openTenantTeam()"
                 data-i18n="nav.dev_team">فريق التطوير</button>
               <button type="button" class="tenant-sidebar-link" data-permission="custom_fields"
-                data-nav-page="tenantFieldsPage" onclick="openTenantFields()"
-                data-i18n="nav.fields">الحقول</button>
+                data-nav-page="tenantFieldsPage" onclick="openTenantFields()">
+                <span data-i18n="nav.fields">الحقول</span>
+                <span class="section-status-badge draft" style="margin-inline-start:auto"
+                  data-i18n="status.under_construction">تحت الإنشاء</span>
+              </button>
               <button type="button" class="tenant-sidebar-link" data-permission="manage_users"
                 data-nav-page="tenantUsersPage" onclick="openTenantUsers()"
                 data-i18n="nav.staff">الموظفون</button>
@@ -500,7 +503,9 @@
         <div>
           <h2>الحقول المخصصة للمشاريع</h2>
         </div>
+        <span class="section-status-badge draft" data-i18n="status.under_construction">تحت الإنشاء</span>
       </div>
+      <div id="tenantFieldsWorkbench" hidden>
       <div id="tenantFieldsList" style="margin-bottom: 20px;"></div>
 
       <!-- Custom Sections Manager -->
@@ -601,6 +606,7 @@
             التعديل</button>
           <button class="btn ghost" onclick="clearNewFieldForm()">تفريغ</button>
         </div>
+      </div>
       </div>
     </section>
 

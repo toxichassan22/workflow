@@ -363,8 +363,11 @@
     }
 
     // Custom fields
+    const TENANT_FIELDS_PAGE_WIP = true;
+
     async function openTenantFields() {
       showTenantPage('tenantFieldsPage');
+      if (TENANT_FIELDS_PAGE_WIP) return;
       const sectionsData = await api('GET', '/api/field-sections');
       tenantFieldSections = sectionsData.available || [];
       tenantAllowedFieldSections = sectionsData.allowed || {};
