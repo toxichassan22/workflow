@@ -4582,12 +4582,62 @@
       flex: 1;
       display: flex;
       align-items: center;
+      position: relative;
     }
 
     .admin-chart svg {
       display: block;
       width: 100%;
       height: auto;
+    }
+
+    .admin-chart-tip {
+      position: absolute;
+      top: 4px;
+      transform: translateX(-50%);
+      background: var(--surface, #fff);
+      border: 1px solid var(--border, #d8e0ea);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 11px;
+      box-shadow: 0 8px 20px rgba(18, 45, 75, .14);
+      pointer-events: none;
+      z-index: 5;
+      min-width: 110px;
+    }
+
+    .admin-chart-tip .tip-title {
+      font-weight: 800;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .admin-chart-tip .tip-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink-muted);
+      margin-top: 2px;
+      white-space: nowrap;
+    }
+
+    .admin-chart-tip .tip-row strong {
+      color: var(--ink);
+      margin-inline-start: auto;
+      padding-inline-start: 8px;
+    }
+
+    .admin-chart-guide {
+      stroke: var(--ink-muted);
+      stroke-width: 1;
+      stroke-dasharray: 3 3;
+      pointer-events: none;
+    }
+
+    .admin-chart-hover-dot {
+      stroke: var(--surface, #fff);
+      stroke-width: 2;
+      pointer-events: none;
     }
 
     .admin-chart-grid {
@@ -4670,6 +4720,22 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
+    }
+
+    .admin-donut-seg {
+      cursor: pointer;
+      transition: stroke-width .15s ease;
+    }
+
+    .admin-donut-legend .admin-legend-item {
+      cursor: pointer;
+      border-radius: 6px;
+      padding: 2px 6px;
+      margin: -2px -6px;
+    }
+
+    .admin-donut-legend .admin-legend-item:hover {
+      background: var(--surface-soft, #eef4f8);
     }
 
     .admin-action-card {

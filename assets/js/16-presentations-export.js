@@ -1091,6 +1091,7 @@
         );
         const tenantsData = await api('GET', '/api/admin/tenants');
         sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
+        sagSyncPlanFilter();
         renderSagTenants(sagAllTenants);
       } finally {
         submit.disabled = false;
@@ -1218,6 +1219,7 @@
         svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
       });
       series.forEach(s => {
+        const fmt = s.fmt || sagFmtNum;
         const pts = s.values.map((v, i) => [x(i), y(v)]);
         const line = sagSmoothPath(pts);
         const area = line + ' L' + x(n - 1) + ' ' + (padT + innerH) + ' L' + x(0) + ' ' + (padT + innerH) + ' Z';
@@ -1225,25 +1227,89 @@
           '<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2.4" stroke-linecap="round"/>';
         pts.forEach((p, i) => {
           svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2" fill="' + s.color + '">' +
-            '<title>' + s.name + ': ' + sagFmtNum(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
+            '<title>' + s.name + ': ' + fmt(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
         });
       });
-      return svg + '</svg>';
+      return { svg: svg + '</svg>', geom: { W, H, padL, padR, padT, padB, top, n } };
+    }
+
+    function sagBindChartTooltip(container, labels, series, geom) {
+      const svg = container.querySelector('svg');
+      if (!svg || !geom.n) return;
+      const NS = 'http://www.w3.org/2000/svg';
+      const innerW = geom.W - geom.padL - geom.padR;
+      const innerH = geom.H - geom.padT - geom.padB;
+      const xFor = i => geom.padL + (geom.n === 1 ? innerW / 2 : i * innerW / (geom.n - 1));
+      const yFor = v => geom.padT + innerH - (v / geom.top) * innerH;
+      const guide = document.createElementNS(NS, 'line');
+      guide.setAttribute('class', 'admin-chart-guide');
+      guide.setAttribute('x1', '0');
+      guide.setAttribute('x2', '0');
+      guide.setAttribute('y1', String(geom.padT));
+      guide.setAttribute('y2', String(geom.H - geom.padB));
+      guide.style.display = 'none';
+      svg.appendChild(guide);
+      const dots = series.map(s => {
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('r', '4.5');
+        c.setAttribute('fill', s.color);
+        c.setAttribute('class', 'admin-chart-hover-dot');
+        c.style.display = 'none';
+        svg.appendChild(c);
+        return c;
+      });
+      const tip = document.createElement('div');
+      tip.className = 'admin-chart-tip';
+      tip.style.display = 'none';
+      container.appendChild(tip);
+      svg.addEventListener('mousemove', (ev) => {
+        const rect = svg.getBoundingClientRect();
+        if (!rect.width) return;
+        const vbX = (ev.clientX - rect.left) * (geom.W / rect.width);
+        const span = innerW / Math.max(1, geom.n - 1);
+        let i = Math.round((vbX - geom.padL) / span);
+        i = Math.max(0, Math.min(geom.n - 1, i));
+        const px = xFor(i);
+        guide.setAttribute('x1', px.toFixed(1));
+        guide.setAttribute('x2', px.toFixed(1));
+        guide.style.display = '';
+        series.forEach((s, si) => {
+          dots[si].setAttribute('cx', px.toFixed(1));
+          dots[si].setAttribute('cy', yFor(s.values[i] || 0).toFixed(1));
+          dots[si].style.display = '';
+        });
+        tip.innerHTML = '<div class="tip-title">' + escapeHtml(sagMonthLabel(labels[i])) + '</div>' +
+          series.map(s =>
+            '<div class="tip-row"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' +
+            '<span>' + s.name + '</span><strong>' + escapeHtml(String((s.fmt || sagFmtNum)(s.values[i] || 0))) + '</strong></div>'
+          ).join('');
+        tip.style.display = 'block';
+        const cRect = container.getBoundingClientRect();
+        const half = tip.offsetWidth / 2;
+        tip.style.left = Math.max(half + 4, Math.min(cRect.width - half - 4, ev.clientX - cRect.left)) + 'px';
+      });
+      svg.addEventListener('mouseleave', () => {
+        guide.style.display = 'none';
+        dots.forEach(c => { c.style.display = 'none'; });
+        tip.style.display = 'none';
+      });
     }
 
     function sagDonut(segments, centerLabel) {
       const r = 56, C = 2 * Math.PI * r, size = 150;
       const total = segments.reduce((a, s) => a + (s.value || 0), 0);
+      const go = s => s.key ? ' onclick="sagGoToCompaniesByPlan(\'' + encodeURIComponent(String(s.key)) + '\')"' : '';
       let off = 0, rings = '';
       segments.forEach(s => {
         const len = total ? (s.value / total) * C : 0;
-        rings += '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="20" ' +
-          'stroke-dasharray="' + len.toFixed(1) + ' ' + (C - len).toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')">' +
+        rings += '<circle class="admin-donut-seg" cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="20" ' +
+          'stroke-dasharray="' + len.toFixed(1) + ' ' + (C - len).toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')"' + go(s) +
+          ' onmouseenter="this.setAttribute(\'stroke-width\',\'26\')" onmouseleave="this.setAttribute(\'stroke-width\',\'20\')">' +
           '<title>' + s.label + ': ' + sagFmtNum(s.value) + '</title></circle>';
         off += len;
       });
       const legend = segments.map(s =>
-        '<div class="admin-legend-item"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' +
+        '<div class="admin-legend-item"' + go(s) + '><span class="admin-legend-dot" style="background:' + s.color + '"></span>' +
         '<span>' + s.label + '</span><strong>' + sagFmtNum(s.value) + '</strong></div>'
       ).join('');
       return '<div class="admin-donut-chart"><svg viewBox="0 0 ' + size + ' ' + size + '" role="img">' +
@@ -1258,6 +1324,40 @@
       el.innerHTML = series.map(s =>
         '<span class="admin-legend-item"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' + s.name + '</span>'
       ).join('');
+    }
+
+    const SAG_PLAN_COLORS = ['var(--chart-1)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-2)', 'var(--chart-5)', '#8b5cf6', '#0ea5e9', '#f59e0b'];
+    const SAG_PLAN_ORDER = ['free', 'pro', 'enterprise'];
+
+    function sagSortedPlans(plans) {
+      return plans.slice().sort((a, b) => {
+        const ia = SAG_PLAN_ORDER.indexOf(a), ib = SAG_PLAN_ORDER.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || String(a).localeCompare(String(b));
+      });
+    }
+
+    function sagPlanLabel(plan) {
+      const known = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
+      if (known[plan]) return known[plan];
+      return String(plan || 'free').replace(/[-_]+/g, ' ');
+    }
+
+    async function sagGoToCompaniesByPlan(plan) {
+      await openTenantCompanies();
+      const sel = document.getElementById('sagFilterPlan');
+      if (!sel) return;
+      sel.value = decodeURIComponent(plan);
+      filterSagTenants();
+    }
+
+    function sagSyncPlanFilter() {
+      const sel = document.getElementById('sagFilterPlan');
+      if (!sel) return;
+      const current = sel.value;
+      const plans = sagSortedPlans([...new Set(sagAllTenants.map(t => t.plan || 'free'))]);
+      sel.innerHTML = '<option value="">' + WFT('admin.filter_all_plans', 'كل الخطط') + '</option>' +
+        plans.map(p => '<option value="' + escapeHtml(p) + '">' + escapeHtml(sagPlanLabel(p)) + '</option>').join('');
+      if (plans.indexOf(current) !== -1) sel.value = current;
     }
 
     function renderAdminDashboard(overview) {
@@ -1291,10 +1391,12 @@
       const activityEl = document.getElementById('sagActivityChart');
       if (activityEl && labels.length) {
         const series = [
-          { name: WFT('admin.legend_presentations', 'عروض مولدة'), values: trends.presentations || [], color: 'var(--chart-1)' },
-          { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)' },
+          { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
+          { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)', fmt: sagFmtNum },
         ];
-        activityEl.innerHTML = sagLineChart(labels, series);
+        const chart = sagLineChart(labels, series);
+        activityEl.innerHTML = chart.svg;
+        sagBindChartTooltip(activityEl, labels, series, chart.geom);
         sagLegend(document.getElementById('sagActivityLegend'), series);
       }
 
@@ -1302,11 +1404,13 @@
       if (donutEl) {
         const planCounts = {};
         sagAllTenants.filter(t => !t.isAdmin).forEach(t => { const p = t.plan || 'free'; planCounts[p] = (planCounts[p] || 0) + 1; });
-        donutEl.innerHTML = sagDonut([
-          { label: 'Free', value: planCounts.free || 0, color: 'var(--chart-1)' },
-          { label: 'Pro', value: planCounts.pro || 0, color: 'var(--chart-3)' },
-          { label: 'Enterprise', value: planCounts.enterprise || 0, color: 'var(--chart-4)' },
-        ], WFT('admin.donut_companies', 'شركة'));
+        const plans = sagSortedPlans(Object.keys(planCounts));
+        donutEl.innerHTML = sagDonut(plans.map((p, i) => ({
+          key: p,
+          label: sagPlanLabel(p),
+          value: planCounts[p],
+          color: SAG_PLAN_COLORS[i % SAG_PLAN_COLORS.length]
+        })), WFT('admin.donut_companies', 'شركة'));
       }
 
       const ticketEl = document.getElementById('sagTicketBars');
@@ -1426,6 +1530,7 @@
       showInlineLoader(list, 'جاري التحميل...');
       const tenantsData = await api('GET', '/api/admin/tenants');
       sagAllTenants = (tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
+      sagSyncPlanFilter();
       renderSagTenants(sagAllTenants);
     }
 
@@ -1495,6 +1600,7 @@
         }
         const tenantsData = await api('GET', '/api/admin/tenants');
         sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
+        sagSyncPlanFilter();
         renderSagTenants(sagAllTenants);
       } finally {
         if (btn) btn.disabled = false;
