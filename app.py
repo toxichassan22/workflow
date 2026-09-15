@@ -24512,6 +24512,7 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'task_not_open': 'المهمة مغلقة بالفعل',
     'key_and_label_required': 'المفتاح والتسمية العربية مطلوبان',
     'package_name_required': 'اختر الباقة المطلوب شراؤها',
+    'reference_or_receipt_required': 'رقم الحوالة أو إيصال التحويل مطلوب',
     'stamp_failed': 'تعذر ختم الملف',
     'nothing_to_reserve': 'لا توجد نقاط لحجزها',
     'reservation_not_reserved': 'تم تسوية الحجز مسبقًا',
@@ -25519,9 +25520,9 @@ def api_admin_list_recharge_requests():
 @app.route('/api/billing/packages', methods=['GET'])
 @require_auth
 def api_billing_packages():
-    """t33: the purchase screen lists the catalog, never hardcoded prices."""
-    packages = [p for p in db.list_billing_packages(active_only=True)
-                if not p.get('is_custom')]
+    """t33: the purchase screen lists every active package the super admin
+    manages, never hardcoded prices."""
+    packages = db.list_billing_packages(active_only=True)
     return jsonify({'success': True, 'packages': packages, 'taxRate': db.TAX_RATE_SAR})
 
 

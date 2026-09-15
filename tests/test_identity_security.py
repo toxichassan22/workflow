@@ -598,7 +598,7 @@ class IdentityApiTests(unittest.TestCase):
         db.set_user_permission(uid, 'billing', True)
         allowed = self.client.post('/api/recharge-requests', headers=self.headers(emp_token),
                                    json={'packageName': 'باقة نمو', 'amountUsd': 100,
-                                         'priceSar': 375})
+                                         'priceSar': 375, 'referenceNumber': 'TRX-SEC-1'})
         self.assertEqual(allowed.status_code, 200, allowed.get_json())
 
 

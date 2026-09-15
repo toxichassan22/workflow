@@ -10603,9 +10603,13 @@ def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=Non
 
     When a ``package_id`` is supplied the amount and price come from the
     catalog row, not the client; a bank-transfer reference may only back one
-    request so the same receipt cannot be submitted twice.
+    request so the same receipt cannot be submitted twice. Every request must
+    carry proof of the transfer: the bank reference number or an uploaded
+    receipt (either one suffices).
     """
     transfer_reference = str(transfer_reference or '').strip() or None
+    if not transfer_reference and not str(receipt_file_id or '').strip():
+        return {'error': 'reference_or_receipt_required'}
     conn = get_db()
     if transfer_reference:
         duplicate = conn.execute(

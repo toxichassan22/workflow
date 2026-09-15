@@ -437,7 +437,7 @@ class OmranDbTests(unittest.TestCase):
     def test_recharge_request_decision_credits_ledger_once(self):
         row = db.create_recharge_request(
             'tenant-1', 'باقة نمو', amount_usd=100, requested_by='user-1',
-            requested_by_name='رئيس القسم')
+            requested_by_name='رئيس القسم', transfer_reference='TRX-LEDGER-1')
         self.assertEqual(row['status'], 'pending')
         decided = db.decide_recharge_request(
             'tenant-1', row['id'], 'approved', 'admin-1', 'المدير')
@@ -447,7 +447,7 @@ class OmranDbTests(unittest.TestCase):
         self.assertGreaterEqual(balance, 200)
         rejected = db.create_recharge_request(
             'tenant-1', 'باقة ثانية', amount_usd=50, requested_by='user-1',
-            requested_by_name='رئيس القسم')
+            requested_by_name='رئيس القسم', transfer_reference='TRX-LEDGER-2')
         decided = db.decide_recharge_request(
             'tenant-1', rejected['id'], 'rejected', 'admin-1', 'المدير')
         self.assertEqual(decided['status'], 'rejected')
@@ -527,10 +527,25 @@ class OmranDbTests(unittest.TestCase):
         package = db.create_billing_package('باقة اختبار', credit_usd=75, price_sar=281.25)
         row = db.create_recharge_request(
             'tenant-1', 'client-supplied-name', amount_usd=9999, price_sar=1,
-            package_id=package['id'], requested_by='user-1')
+            package_id=package['id'], requested_by='user-1',
+            transfer_reference='TRX-PKG-1')
         self.assertEqual(row['amount_usd'], 75)
         self.assertEqual(row['price_sar'], 281.25)
         self.assertEqual(row['package_name'], 'باقة اختبار')
+
+    def test_recharge_requires_transfer_reference_or_receipt(self):
+        missing = db.create_recharge_request(
+            'tenant-1', 'باقة نمو', amount_usd=100, requested_by='user-1')
+        self.assertEqual(missing.get('error'), 'reference_or_receipt_required')
+        by_receipt = db.create_recharge_request(
+            'tenant-1', 'باقة نمو', amount_usd=100,
+            receipt_file_id='file-1', requested_by='user-1')
+        self.assertEqual(by_receipt['status'], 'pending')
+        self.assertEqual(by_receipt['receipt_file_id'], 'file-1')
+        by_ref = db.create_recharge_request(
+            'tenant-1', 'باقة نمو', amount_usd=100,
+            transfer_reference='TRX-NEW', requested_by='user-1')
+        self.assertEqual(by_ref['status'], 'pending')
 
     # ── t30/t32: points overview and ledger adjustments ──────────────────
 
@@ -1072,7 +1087,8 @@ class OmranApiTests(unittest.TestCase):
     def test_recharge_request_tenant_scoped(self):
         created = self.client.post(
             '/api/recharge-requests', headers=self.headers(self.token),
-            json={'packageName': 'باقة نمو', 'amountUsd': 100})
+            json={'packageName': 'باقة نمو', 'amountUsd': 100,
+                  'referenceNumber': 'TRX-TENANT-1'})
         self.assertEqual(created.status_code, 200)
         listed = self.client.get('/api/recharge-requests', headers=self.headers(self.token))
         self.assertEqual(listed.status_code, 200)

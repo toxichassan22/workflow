@@ -453,7 +453,12 @@
       if (!select) return;
       const data = await api('GET', '/api/billing/packages').catch(() => null);
       omRechargePackages = (data && data.success && data.packages) || [];
-      if (!omRechargePackages.length) return;
+      if (!omRechargePackages.length) {
+        select.innerHTML = '<option value="" disabled selected>' +
+          omEscape(WFT('recharge.no_packages', 'لا توجد باقات متاحة')) + '</option>';
+        omShowPackageInfo();
+        return;
+      }
       select.innerHTML = omRechargePackages.map(p =>
         '<option value="' + omEscape(p.id) + '">' + omEscape(p.name) +
         ' (' + (p.credit_usd || 0) + ' <span>دولار</span>' +
@@ -492,8 +497,18 @@
     async function omCreateRechargeRequest() {
       const packageId = (document.getElementById('omRechargePackage') || {}).value || '';
       const ref = (document.getElementById('omRechargeRef') || {}).value || '';
+      const receiptInput = document.getElementById('omRechargeReceipt');
+      const hasReceipt = !!(receiptInput && receiptInput.files && receiptInput.files[0]);
       const errBox = document.getElementById('omRechargeError');
       if (errBox) errBox.textContent = '';
+      if (!packageId) {
+        if (errBox) errBox.textContent = WFT('recharge.package_required', 'اختر الباقة المطلوب شراؤها');
+        return;
+      }
+      if (!ref.trim() && !hasReceipt) {
+        if (errBox) errBox.textContent = WFT('recharge.reference_or_receipt_required', 'رقم الحوالة أو إيصال التحويل مطلوب');
+        return;
+      }
       const receipt = await omUploadRechargeReceipt();
       if (receipt && receipt.error) {
         if (errBox) errBox.textContent = receipt.error;
@@ -828,7 +843,7 @@
         name: document.getElementById('adminPackageName').value.trim(),
         priceSar: Number(document.getElementById('adminPackagePrice').value),
         creditUsd: Number(document.getElementById('adminPackageCredit').value),
-        isCustom: true
+        isCustom: false
       }).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر حفظ الباقة'); return; }
       document.getElementById('adminPackageName').value = '';
