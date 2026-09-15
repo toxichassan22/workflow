@@ -660,6 +660,50 @@ class IdentityApiTests(unittest.TestCase):
             headers=self.headers(self.admin_user_token), json={})
         self.assertEqual(resend.status_code, 409)
 
+    # ── Cross-tenant reads ───────────────────────────────────────────────
+
+    def test_presentation_approval_status_is_tenant_and_scope_guarded(self):
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.admin_user_id, {'project_name': 'ملف'},
+            {'basic': 'draft'}, 'draft', draft_id='appr-draft')
+        other_draft = db.save_project_draft(
+            self.tenant_id, self.admin_user_id, {'project_name': 'آخر'},
+            {'basic': 'draft'}, 'draft', draft_id='appr-draft-2')
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO presentations (id, tenant_id, draft_id, title, status) "
+            "VALUES ('pres-appr', ?, ?, 'عرض', 'pending_approval')",
+            (self.tenant_id, draft_id))
+        conn.commit()
+        approval_id = db.create_approval(
+            'pres-appr', self.tenant_id, self.admin_user_id, 'مدير الشركة')
+
+        own = self.client.get('/api/presentations/pres-appr/approval-status',
+                              headers=self.headers(self.admin_user_token))
+        self.assertEqual(own.status_code, 200, own.get_json())
+        self.assertEqual(own.get_json()['approval']['id'], approval_id)
+
+        # A session from another company must not read this approval record.
+        other_tenant = db.create_tenant('شركة أخرى', 'other@x.test', 'hash', 'other')
+        other_uid = db.create_user(other_tenant, 'مدير', 'other-admin@x.test',
+                                   'hash', role='company_admin')
+        other_token = auth.create_token(other_tenant, 'other-admin@x.test', user_id=other_uid,
+                                        user_name='مدير', user_role='company_admin')
+        denied = self.client.get('/api/presentations/pres-appr/approval-status',
+                                 headers=self.headers(other_token))
+        self.assertEqual(denied.status_code, 404)
+        self.assertIsNone(denied.get_json().get('approval'))
+
+        # A project-scoped member of the same tenant is refused for a file
+        # outside their scope, exactly like the presentation GET route.
+        scoped_uid = self._employee('scoped-appr@x.test')
+        db.set_user_project_scope(self.tenant_id, scoped_uid, [other_draft])
+        scoped_token = auth.create_token(self.tenant_id, 'scoped-appr@x.test', user_id=scoped_uid,
+                                         user_name='موظف', user_role='employee')
+        scoped = self.client.get('/api/presentations/pres-appr/approval-status',
+                                 headers=self.headers(scoped_token))
+        self.assertEqual(scoped.status_code, 404)
+
     def test_billing_permission_gates_recharge(self):
         uid = self._employee('nobill@x.test')
         emp_token = auth.create_token(self.tenant_id, 'nobill@x.test', user_id=uid,

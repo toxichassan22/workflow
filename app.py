@@ -23970,7 +23970,7 @@ def api_request_approval(pres_id):
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
-    existing = db.get_approval_status(pres_id)
+    existing = db.get_approval_status(pres_id, tenant_id=g.tenant_id)
     if existing and existing['status'] == 'pending':
         return jsonify({'error': 'Approval already requested'}), 400
     approval_id = db.create_approval(pres_id, g.tenant_id, g.user_id, g.user_name or 'Unknown')
@@ -24011,7 +24011,14 @@ def api_review_approval(approval_id):
 @require_auth
 def api_approval_status(pres_id):
     """Get approval status for a presentation."""
-    approval = db.get_approval_status(pres_id)
+    pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not pres:
+        return jsonify({'error': 'Presentation not found'}), 404
+    if pres.get('draft_id'):
+        accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+        if accessible is not None and pres['draft_id'] not in accessible:
+            return jsonify({'error': 'Presentation not found'}), 404
+    approval = db.get_approval_status(pres_id, tenant_id=g.tenant_id)
     return jsonify({'success': True, 'approval': approval})
 
 

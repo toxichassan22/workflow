@@ -4149,13 +4149,19 @@ def review_approval(approval_id, tenant_id, status, reviewed_by, reviewed_by_nam
     return True
 
 
-def get_approval_status(presentation_id):
+def get_approval_status(presentation_id, tenant_id=None):
     """Get the latest approval status for a presentation."""
     conn = get_db()
-    row = conn.execute(
-        'SELECT * FROM presentation_approvals WHERE presentation_id = ? ORDER BY created_at DESC LIMIT 1',
-        (presentation_id,)
-    ).fetchone()
+    if tenant_id:
+        row = conn.execute(
+            'SELECT * FROM presentation_approvals WHERE presentation_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 1',
+            (presentation_id, tenant_id)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            'SELECT * FROM presentation_approvals WHERE presentation_id = ? ORDER BY created_at DESC LIMIT 1',
+            (presentation_id,)
+        ).fetchone()
     return dict(row) if row else None
 
 
