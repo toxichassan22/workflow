@@ -349,11 +349,7 @@ class Mission5DbTests(unittest.TestCase):
     def test_csv_reports_emit_utf8_bom_and_rows(self):
         db.record_ledger_credit('tenant-1', 50, note='شحن')
         for name, fn in (('ledger', db.export_ledger_csv),
-                         ('approvals', db.export_approvals_csv),
-                         ('downloads', db.export_downloads_csv),
-                         ('tickets', db.export_tickets_csv),
-                         ('user-activity', db.export_user_activity_csv),
-                         ('files', db.export_files_csv)):
+                         ('tickets', db.export_tickets_csv)):
             body = fn()
             self.assertIsInstance(body, str)
             self.assertTrue(body.startswith('﻿'), name)

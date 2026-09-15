@@ -25760,11 +25760,7 @@ def api_company_dashboard():
 
 _ADMIN_REPORTS = {
     'ledger': db.export_ledger_csv,
-    'approvals': db.export_approvals_csv,
-    'downloads': db.export_downloads_csv,
     'tickets': db.export_tickets_csv,
-    'user-activity': db.export_user_activity_csv,
-    'files': db.export_files_csv,
 }
 
 
@@ -25791,7 +25787,7 @@ def api_admin_export_report(report_name):
 @require_permission('company_settings')
 def api_company_export_report(report_name):
     """t55: the company admin exports only their own registers."""
-    if report_name not in ('ledger', 'approvals', 'downloads', 'tickets', 'files'):
+    if report_name not in ('ledger', 'tickets'):
         return jsonify({'error': 'Unknown report'}), 404
     exporter = _ADMIN_REPORTS[report_name]
     body = exporter(

@@ -1379,11 +1379,7 @@
       if (!el) return;
       const reports = [
         { key: 'ledger', label: WFT('admin.report_ledger', 'حركات الرصيد') },
-        { key: 'approvals', label: WFT('admin.report_approvals', 'قرارات الاعتماد') },
-        { key: 'downloads', label: WFT('admin.report_downloads', 'مكتبة التنزيلات') },
         { key: 'tickets', label: WFT('admin.report_tickets', 'تذاكر الدعم') },
-        { key: 'user-activity', label: WFT('admin.report_user_activity', 'نشاط المستخدمين') },
-        { key: 'files', label: WFT('admin.report_files', 'سجل الملفات') },
       ];
       el.innerHTML = reports.map(r =>
         '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
