@@ -172,6 +172,50 @@ class WorkflowGateDbTests(unittest.TestCase):
         draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
         self.assertNotEqual(draft['status'], 'generating')
 
+    def test_job_idempotency_key_stays_inside_its_tenant_and_approval(self):
+        """ISS-013: a key names one retried request — (tenant, approval, key).
+        The old global index let one company's key return another's job."""
+        conn = db.get_db()
+        # Legacy installs carry the global index; re-running schema drops it.
+        conn.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS ux_generation_jobs_idem '
+            'ON generation_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL')
+        conn.commit()
+        db.init_db()
+        self.assertIsNone(conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'ux_generation_jobs_idem'").fetchone())
+        self.assertTrue(conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'ux_generation_jobs_tenant_idem'").fetchone())
+
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, subdomain, email, password_hash, plan, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1)",
+            ('tenant-2', 'Other Co', 'other', 'other@example.test', 'hash', 'free'))
+        conn.commit()
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One')
+        db.decide_generation_approval('tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        job = db.create_generation_job(
+            'tenant-1', approval_id=approval['id'], draft_id='draft-1',
+            idempotency_key='shared-key')
+
+        # The same key at another company is its own job — never a leak of ours.
+        foreign = db.create_generation_job(
+            'tenant-2', draft_id='draft-9', idempotency_key='shared-key')
+        self.assertNotEqual(foreign['id'], job['id'])
+        self.assertEqual(foreign['tenant_id'], 'tenant-2')
+        # Same company, same key, a different approval: a different request that
+        # gets its own run instead of being handed the first approval's job.
+        other_scope = db.create_generation_job(
+            'tenant-1', draft_id='draft-1', idempotency_key='shared-key')
+        self.assertNotEqual(other_scope['id'], job['id'])
+        self.assertIsNone(other_scope['approval_id'])
+        # Only the true replay — same tenant, same approval, same key — dedupes.
+        replay = db.create_generation_job(
+            'tenant-1', approval_id=approval['id'], draft_id='draft-1',
+            idempotency_key='shared-key')
+        self.assertEqual(replay['id'], job['id'])
+
     def test_completed_job_marks_finished_and_settles_once(self):
         estimate = self._estimate(points=25000)
         approval = db.create_generation_approval(

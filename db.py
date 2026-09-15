@@ -8528,7 +8528,14 @@ def _create_platform_tables(conn):
         started_at TEXT,
         finished_at TEXT
     )''')
-    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_generation_jobs_idem ON generation_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL')
+    # Idempotent replay is scoped to the (tenant, approval) pair that owns the
+    # request: the old global index let one company's key return — or block —
+    # another company's job.
+    try:
+        conn.execute('DROP INDEX IF EXISTS ux_generation_jobs_idem')
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_generation_jobs_tenant_idem ON generation_jobs(tenant_id, COALESCE(approval_id, ''), idempotency_key) WHERE idempotency_key IS NOT NULL")
+    except Exception as exc:
+        print(f'[DB] unique index skipped (ux_generation_jobs_tenant_idem): {exc}')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_generation_jobs_tenant ON generation_jobs(tenant_id, status, created_at DESC)')
 
     # t60-05: document versions for every produced file, tied to the approval
@@ -13197,6 +13204,18 @@ def list_support_ticket_attachments(ticket_id):
 GENERATION_JOB_STATUSES = ('queued', 'running', 'completed', 'failed', 'cancelled')
 
 
+def _generation_job_by_idempotency(conn, tenant_id, approval_id, idempotency_key):
+    """The replay lookup lives at (tenant, approval, key) scope: the key names
+    one client's retried request, so a match outside this approval — or outside
+    this company entirely — is a different request and must not return the row."""
+    return conn.execute(
+        "SELECT * FROM generation_jobs WHERE tenant_id = ? "
+        "AND COALESCE(approval_id, '') = COALESCE(?, '') AND idempotency_key = ?",
+        (str(tenant_id), str(approval_id) if approval_id is not None else None,
+         str(idempotency_key)),
+    ).fetchone()
+
+
 def create_generation_job(tenant_id, approval_id=None, draft_id=None, presentation_id=None,
                           model=None, template_version=None, schema_version=None,
                           input_snapshot=None, estimated_cost_usd=None, slides_total=None,
@@ -13209,25 +13228,30 @@ def create_generation_job(tenant_id, approval_id=None, draft_id=None, presentati
     """
     conn = get_db()
     if idempotency_key:
-        existing = conn.execute(
-            'SELECT * FROM generation_jobs WHERE idempotency_key = ?',
-            (str(idempotency_key),),
-        ).fetchone()
+        existing = _generation_job_by_idempotency(
+            conn, tenant_id, approval_id, idempotency_key)
         if existing:
             return dict(existing)
     job_id = str(uuid.uuid4())
-    conn.execute(
-        '''INSERT INTO generation_jobs
-           (id, tenant_id, approval_id, draft_id, presentation_id, status, model,
-            template_version, schema_version, input_snapshot_json, estimated_cost_usd,
-            slides_total, correlation_id, idempotency_key, created_by, created_by_name)
-           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (job_id, str(tenant_id), approval_id, draft_id, presentation_id, model,
-         template_version, schema_version,
-         json.dumps(input_snapshot, ensure_ascii=False) if input_snapshot is not None else None,
-         estimated_cost_usd, slides_total, correlation_id,
-         str(idempotency_key) if idempotency_key else None, created_by, created_by_name),
-    )
+    try:
+        conn.execute(
+            '''INSERT INTO generation_jobs
+               (id, tenant_id, approval_id, draft_id, presentation_id, status, model,
+                template_version, schema_version, input_snapshot_json, estimated_cost_usd,
+                slides_total, correlation_id, idempotency_key, created_by, created_by_name)
+               VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (job_id, str(tenant_id), approval_id, draft_id, presentation_id, model,
+             template_version, schema_version,
+             json.dumps(input_snapshot, ensure_ascii=False) if input_snapshot is not None else None,
+             estimated_cost_usd, slides_total, correlation_id,
+             str(idempotency_key) if idempotency_key else None, created_by, created_by_name),
+        )
+    except sqlite3.IntegrityError:
+        raced = (_generation_job_by_idempotency(conn, tenant_id, approval_id, idempotency_key)
+                 if idempotency_key else None)
+        if raced:
+            return dict(raced)
+        raise
     conn.commit()
     return dict(conn.execute('SELECT * FROM generation_jobs WHERE id = ?', (job_id,)).fetchone())
 

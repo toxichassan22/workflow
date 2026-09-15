@@ -24999,9 +24999,13 @@ def api_create_generation_job(approval_id):
         correlation_id=data.get('correlationId'),
     )
     try:
-        conn = db.get_db()
-        conn.execute('UPDATE generation_approvals SET job_id = ? WHERE id = ?', (job['id'], approval_id))
-        conn.commit()
+        # The link is only written when the returned job is this approval's own
+        # run — a replayed key can never point this approval at a foreign job.
+        if str(job.get('approval_id') or '') == str(approval_id):
+            conn = db.get_db()
+            conn.execute('UPDATE generation_approvals SET job_id = ? WHERE id = ? AND tenant_id = ?',
+                         (job['id'], approval_id, g.tenant_id))
+            conn.commit()
     except Exception:
         pass
     return jsonify({'success': True, 'job': job})
