@@ -67,99 +67,116 @@
   </div>
 
   <div id="tenantAppPage" class="tenant-app">
-    <div class="tenant-topbar">
-      <div class="tenant-brand">
-        <img id="tenantLogo" src="assets/logo.png" alt="logo">
+    <aside id="tenantSidebar" class="tenant-sidebar">
+      <div class="tenant-sidebar-brand">
+        <div class="tenant-brand">
+          <span class="tenant-brand-logo"><img id="tenantLogo" src="assets/logo.png" alt="logo"></span>
+          <div class="tenant-brand-copy">
+            <h1 id="tenantName">الشركة</h1>
+            <span id="tenantPlan">free</span>
+          </div>
+        </div>
+      </div>
+      <div class="tenant-sidebar-scroll">
+        <nav class="tenant-sidebar-nav" data-nav-role="superadmin" aria-label="إدارة المنصة" data-i18n-aria="chrome.platform">
+          <div class="tenant-nav-group">
+            <span class="tenant-nav-label" data-i18n="nav.platform">المنصة</span>
+            <button type="button" class="tenant-sidebar-link tenant-hidden" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPage" id="tenantAdminBtn" onclick="openTenantAdmin()"
+              data-i18n="nav.admin">لوحة المدير</button>
+            <button type="button" class="tenant-sidebar-link" data-nav-page="tenantOmranOpsPage"
+              onclick="openOmranOpsPage()" data-i18n="nav.operations">العمليات</button>
+          </div>
+        </nav>
+        <nav class="tenant-sidebar-nav" data-nav-role="tenant" aria-label="مساحة العمل" data-i18n-aria="chrome.workspace">
+          <div class="tenant-nav-group">
+            <span class="tenant-nav-label" data-i18n="nav.workspace">مساحة العمل</span>
+            <button type="button" class="tenant-sidebar-link" data-nav-page="tenantDashboardPage"
+              onclick="showTenantPage('tenantDashboardPage')" data-i18n="nav.dashboard">لوحة التحكم</button>
+            <button type="button" class="tenant-sidebar-link tenant-sidebar-action"
+              data-permission="create_presentation" data-nav-page="tenantProjectPage"
+              onclick="startTenantProject()" data-i18n="nav.new_proposal">عرض جديد</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="view_presentations"
+              data-nav-page="tenantPresentationsPage" onclick="openTenantPresentations()"
+              data-i18n="nav.projects">المشاريع</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="approvals"
+              data-nav-page="tenantApprovalsPage" onclick="openTenantApprovals()"
+              data-i18n="nav.approve_offers">تعميد العروض</button>
+            <button type="button" class="tenant-sidebar-link" data-nav-page="tenantOmranOpsPage"
+              onclick="openOmranOpsPage()" data-i18n="nav.operations">العمليات</button>
+          </div>
+          <div class="tenant-nav-group">
+            <span class="tenant-nav-label" data-i18n="nav.management">الإدارة</span>
+            <button type="button" class="tenant-sidebar-link" data-permission="company_settings"
+              data-nav-page="tenantSettingsPage" onclick="openTenantSettings()"
+              data-i18n="nav.company_settings">إعدادات الشركة</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="company_settings"
+              data-nav-page="tenantTeamPage" onclick="openTenantTeam()"
+              data-i18n="nav.dev_team">فريق التطوير</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="custom_fields"
+              data-nav-page="tenantFieldsPage" onclick="openTenantFields()"
+              data-i18n="nav.fields">الحقول</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="manage_users"
+              data-nav-page="tenantUsersPage" onclick="openTenantUsers()"
+              data-i18n="nav.staff">الموظفون</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="ai_rules"
+              data-nav-page="tenantAIRulesPage" onclick="openTenantAIRules()"
+              data-i18n="nav.ai_rules">قواعد AI</button>
+          </div>
+        </nav>
+      </div>
+      <div class="tenant-sidebar-account">
+        <span class="tenant-account-label" data-i18n="chrome.current_account">الحساب الحالي</span>
+        <span id="tenantUserInfo" class="tenant-user-name"></span>
+        <span id="tenantWorkspaceRole" class="tenant-user-role" data-i18n="role.employee">موظف</span>
+        <button type="button" class="tenant-sidebar-logout" onclick="tenantLogout()"
+          data-i18n="nav.logout">خروج</button>
+      </div>
+    </aside>
+    <div class="tenant-sidebar-backdrop" onclick="closeTenantSidebar()"></div>
+    <header class="tenant-topbar">
+      <div class="tenant-topbar-heading">
+        <button type="button" id="tenantMobileMenuBtn" class="tenant-mobile-nav-btn"
+          onclick="toggleTenantSidebar()" data-i18n="nav.menu">القائمة</button>
         <div>
-          <h1 id="tenantName">الشركة</h1>
-          <span id="tenantPlan">free</span>
+          <span id="tenantCurrentPageContext" class="tenant-page-context" data-i18n="chrome.workspace">مساحة العمل</span>
+          <h2 id="tenantCurrentPageTitle" data-i18n="page.dashboard">لوحة التحكم</h2>
         </div>
       </div>
       <div class="tenant-nav">
-        <span id="tenantUserInfo" class="tenant-hint"
-          style="background:#E8F4FA;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap"></span>
-        <div class="tenant-dropdown" style="position:relative">
-          <button class="btn ghost" onclick="toggleTenantDropdown(this)" data-i18n="nav.menu">القائمة</button>
-          <div class="tenant-dropdown-menu" style="min-width:200px">
-            <button class="btn ghost" data-permission="create_presentation"
-              onclick="startTenantProject(); closeTenantDropdown()" data-i18n="nav.new_proposal">عرض جديد</button>
-            <button class="btn ghost" data-permission="view_presentations"
-              onclick="openTenantPresentations(); closeTenantDropdown()" data-i18n="nav.projects">المشاريع</button>
-            <button class="btn ghost" data-permission="company_settings"
-              onclick="openTenantSettings(); closeTenantDropdown()" data-i18n="nav.company_settings">إعدادات الشركة</button>
-            <button class="btn ghost" data-permission="custom_fields"
-              onclick="openTenantFields(); closeTenantDropdown()" data-i18n="nav.fields">الحقول</button>
-            <button class="btn ghost" data-permission="company_settings"
-              onclick="openTenantTeam(); closeTenantDropdown()" data-i18n="nav.dev_team">فريق التطوير</button>
-            <button class="btn ghost" data-permission="manage_users"
-              onclick="openTenantUsers(); closeTenantDropdown()" data-i18n="nav.staff">الموظفون</button>
-            <button class="btn ghost" data-permission="ai_rules"
-              onclick="openTenantAIRules(); closeTenantDropdown()" data-i18n="nav.ai_rules">قواعد AI</button>
-            <button class="btn ghost" data-permission="approvals"
-              onclick="openTenantApprovals(); closeTenantDropdown()" data-i18n="nav.approve_offers">تعميد العروض</button>
-            <button class="btn ghost"
-              onclick="openOmranOpsPage(); closeTenantDropdown()" data-i18n="nav.operations">العمليات</button>
-            <button class="btn ghost tenant-hidden" data-permission="sag_admin_panel" id="tenantAdminBtn"
-              onclick="openTenantAdmin(); closeTenantDropdown()" data-i18n="nav.admin">لوحة المدير</button>
-          </div>
-        </div>
-        <button class="btn ghost" id="langToggleBtn" onclick="toggleAppLanguage()">English</button>
-        <button class="btn danger" onclick="tenantLogout()" data-i18n="nav.logout">خروج</button>
+        <button type="button" class="tenant-topbar-button" id="langToggleBtn" onclick="toggleAppLanguage()">English</button>
       </div>
-    </div>
+    </header>
 
     <!-- Dashboard -->
     <section id="tenantDashboardPage" class="tenant-page active">
-      <!-- U3: Onboarding guide for first-time users -->
-      <div id="onboardingGuide"
-        style="display:none;background:linear-gradient(135deg,#f0f7ff,#e8f4fa);border:1px solid #b3d4f0;border-radius:14px;padding:18px 20px;margin-bottom:20px;position:relative">
-        <button
-          onclick="document.getElementById('onboardingGuide').style.display='none';localStorage.setItem('onboardingSeen','1')"
-          style="position:absolute;top:10px;left:10px;background:none;border:none;font-size:18px;cursor:pointer;color:#888">×</button>
-        <h3 style="margin:0 0 6px;color:var(--p);font-size:16px">أهلاً بك في المنصة!</h3>
-        <p style="margin:0 0 12px;color:#555;font-size:13px;line-height:1.7">
-          هذا دليل سريع لبدء استخدام المنصة:
-        </p>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
-          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
-            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">1</div>
-            <strong style="font-size:13px">عرض تقديمي جديد</strong>
-            <p style="margin:4px 0 0;font-size:12px;color:#666">اضغط "عرض جديد" وأدخل بيانات مشروعك (أو استخدم البيانات
-              التجريبية)</p>
-          </div>
-          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
-            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">2</div>
-            <strong style="font-size:13px">تحليل الموقع والبيانات</strong>
-            <p style="margin:4px 0 0;font-size:12px;color:#666">اضغط تحليل الموقع لملء بيانات الطرق والمعالم والخرائط
-              تلقائيًا مع إمكانية تعديلها</p>
-          </div>
-          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
-            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">3</div>
-            <strong style="font-size:13px">توليد الصور والشرائح</strong>
-            <p style="margin:4px 0 0;font-size:12px;color:#666">توليد صورة الغلاف والمودبورد ثم الشرائح الكاملة</p>
-          </div>
-          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
-            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">4</div>
-            <strong style="font-size:13px">معاينة وتصدير</strong>
-            <p style="margin:4px 0 0;font-size:12px;color:#666">راجع الشرائح، عدّلها، ثم صدّرها كـ PDF أو PPTX</p>
-          </div>
+      <div class="tenant-page-heading tenant-dashboard-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="dashboard.summary">ملخص الأداء</span>
+          <h2 data-i18n="dashboard.overview">نظرة عامة</h2>
+        </div>
+        <button type="button" class="btn primary" data-permission="create_presentation"
+          onclick="startTenantProject()" data-i18n="nav.new_proposal">عرض جديد</button>
+      </div>
+      <div id="dashboardStats" class="tenant-dashboard-stats">
+        <div class="tenant-dash-card stat">
+          <h3 id="dashStatTotal">0</h3>
+          <p data-i18n="dashboard.total_presentations">إجمالي العروض</p>
+        </div>
+        <div class="tenant-dash-card stat tenant-admin-only">
+          <h3 id="dashStatPending">0</h3>
+          <p data-i18n="dashboard.pending_approvals">بانتظار التعميد</p>
         </div>
       </div>
-
-      <div id="dashboardStats" class="tenant-dashboard-stats"
-        style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
-        <div class="tenant-dash-card stat" style="cursor:default">
-          <h3 style="font-size:26px; margin:0 0 4px; color:var(--pd);" id="dashStatTotal">0</h3>
-          <p style="margin:0; font-size:13px;">إجمالي العروض</p>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="dashboard.recent">آخر العروض</h3>
+          <button type="button" class="btn small ghost" data-permission="view_presentations"
+            onclick="openTenantPresentations()" data-i18n="dashboard.view_projects">عرض المشاريع</button>
         </div>
-        <div class="tenant-dash-card stat tenant-admin-only" style="cursor:default">
-          <h3 style="font-size:26px; margin:0 0 4px; color:var(--pd);" id="dashStatPending">0</h3>
-          <p style="margin:0; font-size:13px;">بانتظار التعميد</p>
+        <div id="dashboardRecentList">
+          <p class="tenant-hint">جاري التحميل...</p>
         </div>
-      </div>
-      <h3 class="dash-section-title">آخر العروض</h3>
-      <div id="dashboardRecentList">
-        <p class="tenant-hint">جاري التحميل...</p>
       </div>
     </section>
 
@@ -170,7 +187,6 @@
         <div>
           <h2 style="margin:0">إعدادات الشركة والهوية البصرية</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
       <div id="settingsError" class="auth-error" style="display:none"></div>
       <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
@@ -345,7 +361,6 @@
         <div class="tenant-btns">
           <button class="btn primary" onclick="saveTenantSettings()">حفظ الإعدادات</button>
           <button class="btn ghost" onclick="applyTemplateToSettings()">تطبيق القالب</button>
-          <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
         </div>
       </div>
     </section>
@@ -357,7 +372,6 @@
         <div>
           <h2>فريق التطوير</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
@@ -390,7 +404,6 @@
         <div>
           <h2>الحقول المخصصة للمشاريع</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
       <div id="tenantFieldsList" style="margin-bottom: 20px;"></div>
 
@@ -758,9 +771,6 @@
         <div class="tenant-field"><button type="button" class="btn primary" onclick="openTenantPresentations(true)">تصفية</button></div>
       </div>
       <div id="tenantPresentationsList"></div>
-      <div class="tenant-btns">
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
-      </div>
     </section>
 
     <section id="tenantProjectPresentationsPage" class="tenant-page">
@@ -785,7 +795,6 @@
         <div>
           <h2 style="margin:0">إدارة الموظفين</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <div id="tenantUsersList" class="tenant-grid full" style="margin-bottom:20px"></div>
@@ -847,7 +856,6 @@
         <div>
           <h2>تدريب GLM عبر المحادثة</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
@@ -904,9 +912,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>قواعد الذكاء الاصطناعي</h2>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
         </div>
       </div>
 
@@ -975,7 +980,6 @@
         <div>
           <h2>تعميد العروض</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
       <div id="approvalsList"></div>
     </section>
@@ -990,7 +994,6 @@
         <div class="tenant-actions">
           <button class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
           <button class="btn ghost" onclick="sagEnsureAllKeys()" id="sagEnsureKeysBtn" data-i18n="admin.keys_issue">إصدار مفاتيح الشركات</button>
-          <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
         </div>
       </div>
 
@@ -1140,7 +1143,6 @@
         <div>
           <h2>العمليات</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <!-- Quick KPI Stats -->

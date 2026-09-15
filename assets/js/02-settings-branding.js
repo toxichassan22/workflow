@@ -122,6 +122,8 @@
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       const el = document.getElementById(pageId);
       if (el) el.classList.add('active');
+      updateTenantChrome(pageId);
+      closeTenantSidebar();
 
       const appPage = document.getElementById('tenantAppPage');
       if (appPage) {
@@ -139,14 +141,7 @@
         if (pageId === 'tenantProjectPage' && browserState.activeSection) showSection(browserState.activeSection, true);
       }
 
-      if (pageId === 'tenantDashboardPage') {
-        loadDashboard();
-        // U3: Show onboarding guide for first-time users
-        if (!localStorage.getItem('onboardingSeen')) {
-          const guide = document.getElementById('onboardingGuide');
-          if (guide) guide.style.display = 'block';
-        }
-      }
+      if (pageId === 'tenantDashboardPage') loadDashboard();
       renderWorkflowStageSidebars(pageId);
       refreshGlobalRail();
       updatePresentationUndoButtons();
@@ -531,6 +526,94 @@
       }
     }
 
+    const TENANT_PAGE_CHROME = Object.freeze({
+      tenantDashboardPage: ['page.dashboard', 'لوحة التحكم'],
+      tenantProjectPage: ['page.project_new', 'مشروع جديد'],
+      tenantProjectPresentationsPage: ['page.project_presentations', 'عروض المشروع'],
+      tenantVisualConceptPage: ['page.visual_concept', 'التصور البصري'],
+      tenantGenerationPage: ['page.generation', 'تجهيز العرض'],
+      tenantSlidesPage: ['page.presentation_editor', 'محرر العرض'],
+      tenantPresentationsPage: ['page.projects', 'المشاريع'],
+      tenantSettingsPage: ['page.company_settings', 'إعدادات الشركة'],
+      tenantTeamPage: ['page.team', 'فريق التطوير'],
+      tenantFieldsPage: ['page.fields', 'الحقول'],
+      tenantUsersPage: ['page.staff', 'الموظفون'],
+      tenantTrainingPage: ['page.training', 'بيانات التدريب'],
+      tenantAIRulesPage: ['page.ai_rules', 'قواعد AI'],
+      tenantApprovalsPage: ['page.approvals', 'تعميد العروض'],
+      tenantAdminPage: ['page.super_admin', 'إدارة المنصة'],
+      tenantOmranOpsPage: ['page.operations', 'العمليات']
+    });
+
+    function refreshTenantNavGroups() {
+      document.querySelectorAll('.tenant-nav-group').forEach(group => {
+        const visible = Array.from(group.querySelectorAll('.tenant-sidebar-link')).some(link =>
+          link.style.display !== 'none' && !link.classList.contains('tenant-hidden'));
+        group.style.display = visible ? '' : 'none';
+      });
+    }
+
+    function updateTenantChrome(pageId) {
+      const app = document.getElementById('tenantAppPage');
+      if (!app) return;
+      const isSagAdmin = Boolean(tenantUser && tenantUser.isAdmin);
+      const role = (tenantUser && tenantUser._userRole) || 'company_admin';
+      const roleData = isSagAdmin
+        ? ['superadmin', 'role.super_admin', 'سوبر أدمن']
+        : role === 'company_admin'
+          ? ['company-admin', 'role.company_admin', 'أدمن الشركة']
+          : ['employee', 'role.employee', 'موظف'];
+      app.dataset.role = roleData[0];
+
+      const roleEl = document.getElementById('tenantWorkspaceRole');
+      if (roleEl) {
+        roleEl.dataset.i18n = roleData[1];
+        roleEl.textContent = WFT(roleData[1], roleData[2]);
+      }
+      const contextEl = document.getElementById('tenantCurrentPageContext');
+      if (contextEl) {
+        const contextKey = isSagAdmin ? 'chrome.platform' : 'chrome.workspace';
+        const contextFallback = isSagAdmin ? 'إدارة المنصة' : 'مساحة العمل';
+        contextEl.dataset.i18n = contextKey;
+        contextEl.textContent = WFT(contextKey, contextFallback);
+      }
+      const pageData = TENANT_PAGE_CHROME[pageId] || TENANT_PAGE_CHROME.tenantDashboardPage;
+      const titleEl = document.getElementById('tenantCurrentPageTitle');
+      if (titleEl) {
+        titleEl.dataset.i18n = pageData[0];
+        titleEl.textContent = WFT(pageData[0], pageData[1]);
+      }
+      const parentPages = {
+        tenantProjectPresentationsPage: 'tenantPresentationsPage',
+        tenantVisualConceptPage: 'tenantProjectPage',
+        tenantGenerationPage: 'tenantProjectPage',
+        tenantSlidesPage: 'tenantProjectPage'
+      };
+      const activePageId = parentPages[pageId] || pageId;
+      document.querySelectorAll('[data-nav-page]').forEach(link => {
+        const active = link.dataset.navPage === activePageId;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      });
+      refreshTenantNavGroups();
+    }
+
+    function toggleTenantSidebar() {
+      const app = document.getElementById('tenantAppPage');
+      if (!app) return;
+      const open = app.classList.toggle('sidebar-open');
+      const button = document.getElementById('tenantMobileMenuBtn');
+      if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function closeTenantSidebar() {
+      const app = document.getElementById('tenantAppPage');
+      if (app) app.classList.remove('sidebar-open');
+      const button = document.getElementById('tenantMobileMenuBtn');
+      if (button) button.setAttribute('aria-expanded', 'false');
+    }
+
     function toggleTenantDropdown(btn) {
       const drop = btn.closest('.tenant-dropdown');
       if (!drop) return;
@@ -910,18 +993,16 @@
         if (el.hasAttribute('data-permission')) return;
         el.style.display = isCompanyAdmin ? '' : 'none';
       });
-      // Show user info in topbar
+      // Show user info in sidebar
       const userInfo = document.getElementById('tenantUserInfo');
-      if (userInfo) {
-        const roleLabel = isSagAdmin ? 'SAG Admin' : (role === 'company_admin' ? 'أدمن' : 'موظف');
-        userInfo.innerHTML = escapeHtml(tenantUser._userName || tenantUser.companyName || '') + ' (<span>' + roleLabel + '</span>)';
-      }
+      if (userInfo) userInfo.textContent = tenantUser._userName || tenantUser.companyName || '';
       // SAG admin: hide company-specific nav items, show admin panel button
       if (isSagAdmin) {
         document.querySelectorAll('.tenant-dash-card.tenant-admin-only').forEach(el => {
           el.style.display = 'none';
         });
       }
+      updateTenantChrome(tgrCurrentPageId() || (isSagAdmin ? 'tenantAdminPage' : 'tenantDashboardPage'));
     }
 
     function updateTenantTopbar() {
