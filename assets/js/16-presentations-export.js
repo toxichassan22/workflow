@@ -1333,8 +1333,6 @@
         const items = [
           { label: WFT('admin.pending_recharges', 'طلبات شحن بانتظار المراجعة'), count: workflows.pending_recharges || 0, action: 'openAdminRechargePage()' },
           { label: WFT('admin.pending_tickets', 'تذاكر دعم مفتوحة من الشركات'), count: workflows.open_support_tickets || 0, action: 'openAdminTicketsPage()' },
-          { label: WFT('admin.pending_gen', 'اعتمادات توليد معلقة داخل الشركات'), count: workflows.pending_generation_approvals || 0, action: '' },
-          { label: WFT('admin.pending_final', 'اعتمادات ملفات نهائية معلقة'), count: workflows.pending_final_approvals || 0, action: '' },
         ];
         pendingEl.innerHTML = items.map(item =>
           '<div class="tenant-presentation-card admin-action-card">' +

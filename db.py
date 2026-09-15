@@ -10762,8 +10762,6 @@ def operational_overview():
         'drafts': {'total': count('project_drafts')},
         'presentations': {'total': count('presentations'), 'approved': count('presentations', "status = 'approved'")},
         'workflows': {
-            'pending_generation_approvals': count('generation_approvals', "status = 'pending'"),
-            'pending_final_approvals': count('final_file_approvals', "status = 'pending'"),
             'pending_recharges': count('recharge_requests', "status = 'pending'"),
             'open_support_tickets': count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
             'open_tasks': count('approval_tasks', "status = 'open'"),
