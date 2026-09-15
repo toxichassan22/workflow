@@ -897,7 +897,7 @@
 
     async function adminDeletePackage(packageId) {
       const p = omAdminPackages.find(item => item.id === packageId);
-      if (!confirm('سيتم حذف باقة «' + (p ? p.name : '') + '» نهائيًا. هل تريد المتابعة؟')) return;
+      if (!confirm(WFT('packages.delete_confirm', 'سيتم حذف باقة «{name}» نهائيًا. هل تريد المتابعة؟', { name: p ? p.name : '' }))) return;
       const res = await api('DELETE', '/api/admin/packages/' + packageId).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر حذف الباقة'); return; }
       if (omEditingPackageId === packageId) adminCancelPackageEdit();

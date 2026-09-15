@@ -11,6 +11,8 @@
     let notifPollTimer = null;
     let notifDropdownOpen = false;
     let notifLastItems = [];
+    let notifLastCategories = null;
+    let notifStatusState = 'all';
 
     function notifCategoryLabel(cat) {
       return WFT('notif.cat.' + cat, NOTIF_CATEGORY_FALLBACKS[cat] || cat);
@@ -164,7 +166,26 @@
     async function openNotificationsPage() {
       closeNotificationsDropdown();
       showTenantPage('tenantNotificationsPage');
+      // The page is shared between the super admin and company workspaces, so
+      // its kicker follows the role instead of a static label.
+      const kicker = document.getElementById('notifPageKicker');
+      if (kicker) {
+        const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
+        const key = isAdmin ? 'chrome.platform' : 'chrome.workspace';
+        kicker.dataset.i18n = key;
+        kicker.textContent = WFT(key, isAdmin ? 'إدارة المنصة' : 'مساحة العمل');
+      }
       await Promise.all([renderNotificationsPage(), renderNotificationPrefs()]);
+    }
+
+    function setNotifStatusFilter(status) {
+      notifStatusState = ['all', 'unread', 'read'].indexOf(status) !== -1 ? status : 'all';
+      document.querySelectorAll('#tenantNotificationsPage [data-notif-status]').forEach(btn => {
+        const active = btn.getAttribute('data-notif-status') === notifStatusState;
+        btn.classList.toggle('primary', active);
+        btn.classList.toggle('ghost', !active);
+      });
+      renderNotificationsPage();
     }
 
     function fillNotifCategoryFilter(categories) {
@@ -181,16 +202,23 @@
       if (!list) return;
       const params = ['limit=100'];
       const cat = (document.getElementById('notifCategoryFilter') || {}).value || '';
-      const status = (document.getElementById('notifStatusFilter') || {}).value || 'all';
       if (cat) params.push('category=' + encodeURIComponent(cat));
-      if (status && status !== 'all') params.push('status=' + encodeURIComponent(status));
+      if (notifStatusState !== 'all') params.push('status=' + encodeURIComponent(notifStatusState));
       const data = await api('GET', '/api/notifications?' + params.join('&')).catch(() => null);
       if (!data || !data.success) {
         list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
         return;
       }
+      notifLastCategories = data.categories || null;
       fillNotifCategoryFilter(data.categories);
       notifLastItems = data.notifications || [];
+      const unreadChip = document.getElementById('notifUnreadCount');
+      if (unreadChip) {
+        const unread = parseInt(data.unreadCount, 10) || 0;
+        unreadChip.hidden = unread <= 0;
+        unreadChip.textContent = unread > 0
+          ? WFT('notif.unread_count', '{count} غير مقروءة', { count: unread }) : '';
+      }
       if (!notifLastItems.length) {
         list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
         return;
@@ -199,12 +227,14 @@
         '<div class="tenant-presentation-card tenant-notif-card' + (!n.read_at ? ' unread' : '') + '"' +
         ' role="button" tabindex="0" onclick="notificationOpen(\'' + omEscape(n.id) + '\')"' +
         ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + omEscape(n.id) + '\')">' +
-        '<div><h3>' + omEscape(n.title) +
+        '<div class="tenant-notif-main">' +
+        '<h3>' + (!n.read_at ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
+        omEscape(n.title) +
         (!n.read_at ? ' <span class="tenant-notif-new">(' + omEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
+        (n.body ? '<p class="tenant-notif-body">' + omEscape(n.body) + '</p>' : '') +
         '<div class="meta">' +
         '<span class="tenant-notif-cat">' + omEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
-        (n.body ? ' | <span>' + omEscape(n.body) + '</span>' : '') +
-        ' | ' + omEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) +
+        '<bdi class="tenant-notif-time">' + omEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) + '</bdi>' +
         '</div></div>' +
         '<div class="tenant-actions">' +
         '<button type="button" class="btn small ghost"' +
@@ -218,15 +248,23 @@
       const box = document.getElementById('tenantNotifPrefs');
       if (!box) return;
       const data = await api('GET', '/api/notifications/preferences').catch(() => null);
+      const summary = document.getElementById('notifPrefsSummary');
       if (!data || !data.success) {
         box.innerHTML = '';
+        if (summary) summary.textContent = '';
         return;
       }
       const prefs = data.preferences || {};
       const cats = (data.categories && data.categories.length) ? data.categories : NOTIF_CATEGORY_KEYS;
+      if (summary) {
+        const on = cats.filter(c => prefs[c] !== false).length;
+        summary.textContent = WFT('notif.prefs_enabled_count', '{on} من {total} مفعّلة',
+          { on: on, total: cats.length });
+      }
       box.innerHTML = cats.map(c => {
         const on = prefs[c] !== false;
-        return '<label class="tenant-notif-pref"><input type="checkbox" ' + (on ? 'checked ' : '') +
+        return '<label class="tenant-notif-pref' + (on ? ' on' : '') + '">' +
+          '<input type="checkbox" ' + (on ? 'checked ' : '') +
           'onchange="setNotificationPreference(\'' + omEscape(c) + '\', this.checked)">' +
           '<span>' + omEscape(notifCategoryLabel(c)) + '</span></label>';
       }).join('');
@@ -242,4 +280,23 @@
       }
       refreshNotificationBadge();
       renderNotificationsPage();
+      renderNotificationPrefs();
     }
+
+    // The category select and the preference pills render through WFT at fill
+    // time, so a language switch has to refill them — options are skipped by
+    // the DOM auto-translator by design.
+    document.addEventListener('wf:lang', () => {
+      const sel = document.getElementById('notifCategoryFilter');
+      if (sel && sel.dataset.filled) {
+        const current = sel.value;
+        delete sel.dataset.filled;
+        fillNotifCategoryFilter(notifLastCategories);
+        sel.value = current;
+      }
+      const page = document.getElementById('tenantNotificationsPage');
+      if (page && page.classList.contains('active')) {
+        renderNotificationsPage();
+        renderNotificationPrefs();
+      }
+    });

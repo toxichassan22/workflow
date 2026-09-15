@@ -4255,7 +4255,13 @@
     }
 
     .tenant-notif-cat {
+      display: inline-block;
+      padding: 2px 9px;
+      border: 1px solid var(--ui-border);
+      border-radius: 99px;
+      background: var(--surface-subtle);
       color: var(--p);
+      font-size: 11px;
       font-weight: 700;
     }
 
@@ -4302,8 +4308,52 @@
       flex: 1;
     }
 
+    .tenant-notif-card {
+      cursor: pointer;
+    }
+
     .tenant-notif-card.unread {
-      border-color: var(--p);
+      border-color: var(--p) !important;
+      background: linear-gradient(0deg, var(--p-soft), var(--p-soft)), var(--surface) !important;
+    }
+
+    .tenant-notif-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .tenant-notif-card h3 {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .tenant-notif-card h3 .tenant-notif-dot {
+      margin-top: 0;
+    }
+
+    .tenant-notif-body {
+      margin: 5px 0 0;
+      color: var(--ink-muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.7;
+    }
+
+    .tenant-notif-card .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 7px;
+    }
+
+    /* The timestamp is a numeric LTR run; without isolation the RTL line
+       scrambles the date pieces. */
+    .tenant-notif-time {
+      direction: ltr;
+      unicode-bidi: isolate;
     }
 
     .tenant-notif-new {
@@ -4311,17 +4361,103 @@
       font-size: 11px;
     }
 
-    .tenant-notif-prefs {
+    .notif-toolbar {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       flex-wrap: wrap;
-      gap: 10px 22px;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--ui-border);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .notif-toolbar .sag-tabs {
+      margin: 0;
+      border: 0;
+      padding: 3px;
+    }
+
+    .notif-filter-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .notif-filter-field select {
+      min-height: 34px;
+      min-width: 170px;
+    }
+
+    .notif-unread-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 12px;
+      border: 1px solid var(--ui-border);
+      border-radius: 99px;
+      background: var(--surface);
+      color: var(--p);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .notif-unread-chip[hidden] {
+      display: none;
+    }
+
+    .notif-prefs-panel {
+      margin-top: 20px;
+    }
+
+    .tenant-notif-prefs {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 10px;
     }
 
     .tenant-notif-pref {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 9px;
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--ui-border);
+      border-radius: 9px;
+      background: var(--surface-subtle);
+      color: var(--ink);
       font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color .16s ease, background-color .16s ease;
+    }
+
+    .tenant-notif-pref:hover {
+      border-color: var(--ui-border-strong);
+    }
+
+    .tenant-notif-pref.on {
+      background: var(--surface);
+      border-color: var(--p);
+    }
+
+    /* The global input rule sets min-height:42px on every input — without an
+       override the preference checkboxes render as giant blue tiles. */
+    .tenant-notif-pref input[type="checkbox"] {
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      accent-color: var(--p);
       cursor: pointer;
     }
 

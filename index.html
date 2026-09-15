@@ -1742,27 +1742,41 @@
     <!-- NOTIFICATIONS PAGE: full feed, filters and category preferences  -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <section id="tenantNotificationsPage" class="tenant-page">
-      <div
-        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+      <div class="tenant-page-heading">
         <div>
+          <span class="tenant-page-kicker" id="notifPageKicker" data-i18n="chrome.workspace">مساحة العمل</span>
           <h2 data-i18n="page.notifications">الإشعارات</h2>
         </div>
-        <button type="button" class="btn ghost" onclick="notificationsMarkAllRead()"
-          data-i18n="admin.mark_all_read">تحديد الكل كمقروء</button>
+        <div class="tenant-actions">
+          <span id="notifUnreadCount" class="notif-unread-chip" hidden></span>
+          <button type="button" class="btn ghost" onclick="notificationsMarkAllRead()"
+            data-i18n="admin.mark_all_read">تحديد الكل كمقروء</button>
+        </div>
       </div>
-      <div class="sag-filters" style="margin-bottom:12px">
-        <select id="notifCategoryFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"
-          aria-label="تصنيف الإشعار"></select>
-        <select id="notifStatusFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"
-          aria-label="حالة القراءة">
-          <option value="all" data-i18n="notif.status_all">الكل</option>
-          <option value="unread" data-i18n="notif.status_unread">غير مقروءة</option>
-          <option value="read" data-i18n="notif.status_read">مقروءة</option>
-        </select>
+
+      <div class="notif-toolbar">
+        <div class="sag-tabs notif-status-tabs" role="group" aria-label="حالة القراءة"
+          data-i18n-aria="notif.status_label">
+          <button type="button" class="btn small primary" data-notif-status="all"
+            onclick="setNotifStatusFilter('all')" data-i18n="notif.status_all">الكل</button>
+          <button type="button" class="btn small ghost" data-notif-status="unread"
+            onclick="setNotifStatusFilter('unread')" data-i18n="notif.status_unread">غير مقروءة</button>
+          <button type="button" class="btn small ghost" data-notif-status="read"
+            onclick="setNotifStatusFilter('read')" data-i18n="notif.status_read">مقروءة</button>
+        </div>
+        <label class="notif-filter-field">
+          <span data-i18n="notif.category_label">التصنيف</span>
+          <select id="notifCategoryFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"></select>
+        </label>
       </div>
+
       <div id="tenantNotificationsList"></div>
-      <div class="tenant-dash-card" style="margin-top:20px">
-        <h3 class="dash-section-title" data-i18n="notif.prefs_title">تفضيلات الإشعارات</h3>
+
+      <div class="tenant-content-panel notif-prefs-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="notif.prefs_title">تفضيلات الإشعارات</h3>
+          <span class="tenant-hint" id="notifPrefsSummary"></span>
+        </div>
         <div id="tenantNotifPrefs" class="tenant-notif-prefs"></div>
       </div>
     </section>
