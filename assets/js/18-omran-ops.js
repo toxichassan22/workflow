@@ -259,6 +259,8 @@
     async function omLoadTickets() {
       const box = document.getElementById('omTicketsList');
       if (!box) return;
+      // The desk is permission-gated; skip the call for members without it.
+      if (!hasPermission('support_tickets')) { box.innerHTML = ''; return; }
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const data = await api('GET', '/api/support/tickets').catch(() => null);
       if (!data || !data.success) {

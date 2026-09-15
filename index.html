@@ -1452,7 +1452,7 @@
           <h3 id="omStatNotifications">0</h3>
           <p>التنبيهات الجديدة</p>
         </div>
-        <div class="tenant-dash-card stat">
+        <div class="tenant-dash-card stat" data-permission="support_tickets">
           <h3 id="omStatTickets">0</h3>
           <p>التذاكر النشطة</p>
         </div>
@@ -1466,7 +1466,7 @@
       <div class="sag-tabs" id="omranOpsTabs">
         <button type="button" class="btn small primary" id="omTabBtn_tasks" onclick="showOmranOpsTab('tasks')">المهام والتنبيهات</button>
         <button type="button" class="btn small ghost" id="omTabBtn_recharge" onclick="showOmranOpsTab('recharge')">المحفظة والشحن</button>
-        <button type="button" class="btn small ghost" id="omTabBtn_tickets" onclick="showOmranOpsTab('tickets')">الدعم الفني</button>
+        <button type="button" class="btn small ghost" id="omTabBtn_tickets" data-permission="support_tickets" onclick="showOmranOpsTab('tickets')">الدعم الفني</button>
         <button type="button" class="btn small ghost" id="omTabBtn_contracts" onclick="showOmranOpsTab('contracts')">العقود والاتفاقيات</button>
       </div>
 
@@ -1529,7 +1529,7 @@
       <div id="omTabPane_tickets" style="display:none">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <h3 class="dash-section-title" style="margin:0">تذاكر الدعم</h3>
-          <button type="button" class="btn primary small" id="omTicketNewBtn" onclick="openOmModal('omTicketModal')">تذكرة دعم جديدة</button>
+          <button type="button" class="btn primary small" id="omTicketNewBtn" data-permission="support_tickets" onclick="openOmModal('omTicketModal')">تذكرة دعم جديدة</button>
         </div>
         <div id="omTicketsList" style="margin-bottom:24px"></div>
         <div id="omTicketDetail" style="display:none;margin-top:16px;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>

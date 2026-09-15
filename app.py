@@ -25403,9 +25403,20 @@ def api_admin_decide_recharge_request(request_id):
 
 # ── t50: support tickets ─────────────────────────────────────────────────────
 
+def _omran_ticket_actor_is_creator(ticket):
+    """The requester keeps view/reply/close rights on their own ticket even
+    without the desk permission — tickets filed before the gate existed, or a
+    grant the company admin later revoked."""
+    return str((ticket or {}).get('created_by') or '') == str(_omran_actor_id())
+
+
 @app.route('/api/support/tickets', methods=['POST'])
 @require_auth
 def api_create_support_ticket():
+    """Opening a ticket is a support-desk act: the company admin or a user
+    granted support_tickets — not every authenticated employee."""
+    if not _omran_can('support_tickets'):
+        return _omran_forbidden('فتح تذاكر الدعم يتطلب صلاحية تذاكر الدعم')
     data = request.json or {}
     row = db.create_support_ticket(
         g.tenant_id, data.get('subject'), category=data.get('category') or 'general',
@@ -25433,6 +25444,9 @@ def api_create_support_ticket():
 @app.route('/api/support/tickets', methods=['GET'])
 @require_auth
 def api_list_support_tickets():
+    """The inbox is the desk surface — permission holders only."""
+    if not _omran_can('support_tickets'):
+        return _omran_forbidden('عرض تذاكر الدعم يتطلب صلاحية تذاكر الدعم')
     rows = db.list_support_tickets(g.tenant_id, status=request.args.get('status'))
     return jsonify({'success': True, 'tickets': rows})
 
@@ -25443,6 +25457,8 @@ def api_get_support_ticket(ticket_id):
     row = db.get_support_ticket(g.tenant_id, ticket_id)
     if not row:
         return jsonify({'error': 'Ticket not found', 'error_code': 'ticket_not_found'}), 404
+    if not _omran_can('support_tickets') and not _omran_ticket_actor_is_creator(row):
+        return _omran_forbidden('عرض التذكرة يتطلب صلاحية تذاكر الدعم')
     return jsonify({'success': True, 'ticket': row})
 
 
@@ -25450,6 +25466,12 @@ def api_get_support_ticket(ticket_id):
 @require_auth
 def api_add_support_message(ticket_id):
     data = request.json or {}
+    if not _omran_can('support_tickets'):
+        ticket = db.get_support_ticket(g.tenant_id, ticket_id)
+        if not ticket:
+            return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+        if not _omran_ticket_actor_is_creator(ticket):
+            return _omran_forbidden('الرد على التذكرة يتطلب صلاحية تذاكر الدعم')
     row = db.add_support_message(
         g.tenant_id, ticket_id, data.get('body'), author_id=_omran_actor_id(),
         author_name=_omran_actor_name(), author_role=g.user_role or 'customer',
@@ -25476,7 +25498,7 @@ def api_update_support_ticket_status(ticket_id):
         ticket = db.get_support_ticket(g.tenant_id, ticket_id)
         if not ticket:
             return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
-        is_creator = str(ticket.get('created_by') or '') == str(_omran_actor_id())
+        is_creator = _omran_ticket_actor_is_creator(ticket)
         if not (is_creator and new_status == 'closed'):
             return _omran_forbidden('تغيير حالة التذكرة يتطلب صلاحية الدعم')
     row = db.update_support_ticket_status(g.tenant_id, ticket_id, new_status,

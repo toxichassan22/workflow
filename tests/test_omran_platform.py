@@ -814,12 +814,21 @@ class OmranApiTests(unittest.TestCase):
         self.assertEqual(own.status_code, 403)
         self.assertEqual(own.get_json().get('error_code'), 'self_approval_not_allowed')
 
-    def test_support_status_needs_support_permission_or_creator_close(self):
-        _, creator_token = self._user_token('عميل', 'cust@x.test', 'employee')
+    def test_support_ticket_creation_and_status_are_gated(self):
+        emp_id, creator_token = self._user_token('عميل', 'cust@x.test', 'employee')
         _, other_token = self._user_token('آخر', 'other-emp@x.test', 'employee')
         _, support_token = self._user_token('دعم', 'sup@x.test', 'support')
-        created = self.client.post(
+        # Opening a ticket is a desk act: a plain employee is refused, a
+        # support_tickets holder (or company admin) is not.
+        denied_create = self.client.post(
             '/api/support/tickets', headers=self.headers(creator_token),
+            json={'subject': 'مشكلة', 'body': 'تفاصيل'})
+        self.assertEqual(denied_create.status_code, 403)
+        denied_list = self.client.get(
+            '/api/support/tickets', headers=self.headers(creator_token))
+        self.assertEqual(denied_list.status_code, 403)
+        created = self.client.post(
+            '/api/support/tickets', headers=self.headers(support_token),
             json={'subject': 'مشكلة', 'body': 'تفاصيل'})
         self.assertEqual(created.status_code, 200, created.get_json())
         ticket_id = created.get_json()['ticket']['id']
@@ -827,8 +836,11 @@ class OmranApiTests(unittest.TestCase):
             f'/api/support/tickets/{ticket_id}/status', headers=self.headers(other_token),
             json={'status': 'in_progress'})
         self.assertEqual(denied.status_code, 403)
+        # A ticket filed before the gate still lets its own creator close it.
+        legacy = db.create_support_ticket(
+            self.tenant_id, 'مشكلة قديمة', created_by=emp_id, created_by_name='عميل')
         creator_close = self.client.post(
-            f'/api/support/tickets/{ticket_id}/status', headers=self.headers(creator_token),
+            f'/api/support/tickets/{legacy["id"]}/status', headers=self.headers(creator_token),
             json={'status': 'closed'})
         self.assertEqual(creator_close.status_code, 200, creator_close.get_json())
         support_move = self.client.post(
