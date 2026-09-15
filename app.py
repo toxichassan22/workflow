@@ -14032,7 +14032,7 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     return output_path
 
 
-def generate_financial_pdf(html, output_path, model=None, project_name=''):
+def generate_financial_pdf(html, output_path, model=None, project_name='', min_text=200):
     last_error = None
     try:
         from playwright.sync_api import sync_playwright
@@ -14056,7 +14056,7 @@ def generate_financial_pdf(html, output_path, model=None, project_name=''):
                 )
             finally:
                 browser.close()
-        if os.path.isfile(output_path) and _financial_pdf_has_text(output_path):
+        if os.path.isfile(output_path) and _financial_pdf_has_text(output_path, min_text):
             return output_path
         last_error = RuntimeError('Playwright wrote an empty PDF')
     except Exception as error:
@@ -14068,7 +14068,7 @@ def generate_financial_pdf(html, output_path, model=None, project_name=''):
     if model is not None:
         try:
             generate_financial_pdf_from_model(project_name, model, output_path)
-            if _financial_pdf_has_text(output_path):
+            if _financial_pdf_has_text(output_path, min_text):
                 return output_path
             last_error = RuntimeError('Model renderer wrote a PDF with no text')
         except Exception as error:
@@ -14083,7 +14083,7 @@ def generate_financial_pdf(html, output_path, model=None, project_name=''):
                 document.save(output_path)
             finally:
                 document.close()
-            if os.path.isfile(output_path) and _financial_pdf_has_text(output_path):
+            if os.path.isfile(output_path) and _financial_pdf_has_text(output_path, min_text):
                 return output_path
         except Exception as error:
             last_error = error
@@ -25759,28 +25759,95 @@ def api_company_dashboard():
 
 
 _ADMIN_REPORTS = {
-    'ledger': db.export_ledger_csv,
-    'tickets': db.export_tickets_csv,
+    'ledger': ('حركات الرصيد', db.ledger_report_rows),
+    'tickets': ('تذاكر الدعم', db.tickets_report_rows),
 }
+
+
+def _report_pdf_html(title, headers, rows, generated_note):
+    """A4-landscape RTL table document for the platform report exports."""
+    from design_templates import _load_bundled_fonts
+    font_face = ''
+    bundled = (_load_bundled_fonts().get('TheSansArabic-Light')
+               or _load_bundled_fonts().get('TheSansArabic-Bold'))
+    if bundled:
+        data, fmt = bundled
+        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf',
+                'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        font_face = ("@font-face{font-family:'report-arabic';"
+                     f"src:url(data:{mime};base64,{data}) format('{fmt}');"
+                     "font-display:swap;}")
+    head_cells = ''.join(f'<th>{html_lib.escape(str(h))}</th>' for h in headers)
+    body_rows = ''.join(
+        '<tr>' + ''.join(
+            f'<td>{html_lib.escape("" if cell is None else str(cell))}</td>'
+            for cell in row) + '</tr>'
+        for row in rows)
+    return (
+        '<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">'
+        f'<style>{font_face}'
+        "body{font-family:'report-arabic','IBM Plex Sans Arabic',Tahoma,Arial,sans-serif;"
+        'direction:rtl;color:#1a1a1a;margin:0}'
+        'h1{font-size:15px;color:#123B6D;margin:0 0 2px}'
+        '.note{font-size:9px;color:#666;margin:0 0 10px}'
+        'table{width:100%;border-collapse:collapse;font-size:9px}'
+        'thead{display:table-header-group}'
+        'th{background:#123B6D;color:#fff;border:1px solid #123B6D;padding:5px 6px;'
+        'text-align:right;font-weight:600}'
+        'td{border:1px solid #c9d2dc;padding:4px 6px;text-align:right;'
+        'vertical-align:top;word-break:break-word}'
+        'tr:nth-child(even) td{background:#f5f7fa}'
+        '</style></head><body>'
+        f'<h1>{html_lib.escape(title)}</h1>'
+        f'<div class="note">{html_lib.escape(generated_note)}</div>'
+        f'<table><thead><tr>{head_cells}</tr></thead>'
+        f'<tbody>{body_rows}</tbody></table>'
+        '</body></html>')
+
+
+def _serve_report_pdf(report_name, tenant_id=None):
+    """Shared admin/company report export: register rows -> RTL HTML -> PDF."""
+    entry = _ADMIN_REPORTS.get(report_name)
+    if not entry:
+        return jsonify({'error': 'Unknown report'}), 404
+    title, row_fn = entry
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 5000), 5000))
+    except (TypeError, ValueError):
+        limit = 5000
+    headers, rows = row_fn(
+        tenant_id=tenant_id,
+        from_date=request.args.get('from'),
+        to_date=request.args.get('to'),
+        limit=limit)
+    note = datetime.now().strftime('%Y-%m-%d %H:%M') + f' — {len(rows)} صف'
+    if len(rows) >= limit:
+        note += ' — وصل التقرير الحد الأقصى للصفوف'
+    report_html = _report_pdf_html(title, headers, rows, note)
+    import tempfile
+    fd, pdf_path = tempfile.mkstemp(prefix=f'{report_name}-report-', suffix='.pdf')
+    os.close(fd)
+    try:
+        generate_financial_pdf(report_html, pdf_path, min_text=20)
+        with open(pdf_path, 'rb') as handle:
+            payload = handle.read()
+    finally:
+        try:
+            os.unlink(pdf_path)
+        except OSError:
+            pass
+    response = app.make_response(payload)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = \
+        f'attachment; filename="{report_name}-report.pdf"'
+    return response
 
 
 @app.route('/api/admin/reports/<report_name>', methods=['GET'])
 @require_admin
 def api_admin_export_report(report_name):
-    """t55: CSV export of the operational/financial registers."""
-    exporter = _ADMIN_REPORTS.get(report_name)
-    if not exporter:
-        return jsonify({'error': 'Unknown report'}), 404
-    body = exporter(
-        tenant_id=request.args.get('tenantId'),
-        from_date=request.args.get('from'),
-        to_date=request.args.get('to'),
-    )
-    response = app.make_response(body)
-    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
-    response.headers['Content-Disposition'] = \
-        f'attachment; filename="{report_name}-report.csv"'
-    return response
+    """t55: PDF export of the operational/financial registers."""
+    return _serve_report_pdf(report_name, tenant_id=request.args.get('tenantId'))
 
 
 @app.route('/api/company/reports/<report_name>', methods=['GET'])
@@ -25789,17 +25856,7 @@ def api_company_export_report(report_name):
     """t55: the company admin exports only their own registers."""
     if report_name not in ('ledger', 'tickets'):
         return jsonify({'error': 'Unknown report'}), 404
-    exporter = _ADMIN_REPORTS[report_name]
-    body = exporter(
-        tenant_id=g.tenant_id,
-        from_date=request.args.get('from'),
-        to_date=request.args.get('to'),
-    )
-    response = app.make_response(body)
-    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
-    response.headers['Content-Disposition'] = \
-        f'attachment; filename="{report_name}-report.csv"'
-    return response
+    return _serve_report_pdf(report_name, tenant_id=g.tenant_id)
 
 
 

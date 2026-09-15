@@ -3,7 +3,7 @@
 Covers the graph-model tables, company slugs and redirects, the activation
 gate, package versions and subscriptions, generation
 jobs, the durable job queue, email outbox, study-type and
-generator registries, backup history, dashboards and CSV reports, and the
+generator registries, backup history, dashboards and PDF reports, and the
 matching admin endpoints. Runs against a temporary SQLite database.
 """
 
@@ -346,16 +346,17 @@ class Mission5DbTests(unittest.TestCase):
                     'spend_by_project', 'activity_by_user'):
             self.assertIn(key, dash)
 
-    def test_csv_reports_emit_utf8_bom_and_rows(self):
+    def test_report_rows_return_headers_and_data(self):
         db.record_ledger_credit('tenant-1', 50, note='شحن')
-        for name, fn in (('ledger', db.export_ledger_csv),
-                         ('tickets', db.export_tickets_csv)):
-            body = fn()
-            self.assertIsInstance(body, str)
-            self.assertTrue(body.startswith('﻿'), name)
-        ledger = db.export_ledger_csv(tenant_id='tenant-1')
-        self.assertIn('شحن', ledger)
-        self.assertIn('Tenant One', ledger)
+        for name, fn in (('ledger', db.ledger_report_rows),
+                         ('tickets', db.tickets_report_rows)):
+            headers, body = fn()
+            self.assertTrue(headers, name)
+            self.assertIsInstance(body, list, name)
+        _, ledger_rows = db.ledger_report_rows(tenant_id='tenant-1')
+        flat = [str(cell) for row in ledger_rows for cell in row]
+        self.assertIn('شحن', flat)
+        self.assertIn('Tenant One', flat)
 
     def test_ticket_carries_project_link(self):
         ticket = db.create_support_ticket(
@@ -474,18 +475,27 @@ class Mission5ApiTests(unittest.TestCase):
             headers=self.admin_headers)
         self.assertEqual(len(res.get_json()['versions']), 2)
 
-    def test_reports_csv_export(self):
-        res = self.client.get('/api/admin/reports/ledger',
-                              headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200)
-        self.assertIn('text/csv', res.headers['Content-Type'])
-        self.assertTrue(res.data.startswith(b'\xef\xbb\xbf'))
+    def test_reports_pdf_export(self):
+        import unittest.mock as mock
+        import app as app_module
+
+        def fake_pdf(html, out_path, model=None, project_name='', min_text=200):
+            with open(out_path, 'wb') as handle:
+                handle.write(b'%PDF-1.4 test-report')
+            return out_path
+
+        with mock.patch.object(app_module, 'generate_financial_pdf', fake_pdf):
+            res = self.client.get('/api/admin/reports/ledger',
+                                  headers=self.admin_headers)
+            self.assertEqual(res.status_code, 200)
+            self.assertIn('application/pdf', res.headers['Content-Type'])
+            self.assertTrue(res.data.startswith(b'%PDF'))
+            res = self.client.get('/api/company/reports/tickets',
+                                  headers=self.company_headers)
+            self.assertEqual(res.status_code, 200)
         denied = self.client.get('/api/admin/reports/ledger',
                                  headers=self.company_headers)
         self.assertEqual(denied.status_code, 403)
-        res = self.client.get('/api/company/reports/tickets',
-                              headers=self.company_headers)
-        self.assertEqual(res.status_code, 200)
         res = self.client.get('/api/admin/reports/nope',
                               headers=self.admin_headers)
         self.assertEqual(res.status_code, 404)

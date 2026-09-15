@@ -1374,6 +1374,8 @@
       }).join('');
     }
 
+    var sagReportRange = { from: '', to: '' };
+
     function renderSagReportsPanel() {
       const el = document.getElementById('sagReportsPanel');
       if (!el) return;
@@ -1381,17 +1383,28 @@
         { key: 'ledger', label: WFT('admin.report_ledger', 'حركات الرصيد') },
         { key: 'tickets', label: WFT('admin.report_tickets', 'تذاكر الدعم') },
       ];
-      el.innerHTML = reports.map(r =>
-        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
-        '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">' +
-        WFT('reports.download_csv', 'تنزيل CSV') + '</button></div></div>'
-      ).join('');
+      el.innerHTML =
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">' +
+        '<div class="tenant-field"><label for="sagReportFrom">' + WFT('reports.range_from', 'من تاريخ') + '</label>' +
+        '<input type="date" id="sagReportFrom" dir="ltr" value="' + escapeHtml(sagReportRange.from) + '" onchange="sagReportRange.from=this.value"></div>' +
+        '<div class="tenant-field"><label for="sagReportTo">' + WFT('reports.range_to', 'إلى تاريخ') + '</label>' +
+        '<input type="date" id="sagReportTo" dir="ltr" value="' + escapeHtml(sagReportRange.to) + '" onchange="sagReportRange.to=this.value"></div>' +
+        '</div>' +
+        reports.map(r =>
+          '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
+          '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">' +
+          WFT('reports.download_pdf', 'تنزيل PDF') + '</button></div></div>'
+        ).join('');
     }
 
     async function sagDownloadReport(name) {
       const token = (typeof getTenantToken === 'function') ? getTenantToken() : null;
       try {
-        const res = await fetch('/api/admin/reports/' + encodeURIComponent(name), {
+        const params = new URLSearchParams();
+        if (sagReportRange.from) params.set('from', sagReportRange.from);
+        if (sagReportRange.to) params.set('to', sagReportRange.to);
+        const qs = params.toString();
+        const res = await fetch('/api/admin/reports/' + encodeURIComponent(name) + (qs ? '?' + qs : ''), {
           headers: token ? { 'Authorization': 'Bearer ' + token } : {}
         });
         if (!res.ok) { toast(WFT('reports.download_failed', 'تعذر تنزيل التقرير')); return; }
@@ -1399,7 +1412,7 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = name + '-report.csv';
+        a.download = name + '-report.pdf';
         document.body.appendChild(a);
         a.click();
         a.remove();

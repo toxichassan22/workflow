@@ -75,12 +75,13 @@ tenant, so a leaked link cannot cross tenants and dies on expiry.
 ## Observability
 
 - `platform_alerts()` computes the alert strip: recharge SLA breaches, ticket
-  SLA breaches, failed generation jobs, dead queue rows, zero-balance
-  companies, RPO breach, contract expiry.
+  stale recharge requests, failed generation jobs, dead queue rows,
+  contract expiry and lapsed retention windows.
 - `operational_overview()` aggregates tenants, users, presentations, spend,
   revenue, ticket mix, trends and deltas — counts only, no content.
 - Every mutation writes an `audit_events` row; the super-admin company file
-  and the CSV report endpoints (`/api/admin/reports/*`) read from it.
+  reads from it, and the PDF report endpoints (`/api/admin/reports/*`) cover
+  the ledger and support-ticket registers.
 
 ## Recovery targets
 

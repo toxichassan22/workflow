@@ -11006,21 +11006,8 @@ def company_admin_dashboard(tenant_id):
     }
 
 
-def _csv_response(headers, rows):
-    """Build a UTF-8 BOM CSV body from a header list and row sequences."""
-    import csv
-    import io
-    output = io.StringIO()
-    output.write('﻿')  # UTF-8 BOM so Excel opens the Arabic columns correctly
-    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(headers)
-    for row in rows:
-        writer.writerow(['' if cell is None else cell for cell in row])
-    return output.getvalue()
-
-
-def export_ledger_csv(tenant_id=None, from_date=None, to_date=None, kind=None, limit=5000):
-    """Points-ledger report: every wallet movement (t32/t55)."""
+def ledger_report_rows(tenant_id=None, from_date=None, to_date=None, kind=None, limit=5000):
+    """Points-ledger report rows: every wallet movement (t32/t55)."""
     conn = get_db()
     clauses = []
     params = []
@@ -11043,16 +11030,16 @@ def export_ledger_csv(tenant_id=None, from_date=None, to_date=None, kind=None, l
     query += ' ORDER BY l.created_at DESC LIMIT ?'
     params.append(int(limit))
     rows = conn.execute(query, params).fetchall()
-    return _csv_response(
-        ['التاريخ', 'الشركة', 'النوع', 'المبلغ USD', 'التكلفة الخام', 'المضاعف',
-         'أحداث AI', 'أحداث الخرائط', 'مرجع عدم التكرار', 'ملاحظة'],
-        [[r['created_at'], r['company_name'], r['kind'], r['amount_usd'],
-          r['raw_cost_usd'], r['multiplier'], r['ai_events_count'],
-          r['maps_events_count'], r['idempotency_key'], r['note']] for r in rows])
+    headers = ['التاريخ', 'الشركة', 'النوع', 'المبلغ USD', 'التكلفة الخام', 'المضاعف',
+               'أحداث AI', 'أحداث الخرائط', 'مرجع عدم التكرار', 'ملاحظة']
+    body = [[r['created_at'], r['company_name'], r['kind'], r['amount_usd'],
+             r['raw_cost_usd'], r['multiplier'], r['ai_events_count'],
+             r['maps_events_count'], r['idempotency_key'], r['note']] for r in rows]
+    return headers, body
 
 
-def export_tickets_csv(tenant_id=None, from_date=None, to_date=None, limit=5000):
-    """Support tickets report."""
+def tickets_report_rows(tenant_id=None, from_date=None, to_date=None, limit=5000):
+    """Support tickets report rows."""
     conn = get_db()
     clauses = []
     params = []
@@ -11072,13 +11059,13 @@ def export_tickets_csv(tenant_id=None, from_date=None, to_date=None, limit=5000)
     query += ' ORDER BY t.created_at DESC LIMIT ?'
     params.append(int(limit))
     rows = conn.execute(query, params).fetchall()
-    return _csv_response(
-        ['الرقم', 'الشركة', 'العنوان', 'الفئة', 'الأولوية', 'الحالة', 'المنشئ',
-         'أول استجابة', 'أنشئت', 'حُلّت', 'أُغلقت'],
-        [[r['number'], r['company_name'], r['subject'], r['category'], r['priority'],
-          r['status'], r['created_by_name'], r['first_response_at'],
-          r['created_at'], r['resolved_at'], r['closed_at']]
-         for r in rows])
+    headers = ['الرقم', 'الشركة', 'العنوان', 'الفئة', 'الأولوية', 'الحالة', 'المنشئ',
+               'أول استجابة', 'أنشئت', 'حُلّت', 'أُغلقت']
+    body = [[r['number'], r['company_name'], r['subject'], r['category'], r['priority'],
+             r['status'], r['created_by_name'], r['first_response_at'],
+             r['created_at'], r['resolved_at'], r['closed_at']]
+            for r in rows]
+    return headers, body
 
 
 # ═════════════════════════════════════════════════════════════════════════════
