@@ -1096,6 +1096,7 @@
       if (!tenantUser) return;
       document.getElementById('tenantName').textContent = tenantUser.companyName || 'الشركة';
       document.getElementById('tenantPlan').textContent = tenantUser.plan || 'free';
+      updateTenantLogoMark();
       const adminBtn = document.getElementById('tenantAdminBtn');
       if (adminBtn) adminBtn.classList.toggle('tenant-hidden', !tenantUser.isAdmin);
     }
@@ -1124,34 +1125,85 @@
       applyTenantBrandingData(data);
     }
 
+    function brandingHexRgb(hex) {
+      const h = String(hex || '').trim().replace('#', '');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+      return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
+    }
+
+    function brandingLuminance(rgb) {
+      const f = c => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+    }
+
+    function brandingShade(hex, pct) {
+      const rgb = brandingHexRgb(hex);
+      if (!rgb) return hex;
+      const f = pct / 100;
+      const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+      return '#' + rgb.map(c => clamp(f < 0 ? c * (1 + f) : c + (255 - c) * f).toString(16).padStart(2, '0')).join('');
+    }
+
+    function updateTenantLogoMark() {
+      const markEl = document.getElementById('tenantLogoMark');
+      if (!markEl) return;
+      const name = (tenantUser && tenantUser.companyName) || (tenantBranding && tenantBranding.company_name) || '';
+      markEl.textContent = name.trim().charAt(0) || '—';
+    }
+
     function applyTenantBrandingData(data) {
       if (!data || !data.success || !data.branding) return false;
       tenantBranding = data.branding;
       const b = data.branding;
       // Apply CSS variables
       const root = document.documentElement;
+      const primaryRgb = brandingHexRgb(b.primary_color);
       if (b.primary_color) {
         root.style.setProperty('--p', b.primary_color);
-        // Derive muted/line/soft from primary color
-        const hex = b.primary_color.replace('#', '');
-        const r = parseInt(hex.substr(0, 2), 16);
-        const g = parseInt(hex.substr(2, 2), 16);
-        const bl = parseInt(hex.substr(4, 2), 16);
-        root.style.setProperty('--muted', `rgba(${r},${g},${bl},0.6)`);
-        root.style.setProperty('--line', `rgba(${r},${g},${bl},0.2)`);
-        root.style.setProperty('--soft', `rgba(${r},${g},${bl},0.08)`);
+        if (primaryRgb) {
+          const [r, g, bl] = primaryRgb;
+          root.style.setProperty('--muted', `rgba(${r},${g},${bl},0.6)`);
+          root.style.setProperty('--line', `rgba(${r},${g},${bl},0.2)`);
+          root.style.setProperty('--soft', `rgba(${r},${g},${bl},0.08)`);
+          root.style.setProperty('--p-soft', `rgba(${r},${g},${bl},0.10)`);
+          root.style.setProperty('--focus-ring', `rgba(${r},${g},${bl},0.18)`);
+        }
       }
       if (b.secondary_color) root.style.setProperty('--pd', b.secondary_color);
       if (b.accent_color) root.style.setProperty('--g', b.accent_color);
       if (b.background_color) root.style.setProperty('--bg', b.background_color);
       if (b.text_color) root.style.setProperty('--txt', b.text_color);
-      // Logo
-      const logoEl = document.getElementById('tenantLogo');
-      if (logoEl && b.logo_path) {
-        const logoSrc = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path + '?t=' + Date.now();
-        logoEl.src = logoSrc;
+      // The workspace is white-labeled: the brand card carries the company's
+      // colors, falling back to the platform navy only when none are saved.
+      if (b.primary_color && primaryRgb) {
+        const onLight = brandingLuminance(primaryRgb) > 0.45;
+        root.style.setProperty('--brand-a', b.primary_color);
+        root.style.setProperty('--brand-b', b.secondary_color || brandingShade(b.primary_color, -22));
+        root.style.setProperty('--brand-ink', onLight ? '#0f2333' : '#ffffff');
+        root.style.setProperty('--brand-ink-muted', onLight ? 'rgba(15,35,51,.66)' : 'rgba(255,255,255,.72)');
+        root.style.setProperty('--brand-badge', onLight ? 'rgba(15,35,51,.09)' : 'rgba(255,255,255,.16)');
+        root.style.setProperty('--brand-mark', onLight ? '#0f2333' : b.primary_color);
       }
-      if (logoEl && !b.logo_path) logoEl.src = 'assets/logo.png';
+      // Logo: an uploaded logo wins; otherwise the company initial stands in
+      // for it (the product ships no placeholder images).
+      const logoEl = document.getElementById('tenantLogo');
+      const markEl = document.getElementById('tenantLogoMark');
+      updateTenantLogoMark();
+      if (logoEl) {
+        if (b.logo_path) {
+          logoEl.onerror = () => {
+            logoEl.classList.add('hidden');
+            if (markEl) markEl.classList.remove('hidden');
+          };
+          const logoSrc = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path + '?t=' + Date.now();
+          logoEl.src = logoSrc;
+          logoEl.classList.remove('hidden');
+          if (markEl) markEl.classList.add('hidden');
+        } else {
+          logoEl.classList.add('hidden');
+          if (markEl) markEl.classList.remove('hidden');
+        }
+      }
       return true;
     }
 
@@ -1364,6 +1416,7 @@
       setValue('settingsMapStyleCatchment', b.map_style_catchment || 'auto');
       setChecked('settingsDrawCompass', b.draw_compass !== 0);
       setChecked('settingsDrawInset', b.draw_inset !== 0);
+      refreshSettingsColorFields();
       // previews
       const logoPreview = document.getElementById('settingsLogoPreview');
       if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
@@ -1372,6 +1425,20 @@
       if (refPreview) refPreview.textContent = b.reference_image_path ? 'تم رفع صورة مرجعية' : 'اضغط لرفع صورة مرجعية للاستيل التصميمي';
       await loadTenantFonts();
     }
+
+    function refreshSettingsColorFields() {
+      document.querySelectorAll('.tenant-color-value[data-color-for]').forEach(el => {
+        const input = document.getElementById(el.getAttribute('data-color-for'));
+        el.textContent = input && input.value ? String(input.value).toUpperCase() : '';
+      });
+    }
+
+    document.addEventListener('input', e => {
+      const t = e.target;
+      if (!t || t.type !== 'color' || !t.id) return;
+      const el = document.querySelector('.tenant-color-value[data-color-for="' + t.id + '"]');
+      if (el) el.textContent = String(t.value).toUpperCase();
+    });
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
     function getValue(id) { const el = document.getElementById(id); return el ? el.value : ''; }

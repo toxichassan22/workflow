@@ -49,20 +49,25 @@
   <!-- ═══════════════════ Tenant Multi-Tenant UI ═══════════════════ -->
   <div id="tenantAuthPage" class="tenant-auth">
     <div class="auth-card">
-      <img class="auth-logo" src="assets/landloom-logo.png" alt="LandLoom">
-      <p>تسجيل الدخول</p>
+      <div class="auth-brand">
+        <img class="auth-brand-logo" src="assets/landloom-logo-white.png" alt="LandLoom">
+        <p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>
+      </div>
+      <div class="auth-body">
+        <p class="auth-title" data-i18n="auth.sign_in">تسجيل الدخول</p>
 
-      <div id="loginError" class="auth-error"></div>
-      <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
-        <label>البريد الإلكتروني أو اسم المستخدم</label>
-        <input type="text" id="loginEmail" autocomplete="username" required>
-        <label>كلمة المرور</label>
-        <div style="position:relative">
-          <input type="password" id="loginPassword" placeholder="كلمة المرور" required style="padding-left:64px">
-          <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:#07182C;font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
-        </div>
-        <button type="submit" class="auth-btn">دخول</button>
-      </form>
+        <div id="loginError" class="auth-error"></div>
+        <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
+          <label>البريد الإلكتروني أو اسم المستخدم</label>
+          <input type="text" id="loginEmail" autocomplete="username" required>
+          <label>كلمة المرور</label>
+          <div style="position:relative">
+            <input type="password" id="loginPassword" placeholder="كلمة المرور" required style="padding-left:64px">
+            <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:#07182C;font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+          </div>
+          <button type="submit" class="auth-btn">دخول</button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -70,10 +75,13 @@
     <aside id="tenantSidebar" class="tenant-sidebar">
       <div class="tenant-sidebar-brand">
         <div class="tenant-brand">
-          <span class="tenant-brand-logo"><img id="tenantLogo" src="assets/logo.png" alt="logo"></span>
+          <span class="tenant-brand-logo">
+            <img id="tenantLogo" alt="" class="hidden">
+            <span id="tenantLogoMark" class="tenant-brand-monogram" aria-hidden="true"></span>
+          </span>
           <div class="tenant-brand-copy">
             <h1 id="tenantName">الشركة</h1>
-            <span id="tenantPlan">free</span>
+            <span id="tenantPlan" class="tenant-plan-badge">free</span>
           </div>
         </div>
       </div>
@@ -141,6 +149,9 @@
         <span id="tenantWorkspaceRole" class="tenant-user-role" data-i18n="role.employee">موظف</span>
         <button type="button" class="tenant-sidebar-logout" onclick="tenantLogout()"
           data-i18n="nav.logout">خروج</button>
+      </div>
+      <div class="tenant-sidebar-powered" aria-hidden="true">
+        <img src="assets/landloom-logo.png" alt="LandLoom">
       </div>
     </aside>
     <div class="tenant-sidebar-backdrop" onclick="closeTenantSidebar()"></div>
@@ -211,23 +222,38 @@
           </div>
           <div class="tenant-field">
             <label>اللون الرئيسي</label>
-            <input type="color" id="settingsPrimaryColor">
+            <div class="tenant-color-field">
+              <input type="color" id="settingsPrimaryColor">
+              <span class="tenant-color-value" data-color-for="settingsPrimaryColor" dir="ltr"></span>
+            </div>
           </div>
           <div class="tenant-field">
             <label>اللون الثانوي</label>
-            <input type="color" id="settingsSecondaryColor">
+            <div class="tenant-color-field">
+              <input type="color" id="settingsSecondaryColor">
+              <span class="tenant-color-value" data-color-for="settingsSecondaryColor" dir="ltr"></span>
+            </div>
           </div>
           <div class="tenant-field">
             <label>لون التمييز</label>
-            <input type="color" id="settingsAccentColor">
+            <div class="tenant-color-field">
+              <input type="color" id="settingsAccentColor">
+              <span class="tenant-color-value" data-color-for="settingsAccentColor" dir="ltr"></span>
+            </div>
           </div>
           <div class="tenant-field">
             <label>لون الخلفية</label>
-            <input type="color" id="settingsBackgroundColor">
+            <div class="tenant-color-field">
+              <input type="color" id="settingsBackgroundColor">
+              <span class="tenant-color-value" data-color-for="settingsBackgroundColor" dir="ltr"></span>
+            </div>
           </div>
           <div class="tenant-field">
             <label>لون النص</label>
-            <input type="color" id="settingsTextColor">
+            <div class="tenant-color-field">
+              <input type="color" id="settingsTextColor">
+              <span class="tenant-color-value" data-color-for="settingsTextColor" dir="ltr"></span>
+            </div>
           </div>
           <div class="tenant-field" style="display:none;">
             <select id="settingsFontFamily">
@@ -1004,12 +1030,44 @@
           <h2 data-i18n="nav.admin">لوحة المدير</h2>
         </div>
         <div class="tenant-actions">
-          <button type="button" class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
+          <button type="button" class="btn ghost" onclick="loadAdminDashboard()"><span data-i18n="admin.refresh">تحديث</span></button>
         </div>
       </div>
 
-      <!-- KPI Cards -->
-      <div id="sagAdminStats" class="tenant-dashboard-stats"></div>
+      <!-- KPI cards with sparklines and month-over-month deltas -->
+      <div id="sagAdminStats" class="admin-kpi-grid"></div>
+
+      <div class="admin-charts-grid">
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.chart_activity">نشاط المنصة</h3>
+            <div class="admin-chart-legend" id="sagActivityLegend"></div>
+          </div>
+          <div id="sagActivityChart" class="admin-chart"></div>
+        </div>
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.plan_distribution">الشركات حسب الباقة</h3>
+          </div>
+          <div id="sagPlanDonut" class="admin-donut-wrap"></div>
+        </div>
+      </div>
+
+      <div class="admin-charts-grid">
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.chart_spend">استهلاك التوليد والخرائط</h3>
+            <div class="admin-chart-legend" id="sagSpendLegend"></div>
+          </div>
+          <div id="sagSpendChart" class="admin-chart"></div>
+        </div>
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.chart_tickets">تذاكر الدعم حسب الحالة</h3>
+          </div>
+          <div id="sagTicketBars"></div>
+        </div>
+      </div>
 
       <div class="tenant-admin-grid">
         <div class="tenant-content-panel">
@@ -1020,12 +1078,8 @@
         </div>
         <div class="tenant-content-panel">
           <div class="tenant-panel-heading">
-            <h3 class="dash-section-title" data-i18n="admin.plan_distribution">الشركات حسب الباقة</h3>
-          </div>
-          <div id="sagPlanBars"></div>
-          <div class="tenant-panel-heading" style="margin-top:22px">
             <h3 class="dash-section-title" data-i18n="admin.latest_notifications">آخر الإشعارات</h3>
-            <button type="button" class="btn small ghost" onclick="omMarkAllRead()">تحديد الكل كمقروء</button>
+            <button type="button" class="btn small ghost" onclick="omMarkAllRead()"><span data-i18n="admin.mark_all_read">تحديد الكل كمقروء</span></button>
           </div>
           <div id="adminNotificationsList"></div>
         </div>

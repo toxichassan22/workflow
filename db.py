@@ -8437,7 +8437,7 @@ def list_tenant_contracts(tenant_id, include_expired=True):
 # ── t54: operational monitoring that never exposes client content ───────────
 
 def operational_overview():
-    """Counts only: the super-admin sees the shape of activity, never the content."""
+    """Counts and activity shape only: the super-admin never sees client content."""
     conn = get_db()
     def count(table, where='1 = 1', params=()):
         try:
@@ -8445,10 +8445,62 @@ def operational_overview():
             return int(row['n'] or 0)
         except Exception:
             return 0
+
+    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at', where='1 = 1'):
+        try:
+            rows = conn.execute(
+                'SELECT substr(' + date_col + ', 1, 7) AS m, ' + value_sql + ' AS v FROM ' + table +
+                ' WHERE ' + where + ' AND ' + date_col + ' IS NOT NULL GROUP BY m'
+            ).fetchall()
+            return {r['m']: float(r['v'] or 0) for r in rows if r['m']}
+        except Exception:
+            return {}
+
+    now = datetime.now()
+    labels = []
+    for i in range(11, -1, -1):
+        mm = now.month - i
+        yy = now.year + (mm - 1) // 12
+        mm = (mm - 1) % 12 + 1
+        labels.append('%04d-%02d' % (yy, mm))
+
+    series_maps = {
+        'companies': monthly_map('tenants', where='is_admin = 0'),
+        'presentations': monthly_map('presentations'),
+        'users': monthly_map('users'),
+        'ai_spend': monthly_map('ai_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
+        'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
+        'revenue': monthly_map('recharge_requests', 'COALESCE(SUM(amount_usd), 0)',
+                               date_col='reviewed_at', where="status = 'approved'"),
+        'tickets': monthly_map('support_tickets'),
+    }
+    trends = {'labels': labels}
+    for key, mmap in series_maps.items():
+        trends[key] = [round(mmap.get(lb, 0), 2) for lb in labels]
+
+    def delta(mmap):
+        cur = mmap.get(labels[-1], 0)
+        prev = mmap.get(labels[-2], 0)
+        if not prev:
+            return None
+        return round((cur - prev) / float(prev) * 100)
+
+    ticket_status = {}
+    try:
+        for r in conn.execute('SELECT status, COUNT(*) AS n FROM support_tickets GROUP BY status').fetchall():
+            ticket_status[r['status'] or 'open'] = int(r['n'] or 0)
+    except Exception:
+        pass
+
+    spend_map = series_maps['ai_spend']
+    maps_map = series_maps['maps_spend']
+    revenue_map = series_maps['revenue']
     return {
         'tenants': {
             'total': count('tenants'),
+            'companies': count('tenants', 'is_admin = 0'),
             'active': count('tenants', 'is_active = 1'),
+            'active_companies': count('tenants', 'is_active = 1 AND is_admin = 0'),
         },
         'users': {'total': count('users'), 'active': count('users', 'is_active = 1')},
         'drafts': {'total': count('project_drafts')},
@@ -8460,7 +8512,25 @@ def operational_overview():
             'open_support_tickets': count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
             'open_tasks': count('approval_tasks', "status = 'open'"),
         },
-        'generated_at': datetime.now().isoformat(),
+        'tickets_by_status': ticket_status,
+        'revenue': {
+            'month_usd': round(revenue_map.get(labels[-1], 0), 2),
+            'total_usd': round(sum(revenue_map.values()), 2),
+        },
+        'spend': {
+            'month_usd': round(spend_map.get(labels[-1], 0) + maps_map.get(labels[-1], 0), 2),
+            'total_usd': round(sum(spend_map.values()) + sum(maps_map.values()), 2),
+        },
+        'trends': trends,
+        'deltas': {
+            'companies': delta(series_maps['companies']),
+            'presentations': delta(series_maps['presentations']),
+            'users': delta(series_maps['users']),
+            'spend': delta({k: spend_map.get(k, 0) + maps_map.get(k, 0) for k in labels}),
+            'revenue': delta(revenue_map),
+            'tickets': delta(series_maps['tickets']),
+        },
+        'generated_at': now.isoformat(),
     }
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -1098,52 +1098,262 @@
       if (typeof omLoadNotifications === 'function') omLoadNotifications('adminNotificationsList');
     }
 
+    // ── Super-admin dashboard: SVG data-viz helpers (no icon glyphs; charts
+    //    are genuine data rendering and keep the no-icons rule intact) ──
+
+    const SAG_MONTHS = {
+      ar: ['ينا', 'فبر', 'مار', 'أبر', 'ماي', 'يون', 'يول', 'أغس', 'سبت', 'أكت', 'نوف', 'ديس'],
+      en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    };
+
+    function sagMonthLabel(iso) {
+      const lang = (window.WFI18n && WFI18n.getLang && WFI18n.getLang()) || 'ar';
+      const names = SAG_MONTHS[lang === 'en' ? 'en' : 'ar'];
+      const m = parseInt(String(iso).split('-')[1], 10);
+      return names[(m || 1) - 1] || iso;
+    }
+
+    function sagFmtNum(v) {
+      return Number(v || 0).toLocaleString('en-US');
+    }
+
+    function sagFmtMoney(v) {
+      const n = Number(v || 0);
+      const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
+      return '$' + n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
+
+    function sagDeltaChip(d) {
+      if (d === null || d === undefined || isNaN(d)) {
+        return '<span class="admin-delta flat">' + WFT('admin.delta_na', '—') + '</span>';
+      }
+      const cls = d > 0 ? 'up' : (d < 0 ? 'down' : 'flat');
+      const txt = (d > 0 ? '+' : '') + d + '%';
+      return '<span class="admin-delta ' + cls + '">' + txt + '</span>';
+    }
+
+    function sagSmoothPath(pts) {
+      if (pts.length < 3) {
+        return 'M' + pts.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L');
+      }
+      let d = 'M' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+      }
+      return d;
+    }
+
+    function sagSparkline(values, color) {
+      const w = 140, h = 40, pad = 3;
+      const vals = (values && values.length ? values : [0, 0]);
+      const max = Math.max(1, ...vals);
+      const pts = vals.map((v, i) => [pad + i * (w - 2 * pad) / (vals.length - 1), h - pad - (v / max) * (h - 2 * pad)]);
+      const line = sagSmoothPath(pts);
+      const area = line + ' L' + pts[pts.length - 1][0].toFixed(1) + ' ' + h + ' L' + pts[0][0].toFixed(1) + ' ' + h + ' Z';
+      return '<svg class="admin-spark-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path d="' + area + '" fill="' + color + '" opacity="0.14"/>' +
+        '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round"/></svg>';
+    }
+
+    function sagNiceScale(maxV) {
+      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000];
+      const step = steps.find(s => maxV <= s * 3) || 50000;
+      return { top: step * 3, step: step };
+    }
+
+    function sagTickText(v, top) {
+      return top < 10 ? String(Math.round(v * 10) / 10) : sagFmtNum(Math.round(v));
+    }
+
+    function sagLineChart(labels, series) {
+      const W = 660, H = 240, padL = 34, padR = 10, padT = 16, padB = 28;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const maxV = Math.max(0.01, ...series.flatMap(s => s.values));
+      const sc = sagNiceScale(maxV), top = sc.top;
+      const n = labels.length;
+      const x = i => padL + (n === 1 ? innerW / 2 : i * innerW / (n - 1));
+      const y = v => padT + innerH - (v / top) * innerH;
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+      for (let g = 0; g <= 3; g++) {
+        const gv = sc.step * g, gy = y(gv);
+        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
+          '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
+      }
+      labels.forEach((lb, i) => {
+        if (n > 8 && i % 2 === 1) return;
+        svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
+      });
+      series.forEach(s => {
+        const pts = s.values.map((v, i) => [x(i), y(v)]);
+        const line = sagSmoothPath(pts);
+        const area = line + ' L' + x(n - 1) + ' ' + (padT + innerH) + ' L' + x(0) + ' ' + (padT + innerH) + ' Z';
+        svg += '<path d="' + area + '" fill="' + s.color + '" opacity="0.10"/>' +
+          '<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2.4" stroke-linecap="round"/>';
+        pts.forEach((p, i) => {
+          svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2" fill="' + s.color + '">' +
+            '<title>' + s.name + ': ' + sagFmtNum(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
+        });
+      });
+      return svg + '</svg>';
+    }
+
+    function sagBarChart(labels, series) {
+      const W = 660, H = 240, padL = 40, padR = 10, padT = 16, padB = 28;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const maxV = Math.max(0.01, ...series.flatMap(s => s.values));
+      const sc = sagNiceScale(maxV), top = sc.top;
+      const n = labels.length, groupW = innerW / n, barW = Math.min(16, (groupW - 10) / series.length);
+      const y = v => padT + innerH - (v / top) * innerH;
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+      for (let g = 0; g <= 3; g++) {
+        const gv = sc.step * g, gy = y(gv);
+        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
+          '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
+      }
+      labels.forEach((lb, i) => {
+        if (n > 8 && i % 2 === 1) return;
+        const cx = padL + i * groupW + groupW / 2;
+        svg += '<text x="' + cx + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
+        series.forEach((s, si) => {
+          const v = s.values[i] || 0;
+          const bx = cx - (series.length * barW + (series.length - 1) * 3) / 2 + si * (barW + 3);
+          const bh = Math.max(v > 0 ? 2 : 0, innerH * v / top);
+          svg += '<rect x="' + bx.toFixed(1) + '" y="' + (padT + innerH - bh).toFixed(1) + '" width="' + barW + '" height="' + bh.toFixed(1) + '" rx="3" fill="' + s.color + '">' +
+            '<title>' + s.name + ': ' + sagFmtNum(v) + ' — ' + sagMonthLabel(lb) + '</title></rect>';
+        });
+      });
+      return svg + '</svg>';
+    }
+
+    function sagDonut(segments, centerLabel) {
+      const r = 56, C = 2 * Math.PI * r, size = 150;
+      const total = segments.reduce((a, s) => a + (s.value || 0), 0);
+      let off = 0, rings = '';
+      segments.forEach(s => {
+        const len = total ? (s.value / total) * C : 0;
+        rings += '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="20" ' +
+          'stroke-dasharray="' + len.toFixed(1) + ' ' + (C - len).toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')">' +
+          '<title>' + s.label + ': ' + sagFmtNum(s.value) + '</title></circle>';
+        off += len;
+      });
+      const legend = segments.map(s =>
+        '<div class="admin-legend-item"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' +
+        '<span>' + s.label + '</span><strong>' + sagFmtNum(s.value) + '</strong></div>'
+      ).join('');
+      return '<div class="admin-donut-chart"><svg viewBox="0 0 ' + size + ' ' + size + '" role="img">' +
+        '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" class="admin-donut-track" stroke-width="20"/>' + rings +
+        '<text x="' + size / 2 + '" y="' + (size / 2 - 2) + '" class="admin-donut-total" text-anchor="middle">' + sagFmtNum(total) + '</text>' +
+        '<text x="' + size / 2 + '" y="' + (size / 2 + 16) + '" class="admin-donut-sub" text-anchor="middle">' + centerLabel + '</text>' +
+        '</svg></div><div class="admin-donut-legend">' + legend + '</div>';
+    }
+
+    function sagLegend(el, series) {
+      if (!el) return;
+      el.innerHTML = series.map(s =>
+        '<span class="admin-legend-item"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' + s.name + '</span>'
+      ).join('');
+    }
+
     function renderAdminDashboard(overview) {
       const statsEl = document.getElementById('sagAdminStats');
       const pendingEl = document.getElementById('sagPendingActions');
-      const barsEl = document.getElementById('sagPlanBars');
       const tenants = overview.tenants || {};
       const users = overview.users || {};
       const presentations = overview.presentations || {};
       const workflows = overview.workflows || {};
+      const trends = overview.trends || {};
+      const deltas = overview.deltas || {};
+      const spend = overview.spend || {};
+      const revenue = overview.revenue || {};
+      const labels = trends.labels || [];
+      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+
       if (statsEl) {
-        const cards = [
-          { label: 'إجمالي الشركات', value: tenants.total || sagAllTenants.length },
-          { label: 'شركات نشطة', value: tenants.active != null ? tenants.active : sagAllTenants.filter(t => t.isActive).length },
-          { label: 'مستخدمون نشطون', value: users.active || 0 },
-          { label: 'إجمالي العروض', value: presentations.total || 0 },
-          { label: 'طلبات شحن معلقة', value: workflows.pending_recharges || 0 },
-          { label: 'تذاكر مفتوحة', value: workflows.open_support_tickets || 0 },
+        const kpis = [
+          { label: WFT('admin.kpi_companies', 'إجمالي الشركات'), value: sagFmtNum(tenants.companies != null ? tenants.companies : tenants.total || sagAllTenants.filter(t => !t.isAdmin).length), sub: WFT('admin.kpi_active', '{n} نشطة', { n: sagFmtNum(tenants.active_companies != null ? tenants.active_companies : tenants.active || 0) }), delta: deltas.companies, spark: trends.companies, color: 'var(--chart-1)' },
+          { label: WFT('admin.kpi_users', 'المستخدمون النشطون'), value: sagFmtNum(users.active || 0), sub: WFT('admin.kpi_users_total', 'من أصل {n}', { n: sagFmtNum(users.total || 0) }), delta: deltas.users, spark: trends.users, color: 'var(--chart-2)' },
+          { label: WFT('admin.kpi_presentations', 'العروض المولدة'), value: sagFmtNum(presentations.total || 0), sub: WFT('admin.kpi_approved', '{n} معتمد', { n: sagFmtNum(presentations.approved || 0) }), delta: deltas.presentations, spark: trends.presentations, color: 'var(--chart-4)' },
+          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoney(spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
+          { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoney(revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue, color: 'var(--chart-5)' },
         ];
-        statsEl.innerHTML = cards.map(c =>
-          '<div class="tenant-dash-card stat"><h3>' + c.value + '</h3><p>' + c.label + '</p></div>'
-        ).join('');
-      }
-      if (pendingEl) {
-        const items = [
-          { label: 'طلبات شحن بانتظار المراجعة', count: workflows.pending_recharges || 0, action: 'openAdminRechargePage()' },
-          { label: 'تذاكر دعم مفتوحة من الشركات', count: workflows.open_support_tickets || 0, action: 'openAdminTicketsPage()' },
-          { label: 'اعتمادات توليد معلقة داخل الشركات', count: workflows.pending_generation_approvals || 0, action: '' },
-          { label: 'اعتمادات ملفات نهائية معلقة', count: workflows.pending_final_approvals || 0, action: '' },
-        ];
-        pendingEl.innerHTML = items.map(item =>
-          '<div class="tenant-presentation-card">' +
-          '<div><h3>' + item.label + '</h3>' +
-          '<div class="meta"><span>' + item.count + '</span></div></div>' +
-          (item.action ? '<div><button type="button" class="btn small primary" onclick="' + item.action + '">مراجعة</button></div>' : '') +
+        statsEl.innerHTML = kpis.map(k =>
+          '<div class="admin-kpi-card">' +
+          '<div class="admin-kpi-top"><span class="admin-kpi-label">' + k.label + '</span>' + sagDeltaChip(k.delta) + '</div>' +
+          '<div class="admin-kpi-value">' + k.value + '</div>' +
+          '<div class="admin-kpi-sub">' + k.sub + '</div>' +
+          '<div class="admin-spark">' + sagSparkline(k.spark, k.color) + '</div>' +
           '</div>'
         ).join('');
       }
-      if (barsEl) {
+
+      const activityEl = document.getElementById('sagActivityChart');
+      if (activityEl && labels.length) {
+        const series = [
+          { name: WFT('admin.legend_presentations', 'عروض مولدة'), values: trends.presentations || [], color: 'var(--chart-1)' },
+          { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)' },
+        ];
+        activityEl.innerHTML = sagLineChart(labels, series);
+        sagLegend(document.getElementById('sagActivityLegend'), series);
+      }
+
+      const spendEl = document.getElementById('sagSpendChart');
+      if (spendEl && labels.length) {
+        const series = [
+          { name: WFT('admin.legend_ai', 'ذكاء اصطناعي'), values: trends.ai_spend || [], color: 'var(--chart-3)' },
+          { name: WFT('admin.legend_maps', 'خرائط'), values: trends.maps_spend || [], color: 'var(--chart-4)' },
+        ];
+        spendEl.innerHTML = sagBarChart(labels, series);
+        sagLegend(document.getElementById('sagSpendLegend'), series);
+      }
+
+      const donutEl = document.getElementById('sagPlanDonut');
+      if (donutEl) {
         const planCounts = {};
-        sagAllTenants.forEach(t => { const p = t.plan || 'free'; planCounts[p] = (planCounts[p] || 0) + 1; });
-        const planOrder = ['free', 'pro', 'enterprise'];
-        const max = Math.max(1, ...planOrder.map(p => planCounts[p] || 0));
-        barsEl.innerHTML = planOrder.map(p =>
-          '<div class="admin-bar-row"><span class="admin-bar-label">' + p + '</span>' +
-          '<span class="admin-bar-track"><span class="admin-bar-fill" style="width:' + Math.round(((planCounts[p] || 0) / max) * 100) + '%"></span></span>' +
-          '<strong>' + (planCounts[p] || 0) + '</strong></div>'
-        ).join('') || '<p class="tenant-hint">لا توجد شركات</p>';
+        sagAllTenants.filter(t => !t.isAdmin).forEach(t => { const p = t.plan || 'free'; planCounts[p] = (planCounts[p] || 0) + 1; });
+        donutEl.innerHTML = sagDonut([
+          { label: 'Free', value: planCounts.free || 0, color: 'var(--chart-1)' },
+          { label: 'Pro', value: planCounts.pro || 0, color: 'var(--chart-3)' },
+          { label: 'Enterprise', value: planCounts.enterprise || 0, color: 'var(--chart-4)' },
+        ], WFT('admin.donut_companies', 'شركة'));
+      }
+
+      const ticketEl = document.getElementById('sagTicketBars');
+      if (ticketEl) {
+        const byStatus = overview.tickets_by_status || {};
+        const rows = [
+          { key: 'open', label: WFT('support.status_open', 'مفتوحة'), color: 'var(--chart-5)' },
+          { key: 'in_progress', label: WFT('support.status_in_progress', 'قيد المعالجة'), color: 'var(--chart-1)' },
+          { key: 'waiting_customer', label: WFT('support.status_waiting', 'بانتظار العميل'), color: 'var(--chart-4)' },
+          { key: 'resolved', label: WFT('support.status_resolved', 'تم الحل'), color: 'var(--chart-2)' },
+          { key: 'closed', label: WFT('support.status_closed', 'مغلقة'), color: 'var(--muted)' },
+        ];
+        const max = Math.max(1, ...rows.map(r => byStatus[r.key] || 0));
+        const total = rows.reduce((a, r) => a + (byStatus[r.key] || 0), 0);
+        ticketEl.innerHTML = total === 0 ? '<p class="tenant-hint">' + WFT('admin.no_tickets', 'لا توجد تذاكر') + '</p>' :
+          rows.map(r =>
+            '<div class="admin-bar-row"><span class="admin-bar-label">' + r.label + '</span>' +
+            '<span class="admin-bar-track"><span class="admin-bar-fill" style="width:' + Math.round(((byStatus[r.key] || 0) / max) * 100) + '%;background:' + r.color + '"></span></span>' +
+            '<strong>' + (byStatus[r.key] || 0) + '</strong></div>'
+          ).join('');
+      }
+
+      if (pendingEl) {
+        const items = [
+          { label: WFT('admin.pending_recharges', 'طلبات شحن بانتظار المراجعة'), count: workflows.pending_recharges || 0, action: 'openAdminRechargePage()' },
+          { label: WFT('admin.pending_tickets', 'تذاكر دعم مفتوحة من الشركات'), count: workflows.open_support_tickets || 0, action: 'openAdminTicketsPage()' },
+          { label: WFT('admin.pending_gen', 'اعتمادات توليد معلقة داخل الشركات'), count: workflows.pending_generation_approvals || 0, action: '' },
+          { label: WFT('admin.pending_final', 'اعتمادات ملفات نهائية معلقة'), count: workflows.pending_final_approvals || 0, action: '' },
+        ];
+        pendingEl.innerHTML = items.map(item =>
+          '<div class="tenant-presentation-card admin-action-card">' +
+          '<div><h3>' + item.label + '</h3>' +
+          '<div class="meta"><span class="admin-action-count' + (item.count ? ' has' : '') + '">' + item.count + '</span></div></div>' +
+          (item.action ? '<div><button type="button" class="btn small primary" onclick="' + item.action + '">' + WFT('admin.review', 'مراجعة') + '</button></div>' : '') +
+          '</div>'
+        ).join('');
       }
     }
 

@@ -3955,13 +3955,16 @@ class MeetingRequirementsTests(unittest.TestCase):
             found = sorted({match.group() for match in pictographs.finditer(source)})
             self.assertEqual(found, [], f'{name} still contains icon glyphs: {found}')
 
-        # No icon libraries, and the only inline SVG is the map polygon overlay.
-        # The <svg count stays shell-only: scripts build overlay markup in strings.
+        # No icon libraries. SVG is allowed only for genuine data rendering:
+        # the favicon, the map polygon overlay, and the super-admin dashboard
+        # charts (sparkline/line/bar/donut builders emit SVG strings in JS).
         index_source = read_frontend_text()
-        shell_source = read_shell_text()
+        shell_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
-        self.assertEqual(shell_source.count('<svg'), 2, 'only the favicon and the map overlay may use SVG')
+        self.assertEqual(shell_source.count('<svg'), 1, 'the shell may inline only the favicon SVG')
+        self.assertEqual(index_source.count('<svg'), 6,
+            'allowed SVG: favicon + map overlay + the four admin dashboard chart builders')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 
         # Missing logos fall back to a text monogram rather than a building glyph.
