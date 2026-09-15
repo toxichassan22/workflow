@@ -331,7 +331,7 @@
 
     async function copyProjectDraftById(draftId) {
       if (!draftId) return;
-      const newTitle = prompt('اسم العرض الجديد:');
+      const newTitle = prompt(WFT('admin.new_deck_name', 'اسم العرض الجديد:'));
       if (!newTitle || !newTitle.trim()) return;
       const res = await api('POST', '/api/project-draft/copy', { draftId, newTitle: newTitle.trim() });
       if (res && res.success) {
@@ -375,7 +375,7 @@
     }
 
     async function deleteProjectDraftById(draftId) {
-      if (!confirm('هل أنت تأكد من حذف هذه المسودة؟')) return;
+      if (!confirm(WFT('admin.confirm_delete_draft', 'هل أنت تأكد من حذف هذه المسودة؟'))) return;
       const resp = await api('DELETE', '/api/project-draft/' + encodeURIComponent(draftId));
       if (resp.success) {
         tenantArchiveCache = null;
@@ -900,7 +900,7 @@
     }
 
     async function deleteTenantPresentation(presId) {
-      if (!confirm('هل أنت متأكد من حذف هذا العرض؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+      if (!confirm(WFT('admin.confirm_delete_deck', 'هل أنت متأكد من حذف هذا العرض؟ لا يمكن التراجع عن هذا الإجراء.'))) return;
       const data = await api('DELETE', '/api/presentations/' + presId);
       if (data.success) {
         toast('تم حذف العرض بنجاح');
@@ -1668,7 +1668,7 @@
         const date = (a.created_at || '').slice(0, 16).replace('T', ' ');
         const target = a.target_type === 'presentation' ? 'عرض' : a.target_type === 'draft' ? 'ملف مشروع' : escapeHtml(a.target_type || '');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(a.action || 'تعديل') + '</h3>' +
-          '<div class="meta">' + escapeHtml(a.user_name || '') + ' | ' + escapeHtml(a.summary || '') + ' | ' + target + ' | ' + escapeHtml(date) + '</div></div></div>';
+          '<div class="meta">' + escapeHtml(a.user_name || '') + ' | ' + escapeHtml(a.summary || '') + ' | <span>' + target + '</span> | ' + escapeHtml(date) + '</div></div></div>';
       }).join('');
     }
 
@@ -1849,7 +1849,7 @@
     }
 
     async function sagDeleteTenantUser(tenantId, userId) {
-      if (!confirm('حذف المستخدم نهائياً؟')) return;
+      if (!confirm(WFT('admin.confirm_delete_user', 'حذف المستخدم نهائياً؟'))) return;
       const data = await api('DELETE', '/api/admin/tenants/' + tenantId + '/users/' + userId);
       if (!data.success) {
         toast(data.error || 'تعذر حذف المستخدم');
@@ -2007,7 +2007,7 @@
     }
 
     async function sagDeleteTenant(tenantId) {
-      if (!confirm('حذف الشركة وكل بياناتها نهائياً؟')) return;
+      if (!confirm(WFT('admin.confirm_delete_tenant', 'حذف الشركة وكل بياناتها نهائياً؟'))) return;
       const data = await api('DELETE', '/api/admin/tenants/' + tenantId);
       if (data.success) { toast('تم حذف الشركة'); openTenantCompanies(); }
       else { toast(data.error || 'فشل الحذف'); }

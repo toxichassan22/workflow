@@ -87,7 +87,7 @@
       box.innerHTML = tasks.map(t => {
         const due = (t.due_at || t.event_date || '').slice(0, 16).replace('T', ' ');
         const recurring = t.recurrence && t.recurrence !== 'none'
-          ? ' | متكررة: ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
+          ? ' | <span>متكررة:</span> ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
           : '';
         const action = t.status === 'open' &&
           (canManageTasks || String(t.assignee_user_id || '') === myUserId || String(t.created_by || '') === myActorId)
@@ -95,7 +95,7 @@
           : '';
         return '<div class="tenant-presentation-card"><div><h3>' + omEscape(t.title) + '</h3>' +
           '<div class="meta"><span>' + omStatus(t.status) + '</span>' +
-          (due ? ' | <span>الاستحقاق: ' + omEscape(due) + '</span>' : '') + recurring + '</div></div>' +
+          (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + '</div></div>' +
           '<div>' + action + '</div></div>';
       }).join('');
     }
@@ -178,10 +178,10 @@
       }
       box.innerHTML = tickets.map(t => {
         const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
-        const sla = t.sla_due_at ? (' | <span>استحقاق SLA: ' + omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')) + '</span>') : '';
+        const sla = t.sla_due_at ? (' | <span>استحقاق SLA:</span> ' + omEscape(t.sla_due_at.slice(0, 16).replace('T', ' '))) : '';
         return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="omOpenTicket(\'' + t.id + '\')">' +
           '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
-          '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية: ' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla + '</div></div></div>';
+          '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla + '</div></div></div>';
       }).join('');
     }
 
@@ -217,7 +217,7 @@
           : '');
       detail.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — ' + omStatus(t.status) + '</h3>' +
+        '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — <span>' + omStatus(t.status) + '</span></h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'omTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
         statusActions +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
@@ -283,9 +283,9 @@
       }
       box.innerHTML = requests.map(r => {
         const date = (r.created_at || '').slice(0, 16).replace('T', ' ');
-        const tenantInfo = (isAdmin && (r.tenant_name || r.company_name)) ? ('<span>الشركة: ' + omEscape(r.tenant_name || r.company_name) + '</span> | ') : '';
-        const ref = r.transfer_reference ? (' | <span>المرجع البنكي: ' + omEscape(r.transfer_reference) + '</span>') : '';
-        const inv = r.reference_number ? (' | <span style="color:#1c7a2e;font-weight:600;">سند مالي: ' + omEscape(r.reference_number) + '</span>') : '';
+        const tenantInfo = (isAdmin && (r.tenant_name || r.company_name)) ? ('<span>الشركة:</span> ' + omEscape(r.tenant_name || r.company_name) + ' | ') : '';
+        const ref = r.transfer_reference ? (' | <span>المرجع البنكي:</span> ' + omEscape(r.transfer_reference)) : '';
+        const inv = r.reference_number ? (' | <span style="color:#1c7a2e;font-weight:600;">سند مالي:</span> ' + omEscape(r.reference_number)) : '';
         const actions = (isAdmin && r.status === 'pending')
           ? '<div style="display:flex;gap:6px;margin-top:6px;">' +
             '<button type="button" class="btn small green" onclick="omDecideRecharge(\'' + r.id + '\', \'approved\')">اعتماد الطلب</button>' +
@@ -293,7 +293,7 @@
             '</div>'
           : '';
         return '<div class="tenant-presentation-card">' +
-          '<div><h3>' + omEscape(r.package_name) + ' — ' + (r.price_sar ? r.price_sar + ' ريال' : (r.amount_usd + ' دولار')) + '</h3>' +
+          '<div><h3><span>' + omEscape(r.package_name) + '</span> — ' + (r.price_sar ? r.price_sar + ' <span>ريال</span>' : (r.amount_usd + ' <span>دولار</span>')) + '</h3>' +
           '<div class="meta">' + tenantInfo + '<span>' + omStatus(r.status) + '</span> | <span>' + omEscape(date) + '</span>' + ref + inv + '</div>' +
           actions +
           '</div></div>';
@@ -358,12 +358,12 @@
         return;
       }
       box.innerHTML = contracts.map(c => {
-        const expires = c.expires_at ? (' | <span>ينتهي: ' + omEscape(c.expires_at) + '</span>') : '';
+        const expires = c.expires_at ? (' | <span>ينتهي:</span> ' + omEscape(c.expires_at)) : '';
         const kindLabel = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد رئيسي';
         const isExpired = c.status === 'expired' || (c.expires_at && new Date(c.expires_at) < new Date());
         const statusLabel = isExpired ? '<span style="color:#c33;">منتهي (محفوظ 365 يوماً)</span>' : '<span style="color:var(--green);">سارٍ</span>';
         return '<div class="tenant-presentation-card">' +
-          '<div><h3>' + omEscape(c.title) + ' (' + kindLabel + ')</h3>' +
+          '<div><h3>' + omEscape(c.title) + ' — <span>' + kindLabel + '</span></h3>' +
           '<div class="meta">' + statusLabel + expires + '</div></div></div>';
       }).join('');
     }
@@ -423,7 +423,7 @@
           '<tr style="border-bottom:1px solid #e2e8f0;">' +
           '<td style="padding:10px 8px;font-weight:600;">' + omEscape(t.label_ar) + '</td>' +
           '<td style="padding:10px 8px;font-family:monospace;font-size:12px;">' + omEscape(t.key) + '</td>' +
-          '<td style="padding:10px 8px;">' + (t.max_size_mb || 25) + ' ميجابايت</td>' +
+          '<td style="padding:10px 8px;">' + (t.max_size_mb || 25) + ' <span>ميجابايت</span></td>' +
           '<td style="padding:10px 8px;font-size:12px;color:#64748b;">' + omEscape(t.allowed_extensions || 'جميع الامتدادات المدعومة') + '</td>' +
           '<td style="padding:10px 8px;">' +
           '<button type="button" class="btn small ghost" onclick="omUpdateFileTypePrompt(\'' + omEscape(t.key) + '\', \'' + omEscape(t.label_ar) + '\', ' + (t.max_size_mb || 25) + ', \'' + omEscape(t.allowed_extensions || '') + '\')">تعديل الحد</button>' +
@@ -433,7 +433,7 @@
     }
 
     async function omUpdateFileTypePrompt(key, label, currentMaxMb, currentExts) {
-      const newMbStr = prompt('الحد الأقصى بالـ MB لنوع (' + label + '):', currentMaxMb);
+      const newMbStr = prompt(WFT('file_types.max_prompt', 'الحد الأقصى بالـ MB لنوع ({label}):', { label }), currentMaxMb);
       if (!newMbStr) return;
       const newMb = parseInt(newMbStr, 10);
       if (isNaN(newMb) || newMb <= 0) { toast(WFT('common.invalid_value', 'قيمة غير صالحة')); return; }
@@ -501,14 +501,14 @@
       const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
       box.innerHTML = tickets.map(t => {
         const sla = t.sla_due_at
-          ? (' | <span' + (t.sla_overdue ? ' style="color:#c33;font-weight:700"' : '') + '>استحقاق SLA: ' +
-             omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')) + '</span>')
+          ? (' | <span' + (t.sla_overdue ? ' style="color:#c33;font-weight:700"' : '') + '>استحقاق SLA:</span> ' +
+             omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')))
           : '';
         return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="adminOpenTicket(\'' + t.id + '\')">' +
           '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
           '<div class="meta"><span style="font-weight:700">' + omEscape(t.tenant_name || 'شركة') + '</span>' +
           ' | <span>' + omStatus(t.status) + '</span>' +
-          ' | <span>الأولوية: ' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla +
+          ' | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla +
           (t.sla_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '') +
           '</div></div></div>';
       }).join('');
@@ -543,9 +543,9 @@
         : '';
       detail.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
-        '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — ' + omStatus(t.status) + '</h3>' +
+        '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — <span>' + omStatus(t.status) + '</span></h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'adminTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
-        '<div class="meta" style="margin-top:4px"><span>الشركة: ' + omEscape(t.tenant_name || '') + '</span></div>' +
+        '<div class="meta" style="margin-top:4px"><span>الشركة:</span> ' + omEscape(t.tenant_name || '') + '</div>' +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         statusActions;
       detail.scrollIntoView({ block: 'nearest' });
