@@ -1356,8 +1356,6 @@
       recharge_sla: ['admin.alert_recharge_sla', 'طلبات شحن تجاوزت مهلة المراجعة ٢٤ ساعة'],
       generation_failures: ['admin.alert_generation_failures', 'مهام توليد فاشلة خلال ٢٤ ساعة'],
       dead_jobs: ['admin.alert_dead_jobs', 'مهام خلفية استنفدت محاولاتها'],
-      zero_balance: ['admin.alert_zero_balance', 'شركات نشطة برصيد صفري'],
-      backup_overdue: ['admin.alert_backup_overdue', 'لا توجد نسخة احتياطية ناجحة ضمن هدف الاسترداد'],
       contract_expiry: ['admin.alert_contract_expiry', 'عقود تنتهي خلال ٣٠ يومًا'],
       retention_due: ['admin.alert_retention_due', 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'],
     };

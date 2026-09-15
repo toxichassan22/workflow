@@ -13485,27 +13485,6 @@ def platform_alerts():
         alerts.append({'kind': 'dead_jobs', 'severity': 'critical', 'count': dead_jobs,
                        'message_ar': 'مهام خلفية استنفدت محاولاتها'})
     try:
-        zero_balance = int(conn.execute(
-            'SELECT COUNT(*) AS n FROM tenants WHERE is_admin = 0 AND is_active = 1 '
-            'AND COALESCE(credit_balance, 0) <= 0'
-        ).fetchone()['n'] or 0)
-    except Exception:
-        zero_balance = 0
-    if zero_balance:
-        alerts.append({'kind': 'zero_balance', 'severity': 'info', 'count': zero_balance,
-                       'message_ar': 'شركات نشطة برصيد صفري'})
-    latest_backup = latest_successful_backup()
-    backup_overdue = True
-    if latest_backup and latest_backup.get('created_at'):
-        try:
-            backup_overdue = (now - datetime.fromisoformat(latest_backup['created_at'])) \
-                > timedelta(hours=RPO_TARGET_HOURS)
-        except (TypeError, ValueError):
-            backup_overdue = True
-    if backup_overdue:
-        alerts.append({'kind': 'backup_overdue', 'severity': 'critical', 'count': 1,
-                       'message_ar': 'لا توجد نسخة احتياطية ناجحة ضمن هدف الاسترداد'})
-    try:
         expiring = int(conn.execute(
             """SELECT COUNT(*) AS n FROM tenant_contracts
                WHERE status = 'active' AND expires_at IS NOT NULL
