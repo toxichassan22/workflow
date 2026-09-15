@@ -15072,8 +15072,9 @@ def api_register():
         return jsonify({'error': 'Company name is too long'}), 400
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
         return jsonify({'error': 'Invalid email address'}), 400
-    if len(password) < 10:
-        return jsonify({'error': 'Password must be at least 10 characters'}), 400
+    password_error = _password_validation_error(password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
     if subdomain and not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', subdomain):
         return jsonify({'error': 'Invalid subdomain'}), 400
     if domain and not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}', domain):
@@ -15633,8 +15634,9 @@ def api_add_user():
         return jsonify({'error': 'name, email, and password are required'}), 400
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
         return jsonify({'error': 'Invalid email'}), 400
-    if len(password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    password_error = _password_validation_error(password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
     if role not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
 
@@ -15685,7 +15687,11 @@ def api_update_user(user_id):
     if updates.get('role') is not None and updates['role'] not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
     if 'password' in data and data['password']:
+        password_error = _password_validation_error(data['password'])
+        if password_error:
+            return jsonify({'error': password_error}), 400
         updates['password_hash'] = hash_password(data['password'])
+        updates['require_password_change'] = 0
 
     # t21-03: the last active company admin can never be disabled or demoted.
     demotes_admin = ('role' in updates and updates['role'] != 'company_admin' and user.get('role') == 'company_admin') \
@@ -19132,8 +19138,9 @@ def api_accept_invite(token):
     password = data.get('password', '')
     if not password:
         return jsonify({'error': 'password is required'}), 400
-    if len(password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    password_error = _password_validation_error(password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
 
     existing = db.get_user_by_email(invite['email'])
     if existing:
@@ -22468,6 +22475,13 @@ def api_training_chat():
 ```action
 {{"tool": "toggle_user", "params": {{"user_email": "...", "is_active": true}}}}
 ```
+ولإضافة موظف جديد:
+```action
+{{"tool": "add_user", "params": {{"name": "...", "email": "...", "role": "employee", "password": "..."}}}}
+```
+- `password` اختياري؛ إن أُرسل فيجب أن يطابق سياسة المنصة (10 أحرف على الأقل وتشمل حروفًا وأرقامًا).
+- بدون `password` يُنشأ الحساب برابط تعيين كلمة مرور لمرة واحدة يعود في النتيجة — لا تخترع كلمة مرور افتراضية أبدًا.
+- لا تعرض كلمة المرور ولا تكررها في الرد؛ النتيجة نفسها لا تحملها.
 
 ### 10. عرض الأقسام:
 ```action
@@ -23518,25 +23532,47 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
         elif tool == 'add_user':
             name = (params.get('name') or params.get('user_name') or '').strip()
             email = (params.get('email') or params.get('user_email') or '').strip().lower()
-            password = (params.get('password') or '123456').strip()
+            password = (params.get('password') or '').strip()
             role = (params.get('role') or 'employee').strip()
+            password_error = _password_validation_error(password) if password else None
             if not name or not email:
                 result['status'] = 'error'
                 result['message'] = 'name و email مطلوبان لإضافة الموظف'
             elif role not in db.USER_ROLES:
                 result['status'] = 'error'
                 result['message'] = f'الدور "{role}" غير معروف. الأدوار المتاحة: {", ".join(db.USER_ROLES)}'
+            elif password_error:
+                result['status'] = 'error'
+                result['message'] = password_error
             else:
                 existing = db.get_user_by_email(email)
                 if existing:
                     result['status'] = 'error'
                     result['message'] = f'الموظف بالإيميل "{email}" موجود بالفعل'
                 else:
-                    pw_hash = auth.hash_password(password)
-                    user_id = db.create_user(tenant_id, name, email, pw_hash, role=role)
+                    # No default password: when none is supplied the account is
+                    # created behind a one-time setup link and stays locked to
+                    # password login until the employee sets their own.
+                    if password:
+                        pw_hash = auth.hash_password(password)
+                        require_change = False
+                    else:
+                        pw_hash = auth.hash_password(_generate_secure_password())
+                        require_change = True
+                    user_id = db.create_user(tenant_id, name, email, pw_hash, role=role,
+                                             require_password_change=require_change)
+                    setup_url = None
+                    if require_change:
+                        setup_url = _password_setup_url(
+                            db.create_password_setup_token(tenant_id, user_id))
                     db.log_ai_rule_change(tenant_id, 'agent_user', 'add_user', None, f'{name} ({email})', risk_level='yellow')
-                    result['message'] = f'تم إضافة الموظف "{name}" ({email}) بكلمة مرور مؤقتة ({password}) بنجاح.'
                     result['user_id'] = user_id
+                    if setup_url:
+                        result['data'] = {'setupUrl': setup_url}
+                        result['message'] = (f'تم إضافة الموظف "{name}" ({email}). '
+                                             f'رابط تعيين كلمة المرور: {setup_url}')
+                    else:
+                        result['message'] = f'تم إضافة الموظف "{name}" ({email}) بنجاح.'
 
         # ── Set Permission ────────────────────────────────────────────
         elif tool == 'set_permission':

@@ -252,6 +252,50 @@ class AdminAgentTests(unittest.TestCase):
                     user = db.get_user_by_email(email)
                     if user:
                         db.delete_user(user['id'])
+
+    # ── Adding employees never goes through a default password ────────────
+
+    def test_agent_add_user_never_falls_back_to_a_default_password(self):
+        """ISS-008: the tool used to substitute '123456' when the model sent
+        no password and then repeated that password back in the chat reply."""
+        # No password at all -> one-time setup link, first login must set one.
+        created = self._run('add_user', name='موظف بلا كلمة', email='nopw@agent.test',
+                            role='employee')
+        self.assertEqual(created['status'], 'success', created.get('message'))
+        setup_url = (created.get('data') or {}).get('setupUrl', '')
+        self.assertIn('/set-password/', setup_url)
+        self.assertNotIn('123456', created['message'])
+        with self.app.app_context():
+            user = db.get_user_by_email('nopw@agent.test')
+            self.assertEqual(user['require_password_change'], 1)
+            token_row = db.get_password_setup_token(setup_url.rsplit('/', 1)[-1])
+            self.assertIsNotNone(token_row)
+            self.assertEqual(token_row['user_id'], user['id'])
+
+        # A weak password is refused, not silently accepted.
+        weak = self._run('add_user', name='موظف ضعيف', email='weak@agent.test',
+                         password='123456')
+        self.assertEqual(weak['status'], 'error')
+        with self.app.app_context():
+            self.assertIsNone(db.get_user_by_email('weak@agent.test'))
+
+        # A policy-compliant password is honoured and never echoed back.
+        strong = self._run('add_user', name='موظف قوي', email='strong@agent.test',
+                           password='AgentPass123')
+        self.assertEqual(strong['status'], 'success', strong.get('message'))
+        self.assertNotIn('AgentPass123', strong['message'])
+        with self.app.app_context():
+            user = db.get_user_by_email('strong@agent.test')
+            self.assertEqual(user['require_password_change'], 0)
+            self.assertTrue(auth.verify_password('AgentPass123', user['password_hash']))
+
+    def test_agent_prompt_documents_the_add_user_contract(self):
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('"tool": "add_user"', app_source)
+        # The contract must rule out invented defaults and echoed secrets.
+        self.assertNotIn("or '123456'", app_source)
+        self.assertIn('لا تخترع كلمة مرور افتراضية', app_source)
+
     # ── Company settings the agent could not reach before ─────────────────
 
     def test_agent_can_set_map_styles_and_lock_the_slide_count(self):

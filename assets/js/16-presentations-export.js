@@ -2351,10 +2351,8 @@
       };
       const newPassword = document.getElementById('sagEditUserPassword').value;
       if (newPassword) {
-        if (newPassword.length < 10) {
-          toast('كلمة المرور 10 أحرف على الأقل');
-          return;
-        }
+        const pwError = passwordPolicyError(newPassword);
+        if (pwError) { toast(pwError); return; }
         payload.password = newPassword;
       }
       if (!payload.name || !payload.email || !payload.username) {
@@ -2414,10 +2412,8 @@
 
     async function sagResetPasswordWithValue(tenantId) {
       const password = document.getElementById('sagResetPasswordValue').value;
-      if (!password || password.length < 10) {
-        toast('كلمة المرور 10 أحرف على الأقل');
-        return;
-      }
+      const pwError = passwordPolicyError(password);
+      if (pwError) { toast(pwError); return; }
       showLoader('جاري تعيين كلمة المرور', 'حفظ كلمة المرور الجديدة', 15);
       try {
         const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-password', { password });

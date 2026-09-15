@@ -761,7 +761,7 @@ class IdentityApiTests(unittest.TestCase):
         info = self.client.get(f'/api/invite/{token}')
         self.assertEqual(info.status_code, 200)
         registered = self.client.post(f'/api/invite/{token}/register',
-                                      json={'password': 'secret123'})
+                                      json={'password': 'Secret1234'})
         body = registered.get_json()
         self.assertEqual(registered.status_code, 201, body)
         self.assertEqual(body['user']['role'], 'section_editor')
@@ -770,13 +770,64 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(db.get_user_project_scope_ids(new_user['id']), {draft_id})
         self.assertTrue(db.get_user_field_sections(new_user['id'], self.tenant_id).get('basic'))
         # The link is spent.
-        again = self.client.post(f'/api/invite/{token}/register', json={'password': 'secret123'})
+        again = self.client.post(f'/api/invite/{token}/register', json={'password': 'Secret1234'})
         self.assertEqual(again.status_code, 404)
         # Resend refuses a used invite.
         resend = self.client.post(
             f"/api/invites/{created.get_json()['inviteId']}/resend",
             headers=self.headers(self.admin_user_token), json={})
         self.assertEqual(resend.status_code, 409)
+
+    # ── One password policy across every endpoint ────────────────────────
+
+    def test_password_policy_is_identical_on_every_path(self):
+        """ISS-008: employee add, employee edit, invite acceptance and company
+        registration used to each carry a different rule (6 chars, any
+        non-empty value, 10 chars without the letters/digits requirement).
+        All of them now share _password_validation_error."""
+        # Add employee: short or digit-less passwords are refused before insert.
+        for weak in ('abc123', 'onlyletters', '1234567890'):
+            res = self.client.post('/api/users', headers=self.headers(self.admin_user_token),
+                                   json={'name': 'موظف', 'email': 'w1@x.test',
+                                         'password': weak})
+            self.assertEqual(res.status_code, 400, (weak, res.get_json()))
+        self.assertIsNone(db.get_user_by_email('w1@x.test'))
+        ok = self.client.post('/api/users', headers=self.headers(self.admin_user_token),
+                              json={'name': 'موظف', 'email': 'w1@x.test',
+                                    'password': 'Employee123'})
+        self.assertEqual(ok.status_code, 201, ok.get_json())
+        uid = ok.get_json()['userId']
+
+        # Editing the same employee's password applies the same policy, and a
+        # manual set clears any pending first-login flag.
+        weak_edit = self.client.put(f'/api/users/{uid}',
+                                    headers=self.headers(self.admin_user_token),
+                                    json={'password': 'short'})
+        self.assertEqual(weak_edit.status_code, 400)
+        strong_edit = self.client.put(f'/api/users/{uid}',
+                                      headers=self.headers(self.admin_user_token),
+                                      json={'password': 'NewEmployee123'})
+        self.assertEqual(strong_edit.status_code, 200, strong_edit.get_json())
+        self.assertEqual(db.get_user_by_id(uid)['require_password_change'], 0)
+
+        # Invite acceptance no longer settles for 6 characters.
+        created = self.client.post('/api/invites', headers=self.headers(self.admin_user_token),
+                                   json={'email': 'weak-invite@x.test', 'name': 'مدعو'})
+        token = created.get_json()['token']
+        weak_invite = self.client.post(f'/api/invite/{token}/register',
+                                       json={'password': 'abc123'})
+        self.assertEqual(weak_invite.status_code, 400)
+        self.assertIsNone(db.get_user_by_email('weak-invite@x.test'))
+        strong_invite = self.client.post(f'/api/invite/{token}/register',
+                                         json={'password': 'InvitePass12'})
+        self.assertEqual(strong_invite.status_code, 201, strong_invite.get_json())
+
+        # Registration demands letters and digits, not just ten characters.
+        weak_register = self.client.post('/api/auth/register', json={
+            'companyName': 'شركة ضعيفة', 'email': 'weakco@x.test',
+            'password': 'onlylettersxx'})
+        self.assertEqual(weak_register.status_code, 400)
+        self.assertIsNone(db.get_tenant_by_email('weakco@x.test'))
 
     # ── Cross-tenant reads ───────────────────────────────────────────────
 

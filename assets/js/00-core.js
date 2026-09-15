@@ -6,6 +6,15 @@
       setTimeout(() => t.classList.remove('active'), duration);
     }
 
+    // Mirrors _password_validation_error in app.py so every password form
+    // enforces the same rule before the request leaves the page.
+    function passwordPolicyError(password) {
+      const pw = String(password || '');
+      if (pw.length < 10) return 'كلمة المرور يجب أن تكون 10 أحرف على الأقل';
+      if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'كلمة المرور يجب أن تحتوي على حروف وأرقام';
+      return '';
+    }
+
     let loaderProgressTimer = null;
     let loaderHideTimer = null;
     let loaderProgressValue = 0;

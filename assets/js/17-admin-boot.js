@@ -932,7 +932,8 @@
       const password = document.getElementById('newUserPassword').value;
       const role = document.getElementById('newUserRole').value;
       if (!name || !email || !password) { toast('كل الحقول مطلوبة'); return; }
-      if (password.length < 6) { toast('كلمة المرور 6 أحرف على الأقل'); return; }
+      const pwError = passwordPolicyError(password);
+      if (pwError) { toast(pwError); return; }
       const data = await api('POST', '/api/users', { name, email, password, role });
       if (data.success) {
         toast('تم إضافة الموظف');
@@ -1551,6 +1552,8 @@
         errorHost.textContent = 'كلمتا المرور غير متطابقتين';
         return;
       }
+      const pwError = passwordPolicyError(password);
+      if (pwError) { errorHost.textContent = pwError; return; }
       const data = await api(
         'POST',
         '/api/auth/password-setup/' + encodeURIComponent(rawToken),
@@ -1627,9 +1630,9 @@
         '<form class="auth-form active" onsubmit="handleInviteRegister(event, \'' + inviteToken + '\')">' +
         '<label>الاسم الكامل *</label>' +
         '<input type="text" id="inviteName" placeholder="اسمك الكامل" required>' +
-        '<label>كلمة المرور (6 أحرف على الأقل) *</label>' +
+        '<label>كلمة المرور (10 أحرف على الأقل، حروف وأرقام) *</label>' +
         '<div style="position:relative">' +
-        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="6" style="padding-left:64px">' +
+        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="10" style="padding-left:64px">' +
         '<button type="button" onclick="togglePasswordVisibility(\'invitePassword\', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button></div>' +
         '<button type="submit" class="auth-btn">إنشاء حسابي</button>' +
         '</form></div>';
@@ -1641,6 +1644,8 @@
       const name = document.getElementById('inviteName').value.trim();
       const password = document.getElementById('invitePassword').value;
       showTenantError('inviteError', '');
+      const pwError = passwordPolicyError(password);
+      if (pwError) { showTenantError('inviteError', pwError); return; }
       const data = await api('POST', '/api/invite/' + inviteToken + '/register', { name, password });
       if (data.success && data.token) {
         setTenantToken(data.token);
