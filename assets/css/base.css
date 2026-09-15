@@ -4176,7 +4176,7 @@
     .tenant-notif-badge {
       position: absolute;
       top: -7px;
-      inset-inline-start: -7px;
+      inset-inline-end: -7px;
       min-width: 18px;
       height: 18px;
       padding: 0 5px;
@@ -4193,7 +4193,7 @@
     .tenant-notif-dropdown {
       position: absolute;
       top: calc(100% + 8px);
-      inset-inline-end: 0;
+      inset-inline-start: 0;
       z-index: 120;
       display: flex;
       flex-direction: column;
@@ -4427,7 +4427,7 @@
     .tenant-bell-panel {
       position: absolute;
       top: calc(100% + 8px);
-      inset-inline-end: 0;
+      inset-inline-start: 0;
       z-index: 120;
       width: 300px;
       max-height: 360px;
