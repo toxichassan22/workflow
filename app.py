@@ -11300,9 +11300,14 @@ def api_save_presentation():
     except ValueError as error:
         return jsonify({'error': str(error)}), 400
     title = str(data.get('title') or 'عرض بدون عنوان').strip()
+    incoming_project = data.get('projectData') or {}
+    locked_status = _presentation_draft_lock(
+        incoming_project.get('draftId') or incoming_project.get('draft_id'), data)
+    if locked_status:
+        return _draft_locked_response(locked_status)
     save_stage = 'normalize'
     try:
-        project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
+        project_data = normalize_presentation_assets(incoming_project, g.tenant_id)
         slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
         branding = db.get_branding(g.tenant_id) or {}
         render_project_data = copy.deepcopy(project_data)
@@ -11397,6 +11402,9 @@ def api_update_presentation(pres_id):
     data = request.json or {}
     if not isinstance(data, dict) or ('projectData' in data and not isinstance(data['projectData'], dict)) or ('slidesData' in data and not isinstance(data['slidesData'], list)):
         return jsonify({'error': 'projectData must be an object and slidesData an array'}), 400
+    locked_status = _presentation_draft_lock(pres.get('draft_id'), data)
+    if locked_status:
+        return _draft_locked_response(locked_status)
     try:
         expected_revision = _expected_presentation_revision(data, pres)
     except ValueError as error:
@@ -11798,6 +11806,36 @@ def _enforce_draft_field_sections(draft_data, stored_data, section_statuses, sto
     return forbidden, restored
 
 
+def _draft_locked_response(status):
+    """423 answer naming the lifecycle state that froze the draft."""
+    label = db.PROPOSAL_LIFECYCLE_STATES.get(status, {}).get('label', status)
+    return jsonify({
+        'error': f'المشروع مقفل في حالة «{label}» ولا يقبل التعديل حاليًا',
+        'error_code': 'DRAFT_LOCKED',
+        'status': status,
+    }), 423
+
+
+def _presentation_draft_lock(draft_id, data):
+    """The lifecycle status freezing this presentation's draft, or None.
+
+    A presentation write is draft editing: while the draft sits in a locked
+    lifecycle state only the running generation job may write, and only through
+    its own ``operation='generation'`` save.
+    """
+    if not draft_id:
+        return None
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return None
+    status = db.normalize_proposal_status(draft.get('status'))
+    if not db.proposal_status_is_locked(status):
+        return None
+    if status == 'generating' and (data or {}).get('operation') == 'generation':
+        return None
+    return status
+
+
 @app.route('/api/project-draft', methods=['POST'])
 @require_auth
 def api_save_project_draft():
@@ -11848,11 +11886,18 @@ def api_save_project_draft():
                 'error_code': 'SECTION_FORBIDDEN',
                 'sections': forbidden_sections,
             }), 403
+    # While the draft runs its generation job only the job's own checkpoint saves
+    # may write; every other locked state refuses the save outright.
+    prev_norm = db.normalize_proposal_status((previous or {}).get('status')) if previous else 'draft'
+    allow_generating = bool(data.get('slideCheckpoint')) and prev_norm == 'generating'
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
-            draft_id=draft_data.get('draftId') or draft_data.get('draft_id')
+            draft_id=draft_data.get('draftId') or draft_data.get('draft_id'),
+            allow_generating=allow_generating,
         )
+    except db.DraftLocked as locked:
+        return _draft_locked_response(locked.status)
     except db.DraftOverwriteRefused as refused:
         app.logger.warning(
             '[DRAFT SAVE] Refused to empty draft %s: tenant=%s actor=%s stored=%d fields received=%s',
@@ -12059,9 +12104,12 @@ def api_update_section_status():
             if versioned_blocked:
                 return jsonify({'error': 'These sections have version snapshots; send and approve the version instead of toggling directly',
                                 'error_code': 'SECTION_VERSION_REQUIRED', 'sections': versioned_blocked}), 409
-        result = db.update_draft_section_statuses(
-            g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
-        )
+        try:
+            result = db.update_draft_section_statuses(
+                g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
+            )
+        except db.DraftLocked as locked:
+            return _draft_locked_response(locked.status)
         if not result:
             return jsonify({'error': 'Unable to update section status'}), 400
         _record_change('draft', draft_id or _resolve_draft_id(), 'اعتماد الأقسام',
@@ -12088,9 +12136,12 @@ def api_update_section_status():
             return jsonify({'error': 'This section has version snapshots; send and approve the version instead of toggling directly',
                             'error_code': code, 'sections': [section_key],
                             'version': (meta or {}).get('version_number')}), 409
-    result = db.update_draft_section_status(
-        g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
-    )
+    try:
+        result = db.update_draft_section_status(
+            g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
+        )
+    except db.DraftLocked as locked:
+        return _draft_locked_response(locked.status)
     if not result:
         return jsonify({'error': 'Unable to update section status'}), 400
     _record_change('draft', draft_id or _resolve_draft_id(), 'اعتماد قسم',
@@ -12130,6 +12181,8 @@ def api_send_section_for_approval():
         return jsonify({'error': 'No project draft found'}), 404
     if version.get('error') == 'unknown_section':
         return jsonify({'error': 'Unknown project section'}), 400
+    if version.get('error') == 'draft_locked':
+        return _draft_locked_response(version.get('status'))
     if version.get('error'):
         return jsonify({'error': 'Unable to store the section snapshot'}), 400
     _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
@@ -12195,6 +12248,8 @@ def api_decide_section_version():
     if decided.get('error') == 'version_not_pending':
         return jsonify({'error': 'This version was already decided',
                         'error_code': 'SECTION_VERSION_DECIDED'}), 409
+    if decided.get('error') == 'draft_locked':
+        return _draft_locked_response(decided.get('status'))
     if decided.get('error') == 'note_required':
         return jsonify({'error': 'A reason is required to return or reject a version'}), 400
     if decided.get('error'):
@@ -12257,6 +12312,8 @@ def api_cancel_section_version():
     if cancelled.get('error') == 'version_not_pending':
         return jsonify({'error': 'This version was already decided',
                         'error_code': 'SECTION_VERSION_DECIDED'}), 409
+    if cancelled.get('error') == 'draft_locked':
+        return _draft_locked_response(cancelled.get('status'))
     if cancelled.get('error'):
         return jsonify({'error': 'Unable to cancel the section version'}), 400
     _record_change('draft', draft['id'], 'إلغاء طلب اعتماد قسم',
@@ -12329,6 +12386,8 @@ def api_restore_section_version():
             g.tenant_id, _project_draft_actor_id(), live,
             None, draft.get('status') or 'draft', draft_id=draft['id'],
         )
+    except db.DraftLocked as locked:
+        return _draft_locked_response(locked.status)
     except db.DraftOverwriteRefused:
         return jsonify({'error': 'Restoring this version would empty the draft'}), 400
     except Exception:
@@ -12337,6 +12396,8 @@ def api_restore_section_version():
         g.tenant_id, draft['id'], version['section_key'], snapshot,
         _project_draft_actor_id(), _project_draft_actor_name(),
     )
+    if restored.get('error') == 'draft_locked':
+        return _draft_locked_response(restored.get('status'))
     if restored.get('error'):
         return jsonify({'error': 'Unable to store the restored section snapshot'}), 400
     _record_change('draft', draft['id'], 'الرجوع لنسخة قسم سابقة',
@@ -12399,6 +12460,14 @@ def api_request_project_draft_approval():
             'error_code': 'SECTIONS_NOT_APPROVED',
             'sectionStatuses': draft.get('section_statuses', {})
         }), 400
+    if draft.get('error') == 'draft_locked':
+        return _draft_locked_response(draft.get('status'))
+    if draft.get('error') == 'invalid_transition':
+        return jsonify({'error': 'This draft cannot be sent for approval from its current state',
+                        'error_code': 'INVALID_TRANSITION',
+                        'status': draft.get('current_status')}), 409
+    if draft.get('error'):
+        return jsonify({'error': 'Unable to request approval'}), 400
     _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
                    ['أُرسل المشروع للمراجعة'])
     return jsonify({'success': True, 'draft': draft})
@@ -12430,13 +12499,25 @@ def api_review_project_draft():
     note = (data.get('note') or '').strip()[:3000]
     if not isinstance(draft_id, str) or not draft_id or review_status not in {'approved', 'rejected'}:
         return jsonify({'error': 'draftId and status (approved or rejected) are required'}), 400
-    if not db.review_project_draft(
+    reviewed = db.review_project_draft(
         g.tenant_id, draft_id, review_status, _project_draft_actor_id(), _project_draft_actor_name(), note
-    ):
+    )
+    if reviewed.get('error') in {'draft_not_found', 'draft_not_pending', 'draft_not_reviewable'}:
         return jsonify({'error': 'Pending draft approval not found'}), 404
+    if reviewed.get('error') == 'reason_required':
+        return jsonify({'error': 'A reason is required when returning the draft for revision',
+                        'error_code': 'REASON_REQUIRED'}), 400
+    if reviewed.get('error') == 'draft_locked':
+        return _draft_locked_response(reviewed.get('status'))
+    if reviewed.get('error') == 'invalid_transition':
+        return jsonify({'error': 'This draft cannot be reviewed from its current state',
+                        'error_code': 'INVALID_TRANSITION',
+                        'status': reviewed.get('current_status')}), 409
+    if reviewed.get('error'):
+        return jsonify({'error': 'Unable to review the draft'}), 400
     action = 'اعتماد المشروع' if review_status == 'approved' else 'إعادة المشروع للتعديل'
     _record_change('draft', draft_id, action, [note] if note else [action])
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'draft': reviewed})
 
 
 @app.route('/api/project-draft/lifecycle-states', methods=['GET'])
@@ -12522,7 +12603,16 @@ def api_transition_proposal_status(draft_id):
         actor_role=getattr(g, 'user_role', 'employee'),
         reason=reason,
         metadata=metadata,
+        manual=True,
     )
+
+    if res.get('error') == 'manual_transition_not_allowed':
+        return jsonify({
+            'error': 'This state is reached by its approval workflow, not by a manual transition',
+            'error_code': 'SYSTEM_TRANSITION_ONLY',
+            'current_status': res.get('current_status'),
+            'target_status': res.get('target_status'),
+        }), 403
 
     if res.get('error') == 'invalid_transition':
         return jsonify({
@@ -22954,8 +23044,10 @@ _OMRAN_NOT_FOUND = {
     'draft_not_found', 'presentation_not_found', 'request_not_found',
     'reservation_not_found', 'ticket_not_found', 'task_not_found', 'approval_not_found',
 }
-_OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived'}
-_OMRAN_FORBIDDEN = {'self_approval_not_allowed', 'cancel_not_allowed', 'platform_tenant_recharge_forbidden'}
+_OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived',
+                   'invalid_transition', 'approval_not_pending', 'request_not_pending', 'reservation_not_reserved'}
+_OMRAN_FORBIDDEN = {'self_approval_not_allowed', 'cancel_not_allowed', 'platform_tenant_recharge_forbidden',
+                    'manual_transition_not_allowed'}
 
 # Arabic-first messages: these strings land directly in UI toasts.
 _OMRAN_ERROR_MESSAGES_AR = {
@@ -22993,6 +23085,13 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'stamp_failed': 'تعذر ختم الملف',
     'nothing_to_reserve': 'لا توجد نقاط لحجزها',
     'reservation_not_reserved': 'تم تسوية الحجز مسبقًا',
+    'draft_locked': 'المشروع مقفل في حالته الحالية ولا يقبل هذا الإجراء',
+    'invalid_transition': 'لا يمكن الانتقال إلى هذه الحالة من الحالة الحالية',
+    'manual_transition_not_allowed': 'هذه الحالة تصل إليها مسارات الاعتماد فقط، لا الانتقال اليدوي',
+    'reason_required': 'السبب إلزامي لهذا الإجراء',
+    'note_required': 'سبب الرفض إلزامي',
+    'lifecycle_transition_failed': 'تعذر تحديث حالة المشروع المرتبطة بالاعتماد',
+    'missing_arguments': 'بيانات ناقصة لإتمام الإجراء',
 }
 
 
@@ -23010,7 +23109,14 @@ def _omran_error(result):
         return jsonify({'error': default_message, 'error_code': code}), 403
     if code == 'insufficient_balance':
         return jsonify({'error': default_message, 'error_code': code}), 402
-    return jsonify({'error': default_message, 'error_code': code}), 400
+    if code == 'draft_locked':
+        return _draft_locked_response(result.get('status'))
+    payload = {'error': default_message, 'error_code': code}
+    if result.get('approval_id'):
+        payload['approval_id'] = result['approval_id']
+    if result.get('current_status'):
+        payload['current_status'] = result['current_status']
+    return jsonify(payload), 400
 
 
 def _omran_actor_id():

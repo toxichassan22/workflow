@@ -64,6 +64,7 @@ def init_db():
         _create_omran_event_tables(conn)
         _seed_file_type_registry(conn)
         _ensure_omran_columns(conn)
+        _migrate_generation_approval_columns(conn)
 
         try:
             conn.commit()
@@ -1709,6 +1710,19 @@ def _migrate_project_draft_columns(conn):
         conn.commit()
     except Exception as e:
         print(f"[DB DRAFT MIGRATION ERR] {e}")
+
+
+def _migrate_generation_approval_columns(conn):
+    """Add the lifecycle bookkeeping column to historical generation approvals."""
+    try:
+        cursor = conn.execute("PRAGMA table_info(generation_approvals)")
+        existing_cols = {row['name'] for row in cursor.fetchall()}
+        if 'prior_status' not in existing_cols:
+            conn.execute("ALTER TABLE generation_approvals ADD COLUMN prior_status TEXT")
+            print("[DB MIGRATION] Added generation_approvals column: prior_status")
+        conn.commit()
+    except Exception as e:
+        print(f"[DB GENERATION MIGRATION ERR] {e}")
 
 
 def _migrate_presentation_revision_schema(conn):
@@ -3961,12 +3975,29 @@ PROPOSAL_ALLOWED_TRANSITIONS = {
     'sections_in_progress': {'section_approval_pending', 'sections_approved', 'rejected_for_revision', 'archived'},
     'section_approval_pending': {'sections_in_progress', 'rejected_for_revision', 'sections_approved', 'archived'},
     'rejected_for_revision': {'sections_in_progress', 'section_approval_pending', 'archived'},
-    'sections_approved': {'generation_approval_pending', 'generating', 'sections_in_progress', 'archived'},
+    'sections_approved': {'generation_approval_pending', 'generating', 'sections_in_progress', 'rejected_for_revision', 'archived'},
     'generation_approval_pending': {'generating', 'sections_approved', 'sections_in_progress', 'archived'},
     'generating': {'generated_draft', 'sections_approved', 'archived'},
-    'generated_draft': {'final_approval_pending', 'generating', 'sections_in_progress', 'archived'},
+    'generated_draft': {'final_approval_pending', 'generation_approval_pending', 'generating', 'sections_in_progress', 'archived'},
     'final_approval_pending': {'approved', 'generated_draft', 'rejected_for_revision', 'archived'},
     'approved': {'archived', 'generated_draft', 'sections_in_progress'},
+    'archived': {'draft', 'sections_in_progress'},
+}
+
+# The subset a user may pick through the manual transition endpoint. Gate states
+# (generation_approval_pending, generating, generated_draft, final_approval_pending,
+# approved) are entered only by their own backend workflows, never by hand.
+PROPOSAL_MANUAL_TRANSITIONS = {
+    'draft': {'sections_in_progress', 'section_approval_pending', 'archived'},
+    'sections_in_progress': {'section_approval_pending', 'rejected_for_revision', 'archived'},
+    'section_approval_pending': {'sections_in_progress', 'rejected_for_revision', 'sections_approved', 'archived'},
+    'rejected_for_revision': {'sections_in_progress', 'section_approval_pending', 'archived'},
+    'sections_approved': {'sections_in_progress', 'rejected_for_revision', 'archived'},
+    'generation_approval_pending': {'sections_approved', 'sections_in_progress', 'archived'},
+    'generating': {'archived'},
+    'generated_draft': {'sections_in_progress', 'archived'},
+    'final_approval_pending': {'generated_draft', 'archived'},
+    'approved': {'generated_draft', 'sections_in_progress', 'archived'},
     'archived': {'draft', 'sections_in_progress'},
 }
 
@@ -4000,6 +4031,20 @@ def can_transition_proposal_status(current_status, next_status):
         return True
     allowed = PROPOSAL_ALLOWED_TRANSITIONS.get(curr, set())
     return target in allowed
+
+
+def proposal_status_is_locked(status):
+    """True when the normalized lifecycle state freezes user edits."""
+    return bool(PROPOSAL_LIFECYCLE_STATES.get(normalize_proposal_status(status), {}).get('is_locked'))
+
+
+class DraftLocked(Exception):
+    """Raised when a write targets a draft whose lifecycle state is locked."""
+
+    def __init__(self, draft_id, status):
+        super().__init__(f'Project draft {draft_id} is locked in state {status}')
+        self.draft_id = draft_id
+        self.status = status
 
 # Keys every save carries as bookkeeping: they say nothing about whether the payload still
 # holds the project itself, so they are ignored when judging a destructive overwrite.
@@ -4082,7 +4127,8 @@ def _clear_draft_approval_fields(conn, draft_id):
     )
 
 
-def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft', draft_id=None):
+def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft',
+                       draft_id=None, allow_generating=False):
     """Save one unified draft per tenant actor without losing section approvals.
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
@@ -4091,6 +4137,12 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     A save that does not name its draft still lands on the row this actor updated most recently,
     which is the single-draft contract older clients rely on.  That is also why an unnamed save
     reaching the wrong project is possible, so it is logged: a current client always sends an id.
+
+    A locked lifecycle state refuses the write with ``DraftLocked``; the only exception is
+    ``generating``, which a generation checkpoint may still update when the caller explicitly
+    passes ``allow_generating``.  The ``status`` argument is a legacy hint, not a lifecycle
+    command: a save never advances or regresses the stored state — only the approval-void
+    reset below may move it, and new drafts always start as ``draft``.
     """
     conn = get_db()
     if draft_id:
@@ -4110,7 +4162,6 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     # Determine the stable draft id before serializing
     draft_id = existing['id'] if existing else (draft_id or str(uuid.uuid4()))
 
-    requested_status = status if status in PROJECT_DRAFT_STATUSES else 'draft'
     now = datetime.now().isoformat()
 
     # Strip client-supplied draftId so it doesn't trigger false data_changed or bloat the row
@@ -4125,6 +4176,11 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     data_bytes = len(draft_json.encode('utf-8'))
 
     if existing:
+        norm_existing = normalize_proposal_status(existing['status'])
+        if proposal_status_is_locked(norm_existing) \
+                and not (allow_generating and norm_existing == 'generating'):
+            raise DraftLocked(existing['id'], norm_existing)
+
         old_statuses = _json_object(existing['section_statuses'])
         # Older clients send {} whenever they autosave.  Treat that as "unchanged"
         # instead of silently erasing every section's review state.
@@ -4157,18 +4213,28 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         old_overall_status = existing['status'] or 'draft'
 
         norm_old_status = normalize_proposal_status(old_overall_status)
-        if norm_old_status == 'section_approval_pending' and any(v == 'pending' for v in new_statuses.values()) and requested_status in {'draft', 'submitted'}:
-            next_status = old_overall_status
-            clear_approval = False
-        elif old_overall_status in {'pending_approval', 'approved'} and (data_changed or statuses_changed):
+        if norm_old_status == 'section_approval_pending':
+            if any(v == 'pending' for v in new_statuses.values()):
+                # A live section-version review keeps the draft pending even when
+                # unrelated fields change — the snapshot under review is immutable.
+                next_status = old_overall_status
+                clear_approval = False
+            elif data_changed or statuses_changed:
+                # Editing while a review request is open voids it; resubmit after fixing.
+                next_status = 'draft'
+                clear_approval = True
+            else:
+                next_status = old_overall_status
+                clear_approval = False
+        elif norm_old_status == 'approved' and (data_changed or statuses_changed):
+            # Only reachable for a legacy raw 'approved' row: the canonical state is
+            # locked above and a real reopen goes through transition with a reason.
             next_status = 'draft'
             clear_approval = True
-        elif old_overall_status in {'pending_approval', 'approved'} and requested_status in {'draft', 'submitted'}:
-            # Re-saving unchanged data does not undo a valid approval request/result.
-            next_status = old_overall_status
-            clear_approval = False
         else:
-            next_status = requested_status
+            # The status hint ('draft'/'submitted') is never a lifecycle command: a save
+            # neither regresses a reviewed draft nor submits it past the section gate.
+            next_status = old_overall_status
             clear_approval = False
 
         conn.execute(
@@ -4185,13 +4251,15 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         return draft_id
 
     statuses = section_statuses if isinstance(section_statuses, dict) else {}
+    # A draft is born 'draft' — no save payload may create one already inside a
+    # gate state; every state past it is earned through the lifecycle.
     conn.execute(
         '''INSERT INTO project_drafts
            (id, tenant_id, user_id, title, draft_data, section_statuses, status,
             revision, data_bytes, has_slides, has_maps, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (draft_id, tenant_id, user_id, title, draft_json, json.dumps(statuses, ensure_ascii=False),
-         requested_status, 1, data_bytes, has_slides, has_maps, now, now)
+         'draft', 1, data_bytes, has_slides, has_maps, now, now)
     )
     conn.commit()
     return draft_id
@@ -4464,11 +4532,16 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
             draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
             if not draft:
                 return False
+        norm_status = normalize_proposal_status(draft.get('status'))
+        if proposal_status_is_locked(norm_status):
+            raise DraftLocked(draft['id'], norm_status)
         statuses = dict(draft.get('section_statuses') or {})
         expected = json.dumps(statuses, ensure_ascii=False)
         changed = any(statuses.get(key) != value for key, value in updates.items())
         statuses.update(updates)
-        resets_approval = changed and draft.get('status') in {'pending_approval', 'approved'}
+        # Toggling a section after the draft entered review or passed the section
+        # gate voids that state; the draft returns to a plain editable draft.
+        resets_approval = changed and norm_status in {'section_approval_pending', 'sections_approved'}
         next_status = 'draft' if resets_approval else (draft.get('status') or 'draft')
         cursor = conn.execute(
             '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
@@ -4603,11 +4676,13 @@ def create_section_version(tenant_id, draft_id, section_key, snapshot, created_b
     section_key = section_key.strip()
     conn = get_db()
     draft = conn.execute(
-        'SELECT id, section_statuses FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        'SELECT id, status, section_statuses FROM project_drafts WHERE id = ? AND tenant_id = ?',
         (draft_id, tenant_id),
     ).fetchone()
     if not draft:
         return {'error': 'draft_not_found'}
+    if proposal_status_is_locked(draft['status']):
+        return {'error': 'draft_locked', 'status': normalize_proposal_status(draft['status'])}
     if section_key not in _known_section_keys(conn, tenant_id, _json_object(draft['section_statuses'])):
         return {'error': 'unknown_section'}
     snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
@@ -4725,6 +4800,12 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
         return {'error': 'version_not_found'}
     if row['status'] != 'pending':
         return {'error': 'version_not_pending'}
+    draft_row = conn.execute(
+        'SELECT status FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        (row['draft_id'], tenant_id),
+    ).fetchone()
+    if draft_row and proposal_status_is_locked(draft_row['status']):
+        return {'error': 'draft_locked', 'status': normalize_proposal_status(draft_row['status'])}
 
     is_self_approval = bool(row['created_by'] and decided_by and str(row['created_by']) == str(decided_by))
 
@@ -4782,6 +4863,12 @@ def cancel_section_version(tenant_id, version_id, cancelled_by, cancelled_by_nam
         return {'error': 'version_not_found'}
     if row['status'] != 'pending':
         return {'error': 'version_not_pending'}
+    draft_row = conn.execute(
+        'SELECT status FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        (row['draft_id'], tenant_id),
+    ).fetchone()
+    if draft_row and proposal_status_is_locked(draft_row['status']):
+        return {'error': 'draft_locked', 'status': normalize_proposal_status(draft_row['status'])}
     conn.execute(
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ? WHERE id = ?''',
@@ -5002,60 +5089,84 @@ def request_project_draft_approval(tenant_id, user_id, requested_by, requested_b
         draft = None
     if not draft:
         return {'error': 'draft_not_found'}
+    norm = normalize_proposal_status(draft.get('status'))
+    if proposal_status_is_locked(norm):
+        return {'error': 'draft_locked', 'status': norm}
+    if norm not in {'draft', 'sections_in_progress', 'rejected_for_revision', 'section_approval_pending'}:
+        # A draft already past the section gate cannot be re-submitted through it.
+        return {'error': 'invalid_transition', 'current_status': norm}
     statuses = draft.get('section_statuses', {})
     if not statuses or any(value != 'approved' for value in statuses.values()):
         return {'error': 'sections_not_approved', 'section_statuses': statuses}
     conn = get_db()
     conn.execute(
-        '''UPDATE project_drafts SET status = 'pending_approval', requested_by = ?,
-           requested_by_name = ?, requested_at = ?, reviewed_by = NULL,
+        '''UPDATE project_drafts SET requested_by = ?, requested_by_name = ?,
+           requested_at = ?, reviewed_by = NULL,
            reviewed_by_name = NULL, review_note = NULL, reviewed_at = NULL, updated_at = ?
            WHERE id = ? AND tenant_id = ?''',
         (requested_by, requested_by_name, datetime.now().isoformat(), datetime.now().isoformat(),
          draft['id'], tenant_id)
     )
     conn.commit()
+    if norm != 'section_approval_pending':
+        # Canonical state + audit event + presentation sync all come from the
+        # transition authority; 'pending_approval' remains a readable alias.
+        res = transition_project_draft_status(
+            tenant_id, draft['id'], 'section_approval_pending',
+            actor_id=requested_by, actor_name=requested_by_name,
+            reason='طلب اعتماد المشروع',
+        )
+        if res.get('error'):
+            return res
     return get_project_draft_by_id(tenant_id, draft['id'])
 
 
 def review_project_draft(tenant_id, draft_id, review_status, reviewed_by, reviewed_by_name, note=None):
     """Record a tenant-scoped approval or return a draft for correction.
 
-    Approval accepts any unapproved draft state: reviewers with the approvals
-    permission (company admins) may approve directly, even a draft that was
-    never submitted. Returning for correction only makes sense for a pending
-    request, so rejection still requires 'pending_approval'.
+    Approval lands on the canonical ``sections_approved`` state — the draft passed
+    the section gate and may now request generation. Returning for correction only
+    makes sense for a pending request and requires a reason, matching the
+    lifecycle rule for ``rejected_for_revision``.
     """
     if review_status not in {'approved', 'rejected'}:
-        return False
-    conn = get_db()
-    if review_status == 'approved':
-        draft = conn.execute(
-            "SELECT id FROM project_drafts WHERE id = ? AND tenant_id = ?"
-            " AND COALESCE(status, 'draft') IN ('draft', 'edited', 'pending_approval')",
-            (draft_id, tenant_id)
-        ).fetchone()
-    else:
-        draft = conn.execute(
-            "SELECT id FROM project_drafts WHERE id = ? AND tenant_id = ? AND status = 'pending_approval'",
-            (draft_id, tenant_id)
-        ).fetchone()
+        return {'error': 'invalid_status'}
+    draft = get_project_draft_by_id(tenant_id, draft_id)
     if not draft:
-        return False
-    final_status = 'approved' if review_status == 'approved' else 'draft'
+        return {'error': 'draft_not_found'}
+    norm = normalize_proposal_status(draft.get('status'))
+    if review_status == 'approved':
+        if norm not in {'draft', 'sections_in_progress', 'section_approval_pending'}:
+            return {'error': 'draft_not_reviewable', 'status': norm}
+        target = 'sections_approved'
+    else:
+        if norm != 'section_approval_pending':
+            return {'error': 'draft_not_pending', 'status': norm}
+        if not str(note or '').strip():
+            return {'error': 'reason_required'}
+        target = 'rejected_for_revision'
+    res = transition_project_draft_status(
+        tenant_id, draft_id, target,
+        actor_id=reviewed_by, actor_name=reviewed_by_name,
+        reason=str(note or '').strip() or ('اعتماد المشروع' if review_status == 'approved' else None),
+    )
+    if res.get('error'):
+        return res
+    conn = get_db()
     conn.execute(
-        '''UPDATE project_drafts SET status = ?, reviewed_by = ?, reviewed_by_name = ?,
+        '''UPDATE project_drafts SET reviewed_by = ?, reviewed_by_name = ?,
            review_note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?''',
-        (final_status, reviewed_by, reviewed_by_name, note, datetime.now().isoformat(),
+        (reviewed_by, reviewed_by_name, note, datetime.now().isoformat(),
          datetime.now().isoformat(), draft_id)
     )
     conn.commit()
-    return True
+    return {'success': True, 'draft': res.get('draft')}
 
 
 def transition_project_draft_status(tenant_id, draft_id, target_status,
                                     actor_id=None, actor_name=None,
-                                    actor_role=None, reason=None, metadata=None):
+                                    actor_role=None, reason=None, metadata=None,
+                                    manual=False):
     """Transition a project draft through the 11-state lifecycle with validation and immutable audit logging."""
     if not tenant_id or not draft_id or not target_status:
         return {'error': 'missing_arguments'}
@@ -5073,6 +5184,15 @@ def transition_project_draft_status(tenant_id, draft_id, target_status,
             'current_status': norm_current,
             'target_status': norm_target,
             'allowed_transitions': sorted(list(PROPOSAL_ALLOWED_TRANSITIONS.get(norm_current, []))),
+        }
+
+    if manual and norm_target not in PROPOSAL_MANUAL_TRANSITIONS.get(norm_current, set()):
+        # A user may never hand-move a draft into a gate state; those belong to
+        # the approval workflows that guard them.
+        return {
+            'error': 'manual_transition_not_allowed',
+            'current_status': norm_current,
+            'target_status': norm_target,
         }
 
     # Spec Section 8.4: Reopening an approved proposal requires a mandatory reason
@@ -5098,6 +5218,24 @@ def transition_project_draft_status(tenant_id, draft_id, target_status,
                WHERE tenant_id = ? AND (draft_id = ? OR json_extract(project_data, '$.draftId') = ?)''',
             (norm_target, now_iso, tenant_id, draft_id, draft_id)
         )
+    except Exception:
+        pass
+    # Leaving a gate state voids the request that put the draft there: a still-pending
+    # approval would otherwise stay open and could later decide on a stale state.
+    try:
+        if norm_current == 'generation_approval_pending' and norm_target != 'generating':
+            conn.execute(
+                '''UPDATE generation_approvals SET status = 'cancelled', decision_note = ?
+                   WHERE tenant_id = ? AND draft_id = ? AND status = 'pending' ''',
+                ('أُلغي تلقائيًا عند مغادرة حالة انتظار اعتماد التوليد', tenant_id, draft_id),
+            )
+        if norm_current == 'final_approval_pending' and norm_target != 'approved':
+            conn.execute(
+                '''UPDATE final_file_approvals SET status = 'cancelled', decision_note = ?
+                   WHERE tenant_id = ? AND status = 'pending' AND presentation_id IN (
+                       SELECT id FROM presentations WHERE tenant_id = ? AND draft_id = ?)''',
+                ('أُلغي تلقائيًا عند مغادرة حالة انتظار اعتماد الملف النهائي', tenant_id, tenant_id, draft_id),
+            )
     except Exception:
         pass
     conn.commit()
@@ -7107,7 +7245,8 @@ def _create_omran_tables(conn):
         decided_by_name TEXT,
         decided_at TEXT,
         decision_note TEXT,
-        job_id TEXT
+        job_id TEXT,
+        prior_status TEXT
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_generation_approvals_tenant ON generation_approvals(tenant_id, status, requested_at DESC)')
 
@@ -7504,22 +7643,82 @@ def estimate_generation_cost(tenant_id, draft_id=None, slides_count=0, presentat
     }
 
 
+def _draft_gate_transition(tenant_id, draft_id, target_status, actor_id, actor_name, reason):
+    """Move a draft as part of an approval gate, warning instead of raising.
+
+    Gate helpers already committed their own rows; a lifecycle failure here must
+    surface in the result and the log without rolling the decision back.
+    """
+    if not draft_id:
+        return None
+    try:
+        res = transition_project_draft_status(
+            tenant_id, draft_id, target_status,
+            actor_id=actor_id, actor_name=actor_name, reason=reason,
+        )
+    except Exception as exc:
+        print(f'[LIFECYCLE] gate transition {draft_id} -> {target_status} crashed: {exc}')
+        return None
+    if res.get('error'):
+        print(f"[LIFECYCLE] gate transition {draft_id} -> {target_status} refused: {res.get('error')}")
+        return None
+    return res
+
+
 def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requested_by_name, presentation_id=None):
-    """Open a generation approval carrying the estimate shown to the approver."""
+    """Open a generation approval carrying the estimate shown to the approver.
+
+    The request is what moves the draft into ``generation_approval_pending``:
+    every tracked section must already be approved (the request itself fails
+    early otherwise), one pending request per draft at a time, and a locked or
+    generating draft refuses a new request. ``prior_status`` remembers where a
+    rejected or released request returns the draft.
+    """
     conn = get_db()
-    if not get_project_draft_by_id(tenant_id, draft_id):
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
         return {'error': 'draft_not_found'}
+    pending = conn.execute(
+        "SELECT id FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? AND status = 'pending'",
+        (tenant_id, draft_id),
+    ).fetchone()
+    if pending:
+        return {'error': 'approval_already_pending', 'approval_id': pending['id']}
+    norm = normalize_proposal_status(draft.get('status'))
+    if proposal_status_is_locked(norm):
+        return {'error': 'draft_locked', 'status': norm}
+    if norm == 'generated_draft':
+        # Regeneration: the file exists, a new gate opens on top of it.
+        prior_status = 'generated_draft'
+    elif norm in {'draft', 'sections_in_progress', 'section_approval_pending',
+                  'rejected_for_revision', 'sections_approved'}:
+        statuses = draft.get('section_statuses') or {}
+        if statuses and any(value != 'approved' for value in statuses.values()):
+            return {'error': 'sections_not_approved', 'section_statuses': statuses}
+        prior_status = 'sections_approved'
+        if norm != 'sections_approved':
+            res = _draft_gate_transition(
+                tenant_id, draft_id, 'sections_approved', requested_by, requested_by_name,
+                'جميع أقسام المشروع معتمدة — تأهيل تلقائي قبل طلب التوليد')
+            if res is None:
+                return {'error': 'invalid_transition', 'current_status': norm,
+                        'target_status': 'sections_approved'}
+    else:
+        return {'error': 'invalid_transition', 'current_status': norm}
     approval_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO generation_approvals
            (id, tenant_id, draft_id, presentation_id, estimated_cost_usd, estimated_points,
-            slides_count, status, requested_by, requested_by_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)''',
+            slides_count, status, requested_by, requested_by_name, prior_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)''',
         (approval_id, tenant_id, draft_id, presentation_id,
          float(estimate.get('estimated_cost_usd') or 0), int(estimate.get('estimated_points') or 0),
-         int(estimate.get('slides_count') or 0), requested_by, requested_by_name),
+         int(estimate.get('slides_count') or 0), requested_by, requested_by_name, prior_status),
     )
     conn.commit()
+    _draft_gate_transition(
+        tenant_id, draft_id, 'generation_approval_pending', requested_by, requested_by_name,
+        'طلب اعتماد التوليد')
     row = conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone()
     return dict(row)
 
@@ -7555,6 +7754,12 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
         statuses = (draft or {}).get('section_statuses') or {}
         if statuses and any(value != 'approved' for value in statuses.values()):
             return {'error': 'sections_not_approved', 'section_statuses': statuses}
+        # And the draft must be able to enter 'generating' right now — an
+        # approved reservation on an unreachable state would strand the run.
+        if draft and not can_transition_proposal_status(draft.get('status'), 'generating'):
+            return {'error': 'invalid_transition',
+                    'current_status': normalize_proposal_status(draft.get('status')),
+                    'target_status': 'generating'}
     conn.execute(
         '''UPDATE generation_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
@@ -7563,28 +7768,63 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
     conn.commit()
     updated = dict(conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone())
     if decision == 'approved':
-        if int(updated.get('estimated_points') or 0) <= 0:
-            # A zero-cost estimate needs no reservation; the approval stands alone.
-            return updated
-        reservation = reserve_points(
-            tenant_id, updated['estimated_points'], updated['estimated_cost_usd'],
-            reserved_by=decided_by, reserved_by_name=decided_by_name,
-            generation_approval_id=approval_id, draft_id=row['draft_id'],
-        )
-        if reservation.get('error'):
+        reservation_id = None
+        if int(updated.get('estimated_points') or 0) > 0:
+            reservation = reserve_points(
+                tenant_id, updated['estimated_points'], updated['estimated_cost_usd'],
+                reserved_by=decided_by, reserved_by_name=decided_by_name,
+                generation_approval_id=approval_id, draft_id=row['draft_id'],
+            )
+            if reservation.get('error'):
+                conn.execute(
+                    "UPDATE generation_approvals SET status = 'pending', decided_by = NULL, "
+                    'decided_by_name = NULL, decided_at = NULL WHERE id = ?',
+                    (approval_id,),
+                )
+                conn.commit()
+                return {'error': reservation['error']}
+            reservation_id = reservation['id']
+            updated['reservation_id'] = reservation_id
+        # Approval starts the run: the draft leaves the queue for 'generating'.
+        lifecycle = _draft_gate_transition(
+            tenant_id, row['draft_id'], 'generating', decided_by, decided_by_name,
+            'اعتماد طلب التوليد — بدء التنفيذ')
+        if lifecycle:
+            updated['draft_status'] = lifecycle.get('current_status')
+        elif row['draft_id']:
+            # The gate could not open — roll the decision and the reservation
+            # back so nothing is approved against a draft that never started.
+            if reservation_id:
+                release_points(tenant_id, reservation_id, settled_by=decided_by,
+                               note='تراجع الاعتماد: تعذر الانتقال إلى التوليد')
             conn.execute(
                 "UPDATE generation_approvals SET status = 'pending', decided_by = NULL, "
                 'decided_by_name = NULL, decided_at = NULL WHERE id = ?',
                 (approval_id,),
             )
             conn.commit()
-            return {'error': reservation['error']}
-        updated['reservation_id'] = reservation['id']
+            return {'error': 'lifecycle_transition_failed', 'target_status': 'generating'}
+    else:
+        # Rejected or withdrawn: the draft returns to the state it was requested
+        # from — approved sections, or the generated file for a re-run.
+        prior = (row.get('prior_status') or '').strip()
+        if prior not in PROPOSAL_LIFECYCLE_STATES:
+            prior = 'sections_approved'
+        lifecycle = _draft_gate_transition(
+            tenant_id, row['draft_id'], prior, decided_by, decided_by_name,
+            str(note or '').strip() or 'قرار على طلب اعتماد التوليد')
+        if lifecycle:
+            updated['draft_status'] = lifecycle.get('current_status')
     return updated
 
 
 def settle_generation_approval(tenant_id, approval_id, job_id, consumed=True, settled_by=None, note=None):
-    """After the generation job finishes: consume the reservation once, or release it."""
+    """After the generation job finishes: consume the reservation once, or release it.
+
+    Settlement is also the lifecycle boundary: a consumed run lands the draft on
+    ``generated_draft``; a released one returns it to the state the request came
+    from so a new approval can be opened.
+    """
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM generation_approvals WHERE id = ? AND tenant_id = ?',
@@ -7612,7 +7852,21 @@ def settle_generation_approval(tenant_id, approval_id, job_id, consumed=True, se
         ('consumed' if consumed else 'rejected', job_id, approval_id),
     )
     conn.commit()
-    return {'id': approval_id, 'status': 'consumed' if consumed else 'rejected', 'reservations': settled}
+    if consumed:
+        lifecycle = _draft_gate_transition(
+            tenant_id, row['draft_id'], 'generated_draft', settled_by, settled_by,
+            'اكتمال التوليد وحفظ العرض')
+    else:
+        prior = (row.get('prior_status') or '').strip()
+        if prior not in PROPOSAL_LIFECYCLE_STATES:
+            prior = 'sections_approved'
+        lifecycle = _draft_gate_transition(
+            tenant_id, row['draft_id'], prior, settled_by, settled_by,
+            str(note or '').strip() or 'تحرير حجز التوليد بعد فشل أو إلغاء')
+    result = {'id': approval_id, 'status': 'consumed' if consumed else 'rejected', 'reservations': settled}
+    if lifecycle:
+        result['draft_status'] = lifecycle.get('current_status')
+    return result
 
 
 def reserve_points(tenant_id, points, cost_usd=0, reserved_by=None, reserved_by_name=None,
@@ -7761,6 +8015,13 @@ def stamp_final_file(app_root, tenant_id, presentation_id, revision=0):
 
 
 def request_final_file_approval(tenant_id, presentation_id, requested_by, requested_by_name, revision=0):
+    """Send a generated file to the final approver.
+
+    The request itself moves the linked draft to ``final_approval_pending``
+    before the approval row exists, so a draft that cannot legally enter the
+    gate refuses the request instead of opening an approval on a stale state.
+    A presentation without a linked draft keeps the legacy unlinked behaviour.
+    """
     conn = get_db()
     presentation = get_presentation(presentation_id, tenant_id=tenant_id)
     if not presentation:
@@ -7771,6 +8032,15 @@ def request_final_file_approval(tenant_id, presentation_id, requested_by, reques
     ).fetchone()
     if pending:
         return {'error': 'approval_already_pending', 'approval_id': pending['id']}
+    draft_id = presentation.get('draft_id')
+    if draft_id and get_project_draft_by_id(tenant_id, draft_id):
+        res = transition_project_draft_status(
+            tenant_id, draft_id, 'final_approval_pending',
+            actor_id=requested_by, actor_name=requested_by_name,
+            reason='إرسال الملف النهائي للاعتماد',
+        )
+        if res.get('error'):
+            return res
     approval_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO final_file_approvals
@@ -7779,14 +8049,6 @@ def request_final_file_approval(tenant_id, presentation_id, requested_by, reques
         (approval_id, tenant_id, presentation_id, int(revision or 0), requested_by, requested_by_name),
     )
     conn.commit()
-    try:
-        transition_project_draft_status(
-            tenant_id, presentation.get('draft_id'), 'final_approval_pending',
-            actor_id=requested_by, actor_name=requested_by_name,
-            reason='إرسال الملف النهائي للاعتماد',
-        )
-    except Exception:
-        pass
     row = conn.execute('SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone()
     return dict(row)
 
@@ -7794,9 +8056,18 @@ def request_final_file_approval(tenant_id, presentation_id, requested_by, reques
 def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, decided_by_name,
                                note=None, allow_self=False):
     """Decide the final-file gate. The requester may not self-approve (d02);
-    allow_self is reserved for company-level administrators."""
+    allow_self is reserved for company-level administrators.
+
+    The decision drives the draft lifecycle: approval lands the draft on
+    ``approved`` (and the presentation follows through the transition sync),
+    while a rejection — which needs a written reason — returns it to
+    ``generated_draft`` for rework.
+    """
     if decision not in {'approved', 'rejected'}:
         return {'error': 'invalid_decision'}
+    clean_note = str(note or '').strip()
+    if decision == 'rejected' and not clean_note:
+        return {'error': 'note_required'}
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM final_file_approvals WHERE id = ? AND tenant_id = ?',
@@ -7808,11 +8079,23 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
         return {'error': 'approval_not_pending'}
     if not allow_self and row['requested_by'] and str(row['requested_by']) == str(decided_by):
         return {'error': 'self_approval_not_allowed'}
+    pres = conn.execute(
+        'SELECT draft_id, status FROM presentations WHERE id = ? AND tenant_id = ?',
+        (row['presentation_id'], tenant_id),
+    ).fetchone()
+    draft_id = (pres or {}).get('draft_id')
+    target_status = 'approved' if decision == 'approved' else 'generated_draft'
+    if draft_id:
+        draft = get_project_draft_by_id(tenant_id, draft_id)
+        if draft and not can_transition_proposal_status(draft.get('status'), target_status):
+            return {'error': 'invalid_transition',
+                    'current_status': normalize_proposal_status(draft.get('status')),
+                    'target_status': target_status}
     conn.execute(
         '''UPDATE final_file_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
         (decision, decided_by, decided_by_name, datetime.now().isoformat(),
-         str(note or '').strip() or None, approval_id),
+         clean_note or None, approval_id),
     )
     if decision == 'approved':
         conn.execute(
@@ -7820,7 +8103,27 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
             (row['presentation_id'], tenant_id),
         )
     conn.commit()
-    return dict(conn.execute('SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone())
+    lifecycle = _draft_gate_transition(
+        tenant_id, draft_id, target_status, decided_by, decided_by_name,
+        clean_note or ('اعتماد الملف النهائي' if decision == 'approved' else 'إعادة الملف النهائي للتعديل'))
+    if lifecycle is None and draft_id:
+        # The decision must not stand while the linked draft stayed behind.
+        conn.execute(
+            "UPDATE final_file_approvals SET status = 'pending', decided_by = NULL, "
+            'decided_by_name = NULL, decided_at = NULL, decision_note = NULL WHERE id = ?',
+            (approval_id,),
+        )
+        if decision == 'approved':
+            conn.execute(
+                'UPDATE presentations SET status = ? WHERE id = ? AND tenant_id = ?',
+                ((pres or {}).get('status') or 'generated_draft', row['presentation_id'], tenant_id),
+            )
+        conn.commit()
+        return {'error': 'lifecycle_transition_failed', 'target_status': target_status}
+    updated = dict(conn.execute('SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone())
+    if lifecycle:
+        updated['draft_status'] = lifecycle.get('current_status')
+    return updated
 
 
 def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limit=50):
