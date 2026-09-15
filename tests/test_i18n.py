@@ -46,6 +46,7 @@ FRONTEND_JS_ORDER = (
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
     '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '19-notifications.js',
 )
 
 
