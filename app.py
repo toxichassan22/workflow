@@ -15341,8 +15341,25 @@ def api_mfa_status():
 @app.route('/api/auth/mfa/setup', methods=['POST'])
 @require_auth
 def api_mfa_setup():
-    """Start enrolment: returns the new secret; it activates only after a code verifies."""
+    """Start enrolment: returns the new secret; it activates only after a code verifies.
+
+    When MFA is already enabled this rotates the second factor, so it demands
+    the same proof as disabling: the account password plus a current TOTP code.
+    A session token alone must never be enough to replace the factor."""
     scope, row_id = _mfa_actor_scope()
+    secrets_row = db.get_mfa_secrets(scope, row_id)
+    if secrets_row and secrets_row.get('mfa_enabled'):
+        data = request.json or {}
+        password = data.get('password') or ''
+        code = str(data.get('code') or '').strip()
+        if scope == 'user':
+            account = db.get_user_by_id(row_id)
+        else:
+            account = g.tenant
+        if not account or not verify_password(password, account.get('password_hash') or ''):
+            return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
+        if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+            return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
     secret = auth.generate_totp_secret()
     db.set_mfa_pending_secret(scope, row_id, secret)
     account = g.user_name or g.tenant.get('email') or 'admin'
