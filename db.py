@@ -2488,8 +2488,11 @@ def get_presentation(pres_id, tenant_id=None):
     return dict(row) if row else None
 
 
-def _presentation_list_clauses(tenant_id, draft_id=None, search='', status='', date_from='', date_to=''):
-    """Shared WHERE clauses for the presentation list and its total count."""
+def _presentation_list_clauses(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', accessible_draft_ids=None):
+    """Shared WHERE clauses for the presentation list and its total count.
+
+    ``accessible_draft_ids`` limits the list to presentations of drafts the
+    caller may reach (t20); presentations with no draft stay visible to all."""
     clauses = ['tenant_id = ?']
     params = [tenant_id]
     if draft_id:
@@ -2513,13 +2516,20 @@ def _presentation_list_clauses(tenant_id, draft_id=None, search='', status='', d
     if date_to:
         clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) <= ?')
         params.append(str(date_to)[:10])
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            clauses.append('(draft_id IS NULL OR draft_id IN (' + ','.join('?' * len(ids)) + '))')
+            params.extend(ids)
+        else:
+            clauses.append('draft_id IS NULL')
     return clauses, params
 
 
-def count_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to=''):
+def count_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', accessible_draft_ids=None):
     """Cheap total for a presentation list without touching any payload column."""
     conn = get_db()
-    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to)
+    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to, accessible_draft_ids)
     row = conn.execute(
         'SELECT COUNT(*) AS c FROM presentations WHERE ' + ' AND '.join(clauses),
         params,
@@ -2527,7 +2537,7 @@ def count_presentations(tenant_id, draft_id=None, search='', status='', date_fro
     return int((dict(row) if row else {}).get('c') or 0)
 
 
-def get_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', limit=200, offset=0):
+def get_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', limit=200, offset=0, accessible_draft_ids=None):
     """Get tenant presentations with optional project and archive filters.
 
     List-only: selects metadata columns, never project_data/slides_data. Those
@@ -2536,7 +2546,7 @@ def get_presentations(tenant_id, draft_id=None, search='', status='', date_from=
     presentation_scope and the legacy draft fallback are extracted in SQL.
     """
     conn = get_db()
-    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to)
+    clauses, params = _presentation_list_clauses(tenant_id, draft_id, search, status, date_from, date_to, accessible_draft_ids)
     limit = max(1, min(int(limit or 200), 500))
     offset = max(0, int(offset or 0))
     params.extend([limit, offset])
@@ -2631,13 +2641,29 @@ def create_export(presentation_id, tenant_id, format, file_path, content_hash=No
     return export_id
 
 
-def get_exports(tenant_id):
-    """Get all exports for a tenant."""
+def get_exports(tenant_id, accessible_draft_ids=None):
+    """Get all exports for a tenant.
+
+    ``accessible_draft_ids`` keeps only exports whose presentation belongs to a
+    reachable draft (t20); exports with no presentation or whose presentation
+    carries no draft stay visible."""
     conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM exports WHERE tenant_id = ? ORDER BY created_at DESC',
-        (tenant_id,)
-    ).fetchall()
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        placeholders = ','.join('?' * len(ids)) if ids else "''"
+        rows = conn.execute(
+            '''SELECT e.* FROM exports e LEFT JOIN presentations p
+               ON p.id = e.presentation_id AND p.tenant_id = e.tenant_id
+               WHERE e.tenant_id = ?
+               AND (e.presentation_id IS NULL OR p.draft_id IS NULL OR p.draft_id IN (''' + placeholders + '''))
+               ORDER BY e.created_at DESC''',
+            (tenant_id, *ids)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM exports WHERE tenant_id = ? ORDER BY created_at DESC',
+            (tenant_id,)
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -2866,6 +2892,7 @@ PERMISSION_KEYS = [
     'copy_presentation',
     'post_approval_edit',
     'billing',
+    'audit_log',
     'sag_admin_panel',
 ]
 
@@ -2903,6 +2930,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': True,
         'post_approval_edit': True,
         'billing': True,
+        'audit_log': True,
         'sag_admin_panel': False,
     },
     'employee': {
@@ -2924,6 +2952,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': True,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'section_editor': {
@@ -2945,6 +2974,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': True,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'section_approver': {
@@ -2966,6 +2996,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': False,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'generation_approver': {
@@ -2987,6 +3018,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': False,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'final_file_approver': {
@@ -3008,6 +3040,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': False,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'profile': {
@@ -3029,6 +3062,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': False,
         'post_approval_edit': False,
         'billing': False,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
     'support': {
@@ -3050,6 +3084,7 @@ DEFAULT_PERMISSIONS = {
         'copy_presentation': False,
         'post_approval_edit': False,
         'billing': True,
+        'audit_log': False,
         'sag_admin_panel': False,
     },
 }
@@ -4668,13 +4703,22 @@ def get_project_draft(tenant_id, user_id):
     return _hydrate_project_draft(row)
 
 
-def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', status='', date_from='', date_to=''):
-    """Return lightweight draft metadata without hydrating project payloads."""
+def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', status='', date_from='', date_to='', accessible_ids=None):
+    """Return lightweight draft metadata without hydrating project payloads.
+
+    ``accessible_ids`` scopes the list to the drafts a project-scoped user may
+    see (t20); ``None`` keeps the tenant-wide listing."""
     conn = get_db()
     limit = max(1, min(int(limit or 50), 200))
     offset = max(0, int(offset or 0))
     clauses = ['tenant_id = ?']
     params = [tenant_id]
+    if accessible_ids is not None:
+        ids = [str(i) for i in accessible_ids]
+        if not ids:
+            return []
+        clauses.append('id IN (' + ','.join('?' * len(ids)) + ')')
+        params.extend(ids)
     if str(search or '').strip():
         clauses.append('LOWER(title) LIKE ?')
         params.append('%' + str(search).strip().lower() + '%')
@@ -9795,14 +9839,25 @@ def copy_project_draft(tenant_id, source_draft_id, new_title, copied_by, copied_
     }
 
 
-def list_proposal_copies(tenant_id, limit=50):
+def list_proposal_copies(tenant_id, limit=50, accessible_ids=None):
     conn = get_db()
+    scope_sql = ''
+    params = [tenant_id]
+    if accessible_ids is not None:
+        ids = [str(i) for i in accessible_ids]
+        if not ids:
+            return []
+        placeholders = ','.join('?' * len(ids))
+        scope_sql = (' AND (pc.source_draft_id IN (' + placeholders + ')'
+                     ' OR pc.new_draft_id IN (' + placeholders + '))')
+        params.extend(ids * 2)
+    params.append(int(limit))
     rows = conn.execute(
         '''SELECT pc.id, pc.source_draft_id, pc.new_draft_id, pc.new_title, pc.copied_by_name, pc.created_at,
                   d.title AS source_title
            FROM proposal_copies pc LEFT JOIN project_drafts d ON d.id = pc.source_draft_id
-           WHERE pc.tenant_id = ? ORDER BY pc.created_at DESC LIMIT ?''',
-        (tenant_id, int(limit)),
+           WHERE pc.tenant_id = ?''' + scope_sql + ''' ORDER BY pc.created_at DESC LIMIT ?''',
+        params,
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -10692,7 +10747,7 @@ def enforce_contract_retention(tenant_id=None):
 
 # ── t54: operational monitoring that never exposes client content ───────────
 
-def operational_overview():
+def operational_overview(months=12, from_month=None, to_month=None):
     """Counts and activity shape only: the super-admin never sees client content."""
     conn = get_db()
     def count(table, where='1 = 1', params=()):
@@ -10713,12 +10768,36 @@ def operational_overview():
             return {}
 
     now = _utcnow()
-    labels = []
-    for i in range(11, -1, -1):
-        mm = now.month - i
-        yy = now.year + (mm - 1) // 12
-        mm = (mm - 1) % 12 + 1
-        labels.append('%04d-%02d' % (yy, mm))
+
+    def _parse_month(value):
+        try:
+            year, month = str(value).split('-')[:2]
+            year, month = int(year), int(month)
+            return (year, month) if 1 <= month <= 12 else None
+        except Exception:
+            return None
+
+    pairs = []
+    start, end = _parse_month(from_month), _parse_month(to_month)
+    if start and end:
+        if start > end:
+            start, end = end, start
+        cur = start
+        while cur <= end and len(pairs) < 37:
+            pairs.append(cur)
+            cur = (cur[0] + (1 if cur[1] == 12 else 0),
+                   1 if cur[1] == 12 else cur[1] + 1)
+    if not pairs:
+        try:
+            months = max(1, min(int(months or 12), 36))
+        except (TypeError, ValueError):
+            months = 12
+        for i in range(months - 1, -1, -1):
+            mm = now.month - i
+            yy = now.year + (mm - 1) // 12
+            mm = (mm - 1) % 12 + 1
+            pairs.append((yy, mm))
+    labels = ['%04d-%02d' % p for p in pairs]
 
     series_maps = {
         'companies': monthly_map('tenants', where='is_admin = 0'),
@@ -11444,9 +11523,15 @@ TENANT_POLICY_DEFAULTS = {
     # 'allow' records it with a self-approval audit note, 'warn' allows it and
     # flags it in the matrix, 'block' refuses the decision outright.
     'section_self_approval': 'allow',
+    # d02 relaxed: whether a requester may approve their own generation
+    # request. 'block' keeps the mandatory separation — only approvers and
+    # company admins decide; 'allow' lets the requester pass their own gate
+    # (the request is still priced and the points still reserved).
+    'generation_self_approval': 'block',
 }
 TENANT_POLICY_VALUES = {
     'section_self_approval': ('allow', 'warn', 'block'),
+    'generation_self_approval': ('allow', 'block'),
 }
 
 
@@ -11529,6 +11614,24 @@ def user_project_scope_limited(user_id):
         'SELECT 1 FROM user_project_scopes WHERE user_id = ? LIMIT 1', (user_id,)
     ).fetchone()
     return bool(row)
+
+
+def user_accessible_draft_ids(user_id, tenant_id):
+    """t20: draft ids a project-scoped user may touch — their scope plus their
+    own files. ``None`` when the user carries no scope rows (the legacy
+    unrestricted access) or has no user id (tenant-direct logins)."""
+    if not user_id:
+        return None
+    conn = get_db()
+    scope = {row['draft_id'] for row in conn.execute(
+        'SELECT draft_id FROM user_project_scopes WHERE user_id = ? AND tenant_id = ?',
+        (user_id, tenant_id)).fetchall()}
+    if not scope:
+        return None
+    own = {row['id'] for row in conn.execute(
+        'SELECT id FROM project_drafts WHERE tenant_id = ? AND user_id = ?',
+        (tenant_id, user_id)).fetchall()}
+    return scope | own
 
 
 def user_may_access_draft(user_id, draft):

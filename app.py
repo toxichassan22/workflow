@@ -3965,6 +3965,7 @@ def api_generate_images():
 # ENDPOINT 3: Export PDF
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/export-pdf', methods=['POST'])
+@require_auth
 def api_export_pdf():
     data = request.json
     # Accept both 'slidesHtml' (from designer) and 'html' (legacy)
@@ -3990,6 +3991,7 @@ def api_export_pdf():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.route('/api/official-outline', methods=['POST'])
+@require_auth
 def api_official_outline():
     """Compatibility: Generate outline/titles following tenant slide bounds."""
     project_data = clean_project_data(request.json.get('projectData', {}))
@@ -4053,6 +4055,7 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
 
 
 @app.route('/api/generate-titles', methods=['POST'])
+@require_auth
 def api_generate_titles():
     """Compatibility: Same as official-outline"""
     return api_official_outline()
@@ -4499,12 +4502,14 @@ def api_designer_generate():
 
 
 @app.route('/api/generate-outline', methods=['POST'])
+@require_auth
 def api_generate_outline():
     """Compatibility: Generate outline"""
     return api_official_outline()
 
 
 @app.route('/api/generate-content', methods=['POST'])
+@require_auth
 def api_generate_content():
     """Compatibility: Generate content for a slide"""
     slide_data = request.json.get('slide', {})
@@ -4521,6 +4526,7 @@ def api_generate_content():
 
 
 @app.route('/api/ai-edit-slide', methods=['POST'])
+@require_auth
 def api_ai_edit_slide():
     """Compatibility: AI edit a slide with Playwright Vision guidance"""
     data = request.json
@@ -4592,6 +4598,7 @@ def api_ai_edit_slide():
 
 
 @app.route('/api/ai-chat', methods=['POST'])
+@require_auth
 def api_ai_chat():
     """Compatibility: AI chat — returns data.data format expected by frontend"""
     data = request.json
@@ -4645,6 +4652,7 @@ def api_edit_deck_data():
 
 
 @app.route('/api/generate-bullets', methods=['POST'])
+@require_auth
 def api_generate_bullets():
     """Compatibility: Generate bullets for a slide"""
     title = request.json.get('title', '')
@@ -4672,36 +4680,42 @@ def api_organize_text():
 
 
 @app.route('/api/generate-design', methods=['POST'])
+@require_auth
 def api_generate_design():
     """Compatibility: Generate design (use designer-generate)"""
     return api_designer_generate()
 
 
 @app.route('/api/generate-design-batch', methods=['POST'])
+@require_auth
 def api_generate_design_batch():
     """Compatibility: Generate design batch"""
     return api_designer_generate()
 
 
 @app.route('/api/redesign-slide', methods=['POST'])
+@require_auth
 def api_redesign_slide():
     """Compatibility: Redesign a slide"""
     return api_ai_edit_slide()
 
 
 @app.route('/api/pdf-design', methods=['POST'])
+@require_auth
 def api_pdf_design():
     """Compatibility: PDF design (use export-pdf)"""
     return api_export_pdf()
 
 
 @app.route('/api/pdf-design-stream', methods=['POST'])
+@require_auth
 def api_pdf_design_stream():
     """Compatibility: PDF design stream"""
     return api_export_pdf()
 
 
 @app.route('/api/generate-pdf', methods=['POST'])
+@require_auth
 def api_generate_pdf():
     """Compatibility: Generate PDF"""
     return api_export_pdf()
@@ -4719,6 +4733,7 @@ def api_pdf_chat_upload():
 
 
 @app.route('/api/render-slide-image', methods=['POST'])
+@require_auth
 def api_render_slide_image():
     """Render slide as image (returns base64 data URI via Playwright)"""
     data = request.json or {}
@@ -11095,6 +11110,7 @@ def api_get_presentations():
         offset = int(request.args.get('offset', 0))
     except (TypeError, ValueError):
         return jsonify({'error': 'limit and offset must be integers'}), 400
+    accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
     presentations = db.get_presentations(
         g.tenant_id,
         draft_id=(request.args.get('draftId') or '').strip() or None,
@@ -11104,6 +11120,7 @@ def api_get_presentations():
         date_to=(request.args.get('to') or '').strip(),
         limit=limit,
         offset=offset,
+        accessible_draft_ids=accessible,
     )
     total = db.count_presentations(
         g.tenant_id,
@@ -11112,6 +11129,7 @@ def api_get_presentations():
         status=(request.args.get('status') or '').strip(),
         date_from=(request.args.get('from') or '').strip(),
         date_to=(request.args.get('to') or '').strip(),
+        accessible_draft_ids=accessible,
     )
     result = []
     for p in presentations:
@@ -11430,6 +11448,10 @@ def api_get_presentation(pres_id):
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
+    if pres.get('draft_id'):
+        accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+        if accessible is not None and pres['draft_id'] not in accessible:
+            return jsonify({'error': 'Presentation not found'}), 404
 
     if int(pres.get('revision') or 0) > 0:
         return jsonify({'success': True, 'presentation': _presentation_state(pres)})
@@ -11685,6 +11707,8 @@ def _versioned_draft_or_404(draft_id):
         return None, {'error': 'No project draft found'}
     if draft.get('user_id') != _project_draft_actor_id():
         return None, {'error': 'No project draft found'}
+    if not db.user_may_access_draft(g.user_id, draft):
+        return None, {'error': 'No project draft found'}
     return draft, None
 
 
@@ -11706,9 +11730,14 @@ def _has_approvals_permission():
 
 
 def _versioned_draft_for_read(draft_id):
-    """Draft visible to its owner or to a caller with the approvals permission."""
+    """Draft visible to its owner or to a caller with the approvals permission.
+
+    Project-scoped users stay inside their scope either way (t20): a granted
+    approvals permission never widens the project list an invite fixed."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
     if not draft:
+        return None, {'error': 'No project draft found'}
+    if not db.user_may_access_draft(g.user_id, draft):
         return None, {'error': 'No project draft found'}
     if draft.get('user_id') == _project_draft_actor_id():
         return draft, None
@@ -12056,6 +12085,7 @@ def api_get_all_project_drafts():
         status=(request.args.get('status') or '').strip(),
         date_from=(request.args.get('from') or '').strip(),
         date_to=(request.args.get('to') or '').strip(),
+        accessible_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id),
     )
     return jsonify({'success': True, 'drafts': drafts, 'limit': max(1, min(limit, 200)), 'offset': max(0, offset)})
 
@@ -12065,7 +12095,7 @@ def api_get_all_project_drafts():
 def api_get_project_draft_by_id(draft_id):
     """Get a specific project draft by ID."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
-    if not draft:
+    if not draft or not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'Draft not found'}), 404
     draft['draft_data'] = _merge_persisted_map_assets(
         draft.get('draft_data') or {}, g.tenant_id, draft_id=draft_id
@@ -12089,19 +12119,24 @@ def api_project_draft_recovery():
     """
     _wanted = [part.strip() for part in (request.args.get('draftIds') or request.args.get('draft_ids') or '').split(',') if part.strip()][:200]
     _wanted_set = set(_wanted) or None
-    snapshots = db.find_draft_snapshots(g.tenant_id, draft_ids=_wanted_set)
+    accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+    if _wanted_set is not None and accessible is not None:
+        _wanted_set &= accessible
+    snapshots = [] if _wanted_set == set() else db.find_draft_snapshots(g.tenant_id, draft_ids=_wanted_set)
+    if accessible is not None:
+        snapshots = [s for s in snapshots if s.get('draft_id') in accessible]
     by_draft = {}
     for snapshot in snapshots:
         key = snapshot['draft_id']
         if key and (_wanted_set is None or key in _wanted_set) and (key not in by_draft or snapshot['field_count'] > by_draft[key]['field_count']):
             by_draft[key] = snapshot
     if _wanted_set is not None:
-        summaries = [s for s in db.get_all_project_draft_summaries(g.tenant_id, limit=200) if s['id'] in _wanted_set]
+        summaries = [s for s in db.get_all_project_draft_summaries(g.tenant_id, limit=200, accessible_ids=accessible) if s['id'] in _wanted_set]
         # Preserve the requested order for a stable progressive patch on the client.
         summaries.sort(key=lambda s: _wanted.index(s['id']) if s['id'] in _wanted else 0)
         field_counts = db.get_draft_field_counts(g.tenant_id, [s['id'] for s in summaries])
     else:
-        summaries = db.get_all_project_draft_summaries(g.tenant_id, limit=200)
+        summaries = db.get_all_project_draft_summaries(g.tenant_id, limit=200, accessible_ids=accessible)
         field_counts = {}
     report = []
     for draft in summaries:
@@ -12847,6 +12882,9 @@ def api_get_proposal_lifecycle_states():
 def api_get_proposal_lifecycle(draft_id):
     """Return the current lifecycle state, metadata, and transition history for a proposal."""
     resolved_id = _resolve_draft_id(draft_id)
+    draft = db.get_project_draft_by_id(g.tenant_id, resolved_id)
+    if not draft or not db.user_may_access_draft(g.user_id, draft):
+        return jsonify({'error': 'Project draft not found'}), 404
     info = db.get_proposal_lifecycle_info(g.tenant_id, resolved_id)
     if not info:
         return jsonify({'error': 'Project draft not found'}), 404
@@ -12859,7 +12897,7 @@ def api_transition_proposal_status(draft_id):
     """Execute a validated state transition for a proposal in accordance with the 11-state lifecycle."""
     resolved_id = _resolve_draft_id(draft_id)
     draft = db.get_project_draft_by_id(g.tenant_id, resolved_id)
-    if not draft:
+    if not draft or not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'Project draft not found'}), 404
 
     data = request.json or {}
@@ -14368,7 +14406,8 @@ def api_export():
 @require_auth
 def api_get_exports():
     """List all exports for the current tenant."""
-    exports = db.get_exports(g.tenant_id)
+    exports = db.get_exports(
+        g.tenant_id, accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     result = []
     for e in exports:
         result.append({
@@ -14445,6 +14484,12 @@ def api_download_export(export_id):
     exported_file = db.get_export(export_id, g.tenant_id)
     if not exported_file:
         return jsonify({'error': 'Export not found'}), 404
+    export_pres = db.get_presentation(exported_file['presentation_id'], tenant_id=g.tenant_id) \
+        if exported_file.get('presentation_id') else None
+    if export_pres and export_pres.get('draft_id'):
+        accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+        if accessible is not None and export_pres['draft_id'] not in accessible:
+            return jsonify({'error': 'Export not found'}), 404
     file_path = os.path.abspath(exported_file['file_path'])
     tenant_output_dir = os.path.abspath(os.path.join(OUTPUT_DIR, g.tenant_id))
     if os.path.commonpath([file_path, tenant_output_dir]) != tenant_output_dir or not os.path.isfile(file_path):
@@ -18844,7 +18889,7 @@ def api_get_edit_log(pres_id):
 def api_get_draft_edit_log(draft_id):
     """Edit history for one project file. Drafts had no history at all before."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
-    if not draft:
+    if not draft or not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'Draft not found'}), 404
     return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'draft', draft_id)})
 
@@ -18869,7 +18914,7 @@ def api_log_presentation_edit(pres_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.route('/api/audit-log', methods=['GET'])
-@require_auth
+@require_permission('audit_log')
 def api_list_audit_log():
     """Query immutable audit events with filtering and pagination."""
     entity_type = request.args.get('entityType') or request.args.get('entity_type') or None
@@ -18896,7 +18941,7 @@ def api_list_audit_log():
 
 
 @app.route('/api/audit-log/<event_id>', methods=['GET'])
-@require_auth
+@require_permission('audit_log')
 def api_get_audit_event(event_id):
     """Fetch a single immutable audit event."""
     event = db.get_audit_event(g.tenant_id, event_id)
@@ -18906,7 +18951,7 @@ def api_get_audit_event(event_id):
 
 
 @app.route('/api/audit-log/export', methods=['GET'])
-@require_auth
+@require_permission('audit_log')
 def api_export_audit_log():
     """Export corporate audit events report as UTF-8 CSV with BOM."""
     entity_type = request.args.get('entityType') or request.args.get('entity_type') or None
@@ -24386,7 +24431,10 @@ def api_create_generation_approval():
                         new_value=approval['status'],
                         metadata={'estimated_points': approval.get('estimated_points'),
                                   'estimated_cost_usd': approval.get('estimated_cost_usd')})
-    return jsonify({'success': True, 'approval': approval, 'estimate': estimate})
+    can_self_decide = _omran_actor_is_admin() \
+        or db.get_tenant_policy(g.tenant_id, 'generation_self_approval', 'block') == 'allow'
+    return jsonify({'success': True, 'approval': approval, 'estimate': estimate,
+                    'can_self_decide': can_self_decide})
 
 
 @app.route('/api/generation-approvals', methods=['GET'])
@@ -24412,15 +24460,23 @@ def api_decide_generation_approval(approval_id):
 
     Decide acts need the dedicated approve_generation permission; cancelling a
     pending request stays with its requester. Self-decisions are refused unless
-    the actor is a company-level administrator (d02).
+    the actor is a company-level administrator (d02) — or the tenant's
+    generation_self_approval policy is 'allow', which lets a requester pass
+    their own gate.
     """
     data = request.json or {}
     decision = data.get('decision')
-    if decision in {'approved', 'rejected'} and not _omran_can('approve_generation'):
+    approval_row = db.get_generation_approval(g.tenant_id, approval_id)
+    self_decision = bool(approval_row) \
+        and str(approval_row.get('requested_by') or '') == str(_omran_actor_id())
+    policy_self_ok = db.get_tenant_policy(g.tenant_id, 'generation_self_approval', 'block') == 'allow'
+    if decision in {'approved', 'rejected'} and not _omran_can('approve_generation') \
+            and not (self_decision and policy_self_ok):
         return _omran_forbidden('اعتماد أو رفض طلب التوليد يتطلب صلاحية معتمد التوليد')
     result = db.decide_generation_approval(
         g.tenant_id, approval_id, decision, _omran_actor_id(), _omran_actor_name(),
-        note=data.get('note'), allow_self=_omran_actor_is_admin(),
+        note=data.get('note'),
+        allow_self=_omran_actor_is_admin() or (self_decision and policy_self_ok),
     )
     failure = _omran_error(result)
     if failure:
@@ -24745,7 +24801,8 @@ def api_copy_project_draft():
 @app.route('/api/project-draft/copies', methods=['GET'])
 @require_auth
 def api_list_proposal_copies():
-    return jsonify({'success': True, 'copies': db.list_proposal_copies(g.tenant_id)})
+    return jsonify({'success': True, 'copies': db.list_proposal_copies(
+        g.tenant_id, accessible_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))})
 
 
 # ── t18: archive and restore; the client never hard-deletes ─────────────────
@@ -25403,7 +25460,10 @@ def api_admin_tenant_contracts(tenant_id):
 @app.route('/api/admin/operational-overview', methods=['GET'])
 @require_admin
 def api_operational_overview():
-    return jsonify({'success': True, 'overview': db.operational_overview()})
+    return jsonify({'success': True, 'overview': db.operational_overview(
+        months=request.args.get('months'),
+        from_month=request.args.get('from'),
+        to_month=request.args.get('to'))})
 
 
 @app.route('/api/contracts', methods=['GET'])

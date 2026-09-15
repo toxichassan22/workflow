@@ -1117,6 +1117,7 @@
       sagAllTenants = (tenantsData && tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
       sagLastOverview = overview;
       renderAdminDashboard(overview);
+      if (sagChartRange.preset !== '12') sagApplyChartRange();
       if (typeof omLoadNotifications === 'function') omLoadNotifications('adminNotificationsList');
     }
 
@@ -1134,15 +1135,16 @@
     //    are genuine data rendering and keep the no-icons rule intact) ──
 
     const SAG_MONTHS = {
-      ar: ['ينا', 'فبر', 'مار', 'أبر', 'ماي', 'يون', 'يول', 'أغس', 'سبت', 'أكت', 'نوف', 'ديس'],
-      en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+      en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
     };
 
     function sagMonthLabel(iso) {
       const lang = (window.WFI18n && WFI18n.getLang && WFI18n.getLang()) || 'ar';
       const names = SAG_MONTHS[lang === 'en' ? 'en' : 'ar'];
-      const m = parseInt(String(iso).split('-')[1], 10);
-      return names[(m || 1) - 1] || iso;
+      const parts = String(iso).split('-');
+      const m = parseInt(parts[1], 10);
+      return (names[(m || 1) - 1] || iso) + ' ' + (parts[0] || '');
     }
 
     function sagFmtNum(v) {
@@ -1326,6 +1328,66 @@
       ).join('');
     }
 
+    var sagLastChartTrends = null;
+    var sagChartRange = { preset: '12', from: '', to: '' };
+
+    function renderSagActivityChart(trends) {
+      trends = trends || {};
+      sagLastChartTrends = trends;
+      const activityEl = document.getElementById('sagActivityChart');
+      if (!activityEl) return;
+      const labels = trends.labels || [];
+      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+      const series = [
+        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
+        { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)', fmt: sagFmtNum },
+      ];
+      const chart = sagLineChart(labels, series);
+      activityEl.innerHTML = labels.length ? chart.svg : '';
+      if (labels.length) sagBindChartTooltip(activityEl, labels, series, chart.geom);
+      sagLegend(document.getElementById('sagActivityLegend'), series);
+      renderSagRangeControls();
+    }
+
+    function renderSagRangeControls() {
+      const box = document.getElementById('sagActivityRange');
+      if (!box) return;
+      const presets = [
+        { v: '3', t: WFT('admin.range_3m', 'آخر 3 شهور') },
+        { v: '6', t: WFT('admin.range_6m', 'آخر 6 شهور') },
+        { v: '12', t: WFT('admin.range_12m', 'آخر 12 شهرًا') },
+        { v: '24', t: WFT('admin.range_24m', 'آخر سنتين') },
+        { v: 'ytd', t: WFT('admin.range_ytd', 'هذه السنة') },
+        { v: 'custom', t: WFT('admin.range_custom', 'نطاق مخصص') },
+      ];
+      box.innerHTML =
+        '<select id="sagRangePreset" class="admin-range-select" onchange="sagChartRange.preset=this.value; sagApplyChartRange()">' +
+        presets.map(p => '<option value="' + p.v + '"' + (sagChartRange.preset === p.v ? ' selected' : '') + '>' + p.t + '</option>').join('') +
+        '</select>' +
+        '<span class="admin-range-custom" style="display:' + (sagChartRange.preset === 'custom' ? 'inline-flex' : 'none') + '">' +
+        '<input type="month" id="sagRangeFrom" dir="ltr" value="' + escapeHtml(sagChartRange.from) + '" onchange="sagChartRange.from=this.value; sagApplyChartRange()">' +
+        '<input type="month" id="sagRangeTo" dir="ltr" value="' + escapeHtml(sagChartRange.to) + '" onchange="sagChartRange.to=this.value; sagApplyChartRange()">' +
+        '</span>';
+    }
+
+    async function sagApplyChartRange() {
+      const params = new URLSearchParams();
+      if (sagChartRange.preset === 'custom') {
+        renderSagRangeControls();
+        if (!sagChartRange.from && !sagChartRange.to) return;
+        if (sagChartRange.from) params.set('from', sagChartRange.from);
+        if (sagChartRange.to) params.set('to', sagChartRange.to);
+      } else if (sagChartRange.preset === 'ytd') {
+        params.set('months', String(new Date().getMonth() + 1));
+      } else {
+        params.set('months', sagChartRange.preset);
+      }
+      const data = await api('GET', '/api/admin/operational-overview?' + params.toString()).catch(() => null);
+      if (data && data.overview) {
+        renderSagActivityChart(data.overview.trends || {});
+      }
+    }
+
     const SAG_PLAN_COLORS = ['var(--chart-1)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-2)', 'var(--chart-5)', '#8b5cf6', '#0ea5e9', '#f59e0b'];
     const SAG_PLAN_ORDER = ['free', 'pro', 'enterprise'];
 
@@ -1369,7 +1431,6 @@
       const deltas = overview.deltas || {};
       const spend = overview.spend || {};
       const revenue = overview.revenue || {};
-      const labels = trends.labels || [];
       const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
 
       if (statsEl) {
@@ -1388,17 +1449,7 @@
         ).join('');
       }
 
-      const activityEl = document.getElementById('sagActivityChart');
-      if (activityEl && labels.length) {
-        const series = [
-          { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
-          { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)', fmt: sagFmtNum },
-        ];
-        const chart = sagLineChart(labels, series);
-        activityEl.innerHTML = chart.svg;
-        sagBindChartTooltip(activityEl, labels, series, chart.geom);
-        sagLegend(document.getElementById('sagActivityLegend'), series);
-      }
+      renderSagActivityChart(sagLastChartTrends || trends);
 
       const donutEl = document.getElementById('sagPlanDonut');
       if (donutEl) {

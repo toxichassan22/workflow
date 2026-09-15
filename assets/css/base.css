@@ -4651,10 +4651,41 @@
       font-weight: 600;
     }
 
+    .admin-chart-heading-side {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
     .admin-chart-legend {
       display: flex;
       flex-wrap: wrap;
       gap: 6px 16px;
+    }
+
+    .admin-range {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .admin-range-select,
+    .admin-range-custom input[type="month"] {
+      min-height: 32px;
+      padding: 0 8px;
+      border: 1px solid var(--ui-border, #d8e0ea);
+      border-radius: 7px;
+      background: var(--surface, #fff);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+    }
+
+    .admin-range-custom {
+      align-items: center;
+      gap: 6px;
     }
 
     .admin-legend-item {
