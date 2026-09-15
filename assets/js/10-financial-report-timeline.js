@@ -948,7 +948,7 @@
       return draftSaveChain;
     }
 
-    async function saveProjectAsDraftNow(silent = false, syncPresentation = true) {
+    async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false) {
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
@@ -1043,7 +1043,8 @@
         const savedPresentationId = tenantPresentationId;
         const savedPresentationTitle = tenantPresentationTitle;
         const resp = await api('POST', '/api/project-draft',
-          { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
+          { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
+            slideCheckpoint },
           false, { onProgress });
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {

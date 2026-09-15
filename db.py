@@ -3976,7 +3976,7 @@ PROPOSAL_ALLOWED_TRANSITIONS = {
     'section_approval_pending': {'sections_in_progress', 'rejected_for_revision', 'sections_approved', 'archived'},
     'rejected_for_revision': {'sections_in_progress', 'section_approval_pending', 'archived'},
     'sections_approved': {'generation_approval_pending', 'generating', 'sections_in_progress', 'rejected_for_revision', 'archived'},
-    'generation_approval_pending': {'generating', 'sections_approved', 'sections_in_progress', 'archived'},
+    'generation_approval_pending': {'generating', 'generated_draft', 'sections_approved', 'sections_in_progress', 'archived'},
     'generating': {'generated_draft', 'sections_approved', 'archived'},
     'generated_draft': {'final_approval_pending', 'generation_approval_pending', 'generating', 'sections_in_progress', 'archived'},
     'final_approval_pending': {'approved', 'generated_draft', 'rejected_for_revision', 'archived'},
@@ -4151,12 +4151,19 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             (draft_id, tenant_id, user_id)
         ).fetchone()
     else:
+        # The single-draft fallback targets the newest EDITABLE row: a locked
+        # lifecycle state sealed that file, so work continues on the draft that
+        # is still open instead of overwriting a sealed one.
         existing = conn.execute(
-            'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
+            '''SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ?
+               AND COALESCE(status, 'draft') NOT IN (
+                   'generation_approval_pending', 'generating',
+                   'final_approval_pending', 'approved', 'archived')
+               ORDER BY updated_at DESC LIMIT 1''',
             (tenant_id, user_id)
         ).fetchone()
         if existing:
-            print(f'[DRAFT SAVE] Save without a draft id applied to newest draft {existing["id"]} '
+            print(f'[DRAFT SAVE] Save without a draft id applied to newest editable draft {existing["id"]} '
                   f'of actor {user_id}')
 
     # Determine the stable draft id before serializing
@@ -5117,6 +5124,10 @@ def request_project_draft_approval(tenant_id, user_id, requested_by, requested_b
     norm = normalize_proposal_status(draft.get('status'))
     if proposal_status_is_locked(norm):
         return {'error': 'draft_locked', 'status': norm}
+    if norm == 'sections_approved':
+        # Already past the section gate — asking again is a no-op success so a
+        # client that re-submits after fixing staleness still lands cleanly.
+        return get_project_draft_by_id(tenant_id, draft['id'])
     if norm not in {'draft', 'sections_in_progress', 'rejected_for_revision', 'section_approval_pending'}:
         # A draft already past the section gate cannot be re-submitted through it.
         return {'error': 'invalid_transition', 'current_status': norm}
@@ -5260,6 +5271,14 @@ def transition_project_draft_status(tenant_id, draft_id, target_status,
                    WHERE tenant_id = ? AND status = 'pending' AND presentation_id IN (
                        SELECT id FROM presentations WHERE tenant_id = ? AND draft_id = ?)''',
                 ('أُلغي تلقائيًا عند مغادرة حالة انتظار اعتماد الملف النهائي', tenant_id, tenant_id, draft_id),
+            )
+        if norm_current == 'generating' and norm_target != 'generated_draft':
+            # Abandoning a run frees what it reserved; otherwise the wallet
+            # stays locked against a generation that will never settle.
+            conn.execute(
+                """UPDATE point_reservations SET status = 'released', settled_at = ?, note = ?
+                   WHERE tenant_id = ? AND status = 'reserved' AND draft_id = ?""",
+                (now_iso, 'تحرير تلقائي عند مغادرة حالة التوليد', tenant_id, draft_id),
             )
     except Exception:
         pass
@@ -7832,7 +7851,7 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
     else:
         # Rejected or withdrawn: the draft returns to the state it was requested
         # from — approved sections, or the generated file for a re-run.
-        prior = (row.get('prior_status') or '').strip()
+        prior = ((row['prior_status'] if 'prior_status' in row.keys() else '') or '').strip()
         if prior not in PROPOSAL_LIFECYCLE_STATES:
             prior = 'sections_approved'
         lifecycle = _draft_gate_transition(
@@ -7882,7 +7901,7 @@ def settle_generation_approval(tenant_id, approval_id, job_id, consumed=True, se
             tenant_id, row['draft_id'], 'generated_draft', settled_by, settled_by,
             'اكتمال التوليد وحفظ العرض')
     else:
-        prior = (row.get('prior_status') or '').strip()
+        prior = ((row['prior_status'] if 'prior_status' in row.keys() else '') or '').strip()
         if prior not in PROPOSAL_LIFECYCLE_STATES:
             prior = 'sections_approved'
         lifecycle = _draft_gate_transition(
@@ -8108,7 +8127,7 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
         'SELECT draft_id, status FROM presentations WHERE id = ? AND tenant_id = ?',
         (row['presentation_id'], tenant_id),
     ).fetchone()
-    draft_id = (pres or {}).get('draft_id')
+    draft_id = pres['draft_id'] if pres else None
     target_status = 'approved' if decision == 'approved' else 'generated_draft'
     if draft_id:
         draft = get_project_draft_by_id(tenant_id, draft_id)
@@ -8141,7 +8160,7 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
         if decision == 'approved':
             conn.execute(
                 'UPDATE presentations SET status = ? WHERE id = ? AND tenant_id = ?',
-                ((pres or {}).get('status') or 'generated_draft', row['presentation_id'], tenant_id),
+                ((pres['status'] if pres else None) or 'generated_draft', row['presentation_id'], tenant_id),
             )
         conn.commit()
         return {'error': 'lifecycle_transition_failed', 'target_status': target_status}

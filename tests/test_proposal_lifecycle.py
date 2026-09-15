@@ -270,7 +270,7 @@ class ProposalLifecycleApiTests(unittest.TestCase):
             conn.commit()
             db.save_project_draft(
                 'tenant-1', 'user-employee',
-                {'project_name': 'مشروع الياسمين', 'city': 'جدة'},
+                {'project_name': 'مشروع الياسمين', 'city': 'جدة', 'project_type': 'سكني'},
                 {'basic': 'draft'}, 'draft', draft_id='draft-api-1',
             )
 
@@ -333,6 +333,368 @@ class ProposalLifecycleApiTests(unittest.TestCase):
         )
         self.assertEqual(resp4.status_code, 400)
         self.assertEqual(resp4.get_json()['error_code'], 'REASON_REQUIRED')
+
+    def test_manual_transition_cannot_enter_operational_states(self):
+        """T12-05: the transition endpoint never hand-moves a draft into a gate state."""
+        admin = {'Authorization': f'Bearer {self.admin_token}'}
+        # Walk the draft to sections_approved through the internal machinery.
+        with self.app.app_context():
+            for target in ('sections_in_progress', 'section_approval_pending', 'sections_approved'):
+                res = db.transition_project_draft_status(
+                    'tenant-1', 'draft-api-1', target, actor_id='user-admin')
+                self.assertTrue(res.get('success'), res)
+
+        # Gate entries that are valid internally are refused for a manual caller.
+        for target in ('generation_approval_pending', 'generating'):
+            resp = self.client.post(
+                '/api/project-draft/draft-api-1/transition-status',
+                headers=admin, json={'targetStatus': target, 'reason': 'اختبار'},
+            )
+            self.assertEqual(resp.status_code, 403, target)
+            self.assertEqual(resp.get_json()['error_code'], 'SYSTEM_TRANSITION_ONLY', target)
+
+        # Move on to generated_draft internally, then the final gate stays manual-proof.
+        with self.app.app_context():
+            for target in ('generation_approval_pending', 'generating', 'generated_draft'):
+                db.transition_project_draft_status(
+                    'tenant-1', 'draft-api-1', target, actor_id='user-admin')
+        resp = self.client.post(
+            '/api/project-draft/draft-api-1/transition-status',
+            headers=admin, json={'targetStatus': 'final_approval_pending'},
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json()['error_code'], 'SYSTEM_TRANSITION_ONLY')
+
+        with self.app.app_context():
+            db.transition_project_draft_status(
+                'tenant-1', 'draft-api-1', 'final_approval_pending', actor_id='user-admin')
+        resp = self.client.post(
+            '/api/project-draft/draft-api-1/transition-status',
+            headers=admin, json={'targetStatus': 'approved', 'reason': 'اختبار'},
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json()['error_code'], 'SYSTEM_TRANSITION_ONLY')
+
+        # The draft itself never moved past where the internal calls put it.
+        lifecycle = self.client.get(
+            '/api/project-draft/draft-api-1/lifecycle',
+            headers=admin,
+        ).get_json()['lifecycle']
+        self.assertEqual(lifecycle['current_status'], 'final_approval_pending')
+
+    def test_manual_transition_cannot_bypass_section_gate(self):
+        """T12-04: draft -> sections_approved by hand is refused even for an approver."""
+        resp = self.client.post(
+            '/api/project-draft/draft-api-1/transition-status',
+            headers={'Authorization': f'Bearer {self.admin_token}'},
+            json={'targetStatus': 'sections_approved'},
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json()['error_code'], 'SYSTEM_TRANSITION_ONLY')
+
+    def test_employee_cannot_self_approve_sections_via_transition(self):
+        """A draft owner cannot move their own draft through the section gate."""
+        self.client.post(
+            '/api/project-draft/draft-api-1/transition-status',
+            headers={'Authorization': f'Bearer {self.employee_token}'},
+            json={'targetStatus': 'section_approval_pending'},
+        )
+        resp = self.client.post(
+            '/api/project-draft/draft-api-1/transition-status',
+            headers={'Authorization': f'Bearer {self.employee_token}'},
+            json={'targetStatus': 'sections_approved'},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_locked_draft_refuses_save_and_section_writes(self):
+        """T12-03: a draft in a locked lifecycle state refuses writes with 423."""
+        with self.app.app_context():
+            db.transition_project_draft_status(
+                'tenant-1', 'draft-api-1', 'sections_in_progress', actor_id='user-employee')
+            db.transition_project_draft_status(
+                'tenant-1', 'draft-api-1', 'section_approval_pending', actor_id='user-employee')
+            db.transition_project_draft_status(
+                'tenant-1', 'draft-api-1', 'sections_approved', actor_id='user-admin')
+            db.transition_project_draft_status(
+                'tenant-1', 'draft-api-1', 'generation_approval_pending',
+                actor_id='user-employee', reason='طلب اعتماد التوليد')
+
+        headers = {'Authorization': f'Bearer {self.employee_token}'}
+        save = self.client.post('/api/project-draft', headers=headers, json={
+            'draftId': 'draft-api-1',
+            'draftData': {'draftId': 'draft-api-1', 'project_name': 'تعديل مرفوض'},
+            'sectionStatuses': {'basic': 'draft'},
+        })
+        self.assertEqual(save.status_code, 423)
+        self.assertEqual(save.get_json()['error_code'], 'DRAFT_LOCKED')
+        self.assertEqual(save.get_json()['status'], 'generation_approval_pending')
+
+        section = self.client.post('/api/project-draft/section-status', headers=headers, json={
+            'draftId': 'draft-api-1', 'sectionKey': 'basic', 'sectionStatus': 'approved',
+        })
+        self.assertEqual(section.status_code, 423)
+        self.assertEqual(section.get_json()['error_code'], 'DRAFT_LOCKED')
+
+        version = self.client.post('/api/project-draft/section-version', headers=headers, json={
+            'draftId': 'draft-api-1', 'sectionKey': 'basic', 'snapshot': {'a': 1},
+        })
+        self.assertEqual(version.status_code, 423)
+
+
+class ProposalLifecycleGateTests(unittest.TestCase):
+    """The three approval gates drive the 11-state lifecycle end to end (t12)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.original_db_path = db.DB_PATH
+        db.DB_PATH = os.path.join(self.temp_dir, 'proposal-gates.db')
+        db.init_db()
+        self.app = Flask(__name__)
+        self.context = self.app.app_context()
+        self.context.push()
+
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, subdomain, email, password_hash, plan, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1)",
+            ('tenant-1', 'Test Tenant', 'testtenant', 'tenant@example.test', 'hash', 'free'),
+        )
+        conn.commit()
+
+    def tearDown(self):
+        db.close_db()
+        self.context.pop()
+        db.DB_PATH = self.original_db_path
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _seed_draft(self, draft_id, status='draft', section_statuses=None):
+        db.save_project_draft(
+            'tenant-1', 'user-1',
+            {'project_name': 'مشروع البوابات', 'city': 'الرياض'},
+            section_statuses if section_statuses is not None else {'basic': 'approved'},
+            'draft', draft_id=draft_id,
+        )
+        if status != 'draft':
+            conn = db.get_db()
+            conn.execute('UPDATE project_drafts SET status = ? WHERE id = ?', (status, draft_id))
+            conn.commit()
+        return draft_id
+
+    def _draft_status(self, draft_id):
+        return db.get_project_draft_by_id('tenant-1', draft_id).get('status')
+
+    def _approval(self, draft_id):
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=draft_id, slides_count=5)
+        approval = db.create_generation_approval(
+            'tenant-1', draft_id, estimate, 'user-1', 'مقدم الطلب')
+        self.assertNotIn('error', approval)
+        return approval
+
+    def test_new_draft_never_starts_in_a_gate_state(self):
+        """A save payload may not create a draft already past the section gate."""
+        db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'مشروع', 'city': 'جدة'},
+            {'basic': 'approved'}, 'approved', draft_id='draft-born-approved',
+        )
+        self.assertEqual(self._draft_status('draft-born-approved'), 'draft')
+        db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'مشروع ٢', 'city': 'جدة'},
+            {'basic': 'draft'}, 'submitted', draft_id='draft-born-submitted',
+        )
+        self.assertEqual(self._draft_status('draft-born-submitted'), 'draft')
+
+    def test_generation_request_moves_draft_to_approval_pending(self):
+        """T12-01: opening a generation approval parks the draft in its gate state."""
+        self._seed_draft('gate-1', status='sections_approved')
+        approval = self._approval('gate-1')
+        self.assertEqual(approval['status'], 'pending')
+        self.assertEqual(approval['prior_status'], 'sections_approved')
+        self.assertEqual(self._draft_status('gate-1'), 'generation_approval_pending')
+
+    def test_generation_request_requires_approved_sections(self):
+        """The request fails when a tracked section is not approved."""
+        self._seed_draft('gate-2', status='sections_in_progress',
+                         section_statuses={'basic': 'draft'})
+        estimate = db.estimate_generation_cost('tenant-1', draft_id='gate-2', slides_count=5)
+        res = db.create_generation_approval('tenant-1', 'gate-2', estimate, 'user-1', 'مقدم')
+        self.assertEqual(res.get('error'), 'sections_not_approved')
+        self.assertEqual(self._draft_status('gate-2'), 'sections_in_progress')
+
+    def test_generation_request_on_locked_draft_refused(self):
+        """A draft already inside a gate refuses a second generation request."""
+        self._seed_draft('gate-3', status='generating')
+        estimate = db.estimate_generation_cost('tenant-1', draft_id='gate-3', slides_count=5)
+        res = db.create_generation_approval('tenant-1', 'gate-3', estimate, 'user-1', 'مقدم')
+        self.assertEqual(res.get('error'), 'draft_locked')
+
+    def test_generation_approval_decision_moves_draft_to_generating(self):
+        """Approving the request starts the run: the draft lands on 'generating'."""
+        self._seed_draft('gate-4', status='sections_approved')
+        approval = self._approval('gate-4')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد التوليد')
+        self.assertEqual(decided.get('status'), 'approved')
+        self.assertEqual(self._draft_status('gate-4'), 'generating')
+        self.assertEqual(decided.get('draft_status'), 'generating')
+
+    def test_generation_rejection_restores_prior_status(self):
+        """A rejected request returns the draft to where it was requested from."""
+        self._seed_draft('gate-5', status='sections_approved')
+        approval = self._approval('gate-5')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'rejected', 'user-2', 'معتمد التوليد', note='السعر مرتفع')
+        self.assertEqual(decided.get('status'), 'rejected')
+        self.assertEqual(self._draft_status('gate-5'), 'sections_approved')
+
+    def test_generation_cancel_restores_prior_status(self):
+        """The requester cancelling their pending request frees the draft again."""
+        self._seed_draft('gate-6', status='sections_approved')
+        approval = self._approval('gate-6')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'cancelled', 'user-1', 'مقدم الطلب')
+        self.assertEqual(decided.get('status'), 'cancelled')
+        self.assertEqual(self._draft_status('gate-6'), 'sections_approved')
+
+    def test_generation_settle_consumed_moves_to_generated_draft(self):
+        """A finished run consumes the reservation and lands on 'generated_draft'."""
+        self._seed_draft('gate-7', status='sections_approved')
+        approval = self._approval('gate-7')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد التوليد')
+        settled = db.settle_generation_approval(
+            'tenant-1', approval['id'], 'job-1', consumed=True, settled_by='user-1')
+        self.assertEqual(settled.get('status'), 'consumed')
+        self.assertEqual(self._draft_status('gate-7'), 'generated_draft')
+        self.assertEqual(settled.get('draft_status'), 'generated_draft')
+
+    def test_generation_settle_release_restores_prior(self):
+        """A failed run releases the reservation and returns the draft to its prior state."""
+        self._seed_draft('gate-8', status='sections_approved')
+        approval = self._approval('gate-8')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد التوليد')
+        settled = db.settle_generation_approval(
+            'tenant-1', approval['id'], 'job-1', consumed=False, settled_by='user-1',
+            note='تعذر توليد الشرائح')
+        self.assertEqual(settled.get('status'), 'rejected')
+        self.assertEqual(self._draft_status('gate-8'), 'sections_approved')
+
+    def test_regeneration_request_remembers_generated_prior(self):
+        """A re-run on a generated draft returns to 'generated_draft' when rejected."""
+        self._seed_draft('gate-9', status='generated_draft')
+        approval = self._approval('gate-9')
+        self.assertEqual(approval['prior_status'], 'generated_draft')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'rejected', 'user-2', 'معتمد', note='لا حاجة')
+        self.assertEqual(self._draft_status('gate-9'), 'generated_draft')
+
+    def test_leaving_gate_state_cancels_pending_approval(self):
+        """Manual withdrawal from the gate voids the still-pending request."""
+        self._seed_draft('gate-10', status='sections_approved')
+        approval = self._approval('gate-10')
+        res = db.transition_project_draft_status(
+            'tenant-1', 'gate-10', 'sections_in_progress',
+            actor_id='user-1', reason='سحب الطلب', manual=True)
+        self.assertTrue(res.get('success'))
+        refreshed = db.get_generation_approval('tenant-1', approval['id'])
+        self.assertEqual(refreshed['status'], 'cancelled')
+
+    def test_final_file_request_moves_draft_to_final_pending(self):
+        """T12-02: requesting the final file parks the draft in final_approval_pending."""
+        self._seed_draft('gate-11', status='generated_draft')
+        pres_id = db.create_presentation(
+            'tenant-1', 'عرض الملف', project_data={'draftId': 'gate-11'},
+            slides_data=[{'title': 'غلاف'}], draft_id='gate-11')
+        approval = db.request_final_file_approval('tenant-1', pres_id, 'user-1', 'مقدم')
+        self.assertNotIn('error', approval)
+        self.assertEqual(self._draft_status('gate-11'), 'final_approval_pending')
+        self.assertEqual(approval['status'], 'pending')
+
+    def test_final_file_approval_moves_draft_and_presentation_to_approved(self):
+        """Approval lands both the presentation and the linked draft on 'approved'."""
+        self._seed_draft('gate-12', status='generated_draft')
+        pres_id = db.create_presentation(
+            'tenant-1', 'عرض الملف', project_data={'draftId': 'gate-12'},
+            slides_data=[{'title': 'غلاف'}], draft_id='gate-12')
+        approval = db.request_final_file_approval('tenant-1', pres_id, 'user-1', 'مقدم')
+        decided = db.decide_final_file_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد الملف')
+        self.assertEqual(decided.get('status'), 'approved')
+        self.assertEqual(self._draft_status('gate-12'), 'approved')
+        pres = db.get_presentation(pres_id, tenant_id='tenant-1')
+        self.assertEqual(pres.get('status'), 'approved')
+
+    def test_final_file_rejection_returns_draft_to_generated(self):
+        """A rejected final file sends the draft back to 'generated_draft' for rework."""
+        self._seed_draft('gate-13', status='generated_draft')
+        pres_id = db.create_presentation(
+            'tenant-1', 'عرض الملف', project_data={'draftId': 'gate-13'},
+            slides_data=[{'title': 'غلاف'}], draft_id='gate-13')
+        approval = db.request_final_file_approval('tenant-1', pres_id, 'user-1', 'مقدم')
+        decided = db.decide_final_file_approval(
+            'tenant-1', approval['id'], 'rejected', 'user-2', 'معتمد الملف',
+            note='الصفحة الأخيرة تحتاج إعادة تصميم')
+        self.assertEqual(decided.get('status'), 'rejected')
+        self.assertEqual(self._draft_status('gate-13'), 'generated_draft')
+
+    def test_final_file_rejection_requires_note(self):
+        """A rejection without a written reason is refused before any state moves."""
+        self._seed_draft('gate-14', status='generated_draft')
+        pres_id = db.create_presentation(
+            'tenant-1', 'عرض الملف', project_data={'draftId': 'gate-14'},
+            slides_data=[{'title': 'غلاف'}], draft_id='gate-14')
+        approval = db.request_final_file_approval('tenant-1', pres_id, 'user-1', 'مقدم')
+        res = db.decide_final_file_approval(
+            'tenant-1', approval['id'], 'rejected', 'user-2', 'معتمد الملف')
+        self.assertEqual(res.get('error'), 'note_required')
+        self.assertEqual(self._draft_status('gate-14'), 'final_approval_pending')
+
+    def test_save_and_section_writes_refuse_locked_draft(self):
+        """T12-03: DraftLocked guards saves and section writes on a locked draft."""
+        self._seed_draft('gate-15', status='generation_approval_pending')
+        with self.assertRaises(db.DraftLocked):
+            db.save_project_draft(
+                'tenant-1', 'user-1', {'project_name': 'تعديل'}, {'basic': 'approved'},
+                'draft', draft_id='gate-15')
+        with self.assertRaises(db.DraftLocked):
+            db.update_draft_section_statuses(
+                'tenant-1', 'user-1', {'basic': 'draft'}, draft_id='gate-15')
+        res = db.create_section_version(
+            'tenant-1', 'gate-15', 'basic', {'a': 1}, 'user-1', 'مقدم')
+        self.assertEqual(res.get('error'), 'draft_locked')
+
+    def test_generating_draft_accepts_only_checkpoint_saves(self):
+        """While 'generating', ordinary saves refuse; the job's checkpoint save passes."""
+        self._seed_draft('gate-16', status='generating')
+        with self.assertRaises(db.DraftLocked):
+            db.save_project_draft(
+                'tenant-1', 'user-1', {'project_name': 'تعديل'}, None,
+                'draft', draft_id='gate-16')
+        draft_id = db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'نقطة تفتيش', 'city': 'الرياض'},
+            {'basic': 'approved'}, 'draft', draft_id='gate-16', allow_generating=True)
+        self.assertEqual(draft_id, 'gate-16')
+        self.assertEqual(self._draft_status('gate-16'), 'generating')
+
+    def test_full_lifecycle_walkthrough(self):
+        """Every gate moves the draft forward through the canonical 11 states."""
+        self._seed_draft('gate-17', status='draft')
+        steps = [
+            ('sections_in_progress', {}),
+            ('section_approval_pending', {}),
+            ('sections_approved', {}),
+            ('generation_approval_pending', {}),
+            ('generating', {}),
+            ('generated_draft', {}),
+            ('final_approval_pending', {}),
+            ('approved', {}),
+            ('archived', {}),
+        ]
+        for target, kwargs in steps:
+            res = db.transition_project_draft_status(
+                'tenant-1', 'gate-17', target, actor_id='user-1', **kwargs)
+            self.assertTrue(res.get('success'), f'{target}: {res}')
+            self.assertEqual(self._draft_status('gate-17'), target)
 
 
 if __name__ == '__main__':

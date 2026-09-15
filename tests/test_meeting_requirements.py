@@ -7224,10 +7224,6 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'sectionStatuses': {},
             })
             self.assertEqual(response.status_code, 200)
-        with self.app.app_context():
-            connection = db.get_db()
-            connection.execute("UPDATE project_drafts SET status = 'approved' WHERE id = ?", (draft_beta,))
-            connection.commit()
 
         presentation_ids = []
         for index, status in enumerate(('draft', 'pending_approval', 'approved')):
@@ -7250,6 +7246,11 @@ class MeetingRequirementsTests(unittest.TestCase):
             'slidesData': [{'title': 'Cover', 'type': 'cover', 'html': '<div class="slide">Cover</div>'}],
             'slideCount': 1,
         }).get_json()['presentationId']
+        # Sealed after its presentation exists: a locked draft accepts no new artifacts.
+        with self.app.app_context():
+            connection = db.get_db()
+            connection.execute("UPDATE project_drafts SET status = 'approved' WHERE id = ?", (draft_beta,))
+            connection.commit()
 
         filtered = client.get(
             '/api/presentations?draftId=' + draft_alpha + '&status=draft&search=Alpha', headers=headers)
@@ -8702,16 +8703,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(review.status_code, 200)
         approved = client.get('/api/project-draft/approval-status', headers=headers).get_json()['approval']
-        self.assertEqual(approved['status'], 'approved')
+        self.assertEqual(approved['status'], 'sections_approved')
         self.assertEqual(approved['review_note'], 'Reviewed in test')
 
-        # Editing a previously approved section returns the unified draft to draft state.
+        # Editing a previously approved section returns the unified draft to work-in-progress.
         returned = client.post('/api/project-draft/section-status', headers=headers, json={
             'sectionKey': 'basic', 'sectionStatus': 'draft'
         })
         self.assertEqual(returned.status_code, 200)
         current = client.get('/api/project-draft', headers=headers).get_json()['draft']
-        self.assertEqual(current['status'], 'draft')
+        self.assertEqual(current['status'], 'sections_in_progress')
 
     def test_admin_approves_draft_directly_while_employee_request_stays_pending(self):
         client = self.app.test_client()
@@ -8735,7 +8736,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(review.status_code, 200, review.get_json())
         approved = client.get(
             '/api/project-draft/draft-direct-approve', headers=headers).get_json()['draft']
-        self.assertEqual(approved['status'], 'approved')
+        self.assertEqual(approved['status'], 'sections_approved')
 
         # An employee without the approvals permission cannot use the review route.
         denied = client.post('/api/project-draft/review', headers=employee_headers, json={
@@ -8758,7 +8759,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(requested.status_code, 200, requested.get_json())
         waiting = client.get(
             '/api/project-draft/draft-employee-waiting', headers=employee_headers).get_json()['draft']
-        self.assertEqual(waiting['status'], 'pending_approval')
+        self.assertEqual(waiting['status'], 'section_approval_pending')
 
         # And the admin decision on that pending request still lands.
         decision = client.post('/api/project-draft/review', headers=headers, json={
@@ -8766,7 +8767,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(decision.status_code, 200)
         final = client.get(
             '/api/project-draft/draft-employee-waiting', headers=headers).get_json()['draft']
-        self.assertEqual(final['status'], 'approved')
+        self.assertEqual(final['status'], 'sections_approved')
 
         index_source = read_frontend_text()
         self.assertIn('async function approveProjectDraftById(draftId)', index_source)

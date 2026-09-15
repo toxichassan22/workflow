@@ -12589,9 +12589,10 @@ def api_transition_proposal_status(draft_id):
     norm_target = db.normalize_proposal_status(target_status)
 
     # Permission check for administrative transitions:
-    # 1. Direct approval to 'approved' requires approvals permission
-    if norm_target == 'approved' and not can_review:
-        return jsonify({'error': 'Approvals permission required to approve a proposal'}), 403
+    # 1. Gate outcomes (sections approved, returned for revision, final approval)
+    #    belong to approvers — the owner cannot pass their own draft through.
+    if norm_target in {'approved', 'sections_approved', 'rejected_for_revision'} and not can_review:
+        return jsonify({'error': 'Approvals permission required for this decision'}), 403
 
     # 2. Reopening an approved proposal (post-approval edit, Section 8.4) requires approvals permission + reason
     if current_status == 'approved' and norm_target != 'archived' and not can_review:
@@ -23104,21 +23105,22 @@ def _omran_error(result):
         return None
     code = result['error']
     default_message = _OMRAN_ERROR_MESSAGES_AR.get(code, 'حدث خطأ، أعد المحاولة')
+    payload = {'error': default_message, 'error_code': code}
+    # Machine-readable companions: the client reuses a pending approval or shows
+    # which lifecycle state refused the move.
+    for extra_key in ('approval_id', 'current_status', 'target_status', 'status'):
+        if result.get(extra_key):
+            payload[extra_key] = result[extra_key]
     if code in _OMRAN_NOT_FOUND:
-        return jsonify({'error': default_message, 'error_code': code}), 404
+        return jsonify(payload), 404
     if code in _OMRAN_CONFLICT:
-        return jsonify({'error': default_message, 'error_code': code}), 409
+        return jsonify(payload), 409
     if code in _OMRAN_FORBIDDEN:
-        return jsonify({'error': default_message, 'error_code': code}), 403
+        return jsonify(payload), 403
     if code == 'insufficient_balance':
-        return jsonify({'error': default_message, 'error_code': code}), 402
+        return jsonify(payload), 402
     if code == 'draft_locked':
         return _draft_locked_response(result.get('status'))
-    payload = {'error': default_message, 'error_code': code}
-    if result.get('approval_id'):
-        payload['approval_id'] = result['approval_id']
-    if result.get('current_status'):
-        payload['current_status'] = result['current_status']
     return jsonify(payload), 400
 
 

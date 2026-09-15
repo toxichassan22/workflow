@@ -439,7 +439,9 @@
       tenantProjectData.slide_generation_checkpoint = tenantSlideGenerationCheckpoint;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       try {
-        await saveProjectAsDraftNow(true, false);
+        // The draft sits in the locked 'generating' state while this runs; the
+        // flag marks this as the job's own checkpoint write, not a user edit.
+        await saveProjectAsDraftNow(true, false, true);
       } catch (error) {
         console.error('[SLIDE CHECKPOINT]', error);
       }

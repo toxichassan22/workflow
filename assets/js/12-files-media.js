@@ -571,6 +571,26 @@
       } catch (err) {
         console.warn('Generation approval estimate error:', err);
       }
+      // A second open on the same draft reuses the pending request instead of
+      // dying — the gate it opened is still the one being decided.
+      if (estimateData && estimateData.error_code === 'approval_already_pending' && estimateData.approval_id) {
+        try {
+          const existing = await api('GET', '/api/generation-approvals/' + encodeURIComponent(estimateData.approval_id));
+          if (existing && existing.success && existing.approval) {
+            estimateData = {
+              success: true,
+              approval: existing.approval,
+              estimate: {
+                estimated_points: existing.approval.estimated_points,
+                estimated_cost_usd: existing.approval.estimated_cost_usd,
+                slides_count: existing.approval.slides_count,
+              },
+            };
+          }
+        } catch (err) {
+          console.warn('Generation approval reuse error:', err);
+        }
+      }
       // The request itself is the gate: when it cannot be opened there is
       // nothing to approve, so generation does not proceed on a failure.
       if (!estimateData || !estimateData.success) {

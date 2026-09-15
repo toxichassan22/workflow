@@ -144,13 +144,30 @@ class OmranDbTests(unittest.TestCase):
 
     def test_generation_approval_requires_approved_sections(self):
         conn = db.get_db()
+        # The request itself refuses while a tracked section is not approved.
         conn.execute(
             'UPDATE project_drafts SET section_statuses = ? WHERE id = ?',
             (json.dumps({'basic': 'draft'}), self.draft_id))
         conn.commit()
         estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        refused = db.create_generation_approval(
+            'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        self.assertEqual(refused.get('error'), 'sections_not_approved')
+
+        conn.execute(
+            'UPDATE project_drafts SET section_statuses = ? WHERE id = ?',
+            (json.dumps({'basic': 'approved'}), self.draft_id))
+        conn.commit()
         approval = db.create_generation_approval(
             'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        self.assertEqual(approval.get('status'), 'pending')
+
+        # The decision re-checks too: a section revoked after the request still
+        # blocks approval.
+        conn.execute(
+            'UPDATE project_drafts SET section_statuses = ? WHERE id = ?',
+            (json.dumps({'basic': 'draft'}), self.draft_id))
+        conn.commit()
         blocked = db.decide_generation_approval(
             'tenant-1', approval['id'], 'approved', 'user-2', 'المعتمد')
         self.assertEqual(blocked.get('error'), 'sections_not_approved')
