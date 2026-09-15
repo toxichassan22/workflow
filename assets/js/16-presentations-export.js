@@ -914,6 +914,7 @@
 
     // SAG Super Admin
     let sagAllTenants = [];
+    let sagLastOverview = null;
     let sagCurrentTenantId = null;
     let sagTenantActiveTab = 'company';
     let sagModalUsers = [];
@@ -1094,9 +1095,20 @@
       ]);
       const overview = (overviewData && overviewData.overview) || {};
       sagAllTenants = (tenantsData && tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
+      sagLastOverview = overview;
       renderAdminDashboard(overview);
       if (typeof omLoadNotifications === 'function') omLoadNotifications('adminNotificationsList');
     }
+
+    // Re-render on language toggle: every dashboard label is built through
+    // WFT at render time, so switching ar/en redraws KPIs, legends, month
+    // ticks, status bars and pending actions instead of leaving stale Arabic.
+    document.addEventListener('wf:lang', function () {
+      const page = document.getElementById('tenantAdminPage');
+      if (!page || !sagLastOverview) return;
+      const visible = page.classList.contains('active') || (page.style.display !== 'none' && page.style.display !== '');
+      if (visible) renderAdminDashboard(sagLastOverview);
+    });
 
     // ── Super-admin dashboard: SVG data-viz helpers (no icon glyphs; charts
     //    are genuine data rendering and keep the no-icons rule intact) ──
