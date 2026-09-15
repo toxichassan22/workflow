@@ -117,6 +117,7 @@ def _create_tables(conn):
         is_admin INTEGER DEFAULT 0,
         primary_user_id TEXT,
         require_password_change INTEGER DEFAULT 0,
+        session_version INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         settings_json TEXT
     );
@@ -233,6 +234,7 @@ def _create_tables(conn):
         role TEXT DEFAULT 'employee',
         is_active INTEGER DEFAULT 1,
         require_password_change INTEGER DEFAULT 0,
+        session_version INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -248,6 +250,14 @@ def _create_tables(conn):
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_password_setup_tokens_tenant ON password_setup_tokens(tenant_id);
+
+    CREATE TABLE IF NOT EXISTS revoked_tokens (
+        jti TEXT PRIMARY KEY,
+        tenant_id TEXT,
+        expires_at INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_revoked_tokens_exp ON revoked_tokens(expires_at);
 
     CREATE TABLE IF NOT EXISTS user_permissions (
         id TEXT PRIMARY KEY,
@@ -680,6 +690,7 @@ def _create_tables(conn):
         ('primary_user_id', 'TEXT'),
         ('require_password_change', 'INTEGER DEFAULT 0'),
         ('package_id', 'TEXT'),
+        ('session_version', 'INTEGER DEFAULT 0'),
     ):
         if column not in cols:
             conn.execute(f'ALTER TABLE tenants ADD COLUMN {column} {definition}')
@@ -690,6 +701,7 @@ def _create_tables(conn):
         ('username', 'TEXT'),
         ('phone', 'TEXT'),
         ('require_password_change', 'INTEGER DEFAULT 0'),
+        ('session_version', 'INTEGER DEFAULT 0'),
     ):
         if column not in user_cols:
             conn.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
@@ -1084,7 +1096,11 @@ def update_tenant(tenant_id, **fields):
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
-    set_clause = ', '.join(f'{k} = ?' for k in updates)
+    set_parts = [f'{k} = ?' for k in updates]
+    # A new password retires every session token issued under the old one.
+    if 'password_hash' in updates:
+        set_parts.append('session_version = COALESCE(session_version, 0) + 1')
+    set_clause = ', '.join(set_parts)
     values = list(updates.values()) + [tenant_id]
     conn.execute(f'UPDATE tenants SET {set_clause} WHERE id = ?', values)
     if 'is_active' in updates and not updates['is_active']:
@@ -2786,7 +2802,11 @@ def update_user(user_id, **fields):
         updates['email'] = updates['email'].lower()
     if 'username' in updates and updates['username']:
         updates['username'] = updates['username'].lower()
-    set_clause = ', '.join(f'{k} = ?' for k in updates)
+    set_parts = [f'{k} = ?' for k in updates]
+    # A new password retires every session token issued under the old one.
+    if 'password_hash' in updates:
+        set_parts.append('session_version = COALESCE(session_version, 0) + 1')
+    set_clause = ', '.join(set_parts)
     values = list(updates.values()) + [user_id]
     conn.execute(f'UPDATE users SET {set_clause} WHERE id = ?', values)
     if 'is_active' in updates and not updates['is_active']:
@@ -2821,7 +2841,8 @@ def set_primary_company_admin(tenant_id, user_id):
         conn.execute(
             '''UPDATE tenants
                SET primary_user_id = ?, account_manager_name = ?, username = ?, phone = ?,
-                   email = ?, password_hash = ?, require_password_change = ?
+                   email = ?, password_hash = ?, require_password_change = ?,
+                   session_version = COALESCE(session_version, 0) + 1
                WHERE id = ?''',
             (user_id, user['name'], user['username'], user['phone'], user['email'],
              user['password_hash'], user['require_password_change'], tenant_id)
@@ -2872,6 +2893,17 @@ def sync_primary_company_admin(tenant_id, **fields):
             )
         if 'is_active' in fields and not fields['is_active']:
             _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
+        # A synced password rewrite retires sessions on both login identities.
+        if 'password_hash' in fields:
+            conn.execute(
+                'UPDATE tenants SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
+                (tenant_id,)
+            )
+            if user_id:
+                conn.execute(
+                    'UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
+                    (user_id,)
+                )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3892,13 +3924,15 @@ def complete_password_setup(raw_token, password_hash):
             return None
         conn.execute(
             '''UPDATE users
-               SET password_hash = ?, require_password_change = 0, is_active = 1
+               SET password_hash = ?, require_password_change = 0, is_active = 1,
+                   session_version = COALESCE(session_version, 0) + 1
                WHERE id = ? AND tenant_id = ?''',
             (password_hash, token['user_id'], token['tenant_id'])
         )
         conn.execute(
             '''UPDATE tenants
-               SET password_hash = ?, require_password_change = 0
+               SET password_hash = ?, require_password_change = 0,
+                   session_version = COALESCE(session_version, 0) + 1
                WHERE id = ? AND primary_user_id = ?''',
             (password_hash, token['tenant_id'], token['user_id'])
         )
@@ -3910,6 +3944,70 @@ def complete_password_setup(raw_token, password_hash):
         'tenant_id': token['tenant_id'],
         'user_id': token['user_id'],
     }
+
+
+# ── Session revocation ────────────────────────────────────────────────────────
+# Session JWTs carry the identity's ``session_version`` (``sv``) plus a unique
+# ``jti``. A password write bumps the version so every earlier token goes stale;
+# logout records the jti in ``revoked_tokens`` until the token's natural exp.
+
+
+def get_session_version(scope, row_id):
+    """Current session epoch for an identity ('user' or 'tenant'); missing rows read 0."""
+    if not row_id:
+        return 0
+    table = 'users' if scope == 'user' else 'tenants'
+    conn = get_db()
+    try:
+        row = conn.execute(
+            f'SELECT session_version FROM {table} WHERE id = ?', (row_id,)
+        ).fetchone()
+    except Exception:
+        return 0
+    if not row:
+        return 0
+    try:
+        return int(row['session_version'] or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_session_version(scope, row_id):
+    """Invalidate every outstanding session token for this identity."""
+    if not row_id:
+        return
+    table = 'users' if scope == 'user' else 'tenants'
+    conn = get_db()
+    conn.execute(
+        f'UPDATE {table} SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
+        (row_id,)
+    )
+    conn.commit()
+
+
+def revoke_token_jti(jti, tenant_id, expires_at):
+    """Denylist a single token id until its natural expiry (logout)."""
+    if not jti:
+        return
+    conn = get_db()
+    now = int(datetime.now(timezone.utc).timestamp())
+    conn.execute('DELETE FROM revoked_tokens WHERE expires_at < ?', (now,))
+    conn.execute(
+        'INSERT OR IGNORE INTO revoked_tokens (jti, tenant_id, expires_at) VALUES (?, ?, ?)',
+        (str(jti), str(tenant_id or ''), int(expires_at or now))
+    )
+    conn.commit()
+
+
+def is_token_revoked(jti):
+    """True when this token id was revoked before its exp."""
+    if not jti:
+        return False
+    conn = get_db()
+    row = conn.execute(
+        'SELECT 1 FROM revoked_tokens WHERE jti = ?', (str(jti),)
+    ).fetchone()
+    return row is not None
 
 
 def get_invite_by_token(token):

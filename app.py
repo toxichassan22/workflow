@@ -15340,6 +15340,16 @@ def api_refresh():
     return jsonify({'success': True, 'token': token})
 
 
+@app.route('/api/auth/logout', methods=['POST'])
+@require_auth
+def api_logout():
+    """Revoke the presented session token server-side; the client also drops it."""
+    payload = getattr(g, 'token_payload', None) or {}
+    if payload.get('jti'):
+        db.revoke_token_jti(payload['jti'], g.tenant_id, payload.get('exp'))
+    return jsonify({'success': True})
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TWO-FACTOR AUTHENTICATION (t21/t63): TOTP challenge at login plus one-time
 # recovery codes. The post-password challenge travels in a purpose-scoped JWT
@@ -21736,6 +21746,9 @@ def api_admin_reset_tenant_password(tenant_id):
             return jsonify({'error': 'Primary company admin is not configured'}), 400
         raw_token = db.create_password_setup_token(tenant_id, user_id)
         db.sync_primary_company_admin(tenant_id, require_password_change=1)
+        # A forced credential reset retires every session the old password issued.
+        db.bump_session_version('tenant', tenant_id)
+        db.bump_session_version('user', user_id)
         return jsonify({
             'success': True,
             'setupUrl': _password_setup_url(raw_token),
