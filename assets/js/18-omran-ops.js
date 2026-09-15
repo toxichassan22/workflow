@@ -64,8 +64,10 @@
       // The sidebar carries one link per tab, so its active marker follows
       // in-page tab switches too.
       const opsPage = document.getElementById('tenantOmranOpsPage');
-      if (typeof updateTenantChrome === 'function' && opsPage && opsPage.classList.contains('active')) {
-        updateTenantChrome('tenantOmranOpsPage');
+      if (opsPage && opsPage.classList.contains('active')) {
+        if (typeof updateTenantChrome === 'function') updateTenantChrome('tenantOmranOpsPage');
+        // Remember the tab so a refresh on the operations route reopens it.
+        if (typeof saveTenantNavigationState === 'function') saveTenantNavigationState('tenantOmranOpsPage', { opsTab: target });
       }
     }
 

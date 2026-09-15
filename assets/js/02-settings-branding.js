@@ -222,7 +222,9 @@
       const name = TENANT_PAGE_OPENERS[pageId];
       const opener = name && window[name];
       if (typeof opener === 'function') {
-        opener();
+        // The operations entry remembers which sub-tab was showing; every
+        // other opener takes no arguments.
+        opener(pageId === 'tenantOmranOpsPage' ? getBrowserNavigationState().opsTab : undefined);
         return;
       }
       showTenantPage(pageId, true);
@@ -1168,6 +1170,12 @@
           case 'tenantApprovalsPage':
             await openTenantApprovals();
             return true;
+          case 'tenantOmranOpsPage':
+            await openOmranOpsPage(state.opsTab);
+            return true;
+          case 'tenantNotificationsPage':
+            await openNotificationsPage();
+            return true;
           case 'tenantAdminPage':
             if (!tenantUser.isAdmin) return false;
             await openTenantAdmin();
@@ -1342,6 +1350,15 @@
           await openTenantAIRules();
         } else if (requestedPage === 'tenantApprovalsPage') {
           await openTenantApprovals();
+        } else if (requestedPage === 'tenantOmranOpsPage') {
+          // Reopen the sub-tab the refresh was sitting on — the route carries
+          // no tab, so it comes from the remembered navigation state.
+          const opsNavigation = getTenantNavigationState();
+          const opsTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+          const savedOpsTab = opsNavigation && opsNavigation.opsTab &&
+            (!opsNavigation.tenantId || opsNavigation.tenantId === opsTenantId)
+            ? opsNavigation.opsTab : null;
+          await openOmranOpsPage(savedOpsTab);
         } else if (requestedPage === 'tenantNotificationsPage') {
           await openNotificationsPage();
         } else if (requestedPage === 'tenantAdminPage') {

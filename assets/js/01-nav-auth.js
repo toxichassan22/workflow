@@ -942,6 +942,7 @@
             ? (overrides.draftId || currentProjectPresentationsDraftId() || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
         visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
+        opsTab: pageId === 'tenantOmranOpsPage' ? ((typeof omActiveTab !== 'undefined' && omActiveTab) || 'tasks') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
         ...overrides
       };
