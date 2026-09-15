@@ -9031,7 +9031,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(moodboard_blocked.get_json()['error_code'], 'COVER_REQUIRED')
 
         generated = 'data:image/png;base64,AAAA'
-        with patch.object(self.application_module, 'call_image_api_with_references', return_value=generated) as image_call, \
+        with patch.object(self.application_module, 'call_images_api', return_value=generated) as image_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/cover.png'):
             cover = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'cover',
@@ -9065,7 +9065,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(interior_blocked.status_code, 400, interior_blocked.get_json())
         self.assertEqual(interior_blocked.get_json()['error_code'], 'COVER_REQUIRED')
 
-        with patch.object(self.application_module, 'call_image_api_with_references', return_value='data:image/png;base64,BBBB') as interior_call, \
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,BBBB') as interior_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
                 patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
                 patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id: f'data:image/png;base64,{file_id}'):

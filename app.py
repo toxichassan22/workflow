@@ -272,6 +272,8 @@ DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
+# Image-only models live on OpenRouter's dedicated /images endpoint, not /chat/completions.
+VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
 EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '65536'))
@@ -2182,6 +2184,9 @@ def _image_response_url(data):
             return None
         encoded = value.get('b64_json') or value.get('base64')
         if encoded:
+            media_type = value.get('media_type') or value.get('mime_type')
+            if isinstance(media_type, str) and media_type.startswith('image/'):
+                return 'data:' + media_type + ';base64,' + str(encoded)
             return 'data:image/png;base64,' + str(encoded)
         for key in ('image_url', 'image', 'url', 'data_uri'):
             nested = value.get(key)
@@ -2878,15 +2883,7 @@ def _visual_concept_sanitize_prompt(prompt):
     return _visual_concept_text(prompt, 12000)
 
 
-def call_image_api_with_references(prompt, references=None, usage_ctx=None):
-    ctx = usage_ctx or _usage_ctx('image')
-    gate = _tenant_key_gate(ctx)
-    if gate is not None:
-        print(f"[IMAGE ERROR] {gate['message']}")
-        return None
-    if not _has_any_openrouter_key(ctx):
-        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
-        return None
+def _normalize_image_references(references):
     prepared = []
     for reference in references or []:
         item = _prepare_image_reference_for_model(reference) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
@@ -2896,6 +2893,86 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
             resolved = _prepare_image_reference_for_model(item)
             if resolved:
                 prepared.append(resolved)
+    return prepared
+
+
+def call_images_api(prompt, references=None, usage_ctx=None, model=None):
+    """Generate an image through OpenRouter's dedicated /images endpoint.
+
+    Image-only models (e.g. gpt-image-2.5-*) reject /chat/completions and take
+    input_references as {'type': 'image_url', 'image_url': {'url': ...}} objects.
+    """
+    ctx = usage_ctx or _usage_ctx('image')
+    gate = _tenant_key_gate(ctx)
+    if gate is not None:
+        print(f"[IMAGE ERROR] {gate['message']}")
+        return None
+    if not _has_any_openrouter_key(ctx):
+        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
+        return None
+    prepared = _normalize_image_references(references)
+    images_model = model or VISUAL_CONCEPT_IMAGE_MODEL
+    attempt_id = _begin_ai_attempt_record(ctx, images_model)
+    try:
+        headers = _openrouter_headers(ctx)
+        payload = {
+            'model': images_model,
+            'prompt': prompt,
+            'aspect_ratio': '16:9',
+            'quality': 'high',
+            'n': 1,
+        }
+        if prepared:
+            payload['input_references'] = [
+                {'type': 'image_url', 'image_url': {'url': ref}}
+                for ref in prepared[:16]
+            ]
+        response = requests.post(f'{OPENROUTER_BASE}/images', headers=headers, json=payload, timeout=180)
+        data = response.json()
+        generation_id, img_usage = _extract_openrouter_usage(data)
+        _settle_ai_attempt_record(
+            attempt_id,
+            'ok' if response.status_code < 400 and 'error' not in data else 'error',
+            img_usage, generation_id)
+        if response.status_code == 401:
+            print('[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)')
+            return None
+        if response.status_code == 402:
+            print('[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)')
+            return None
+        if response.status_code == 429:
+            print('[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)')
+            return None
+        if 'error' in data:
+            err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
+            print(f'[IMAGE ERROR] OpenRouter images API error: {err_msg}')
+            return None
+        image_url = _image_response_url(data)
+        if image_url:
+            return image_url
+        print(f'[IMAGE ERROR] Images API returned no image (status {response.status_code}). Response: {str(data)[:300]}')
+    except requests.exceptions.Timeout:
+        print('[IMAGE ERROR] OpenRouter API request timed out')
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+    except requests.exceptions.ConnectionError:
+        print('[IMAGE ERROR] Cannot connect to OpenRouter API')
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+    except Exception as e:
+        print('[IMAGE ERROR]', str(e))
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+    return None
+
+
+def call_image_api_with_references(prompt, references=None, usage_ctx=None):
+    ctx = usage_ctx or _usage_ctx('image')
+    gate = _tenant_key_gate(ctx)
+    if gate is not None:
+        print(f"[IMAGE ERROR] {gate['message']}")
+        return None
+    if not _has_any_openrouter_key(ctx):
+        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
+        return None
+    prepared = _normalize_image_references(references)
     if not prepared:
         return call_image_api(prompt, usage_ctx=ctx)
     if len(prepared) == 1:
@@ -2975,8 +3052,9 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
         system_prompt,
         user_prompt,
         temperature=None,
-        max_tokens=2500,
-        model=GEMINI_TEXT_MODEL,
+        max_tokens=4000,
+        model=SLIDE_TEXT_MODEL,
+        reasoning_effort='medium',
         response_format={'type': 'json_object'},
         image_references=image_references or None,
         usage_ctx=usage_ctx or _usage_ctx('image'),
@@ -4466,7 +4544,7 @@ def api_visual_concept_prompt():
             'prompt': prompt,
             'reply': reply,
             'referenceCount': len(references),
-            'model': GEMINI_TEXT_MODEL,
+            'model': SLIDE_TEXT_MODEL,
         })
     except Exception:
         app.logger.exception('Visual concept prompt failed')
@@ -4499,7 +4577,7 @@ def api_visual_concept_generate():
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
-    image = call_image_api_with_references(prompt, references, usage_ctx=_usage_ctx('image', data))
+    image = call_images_api(prompt, references, usage_ctx=_usage_ctx('image', data))
     if not image:
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
@@ -4510,7 +4588,7 @@ def api_visual_concept_generate():
         'image': persist_generated_image(image, g.tenant_id),
         'prompt': prompt,
         'referenceCount': len(references),
-        'model': IMAGE_MODEL,
+        'model': VISUAL_CONCEPT_IMAGE_MODEL,
     })
 
 
