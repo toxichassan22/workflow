@@ -22613,8 +22613,15 @@ def api_training_chat():
                       if isinstance(item, dict) and item.get('status') == 'question'), '')
         if asked and asked not in clean_reply:
             clean_reply = (clean_reply + '\n\n' + asked).strip() if clean_reply else asked
+    denied = [item for item in actions_executed
+              if isinstance(item, dict) and item.get('error_code') == 'AGENT_PERMISSION_DENIED']
     if not clean_reply and actions_executed:
-        clean_reply = ' تم تنفيذ الإجراء بنجاح.'
+        clean_reply = '' if len(denied) == len(actions_executed) else ' تم تنفيذ الإجراء بنجاح.'
+    if denied:
+        note = ('لم تُنفَّذ الإجراءات المطلوبة لأنها تتجاوز صلاحيات حسابك.'
+                if len(denied) == len(actions_executed)
+                else 'بعض الإجراءات لم تُنفَّذ لأنها تتجاوز صلاحيات حسابك.')
+        clean_reply = (clean_reply + '\n\n' + note).strip() if clean_reply else note
 
     return jsonify({
         'success': True,
@@ -22925,12 +22932,89 @@ def _validate_workspace_data(workspace):
     return {'valid': bool(slides) and not errors, 'slide_count': len(slides), 'errors': errors}
 
 
+# The chat route is gated by `training_data` alone, while several tools reach
+# surfaces that carry their own dedicated permission. Every such tool re-checks
+# the permission its equivalent route demands, so granting a staff member
+# training management cannot widen their authority through model-generated
+# actions. Read-only tools any signed-in user may already call stay unmapped.
+AGENT_TOOL_PERMISSIONS = {
+    'update_branding': 'company_settings',
+    'set_font': 'company_settings',
+    'set_generation_rules': 'company_settings',
+    'add_team_entity': 'company_settings',
+    'update_team_entity': 'company_settings',
+    'delete_team_entity': 'company_settings',
+    'add_field': 'custom_fields',
+    'update_field': 'custom_fields',
+    'delete_field': 'custom_fields',
+    'add_section': 'custom_fields',
+    'delete_section': 'custom_fields',
+    'list_users': 'manage_users',
+    'add_user': 'manage_users',
+    'set_permission': 'manage_users',
+    'toggle_user': 'manage_users',
+    'update_workspace': 'create_presentation',
+    'edit_workspace_slide': 'create_presentation',
+    'generate_slide_plan': 'create_presentation',
+    'generate_workspace': 'create_presentation',
+    'inspect_workspace': 'create_presentation',
+    'validate_workspace': 'create_presentation',
+    'save_workspace': 'create_presentation',
+    'delete_presentation': 'create_presentation',
+    'list_presentations': 'view_presentations',
+    'export_workspace': 'export_files',
+    'add_training': 'training_data',
+    'delete_training': 'training_data',
+    'list_training': 'training_data',
+}
+
+AGENT_PERMISSION_LABELS = {
+    'create_presentation': 'إنشاء العروض',
+    'view_presentations': 'عرض العروض',
+    'company_settings': 'إعدادات الشركة',
+    'custom_fields': 'إدارة الحقول',
+    'manage_users': 'إدارة الموظفين',
+    'training_data': 'إدارة بيانات التدريب',
+    'export_files': 'تصدير الملفات',
+}
+
+
+def _agent_requester_permission_granted(permission_key):
+    """Does the user who sent this agent request hold `permission_key`?
+
+    Mirrors require_permission(): the platform super admin, a company admin and
+    the tenant-direct login pass every check; anyone else needs the key granted
+    on their account. With no request context (tests and internal calls) there
+    is no external actor to restrict.
+    """
+    if not has_request_context():
+        return True
+    if getattr(g, 'is_admin', False):
+        return True
+    user_id = getattr(g, 'user_id', None)
+    user_role = getattr(g, 'user_role', None)
+    if not user_id or user_role == 'company_admin':
+        return True
+    permissions = getattr(g, 'user_permissions', None)
+    if permissions is None:
+        permissions = db.get_user_permissions(user_id, user_role or 'employee')
+    return bool(permissions.get(permission_key))
+
+
 def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
     """Execute a single agent action and return the result."""
     tool = action.get('tool', '')
     params = action.get('params', {})
     workspace = workspace if isinstance(workspace, dict) else {}
     result = {'tool': tool, 'status': 'success', 'changes': {}}
+
+    required_permission = AGENT_TOOL_PERMISSIONS.get(tool)
+    if required_permission and not _agent_requester_permission_granted(required_permission):
+        result['status'] = 'error'
+        result['error_code'] = 'AGENT_PERMISSION_DENIED'
+        label = AGENT_PERMISSION_LABELS.get(required_permission, required_permission)
+        result['message'] = f'لم يُنفَّذ الإجراء: حسابك لا يملك صلاحية «{label}»'
+        return result
 
     try:
         # ── Branding ──────────────────────────────────────────────────

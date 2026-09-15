@@ -188,6 +188,70 @@ class AdminAgentTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 0)
 
+    # ── The agent may not exceed the requester's own permissions ───────────
+
+    def test_agent_tools_respect_the_requesters_own_permissions(self):
+        """Regression: entering the agent needed only `training_data`, while its
+        tools created users, granted permissions and rewrote company settings.
+        Every tool now re-checks the permission its dedicated route requires."""
+        client = self.app.test_client()
+        with self.app.app_context():
+            employee_id = db.create_user(self.tenant, 'موظف تدريب',
+                                         'trainer@agent.test', 'hash')
+            db.set_user_permission(employee_id, 'training_data', True)
+            branding_before = db.get_branding(self.tenant)['primary_color']
+        employee_headers = {'Authorization': 'Bearer ' + auth.create_token(
+            self.tenant, 'trainer@agent.test', user_id=employee_id,
+            user_name='موظف تدريب', user_role='employee')}
+        try:
+            reply = _reply_with([
+                {'tool': 'add_user', 'params': {'name': 'مستخدم متسلل', 'email': 'sneaky@agent.test'}},
+                {'tool': 'update_branding', 'params': {'primary_color': '#000000'}},
+                {'tool': 'list_users'},
+                {'tool': 'add_training', 'params': {'title': 'قاعدة', 'content': 'محتوى'}},
+            ], text='نفذت كل المطلوب')
+            with patch.object(self.application_module, 'call_zai_chat', return_value=reply):
+                response = client.post('/api/training-chat', headers=employee_headers,
+                                       json={'message': 'نفذ'})
+
+            payload = response.get_json()
+            self.assertTrue(payload['success'], payload)
+            by_tool = {item.get('tool'): item for item in payload['actions']}
+            for denied_tool in ('add_user', 'update_branding', 'list_users'):
+                self.assertEqual(by_tool[denied_tool]['status'], 'error', denied_tool)
+                self.assertEqual(by_tool[denied_tool]['error_code'], 'AGENT_PERMISSION_DENIED')
+            self.assertIn('إدارة الموظفين', by_tool['add_user']['message'])
+            # A tool inside the requester's own permission still runs.
+            self.assertEqual(by_tool['add_training']['status'], 'success')
+            with self.app.app_context():
+                self.assertIsNone(db.get_user_by_email('sneaky@agent.test'))
+                self.assertEqual(db.get_branding(self.tenant)['primary_color'], branding_before)
+
+            # Granting manage_users re-opens exactly those tools — nothing else.
+            with self.app.app_context():
+                db.set_user_permission(employee_id, 'manage_users', True)
+            reply2 = _reply_with([
+                {'tool': 'add_user', 'params': {'name': 'مستخدم جديد',
+                                                'email': 'sneaky@agent.test',
+                                                'password': 'strongpass1'}},
+                {'tool': 'update_branding', 'params': {'primary_color': '#000000'}},
+            ])
+            with patch.object(self.application_module, 'call_zai_chat', return_value=reply2):
+                response2 = client.post('/api/training-chat', headers=employee_headers,
+                                        json={'message': 'نفذ'})
+            by_tool2 = {item.get('tool'): item for item in response2.get_json()['actions']}
+            self.assertEqual(by_tool2['add_user']['status'], 'success', by_tool2['add_user'])
+            self.assertEqual(by_tool2['update_branding']['status'], 'error')
+            self.assertEqual(by_tool2['update_branding']['error_code'], 'AGENT_PERMISSION_DENIED')
+            with self.app.app_context():
+                self.assertIsNotNone(db.get_user_by_email('sneaky@agent.test'))
+                self.assertEqual(db.get_branding(self.tenant)['primary_color'], branding_before)
+        finally:
+            with self.app.app_context():
+                for email in ('trainer@agent.test', 'sneaky@agent.test'):
+                    user = db.get_user_by_email(email)
+                    if user:
+                        db.delete_user(user['id'])
     # ── Company settings the agent could not reach before ─────────────────
 
     def test_agent_can_set_map_styles_and_lock_the_slide_count(self):

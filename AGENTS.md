@@ -215,6 +215,14 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
 It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-5.6-sol`) with `reasoning_effort='medium'`, because it
 changes company settings; it used to run on the fast text model with 2,000 tokens and no reasoning.
 
+- **Every tool re-checks the caller's own permission.** The route gate is `training_data` only, so
+  `AGENT_TOOL_PERMISSIONS` maps each tool to the permission its dedicated route requires
+  (`manage_users` for user tools, `company_settings` for branding/team/font/generation-rules,
+  `custom_fields` for fields and sections, `create_presentation` for the workspace flow,
+  `export_files` for export). `_agent_requester_permission_granted()` mirrors
+  `require_permission()` semantics — super admin, company admin and tenant-direct pass — and a
+  denied tool returns `error_code: AGENT_PERMISSION_DENIED` without touching state. Read-only
+  tools any signed-in user already has stay unmapped.
 - **It asks instead of guessing.** The `ask` tool short-circuits the turn: if the reply contains it,
   no other action runs, and the response carries `awaitingAnswer`.
 - **It reads what is attached.** `_agent_attachment_context()` passes an image to the model as an
