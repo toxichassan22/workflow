@@ -15111,7 +15111,7 @@ def api_login():
                     user['tenant_id'], user['email'], user_id=user['id'],
                     user_name=user['name'], user_role=user['role']),
             })
-        token = create_token(user['tenant_id'], user['email'], is_admin=bool(user.get('tenant_is_admin')),
+        token = create_token(user['tenant_id'], user['email'], is_admin=False,
                              user_id=user['id'], user_name=user['name'], user_role=user['role'])
         db.record_login(user['tenant_id'], user['id'])
         tenant = db.get_tenant_by_id(user['tenant_id'])
@@ -15123,7 +15123,7 @@ def api_login():
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
                 'email': tenant['email'],
-                'isAdmin': bool(tenant.get('is_admin')),
+                'isAdmin': False,
                 'plan': tenant.get('plan', 'free'),
                 'domain': tenant.get('domain'),
                 'slug': db.tenant_slug(tenant),
@@ -15168,13 +15168,15 @@ def api_password_setup_complete(raw_token):
     user = db.get_user_by_id(completed['user_id'])
     db.record_login(tenant['id'], user['id'])
     token = create_token(
-        tenant['id'], user['email'], is_admin=bool(tenant.get('is_admin')),
+        tenant['id'], user['email'], is_admin=False,
         user_id=user['id'], user_name=user['name'], user_role=user['role']
     )
+    tenant_payload = _company_payload(tenant)
+    tenant_payload['isAdmin'] = False
     return jsonify({
         'success': True,
         'token': token,
-        'tenant': _company_payload(tenant),
+        'tenant': tenant_payload,
         'user': {
             'id': user['id'],
             'name': user['name'],
@@ -15196,7 +15198,7 @@ def api_me():
             'id': t['id'],
             'companyName': t['company_name'],
             'email': t['email'],
-            'isAdmin': bool(t.get('is_admin')),
+            'isAdmin': bool(g.is_admin),
             'plan': t.get('plan', 'free'),
             'subdomain': t.get('subdomain'),
             'domain': t.get('domain'),
@@ -15228,7 +15230,7 @@ def api_me():
 def api_refresh():
     """Refresh the JWT token."""
     t = g.tenant
-    token = create_token(t['id'], t['email'], is_admin=bool(t.get('is_admin')),
+    token = create_token(t['id'], t['email'], is_admin=bool(g.is_admin),
                          user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
     return jsonify({'success': True, 'token': token})
 
@@ -15295,9 +15297,10 @@ def api_mfa_verify():
         user = None
         db.record_login(challenge['sub'])
 
+    session_is_admin = bool(tenant.get('is_admin')) and not user_id
     token = create_token(
         challenge['sub'], challenge.get('email'),
-        is_admin=bool(tenant.get('is_admin')),
+        is_admin=session_is_admin,
         user_id=user_id, user_name=challenge.get('user_name'),
         user_role=challenge.get('user_role'),
     )
@@ -15309,7 +15312,7 @@ def api_mfa_verify():
             'id': tenant['id'],
             'companyName': tenant['company_name'],
             'email': tenant['email'],
-            'isAdmin': bool(tenant.get('is_admin')),
+            'isAdmin': session_is_admin,
             'plan': tenant.get('plan', 'free'),
             'domain': tenant.get('domain'),
             'slug': db.tenant_slug(tenant),

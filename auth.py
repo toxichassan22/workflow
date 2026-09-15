@@ -290,6 +290,11 @@ def _load_token_user(payload):
     return user, None
 
 
+def _is_platform_admin_session(tenant, payload):
+    """Only the admin tenant's own login carries platform rights."""
+    return bool(tenant.get('is_admin')) and not payload.get('user_id')
+
+
 def require_auth(f):
     """Decorator: require a valid JWT token. Sets g.tenant_id, g.tenant, g.is_admin, g.user_id, g.user_name, g.user_role."""
     @wraps(f)
@@ -313,7 +318,7 @@ def require_auth(f):
 
         g.tenant_id = payload['sub']
         g.tenant = tenant
-        g.is_admin = bool(tenant.get('is_admin'))
+        g.is_admin = _is_platform_admin_session(tenant, payload)
         g.user_id = payload.get('user_id')
         g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = (user_row or {}).get('role') or payload.get('user_role')
@@ -347,7 +352,7 @@ def require_company_admin(f):
 
         user_role = (user_row or {}).get('role') or payload.get('user_role')
         user_id = payload.get('user_id')
-        is_super_admin = bool(tenant.get('is_admin'))
+        is_super_admin = _is_platform_admin_session(tenant, payload)
         if not is_super_admin and user_role != 'company_admin' and user_id is not None:
             return jsonify({'error': 'Company admin access required'}), 403
 
@@ -378,23 +383,16 @@ def require_admin(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive'}), 403
 
-        user_row, user_error = _load_token_user(payload)
-        if user_error:
-            return user_error
-        if not tenant.get('is_admin'):
-            return jsonify({'error': 'Admin access required'}), 403
-        if payload.get('user_id') and (user_row or {}).get('role') != 'company_admin':
+        if not _is_platform_admin_session(tenant, payload):
             return jsonify({'error': 'Admin access required'}), 403
 
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = True
-        g.user_id = payload.get('user_id')
-        g.user_name = (user_row or {}).get('name') or payload.get('user_name')
-        g.user_role = (user_row or {}).get('role') or payload.get('user_role')
+        g.user_id = None
+        g.user_name = payload.get('user_name')
+        g.user_role = payload.get('user_role')
         g.user_permissions = {}
-        if g.user_id:
-            g.user_permissions = db.get_user_permissions(g.user_id, g.user_role or 'employee')
         return f(*args, **kwargs)
     return decorated
 
@@ -423,7 +421,7 @@ def require_permission(permission_key):
 
             g.tenant_id = payload['sub']
             g.tenant = tenant
-            g.is_admin = bool(tenant.get('is_admin'))
+            g.is_admin = _is_platform_admin_session(tenant, payload)
             g.user_id = payload.get('user_id')
             g.user_name = (user_row or {}).get('name') or payload.get('user_name')
             g.user_role = (user_row or {}).get('role') or payload.get('user_role')
