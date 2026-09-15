@@ -449,6 +449,49 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(refused.status_code, 400)
         self.assertEqual(refused.get_json()['error_code'], 'mfa_required_role')
 
+    def test_mfa_resetup_requires_password_and_current_code(self):
+        uid = self._employee()
+        emp_token = auth.create_token(self.tenant_id, 'emp@x.test', user_id=uid,
+                                      user_name='موظف', user_role='employee')
+        headers = self.headers(emp_token)
+        first = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
+        self.assertEqual(first.status_code, 200, first.get_json())
+        old_secret = first.get_json()['secret']
+        enabled = self.client.post('/api/auth/mfa/enable', headers=headers,
+                                   json={'code': auth.totp_code(old_secret)})
+        self.assertTrue(enabled.get_json()['enabled'])
+
+        # A session alone cannot replace the factor: re-enrolment demands the
+        # same proof as disabling — the password plus a current TOTP code.
+        naked = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
+        self.assertEqual(naked.status_code, 400)
+        self.assertEqual(naked.get_json()['error_code'], 'password_invalid')
+        wrong_pw = self.client.post('/api/auth/mfa/setup', headers=headers,
+                                    json={'password': 'nope',
+                                          'code': auth.totp_code(old_secret)})
+        self.assertEqual(wrong_pw.status_code, 400)
+        self.assertEqual(wrong_pw.get_json()['error_code'], 'password_invalid')
+        wrong_code = self.client.post('/api/auth/mfa/setup', headers=headers,
+                                      json={'password': 'secret123', 'code': '000000'})
+        self.assertEqual(wrong_code.status_code, 400)
+        self.assertEqual(wrong_code.get_json()['error_code'], 'mfa_code_invalid')
+        # Refused calls never planted a pending secret nor touched the live one.
+        secrets_row = db.get_mfa_secrets('user', uid)
+        self.assertEqual(secrets_row['mfa_secret'], old_secret)
+        self.assertFalse(secrets_row['mfa_pending_secret'])
+
+        # The right proof rotates the factor end to end.
+        again = self.client.post('/api/auth/mfa/setup', headers=headers,
+                                 json={'password': 'secret123',
+                                       'code': auth.totp_code(old_secret)})
+        self.assertEqual(again.status_code, 200, again.get_json())
+        new_secret = again.get_json()['secret']
+        self.assertNotEqual(new_secret, old_secret)
+        rotated = self.client.post('/api/auth/mfa/enable', headers=headers,
+                                   json={'code': auth.totp_code(new_secret)})
+        self.assertTrue(rotated.get_json()['enabled'])
+        self.assertEqual(db.get_mfa_secrets('user', uid)['mfa_secret'], new_secret)
+
     # ── Last-admin protection over HTTP ──────────────────────────────────
 
     def test_last_company_admin_cannot_be_deleted_or_demoted(self):

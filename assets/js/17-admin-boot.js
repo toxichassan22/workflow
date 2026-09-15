@@ -861,10 +861,19 @@
         html += '<button type="button" class="btn primary" onclick="openMfaSetupModal(false)">' + escapeHtml(WFT('auth.mfa_enable', 'تفعيل')) + '</button>';
       } else {
         html += '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button type="button" class="btn ghost" onclick="rotateMfa()">' + escapeHtml(WFT('users.mfa_rotate', 'إعادة الإعداد')) + '</button>' +
           '<button type="button" class="btn ghost" onclick="regenerateMfaCodes()">' + escapeHtml(WFT('users.mfa_regen', 'تجديد رموز الاسترداد')) + '</button>' +
           '<button type="button" class="btn danger" onclick="disableMfa()">' + escapeHtml(WFT('users.mfa_disable', 'تعطيل')) + '</button></div>';
       }
       box.innerHTML = html;
+    }
+
+    function rotateMfa() {
+      const password = prompt(WFT('users.mfa_password_prompt', 'كلمة المرور:'));
+      if (password === null) return;
+      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
+      if (code === null) return;
+      openMfaSetupModal(false, { password: password, code: code.trim() });
     }
 
     async function regenerateMfaCodes() {

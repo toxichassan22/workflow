@@ -1007,7 +1007,7 @@
       if (loginForm) loginForm.style.display = 'block';
     }
 
-    async function openMfaSetupModal(mandatory) {
+    async function openMfaSetupModal(mandatory, reauth) {
       document.getElementById('mfaSetupModal')?.remove();
       const modal = document.createElement('div');
       modal.id = 'mfaSetupModal';
@@ -1021,7 +1021,7 @@
         '<div id="mfaSetupBody"><p class="tenant-hint">' + escapeHtml(WFT('common.loading', 'جاري التحميل...')) + '</p></div>' +
         '</div>';
       document.body.appendChild(modal);
-      const data = await api('POST', '/api/auth/mfa/setup', {});
+      const data = await api('POST', '/api/auth/mfa/setup', reauth || {});
       const body = document.getElementById('mfaSetupBody');
       if (!body) return;
       if (!data || !data.success) {
