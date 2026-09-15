@@ -137,6 +137,35 @@ class AdminAgentTests(unittest.TestCase):
         deleted = self._run('delete_field', field_label='حقل تجريبي للوكيل')
         self.assertEqual(deleted['status'], 'success', deleted.get('message'))
 
+    # ── Permissions: the reported result must match what was applied ───────
+
+    def test_set_permission_reports_the_change_it_applied(self):
+        """Regression: the branch used `status_text` before defining it, so the
+        permission was written and logged, then the tool still answered
+        status='error' (UnboundLocalError) — the user could retry or believe
+        the grant never happened."""
+        with self.app.app_context():
+            uid = db.create_user(self.tenant, 'موظف الصلاحيات',
+                                 'perm-target@example.test', 'hash')
+        try:
+            granted = self._run('set_permission', user_email='perm-target@example.test',
+                                permission='export_files', granted=True)
+            self.assertEqual(granted['status'], 'success', granted.get('message'))
+            self.assertIn('منح', granted['message'])
+            with self.app.app_context():
+                self.assertTrue(db.get_user_permissions(uid)['export_files'])
+
+            # A string 'false' from the model must revoke, not count as truthy.
+            revoked = self._run('set_permission', user_email='perm-target@example.test',
+                                permission='export_files', granted='false')
+            self.assertEqual(revoked['status'], 'success', revoked.get('message'))
+            self.assertIn('سحب', revoked['message'])
+            with self.app.app_context():
+                self.assertFalse(db.get_user_permissions(uid)['export_files'])
+        finally:
+            with self.app.app_context():
+                db.delete_user(uid)
+
     # ── Company settings the agent could not reach before ─────────────────
 
     def test_agent_can_set_map_styles_and_lock_the_slide_count(self):

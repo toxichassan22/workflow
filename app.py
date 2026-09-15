@@ -23270,9 +23270,11 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 result['status'] = 'error'
                 result['message'] = f'الصلاحية "{perm}" غير صالحة. الصلاحيات المتاحة: {", ".join(db.PERMISSION_KEYS)}'
             else:
-                db.set_user_permission(target_user['id'], perm, granted)
-                db.log_ai_rule_change(tenant_id, 'agent_permission', f'{email}:{perm}', 'unknown', str(granted), risk_level='red')
-                target_label = 'للموظف' if granted else 'من الموظف'
+                granted_val = 1 if granted in (True, 1, '1', 'true') else 0
+                db.set_user_permission(target_user['id'], perm, granted_val)
+                db.log_ai_rule_change(tenant_id, 'agent_permission', f'{email}:{perm}', 'unknown', granted_val, risk_level='red')
+                status_text = 'منح' if granted_val else 'سحب'
+                target_label = 'للموظف' if granted_val else 'من الموظف'
                 target_name = target_user["name"]
                 result['message'] = f'تم {status_text} صلاحية "{perm}" {target_label} {target_name}'
 
