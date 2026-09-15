@@ -12,6 +12,7 @@
         open: 'مفتوحة', completed: 'منجزة', cancelled: 'ملغاة',
         pending: 'قيد المراجعة', approved: 'معتمد', rejected: 'مرفوض',
         in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلقة',
+        consumed: 'مسوّى', expired: 'منتهية الصلاحية',
       };
       return labels[status] || status || '';
     }
@@ -570,5 +571,86 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await omLoadFileTypes();
+      await Promise.all([omLoadFileTypes(), adminLoadSlaPolicies(), adminLoadFeatureFlags()]);
+    }
+
+    // ── SLA policies (d08): response/resolve targets per priority ──
+    async function adminLoadSlaPolicies() {
+      const box = document.getElementById('adminSlaPoliciesList');
+      if (!box) return;
+      const data = await api('GET', '/api/admin/support/sla-policies').catch(() => null);
+      const policies = (data && data.success && data.policies) ? data.policies : [];
+      const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
+      if (!policies.length) {
+        box.innerHTML = '<p class="tenant-hint">الأهداف الافتراضية مطبقة: حرجة ٤/٢٤، عاجلة ٨/٤٨، عادية ٢٤/٧٢، منخفضة ٤٨/١٢٠ ساعة.</p>';
+        return;
+      }
+      box.innerHTML =
+        '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
+        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
+        '<th style="padding:10px 8px;">الأولوية</th><th style="padding:10px 8px;">الباقة</th>' +
+        '<th style="padding:10px 8px;">أول استجابة</th><th style="padding:10px 8px;">الحل</th>' +
+        '</tr></thead><tbody>' +
+        policies.map(p =>
+          '<tr style="border-bottom:1px solid #e2e8f0;">' +
+          '<td style="padding:10px 8px;font-weight:600;">' + omEscape(priorityLabels[p.priority] || p.priority) + '</td>' +
+          '<td style="padding:10px 8px;">' + omEscape(p.package_name || 'الكل') + '</td>' +
+          '<td style="padding:10px 8px;">' + (p.first_response_hours || 0) + ' <span>ساعة</span></td>' +
+          '<td style="padding:10px 8px;">' + (p.resolve_hours || 0) + ' <span>ساعة</span></td></tr>'
+        ).join('') +
+        '</tbody></table></div>';
+    }
+
+    async function adminSaveSlaPolicy(event) {
+      event.preventDefault();
+      const res = await api('PUT', '/api/admin/support/sla-policies', {
+        priority: document.getElementById('adminSlaPriority').value,
+        firstResponseHours: Number(document.getElementById('adminSlaFirstResponse').value),
+        resolveHours: Number(document.getElementById('adminSlaResolve').value)
+      }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || WFT('sla.save_failed', 'تعذر حفظ الهدف')); return; }
+      toast(WFT('sla.saved', 'تم حفظ هدف الاستجابة'));
+      await adminLoadSlaPolicies();
+    }
+
+    // ── Feature flags (t62): platform-wide switches with rollback history ──
+    async function adminLoadFeatureFlags() {
+      const box = document.getElementById('adminFeatureFlagsList');
+      if (!box) return;
+      const data = await api('GET', '/api/admin/feature-flags').catch(() => null);
+      const flags = (data && data.success && data.flags) ? data.flags : [];
+      if (!flags.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد مفاتيح ميزات مسجلة.</p>';
+        return;
+      }
+      box.innerHTML = flags.map(f =>
+        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(f.flag_key) + '</h3>' +
+        '<div class="meta"><span>' + (f.tenant_id ? 'شركة محددة' : 'المنصة') + '</span>' +
+        ' | <span>' + omEscape((f.updated_at || '').slice(0, 16).replace('T', ' ')) + '</span></div></div>' +
+        '<div class="tenant-actions"><button type="button" class="btn small ' + (f.enabled ? 'danger' : 'green') +
+        '" onclick="adminToggleFeatureFlag(\'' + omEscape(f.flag_key) + '\', ' + (f.enabled ? 0 : 1) + ', ' +
+        (f.tenant_id ? ('\'' + omEscape(f.tenant_id) + '\'') : 'null') + ')">' +
+        (f.enabled ? 'إيقاف' : 'تفعيل') + '</button></div></div>'
+      ).join('');
+    }
+
+    async function adminToggleFeatureFlag(flagKey, enabled, tenantId) {
+      const res = await api('PUT', '/api/admin/feature-flags', {
+        flag: flagKey, enabled: !!enabled, tenantId: tenantId || null
+      }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث المفتاح'); return; }
+      await adminLoadFeatureFlags();
+    }
+
+    async function adminAddFeatureFlag(event) {
+      event.preventDefault();
+      const res = await api('PUT', '/api/admin/feature-flags', {
+        flag: document.getElementById('adminFlagKey').value.trim(),
+        enabled: document.getElementById('adminFlagEnabled').value === '1'
+      }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || WFT('flags.save_failed', 'تعذر حفظ المفتاح')); return; }
+      document.getElementById('adminFlagKey').value = '';
+      toast(WFT('flags.saved', 'تم حفظ مفتاح الميزة'));
+      await adminLoadFeatureFlags();
     }

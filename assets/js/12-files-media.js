@@ -792,6 +792,15 @@
         }
         triggerAutoSaveDraft();
       } else {
+        // The gate already escrowed the hold: a dead plan releases it and
+        // returns the draft from 'generating' instead of stranding both.
+        if (window.currentGenerationApprovalId) {
+          api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
+            consumed: false,
+            note: 'تعذر إعداد خطة الشرائح'
+          }).catch(err => console.warn('Settlement release error:', err));
+          window.currentGenerationApprovalId = null;
+        }
         const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
         setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
         console.error('[SLIDE PLAN]', planResponse);

@@ -179,6 +179,111 @@ class OmranDbTests(unittest.TestCase):
             'tenant-1', approval['id'], 'approved', 'user-2', 'المعتمد')
         self.assertEqual(allowed.get('status'), 'approved')
 
+    # ── t31: atomic escrow holds on the real ledger ──────────────────────
+
+    def test_estimate_is_priced_per_unit_not_history(self):
+        """A tenant with no billing history still gets a real price (t14-4)."""
+        conn = db.get_db()
+        conn.execute('DELETE FROM tenant_ledger')
+        conn.commit()
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        self.assertGreater(estimate['estimated_cost_usd'], 0)
+        self.assertGreater(estimate['estimated_points'], 0)
+        self.assertEqual(estimate['units']['slide'], 8)
+        self.assertEqual(estimate['units']['plan'], 1)
+
+    def test_two_holds_cannot_spend_the_same_balance(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        first = db.reserve_points('tenant-1', 80000, 80.0, draft_id=self.draft_id)
+        self.assertEqual(first['status'], 'reserved')
+        # $20 is still free — a second hold may spend only what is left.
+        second = db.reserve_points('tenant-1', 80000, 80.0, draft_id=self.draft_id)
+        self.assertEqual(second.get('error'), 'insufficient_balance')
+        fits = db.reserve_points('tenant-1', 20000, 20.0, draft_id=self.draft_id)
+        self.assertEqual(fits['status'], 'reserved')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 0.0)
+
+    def test_one_active_hold_per_approval(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        first = db.reserve_points('tenant-1', 5000, 5.0, generation_approval_id='appr-x')
+        again = db.reserve_points('tenant-1', 5000, 5.0, generation_approval_id='appr-x')
+        self.assertEqual(again['id'], first['id'])
+        self.assertEqual(len(db.list_point_reservations('tenant-1', status='reserved')), 1)
+
+    def test_consume_writes_debit_and_claims_run_usage(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        conn.execute(
+            "INSERT INTO ai_usage_events (id, tenant_id, draft_id, flow, model, cost_usd) "
+            "VALUES ('ev-1', 'tenant-1', ?, 'slide_single', 'm', 1.25)",
+            (self.draft_id,))
+        conn.commit()
+        reservation = db.reserve_points('tenant-1', 25000, 25.0, draft_id=self.draft_id)
+        consumed = db.consume_points('tenant-1', reservation['id'], settled_by='user-2', note='job-1')
+        self.assertEqual(consumed['status'], 'consumed')
+        # The hold became the debit on the real ledger — amount is the agreed
+        # price, raw_cost_usd records the provider cost it claimed.
+        entry = conn.execute(
+            "SELECT * FROM tenant_ledger WHERE idempotency_key = ?",
+            (f'hold:{reservation["id"]}',)).fetchone()
+        self.assertEqual(entry['kind'], 'debit')
+        self.assertEqual(entry['amount_usd'], 25.0)
+        self.assertEqual(entry['raw_cost_usd'], 1.25)
+        claimed = conn.execute(
+            'SELECT billed_ledger_id FROM ai_usage_events WHERE id = ?', ('ev-1',)).fetchone()
+        self.assertEqual(claimed['billed_ledger_id'], entry['id'])
+        # The escrow paid it — no second debit, and the usage stays billed.
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        again = db.consume_points('tenant-1', reservation['id'])
+        self.assertEqual(again.get('error'), 'reservation_not_reserved')
+
+    def test_release_refunds_wallet_and_marks_ledger(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 50 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        reservation = db.reserve_points('tenant-1', 30000, 30.0, draft_id=self.draft_id)
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 20.0)
+        released = db.release_points('tenant-1', reservation['id'], note='فشل')
+        self.assertEqual(released['status'], 'released')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 50.0)
+        entry = conn.execute(
+            "SELECT * FROM tenant_ledger WHERE idempotency_key = ?",
+            (f'hold:{reservation["id"]}',)).fetchone()
+        self.assertEqual(entry['kind'], 'release')
+
+    def test_stale_reservation_sweep_refunds_and_returns_draft(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        estimate['estimated_points'] = 25000
+        estimate['estimated_cost_usd'] = 25.0
+        approval = db.create_generation_approval(
+            'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'المعتمد')
+        self.assertEqual(decided.get('status'), 'approved')
+        draft = db.get_project_draft_by_id('tenant-1', self.draft_id)
+        self.assertEqual(draft['status'], 'generating')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        # The run died with the browser: expire the hold and sweep it.
+        conn.execute("UPDATE point_reservations SET expires_at = '2020-01-01' WHERE status = 'reserved'")
+        conn.commit()
+        self.assertEqual(db.release_stale_reservations('tenant-1'), 1)
+        reservation = conn.execute(
+            'SELECT * FROM point_reservations WHERE generation_approval_id = ?',
+            (approval['id'],)).fetchone()
+        self.assertEqual(reservation['status'], 'released')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 100.0)
+        refreshed = db.get_generation_approval('tenant-1', approval['id'])
+        self.assertEqual(refreshed['status'], 'expired')
+        draft = db.get_project_draft_by_id('tenant-1', self.draft_id)
+        self.assertEqual(draft['status'], 'sections_approved')
+
     # ── t15: final file approvals, downloads ─────────────────────────────
 
     def test_final_file_approval_requires_presentation_and_blocks_double(self):

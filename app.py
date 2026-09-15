@@ -30,7 +30,7 @@ import db_driver
 import concurrent.futures
 import copy
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context
+from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context, redirect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -1866,7 +1866,7 @@ def api_usage_totals():
 
 
 @app.route('/api/billing/ledger', methods=['GET'])
-@require_auth
+@require_permission('billing')
 def api_billing_ledger():
     """Wallet balance, unbilled usage and ledger history for the tenant."""
     try:
@@ -1962,7 +1962,8 @@ def api_billing_topup():
     try:
         result = db.record_ledger_credit(
             g.tenant_id, amount, note=data.get('note'),
-            idempotency_key=idempotency_key)
+            idempotency_key=idempotency_key,
+            actor='platform_admin' if getattr(g, 'is_admin', False) else 'client_admin')
         if result.get('credited') and result.get('balance_usd') is not None:
             _sync_tenant_credit_to_openrouter(g.tenant_id, result.get('balance_usd'))
     except Exception as exc:
@@ -10488,6 +10489,38 @@ def _generation_map_marker_side(images, project_data, view='overview'):
     return 'left' if marker_lng < center_lng else 'right'
 
 
+def _generation_inputs_guard(project_data):
+    """t14-04/t15-01: a running generation must still match its approved inputs.
+
+    Returns an error response when the draft's live inputs drifted from the
+    approved snapshot — e.g. a concurrent edit raced the lock. None = clean.
+    """
+    draft_id = project_data.get('draftId') or project_data.get('draft_id')
+    if not draft_id:
+        return None
+    try:
+        approval = db.get_db().execute(
+            "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+            "AND status = 'approved' ORDER BY decided_at DESC LIMIT 1",
+            (g.tenant_id, draft_id)).fetchone()
+        if not approval:
+            return None
+        snapshot = db._json_object(
+            approval['input_snapshot'] if 'input_snapshot' in approval.keys() else None)
+        wanted = snapshot.get('draft_hash')
+        if not wanted:
+            return None
+        draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+        if not draft:
+            return None
+        if db.draft_generation_input_hash(draft.get('draft_data') or {}) != wanted:
+            return jsonify({'error': 'مدخلات المشروع تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
+                            'error_code': 'inputs_changed'}), 409
+    except Exception:
+        return None
+    return None
+
+
 @app.route('/api/generate-slide-single', methods=['POST'])
 @require_permission('create_presentation')
 def api_generate_slide_single():
@@ -10498,6 +10531,9 @@ def api_generate_slide_single():
     if _billing_guard is not None:
         return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
+    _inputs_guard = _generation_inputs_guard(project_data)
+    if _inputs_guard is not None:
+        return _inputs_guard
     presentation_id = str(data.get('presentationId') or '').strip() or None
     project_data, request_images = _hydrate_map_assets_for_request(
         project_data, data.get('images', {}), g.tenant_id, presentation_id=presentation_id
@@ -10694,6 +10730,10 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
 def api_generate_slide_single_job():
     """Queue one slide so a slow AI response cannot become a proxy 404."""
     data = request.json or {}
+    _inputs_guard = _generation_inputs_guard(
+        data.get('projectData') if isinstance(data.get('projectData'), dict) else {})
+    if _inputs_guard is not None:
+        return _inputs_guard
     slide_plan = data.get('slidePlan') or {}
     slides = slide_plan.get('slides') if isinstance(slide_plan, dict) else None
     if not isinstance(slides, list) or not slides:
@@ -10745,6 +10785,9 @@ def api_generate_slides():
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    _inputs_guard = _generation_inputs_guard(project_data)
+    if _inputs_guard is not None:
+        return _inputs_guard
     slide_plan = data.get('slidePlan', {})
     presentation_id = str(data.get('presentationId') or '').strip() or None
     project_data, request_images = _hydrate_map_assets_for_request(
@@ -11079,13 +11122,34 @@ def api_get_presentations():
     return jsonify({'success': True, 'presentations': result, 'total': total})
 
 
+def _presentation_has_workflow_history(pres_id):
+    """True when the presentation carries approvals, exports or downloads."""
+    conn = db.get_db()
+    try:
+        for table in ('final_file_approvals', 'exports', 'presentation_downloads'):
+            if conn.execute(
+                    f'SELECT 1 FROM {table} WHERE tenant_id = ? AND presentation_id = ? LIMIT 1',
+                    (g.tenant_id, pres_id)).fetchone():
+                return True
+        return False
+    except Exception:
+        return True
+
+
 @app.route('/api/presentations/<pres_id>', methods=['DELETE'])
 @require_permission('create_presentation')
 def api_delete_presentation(pres_id):
-    """Delete a presentation for the current tenant."""
+    """Delete is cleanup for never-processed presentations only — admin-gated,
+    and refused once the file carries workflow history (t18)."""
     presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not presentation:
         return jsonify({'error': 'Presentation not found'}), 404
+    if not _omran_actor_is_admin():
+        return jsonify({'error': 'الحذف النهائي يتطلب صلاحية مدير الشركة — أو استخدم الأرشفة',
+                        'error_code': 'admin_required'}), 403
+    if _presentation_has_workflow_history(pres_id):
+        return jsonify({'error': 'لهذا العرض مسار اعتماد محفوظ — استخدم الأرشفة بدل الحذف',
+                        'error_code': 'archive_required'}), 409
     _record_change('presentation', pres_id, 'حذف العرض',
                    [f'حُذف العرض «{presentation.get("title") or "بدون عنوان"}»'])
     if not db.delete_presentation(pres_id, g.tenant_id):
@@ -11405,6 +11469,17 @@ def api_update_presentation(pres_id):
     locked_status = _presentation_draft_lock(pres.get('draft_id'), data)
     if locked_status:
         return _draft_locked_response(locked_status)
+    # t16: editing a finally-approved file is a privileged, reasoned action —
+    # the permission plus a written reason, both recorded with the edit.
+    post_approval_reason = ''
+    if pres.get('status') == 'approved' and ('projectData' in data or 'slidesData' in data):
+        if not _omran_can('post_approval_edit'):
+            return jsonify({'error': 'تعديل ملف معتمد يتطلب صلاحية التعديل بعد الاعتماد',
+                            'error_code': 'post_approval_edit_required'}), 403
+        post_approval_reason = str(data.get('editReason') or '').strip()
+        if not post_approval_reason:
+            return jsonify({'error': 'سبب التعديل بعد الاعتماد إلزامي',
+                            'error_code': 'reason_required'}), 400
     try:
         expected_revision = _expected_presentation_revision(data, pres)
     except ValueError as error:
@@ -11417,11 +11492,10 @@ def api_update_presentation(pres_id):
             if k in data:
                 db_key = {'projectData': 'project_data', 'slidesData': 'slides_data'}.get(k, k)
                 updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else str(data[k] or '').strip()
-        if 'status' in data:
-            if data.get('status') in {'draft', 'edited'}:
-                updates['status'] = 'draft'
-            elif data.get('status') in {'pending_approval', 'approved', 'rejected'}:
-                updates['status'] = data.get('status')
+        if 'status' in data and data.get('status') in {'draft', 'edited'}:
+            # Operational states (pending_approval/approved/rejected) belong to
+            # the approval gates — a save payload can never walk into them.
+            updates['status'] = 'draft'
         if isinstance(updates.get('project_data'), dict):
             current_project = _presentation_state(pres)['projectData']
             current_scope = current_project.get('presentation_scope')
@@ -11473,6 +11547,8 @@ def api_update_presentation(pres_id):
             action = 'تعديل الشرائح'
         if 'status' in updates and updates['status'] != pres.get('status'):
             details.append(f'حالة العرض: من «{pres.get("status") or "مسودة"}» إلى «{updates["status"]}»')
+        if post_approval_reason:
+            details.append(f'تعديل بعد الاعتماد — السبب: {post_approval_reason}')
         updates.pop('slide_count', None)
         if data.get('operation') == 'generation':
             action = 'توليد العرض'
@@ -11480,6 +11556,8 @@ def api_update_presentation(pres_id):
         result = _commit_presentation_state(
             g.tenant_id, pres_id, expected_revision=expected_revision,
             source=source, action=action, details=details + provenance_details, **updates)
+    except db.PresentationRevisionConflict:
+        raise
     except (LookupError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
     except Exception as exc:
@@ -11669,8 +11747,9 @@ def _section_required_missing_labels(tenant_id, section_key, snapshot):
 def _section_version_readiness(draft, section_key, section_map=None):
     """Readiness of one section against its latest snapshot.
 
-    Returns (state, meta) where state is ok, not_approved or stale. Sections
-    without any version return (legacy, None) so the old toggle keeps working.
+    Returns (state, meta) where state is ok, not_approved, stale or expired.
+    Sections without any version return (legacy, None) so the old toggle
+    keeps working.
     """
     try:
         overview = db.section_versions_overview(g.tenant_id, (draft or {}).get('id'))
@@ -11681,6 +11760,8 @@ def _section_version_readiness(draft, section_key, section_map=None):
         return 'legacy', None
     if (meta.get('status') or '') != 'approved':
         return 'not_approved', meta
+    if meta.get('is_expired'):
+        return 'expired', meta
     try:
         live_hash = db.section_snapshot_hash(
             _section_snapshot_slice((draft or {}).get('draft_data') or {}, section_key,
@@ -11690,6 +11771,34 @@ def _section_version_readiness(draft, section_key, section_map=None):
     if live_hash != meta.get('snapshot_hash'):
         return 'stale', meta
     return 'ok', meta
+
+
+def _void_stale_section_approvals(tenant_id, draft_id, draft_data):
+    """Drop section statuses whose live content no longer matches the approved
+    snapshot (t16): an edit on an approved section voids that approval and the
+    section falls back to 'draft' until it is sent and decided again. Expired
+    approvals void the same way (d05)."""
+    draft = db.get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return
+    statuses = draft.get('section_statuses') or {}
+    if not statuses:
+        return
+    overview = db.section_versions_overview(tenant_id, draft_id)
+    section_map = _draft_field_section_map(tenant_id)
+    stale = {}
+    for key, value in statuses.items():
+        if value != 'approved':
+            continue
+        meta = overview.get(key)
+        if not meta or meta.get('status') != 'approved':
+            continue
+        live_hash = db.section_snapshot_hash(
+            _section_snapshot_slice(draft_data, key, section_map))
+        if live_hash != meta.get('snapshot_hash') or meta.get('is_expired'):
+            stale[key] = 'draft'
+    if stale:
+        db.update_draft_section_status_by_id(tenant_id, draft_id, stale)
 
 
 def _draft_field_section_map(tenant_id):
@@ -11915,6 +12024,13 @@ def api_save_project_draft():
     _record_change('draft', draft_id, 'حفظ بيانات المشروع' if previous else 'إنشاء ملف مشروع',
                    details, source='manual',
                    summary='' if previous else 'تم إنشاء ملف المشروع')
+    # t16: an edit that drifts an approved section from its snapshot voids the
+    # approval — checkpoint saves of a running job never reach this.
+    if not allow_generating:
+        try:
+            _void_stale_section_approvals(g.tenant_id, draft_id, draft_data)
+        except Exception:
+            pass
     return jsonify({'success': True, 'draftId': draft_id})
 
 
@@ -12044,13 +12160,54 @@ def api_restore_project_draft(draft_id):
     return jsonify({'success': True, 'restoredFields': restored, 'restoredCount': len(restored)})
 
 
+def _draft_has_workflow_history(draft_id):
+    """True when approval or output records exist for the draft.
+
+    Delete stays a cleanup for never-processed drafts; anything the gates
+    touched must be archived, not erased (t18). Fails closed: a lookup error
+    counts as history.
+    """
+    conn = db.get_db()
+    try:
+        if conn.execute(
+                'SELECT 1 FROM section_versions WHERE tenant_id = ? AND draft_id = ? LIMIT 1',
+                (g.tenant_id, draft_id)).fetchone():
+            return True
+        if conn.execute(
+                'SELECT 1 FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? LIMIT 1',
+                (g.tenant_id, draft_id)).fetchone():
+            return True
+        pres_ids = [row['id'] for row in conn.execute(
+            'SELECT id FROM presentations WHERE tenant_id = ? AND draft_id = ?',
+            (g.tenant_id, draft_id)).fetchall()]
+        for pres_id in pres_ids:
+            if conn.execute(
+                    'SELECT 1 FROM final_file_approvals WHERE tenant_id = ? AND presentation_id = ? LIMIT 1',
+                    (g.tenant_id, pres_id)).fetchone():
+                return True
+            if conn.execute(
+                    'SELECT 1 FROM exports WHERE tenant_id = ? AND presentation_id = ? LIMIT 1',
+                    (g.tenant_id, pres_id)).fetchone():
+                return True
+        return False
+    except Exception:
+        return True
+
+
 @app.route('/api/project-draft/<draft_id>', methods=['DELETE'])
 @require_auth
 def api_delete_project_draft_by_id(draft_id):
-    """Delete a specific project draft by ID."""
+    """Delete is cleanup for never-processed drafts only — admin-gated, and
+    refused entirely once the draft carries workflow history (t18)."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if not draft:
         return jsonify({'error': 'Draft not found'}), 404
+    if not _omran_actor_is_admin():
+        return jsonify({'error': 'الحذف النهائي يتطلب صلاحية مدير الشركة — أو استخدم الأرشفة',
+                        'error_code': 'admin_required'}), 403
+    if _draft_has_workflow_history(draft_id):
+        return jsonify({'error': 'لهذا المشروع مسار اعتماد محفوظ — استخدم الأرشفة بدل الحذف',
+                        'error_code': 'archive_required'}), 409
     _record_change('draft', draft_id, 'حذف المشروع',
                    [f'حُذف المشروع «{draft.get("title") or "بدون عنوان"}»'])
     db.delete_project_draft_by_id(g.tenant_id, draft_id)
@@ -12099,7 +12256,7 @@ def api_update_section_status():
                     if value != 'approved':
                         continue
                     state, _meta = _section_version_readiness(before, key, section_map)
-                    if state in {'not_approved', 'stale'}:
+                    if state in {'not_approved', 'stale', 'expired'}:
                         versioned_blocked.append(key)
             if versioned_blocked:
                 return jsonify({'error': 'These sections have version snapshots; send and approve the version instead of toggling directly',
@@ -12131,8 +12288,10 @@ def api_update_section_status():
     if section_status == 'approved' and before:
         state, meta = _section_version_readiness(
             before, section_key, _draft_field_section_map(g.tenant_id))
-        if state in {'not_approved', 'stale'}:
-            code = 'SECTION_VERSION_PENDING' if state == 'not_approved' else 'SECTION_VERSION_STALE'
+        if state in {'not_approved', 'stale', 'expired'}:
+            code = {'not_approved': 'SECTION_VERSION_PENDING',
+                    'stale': 'SECTION_VERSION_STALE',
+                    'expired': 'SECTION_VERSION_EXPIRED'}[state]
             return jsonify({'error': 'This section has version snapshots; send and approve the version instead of toggling directly',
                             'error_code': code, 'sections': [section_key],
                             'version': (meta or {}).get('version_number')}), 409
@@ -12176,6 +12335,7 @@ def api_send_section_for_approval():
     version = db.create_section_version(
         g.tenant_id, draft['id'], section_key, snapshot,
         _project_draft_actor_id(), _project_draft_actor_name(),
+        allow_supersede=bool(data.get('supersede')),
     )
     if version.get('error') == 'draft_not_found':
         return jsonify({'error': 'No project draft found'}), 404
@@ -12183,8 +12343,38 @@ def api_send_section_for_approval():
         return jsonify({'error': 'Unknown project section'}), 400
     if version.get('error') == 'draft_locked':
         return _draft_locked_response(version.get('status'))
+    if version.get('error') == 'version_pending_exists':
+        # t13-04: a send already under review is never dropped silently; the
+        # client either cancels it or resubmits with supersede=true.
+        return jsonify({'error': 'يوجد إصدار قيد المراجعة لهذا القسم بالفعل',
+                        'error_code': 'SECTION_VERSION_PENDING_EXISTS',
+                        'version_id': version.get('version_id'),
+                        'version_number': version.get('version_number')}), 409
     if version.get('error'):
         return jsonify({'error': 'Unable to store the section snapshot'}), 400
+    try:
+        # t13-01: every send opens an approver task and notifies the approvers
+        # whose section scope covers this key.
+        db.create_approval_task(
+            g.tenant_id, 'section_approval',
+            f'اعتماد قسم «{_section_version_label(section_key)}»',
+            entity_type='section_version', entity_id=version['id'],
+            section_key=section_key,
+            payload={'draft_id': draft['id'], 'version_number': version['version_number']},
+            due_hours=48)
+        for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
+            try:
+                if not db.get_user_field_sections(approver['id'], g.tenant_id).get(section_key, True):
+                    continue
+            except Exception:
+                continue
+            db.create_notification(
+                g.tenant_id, 'إصدار قسم بانتظار الاعتماد',
+                f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(section_key)} بانتظار قرارك',
+                category='section_approval', user_id=approver['id'],
+                entity_type='section_version', entity_id=version['id'])
+    except Exception:
+        pass
     _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
                    [f'القسم {_section_version_label(section_key)}: لقطة رقم {version["version_number"]} بانتظار القرار'])
     _record_audit_event(
@@ -12239,6 +12429,19 @@ def api_decide_section_version():
     if error:
         return jsonify(error), 404
     actor_id = _project_draft_actor_id()
+    # t13-02: a non-admin approver decides only inside their granted field
+    # sections; keys outside the field map stay governed by the approvals
+    # permission that already let this caller reach the decision.
+    if not _omran_actor_is_admin() and str(draft.get('user_id')) != str(actor_id):
+        section_key = version['section_key']
+        if section_key in db.DEFAULT_FIELD_SECTIONS:
+            try:
+                granted = db.get_user_field_sections(g.user_id, g.tenant_id)
+            except Exception:
+                granted = {}
+            if not granted.get(section_key):
+                return jsonify({'error': 'هذا القسم خارج نطاق اعتمادك',
+                                'error_code': 'section_scope_forbidden'}), 403
     decided = db.decide_section_version(
         g.tenant_id, version_id, decision,
         actor_id, _project_draft_actor_name(), data.get('note'),
@@ -12252,6 +12455,9 @@ def api_decide_section_version():
         return _draft_locked_response(decided.get('status'))
     if decided.get('error') == 'note_required':
         return jsonify({'error': 'A reason is required to return or reject a version'}), 400
+    if decided.get('error') == 'self_approval_blocked_by_policy':
+        return jsonify({'error': 'سياسة الشركة تمنع المحرر من اعتماد قسمه بنفسه',
+                        'error_code': 'self_approval_blocked_by_policy'}), 403
     if decided.get('error'):
         return jsonify({'error': 'Unable to record the version decision'}), 400
     mirror = 'approved' if decision == 'approved' else 'draft'
@@ -12267,6 +12473,33 @@ def api_decide_section_version():
         detail += f' (السبب: {decided["decision_note"]})'
     if (version.get('created_by') or '') == actor_id:
         detail += ' (اعتماد ذاتي)'
+    try:
+        # t13-03: the decision closes the approver task; a return opens an
+        # editor task for the version's sender and notifies them.
+        db.close_approval_tasks_for_entity(
+            g.tenant_id, 'section_version', version_id,
+            closed_by_name=_project_draft_actor_name())
+        sender = str(version.get('created_by') or '')
+        if decision in {'returned', 'rejected'}:
+            db.create_approval_task(
+                g.tenant_id, 'revision',
+                f'إعادة قسم «{_section_version_label(version["section_key"])}» للتعديل',
+                entity_type='project_draft', entity_id=draft['id'],
+                section_key=version['section_key'],
+                assignee_id=None if sender.startswith('tenant-admin:') else sender or None,
+                payload={'version_id': version_id, 'note': decided.get('decision_note')})
+        if sender and sender != str(actor_id):
+            message = {'approved': 'اعتُمد قسمك',
+                       'returned': 'أُعيد قسمك للتعديل',
+                       'rejected': 'رُفض قسمك'}[decision]
+            db.create_notification(
+                g.tenant_id, message,
+                f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(version["section_key"])}',
+                category='section_approval',
+                user_id=None if sender.startswith('tenant-admin:') else sender,
+                entity_type='section_version', entity_id=version_id)
+    except Exception:
+        pass
     _record_change('draft', draft['id'], action, [detail])
     _record_audit_event(
         action=f'section_version_{decision}',
@@ -12319,6 +12552,12 @@ def api_cancel_section_version():
         return _draft_locked_response(cancelled.get('status'))
     if cancelled.get('error'):
         return jsonify({'error': 'Unable to cancel the section version'}), 400
+    try:
+        db.close_approval_tasks_for_entity(
+            g.tenant_id, 'section_version', version_id,
+            closed_by_name=_project_draft_actor_name(), cancel_reason='سحب طلب الاعتماد')
+    except Exception:
+        pass
     _record_change('draft', draft['id'], 'إلغاء طلب اعتماد قسم',
                    [f'القسم {_section_version_label(version["section_key"])}: لقطة رقم {version["version_number"]} أُلغيت'])
     _record_audit_event(
@@ -12398,9 +12637,13 @@ def api_restore_section_version():
     restored = db.create_section_version(
         g.tenant_id, draft['id'], version['section_key'], snapshot,
         _project_draft_actor_id(), _project_draft_actor_name(),
+        allow_supersede=True,
     )
     if restored.get('error') == 'draft_locked':
         return _draft_locked_response(restored.get('status'))
+    if restored.get('error') == 'version_pending_exists':
+        return jsonify({'error': 'يوجد إصدار قيد المراجعة لهذا القسم بالفعل',
+                        'error_code': 'SECTION_VERSION_PENDING_EXISTS'}), 409
     if restored.get('error'):
         return jsonify({'error': 'Unable to store the restored section snapshot'}), 400
     _record_change('draft', draft['id'], 'الرجوع لنسخة قسم سابقة',
@@ -12463,6 +12706,10 @@ def api_request_project_draft_approval():
             'error_code': 'SECTIONS_NOT_APPROVED',
             'sectionStatuses': draft.get('section_statuses', {})
         }), 400
+    if draft.get('error') == 'section_version_expired':
+        return jsonify({'error': 'انتهت صلاحية اعتماد بعض الأقسام — أعد إرسالها للاعتماد',
+                        'error_code': 'SECTION_VERSION_EXPIRED',
+                        'sections': draft.get('sections', [])}), 409
     if draft.get('error') == 'draft_locked':
         return _draft_locked_response(draft.get('status'))
     if draft.get('error') == 'invalid_transition':
@@ -12471,6 +12718,21 @@ def api_request_project_draft_approval():
                         'status': draft.get('current_status')}), 409
     if draft.get('error'):
         return jsonify({'error': 'Unable to request approval'}), 400
+    try:
+        if draft.get('status') == 'section_approval_pending':
+            resolved_id = draft.get('id') or data.get('draftId')
+            db.create_approval_task(
+                g.tenant_id, 'section_approval',
+                f'اعتماد مشروع «{draft.get("title") or "مشروع"}»',
+                entity_type='project_draft', entity_id=resolved_id, due_hours=48)
+            for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
+                db.create_notification(
+                    g.tenant_id, 'مشروع بانتظار الاعتماد',
+                    f'«{draft.get("title") or "مشروع"}» أُرسل للاعتماد',
+                    category='section_approval', user_id=approver['id'],
+                    entity_type='project_draft', entity_id=resolved_id)
+    except Exception:
+        pass
     _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
                    ['أُرسل المشروع للمراجعة'])
     return jsonify({'success': True, 'draft': draft})
@@ -12510,6 +12772,14 @@ def api_review_project_draft():
     if reviewed.get('error') == 'reason_required':
         return jsonify({'error': 'A reason is required when returning the draft for revision',
                         'error_code': 'REASON_REQUIRED'}), 400
+    if reviewed.get('error') == 'sections_not_approved':
+        return jsonify({'error': 'All project sections must be approved before this decision',
+                        'error_code': 'SECTIONS_NOT_APPROVED',
+                        'sectionStatuses': reviewed.get('section_statuses', {})}), 400
+    if reviewed.get('error') == 'section_version_expired':
+        return jsonify({'error': 'انتهت صلاحية اعتماد بعض الأقسام — أعد إرسالها للاعتماد',
+                        'error_code': 'SECTION_VERSION_EXPIRED',
+                        'sections': reviewed.get('sections', [])}), 409
     if reviewed.get('error') == 'draft_locked':
         return _draft_locked_response(reviewed.get('status'))
     if reviewed.get('error') == 'invalid_transition':
@@ -12518,6 +12788,21 @@ def api_review_project_draft():
                         'status': reviewed.get('current_status')}), 409
     if reviewed.get('error'):
         return jsonify({'error': 'Unable to review the draft'}), 400
+    try:
+        db.close_approval_tasks_for_entity(
+            g.tenant_id, 'project_draft', draft_id,
+            closed_by_name=_project_draft_actor_name())
+        reviewed_draft = reviewed.get('draft') or {}
+        requester = str(reviewed_draft.get('requested_by') or '')
+        if requester and requester != str(_project_draft_actor_id()):
+            message = 'اعتُمد مشروعك' if review_status == 'approved' else 'أُعيد مشروعك للتعديل'
+            db.create_notification(
+                g.tenant_id, message, note or None,
+                category='section_approval',
+                user_id=None if requester.startswith('tenant-admin:') else requester,
+                entity_type='project_draft', entity_id=draft_id)
+    except Exception:
+        pass
     action = 'اعتماد المشروع' if review_status == 'approved' else 'إعادة المشروع للتعديل'
     _record_change('draft', draft_id, action, [note] if note else [action])
     return jsonify({'success': True, 'draft': reviewed})
@@ -13977,12 +14262,27 @@ def api_export():
                 pdf_engine = 'unknown'
             print(f'[EXPORT] engine={pdf_engine} pages={slide_count} file={os.path.basename(pdf_path)}')
 
-            # Record export
-            export_id = db.create_export(presentation_id, g.tenant_id, 'pdf', pdf_path)
+            # Record export — d03: each produced file carries the content hash
+            # it was rendered from, its regen policy and the billed run cost.
+            export_content_hash = db._presentation_review_hash({
+                'slides_data': slides_data if slides_data else slides_html,
+                'project_data': project_data,
+            })
+            regen_policy, export_cost = _export_regen_policy(
+                g.tenant_id, presentation_id, export_content_hash)
+            export_id = db.create_export(
+                presentation_id, g.tenant_id, 'pdf', pdf_path,
+                content_hash=export_content_hash, cost_usd=export_cost,
+                regen_policy=regen_policy)
+            official = _export_is_official_row({
+                'id': export_id, 'presentation_id': presentation_id,
+                'content_hash': export_content_hash, 'file_path': pdf_path})
             if presentation_id:
                 _record_change('presentation', presentation_id, 'تصدير',
                                [f'صُدّر العرض بصيغة PDF ({slide_count} شريحة)'])
-            return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf', 'engine': pdf_engine})
+            download_url = f'/api/exports/{export_id}/download' + ('' if official else '?draft=1')
+            return jsonify({'success': True, 'url': download_url, 'exportId': export_id,
+                            'format': 'pdf', 'engine': pdf_engine, 'officiallyApproved': official})
 
         elif fmt == 'pptx':
             from exports.pptx_export import generate_pptx
@@ -14021,11 +14321,23 @@ def api_export():
             pptx_count = len(slides_data)
             print(f'[EXPORT] engine=pptx-native slides={pptx_count} file={os.path.basename(pptx_path)}')
 
-            export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'pptx', pptx_path)
+            pptx_hash = db._presentation_review_hash({
+                'slides_data': slides_data, 'project_data': project_data})
+            regen_policy, export_cost = _export_regen_policy(
+                g.tenant_id, data.get('presentationId'), pptx_hash)
+            export_id = db.create_export(
+                data.get('presentationId'), g.tenant_id, 'pptx', pptx_path,
+                content_hash=pptx_hash, cost_usd=export_cost, regen_policy=regen_policy)
+            official = _export_is_official_row({
+                'id': export_id, 'presentation_id': data.get('presentationId'),
+                'content_hash': pptx_hash, 'file_path': pptx_path})
             if data.get('presentationId'):
                 _record_change('presentation', data['presentationId'], 'تصدير',
                                [f'صُدّر العرض بصيغة PPTX ({len(slides_data)} شريحة)'])
-            return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pptx', 'engine': 'pptx-native', 'slideCount': pptx_count})
+            download_url = f'/api/exports/{export_id}/download' + ('' if official else '?draft=1')
+            return jsonify({'success': True, 'url': download_url, 'exportId': export_id,
+                            'format': 'pptx', 'engine': 'pptx-native', 'slideCount': pptx_count,
+                            'officiallyApproved': official})
 
         else:
             return jsonify({'error': f'Unsupported format: {fmt}. Use pdf or pptx'}), 400
@@ -14056,9 +14368,68 @@ def api_get_exports():
     return jsonify({'success': True, 'exports': result})
 
 
+def _export_content_cost(tenant_id, presentation_id):
+    """The billed cost of the run that produced this presentation (d03)."""
+    if not presentation_id:
+        return 0.0
+    try:
+        row = db.get_db().execute(
+            "SELECT amount_usd FROM tenant_ledger WHERE tenant_id = ? AND presentation_id = ? "
+            "AND kind = 'debit' ORDER BY created_at DESC LIMIT 1",
+            (tenant_id, presentation_id)).fetchone()
+        return float(row['amount_usd']) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def _export_regen_policy(tenant_id, presentation_id, content_hash):
+    """d03: which content version an export carries, with the run's cost.
+
+    'official' — the exported content is exactly what the final gate approved;
+    'superseded' — the content drifted past the approved version and needs a
+    new gate; 'draft' — the file never reached the final gate.
+    """
+    if not presentation_id:
+        return 'draft', 0.0
+    approval = db.latest_final_file_approval(tenant_id, presentation_id, status='approved')
+    policy = 'draft'
+    if approval and approval.get('request_hash'):
+        policy = 'official' if approval['request_hash'] == content_hash else 'superseded'
+    return policy, _export_content_cost(tenant_id, presentation_id)
+
+
+def _export_is_official_row(export_row):
+    """True when this export carries exactly the content the final gate approved.
+
+    Three proofs, strongest first: the export's content hash matches the hash
+    the approver reviewed; the export row is the one the stamp pinned; or the
+    physical file still matches the stamped sha256.
+    """
+    presentation_id = export_row.get('presentation_id')
+    if not presentation_id:
+        return False
+    approval = db.latest_final_file_approval(g.tenant_id, presentation_id, status='approved')
+    if not approval:
+        return False
+    if export_row.get('content_hash') and approval.get('request_hash') \
+            and export_row['content_hash'] == approval['request_hash']:
+        return True
+    if approval.get('stamped_export_id') and approval['stamped_export_id'] == export_row.get('id'):
+        return True
+    if approval.get('content_hash') and export_row.get('file_path'):
+        path = export_row['file_path']
+        if not os.path.isabs(path):
+            path = os.path.join(app.root_path, path)
+        return bool(db._file_sha256(path)) and db._file_sha256(path) == approval['content_hash']
+    return False
+
+
 @app.route('/api/exports/<export_id>/download', methods=['GET'])
 @require_auth
 def api_download_export(export_id):
+    """Serve an export. Only officially approved files download without the
+    draft marker — anything else needs the explicit ?draft=1 flag and ships
+    with a DRAFT- filename prefix and an X-Draft-Mode header (t15-06)."""
     exported_file = db.get_export(export_id, g.tenant_id)
     if not exported_file:
         return jsonify({'error': 'Export not found'}), 404
@@ -14066,7 +14437,17 @@ def api_download_export(export_id):
     tenant_output_dir = os.path.abspath(os.path.join(OUTPUT_DIR, g.tenant_id))
     if os.path.commonpath([file_path, tenant_output_dir]) != tenant_output_dir or not os.path.isfile(file_path):
         return jsonify({'error': 'Export file unavailable'}), 404
-    return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
+    official = _export_is_official_row(exported_file)
+    draft_requested = request.args.get('draft') in ('1', 'true')
+    if not official and not draft_requested:
+        return jsonify({'error': 'الملف غير معتمد نهائيًا — التنزيل الرسمي بعد الاعتماد فقط',
+                        'error_code': 'final_approval_required'}), 403
+    basename = os.path.basename(file_path)
+    response = send_file(file_path, as_attachment=True,
+                         download_name=basename if official else f'DRAFT-{basename}')
+    if not official:
+        response.headers['X-Draft-Mode'] = '1'
+    return response
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14128,7 +14509,16 @@ def _is_public_base_url(url):
     return not re.search(r'localhost|127\.0\.0\.1|0\.0\.0\.0', url)
 
 
-def _password_setup_url(raw_token):
+def _current_base_url():
+    """The public base URL links in outgoing mail should point at.
+
+    Each server carries its own public URL in APP_BASE_URL (staging =
+    lab host, production = main host), while gunicorn behind Apache only
+    sees 127.0.0.1. Prefer the configured public URL, then the proxy
+    headers, then the live request host. A loopback address is only a last
+    resort: it is unreachable from any other machine. The legacy host is
+    dead and is never emitted.
+    """
     try:
         req_base = (request.host_url or '').strip().rstrip('/')
     except Exception:
@@ -14144,12 +14534,6 @@ def _password_setup_url(raw_token):
         scheme = fwd_proto if fwd_proto in ('http', 'https') else 'https'
         fwd_base = f'{scheme}://{fwd_host}'.rstrip('/')
     env_base = (os.environ.get('APP_BASE_URL') or '').strip().rstrip('/')
-    # Each server carries its own public URL in APP_BASE_URL (staging =
-    # lab host, production = main host), while gunicorn behind Apache only
-    # sees 127.0.0.1. Prefer the configured public URL, then the proxy
-    # headers, then the live request host. A loopback address is only a last
-    # resort: it is unreachable from any other machine. The legacy host is
-    # dead and is never emitted.
     base_url = ''
     for candidate in (env_base, fwd_base, req_base):
         if _is_public_base_url(candidate):
@@ -14159,7 +14543,11 @@ def _password_setup_url(raw_token):
         base_url = fwd_base or req_base or env_base
     if base_url.startswith('http://') and _is_public_base_url(base_url):
         base_url = 'https://' + base_url[len('http://'):]
-    return f'{base_url}/set-password/{raw_token}'
+    return base_url
+
+
+def _password_setup_url(raw_token):
+    return f'{_current_base_url()}/set-password/{raw_token}'
 
 
 def send_platform_email(recipient, subject, body):
@@ -14226,6 +14614,18 @@ def _company_payload(tenant):
         'domain': tenant.get('domain'),
         'slug': db.tenant_slug(tenant),
         'createdAt': tenant.get('created_at'),
+        'legalName': tenant.get('legal_name'),
+        'commercialName': tenant.get('commercial_name'),
+        'taxNumber': tenant.get('tax_number'),
+        'crNumber': tenant.get('cr_number'),
+        'country': tenant.get('country'),
+        'region': tenant.get('region'),
+        'address': tenant.get('address'),
+        'contactTitle': tenant.get('contact_title'),
+        'activatedAt': tenant.get('activated_at'),
+        'activatedByName': tenant.get('activated_by_name'),
+        'trialEndsAt': tenant.get('trial_ends_at'),
+        'deactivatedReason': tenant.get('deactivated_reason'),
     }
 
 
@@ -14304,11 +14704,22 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
+        mfa = db.get_mfa_state('tenant', tenant['id'])
+        if mfa.get('enabled'):
+            return jsonify({
+                'success': True,
+                'mfaRequired': True,
+                'mfaToken': auth.create_mfa_token(
+                    tenant['id'], tenant['email'],
+                    user_name=tenant['company_name'], user_role='company_admin'),
+            })
         token = create_token(tenant['id'], tenant['email'], is_admin=bool(tenant.get('is_admin')),
                              user_name=tenant['company_name'], user_role='company_admin')
+        db.record_login(tenant['id'])
         return jsonify({
             'success': True,
             'token': token,
+            'mfaSetupRequired': bool(tenant.get('is_admin')) and not mfa.get('enabled'),
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -14336,12 +14747,23 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
+        mfa = db.get_mfa_state('user', user['id'])
+        if mfa.get('enabled'):
+            return jsonify({
+                'success': True,
+                'mfaRequired': True,
+                'mfaToken': auth.create_mfa_token(
+                    user['tenant_id'], user['email'], user_id=user['id'],
+                    user_name=user['name'], user_role=user['role']),
+            })
         token = create_token(user['tenant_id'], user['email'], is_admin=bool(user.get('tenant_is_admin')),
                              user_id=user['id'], user_name=user['name'], user_role=user['role'])
+        db.record_login(user['tenant_id'], user['id'])
         tenant = db.get_tenant_by_id(user['tenant_id'])
         return jsonify({
             'success': True,
             'token': token,
+            'mfaSetupRequired': user.get('role') == 'company_admin' and not mfa.get('enabled'),
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -14389,6 +14811,7 @@ def api_password_setup_complete(raw_token):
         return jsonify({'error': 'Password setup link is invalid or expired'}), 404
     tenant = db.get_tenant_by_id(completed['tenant_id'])
     user = db.get_user_by_id(completed['user_id'])
+    db.record_login(tenant['id'], user['id'])
     token = create_token(
         tenant['id'], user['email'], is_admin=bool(tenant.get('is_admin')),
         user_id=user['id'], user_name=user['name'], user_role=user['role']
@@ -14432,12 +14855,16 @@ def api_me():
             'role': g.user_role,
             'permissions': g.user_permissions,
         }
+        result['mfa'] = db.get_mfa_state('user', g.user_id)
+        result['mfa']['setupRequired'] = g.user_role == 'company_admin' and not result['mfa']['enabled']
     else:
         result['user'] = {
             'name': t['company_name'],
             'role': 'company_admin',
             'permissions': {k: True for k in db.PERMISSION_KEYS},
         }
+        result['mfa'] = db.get_mfa_state('tenant', t['id'])
+        result['mfa']['setupRequired'] = bool(t.get('is_admin')) and not result['mfa']['enabled']
     return jsonify(result)
 
 
@@ -14449,6 +14876,192 @@ def api_refresh():
     token = create_token(t['id'], t['email'], is_admin=bool(t.get('is_admin')),
                          user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
     return jsonify({'success': True, 'token': token})
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TWO-FACTOR AUTHENTICATION (t21/t63): TOTP challenge at login plus one-time
+# recovery codes. The post-password challenge travels in a purpose-scoped JWT
+# that can never act as a session token.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _mfa_actor_scope():
+    """Which login identity the authenticated caller manages: their user row or
+    the tenant account itself (tenant-direct login)."""
+    if getattr(g, 'user_id', None):
+        return 'user', g.user_id
+    return 'tenant', g.tenant_id
+
+
+def _mfa_role_requires_setup():
+    """Company super admins and the platform admin must enrol (t21)."""
+    if getattr(g, 'is_admin', False):
+        return True
+    return getattr(g, 'user_role', None) == 'company_admin' or getattr(g, 'user_id', None) is None
+
+
+@app.route('/api/auth/mfa/verify', methods=['POST'])
+def api_mfa_verify():
+    """Second step of login: a TOTP code or a one-time recovery code."""
+    data = request.json or {}
+    challenge = auth.verify_mfa_token(data.get('mfaToken'))
+    if not challenge:
+        return jsonify({'error': 'انتهت مهلة رمز التحقق، أعد تسجيل الدخول',
+                        'error_code': 'mfa_challenge_expired'}), 401
+    code = str(data.get('code') or '').strip()
+    if not code:
+        return jsonify({'error': 'رمز التحقق مطلوب', 'error_code': 'mfa_code_required'}), 400
+
+    scope = 'user' if challenge.get('user_id') else 'tenant'
+    row_id = challenge.get('user_id') or challenge['sub']
+    secrets_row = db.get_mfa_secrets(scope, row_id)
+    if not secrets_row or not secrets_row.get('mfa_enabled') or not secrets_row.get('mfa_secret'):
+        return jsonify({'error': 'التحقق الثنائي غير مفعل لهذا الحساب',
+                        'error_code': 'mfa_not_enabled'}), 400
+
+    ok = auth.verify_totp(secrets_row['mfa_secret'], code)
+    method = 'totp'
+    if not ok:
+        ok = db.consume_recovery_code(challenge['sub'], challenge.get('user_id'), code)
+        method = 'recovery'
+    if not ok:
+        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 401
+
+    # Re-validate the live account state before issuing the session.
+    tenant = db.get_tenant_by_id(challenge['sub'])
+    if not tenant or not tenant.get('is_active'):
+        return jsonify({'error': 'Account inactive or not found'}), 403
+    user_id = challenge.get('user_id')
+    if user_id:
+        user = db.get_user_by_id(user_id)
+        if not user or not user.get('is_active') or str(user.get('tenant_id')) != str(challenge['sub']):
+            return jsonify({'error': 'User account inactive or not found'}), 403
+        db.record_login(challenge['sub'], user_id)
+    else:
+        user = None
+        db.record_login(challenge['sub'])
+
+    token = create_token(
+        challenge['sub'], challenge.get('email'),
+        is_admin=bool(tenant.get('is_admin')),
+        user_id=user_id, user_name=challenge.get('user_name'),
+        user_role=challenge.get('user_role'),
+    )
+    payload = {
+        'success': True,
+        'token': token,
+        'mfaMethod': method,
+        'tenant': {
+            'id': tenant['id'],
+            'companyName': tenant['company_name'],
+            'email': tenant['email'],
+            'isAdmin': bool(tenant.get('is_admin')),
+            'plan': tenant.get('plan', 'free'),
+            'domain': tenant.get('domain'),
+            'slug': db.tenant_slug(tenant),
+        },
+        'user': {
+            'id': user_id,
+            'name': challenge.get('user_name'),
+            'email': challenge.get('email'),
+            'role': challenge.get('user_role'),
+        },
+    }
+    if method == 'recovery':
+        payload['recoveryCodesRemaining'] = db.count_unused_recovery_codes(
+            challenge['sub'], user_id)
+    return jsonify(payload)
+
+
+@app.route('/api/auth/mfa/status', methods=['GET'])
+@require_auth
+def api_mfa_status():
+    scope, row_id = _mfa_actor_scope()
+    state = db.get_mfa_state(scope, row_id)
+    state['setupRequired'] = _mfa_role_requires_setup() and not state.get('enabled')
+    state['recoveryCodesRemaining'] = db.count_unused_recovery_codes(
+        g.tenant_id, g.user_id if scope == 'user' else None)
+    return jsonify({'success': True, 'mfa': state})
+
+
+@app.route('/api/auth/mfa/setup', methods=['POST'])
+@require_auth
+def api_mfa_setup():
+    """Start enrolment: returns the new secret; it activates only after a code verifies."""
+    scope, row_id = _mfa_actor_scope()
+    secret = auth.generate_totp_secret()
+    db.set_mfa_pending_secret(scope, row_id, secret)
+    account = g.user_name or g.tenant.get('email') or 'admin'
+    return jsonify({
+        'success': True,
+        'secret': secret,
+        'otpauthUri': auth.totp_otpauth_uri(secret, account),
+    })
+
+
+@app.route('/api/auth/mfa/enable', methods=['POST'])
+@require_auth
+def api_mfa_enable():
+    """Verify one code against the pending secret, then enable MFA and issue
+    the recovery codes once."""
+    scope, row_id = _mfa_actor_scope()
+    secrets_row = db.get_mfa_secrets(scope, row_id)
+    if not secrets_row or not secrets_row.get('mfa_pending_secret'):
+        return jsonify({'error': 'لا يوجد إعداد قيد الانتظار',
+                        'error_code': 'mfa_setup_not_started'}), 400
+    code = str((request.json or {}).get('code') or '').strip()
+    if not auth.verify_totp(secrets_row['mfa_pending_secret'], code):
+        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    db.activate_mfa(scope, row_id)
+    codes = auth.generate_recovery_codes()
+    db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
+    _record_audit_event('mfa.enabled', 'user' if scope == 'user' else 'tenant', row_id,
+                        entity_name=g.user_name or g.tenant.get('company_name'))
+    return jsonify({'success': True, 'enabled': True, 'recoveryCodes': codes})
+
+
+@app.route('/api/auth/mfa/disable', methods=['POST'])
+@require_auth
+def api_mfa_disable():
+    """Disable MFA. Requires the password plus a current code, and is refused
+    for roles where MFA is mandatory (t21)."""
+    if _mfa_role_requires_setup():
+        return jsonify({'error': 'التحقق الثنائي إلزامي لهذا الحساب ولا يمكن تعطيله',
+                        'error_code': 'mfa_required_role'}), 400
+    data = request.json or {}
+    password = data.get('password') or ''
+    code = str(data.get('code') or '').strip()
+    scope, row_id = _mfa_actor_scope()
+    if scope == 'user':
+        account = db.get_user_by_id(row_id)
+    else:
+        account = g.tenant
+    if not account or not verify_password(password, account.get('password_hash') or ''):
+        return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
+    secrets_row = db.get_mfa_secrets(scope, row_id)
+    if not secrets_row or not secrets_row.get('mfa_enabled'):
+        return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
+    if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    db.clear_mfa(scope, row_id)
+    _record_audit_event('mfa.disabled', 'user' if scope == 'user' else 'tenant', row_id,
+                        entity_name=g.user_name or g.tenant.get('company_name'))
+    return jsonify({'success': True, 'enabled': False})
+
+
+@app.route('/api/auth/mfa/recovery-codes', methods=['POST'])
+@require_auth
+def api_mfa_regenerate_recovery_codes():
+    """Regenerate the recovery set; a current TOTP code authorizes it."""
+    scope, row_id = _mfa_actor_scope()
+    secrets_row = db.get_mfa_secrets(scope, row_id)
+    if not secrets_row or not secrets_row.get('mfa_enabled'):
+        return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
+    code = str((request.json or {}).get('code') or '').strip()
+    if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    codes = auth.generate_recovery_codes()
+    db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
+    return jsonify({'success': True, 'recoveryCodes': codes})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14487,10 +15100,30 @@ def api_add_user():
         return jsonify({'error': 'Email already in use'}), 409
 
     try:
-        user_id = db.create_user(g.tenant_id, name, email, hash_password(password), role=role)
+        user_id = db.create_user(g.tenant_id, name, email, hash_password(password), role=role,
+                                 phone=(data.get('phone') or '').strip() or None,
+                                 username=(data.get('username') or '').strip() or None)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email already in use'}), 409
+    _apply_user_scope_payload(user_id, data)
     return jsonify({'success': True, 'userId': user_id}), 201
+
+
+def _apply_user_scope_payload(user_id, data):
+    """Optional sections/projects restrictions on create or update (t20/t21).
+
+    ``sections`` names the field sections the user may see — everything else is
+    switched off. ``projects`` names the drafts they may act on; an empty list
+    lifts the restriction entirely.
+    """
+    sections = data.get('sections')
+    if isinstance(sections, list) and sections:
+        allowed = set(str(s) for s in sections)
+        for key in db.get_user_field_sections(user_id, g.tenant_id):
+            db.set_user_field_section(user_id, key, key in allowed)
+    projects = data.get('projects')
+    if isinstance(projects, list):
+        db.set_user_project_scope(g.tenant_id, user_id, [str(p) for p in projects])
 
 
 @app.route('/api/users/<user_id>', methods=['PUT'])
@@ -14511,7 +15144,15 @@ def api_update_user(user_id):
     if 'password' in data and data['password']:
         updates['password_hash'] = hash_password(data['password'])
 
+    # t21-03: the last active company admin can never be disabled or demoted.
+    demotes_admin = ('role' in updates and updates['role'] != 'company_admin' and user.get('role') == 'company_admin') \
+        or ('is_active' in updates and not updates['is_active'] and user.get('role') == 'company_admin')
+    if demotes_admin and db.is_last_active_company_admin(g.tenant_id, user_id):
+        return jsonify({'error': 'لا يمكن تعطيل أو تخفيض آخر مدير شركة نشط',
+                        'error_code': 'last_company_admin'}), 400
+
     db.update_user(user_id, **updates)
+    _apply_user_scope_payload(user_id, data)
     return jsonify({'success': True})
 
 
@@ -14522,8 +15163,43 @@ def api_delete_user(user_id):
     user = db.get_user_by_id(user_id)
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
+    if db.is_last_active_company_admin(g.tenant_id, user_id):
+        return jsonify({'error': 'لا يمكن حذف آخر مدير شركة نشط',
+                        'error_code': 'last_company_admin'}), 400
     db.delete_user(user_id)
     return jsonify({'success': True})
+
+
+@app.route('/api/users/<user_id>/project-scope', methods=['GET'])
+@require_permission('manage_users')
+def api_get_user_project_scope(user_id):
+    """The drafts a scoped user may act on, plus every draft for the picker."""
+    user = db.get_user_by_id(user_id)
+    if not user or user['tenant_id'] != g.tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+    scope = sorted(db.get_user_project_scope_ids(user_id))
+    drafts = [
+        {'id': item['id'], 'title': item.get('title'), 'status': item.get('status')}
+        for item in db.get_all_project_draft_summaries(g.tenant_id, limit=200)
+    ]
+    return jsonify({'success': True, 'scope': scope, 'limited': bool(scope), 'drafts': drafts})
+
+
+@app.route('/api/users/<user_id>/project-scope', methods=['PUT'])
+@require_permission('manage_users')
+def api_set_user_project_scope(user_id):
+    """Replace the user's draft scope; an empty list lifts the restriction."""
+    data = request.json or {}
+    draft_ids = data.get('draftIds', data.get('projects'))
+    if not isinstance(draft_ids, list):
+        return jsonify({'error': 'draftIds must be a list'}), 400
+    result = db.set_user_project_scope(g.tenant_id, user_id, [str(d) for d in draft_ids])
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('user.project_scope_set', 'user', user_id,
+                        new_value=result.get('scope'))
+    return jsonify({'success': True, **result})
 
 
 @app.route('/api/users/<user_id>/permissions', methods=['GET'])
@@ -17836,29 +18512,48 @@ def api_set_user_field_sections(user_id):
     return jsonify({'success': True, 'sections': sections})
 
 
-@app.route('/api/invites', methods=['POST'])
-@require_permission('manage_users')
-def api_create_invite():
-    """Create an invite link for an employee."""
-    data = request.json or {}
-    email = (data.get('email') or '').strip().lower()
-    if not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
-        return jsonify({'error': 'Valid email required'}), 400
-
-    token = db.create_invite(g.tenant_id, email)
-    invite_url = f"/invite/{token}"
-    tenant = db.get_tenant_by_id(g.tenant_id)
+def _send_invite_email(invite, tenant):
+    """Deliver one invite email and record the outcome on the row (t21)."""
     company_name = (tenant and tenant.get('company_name')) or 'الشركة'
     base_url = _current_base_url().rstrip('/')
-    full_invite_url = f"{base_url}{invite_url}"
-    send_platform_email(
-        email,
+    full_invite_url = f"{base_url}/invite/{invite['token']}"
+    ok = send_platform_email(
+        invite['email'],
         f'دعوة للانضمام إلى {company_name}',
         f'مرحبًا،\n\nتمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
         f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
         'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
     )
-    return jsonify({'success': True, 'inviteUrl': invite_url, 'token': token})
+    db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
+                         None if ok else 'smtp_send_failed')
+    return ok
+
+
+@app.route('/api/invites', methods=['POST'])
+@require_permission('manage_users')
+def api_create_invite():
+    """Create an invite carrying the pre-assigned role and scope (t21)."""
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        return jsonify({'error': 'Valid email required'}), 400
+    role = data.get('role') or 'employee'
+    if role not in db.USER_ROLES:
+        return jsonify({'error': 'Invalid role'}), 400
+    invite = db.create_invite(
+        g.tenant_id, email,
+        role=role,
+        name=data.get('name'), phone=data.get('phone'),
+        sections=data.get('sections') if isinstance(data.get('sections'), list) else None,
+        projects=data.get('projects') if isinstance(data.get('projects'), list) else None,
+    )
+    tenant = db.get_tenant_by_id(g.tenant_id)
+    email_sent = _send_invite_email(invite, tenant)
+    invite_url = f"/invite/{invite['token']}"
+    _record_audit_event('invite.created', 'invite_link', invite['id'], entity_name=email,
+                        metadata={'role': role, 'email_sent': email_sent})
+    return jsonify({'success': True, 'inviteUrl': invite_url, 'token': invite['token'],
+                    'inviteId': invite['id'], 'emailSent': email_sent})
 
 
 @app.route('/api/invite/<token>', methods=['GET'])
@@ -17883,10 +18578,10 @@ def api_accept_invite(token):
         return jsonify({'error': 'Invalid or expired invite'}), 404
 
     data = request.json or {}
-    name = (data.get('name') or '').strip()
+    name = (data.get('name') or invite.get('name') or '').strip()
     password = data.get('password', '')
-    if not name or not password:
-        return jsonify({'error': 'name and password are required'}), 400
+    if not password:
+        return jsonify({'error': 'password is required'}), 400
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
 
@@ -17894,12 +18589,25 @@ def api_accept_invite(token):
     if existing:
         return jsonify({'error': 'Email already registered'}), 409
 
-    user_id = db.create_user(invite['tenant_id'], name, invite['email'], hash_password(password), role='employee')
+    # The invite fixes the role and scope; the registrant only picks a name and
+    # password (t21). The name defaults to the one the admin typed on the invite.
+    invite_role = invite.get('role') if invite.get('role') in db.USER_ROLES else 'employee'
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    user_id = db.create_user(
+        invite['tenant_id'], name, invite['email'], hash_password(password),
+        role=invite_role, phone=invite.get('phone'),
+    )
+    try:
+        db.apply_invite_scope(user_id, invite)
+    except Exception:
+        pass
     db.mark_invite_used(token)
+    db.record_login(invite['tenant_id'], user_id)
 
     tenant = db.get_tenant_by_id(invite['tenant_id'])
     jwt_token = create_token(tenant['id'], invite['email'], is_admin=False,
-                             user_id=user_id, user_name=name, user_role='employee')
+                             user_id=user_id, user_name=name, user_role=invite_role)
     return jsonify({
         'success': True,
         'token': jwt_token,
@@ -17908,8 +18616,31 @@ def api_accept_invite(token):
             'companyName': tenant['company_name'],
             'email': tenant['email'],
         },
-        'user': {'id': user_id, 'name': name, 'email': invite['email'], 'role': 'employee'}
+        'user': {'id': user_id, 'name': name, 'email': invite['email'], 'role': invite_role}
     }), 201
+
+
+@app.route('/api/invites/<invite_id>/resend', methods=['POST'])
+@require_permission('manage_users')
+def api_resend_invite(invite_id):
+    """Retry the invite email for a still-pending invite (t21)."""
+    invite = db.get_invite(g.tenant_id, invite_id)
+    if not invite:
+        return jsonify({'error': 'Invite not found'}), 404
+    if invite.get('used_at'):
+        return jsonify({'error': 'Invite already used'}), 409
+    try:
+        expired = invite.get('expires_at') and datetime.fromisoformat(invite['expires_at']) < datetime.now()
+    except (TypeError, ValueError):
+        expired = False
+    if expired:
+        return jsonify({'error': 'Invite already expired'}), 409
+    tenant = db.get_tenant_by_id(g.tenant_id)
+    sent = _send_invite_email(invite, tenant)
+    _record_audit_event('invite.resent', 'invite_link', invite_id,
+                        entity_name=invite.get('email'), metadata={'email_sent': sent})
+    return jsonify({'success': True, 'emailSent': sent,
+                    'emailAttempts': int(invite.get('email_attempts') or 0) + 1})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -18612,9 +19343,18 @@ def api_get_project_file(file_id):
     if not stored and getattr(g, 'is_admin', False):
         stored = db.get_project_file_by_id(str(file_id))
         resolve_tenant = (stored or {}).get('tenant_id') or g.tenant_id
+        if stored:
+            # d07: cross-tenant file reads need an active client-approved grant.
+            grant = _require_admin_content_access(
+                resolve_tenant, scope='file', target_id=str(file_id))
+            if isinstance(grant, tuple):
+                return grant
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    return _send_project_file_response(stored, resolve_tenant)
 
+
+def _send_project_file_response(stored, resolve_tenant):
     storage_path = _resolve_project_file_storage_path(stored, resolve_tenant)
     if not storage_path:
         tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(resolve_tenant)))
@@ -18624,7 +19364,7 @@ def api_get_project_file(file_id):
         except ValueError:
             inside = False
         if not inside:
-            print(f"[PROJECT FILE] rejected out-of-tenant path for {file_id}")
+            print(f"[PROJECT FILE] rejected out-of-tenant path for {stored.get('id')}")
             return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
         return jsonify({'success': False, 'error': 'الملف غير متاح على السيرفر'}), 404
 
@@ -18642,6 +19382,29 @@ def api_get_project_file(file_id):
     response.headers['Content-Security-Policy'] = "default-src 'none'; object-src 'none'"
     response.headers['Cache-Control'] = 'private, max-age=300'
     return response
+
+
+@app.route('/api/project-files/<file_id>/signed-url', methods=['POST'])
+@require_permission('create_presentation')
+def api_project_file_signed_url(file_id):
+    """t61: mint a short-lived signed URL for a file inside the caller's tenant."""
+    stored = db.get_project_file(g.tenant_id, str(file_id))
+    if not stored or not stored.get('storage_path'):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    token = auth.create_signed_download_token(str(file_id), g.tenant_id)
+    return jsonify({'success': True, 'url': f'/api/files/signed/{token}'})
+
+
+@app.route('/api/files/signed/<token>', methods=['GET'])
+def api_signed_file_download(token):
+    """Serve a project file by signed token — the token itself is the auth."""
+    claims = auth.verify_signed_download_token(token)
+    if not claims:
+        return jsonify({'success': False, 'error': 'الرابط غير صالح أو منتهي'}), 403
+    stored = db.get_project_file(claims['tenant_id'], claims['file_id'])
+    if not stored or not stored.get('storage_path'):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    return _send_project_file_response(stored, claims['tenant_id'])
 
 
 @app.route('/api/project-files/<file_id>', methods=['DELETE'])
@@ -18665,7 +19428,12 @@ def api_delete_project_file(file_id):
             print(f"[PROJECT FILE] rejected delete outside tenant path for {file_id}")
             return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
     try:
-        if storage_path and os.path.isfile(storage_path):
+        # Copied drafts share the same storage path — the physical file is
+        # removed only when this row is its last reference.
+        shared = db.get_db().execute(
+            'SELECT COUNT(*) AS c FROM project_files WHERE storage_path = ? AND id != ?',
+            (stored.get('storage_path') or '', str(file_id))).fetchone()
+        if storage_path and os.path.isfile(storage_path) and not (shared and shared['c']):
             os.unlink(storage_path)
     except OSError as error:
         print(f"[PROJECT FILE] could not remove logo file {file_id}: {error}")
@@ -19316,6 +20084,28 @@ def api_admin_tenants():
         conflict = _identity_conflict(email, username)
         if conflict:
             return jsonify({'error': conflict}), 409
+        slug = (data.get('slug') or '').strip().lower() or None
+        if slug:
+            verdict = db.validate_company_slug(slug)
+            if 'error' in verdict:
+                return jsonify({'error': 'slug_' + verdict['error']}), 409
+            slug = verdict['slug']
+        package_id = data.get('packageId') or None
+        trial_days = data.get('trialDays')
+        try:
+            trial_days = int(trial_days) if trial_days not in (None, '') else None
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid trial days'}), 400
+        profile = {}
+        for input_key, db_key in _COMPANY_PROFILE_KEY_MAP.items():
+            value = data.get(input_key)
+            if value is None:
+                value = data.get(db_key)
+            if value is not None:
+                profile[db_key] = str(value).strip()
+        contracts_payload = data.get('contracts') or []
+        if not isinstance(contracts_payload, list):
+            contracts_payload = []
         if password_mode == 'manual':
             password_error = _password_validation_error(password)
             if password_error:
@@ -19331,10 +20121,14 @@ def api_admin_tenants():
             tenant_id, user_id = db.create_company_with_admin(
                 company_name, manager_name, email, username, phone,
                 hash_password(password), plan=plan, credit_balance=credit_balance,
-                is_active=is_active, require_password_change=require_password_change
+                is_active=is_active, require_password_change=require_password_change,
+                profile=profile, slug=slug, package_id=package_id,
+                trial_days=trial_days, contracts=contracts_payload,
             )
         except db_driver.IntegrityError:
             return jsonify({'error': 'Email or username already registered'}), 409
+        except ValueError:
+            return jsonify({'error': 'slug_invalid'}), 400
 
         setup_token = db.create_password_setup_token(tenant_id, user_id)
         setup_url = _password_setup_url(setup_token)
@@ -19389,6 +20183,13 @@ def api_admin_update_tenant(tenant_id):
                    'plan', 'credit_balance', 'is_active']:
         if db_key in data:
             company_fields[db_key] = data[db_key]
+    for input_key, db_key in _COMPANY_PROFILE_KEY_MAP.items():
+        if input_key in data:
+            company_fields[db_key] = str(data[input_key] or '').strip()
+        elif db_key in data:
+            company_fields[db_key] = str(data[db_key] or '').strip()
+    if 'trialEndsAt' in data:
+        company_fields['trial_ends_at'] = data['trialEndsAt']
 
     if 'company_name' in company_fields:
         company_fields['company_name'] = str(company_fields['company_name'] or '').strip()
@@ -19434,7 +20235,8 @@ def api_admin_update_tenant(tenant_id):
             return jsonify({'error': conflict}), 409
 
     synced_credit_balance = company_fields.get('credit_balance')
-    for key in ['account_manager_name', 'username', 'phone', 'email', 'is_active']:
+    activation_request = company_fields.pop('is_active', None)
+    for key in ['account_manager_name', 'username', 'phone', 'email']:
         if key in company_fields:
             account_fields[key] = company_fields.pop(key)
     try:
@@ -19442,6 +20244,19 @@ def api_admin_update_tenant(tenant_id):
             db.update_tenant(tenant_id, **company_fields)
         if account_fields:
             db.sync_primary_company_admin(tenant_id, **account_fields)
+        if activation_request is not None:
+            target_active = bool(activation_request)
+            if target_active != bool(tenant.get('is_active')):
+                result = db.set_tenant_active(
+                    tenant_id, target_active, actor_id=_omran_actor_id(),
+                    actor_name=_omran_actor_name(), reason=data.get('deactivatedReason'),
+                )
+                if result.get('error') == 'activation_incomplete':
+                    return jsonify({'error': 'activation_incomplete',
+                                    'missing': result.get('missing') or []}), 409
+                if result.get('error'):
+                    return jsonify({'error': result['error']}), 400
+            db.sync_primary_company_admin(tenant_id, is_active=1 if target_active else 0)
         if 'company_name' in company_fields:
             db.update_branding(tenant_id, company_name=company_fields['company_name'])
         primary_user_id = data.get('primaryUserId')
@@ -20221,6 +21036,9 @@ def api_admin_update_tenant_user(tenant_id, user_id):
     if request.method == 'DELETE':
         if tenant.get('primary_user_id') == user_id:
             return jsonify({'error': 'Primary company admin cannot be deleted'}), 400
+        if db.is_last_active_company_admin(tenant_id, user_id):
+            return jsonify({'error': 'لا يمكن حذف آخر مدير شركة نشط',
+                            'error_code': 'last_company_admin'}), 400
         db.delete_user(user_id)
         return jsonify({'success': True})
     data = request.json or {}
@@ -20228,6 +21046,15 @@ def api_admin_update_tenant_user(tenant_id, user_id):
     for key in ['name', 'role', 'is_active']:
         if key in data:
             updates[key] = data[key]
+    # t21-03: never let an update strip the last active company admin.
+    demotes_admin = ('role' in updates and updates['role'] != 'company_admin'
+                     and user.get('role') == 'company_admin') \
+        or ('is_active' in updates and not updates['is_active']
+            and user.get('role') == 'company_admin')
+    if demotes_admin and db.is_last_active_company_admin(tenant_id, user_id) \
+            and not data.get('isPrimary'):
+        return jsonify({'error': 'لا يمكن تعطيل أو تخفيض آخر مدير شركة نشط',
+                        'error_code': 'last_company_admin'}), 400
     if 'email' in data:
         updates['email'] = str(data.get('email') or '').strip().lower()
         if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', updates['email']):
@@ -20313,6 +21140,146 @@ def _admin_tenant_or_404(tenant_id):
     if not tenant:
         return None, (jsonify({'error': 'Tenant not found'}), 404)
     return tenant, None
+
+
+def _notify_tenant_admins(tenant_id, title, body, entity_type=None, entity_id=None):
+    """In-app + email notification to every active company admin of the tenant."""
+    try:
+        for admin in db.get_users_by_tenant(tenant_id):
+            if admin.get('is_active') and admin.get('role') == 'company_admin':
+                db.create_notification(
+                    tenant_id, title, body, category='general',
+                    user_id=admin['id'], entity_type=entity_type, entity_id=entity_id,
+                    email_to=admin.get('email'))
+        # Tenant-direct logins see notifications with user_id NULL.
+        tenant = db.get_tenant_by_id(tenant_id)
+        db.create_notification(
+            tenant_id, title, body, category='general',
+            user_id=None, entity_type=entity_type, entity_id=entity_id,
+            email_to=(tenant or {}).get('email'))
+    except Exception as exc:
+        print(f'[ACCESS REQUEST] client notification failed: {exc}')
+
+
+def _require_admin_content_access(tenant_id, scope, target_id=None):
+    """d07: a platform admin may read client content only under an active grant.
+
+    Returns the grant row when access is allowed, otherwise a ready
+    (response, status) tuple explaining that a client-approved access request
+    is required. Each allowed access is counted, audited in the *client's*
+    audit log, and the first use notifies the client.
+    """
+    grant = db.active_admin_access_grant(tenant_id, scope=scope, target_id=target_id)
+    if not grant:
+        return (jsonify({
+            'error': 'قراءة محتوى العميل تتطلب طلب وصول معتمدًا من مدير الشركة',
+            'error_code': 'access_grant_required',
+            'tenant_id': tenant_id,
+        }), 403)
+    db.mark_admin_access_used(grant['id'])
+    try:
+        db.record_audit_event(
+            tenant_id=tenant_id,
+            action='admin_content.access',
+            entity_type=scope,
+            entity_id=target_id or tenant_id,
+            user_id=None,
+            user_name=grant.get('requested_by_name') or 'مدير النظام',
+            user_role='platform_admin',
+            entity_name=None,
+            new_value={'grant_id': grant['id'], 'scope': scope, 'target_id': target_id},
+            metadata={'reason': grant.get('reason'), 'access_count': int(grant.get('access_count') or 0) + 1},
+        )
+    except Exception as exc:
+        print(f'[ACCESS GRANT] audit write failed: {exc}')
+    if not grant.get('first_accessed_at'):
+        _notify_tenant_admins(
+            tenant_id, 'وصول إداري إلى محتوى الشركة',
+            'اطلع مدير النظام على محتوى شركتك بموجب طلب الوصول المعتمد: ' + (grant.get('reason') or ''),
+            entity_type='admin_access_request', entity_id=grant['id'])
+    return grant
+
+
+@app.route('/api/admin/tenants/<tenant_id>/access-requests', methods=['POST'])
+@require_admin
+def api_admin_create_access_request(tenant_id):
+    """Ask the client for time-boxed read access to its content (d07)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    data = request.json or {}
+    row = db.create_admin_access_request(
+        g.tenant_id, tenant_id, data.get('scope') or 'tenant',
+        data.get('targetId') or data.get('target_id'),
+        data.get('reason'), int(data.get('hours') or 24),
+        g.tenant.get('company_name') or 'مدير النظام',
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    tenant = db.get_tenant_by_id(tenant_id)
+    _notify_tenant_admins(
+        tenant_id, 'طلب وصول إلى محتوى الشركة',
+        f'طلب مدير النظام وصولًا مؤقتًا إلى محتوى {(tenant or {}).get("company_name") or "شركتك"}'
+        f' — السبب: {row.get("reason")}',
+        entity_type='admin_access_request', entity_id=row['id'])
+    return jsonify({'success': True, 'request': row}), 201
+
+
+@app.route('/api/admin/access-requests', methods=['GET'])
+@require_admin
+def api_admin_list_access_requests():
+    rows = db.list_admin_access_requests(admin_tenant_id=g.tenant_id,
+                                         status=request.args.get('status'))
+    return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/access-requests', methods=['GET'])
+@require_auth
+def api_client_list_access_requests():
+    """The client sees every platform-admin access request targeting it (d07)."""
+    if not _omran_actor_is_admin() and not _omran_can('manage_users'):
+        return _omran_forbidden('عرض طلبات الوصول يتطلب صلاحية إدارة المستخدمين')
+    rows = db.list_admin_access_requests(tenant_id=g.tenant_id,
+                                         status=request.args.get('status'))
+    return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/access-requests/<request_id>/decision', methods=['POST'])
+@require_auth
+def api_client_decide_access_request(request_id):
+    """The client's company admin approves or denies the request (d07)."""
+    if not _omran_actor_is_admin():
+        return _omran_forbidden('قرار طلب الوصول لمدير الشركة فقط')
+    data = request.json or {}
+    row = db.decide_admin_access_request(
+        request_id, g.tenant_id, data.get('decision'),
+        _omran_actor_id(), _omran_actor_name(),
+        note=data.get('note'), hours=data.get('hours'),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('admin_access.' + str(data.get('decision')),
+                        'admin_access_request', request_id,
+                        entity_name=row.get('reason'),
+                        new_value={'status': row.get('status'), 'expires_at': row.get('expires_at')})
+    return jsonify({'success': True, 'request': row})
+
+
+@app.route('/api/access-requests/<request_id>/revoke', methods=['POST'])
+@require_auth
+def api_client_revoke_access_request(request_id):
+    """The client closes an active grant before its expiry."""
+    if not _omran_actor_is_admin():
+        return _omran_forbidden('إلغاء الوصول لمدير الشركة فقط')
+    row = db.revoke_admin_access_request(request_id, g.tenant_id, _omran_actor_name())
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('admin_access.revoked', 'admin_access_request', request_id,
+                        entity_name=row.get('reason'))
+    return jsonify({'success': True, 'request': row})
 
 
 def _admin_tenant_user_or_404(tenant_id, user_id):
@@ -20431,20 +21398,28 @@ def api_admin_tenant_exports(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>/activity', methods=['GET'])
 @require_admin
 def api_admin_tenant_activity(tenant_id):
-    """Recent change history across any tenant (super admin only)."""
+    """Recent change history across any tenant — its diff details carry real
+    content, so an active client-approved access grant is required (d07)."""
     _, error = _admin_tenant_or_404(tenant_id)
     if error:
         return error
+    grant = _require_admin_content_access(tenant_id, scope='tenant')
+    if isinstance(grant, tuple):
+        return grant
     return jsonify({'success': True, 'activity': db.get_tenant_recent_activity(tenant_id)})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/presentations/<pres_id>', methods=['GET'])
 @require_admin
 def api_admin_tenant_presentation(tenant_id, pres_id):
-    """Full read-only presentation of any tenant (super admin preview only)."""
+    """Full read-only presentation of any tenant — requires an active,
+    client-approved access grant (d07)."""
     _, error = _admin_tenant_or_404(tenant_id)
     if error:
         return error
+    grant = _require_admin_content_access(tenant_id, scope='presentation', target_id=pres_id)
+    if isinstance(grant, tuple):
+        return grant
     pres = db.get_presentation(pres_id, tenant_id=tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
@@ -22570,6 +23545,13 @@ def superadmin_app_page(page=''):
 @app.route('/c/<slug>/<path:page>')
 def company_app_page(slug='', page=''):
     """Serve the SPA shell for a company workspace; slug mismatch redirects client-side."""
+    try:
+        _, redirect_slug = db.resolve_company_slug(slug)
+        if redirect_slug:
+            target = '/c/' + redirect_slug + ('/' + page if page else '')
+            return redirect(target, code=301)
+    except Exception:
+        pass
     return index()
 
 
@@ -23047,11 +24029,17 @@ designer_chat_reliability.install(app, globals())
 _OMRAN_NOT_FOUND = {
     'draft_not_found', 'presentation_not_found', 'request_not_found',
     'reservation_not_found', 'ticket_not_found', 'task_not_found', 'approval_not_found',
+    'user_not_found', 'tenant_not_found', 'job_not_found',
 }
 _OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived',
-                   'invalid_transition', 'approval_not_pending', 'request_not_pending', 'reservation_not_reserved'}
+                   'invalid_transition', 'approval_not_pending', 'request_not_pending', 'reservation_not_reserved',
+                   'request_not_active', 'version_pending_exists', 'inputs_changed', 'content_changed',
+                   'unchanged_since_rejection', 'already_approved', 'section_version_expired',
+                   'sections_not_approved', 'archive_required', 'job_not_approved', 'job_not_active'}
 _OMRAN_FORBIDDEN = {'self_approval_not_allowed', 'cancel_not_allowed', 'platform_tenant_recharge_forbidden',
-                    'manual_transition_not_allowed'}
+                    'manual_transition_not_allowed', 'self_approval_blocked_by_policy',
+                    'section_scope_forbidden', 'post_approval_edit_required', 'admin_required',
+                    'final_approval_required'}
 
 # Arabic-first messages: these strings land directly in UI toasts.
 _OMRAN_ERROR_MESSAGES_AR = {
@@ -23096,6 +24084,29 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'note_required': 'سبب الرفض إلزامي',
     'lifecycle_transition_failed': 'تعذر تحديث حالة المشروع المرتبطة بالاعتماد',
     'missing_arguments': 'بيانات ناقصة لإتمام الإجراء',
+    'user_not_found': 'المستخدم غير موجود',
+    'tenant_not_found': 'الشركة غير موجودة',
+    'invalid_scope': 'نطاق الوصول غير معروف',
+    'request_not_active': 'لا يوجد وصول نشط لإلغائه',
+    'invalid_policy_value': 'قيمة السياسة غير معروفة',
+    'no_policy_updates': 'لا توجد سياسات لتحديثها',
+    'self_approval_blocked_by_policy': 'سياسة الشركة تمنع المحرر من اعتماد قسمه بنفسه',
+    'version_pending_exists': 'يوجد إصدار قيد المراجعة لهذا القسم بالفعل',
+    'inputs_changed': 'مدخلات المشروع تغيّرت منذ طلب اعتماد التوليد — أعد الطلب',
+    'content_changed': 'محتوى الملف تغيّر بعد إرساله للاعتماد — أعد الإرسال',
+    'unchanged_since_rejection': 'الملف مرفوض ولم يتغير محتواه — عدّل الملف ثم أعد الإرسال',
+    'already_approved': 'هذا الملف معتمد بالفعل ولم يتغير محتواه',
+    'section_version_expired': 'انتهت صلاحية اعتماد بعض الأقسام — أعد إرسالها للاعتماد',
+    'sections_not_approved': 'يجب اعتماد جميع أقسام المشروع قبل هذه الخطوة',
+    'archive_required': 'لهذا السجل مسار اعتماد محفوظ — استخدم الأرشفة بدل الحذف',
+    'job_not_found': 'مهمة التوليد غير موجودة',
+    'job_not_approved': 'مهمة التوليد تتطلب اعتمادًا ساريًا',
+    'job_not_active': 'المهمة ليست قيد التنفيذ',
+    'invalid_job_status': 'حالة المهمة غير معروفة',
+    'section_scope_forbidden': 'هذا القسم خارج نطاق اعتمادك',
+    'post_approval_edit_required': 'تعديل ملف معتمد يتطلب صلاحية التعديل بعد الاعتماد وسببًا مسجلًا',
+    'admin_required': 'هذا الإجراء يتطلب صلاحية مدير الشركة',
+    'final_approval_required': 'الملف غير معتمد نهائيًا — التنزيل الرسمي بعد الاعتماد فقط',
 }
 
 
@@ -23108,7 +24119,8 @@ def _omran_error(result):
     payload = {'error': default_message, 'error_code': code}
     # Machine-readable companions: the client reuses a pending approval or shows
     # which lifecycle state refused the move.
-    for extra_key in ('approval_id', 'current_status', 'target_status', 'status'):
+    for extra_key in ('approval_id', 'current_status', 'target_status', 'status',
+                      'sections', 'version_id', 'version_number', 'job_id'):
         if result.get(extra_key):
             payload[extra_key] = result[extra_key]
     if code in _OMRAN_NOT_FOUND:
@@ -23125,11 +24137,11 @@ def _omran_error(result):
 
 
 def _omran_actor_id():
-    return g.user_id or f'tenant-admin:{g.tenant_id}'
+    return getattr(g, 'user_id', None) or f'tenant-admin:{g.tenant_id}'
 
 
 def _omran_actor_name():
-    return g.user_name or 'Company administrator'
+    return getattr(g, 'user_name', None) or 'Company administrator'
 
 
 def _omran_actor_is_admin():
@@ -23165,17 +24177,51 @@ def api_create_generation_approval():
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if not draft:
         return jsonify({'error': 'No project draft found', 'error_code': 'draft_not_found'}), 404
+    # t20: a scope-limited user may only request generation for drafts in scope.
+    if not _omran_actor_is_admin() and not db.user_may_access_draft(g.user_id, draft):
+        return jsonify({'error': 'No project draft found', 'error_code': 'draft_not_found'}), 404
     estimate = db.estimate_generation_cost(
         g.tenant_id, draft_id=draft_id,
         slides_count=int(data.get('slidesCount') or draft.get('slide_count') or 0),
     )
+    # t14-04: freeze the priced inputs — the decision later verifies the draft
+    # still matches this snapshot, and the job record carries it.
+    overview = db.section_versions_overview(g.tenant_id, draft_id)
+    input_snapshot = {
+        'draft_hash': db.draft_generation_input_hash(draft.get('draft_data') or {}),
+        'section_hashes': {key: meta.get('snapshot_hash') for key, meta in overview.items()},
+        'captured_at': datetime.now().isoformat(),
+        'slides_count': estimate['slides_count'],
+        'units': estimate['units'],
+        'unit_prices': estimate['unit_prices'],
+        'estimated_cost_usd': estimate['estimated_cost_usd'],
+        'estimated_points': estimate['estimated_points'],
+    }
     approval = db.create_generation_approval(
         g.tenant_id, draft_id, estimate, _omran_actor_id(), _omran_actor_name(),
-        presentation_id=data.get('presentationId'),
+        presentation_id=data.get('presentationId'), input_snapshot=input_snapshot,
     )
     failure = _omran_error(approval)
     if failure:
         return failure
+    try:
+        # The request opens an approver task and pings every generation
+        # approver so the gate does not wait on somebody noticing.
+        db.create_approval_task(
+            g.tenant_id, 'generation_approval',
+            f'اعتماد توليد «{draft.get("title") or "مشروع"}»',
+            entity_type='generation_approval', entity_id=approval['id'],
+            payload={'draft_id': draft_id,
+                     'estimated_points': approval.get('estimated_points')},
+            due_hours=48)
+        for approver in db.get_users_with_permission(g.tenant_id, 'approve_generation'):
+            db.create_notification(
+                g.tenant_id, 'طلب اعتماد توليد جديد',
+                f'«{draft.get("title") or "مشروع"}» بانتظار قرار اعتماد التوليد',
+                category='generation_approval', user_id=approver['id'],
+                entity_type='generation_approval', entity_id=approval['id'])
+    except Exception:
+        pass
     _record_audit_event('generation_approval.requested', 'generation_approval', approval['id'],
                         entity_name=draft.get('title'),
                         new_value=approval['status'],
@@ -23220,6 +24266,24 @@ def api_decide_generation_approval(approval_id):
     failure = _omran_error(result)
     if failure:
         return failure
+    try:
+        # The decision closes the approver task and tells the requester.
+        db.close_approval_tasks_for_entity(
+            g.tenant_id, 'generation_approval', approval_id,
+            closed_by_name=_omran_actor_name())
+        requester = str(result.get('requested_by') or '')
+        if requester and requester != str(_omran_actor_id()):
+            message = {'approved': 'اعتُمد طلب التوليد',
+                       'rejected': 'رُفض طلب التوليد',
+                       'cancelled': 'أُلغي طلب التوليد'}.get(decision)
+            if message:
+                db.create_notification(
+                    g.tenant_id, message, str(data.get('note') or '').strip() or None,
+                    category='generation_approval',
+                    user_id=None if requester.startswith('tenant-admin:') else requester,
+                    entity_type='generation_approval', entity_id=approval_id)
+    except Exception:
+        pass
     _record_audit_event(f'generation_approval.{decision}', 'generation_approval', approval_id,
                         old_value='pending', new_value=decision,
                         metadata={'note': data.get('note'), 'reservation_id': result.get('reservation_id')})
@@ -23255,6 +24319,128 @@ def api_settle_generation_approval(approval_id):
     return jsonify({'success': True, 'result': result})
 
 
+# ── t14-05: background generation jobs — the run is a record, not a request ──
+
+@app.route('/api/generation-approvals/<approval_id>/jobs', methods=['POST'])
+@require_auth
+def api_create_generation_job(approval_id):
+    """Register the generation run for an approved gate decision.
+
+    Only the requester or a generation approver may start the job, and the
+    approval must already be approved. The job carries the input snapshot the
+    approver priced, so the run is always attributable to what was decided.
+    """
+    approval = db.get_generation_approval(g.tenant_id, approval_id)
+    if not approval:
+        return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
+    if approval.get('status') != 'approved':
+        return jsonify({'error': 'مهمة التوليد تتطلب اعتمادًا ساريًا',
+                        'error_code': 'job_not_approved'}), 409
+    if str(approval.get('requested_by')) != str(_omran_actor_id()) \
+            and not _omran_can('approve_generation'):
+        return _omran_forbidden('مهمة التوليد تخص مقدم الطلب أو معتمد التوليد')
+    data = request.json or {}
+    snapshot = db._json_object(approval.get('input_snapshot'))
+    job = db.create_generation_job(
+        g.tenant_id, approval_id=approval_id, draft_id=approval.get('draft_id'),
+        presentation_id=approval.get('presentation_id'),
+        model=data.get('model'), input_snapshot=snapshot or None,
+        estimated_cost_usd=approval.get('estimated_cost_usd'),
+        slides_total=int(data.get('slidesTotal') or approval.get('slides_count') or 0),
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+        idempotency_key=data.get('idempotencyKey') or request.headers.get('X-Idempotency-Key'),
+        correlation_id=data.get('correlationId'),
+    )
+    try:
+        conn = db.get_db()
+        conn.execute('UPDATE generation_approvals SET job_id = ? WHERE id = ?', (job['id'], approval_id))
+        conn.commit()
+    except Exception:
+        pass
+    return jsonify({'success': True, 'job': job})
+
+
+@app.route('/api/generation-jobs', methods=['GET'])
+@require_auth
+def api_list_generation_jobs():
+    jobs = db.list_generation_jobs(
+        g.tenant_id, status=request.args.get('status'),
+        limit=request.args.get('limit') or 50)
+    draft_id = request.args.get('draftId')
+    if draft_id:
+        jobs = [job for job in jobs if job.get('draft_id') == draft_id]
+    return jsonify({'success': True, 'jobs': jobs})
+
+
+@app.route('/api/generation-jobs/<job_id>', methods=['GET'])
+@require_auth
+def api_get_generation_job(job_id):
+    job = db.get_generation_job(job_id, tenant_id=g.tenant_id)
+    if not job:
+        return jsonify({'error': 'مهمة التوليد غير موجودة', 'error_code': 'job_not_found'}), 404
+    return jsonify({'success': True, 'job': job})
+
+
+def _generation_job_actor_allowed(job):
+    """The run belongs to its creator, a generation approver, or an admin."""
+    if str(job.get('created_by')) == str(_omran_actor_id()):
+        return True
+    return _omran_can('approve_generation')
+
+
+@app.route('/api/generation-jobs/<job_id>/heartbeat', methods=['POST'])
+@require_auth
+def api_generation_job_heartbeat(job_id):
+    """Progress ping from the running job — also the stale-sweep's clock."""
+    job = db.get_generation_job(job_id, tenant_id=g.tenant_id)
+    if not job:
+        return jsonify({'error': 'مهمة التوليد غير موجودة', 'error_code': 'job_not_found'}), 404
+    if not _generation_job_actor_allowed(job):
+        return _omran_forbidden('هذه المهمة تخص مشغّلها أو معتمد التوليد')
+    if job.get('status') not in ('queued', 'running'):
+        return jsonify({'error': 'المهمة ليست قيد التنفيذ', 'error_code': 'job_not_active'}), 409
+    data = request.json or {}
+    updated = db.update_generation_job(
+        job_id, status='running' if job.get('status') == 'queued' else None,
+        progress=data.get('progress'), slides_done=data.get('slidesDone'),
+        slides_total=data.get('slidesTotal'))
+    return jsonify({'success': True, 'job': updated})
+
+
+@app.route('/api/generation-jobs/<job_id>/finish', methods=['POST'])
+@require_auth
+def api_finish_generation_job(job_id):
+    """Close the run and settle its reservation server-side (t14-06).
+
+    'completed' consumes the hold; 'failed'/'cancelled' release it — so a
+    finished job can never strand the escrow even when the client dies.
+    """
+    job = db.get_generation_job(job_id, tenant_id=g.tenant_id)
+    if not job:
+        return jsonify({'error': 'مهمة التوليد غير موجودة', 'error_code': 'job_not_found'}), 404
+    if not _generation_job_actor_allowed(job):
+        return _omran_forbidden('هذه المهمة تخص مشغّلها أو معتمد التوليد')
+    data = request.json or {}
+    status = data.get('status')
+    if status not in ('completed', 'failed', 'cancelled'):
+        return jsonify({'error': 'حالة المهمة غير معروفة', 'error_code': 'invalid_job_status'}), 400
+    if job.get('status') not in ('queued', 'running'):
+        return jsonify({'error': 'المهمة ليست قيد التنفيذ', 'error_code': 'job_not_active'}), 409
+    updated = db.update_generation_job(
+        job_id, status=status, progress=data.get('progress'),
+        slides_done=data.get('slidesDone'), actual_cost_usd=data.get('actualCostUsd'),
+        error=data.get('error'))
+    if job.get('approval_id'):
+        try:
+            db.settle_generation_approval(
+                g.tenant_id, job['approval_id'], job_id,
+                consumed=(status == 'completed'), settled_by=_omran_actor_id(),
+                note=str(data.get('note') or data.get('error') or '').strip() or None)
+        except Exception:
+            pass
+    return jsonify({'success': True, 'job': updated})
+
+
 @app.route('/api/points/reservations', methods=['GET'])
 @require_auth
 def api_list_point_reservations():
@@ -23274,6 +24460,21 @@ def api_request_final_file_approval(presentation_id):
     failure = _omran_error(approval)
     if failure:
         return failure
+    try:
+        presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+        title = (presentation or {}).get('title') or 'عرض'
+        db.create_approval_task(
+            g.tenant_id, 'final_approval', f'اعتماد الملف النهائي «{title}»',
+            entity_type='final_file_approval', entity_id=approval['id'],
+            payload={'presentation_id': presentation_id}, due_hours=48)
+        for approver in db.get_users_with_permission(g.tenant_id, 'approve_final_file'):
+            db.create_notification(
+                g.tenant_id, 'طلب اعتماد ملف نهائي',
+                f'«{title}» بانتظار قرار اعتماد الملف النهائي',
+                category='final_approval', user_id=approver['id'],
+                entity_type='final_file_approval', entity_id=approval['id'])
+    except Exception:
+        pass
     _record_audit_event('final_file_approval.requested', 'final_file_approval', approval['id'],
                         new_value='pending', metadata={'presentation_id': presentation_id})
     return jsonify({'success': True, 'approval': approval})
@@ -23299,11 +24500,26 @@ def api_decide_final_file_approval(approval_id):
         return _omran_forbidden('اعتماد أو رفض الملف النهائي يتطلب صلاحية معتمد الملف')
     result = db.decide_final_file_approval(
         g.tenant_id, approval_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
-        note=data.get('note'), allow_self=_omran_actor_is_admin(),
+        note=data.get('note'), allow_self=_omran_actor_is_admin(), app_root=app.root_path,
     )
     failure = _omran_error(result)
     if failure:
         return failure
+    try:
+        db.close_approval_tasks_for_entity(
+            g.tenant_id, 'final_file_approval', approval_id,
+            closed_by_name=_omran_actor_name())
+        requester = str(result.get('requested_by') or '')
+        if requester and requester != str(_omran_actor_id()):
+            message = 'اعتُمد الملف النهائي' if data.get('decision') == 'approved' \
+                else 'أُعيد الملف النهائي للتعديل'
+            db.create_notification(
+                g.tenant_id, message, str(data.get('note') or '').strip() or None,
+                category='final_approval',
+                user_id=None if requester.startswith('tenant-admin:') else requester,
+                entity_type='final_file_approval', entity_id=approval_id)
+    except Exception:
+        pass
     _record_audit_event(f"final_file_approval.{data.get('decision')}", 'final_file_approval',
                         approval_id, new_value=result.get('status'),
                         metadata={'note': data.get('note'), 'stamped_file': result.get('stamped_file')})
@@ -23319,6 +24535,7 @@ def api_record_download():
         draft_id=data.get('draftId'), format=data.get('format') or 'pdf',
         version_label=data.get('versionLabel'),
         generated_by=_omran_actor_id(), generated_by_name=_omran_actor_name(),
+        export_id=data.get('exportId'),
     )
     failure = _omran_error(row)
     if failure:
@@ -23349,7 +24566,7 @@ def api_mark_download_delivered(download_id):
 # ── t17: copy a proposal under a new mandatory unique name ──────────────────
 
 @app.route('/api/project-draft/copy', methods=['POST'])
-@require_auth
+@require_permission('copy_presentation')
 def api_copy_project_draft():
     data = request.json or {}
     result = db.copy_project_draft(
@@ -23395,6 +24612,17 @@ def api_restore_presentation(presentation_id):
     _record_audit_event('presentation.restored', 'presentation', presentation_id,
                         old_value='archived', new_value='draft')
     return jsonify({'success': True, 'presentation': result})
+
+
+@app.route('/api/admin/retention/purge', methods=['POST'])
+@require_admin
+def api_purge_expired_archives():
+    """t18: the only delete path left — a platform sweep that removes archives
+    older than the configured retention window. Never a user action."""
+    result = db.purge_expired_archives()
+    _record_audit_event('retention.purged', 'retention', 'archives',
+                        new_value=result)
+    return jsonify({'success': True, 'purged': result})
 
 
 # ── t40: notifications ───────────────────────────────────────────────────────
@@ -23644,9 +24872,32 @@ def api_tenant_users_report():
 
 
 @app.route('/api/approvals/sod-matrix', methods=['GET'])
-@require_permission('approvals')
+@require_auth
 def api_sod_matrix():
+    if not (_omran_can('approvals') or _omran_can('manage_users')):
+        return _omran_forbidden('عرض مصفوفة فصل المهام يتطلب صلاحية الاعتمادات أو إدارة المستخدمين')
     return jsonify({'success': True, 'matrix': db.separation_of_duties_matrix(g.tenant_id)})
+
+
+@app.route('/api/policies', methods=['GET'])
+@require_auth
+def api_get_policies():
+    """Tenant policy settings (d01 and siblings); read by approver tooling."""
+    if not (_omran_can('approvals') or _omran_can('manage_users') or _omran_can('company_settings')):
+        return _omran_forbidden('عرض سياسات الشركة يتطلب صلاحية مناسبة')
+    return jsonify({'success': True, 'policies': db.get_tenant_policies(g.tenant_id)})
+
+
+@app.route('/api/policies', methods=['PUT'])
+@require_permission('company_settings')
+def api_update_policies():
+    """Update tenant policies; only known keys with allowed values apply."""
+    result = db.set_tenant_policies(g.tenant_id, request.json or {})
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('policies.updated', 'tenant', g.tenant_id, new_value=result)
+    return jsonify({'success': True, 'policies': result})
 
 
 # ── t30: package purchase (recharge) requests ────────────────────────────────
@@ -23658,6 +24909,8 @@ def api_create_recharge_request():
     # itself — that would let the super-admin mint wallet credit self-approved.
     if getattr(g, 'is_admin', False):
         return _omran_forbidden('طلبات الشحن تنشأ من حسابات الشركات فقط')
+    if not _omran_can('billing'):
+        return _omran_forbidden('رفع طلبات الشحن يتطلب صلاحية الفوترة')
     data = request.json or {}
     row = db.create_recharge_request(
         g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
@@ -23888,6 +25141,416 @@ def api_upsert_file_type(key):
         return failure
     _record_audit_event('file_type.updated', 'file_type_registry', key, entity_name=row.get('label_ar'))
     return jsonify({'success': True, 'fileType': row})
+
+
+# ── Mission 5: company file, slug, activation, subscriptions ────────────────
+
+_COMPANY_PROFILE_KEY_MAP = {
+    'legalName': 'legal_name', 'commercialName': 'commercial_name',
+    'taxNumber': 'tax_number', 'crNumber': 'cr_number', 'country': 'country',
+    'region': 'region', 'address': 'address', 'contactTitle': 'contact_title',
+}
+
+
+@app.route('/api/admin/tenants/<tenant_id>/slug', methods=['PUT'])
+@require_admin
+def api_admin_set_tenant_slug(tenant_id):
+    """t51: set the company's URL slug; locked once the company is active."""
+    tenant, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    data = request.json or {}
+    allow_locked = bool(data.get('allowAfterActivation'))
+    result = db.set_tenant_slug(
+        tenant_id, data.get('slug'), actor_id=_omran_actor_id(),
+        actor_name=_omran_actor_name(), allow_after_activation=allow_locked,
+    )
+    if result.get('error') == 'slug_locked':
+        return jsonify({'error': 'slug_locked',
+                        'message': 'الشركة نشطة — تغيير الرابط يتطلب تأكيدًا'}), 409
+    if result.get('error') in ('invalid', 'reserved', 'taken'):
+        return jsonify({'error': result['error']}), 409 if result['error'] == 'taken' else 400
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('tenant.slug_changed', 'tenant', tenant_id,
+                        entity_name=tenant.get('company_name'),
+                        old_value=result.get('previous'), new_value=result.get('slug'))
+    return jsonify({'success': True, 'slug': result['slug'],
+                    'redirectCreated': bool(result.get('redirect_created'))})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/activation', methods=['GET'])
+@require_admin
+def api_admin_tenant_activation_checklist(tenant_id):
+    """t50: what is still missing before this company may go live."""
+    tenant, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    checklist = db.tenant_activation_checklist(tenant)
+    return jsonify({'success': True, 'isActive': bool(tenant.get('is_active')),
+                    'activatedAt': tenant.get('activated_at'),
+                    'activatedByName': tenant.get('activated_by_name'),
+                    'checklist': checklist})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/activation', methods=['POST'])
+@require_admin
+def api_admin_set_tenant_activation(tenant_id):
+    """t50: activate or suspend a company; activation passes through the gate."""
+    tenant, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    data = request.json or {}
+    is_active = bool(data.get('isActive', True))
+    if is_active and tenant.get('is_active'):
+        return jsonify({'success': True, 'tenant': _company_payload(tenant), 'unchanged': True})
+    if not is_active and not tenant.get('is_active'):
+        return jsonify({'success': True, 'tenant': _company_payload(tenant), 'unchanged': True})
+    result = db.set_tenant_active(
+        tenant_id, is_active, actor_id=_omran_actor_id(),
+        actor_name=_omran_actor_name(), reason=data.get('reason'),
+    )
+    if result.get('error') == 'activation_incomplete':
+        return jsonify({'error': 'activation_incomplete',
+                        'missing': result.get('missing') or []}), 409
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('tenant.activated' if is_active else 'tenant.deactivated',
+                        'tenant', tenant_id, entity_name=tenant.get('company_name'),
+                        new_value={'reason': data.get('reason')} if not is_active else None)
+    return jsonify({'success': True, 'tenant': _company_payload(result)})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/contracts', methods=['POST'])
+@require_admin
+def api_admin_create_tenant_contract(tenant_id):
+    """t50/t52: register a contract or NDA on the company file."""
+    tenant, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    data = request.json or {}
+    row = db.create_tenant_contract(
+        tenant_id, data.get('title'), kind=data.get('kind') or 'contract',
+        file_id=data.get('fileId'), starts_at=data.get('startsAt'),
+        expires_at=data.get('expiresAt'), notes=data.get('notes'),
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+        signature_status=data.get('signatureStatus') or 'unsigned',
+        retention_until=data.get('retentionUntil'),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('contract.created', 'tenant_contract', row['id'],
+                        entity_name=row['title'])
+    return jsonify({'success': True, 'contract': row}), 201
+
+
+@app.route('/api/admin/tenants/<tenant_id>/contracts/<contract_id>/versions', methods=['GET', 'POST'])
+@require_admin
+def api_admin_contract_versions(tenant_id, contract_id):
+    """t52/t60: contract version list and new-version upload."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    if request.method == 'GET':
+        return jsonify({'success': True,
+                        'versions': db.list_contract_versions(contract_id, tenant_id=tenant_id)})
+    data = request.json or {}
+    row = db.add_contract_version(
+        tenant_id, contract_id, file_id=data.get('fileId'),
+        signature_status=data.get('signatureStatus'), starts_at=data.get('startsAt'),
+        expires_at=data.get('expiresAt'), retention_until=data.get('retentionUntil'),
+        notes=data.get('notes'), created_by=_omran_actor_id(),
+        created_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('contract.version_added', 'tenant_contract', contract_id,
+                        new_value=row.get('version'))
+    return jsonify({'success': True, 'contract': row}), 201
+
+
+@app.route('/api/admin/tenants/<tenant_id>/subscription', methods=['GET', 'POST'])
+@require_admin
+def api_admin_tenant_subscription(tenant_id):
+    """t60: subscription window per company (one active at a time)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    if request.method == 'GET':
+        return jsonify({'success': True,
+                        'current': db.current_subscription(tenant_id),
+                        'history': db.list_subscriptions(tenant_id)})
+    data = request.json or {}
+    row = db.create_subscription(
+        tenant_id, package_id=data.get('packageId'),
+        package_version_id=data.get('packageVersionId'),
+        starts_at=data.get('startsAt'), ends_at=data.get('endsAt'),
+        trial_ends_at=data.get('trialEndsAt'),
+        status=data.get('status') or 'active',
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+    )
+    _record_audit_event('tenant.subscription_changed', 'tenant', tenant_id,
+                        new_value=row.get('package_id'))
+    return jsonify({'success': True, 'subscription': row}), 201
+
+
+@app.route('/api/admin/packages/<package_id>/versions', methods=['GET', 'POST'])
+@require_admin
+def api_admin_package_versions(package_id):
+    """t60: immutable package versions — pricing changes never rewrite history."""
+    if request.method == 'GET':
+        return jsonify({'success': True,
+                        'versions': db.list_package_versions(package_id)})
+    data = request.json or {}
+    row = db.create_package_version(
+        package_id, name=data.get('name'), credit_usd=data.get('creditUsd'),
+        price_sar=data.get('priceSar'), duration_days=data.get('durationDays'),
+        limits=data.get('limits'), features=data.get('features'),
+        actor_id=_omran_actor_id(), actor_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('package.version_created', 'billing_package', package_id,
+                        new_value=row.get('version'))
+    return jsonify({'success': True, 'version': row}), 201
+
+
+# ── Mission 5: registries, flags, SLA policies, queue, outbox, backups ──────
+
+@app.route('/api/admin/study-types', methods=['GET', 'POST'])
+@require_admin
+def api_admin_study_types():
+    """t62: versioned study-type registry."""
+    if request.method == 'GET':
+        active_only = request.args.get('all') != '1'
+        return jsonify({'success': True,
+                        'studyTypes': db.list_study_types(active_only=active_only)})
+    data = request.json or {}
+    row = db.register_study_type(
+        data.get('key'), data.get('nameAr'), name_en=data.get('nameEn'),
+        definition=data.get('definition'),
+        supersedes_version=data.get('supersedesVersion'),
+        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('study_type.registered', 'study_type', row['key'],
+                        new_value=row.get('version'))
+    return jsonify({'success': True, 'studyType': row}), 201
+
+
+@app.route('/api/admin/generators', methods=['GET', 'POST'])
+@require_admin
+def api_admin_generators():
+    """t62: versioned generator registry (templates, models, processors)."""
+    if request.method == 'GET':
+        return jsonify({'success': True,
+                        'generators': db.list_generators(kind=request.args.get('kind'))})
+    data = request.json or {}
+    row = db.register_generator(
+        data.get('kind'), data.get('key'), config=data.get('config'),
+        label_ar=data.get('labelAr'), label_en=data.get('labelEn'),
+        supersedes_version=data.get('supersedesVersion'),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('generator.registered', 'generator_registry',
+                        f"{row['kind']}:{row['key']}", new_value=row.get('version'))
+    return jsonify({'success': True, 'generator': row}), 201
+
+
+@app.route('/api/admin/feature-flags', methods=['GET', 'PUT'])
+@require_admin
+def api_admin_feature_flags():
+    """t62: platform and per-company feature flags."""
+    if request.method == 'GET':
+        return jsonify({'success': True,
+                        'flags': db.list_feature_flags(tenant_id=request.args.get('tenantId'))})
+    data = request.json or {}
+    row = db.set_feature_flag(
+        data.get('flag'), bool(data.get('enabled')),
+        tenant_id=data.get('tenantId'),
+        actor_id=_omran_actor_id(), actor_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('feature_flag.changed', 'feature_flag', row['flag_key'],
+                        new_value=row.get('enabled'))
+    return jsonify({'success': True, 'flag': row})
+
+
+@app.route('/api/admin/feature-flags/<flag_key>/history', methods=['GET'])
+@require_admin
+def api_admin_feature_flag_history(flag_key):
+    return jsonify({'success': True, 'history': db.list_feature_flag_history(
+        flag_key, tenant_id=request.args.get('tenantId'))})
+
+
+@app.route('/api/admin/feature-flags/<flag_key>/rollback', methods=['POST'])
+@require_admin
+def api_admin_feature_flag_rollback(flag_key):
+    data = request.json or {}
+    row = db.rollback_feature_flag(
+        flag_key, tenant_id=data.get('tenantId'), history_id=data.get('historyId'),
+        actor_id=_omran_actor_id(), actor_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('feature_flag.rolled_back', 'feature_flag', flag_key,
+                        new_value=row.get('enabled'))
+    return jsonify({'success': True, 'flag': row})
+
+
+@app.route('/api/admin/support/sla-policies', methods=['GET', 'PUT'])
+@require_admin
+def api_admin_sla_policies():
+    """d08: response/resolve targets per package and priority."""
+    if request.method == 'GET':
+        return jsonify({'success': True, 'policies': db.list_sla_policies()})
+    data = request.json or {}
+    row = db.upsert_sla_policy(
+        data.get('priority'), data.get('firstResponseHours'), data.get('resolveHours'),
+        package_id=data.get('packageId'), updated_by_name=_omran_actor_name(),
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('sla_policy.updated', 'support_sla_policy', row['id'],
+                        new_value={'priority': row['priority'],
+                                   'first_response_hours': row['first_response_hours'],
+                                   'resolve_hours': row['resolve_hours']})
+    return jsonify({'success': True, 'policy': row})
+
+
+@app.route('/api/admin/jobs', methods=['GET'])
+@require_admin
+def api_admin_jobs():
+    """t61: inspect the persistent background queue."""
+    return jsonify({'success': True,
+                    'jobs': db.list_jobs(status=request.args.get('status'),
+                                         job_type=request.args.get('type')),
+                    'stats': db.job_queue_stats()})
+
+
+@app.route('/api/admin/jobs/requeue', methods=['POST'])
+@require_admin
+def api_admin_jobs_requeue():
+    data = request.json or {}
+    count = db.requeue_dead_jobs(job_type=data.get('type'))
+    _record_audit_event('job_queue.requeue', 'job_queue', data.get('type'),
+                        new_value=count)
+    return jsonify({'success': True, 'requeued': count})
+
+
+@app.route('/api/admin/email-outbox', methods=['GET'])
+@require_admin
+def api_admin_email_outbox():
+    """t61/t41: outbound mail queue state."""
+    return jsonify({'success': True,
+                    'emails': db.list_email_outbox(status=request.args.get('status')),
+                    'stats': db.email_outbox_stats()})
+
+
+@app.route('/api/admin/backups', methods=['GET', 'POST'])
+@require_admin
+def api_admin_backups():
+    """t63: backup registry — the run script POSTs each completed backup."""
+    if request.method == 'GET':
+        return jsonify({'success': True, 'backups': db.list_backups(),
+                        'latest': db.latest_successful_backup(),
+                        'rpoHours': db.RPO_TARGET_HOURS, 'rtoHours': db.RTO_TARGET_HOURS})
+    data = request.json or {}
+    row = db.record_backup(
+        kind=data.get('kind') or 'full', path=data.get('path'),
+        size_bytes=data.get('sizeBytes'), sha256=data.get('sha256'),
+        encrypted=bool(data.get('encrypted')), note=data.get('note'),
+    )
+    _record_audit_event('backup.recorded', 'backup', row['id'],
+                        new_value={'kind': row['kind'], 'size_bytes': row.get('size_bytes')})
+    return jsonify({'success': True, 'backup': row}), 201
+
+
+@app.route('/api/admin/backups/<backup_id>/restore-tested', methods=['POST'])
+@require_admin
+def api_admin_backup_restore_tested(backup_id):
+    row = db.mark_backup_restore_tested(backup_id, note=(request.json or {}).get('note'))
+    if not row:
+        return jsonify({'error': 'Backup not found'}), 404
+    _record_audit_event('backup.restore_tested', 'backup', backup_id)
+    return jsonify({'success': True, 'backup': row})
+
+
+# ── t55: dashboards and exportable reports ───────────────────────────────────
+
+@app.route('/api/dashboard', methods=['GET'])
+@require_auth
+def api_client_dashboard():
+    """Client home numbers: lifecycle buckets, open work, month spend."""
+    return jsonify({'success': True, 'dashboard': db.client_dashboard(g.tenant_id)})
+
+
+@app.route('/api/company/dashboard', methods=['GET'])
+@require_permission('company_settings')
+def api_company_dashboard():
+    """Company super-admin view: overdue approvals, speed, spend split."""
+    return jsonify({'success': True, 'dashboard': db.company_admin_dashboard(g.tenant_id)})
+
+
+_ADMIN_REPORTS = {
+    'ledger': db.export_ledger_csv,
+    'approvals': db.export_approvals_csv,
+    'downloads': db.export_downloads_csv,
+    'tickets': db.export_tickets_csv,
+    'user-activity': db.export_user_activity_csv,
+    'files': db.export_files_csv,
+}
+
+
+@app.route('/api/admin/reports/<report_name>', methods=['GET'])
+@require_admin
+def api_admin_export_report(report_name):
+    """t55: CSV export of the operational/financial registers."""
+    exporter = _ADMIN_REPORTS.get(report_name)
+    if not exporter:
+        return jsonify({'error': 'Unknown report'}), 404
+    body = exporter(
+        tenant_id=request.args.get('tenantId'),
+        from_date=request.args.get('from'),
+        to_date=request.args.get('to'),
+    )
+    response = app.make_response(body)
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    response.headers['Content-Disposition'] = \
+        f'attachment; filename="{report_name}-report.csv"'
+    return response
+
+
+@app.route('/api/company/reports/<report_name>', methods=['GET'])
+@require_permission('company_settings')
+def api_company_export_report(report_name):
+    """t55: the company admin exports only their own registers."""
+    if report_name not in ('ledger', 'approvals', 'downloads', 'tickets', 'files'):
+        return jsonify({'error': 'Unknown report'}), 404
+    exporter = _ADMIN_REPORTS[report_name]
+    body = exporter(
+        tenant_id=g.tenant_id,
+        from_date=request.args.get('from'),
+        to_date=request.args.get('to'),
+    )
+    response = app.make_response(body)
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    response.headers['Content-Disposition'] = \
+        f'attachment; filename="{report_name}-report.csv"'
+    return response
 
 
 

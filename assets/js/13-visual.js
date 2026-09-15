@@ -470,6 +470,33 @@
       });
     }
 
+    // t14-05: the run is a generation_jobs row — heartbeat carries progress and
+    // finish settles the reservation server-side, so a closed tab cannot strand
+    // the hold. Without a registered job the direct settle path still applies.
+    async function settleGenerationRun(consumed, note) {
+      const jobId = window.currentGenerationJobId;
+      const approvalId = window.currentGenerationApprovalId;
+      window.currentGenerationJobId = null;
+      window.currentGenerationApprovalId = null;
+      if (jobId) {
+        try {
+          await api('POST', '/api/generation-jobs/' + encodeURIComponent(jobId) + '/finish', {
+            status: consumed ? 'completed' : 'failed',
+            progress: consumed ? 100 : undefined,
+            slidesDone: (tenantSlidesData || []).length,
+            note: note || ''
+          });
+          return;
+        } catch (e) { /* fall through to the direct settle */ }
+      }
+      if (approvalId) {
+        api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/settle', {
+          consumed: consumed,
+          note: note || ''
+        }).catch(err => console.warn('Settlement error:', err));
+      }
+    }
+
     async function generateTenantSlides(options = {}) {
       if (isGeneratingTenantSlides) return;
       if (!tenantSlidePlan || !tenantProjectData) return;
@@ -613,6 +640,16 @@
         // order: tenantSlidesData stays dense, so checkpoints, resume, ordering and
         // the final validation below work exactly as they did for the sequential loop.
         const SLIDE_GENERATION_CONCURRENCY = 3;
+        if (window.currentGenerationApprovalId && !window.currentGenerationJobId) {
+          try {
+            const jobRes = await api('POST', '/api/generation-approvals/' +
+              encodeURIComponent(window.currentGenerationApprovalId) + '/jobs', {
+              slidesTotal: totalSlides,
+              idempotencyKey: 'gen-' + (tenantProjectData.draftId || tenantPresentationId || Date.now())
+            });
+            if (jobRes && jobRes.success && jobRes.job) window.currentGenerationJobId = jobRes.job.id;
+          } catch (jobErr) { console.warn('Generation job register:', jobErr); }
+        }
         const pendingSlides = {};
         let launchIndex = startIndex;
         let inFlightCount = 0;
@@ -711,6 +748,13 @@
           };
           tenantSlidesData.push(slideObj);
           tenantProjectData.tenantSlidesData = tenantSlidesData;
+          if (window.currentGenerationJobId) {
+            api('POST', '/api/generation-jobs/' + encodeURIComponent(window.currentGenerationJobId) + '/heartbeat', {
+              progress: Math.round((tenantSlidesData.length / totalSlides) * 100),
+              slidesDone: tenantSlidesData.length,
+              slidesTotal: totalSlides
+            }).catch(() => {});
+          }
           await saveTenantSlideGenerationCheckpoint(i + 1, 'running');
 
           // Live populate the slide card right in front of the user!
@@ -849,24 +893,12 @@
         pumpSlideLaunches();
         await generationDone;
         if (generationFailure) {
-          if (window.currentGenerationApprovalId) {
-            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
-              consumed: false,
-              note: 'فشل التوليد'
-            }).catch(err => console.warn('Settlement release error:', err));
-            window.currentGenerationApprovalId = null;
-          }
+          await settleGenerationRun(false, 'فشل التوليد');
           return;
         }
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
-          if (window.currentGenerationApprovalId) {
-            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
-              consumed: false,
-              note: 'لم يكتمل التوليد'
-            }).catch(err => console.warn('Settlement release error:', err));
-            window.currentGenerationApprovalId = null;
-          }
+          await settleGenerationRun(false, 'لم يكتمل التوليد');
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
@@ -879,16 +911,13 @@
         // await saveTenantPresentation(options.presentationTitle)
         const presentationSaved = await saveTenantPresentation(options.presentationTitle, { operation: 'generation' });
         if (!presentationSaved) {
+          // No file was produced, so the hold is released — the draft leaves
+          // 'generating' and the points return to the wallet.
+          await settleGenerationRun(false, 'تعذر حفظ العرض بعد التوليد');
           setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
           return;
         }
-        if (window.currentGenerationApprovalId) {
-          api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
-            consumed: true,
-            jobId: tenantPresentationId || 'presentation-job'
-          }).catch(err => console.warn('Settlement error:', err));
-          window.currentGenerationApprovalId = null;
-        }
+        await settleGenerationRun(true, '');
         if (options.markDraftDirty !== false) triggerAutoSaveDraft();
         selectTenantSlide(0);
         const completedTitle = options.sectionLabel

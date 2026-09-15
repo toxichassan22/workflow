@@ -114,11 +114,14 @@
           ? '<span class="proposal-status-badge status-archived" title="محفوظ لمدة 365 يوماً وفق سياسة الحفظ">أرشيف (محفوظ 365 يوماً)</span>'
           : '';
         const statusBadgeHtml = archiveBadge || ('<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>');
+        const copyBtn = hasPermission('copy_presentation')
+          ? '<button class="btn small ghost" onclick="copyProjectDraftById(\'' + d.id + '\')">نسخ العرض</button>'
+          : '';
         const actionsHtml = isArchived
           ? '<button class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">استعادة</button>' +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>'
           : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
-            '<button class="btn small ghost" onclick="copyProjectDraftById(\'' + d.id + '\')">نسخ العرض</button>' +
+            copyBtn +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
             approveBtn +
             '<button class="btn small ghost danger" onclick="archiveProposalById(\'' + d.id + '\')">أرشفة</button>';
@@ -686,7 +689,8 @@
             presentationId: tenantPresentationId,
             draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
             format,
-            versionLabel: 'v' + (tenantPresentationRevision || 1)
+            versionLabel: 'v' + (tenantPresentationRevision || 1),
+            exportId: data.exportId || null
           });
           if (recResp && recResp.success) downloadRecord = recResp.download;
         } catch (recErr) {
@@ -834,16 +838,22 @@
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
       const rows = downloads.length
         ? downloads.map(d => {
-            const date = (d.downloaded_at || d.created_at || '').slice(0, 16).replace('T', ' ');
-            const statusLabel = d.downloaded_at ? 'تم التحميل' : 'متاح للتحميل';
+            const date = (d.downloaded_at || d.created_at || d.generated_at || '').slice(0, 16).replace('T', ' ');
+            const approved = d.approval_status === 'approved';
+            const statusLabel = approved
+              ? (d.downloaded_at ? 'معتمد — تم التحميل' : 'معتمد — متاح للتحميل')
+              : 'بانتظار الاعتماد النهائي';
+            const statusStyle = approved
+              ? 'background:#eef7ee;color:#1c7a2e;'
+              : 'background:#fef3c7;color:#92400e;';
             const safeName = escapeHtml(d.file_name || 'ملف');
-            const safeUrl = d.file_name ? ('/outputs/' + encodeURIComponent(d.file_name)) : '';
+            const safeUrl = approved && d.download_url ? String(d.download_url) : '';
             return '<tr style="border-bottom:1px solid #e2e8f0;">' +
               '<td style="padding:10px 8px;font-weight:600;">' + safeName + '</td>' +
               '<td style="padding:10px 8px;text-transform:uppercase;">' + escapeHtml(d.format || '') + '</td>' +
               '<td style="padding:10px 8px;">' + escapeHtml(d.version_label || 'v1') + '</td>' +
               '<td style="padding:10px 8px;color:#64748b;font-size:12px;">' + escapeHtml(date) + '</td>' +
-              '<td style="padding:10px 8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;background:#eef7ee;color:#1c7a2e;">' + statusLabel + '</span></td>' +
+              '<td style="padding:10px 8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;' + statusStyle + '">' + statusLabel + '</span></td>' +
               '<td style="padding:10px 8px;">' +
               (safeUrl
                 ? '<button type="button" class="btn small primary" onclick="downloadLibraryFile(\'' + safeUrl + '\', \'' + safeName + '\', \'' + d.id + '\')">تحميل</button>'
@@ -1043,13 +1053,20 @@
     async function createSagCompany(event) {
       event.preventDefault();
       const submit = document.getElementById('sagCreateCompanySubmit');
+      const trialDaysEl = document.getElementById('sagCreateTrialDays');
       const payload = {
         companyName: document.getElementById('sagCreateCompanyName').value.trim(),
         accountManagerName: document.getElementById('sagCreateManagerName').value.trim(),
         email: document.getElementById('sagCreateEmail').value.trim().toLowerCase(),
         phone: document.getElementById('sagCreatePhone').value.trim(),
         username: document.getElementById('sagCreateUsername').value.trim().toLowerCase(),
+        slug: (document.getElementById('sagCreateSlug') || {}).value || '',
         isActive: document.getElementById('sagCreateStatus').value === 'active',
+        trialDays: trialDaysEl && trialDaysEl.value !== '' ? Number(trialDaysEl.value) : null,
+        legalName: (document.getElementById('sagCreateLegalName') || {}).value || '',
+        taxNumber: (document.getElementById('sagCreateTaxNumber') || {}).value || '',
+        crNumber: (document.getElementById('sagCreateCrNumber') || {}).value || '',
+        country: (document.getElementById('sagCreateCountry') || {}).value || '',
         passwordMode: document.getElementById('sagCreatePasswordMode').value,
         password: document.getElementById('sagCreatePassword').value,
         sendWelcomeEmail: document.getElementById('sagCreateWelcomeEmail').checked
@@ -1367,6 +1384,84 @@
           '</div>'
         ).join('');
       }
+
+      renderSagOpsAlerts(overview.alerts || []);
+      renderSagOpsMetrics(overview);
+      renderSagReportsPanel();
+    }
+
+    function renderSagOpsAlerts(alerts) {
+      const el = document.getElementById('sagOpsAlerts');
+      if (!el) return;
+      if (!alerts.length) { el.innerHTML = ''; return; }
+      const colors = { critical: '#c33', warning: '#b45309', info: 'var(--p)' };
+      el.innerHTML = alerts.map(a =>
+        '<div class="tenant-presentation-card" style="border-right:4px solid ' + (colors[a.severity] || 'var(--p)') + '">' +
+        '<div><h3>' + escapeHtml(a.message_ar || a.kind) + '</h3>' +
+        '<div class="meta"><span>' + sagFmtNum(a.count || 0) + '</span></div></div></div>'
+      ).join('');
+    }
+
+    function renderSagOpsMetrics(overview) {
+      const el = document.getElementById('sagOpsMetrics');
+      if (!el) return;
+      const gen = overview.generation || {};
+      const queue = overview.queue || {};
+      const email = overview.email || {};
+      const storage = overview.storage || {};
+      const backup = overview.backup || {};
+      const latest = backup.latest || null;
+      const storageMb = Math.round((storage.total_bytes || 0) / (1024 * 1024) * 10) / 10;
+      const cards = [
+        { label: 'مهام التوليد', value: sagFmtNum(gen.total || 0), sub: 'نسبة النجاح ' + (gen.success_rate != null ? gen.success_rate + '%' : '—') },
+        { label: 'فشل خلال ٢٤ ساعة', value: sagFmtNum(gen.failed_24h || 0), sub: 'متوسط المدة ' + (gen.avg_duration_seconds != null ? gen.avg_duration_seconds + ' ث' : '—') },
+        { label: 'طابور الخلفية', value: sagFmtNum(queue.queued || 0), sub: 'ميتة ' + sagFmtNum(queue.dead || 0) },
+        { label: 'البريد الصادر', value: sagFmtNum(email.queued || 0), sub: 'فاشل ' + sagFmtNum(email.failed || 0) },
+        { label: 'التخزين الكلي', value: sagFmtNum(storageMb) + ' MB', sub: sagFmtNum((storage.per_tenant || []).length) + ' شركة' },
+        { label: 'آخر نسخة احتياطية', value: latest ? String(latest.created_at || '').slice(0, 10) : '—', sub: 'هدف RPO ' + sagFmtNum(backup.rpo_hours || 24) + ' ساعة' },
+      ];
+      el.innerHTML = cards.map(c =>
+        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + c.label + '</h3>' +
+        '<div class="meta"><strong style="font-size:16px">' + c.value + '</strong> <span>' + c.sub + '</span></div></div></div>'
+      ).join('');
+    }
+
+    function renderSagReportsPanel() {
+      const el = document.getElementById('sagReportsPanel');
+      if (!el) return;
+      const reports = [
+        { key: 'ledger', label: 'حركات الرصيد' },
+        { key: 'approvals', label: 'قرارات الاعتماد' },
+        { key: 'downloads', label: 'مكتبة التنزيلات' },
+        { key: 'tickets', label: 'تذاكر الدعم' },
+        { key: 'user-activity', label: 'نشاط المستخدمين' },
+        { key: 'files', label: 'سجل الملفات' },
+      ];
+      el.innerHTML = reports.map(r =>
+        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
+        '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">تنزيل CSV</button></div></div>'
+      ).join('');
+    }
+
+    async function sagDownloadReport(name) {
+      const token = (typeof getTenantToken === 'function') ? getTenantToken() : null;
+      try {
+        const res = await fetch('/api/admin/reports/' + encodeURIComponent(name), {
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        if (!res.ok) { toast(WFT('reports.download_failed', 'تعذر تنزيل التقرير')); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name + '-report.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      } catch (e) {
+        toast(WFT('reports.download_failed', 'تعذر تنزيل التقرير'));
+      }
     }
 
     async function openTenantCompanies() {
@@ -1492,7 +1587,7 @@
       renderSagTenants(filtered);
     }
 
-    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'contracts', 'activity'];
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'contracts', 'activity', 'access'];
 
     function sagTenantPaneId(tab) {
       return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -1512,7 +1607,7 @@
         if (pane) pane.style.display = active ? '' : 'none';
         if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
       });
-      if (['drafts', 'presentations', 'exports', 'contracts', 'activity'].includes(tab)) {
+      if (['drafts', 'presentations', 'exports', 'contracts', 'activity', 'access'].includes(tab)) {
         sagLoadTenantDataPane(sagCurrentTenantId, tab);
       }
     }
@@ -1523,19 +1618,67 @@
         presentations: 'sagTenantPresentationsList',
         exports: 'sagTenantExportsList',
         contracts: 'sagTenantContractsList',
-        activity: 'sagTenantActivityList'
+        activity: 'sagTenantActivityList',
+        access: 'sagTenantAccessList'
       };
       const host = document.getElementById(bodies[tab]);
       if (!host || !tenantId || host.dataset.loaded === '1') return;
       showInlineLoader(host, 'جاري التحميل...');
-      const data = await api('GET', '/api/admin/tenants/' + tenantId + '/' + tab).catch(() => ({ success: false }));
-      if (!data || !data.success) { host.innerHTML = '<p class="tenant-hint">تعذر التحميل</p>'; return; }
+      const url = tab === 'access'
+        ? '/api/admin/access-requests?tenant_id=' + encodeURIComponent(tenantId)
+        : '/api/admin/tenants/' + tenantId + '/' + tab;
+      const data = await api('GET', url).catch(() => ({ success: false }));
+      if (!data || !data.success) {
+        host.innerHTML = (data && data.error_code === 'access_grant_required')
+          ? '<p class="tenant-hint">' + escapeHtml(WFT('admin.access_needed', 'الاطلاع على المحتوى يتطلب وصولًا معتمدًا من العميل')) + '</p>'
+          : '<p class="tenant-hint">تعذر التحميل</p>';
+        return;
+      }
       host.dataset.loaded = '1';
       if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
       else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
       else if (tab === 'contracts') host.innerHTML = renderSagTenantContracts(data.contracts || []);
+      else if (tab === 'access') host.innerHTML = renderSagTenantAccess(data.requests || []);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
+    }
+
+    function renderSagTenantAccess(requests) {
+      if (!requests.length) return '<p class="tenant-hint">' + escapeHtml(WFT('admin.access_empty', 'لا توجد طلبات وصول')) + '</p>';
+      const statusLabels = {
+        pending: WFT('users.access_pending', 'قيد الانتظار'), approved: WFT('users.access_approved', 'معتمد'),
+        denied: WFT('users.access_denied', 'مرفوض'), expired: WFT('users.access_expired', 'منتهي'),
+        revoked: WFT('users.access_revoked', 'ملغي'),
+      };
+      return requests.map(r => {
+        const expiry = r.expires_at ? ' | <span>' + escapeHtml(WFT('users.access_expires', 'ينتهي')) + ':</span> ' + escapeHtml(String(r.expires_at).slice(0, 16).replace('T', ' ')) : '';
+        return '<div class="tenant-presentation-card"><div><h3 style="font-size:14px">' + escapeHtml(r.scope || 'tenant') +
+          (r.target_id ? ' — ' + escapeHtml(r.target_id) : '') + '</h3>' +
+          '<div class="meta"><span>' + escapeHtml(statusLabels[r.status] || r.status) + '</span> | ' +
+          escapeHtml(r.reason || '') + expiry + '</div></div></div>';
+      }).join('');
+    }
+
+    async function sagCreateAccessRequest(event, tenantId) {
+      event.preventDefault();
+      const payload = {
+        scope: document.getElementById('sagAccessScope').value,
+        targetId: document.getElementById('sagAccessTarget').value.trim() || null,
+        reason: document.getElementById('sagAccessReason').value.trim(),
+        hours: parseInt(document.getElementById('sagAccessHours').value, 10) || 24,
+      };
+      if (!payload.reason) { toast(WFT('admin.access_reason_required', 'السبب مطلوب')); return; }
+      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/access-requests', payload);
+      if (data && data.success) {
+        toast(WFT('admin.access_requested', 'أرسل طلب الوصول'));
+        document.getElementById('sagAccessReason').value = '';
+        document.getElementById('sagAccessTarget').value = '';
+        const host = document.getElementById('sagTenantAccessList');
+        if (host) host.dataset.loaded = '';
+        sagLoadTenantDataPane(tenantId, 'access');
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
     }
 
     function renderSagTenantDrafts(drafts) {
@@ -1568,7 +1711,15 @@
       showLoader('جاري تحميل العرض', '');
       try {
         const data = await api('GET', '/api/admin/tenants/' + tenantId + '/presentations/' + presId);
-        if (!data.success) { toast('تعذر تحميل العرض'); return; }
+        if (!data.success) {
+          if (data.error_code === 'access_grant_required') {
+            toast(WFT('admin.access_needed', 'الاطلاع على المحتوى يتطلب وصولًا معتمدًا من العميل'));
+            if (sagCurrentTenantId === tenantId) showSagTenantTab('access');
+          } else {
+            toast(data.error || 'تعذر تحميل العرض');
+          }
+          return;
+        }
         sagPreviewSlides = ((data.presentation && data.presentation.slidesData) || []).filter(s => s && s.html);
         if (!sagPreviewSlides.length) { toast('العرض بدون شرائح'); return; }
         sagPreviewIndex = 0;
@@ -1644,12 +1795,32 @@
       }).join('');
     }
 
+    async function sagAddTenantContract(event, tenantId) {
+      event.preventDefault();
+      const payload = {
+        title: document.getElementById('sagContractTitle').value.trim(),
+        kind: document.getElementById('sagContractKind').value,
+        startsAt: document.getElementById('sagContractStart').value || null,
+        expiresAt: document.getElementById('sagContractEnd').value || null,
+        signatureStatus: document.getElementById('sagContractSignature').value,
+        retentionUntil: document.getElementById('sagContractRetention').value || null
+      };
+      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/contracts', payload);
+      if (!data.success) { toast(data.error || WFT('contracts.save_failed', 'تعذر تسجيل الوثيقة')); return; }
+      toast(WFT('contracts.saved', 'تم تسجيل الوثيقة'));
+      const host = document.getElementById('sagTenantContractsList');
+      if (host) delete host.dataset.loaded;
+      await sagLoadTenantDataPane(tenantId, 'contracts');
+    }
+
     function renderSagTenantContracts(contracts) {
       if (!contracts || !contracts.length) return '<p class="tenant-hint">لا توجد عقود مسجلة لهذه الشركة</p>';
+      const sigLabels = { unsigned: 'غير موقع', pending_signature: 'بانتظار التوقيع', signed: 'موقع', expired: 'منتهي التوقيع' };
       return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
         '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
         '<th style="padding:10px 8px;">العنوان</th><th style="padding:10px 8px;">النوع</th>' +
         '<th style="padding:10px 8px;">البداية</th><th style="padding:10px 8px;">الانتهاء</th>' +
+        '<th style="padding:10px 8px;">التوقيع</th><th style="padding:10px 8px;">الإصدار</th>' +
         '<th style="padding:10px 8px;">الحالة</th></tr></thead><tbody>' +
         contracts.map(c => {
           const type = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد خدمة';
@@ -1658,7 +1829,10 @@
             : '<span style="color:var(--green)">سارٍ</span>';
           return '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:10px 8px;">' + escapeHtml(c.title || '—') +
             '</td><td style="padding:10px 8px;">' + type + '</td><td style="padding:10px 8px;">' + escapeHtml(c.starts_at || '—') +
-            '</td><td style="padding:10px 8px;">' + escapeHtml(c.expires_at || '—') + '</td><td style="padding:10px 8px;">' + status + '</td></tr>';
+            '</td><td style="padding:10px 8px;">' + escapeHtml(c.expires_at || '—') +
+            '</td><td style="padding:10px 8px;">' + escapeHtml(sigLabels[c.signature_status] || c.signature_status || '—') +
+            '</td><td style="padding:10px 8px;">' + (c.version || 1) +
+            '</td><td style="padding:10px 8px;">' + status + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
 
@@ -1702,6 +1876,7 @@
         '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
         '<button type="button" id="sagTabBtnContracts" class="btn small ghost" onclick="showSagTenantTab(\'contracts\')">العقود والاتفاقيات</button>' +
         '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
+        '<button type="button" id="sagTabBtnAccess" class="btn small ghost" onclick="showSagTenantTab(\'access\')">' + escapeHtml(WFT('admin.access_tab', 'طلبات الوصول')) + '</button>' +
         '</div>' +
         '<div id="sagTenantTabCompany">' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
@@ -1711,14 +1886,23 @@
         '<div class="tenant-field"><label>رقم الجوال</label><input id="sagDetailPhone" value="' + escapeHtml(t.phone || '') + '" required></div>' +
         '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagDetailUsername" value="' + escapeHtml(t.username || '') + '" required></div>' +
         '<div class="tenant-field"><label>تاريخ إنشاء الحساب</label><p style="margin:0">' + escapeHtml(t.createdAt || '') + '</p></div>' +
+        '<div class="tenant-field"><label>رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
         '<div class="tenant-field"><label>الباقة</label><select id="sagDetailPlan">' +
         '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
         '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
         '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
         '<div class="tenant-field"><label>الرصيد</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalance || 0) + '" required></div>' +
-        '<div class="tenant-field full"><label>حالة الحساب</label><select id="sagDetailStatus">' +
+        '<div class="tenant-field"><label>الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
+        '<div class="tenant-field"><label>الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
+        '<div class="tenant-field"><label>السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
+        '<div class="tenant-field"><label>الدولة</label><input id="sagDetailCountry" maxlength="80" value="' + escapeHtml(t.country || '') + '"></div>' +
+        '<div class="tenant-field"><label>نهاية التجربة</label><input type="date" id="sagDetailTrialEnds" dir="ltr" value="' + escapeHtml((t.trialEndsAt || '').slice(0, 10)) + '"></div>' +
+        '<div class="tenant-field"><label>حالة الحساب</label><select id="sagDetailStatus">' +
         '<option value="active"' + (t.isActive ? ' selected' : '') + '>نشط</option>' +
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
+        '<div class="tenant-field"><label>التفعيل</label><p style="margin:0">' +
+        (t.activatedAt ? ('فُعّلت في ' + escapeHtml(String(t.activatedAt).slice(0, 10)) + (t.activatedByName ? ' بواسطة ' + escapeHtml(t.activatedByName) : '')) : 'لم تُفعّل بعد') +
+        (t.deactivatedReason ? ' | سبب الإيقاف: ' + escapeHtml(t.deactivatedReason) : '') + '</p></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
         '</div>' +
@@ -1748,9 +1932,33 @@
         '<div id="sagTenantTabExports" style="display:none">' +
         '<h3 class="dash-section-title">التصديرات</h3><div id="sagTenantExportsList"></div></div>' +
         '<div id="sagTenantTabContracts" style="display:none">' +
-        '<h3 class="dash-section-title">العقود والاتفاقيات</h3><div id="sagTenantContractsList"></div></div>' +
+        '<h3 class="dash-section-title">العقود والاتفاقيات</h3>' +
+        '<form onsubmit="sagAddTenantContract(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
+        '<div class="tenant-field"><label>العنوان</label><input id="sagContractTitle" maxlength="160" required></div>' +
+        '<div class="tenant-field"><label>النوع</label><select id="sagContractKind">' +
+        '<option value="contract">عقد خدمة</option><option value="nda">اتفاقية سرية</option></select></div>' +
+        '<div class="tenant-field"><label>البداية</label><input type="date" id="sagContractStart" dir="ltr"></div>' +
+        '<div class="tenant-field"><label>الانتهاء</label><input type="date" id="sagContractEnd" dir="ltr"></div>' +
+        '<div class="tenant-field"><label>حالة التوقيع</label><select id="sagContractSignature">' +
+        '<option value="unsigned">غير موقع</option><option value="pending_signature">بانتظار التوقيع</option>' +
+        '<option value="signed">موقع</option></select></div>' +
+        '<div class="tenant-field"><label>الاحتفاظ حتى</label><input type="date" id="sagContractRetention" dir="ltr"></div>' +
+        '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الوثيقة</button></div></form>' +
+        '<div id="sagTenantContractsList"></div></div>' +
         '<div id="sagTenantTabActivity" style="display:none">' +
         '<h3 class="dash-section-title">سجل التعديلات</h3><div id="sagTenantActivityList"></div></div>' +
+        '<div id="sagTenantTabAccess" style="display:none">' +
+        '<h3 class="dash-section-title">' + escapeHtml(WFT('admin.access_tab', 'طلبات الوصول')) + '</h3>' +
+        '<form onsubmit="sagCreateAccessRequest(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
+        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_scope', 'النطاق')) + '</label><select id="sagAccessScope">' +
+        '<option value="tenant">' + escapeHtml(WFT('admin.access_scope_tenant', 'الشركة كاملة')) + '</option>' +
+        '<option value="presentation">' + escapeHtml(WFT('admin.access_scope_presentation', 'عرض محدد')) + '</option>' +
+        '<option value="draft">' + escapeHtml(WFT('admin.access_scope_draft', 'ملف مشروع محدد')) + '</option></select></div>' +
+        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_target', 'معرف الهدف')) + '</label><input id="sagAccessTarget" dir="ltr"></div>' +
+        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_hours', 'المدة بالساعات')) + '</label><input type="number" id="sagAccessHours" min="1" max="72" value="24" dir="ltr"></div>' +
+        '<div class="tenant-field full"><label>' + escapeHtml(WFT('admin.access_reason', 'السبب')) + '</label><input id="sagAccessReason" maxlength="300" required></div>' +
+        '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">' + escapeHtml(WFT('admin.access_request_btn', 'إرسال طلب وصول')) + '</button></div></form>' +
+        '<div id="sagTenantAccessList"></div></div>' +
         '</div>';
       showSagTenantTab(sagTenantActiveTab);
     }
@@ -1783,6 +1991,7 @@
 
     async function saveSagTenant(event, tenantId) {
       event.preventDefault();
+      const trialEl = document.getElementById('sagDetailTrialEnds');
       const payload = {
         companyName: document.getElementById('sagDetailCompanyName').value.trim(),
         accountManagerName: document.getElementById('sagDetailManagerName').value.trim(),
@@ -1791,12 +2000,32 @@
         username: document.getElementById('sagDetailUsername').value.trim().toLowerCase(),
         plan: document.getElementById('sagDetailPlan').value,
         creditBalance: document.getElementById('sagDetailCredit').value,
-        isActive: document.getElementById('sagDetailStatus').value === 'active'
+        isActive: document.getElementById('sagDetailStatus').value === 'active',
+        legalName: (document.getElementById('sagDetailLegalName') || {}).value || '',
+        taxNumber: (document.getElementById('sagDetailTaxNumber') || {}).value || '',
+        crNumber: (document.getElementById('sagDetailCrNumber') || {}).value || '',
+        country: (document.getElementById('sagDetailCountry') || {}).value || '',
+        trialEndsAt: trialEl && trialEl.value ? trialEl.value : null
       };
+      const slugEl = document.getElementById('sagDetailSlug');
+      const slugValue = slugEl ? slugEl.value.trim().toLowerCase() : '';
+      const tenant = (sagAllTenants || []).find(t => t.id === tenantId) || {};
       const data = await api('PUT', '/api/admin/tenants/' + tenantId, payload);
       if (!data.success) {
-        toast(data.error || 'تعذر حفظ بيانات الشركة');
+        if (data.error === 'activation_incomplete') {
+          toast(WFT('admin.profile_incomplete', 'ملف الشركة غير مكتمل:') + ' ' + ((data.missing || []).join('، ')));
+        } else {
+          toast(data.error || 'تعذر حفظ بيانات الشركة');
+        }
         return;
+      }
+      if (slugValue && slugValue !== (tenant.slug || '')) {
+        const slugRes = await api('PUT', '/api/admin/tenants/' + tenantId + '/slug', {
+          slug: slugValue, allowAfterActivation: true
+        }).catch(e => e);
+        if (!slugRes || !slugRes.success) {
+          toast((slugRes && (slugRes.message || slugRes.error)) || 'تعذر تحديث الرابط');
+        }
       }
       toast('تم حفظ بيانات الشركة');
       await openTenantCompanies();

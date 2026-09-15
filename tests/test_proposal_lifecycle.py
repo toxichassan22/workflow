@@ -455,9 +455,9 @@ class ProposalLifecycleGateTests(unittest.TestCase):
 
         conn = db.get_db()
         conn.execute(
-            "INSERT INTO tenants (id, company_name, subdomain, email, password_hash, plan, is_active) "
-            "VALUES (?, ?, ?, ?, ?, ?, 1)",
-            ('tenant-1', 'Test Tenant', 'testtenant', 'tenant@example.test', 'hash', 'free'),
+            "INSERT INTO tenants (id, company_name, subdomain, email, password_hash, plan, "
+            "is_active, credit_balance) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            ('tenant-1', 'Test Tenant', 'testtenant', 'tenant@example.test', 'hash', 'free', 1000.0),
         )
         conn.commit()
 

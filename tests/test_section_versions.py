@@ -66,8 +66,14 @@ class SectionVersionDbTests(unittest.TestCase):
     def test_sends_number_versions_sequentially_and_supersede_pending(self):
         first = db.create_section_version(
             'tenant-1', 'draft-1', 'basic', {'project_name': 'A'}, 'user-1', 'User One')
-        second = db.create_section_version(
+        # t16: a live pending version blocks a resend unless the caller
+        # explicitly supersedes it.
+        blocked = db.create_section_version(
             'tenant-1', 'draft-1', 'basic', {'project_name': 'B'}, 'user-1', 'User One')
+        self.assertEqual(blocked.get('error'), 'version_pending_exists')
+        second = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic', {'project_name': 'B'}, 'user-1', 'User One',
+            allow_supersede=True)
         self.assertEqual(first['version_number'], 1)
         self.assertEqual(second['version_number'], 2)
         history = db.list_section_versions('tenant-1', 'draft-1', 'basic')
@@ -127,7 +133,7 @@ class SectionVersionDbTests(unittest.TestCase):
         second = db.create_section_version(
             'tenant-1', 'draft-1', 'basic',
             {'project_name': 'برج المشرق الثاني', 'project_type': 'سكني', 'city': 'الرياض'},
-            'user-1', 'User One')
+            'user-1', 'User One', allow_supersede=True)
 
         diff = db.diff_section_versions('tenant-1', second['id'])
         self.assertNotIn('error', diff)
@@ -221,7 +227,7 @@ class SectionVersionApiTests(unittest.TestCase):
         self.assertEqual(client.post('/api/project-draft/section-version/decision', headers=self.headers(),
                                      json={'versionId': version['id'], 'decision': 'returned'}).status_code, 400)
         sent2 = client.post('/api/project-draft/section-version',
-                            headers=self.headers(), json={'sectionKey': 'basic'})
+                            headers=self.headers(), json={'sectionKey': 'basic', 'supersede': True})
         version2 = sent2.get_json()['version']
         self.assertEqual(version2['version_number'], 2)
 
@@ -247,7 +253,9 @@ class SectionVersionApiTests(unittest.TestCase):
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         stale = client.post('/api/project-draft/request-approval', headers=self.headers(), json={})
         self.assertEqual(stale.status_code, 400, stale.get_json())
-        self.assertEqual(stale.get_json()['error_code'], 'SECTION_VERSION_STALE')
+        # t16: the save already voided the edited section's approval, so the
+        # request is refused at the section gate rather than by hash drift.
+        self.assertEqual(stale.get_json()['error_code'], 'SECTIONS_NOT_APPROVED')
 
         # Sending and approving the new content restores readiness.
         sent3 = client.post('/api/project-draft/section-version',

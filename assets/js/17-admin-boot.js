@@ -629,7 +629,7 @@
       showTenantPage('tenantUsersPage');
       const list = document.getElementById('tenantUsersList');
       if (!list) return;
-      showInlineLoader(list, 'جاري التحميل...');
+      showInlineLoader(list, WFT('common.loading', 'جاري التحميل...'));
       const [data, reportData] = await Promise.all([
         api('GET', '/api/users'),
         api('GET', '/api/users/report').catch(() => null)
@@ -641,29 +641,278 @@
         disabled: data.users.filter(u => !u.is_active).length,
         total: data.users.length
       };
+      const reportUsers = {};
+      ((reportData && reportData.report && reportData.report.users) || []).forEach(u => { reportUsers[u.id] = u; });
       const reportBanner = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px;">' +
         '<div style="font-weight:700;color:#1a3a52;">تقرير المستخدمين:</div>' +
         '<div><span>نشط:</span> <strong style="color:var(--green);">' + (counts.active || 0) + '</strong></div>' +
-        '<div><span>مدعو:</span> <strong style="color:#2563eb;">' + (counts.invited || 0) + '</strong></div>' +
+        '<div><span>مدعو:</span> <strong style="color:#2563eb;">' + (counts.invited || counts.pending_invites || 0) + '</strong></div>' +
         '<div><span>معطل:</span> <strong style="color:#c33;">' + (counts.disabled || 0) + '</strong></div>' +
         '<div><span>الإجمالي:</span> <strong>' + (counts.total || data.users.length) + '</strong></div>' +
         '<button type="button" class="btn small ghost" style="margin-right:auto;" onclick="showSodMatrixModal()">مصفوفة الفصل بين المهام</button>' +
         '</div>';
-      if (!data.users.length) {
-        list.innerHTML = reportBanner + '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
-        return;
-      }
-      list.innerHTML = reportBanner + data.users.map(u => {
+      const usersHtml = data.users.length ? data.users.map(u => {
         const roleLabel = USER_ROLE_LABELS[u.role] || 'موظف';
         const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
+        const reportUser = reportUsers[u.id] || {};
+        const lastLogin = reportUser.last_login_at
+          ? ' | <span>' + escapeHtml(WFT('users.last_login', 'آخر دخول')) + ':</span> ' + escapeHtml(String(reportUser.last_login_at).slice(0, 16).replace('T', ' '))
+          : '';
+        const mfaBadge = reportUser.mfa_enabled
+          ? ' | <span style="color:#1c7a2e">' + escapeHtml(WFT('users.mfa_on', 'التحقق الثنائي مفعل')) + '</span>'
+          : '';
         return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
-          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + '</div></div>' +
+          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + mfaBadge + '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
           '<button class="btn small primary" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">صلاحيات</button>' +
           '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + (u.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
           '<button class="btn small danger" onclick="deleteTenantUser(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">حذف</button>' +
           '</div></div>';
+      }).join('') : '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
+      list.innerHTML = reportBanner + usersHtml;
+      renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
+      renderTenantRoles();
+      renderMfaCard();
+      renderTenantAccessRequests();
+      populateInviteScopePickers();
+    }
+
+    function renderTenantInvites(invites) {
+      const box = document.getElementById('tenantInvitesList');
+      if (!box) return;
+      if (!invites.length) { box.innerHTML = ''; return; }
+      const statusLabels = {
+        sent: WFT('users.invite_sent', 'أرسلت'), failed: WFT('users.invite_failed', 'فشل الإرسال'),
+        pending: WFT('users.invite_pending_status', 'قيد الإرسال'), queued: WFT('users.invite_pending_status', 'قيد الإرسال'),
+      };
+      box.innerHTML = '<h4 style="margin:8px 0;color:var(--p)">' + escapeHtml(WFT('users.invites_list', 'الدعوات')) + '</h4>' +
+        invites.map(i => {
+          const state = i.is_used ? '<span style="color:#1c7a2e">' + escapeHtml(WFT('users.invite_used', 'مقبولة')) + '</span>'
+            : i.is_expired ? '<span style="color:#c33">' + escapeHtml(WFT('users.invite_expired', 'منتهية')) + '</span>'
+            : '<span style="color:#2563eb">' + escapeHtml(WFT('users.invite_pending', 'معلقة')) + '</span>';
+          const mail = i.email_status ? ' | <span>' + escapeHtml(WFT('users.invite_email_status', 'البريد')) + ':</span> ' + escapeHtml(statusLabels[i.email_status] || i.email_status) : '';
+          const resend = (!i.is_used && !i.is_expired)
+            ? '<button type="button" class="btn small ghost" onclick="resendTenantInvite(\'' + i.id + '\')">' + escapeHtml(WFT('users.invite_resend', 'إعادة الإرسال')) + '</button>'
+            : '';
+          return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
+            '<div><h3 style="font-size:14px">' + escapeHtml(i.email) + '</h3>' +
+            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || i.role || 'موظف') + ' | ' + state + mail + '</div></div>' +
+            '<div class="tenant-actions" style="gap:6px">' + resend + '</div></div>';
+        }).join('');
+    }
+
+    async function resendTenantInvite(inviteId) {
+      const data = await api('POST', '/api/invites/' + inviteId + '/resend', {});
+      if (data && data.success) {
+        toast(data.emailSent ? WFT('users.invite_resent', 'أعيد إرسال الدعوة') : WFT('users.invite_resend_queued', 'سجلت إعادة الإرسال'));
+        openTenantUsers();
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
+    }
+
+    async function renderTenantRoles() {
+      const box = document.getElementById('tenantRolesList');
+      if (!box) return;
+      const data = await api('GET', '/api/roles/template').catch(() => null);
+      const roles = (data && data.roles) || [];
+      if (!roles.length) {
+        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.roles_empty', 'لا توجد قوالب مخصصة')) + '</p>';
+        return;
+      }
+      box.innerHTML = roles.map(r =>
+        '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
+        '<div><h3 style="font-size:14px">' + escapeHtml(r.name) + '</h3>' +
+        '<div class="meta"><span>' + escapeHtml(USER_ROLE_LABELS[r.base_role] || r.base_role || '') + '</span></div></div>' +
+        '<div class="tenant-actions" style="gap:6px">' +
+        '<button type="button" class="btn small ghost" onclick="editTenantRole(\'' + r.id + '\')">' + escapeHtml(WFT('users.role_edit', 'تعديل')) + '</button>' +
+        '<button type="button" class="btn small danger" onclick="deleteTenantRole(\'' + r.id + '\', \'' + escapeHtml(r.name) + '\')">' + escapeHtml(WFT('common.delete', 'حذف')) + '</button>' +
+        '</div></div>'
+      ).join('');
+    }
+
+    async function createTenantRole() {
+      const name = ((document.getElementById('newRoleName') || {}).value || '').trim();
+      const baseRole = ((document.getElementById('newRoleBase') || {}).value || 'employee');
+      if (!name) { toast(WFT('users.role_name_required', 'اسم القالب مطلوب')); return; }
+      const data = await api('POST', '/api/roles', { name, baseRole });
+      if (data && data.success) {
+        toast(WFT('users.role_created', 'أنشئ القالب'));
+        document.getElementById('newRoleName').value = '';
+        renderTenantRoles();
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
+    }
+
+    async function editTenantRole(roleId) {
+      const data = await api('GET', '/api/roles/template').catch(() => null);
+      const role = ((data && data.roles) || []).find(r => r.id === roleId);
+      if (!role) { toast(WFT('common.error', 'حدث خطأ')); return; }
+      document.getElementById('roleTemplateModal')?.remove();
+      const perms = role.permissions || {};
+      const permRows = Object.keys(PERMISSION_LABELS).map(key =>
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">' +
+        '<label>' + escapeHtml(PERMISSION_LABELS[key]) + '</label>' +
+        '<input type="checkbox" id="rolePerm_' + key + '" ' + (perms[key] ? 'checked' : '') + '></div>'
+      ).join('');
+      const modal = document.createElement('div');
+      modal.id = 'roleTemplateModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:480px;width:100%;max-height:85vh;overflow:auto">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+        '<h3>' + escapeHtml(role.name) + '</h3>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'roleTemplateModal\').remove()">' + escapeHtml(WFT('common.close', 'إغلاق')) + '</button></div>' +
+        '<div class="tenant-field" style="margin-bottom:12px"><label>' + escapeHtml(WFT('users.role_name', 'اسم القالب')) + '</label>' +
+        '<input type="text" id="editRoleName" value="' + escapeHtml(role.name) + '"></div>' +
+        permRows +
+        '<div class="tenant-btns" style="margin-top:16px">' +
+        '<button class="btn primary" onclick="saveTenantRole(\'' + roleId + '\')">' + escapeHtml(WFT('common.save', 'حفظ')) + '</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function saveTenantRole(roleId) {
+      const name = ((document.getElementById('editRoleName') || {}).value || '').trim();
+      const permissions = {};
+      Object.keys(PERMISSION_LABELS).forEach(key => {
+        const cb = document.getElementById('rolePerm_' + key);
+        permissions[key] = cb ? cb.checked : false;
+      });
+      const data = await api('POST', '/api/roles/' + roleId + '/update', { name, permissions });
+      if (data && data.success) {
+        toast(WFT('users.role_saved', 'حفظ القالب'));
+        document.getElementById('roleTemplateModal')?.remove();
+        renderTenantRoles();
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
+    }
+
+    async function deleteTenantRole(roleId, roleName) {
+      if (!confirm(WFT('users.role_delete_confirm', 'حذف القالب') + ': ' + roleName + '؟')) return;
+      const data = await api('POST', '/api/roles/' + roleId + '/delete', {});
+      if (data && data.success) { toast(WFT('users.role_deleted', 'حذف القالب')); renderTenantRoles(); }
+      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
+    }
+
+    async function renderTenantAccessRequests() {
+      const box = document.getElementById('tenantAccessRequests');
+      if (!box) return;
+      const data = await api('GET', '/api/access-requests').catch(() => null);
+      const requests = (data && data.requests) || [];
+      if (!requests.length) {
+        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.access_requests_empty', 'لا توجد طلبات وصول')) + '</p>';
+        return;
+      }
+      const statusLabels = {
+        pending: WFT('users.access_pending', 'قيد الانتظار'), approved: WFT('users.access_approved', 'معتمد'),
+        denied: WFT('users.access_denied', 'مرفوض'), expired: WFT('users.access_expired', 'منتهي'),
+        revoked: WFT('users.access_revoked', 'ملغي'),
+      };
+      box.innerHTML = requests.map(r => {
+        const state = '<span>' + escapeHtml(statusLabels[r.status] || r.status) + '</span>';
+        const expiry = r.expires_at ? ' | <span>' + escapeHtml(WFT('users.access_expires', 'ينتهي')) + ':</span> ' + escapeHtml(String(r.expires_at).slice(0, 16).replace('T', ' ')) : '';
+        let actions = '';
+        if (r.status === 'pending') {
+          actions = '<button type="button" class="btn small green" onclick="decideAccessRequest(\'' + r.id + '\', \'approved\')">' + escapeHtml(WFT('users.access_approve', 'اعتماد')) + '</button>' +
+            '<button type="button" class="btn small danger" onclick="decideAccessRequest(\'' + r.id + '\', \'denied\')">' + escapeHtml(WFT('users.access_deny', 'رفض')) + '</button>';
+        } else if (r.status === 'approved') {
+          actions = '<button type="button" class="btn small danger" onclick="revokeAccessRequest(\'' + r.id + '\')">' + escapeHtml(WFT('users.access_revoke', 'إلغاء الوصول')) + '</button>';
+        }
+        return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
+          '<div><h3 style="font-size:14px">' + escapeHtml(r.requested_by_name || '') + ' — ' + escapeHtml(r.scope || 'tenant') + '</h3>' +
+          '<div class="meta">' + state + ' | ' + escapeHtml(r.reason || '') + expiry + '</div></div>' +
+          '<div class="tenant-actions" style="gap:6px">' + actions + '</div></div>';
       }).join('');
+    }
+
+    async function decideAccessRequest(requestId, decision) {
+      const data = await api('POST', '/api/access-requests/' + requestId + '/decision', { decision });
+      if (data && data.success) {
+        toast(decision === 'approved' ? WFT('users.access_approved_ok', 'اعتمد الوصول') : WFT('users.access_denied_ok', 'رفض الوصول'));
+        renderTenantAccessRequests();
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
+    }
+
+    async function revokeAccessRequest(requestId) {
+      if (!confirm(WFT('users.access_revoke_confirm', 'إلغاء الوصول المعتمد؟'))) return;
+      const data = await api('POST', '/api/access-requests/' + requestId + '/revoke', {});
+      if (data && data.success) { toast(WFT('users.access_revoked_ok', 'ألغي الوصول')); renderTenantAccessRequests(); }
+      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
+    }
+
+    async function renderMfaCard() {
+      const box = document.getElementById('mfaCard');
+      if (!box) return;
+      const data = await api('GET', '/api/auth/mfa/status').catch(() => null);
+      const mfa = (data && data.mfa) || {};
+      const enabled = !!mfa.enabled;
+      let html = '<p style="margin:0 0 10px;font-size:13px;color:#475569">' +
+        escapeHtml(enabled ? WFT('users.mfa_status_on', 'التحقق الثنائي مفعل لهذا الحساب') : WFT('users.mfa_status_off', 'التحقق الثنائي غير مفعل')) +
+        (enabled && typeof mfa.recoveryCodesRemaining === 'number'
+          ? ' — ' + escapeHtml(WFT('users.mfa_codes_left', 'رموز متبقية')) + ': ' + mfa.recoveryCodesRemaining : '') +
+        '</p>';
+      if (!enabled) {
+        html += '<button type="button" class="btn primary" onclick="openMfaSetupModal(false)">' + escapeHtml(WFT('auth.mfa_enable', 'تفعيل')) + '</button>';
+      } else {
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button type="button" class="btn ghost" onclick="regenerateMfaCodes()">' + escapeHtml(WFT('users.mfa_regen', 'تجديد رموز الاسترداد')) + '</button>' +
+          '<button type="button" class="btn danger" onclick="disableMfa()">' + escapeHtml(WFT('users.mfa_disable', 'تعطيل')) + '</button></div>';
+      }
+      box.innerHTML = html;
+    }
+
+    async function regenerateMfaCodes() {
+      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
+      if (!code) return;
+      const data = await api('POST', '/api/auth/mfa/recovery-codes', { code: code.trim() });
+      if (data && data.success) {
+        const codes = (data.recoveryCodes || []).join('\n');
+        alert(WFT('users.mfa_recovery_title', 'رموز الاسترداد') + ':\n' + codes);
+        renderMfaCard();
+      } else {
+        toast((data && data.error) || WFT('auth.mfa_invalid', 'رمز التحقق غير صحيح'));
+      }
+    }
+
+    async function disableMfa() {
+      const password = prompt(WFT('users.mfa_password_prompt', 'كلمة المرور:'));
+      if (password === null) return;
+      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
+      if (code === null) return;
+      const data = await api('POST', '/api/auth/mfa/disable', { password, code: code.trim() });
+      if (data && data.success) { toast(WFT('users.mfa_disabled_ok', 'عطل التحقق الثنائي')); renderMfaCard(); }
+      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
+    }
+
+    async function populateInviteScopePickers() {
+      const sectionsBox = document.getElementById('inviteSectionsPicker');
+      const projectsBox = document.getElementById('inviteProjectsPicker');
+      if (!sectionsBox && !projectsBox) return;
+      const [sectionsData, projectsData] = await Promise.all([
+        api('GET', '/api/field-sections').catch(() => null),
+        api('GET', '/api/project-drafts').catch(() => null),
+      ]);
+      if (sectionsBox) {
+        const sections = (sectionsData && (sectionsData.sections || sectionsData.available)) || [];
+        const keys = Array.isArray(sections) ? sections : Object.keys(sections);
+        sectionsBox.innerHTML = (keys || []).map(s => {
+          const key = typeof s === 'string' ? s : s.key;
+          const label = typeof s === 'string' ? s : (s.label || s.key);
+          return '<label style="display:flex;align-items:center;gap:4px;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 8px">' +
+            '<input type="checkbox" class="inviteSectionCb" value="' + escapeHtml(key) + '">' + escapeHtml(label) + '</label>';
+        }).join('') || '<span class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</span>';
+      }
+      if (projectsBox) {
+        const drafts = (projectsData && (projectsData.drafts || projectsData.projects)) || [];
+        projectsBox.innerHTML = drafts.map(d =>
+          '<label style="display:flex;align-items:center;gap:4px;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 8px">' +
+          '<input type="checkbox" class="inviteProjectCb" value="' + escapeHtml(d.id) + '">' + escapeHtml(d.title || d.id) + '</label>'
+        ).join('') || '<span class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</span>';
+      }
     }
 
     async function addTenantUser() {
@@ -716,14 +965,45 @@
         ? selfApprovals.map(item => {
             const date = (item.decided_at || '').slice(0, 16).replace('T', ' ');
             return '<tr style="border-bottom:1px solid #e2e8f0;">' +
-              '<td style="padding:8px;font-weight:600;">' + escapeHtml(item.section_key || '') + '</td>' +
+              '<td style="padding:8px;font-weight:600;">' + escapeHtml(item.section_key || item.kind || '') + '</td>' +
               '<td style="padding:8px;">إصدار ' + (item.version_number || 1) + '</td>' +
-              '<td style="padding:8px;">' + escapeHtml(item.decided_by_name || '') + '</td>' +
+              '<td style="padding:8px;">' + escapeHtml(item.decided_by_name || item.decided_by || '') + '</td>' +
               '<td style="padding:8px;color:#64748b;font-size:12px;">' + escapeHtml(date) + '</td>' +
               '<td style="padding:8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;background:#fff3bf;color:#8a6d00;">تنبيه: تعميد ذاتي للمحرر</span></td>' +
               '</tr>';
           }).join('')
         : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#1c7a2e;">لا توجد مخالفات في الفصل بين المهام</td></tr>';
+
+      const extraSections = [
+        { key: 'cross_gate_approvals', count: 'cross_gate_count', label: 'اعتماد التوليد والملف لنفس المعتمد', name: i => i.decided_by_name || i.decided_by },
+        { key: 'last_editor_conflicts', count: 'last_editor_conflicts_count', label: 'معتمد الملف هو آخر محرر له', name: i => i.decided_by_name || i.decided_by },
+        { key: 'post_approval_edits', count: 'post_approval_edits_count', label: 'تعديل بعد الاعتماد النهائي بدون صلاحية', name: i => i.user_name || i.user_id },
+        { key: 'client_side_topups', count: 'client_side_topups_count', label: 'شحن محفظة من جهة العميل', name: i => i.actor || '' },
+        { key: 'missing_reason_decisions', count: 'missing_reason_count', label: 'قرار رفض أو إرجاع بدون سبب', name: i => i.decided_by || '' },
+      ];
+      const extraRows = extraSections.map(sec => {
+        const items = matrix?.[sec.key] || [];
+        const count = matrix?.[sec.count] ?? items.length;
+        const itemsHtml = items.length
+          ? items.map(i => '<div style="font-size:12px;color:#475569;padding:2px 0">' + escapeHtml(sec.name(i) || '') +
+              ' — ' + escapeHtml((i.decided_at || i.created_at || '').slice(0, 16).replace('T', ' ')) + '</div>').join('')
+          : '';
+        return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
+          '<strong style="font-size:13px">' + escapeHtml(sec.label) + '</strong>' +
+          '<div style="margin-top:6px">العدد: <strong style="color:' + (count > 0 ? '#a67c00' : '#1c7a2e') + '">' + count + '</strong></div>' +
+          itemsHtml + '</div>';
+      }).join('');
+
+      const policies = matrix?.policies || {};
+      const currentPolicy = policies.section_self_approval || 'allow';
+      const policyLabels = { allow: 'سماح مع توثيق', warn: 'سماح مع تنبيه', block: 'منع' };
+      const policySelect = hasPermission('company_settings')
+        ? '<select id="sodPolicySelect" style="margin-top:8px;font-size:12px">' +
+          Object.keys(policyLabels).map(v =>
+            '<option value="' + v + '" ' + (v === currentPolicy ? 'selected' : '') + '>' + policyLabels[v] + '</option>'
+          ).join('') + '</select>' +
+          '<button type="button" class="btn small ghost" style="margin-top:6px" onclick="saveSodPolicy()">' + escapeHtml(WFT('common.save', 'حفظ')) + '</button>'
+        : '<div style="margin-top:8px;font-size:12px;color:#64748b">' + escapeHtml(policyLabels[currentPolicy] || currentPolicy) + '</div>';
 
       modal.innerHTML =
         '<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
@@ -735,14 +1015,15 @@
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
         '<strong>اعتماد المحرر لقسمه (d01):</strong>' +
-        '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">سماح مع التنبيه والتوثيق التلقائي في سجل التدقيق</p>' +
         '<div style="margin-top:8px;">إجمالي التعميد الذاتي: <strong style="color:' + (selfCount > 0 ? '#a67c00' : '#1c7a2e') + ';">' + selfCount + '</strong></div>' +
+        policySelect +
         '</div>' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
         '<strong>معتمد التوليد والملف (d02):</strong>' +
         '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">فصل إلزامي في مصفوفة الأدوار؛ الجمع مقتصر على مدير الشركة</p>' +
         '<div style="margin-top:8px;">حالة الحوكمة: <strong style="color:#1c7a2e;">منضبطة</strong></div>' +
         '</div></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' + extraRows + '</div>' +
         '<div style="flex:1;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
         '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
         '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
@@ -757,6 +1038,17 @@
       document.body.appendChild(modal);
       const closeBtn = modal.querySelector('#closeSodModalBtn');
       if (closeBtn) closeBtn.onclick = () => { if (modal.parentNode) modal.parentNode.removeChild(modal); };
+    }
+
+    async function saveSodPolicy() {
+      const sel = document.getElementById('sodPolicySelect');
+      if (!sel) return;
+      const data = await api('PUT', '/api/policies', { section_self_approval: sel.value });
+      if (data && data.success) {
+        toast(WFT('common.saved', 'حفظ'));
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
     }
 
     let editingUserPermissions = null;
@@ -775,6 +1067,9 @@
       approve_generation: 'اعتماد بدء التوليد',
       approve_final_file: 'اعتماد الملف النهائي',
       export_files: 'تصدير الملفات',
+      copy_presentation: 'نسخ العروض',
+      post_approval_edit: 'التعديل بعد الاعتماد',
+      billing: 'الفوترة والمحفظة',
       support_tickets: 'تذاكر الدعم',
       sag_admin_panel: 'لوحة المدير العام',
     };
@@ -791,16 +1086,21 @@
     };
 
     async function openUserPermissionsModal(userId, userName) {
-      const [permData, sectionData] = await Promise.all([
+      const [permData, sectionData, scopeData, rolesData] = await Promise.all([
         api('GET', '/api/users/' + userId + '/permissions'),
-        api('GET', '/api/users/' + userId + '/field-sections')
+        api('GET', '/api/users/' + userId + '/field-sections'),
+        api('GET', '/api/users/' + userId + '/project-scope').catch(() => null),
+        api('GET', '/api/roles/template').catch(() => null)
       ]);
       if (!permData.success || !sectionData.success) { toast('تعذر تحميل الصلاحيات'); return; }
       const perms = permData.permissions || {};
       const keys = permData.availableKeys || [];
       const sections = sectionData.sections || {};
       const availableSections = sectionData.available || [];
-      editingUserPermissions = { userId, userName, availableSections };
+      const scopeDrafts = (scopeData && scopeData.drafts) || [];
+      const scopeSet = new Set((scopeData && scopeData.scope) || []);
+      const tenantRoles = (rolesData && rolesData.roles) || [];
+      editingUserPermissions = { userId, userName, availableSections, scopeDrafts };
 
       const permRows = keys.map(key => {
         const label = PERMISSION_LABELS[key] || key;
@@ -816,6 +1116,16 @@
           '<input type="checkbox" id="section_' + s.key + '" ' + (sections[s.key] ? 'checked' : '') + '>' +
           '</div>';
       }).join('');
+
+      const scopeRows = scopeDrafts.length ? scopeDrafts.map(d =>
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">' +
+        '<label>' + escapeHtml(d.title || d.id) + '</label>' +
+        '<input type="checkbox" class="scopeDraftCb" value="' + escapeHtml(d.id) + '" ' + (scopeSet.has(d.id) ? 'checked' : '') + '></div>'
+      ).join('') : '<p class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
+
+      const roleOptions = tenantRoles.map(r =>
+        '<option value="' + escapeHtml(r.id) + '">' + escapeHtml(r.name) + '</option>'
+      ).join('');
 
       const modal = document.createElement('div');
       modal.id = 'userPermissionsModal';
@@ -834,12 +1144,18 @@
         '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'profile\')">بروفايل</button>' +
         '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'support\')">دعم</button>' +
         '</div></div>' +
+        (roleOptions ? '<div style="margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">' +
+          '<div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px;">' + escapeHtml(WFT('users.role_assign', 'تعيين قالب مخصص')) + '</div>' +
+          '<div style="display:flex;gap:6px"><select id="assignRoleSelect" style="flex:1">' + roleOptions + '</select>' +
+          '<button type="button" class="btn small ghost" onclick="assignTenantRole()">' + escapeHtml(WFT('users.role_assign_btn', 'تعيين')) + '</button></div></div>' : '') +
         '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
         '' +
         permRows +
         '<h4 style="margin:20px 0 8px;color:var(--p)">أقسام فورم المشروع</h4>' +
         '' +
         sectionRows +
+        '<h4 style="margin:20px 0 8px;color:var(--p)">' + escapeHtml(WFT('users.project_scope', 'ملفات المشاريع المسموحة')) + '</h4>' +
+        scopeRows +
         '<div class="tenant-btns" style="margin-top:16px">' +
         '<button class="btn primary" onclick="saveUserPermissions()">حفظ الصلاحيات</button>' +
         '</div></div>';
@@ -848,11 +1164,11 @@
 
     function applyRoleTemplateQuick(templateKey) {
       const templates = {
-        editor: ['dashboard', 'create_presentation', 'view_presentations', 'generate_images', 'generate_maps'],
+        editor: ['dashboard', 'create_presentation', 'view_presentations', 'generate_images', 'generate_maps', 'copy_presentation'],
         section_approver: ['dashboard', 'view_presentations', 'approvals'],
         generation_approver: ['dashboard', 'view_presentations', 'approve_generation'],
         final_file_approver: ['dashboard', 'view_presentations', 'approve_final_file', 'export_files'],
-        profile: ['dashboard', 'company_settings', 'custom_fields'],
+        profile: ['dashboard', 'company_settings', 'custom_fields', 'billing'],
         support: ['dashboard', 'view_presentations', 'support_tickets']
       };
       const allowed = templates[templateKey] || [];
@@ -860,6 +1176,24 @@
         const cb = document.getElementById('perm_' + key);
         if (cb) cb.checked = allowed.includes(key);
       });
+    }
+
+    async function assignTenantRole() {
+      if (!editingUserPermissions) return;
+      const sel = document.getElementById('assignRoleSelect');
+      const roleId = sel ? sel.value : '';
+      if (!roleId) return;
+      const data = await api('POST', '/api/roles/' + roleId + '/assign', { userId: editingUserPermissions.userId });
+      if (data && data.success) {
+        toast(WFT('users.role_assigned', 'عين القالب'));
+        const perms = data.permissions || {};
+        Object.keys(PERMISSION_LABELS).forEach(key => {
+          const cb = document.getElementById('perm_' + key);
+          if (cb && key in perms) cb.checked = !!perms[key];
+        });
+      } else {
+        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+      }
     }
 
     async function saveUserPermissions() {
@@ -875,34 +1209,50 @@
         const cb = document.getElementById('section_' + s.key);
         sections[s.key] = cb ? cb.checked : false;
       });
+      const draftIds = Array.from(document.querySelectorAll('.scopeDraftCb:checked')).map(cb => cb.value);
       showLoader('جاري حفظ الصلاحيات', '');
-      const [permRes, sectionRes] = await Promise.all([
+      const [permRes, sectionRes, scopeRes] = await Promise.all([
         api('PUT', '/api/users/' + editingUserPermissions.userId + '/permissions', { permissions }),
-        api('PUT', '/api/users/' + editingUserPermissions.userId + '/field-sections', { sections })
+        api('PUT', '/api/users/' + editingUserPermissions.userId + '/field-sections', { sections }),
+        api('PUT', '/api/users/' + editingUserPermissions.userId + '/project-scope', { draftIds }).catch(() => ({ success: true }))
       ]);
       hideLoader();
       const modal = document.getElementById('userPermissionsModal');
       if (modal) modal.remove();
-      if (permRes.success && sectionRes.success) { toast('تم حفظ الصلاحيات'); }
-      else { toast(permRes.error || sectionRes.error || 'فشل الحفظ'); }
+      if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success)) { toast('تم حفظ الصلاحيات'); }
+      else { toast(permRes.error || sectionRes.error || (scopeRes && scopeRes.error) || 'فشل الحفظ'); }
     }
 
     async function sendTenantInvite() {
       const email = document.getElementById('inviteEmail').value.trim();
-      if (!email) { toast('أدخل بريد الموظف'); return; }
+      if (!email) { toast(WFT('users.invite_email_required', 'أدخل بريد الموظف')); return; }
       const result = document.getElementById('inviteResult');
-      showInlineLoader(result, 'جاري الإرسال...');
-      const data = await api('POST', '/api/invites', { email });
+      showInlineLoader(result, WFT('common.sending', 'جاري الإرسال...'));
+      const sections = Array.from(document.querySelectorAll('.inviteSectionCb:checked')).map(cb => cb.value);
+      const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
+      const data = await api('POST', '/api/invites', {
+        email,
+        name: ((document.getElementById('inviteName') || {}).value || '').trim() || null,
+        phone: ((document.getElementById('invitePhone') || {}).value || '').trim() || null,
+        role: ((document.getElementById('inviteRole') || {}).value || 'employee'),
+        sections,
+        projects,
+      });
       if (data.success) {
         const fullUrl = window.location.origin + data.inviteUrl;
         result.innerHTML = '<div style="background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:8px">' +
-          '<p style="margin:0 0 8px"><strong>تم إنشاء الدعوة!</strong></p>' +
-          '<p style="margin:0 0 8px" class="tenant-hint">شارك هذا الرابط مع الموظف (صالح لمدة 7 أيام):</p>' +
+          '<p style="margin:0 0 8px"><strong>' + escapeHtml(WFT('users.invite_created', 'تم إنشاء الدعوة')) + '</strong>' +
+          (data.emailSent ? '' : ' — <span style="color:#a67c00">' + escapeHtml(WFT('users.invite_email_queued', 'تعذر إرسال البريد')) + '</span>') + '</p>' +
           '<input type="text" readonly value="' + fullUrl + '" style="width:100%;font-size:13px" onclick="this.select()">' +
           '</div>';
         document.getElementById('inviteEmail').value = '';
+        const nameEl = document.getElementById('inviteName');
+        if (nameEl) nameEl.value = '';
+        const phoneEl = document.getElementById('invitePhone');
+        if (phoneEl) phoneEl.value = '';
+        openTenantUsers();
       } else {
-        result.innerHTML = '<p style="color:#c33">' + (data.error || 'فشل') + '</p>';
+        result.innerHTML = '<p style="color:#c33">' + escapeHtml(data.error || WFT('common.error', 'فشل')) + '</p>';
       }
     }
 

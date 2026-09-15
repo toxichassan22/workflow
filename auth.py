@@ -39,6 +39,32 @@ JWT_SECRET, JWT_SECRET_SOURCE = _load_jwt_secret()
 JWT_EXPIRY_HOURS = 72  # 3 days
 
 
+def create_signed_download_token(file_id, tenant_id, ttl_seconds=900):
+    """t61: short-lived HMAC token carrying the file and its owning tenant."""
+    exp = int(time.time()) + int(ttl_seconds)
+    signing_input = f"dl.{file_id}.{tenant_id}.{exp}"
+    sig = hmac.new(JWT_SECRET.encode(), signing_input.encode(), hashlib.sha256).hexdigest()
+    return f"{signing_input}.{sig}"
+
+
+def verify_signed_download_token(token):
+    """Return {'file_id', 'tenant_id'} for a valid unexpired token, else None."""
+    parts = str(token or '').split('.')
+    if len(parts) != 5 or parts[0] != 'dl':
+        return None
+    signing_input = '.'.join(parts[:4])
+    expected = hmac.new(JWT_SECRET.encode(), signing_input.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, parts[4]):
+        return None
+    try:
+        exp = int(parts[3])
+    except ValueError:
+        return None
+    if exp < int(time.time()):
+        return None
+    return {'file_id': parts[1], 'tenant_id': parts[2]}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Password Hashing (PBKDF2 + random salt — no external deps)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,10 +156,116 @@ def decode_token(token):
             return None
         if not isinstance(payload.get('sub'), str) or not payload['sub']:
             return None
+        # Purpose-scoped tokens (the MFA challenge) are not session tokens.
+        if payload.get('purpose'):
+            return None
 
         return payload
     except Exception:
         return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOTP two-factor authentication (RFC 6238, pure stdlib — t21/t63)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MFA_TOKEN_EXPIRY_SECONDS = 600  # the post-password challenge lives 10 minutes
+MFA_ISSUER = 'LandLoom'
+
+
+def generate_totp_secret():
+    """A fresh base32 secret for an authenticator app."""
+    return base64.b32encode(secrets.token_bytes(20)).decode('ascii').rstrip('=')
+
+
+def _totp_secret_bytes(secret):
+    padding = 8 - len(secret) % 8
+    if padding != 8:
+        secret = secret + '=' * padding
+    return base64.b32decode(secret.upper())
+
+
+def totp_code(secret, at_time=None, period=30, digits=6):
+    """The current TOTP code for a base32 secret."""
+    counter = int((at_time if at_time is not None else time.time()) // period)
+    digest = hmac.new(
+        _totp_secret_bytes(secret), counter.to_bytes(8, 'big'), hashlib.sha1
+    ).digest()
+    offset = digest[-1] & 0x0F
+    value = int.from_bytes(digest[offset:offset + 4], 'big') & 0x7FFFFFFF
+    return str(value % (10 ** digits)).zfill(digits)
+
+
+def verify_totp(secret, code, window=1):
+    """Accept the current step and ``window`` neighbours for clock drift."""
+    code = str(code or '').strip().replace(' ', '')
+    if not secret or not code.isdigit():
+        return False
+    now = int(time.time())
+    for step in range(-window, window + 1):
+        if hmac.compare_digest(totp_code(secret, at_time=now + step * 30), code):
+            return True
+    return False
+
+
+def create_mfa_token(tenant_id, email, user_id=None, user_name=None, user_role=None):
+    """A short-lived JWT that only carries a login through the MFA challenge.
+
+    The ``purpose`` claim makes ``decode_token`` reject it, so the challenge
+    token can never be replayed as a session token.
+    """
+    header = {'alg': 'HS256', 'typ': 'JWT'}
+    payload = {
+        'sub': tenant_id,
+        'email': email,
+        'user_id': user_id,
+        'user_name': user_name,
+        'user_role': user_role,
+        'purpose': 'mfa',
+        'iat': int(time.time()),
+        'exp': int(time.time()) + MFA_TOKEN_EXPIRY_SECONDS,
+    }
+    header_b64 = _b64encode(json.dumps(header, separators=(',', ':')).encode())
+    payload_b64 = _b64encode(json.dumps(payload, separators=(',', ':')).encode())
+    signing_input = f"{header_b64}.{payload_b64}".encode()
+    signature = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+    return f"{header_b64}.{payload_b64}.{_b64encode(signature)}"
+
+
+def verify_mfa_token(token):
+    """Decode a token only when it is the short-lived MFA challenge."""
+    try:
+        parts = str(token or '').split('.')
+        if len(parts) != 3:
+            return None
+        header_b64, payload_b64, sig_b64 = parts
+        header = json.loads(_b64decode(header_b64))
+        if header.get('alg') != 'HS256' or header.get('typ') != 'JWT':
+            return None
+        signing_input = f"{header_b64}.{payload_b64}".encode()
+        expected_sig = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig_b64, _b64encode(expected_sig)):
+            return None
+        payload = json.loads(_b64decode(payload_b64))
+        if payload.get('purpose') != 'mfa' or payload.get('exp', 0) < time.time():
+            return None
+        if not isinstance(payload.get('sub'), str) or not payload['sub']:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def generate_recovery_codes(count=8):
+    """One-time recovery codes shown once at MFA setup."""
+    return [f'{secrets.randbelow(10**8):08d}' for _ in range(count)]
+
+
+def totp_otpauth_uri(secret, account_name):
+    """otpauth:// URI for authenticator apps that accept pasted setup text."""
+    from urllib.parse import quote
+    label = f'{MFA_ISSUER}:{account_name}'
+    return f'otpauth://totp/{quote(label)}?secret={secret}&issuer={quote(MFA_ISSUER)}'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

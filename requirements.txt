@@ -25,3 +25,4 @@ gunicorn>=21.0.0
 pyjwt>=2.8.0
 fontTools>=4.40.0
 psycopg2-binary>=2.9.0
+cryptography>=42.0.0
