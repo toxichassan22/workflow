@@ -528,6 +528,111 @@ class AdminCompanyAccountTests(unittest.TestCase):
         anonymous = self.client.get('/api/admin/tenants')
         self.assertEqual(anonymous.status_code, 401)
 
+    def test_password_setup_link_dies_when_user_is_deactivated(self):
+        result = self._create_company('linkdeact')
+        tenant_id = result['tenant']['id']
+        user_id = result['tenant']['primaryUserId']
+        raw_token = result['setupUrl'].rsplit('/', 1)[-1]
+
+        with self.app.app_context():
+            db.update_user(user_id, is_active=0)
+
+        completed = self.client.post(
+            f'/api/auth/password-setup/{raw_token}',
+            json={'password': 'SecurePass123'},
+        )
+        self.assertEqual(completed.status_code, 404)
+        stale = self.client.get(f'/api/auth/password-setup/{raw_token}')
+        self.assertEqual(stale.status_code, 404)
+        with self.app.app_context():
+            self.assertFalse(db.get_user_by_id(user_id)['is_active'])
+
+        # A fresh link issued after the deactivation still onboards the user.
+        with self.app.app_context():
+            fresh = db.create_password_setup_token(tenant_id, user_id)
+        completed = self.client.post(
+            f'/api/auth/password-setup/{fresh}',
+            json={'password': 'SecurePass123'},
+        )
+        self.assertEqual(completed.status_code, 200, completed.get_json())
+        with self.app.app_context():
+            self.assertTrue(db.get_user_by_id(user_id)['is_active'])
+
+    def test_password_setup_link_dies_when_company_is_deactivated(self):
+        result = self._create_company('companyoff')
+        tenant_id = result['tenant']['id']
+        user_id = result['tenant']['primaryUserId']
+        raw_token = result['setupUrl'].rsplit('/', 1)[-1]
+
+        suspended = self.client.put(
+            f'/api/admin/tenants/{tenant_id}',
+            headers=self.headers,
+            json={'isActive': False},
+        )
+        self.assertEqual(suspended.status_code, 200, suspended.get_json())
+
+        completed = self.client.post(
+            f'/api/auth/password-setup/{raw_token}',
+            json={'password': 'SecurePass123'},
+        )
+        self.assertEqual(completed.status_code, 404)
+        with self.app.app_context():
+            self.assertFalse(db.get_user_by_id(user_id)['is_active'])
+
+    def test_password_setup_returns_mfa_challenge_when_factor_enabled(self):
+        result = self._create_company('mfalink')
+        user_id = result['tenant']['primaryUserId']
+        raw_token = result['setupUrl'].rsplit('/', 1)[-1]
+
+        with self.app.app_context():
+            secret = auth.generate_totp_secret()
+            db.set_mfa_pending_secret('user', user_id, secret)
+            db.activate_mfa('user', user_id)
+
+        completed = self.client.post(
+            f'/api/auth/password-setup/{raw_token}',
+            json={'password': 'SecurePass123'},
+        )
+        body = completed.get_json()
+        self.assertEqual(completed.status_code, 200, body)
+        self.assertTrue(body['mfaRequired'])
+        self.assertNotIn('token', body)
+
+        # The challenge token cannot authenticate API calls.
+        denied = self.client.get(
+            '/api/auth/me',
+            headers={'Authorization': 'Bearer ' + body['mfaToken']},
+        )
+        self.assertEqual(denied.status_code, 401)
+
+        verified = self.client.post(
+            '/api/auth/mfa/verify',
+            json={'mfaToken': body['mfaToken'], 'code': auth.totp_code(secret)},
+        )
+        self.assertEqual(verified.status_code, 200, verified.get_json())
+        self.assertTrue(verified.get_json()['token'])
+
+    def test_password_setup_replay_does_not_overwrite_password(self):
+        result = self._create_company('onetimelink')
+        raw_token = result['setupUrl'].rsplit('/', 1)[-1]
+        first = self.client.post(
+            f'/api/auth/password-setup/{raw_token}',
+            json={'password': 'SecurePass123'},
+        )
+        self.assertEqual(first.status_code, 200, first.get_json())
+
+        replay = self.client.post(
+            f'/api/auth/password-setup/{raw_token}',
+            json={'password': 'AnotherPass123'},
+        )
+        self.assertEqual(replay.status_code, 404)
+
+        login = self.client.post(
+            '/api/auth/login',
+            json={'username': 'company_onetimelink', 'password': 'SecurePass123'},
+        )
+        self.assertEqual(login.status_code, 200, login.get_json())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1539,6 +1539,8 @@
       togglePasswordVisibility(inputId, btn);
     }
 
+    let pendingSetupMfaToken = null;
+
     async function handlePasswordSetup(event, rawToken) {
       event.preventDefault();
       const password = document.getElementById('passwordSetupValue').value;
@@ -1554,10 +1556,51 @@
         '/api/auth/password-setup/' + encodeURIComponent(rawToken),
         { password }
       );
+      if (data.success && data.mfaRequired) {
+        pendingSetupMfaToken = data.mfaToken;
+        showPasswordSetupMfa();
+        return;
+      }
       if (!data.success || !data.token) {
         errorHost.textContent = data.error || 'تعذر اعتماد كلمة المرور';
         return;
       }
+      setTenantToken(data.token);
+      setTenantUser(data.tenant);
+      try {
+        tenantUser = data.tenant;
+        const next = (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute('tenantDashboardPage')) || '/app/dashboard';
+        window.history.replaceState({}, '', next);
+      } catch (e) { window.history.replaceState({}, '', '/app/dashboard'); }
+      await bootstrapTenant();
+      if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') openMfaSetupModal(true);
+    }
+
+    function showPasswordSetupMfa() {
+      const authPage = document.getElementById('tenantAuthPage');
+      authPage.innerHTML = '<div class="auth-card">' +
+        '<h2>التحقق الثنائي</h2>' +
+        '<div id="passwordSetupError" class="auth-error"></div>' +
+        '<form class="auth-form active" onsubmit="handlePasswordSetupMfa(event)">' +
+        '<label>رمز التحقق الثنائي</label>' +
+        '<input type="text" id="passwordSetupMfaCode" inputmode="numeric" autocomplete="one-time-code" dir="ltr" required>' +
+        '<button type="submit" class="auth-btn">تحقق</button>' +
+        '</form></div>';
+    }
+
+    async function handlePasswordSetupMfa(event) {
+      event.preventDefault();
+      const errorHost = document.getElementById('passwordSetupError');
+      const code = (document.getElementById('passwordSetupMfaCode') || {}).value || '';
+      const data = await api('POST', '/api/auth/mfa/verify', {
+        mfaToken: pendingSetupMfaToken,
+        code: code.trim(),
+      });
+      if (!data.success || !data.token) {
+        if (errorHost) errorHost.textContent = data.error || 'رمز التحقق غير صحيح';
+        return;
+      }
+      pendingSetupMfaToken = null;
       setTenantToken(data.token);
       setTenantUser(data.tenant);
       try {

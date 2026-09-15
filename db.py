@@ -1087,6 +1087,8 @@ def update_tenant(tenant_id, **fields):
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [tenant_id]
     conn.execute(f'UPDATE tenants SET {set_clause} WHERE id = ?', values)
+    if 'is_active' in updates and not updates['is_active']:
+        _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
     conn.commit()
     return True
 
@@ -2787,6 +2789,8 @@ def update_user(user_id, **fields):
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [user_id]
     conn.execute(f'UPDATE users SET {set_clause} WHERE id = ?', values)
+    if 'is_active' in updates and not updates['is_active']:
+        _revoke_password_setup_tokens(conn, user_id=user_id)
     conn.commit()
     return True
 
@@ -2866,6 +2870,8 @@ def sync_primary_company_admin(tenant_id, **fields):
                 f'UPDATE users SET {set_clause} WHERE id = ? AND tenant_id = ?',
                 [*user_updates.values(), user_id, tenant_id]
             )
+        if 'is_active' in fields and not fields['is_active']:
+            _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3844,20 +3850,46 @@ def get_password_setup_token(raw_token):
     return dict(row) if row else None
 
 
+def _revoke_password_setup_tokens(conn, user_id=None, tenant_id=None):
+    """Consume every unused password-setup link for a user or a whole company.
+
+    Runs when the account is deactivated: a link issued before the
+    deactivation must not be able to reactivate the user afterwards.
+    """
+    now = _utcnow().isoformat()
+    if user_id:
+        conn.execute(
+            'UPDATE password_setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+            (now, user_id)
+        )
+    if tenant_id:
+        conn.execute(
+            'UPDATE password_setup_tokens SET used_at = ? WHERE tenant_id = ? AND used_at IS NULL',
+            (now, tenant_id)
+        )
+
+
 def complete_password_setup(raw_token, password_hash):
     """Set the password for a valid setup token and consume it atomically."""
     import hashlib as _hashlib
     conn = get_db()
     token_hash = _hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
     token = conn.execute(
-        '''SELECT * FROM password_setup_tokens
-           WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?''',
-        (token_hash, _utcnow().isoformat())
+        'SELECT * FROM password_setup_tokens WHERE token_hash = ?',
+        (token_hash,)
     ).fetchone()
     if not token:
         return None
     used_at = _utcnow().isoformat()
     try:
+        claimed = conn.execute(
+            '''UPDATE password_setup_tokens SET used_at = ?
+               WHERE id = ? AND used_at IS NULL AND expires_at > ?''',
+            (used_at, token['id'], used_at)
+        )
+        if claimed.rowcount != 1:
+            conn.rollback()
+            return None
         conn.execute(
             '''UPDATE users
                SET password_hash = ?, require_password_change = 0, is_active = 1
@@ -3869,10 +3901,6 @@ def complete_password_setup(raw_token, password_hash):
                SET password_hash = ?, require_password_change = 0
                WHERE id = ? AND primary_user_id = ?''',
             (password_hash, token['tenant_id'], token['user_id'])
-        )
-        conn.execute(
-            'UPDATE password_setup_tokens SET used_at = ? WHERE id = ?',
-            (used_at, token['id'])
         )
         conn.commit()
     except Exception:
@@ -12698,6 +12726,7 @@ def set_tenant_active(tenant_id, is_active, actor_id=None, actor_name=None, reas
             'UPDATE tenants SET is_active = 0, deactivated_reason = ? WHERE id = ?',
             (str(reason or '').strip() or None, tenant_id),
         )
+        _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
     conn.commit()
     return get_tenant_by_id(tenant_id)
 

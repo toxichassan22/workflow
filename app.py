@@ -15166,6 +15166,17 @@ def api_password_setup_complete(raw_token):
         return jsonify({'error': 'Password setup link is invalid or expired'}), 404
     tenant = db.get_tenant_by_id(completed['tenant_id'])
     user = db.get_user_by_id(completed['user_id'])
+    if not tenant or not user:
+        return jsonify({'error': 'Password setup link is invalid or expired'}), 404
+    mfa = db.get_mfa_state('user', user['id'])
+    if mfa.get('enabled'):
+        return jsonify({
+            'success': True,
+            'mfaRequired': True,
+            'mfaToken': auth.create_mfa_token(
+                tenant['id'], user['email'], user_id=user['id'],
+                user_name=user['name'], user_role=user['role']),
+        })
     db.record_login(tenant['id'], user['id'])
     token = create_token(
         tenant['id'], user['email'], is_admin=False,
@@ -15176,6 +15187,7 @@ def api_password_setup_complete(raw_token):
     return jsonify({
         'success': True,
         'token': token,
+        'mfaSetupRequired': user.get('role') == 'company_admin' and not mfa.get('enabled'),
         'tenant': tenant_payload,
         'user': {
             'id': user['id'],
