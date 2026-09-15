@@ -607,11 +607,14 @@
       const points = estimate.estimated_points ?? 500;
       const costUsd = Number(estimate.estimated_cost_usd ?? 25);
 
-      // d02: the requester never decides their own request. Only a
-      // company-level administrator may carry both hats; every other requester
-      // waits here while a generation approver decides from the approvals page.
+      // d02: the requester never decides their own request unless the company
+      // policy opens it (generation_self_approval='allow', reported by the
+      // server as can_self_decide). Otherwise only a company-level
+      // administrator may carry both hats; every other requester waits here
+      // while a generation approver decides from the approvals page.
       const canSelfDecide = Boolean(tenantUser && tenantUser.isAdmin) ||
-        ((tenantUser && tenantUser._userRole) || 'company_admin') === 'company_admin';
+        ((tenantUser && tenantUser._userRole) || 'company_admin') === 'company_admin' ||
+        Boolean(estimateData && estimateData.can_self_decide);
 
       let remainingUsd = 0;
       let remainingSar = 0;

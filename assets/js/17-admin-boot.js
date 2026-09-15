@@ -999,6 +999,8 @@
       const policies = matrix?.policies || {};
       const currentPolicy = policies.section_self_approval || 'allow';
       const policyLabels = { allow: 'سماح مع توثيق', warn: 'سماح مع تنبيه', block: 'منع' };
+      const genPolicy = policies.generation_self_approval || 'block';
+      const genPolicyLabels = { allow: 'سماح', block: 'منع' };
       const policySelect = hasPermission('company_settings')
         ? '<select id="sodPolicySelect" style="margin-top:8px;font-size:12px">' +
           Object.keys(policyLabels).map(v =>
@@ -1006,6 +1008,12 @@
           ).join('') + '</select>' +
           '<button type="button" class="btn small ghost" style="margin-top:6px" onclick="saveSodPolicy()">' + escapeHtml(WFT('common.save', 'حفظ')) + '</button>'
         : '<div style="margin-top:8px;font-size:12px;color:#64748b">' + escapeHtml(policyLabels[currentPolicy] || currentPolicy) + '</div>';
+      const genPolicySelect = hasPermission('company_settings')
+        ? '<select id="sodGenPolicySelect" style="margin-top:8px;font-size:12px">' +
+          Object.keys(genPolicyLabels).map(v =>
+            '<option value="' + v + '" ' + (v === genPolicy ? 'selected' : '') + '>' + genPolicyLabels[v] + '</option>'
+          ).join('') + '</select>'
+        : '<div style="margin-top:8px;font-size:12px;color:#64748b">' + escapeHtml(genPolicyLabels[genPolicy] || genPolicy) + '</div>';
 
       modal.innerHTML =
         '<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
@@ -1021,9 +1029,9 @@
         policySelect +
         '</div>' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
-        '<strong>معتمد التوليد والملف (d02):</strong>' +
-        '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">فصل إلزامي في مصفوفة الأدوار؛ الجمع مقتصر على مدير الشركة</p>' +
-        '<div style="margin-top:8px;">حالة الحوكمة: <strong style="color:#1c7a2e;">منضبطة</strong></div>' +
+        '<strong>اعتماد مقدم طلب التوليد لطلبه (d02):</strong>' +
+        '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">فصل إلزامي في مصفوفة الأدوار ما لم تسمح الشركة بالاعتماد الذاتي</p>' +
+        genPolicySelect +
         '</div></div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' + extraRows + '</div>' +
         '<div style="flex:1;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
@@ -1044,8 +1052,12 @@
 
     async function saveSodPolicy() {
       const sel = document.getElementById('sodPolicySelect');
-      if (!sel) return;
-      const data = await api('PUT', '/api/policies', { section_self_approval: sel.value });
+      const genSel = document.getElementById('sodGenPolicySelect');
+      const updates = {};
+      if (sel) updates.section_self_approval = sel.value;
+      if (genSel) updates.generation_self_approval = genSel.value;
+      if (!Object.keys(updates).length) return;
+      const data = await api('PUT', '/api/policies', updates);
       if (data && data.success) {
         toast(WFT('common.saved', 'حفظ'));
       } else {
@@ -1072,6 +1084,7 @@
       copy_presentation: 'نسخ العروض',
       post_approval_edit: 'التعديل بعد الاعتماد',
       billing: 'الفوترة والمحفظة',
+      audit_log: 'سجل المراجعة',
       support_tickets: 'تذاكر الدعم',
       sag_admin_panel: 'لوحة المدير العام',
     };
