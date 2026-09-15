@@ -3701,13 +3701,13 @@
       --ui-border-strong: #cbd5e1;
       --ink: #0f2333;
       --ink-muted: #64798c;
-      --sidebar-bg: #ffffff;
-      --sidebar-text: #3c5265;
-      --sidebar-muted: #7a8fa0;
-      --sidebar-active: var(--p-soft);
-      --sidebar-accent: var(--p);
-      --brand-a: #102b3d;
-      --brand-b: #0b2232;
+      --sidebar-bg: #102b3d;
+      --sidebar-bg-deep: #0b2232;
+      --sidebar-text: #c8d6df;
+      --sidebar-muted: #8fa5b5;
+      --sidebar-active: rgba(255, 255, 255, .09);
+      --sidebar-accent: #37d6c6;
+      --on-accent: #07182c;
       --brand-ink: #ffffff;
       --brand-ink-muted: rgba(255, 255, 255, .72);
       --brand-badge: rgba(255, 255, 255, .16);
@@ -3765,8 +3765,8 @@
       height: 100vh;
       min-height: 0;
       color: var(--sidebar-text);
-      background: var(--sidebar-bg);
-      border-inline-end: 1px solid var(--ui-border);
+      background: linear-gradient(180deg, var(--sidebar-bg), var(--sidebar-bg-deep));
+      border-inline-end: 1px solid rgba(255, 255, 255, .05);
     }
 
     .tenant-sidebar-brand {
@@ -3781,8 +3781,9 @@
       min-width: 0;
       padding: 13px 14px;
       border-radius: 14px;
-      background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
-      box-shadow: 0 6px 18px rgba(15, 35, 51, .16);
+      background: rgba(255, 255, 255, .06);
+      border: 1px solid rgba(255, 255, 255, .09);
+      box-shadow: none;
     }
 
     .tenant-brand-logo {
@@ -3855,7 +3856,7 @@
       overflow-x: hidden;
       overflow-y: auto;
       padding: 12px;
-      scrollbar-color: rgba(15, 35, 51, .2) transparent;
+      scrollbar-color: rgba(255, 255, 255, .18) transparent;
       scrollbar-width: thin;
     }
 
@@ -3876,7 +3877,7 @@
     .tenant-nav-group + .tenant-nav-group {
       margin-top: 16px;
       padding-top: 14px;
-      border-top: 1px solid var(--ui-border);
+      border-top: 1px solid rgba(255, 255, 255, .07);
     }
 
     .tenant-nav-label {
@@ -3910,15 +3911,15 @@
     }
 
     .tenant-sidebar-link:hover {
-      color: var(--ink);
-      background: var(--surface-subtle);
-      border-color: var(--ui-border);
+      color: #fff;
+      background: rgba(255, 255, 255, .06);
+      border-color: rgba(255, 255, 255, .07);
     }
 
     .tenant-sidebar-link.active {
-      color: var(--p);
+      color: #fff;
       background: var(--sidebar-active);
-      border-color: transparent;
+      border-color: rgba(255, 255, 255, .08);
       font-weight: 800;
       box-shadow: inset 3px 0 0 var(--sidebar-accent);
     }
@@ -3931,20 +3932,21 @@
       margin: 4px 0 4px;
       min-height: 40px;
       justify-content: center;
-      color: #fff;
-      background: var(--p);
+      color: var(--on-accent);
+      background: var(--sidebar-accent);
       border-color: transparent;
       border-radius: 10px;
       font-weight: 800;
-      box-shadow: 0 4px 14px rgba(15, 35, 51, .18);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
     }
 
     .tenant-sidebar-link.tenant-sidebar-action:hover,
     .tenant-sidebar-link.tenant-sidebar-action.active {
-      color: #fff;
-      background: var(--pd);
-      border-color: transparent;
-      box-shadow: 0 4px 14px rgba(15, 35, 51, .22);
+      color: var(--on-accent);
+      background: var(--sidebar-accent);
+      border-color: rgba(255, 255, 255, .18);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+      filter: brightness(1.08);
     }
 
     .tenant-sidebar-account {
@@ -3952,8 +3954,8 @@
       display: grid;
       gap: 2px;
       padding: 13px 14px 12px;
-      background: transparent;
-      border-top: 1px solid var(--ui-border);
+      background: rgba(0, 0, 0, .12);
+      border-top: 1px solid rgba(255, 255, 255, .08);
     }
 
     .tenant-account-label {
@@ -3966,7 +3968,7 @@
       display: block;
       min-width: 0;
       overflow: hidden;
-      color: var(--ink);
+      color: #fff;
       font-size: 13px;
       font-weight: 800;
       text-overflow: ellipsis;
@@ -3983,15 +3985,15 @@
       min-height: 34px;
       margin-top: 10px;
       padding-block: 6px;
-      color: var(--danger);
-      background: #fff;
-      border-color: #efd3d3;
+      color: #f0b4b4;
+      background: transparent;
+      border-color: rgba(255, 255, 255, .12);
     }
 
     .tenant-sidebar-logout:hover {
-      color: #a02f2f;
-      background: #fcefef;
-      border-color: #e5bcbc;
+      color: #fff;
+      background: rgba(179, 58, 58, .26);
+      border-color: rgba(255, 214, 214, .2);
     }
 
     .tenant-sidebar-powered {
@@ -4000,19 +4002,19 @@
       align-items: center;
       justify-content: center;
       padding: 10px 14px 14px;
-      border-top: 1px solid var(--ui-border);
+      border-top: 1px solid rgba(255, 255, 255, .07);
     }
 
     .tenant-sidebar-powered img {
       display: block;
       width: 92px;
       height: auto;
-      opacity: .5;
+      opacity: .45;
       transition: opacity .16s ease;
     }
 
     .tenant-sidebar-powered:hover img {
-      opacity: .8;
+      opacity: .75;
     }
 
     .tenant-sidebar-backdrop {
@@ -4372,7 +4374,7 @@
       width: 34px;
       height: 3px;
       border-radius: 3px 3px 0 0;
-      background: linear-gradient(90deg, var(--p), var(--pd));
+      background: linear-gradient(90deg, var(--p), var(--sidebar-accent));
       opacity: .9;
     }
 

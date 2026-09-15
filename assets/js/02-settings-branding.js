@@ -1173,16 +1173,27 @@
       if (b.accent_color) root.style.setProperty('--g', b.accent_color);
       if (b.background_color) root.style.setProperty('--bg', b.background_color);
       if (b.text_color) root.style.setProperty('--txt', b.text_color);
-      // The workspace is white-labeled: the brand card carries the company's
-      // colors, falling back to the platform navy only when none are saved.
+      // The workspace is white-labeled: the sidebar keeps a dark dominant
+      // surface (its navy share) but tinted by the company primary; a light
+      // primary is deepened so the chrome never turns pale.
       if (b.primary_color && primaryRgb) {
-        const onLight = brandingLuminance(primaryRgb) > 0.45;
-        root.style.setProperty('--brand-a', b.primary_color);
-        root.style.setProperty('--brand-b', b.secondary_color || brandingShade(b.primary_color, -22));
-        root.style.setProperty('--brand-ink', onLight ? '#0f2333' : '#ffffff');
-        root.style.setProperty('--brand-ink-muted', onLight ? 'rgba(15,35,51,.66)' : 'rgba(255,255,255,.72)');
-        root.style.setProperty('--brand-badge', onLight ? 'rgba(15,35,51,.09)' : 'rgba(255,255,255,.16)');
-        root.style.setProperty('--brand-mark', onLight ? '#0f2333' : b.primary_color);
+        const sideA = brandingLuminance(primaryRgb) > 0.30 ? brandingShade(b.primary_color, -62) : b.primary_color;
+        root.style.setProperty('--sidebar-bg', sideA);
+        root.style.setProperty('--sidebar-bg-deep', brandingShade(sideA, -26));
+        root.style.setProperty('--brand-mark',
+          brandingLuminance(primaryRgb) > 0.45 ? '#0f2333' : b.primary_color);
+      }
+      // The accent stays a deliberate 5%: CTA, active marker, small details.
+      // Dark accents are lifted so they still read on the dark sidebar.
+      if (b.accent_color) {
+        const accentRgb = brandingHexRgb(b.accent_color);
+        if (accentRgb) {
+          const accent = brandingLuminance(accentRgb) < 0.07 ? brandingShade(b.accent_color, 55) : b.accent_color;
+          root.style.setProperty('--sidebar-accent', accent);
+          const accentSafe = brandingHexRgb(accent) || accentRgb;
+          root.style.setProperty('--on-accent',
+            brandingLuminance(accentSafe) > 0.5 ? '#07182c' : '#ffffff');
+        }
       }
       // Logo: an uploaded logo wins; otherwise the company initial stands in
       // for it (the product ships no placeholder images).
