@@ -1142,9 +1142,17 @@
     function sagMonthLabel(iso) {
       const lang = (window.WFI18n && WFI18n.getLang && WFI18n.getLang()) || 'ar';
       const names = SAG_MONTHS[lang === 'en' ? 'en' : 'ar'];
-      const parts = String(iso).split('-');
+      const s = String(iso);
+      const parts = s.split('-');
       const m = parseInt(parts[1], 10);
-      return (names[(m || 1) - 1] || iso) + ' ' + (parts[0] || '');
+      const name = names[(m || 1) - 1] || s;
+      if (parts.length >= 3) {
+        const day = parseInt(parts[2], 10);
+        const time = s.includes(' ') ? s.split(' ')[1] : (s.includes('T') ? s.split('T')[1] : '');
+        const base = day + ' ' + name + ' ' + parts[0];
+        return time ? base + ' ' + time.slice(0, 5) : base;
+      }
+      return name + ' ' + (parts[0] || '');
     }
 
     function sagFmtNum(v) {
@@ -1216,8 +1224,9 @@
         svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
           '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
       }
+      const tickStep = Math.max(1, Math.ceil(n / 7));
       labels.forEach((lb, i) => {
-        if (n > 8 && i % 2 === 1) return;
+        if (i % tickStep !== 0 && i !== n - 1) return;
         svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
       });
       series.forEach(s => {
@@ -1361,22 +1370,33 @@
         { v: 'custom', t: WFT('admin.range_custom', 'نطاق مخصص') },
       ];
       box.innerHTML =
-        '<select id="sagRangePreset" class="admin-range-select" onchange="sagChartRange.preset=this.value; sagApplyChartRange()">' +
+        '<select id="sagRangePreset" class="admin-range-select" onchange="sagChartRange.preset=this.value; renderSagRangeControls(); sagApplyChartRange()">' +
         presets.map(p => '<option value="' + p.v + '"' + (sagChartRange.preset === p.v ? ' selected' : '') + '>' + p.t + '</option>').join('') +
         '</select>' +
         '<span class="admin-range-custom" style="display:' + (sagChartRange.preset === 'custom' ? 'inline-flex' : 'none') + '">' +
-        '<input type="month" id="sagRangeFrom" dir="ltr" value="' + escapeHtml(sagChartRange.from) + '" onchange="sagChartRange.from=this.value; sagApplyChartRange()">' +
-        '<input type="month" id="sagRangeTo" dir="ltr" value="' + escapeHtml(sagChartRange.to) + '" onchange="sagChartRange.to=this.value; sagApplyChartRange()">' +
+        '<input type="date" id="sagRangeFromDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from', 'من')) + '" value="' + escapeHtml(sagChartRange.from.slice(0, 10)) + '" onchange="sagRangeChanged()">' +
+        '<input type="time" id="sagRangeFromTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from_time', 'وقت البداية (اختياري)')) + '" value="' + escapeHtml(sagChartRange.from.slice(11, 16)) + '" onchange="sagRangeChanged()">' +
+        '<input type="date" id="sagRangeToDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to', 'إلى')) + '" value="' + escapeHtml(sagChartRange.to.slice(0, 10)) + '" onchange="sagRangeChanged()">' +
+        '<input type="time" id="sagRangeToTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to_time', 'وقت النهاية (اختياري)')) + '" value="' + escapeHtml(sagChartRange.to.slice(11, 16)) + '" onchange="sagRangeChanged()">' +
         '</span>';
+    }
+
+    function sagRangeChanged() {
+      const fd = document.getElementById('sagRangeFromDate');
+      const ft = document.getElementById('sagRangeFromTime');
+      const td = document.getElementById('sagRangeToDate');
+      const tt = document.getElementById('sagRangeToTime');
+      sagChartRange.from = fd && fd.value ? fd.value + (ft && ft.value ? 'T' + ft.value : '') : '';
+      sagChartRange.to = td && td.value ? td.value + (tt && tt.value ? 'T' + tt.value : '') : '';
+      sagApplyChartRange();
     }
 
     async function sagApplyChartRange() {
       const params = new URLSearchParams();
       if (sagChartRange.preset === 'custom') {
-        renderSagRangeControls();
-        if (!sagChartRange.from && !sagChartRange.to) return;
-        if (sagChartRange.from) params.set('from', sagChartRange.from);
-        if (sagChartRange.to) params.set('to', sagChartRange.to);
+        if (!sagChartRange.from || !sagChartRange.to) return;
+        params.set('from', sagChartRange.from);
+        params.set('to', sagChartRange.to);
       } else if (sagChartRange.preset === 'ytd') {
         params.set('months', String(new Date().getMonth() + 1));
       } else {
@@ -1539,15 +1559,28 @@
       el.innerHTML =
         '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">' +
         '<div class="tenant-field"><label for="sagReportFrom">' + WFT('reports.range_from', 'من تاريخ') + '</label>' +
-        '<input type="date" id="sagReportFrom" dir="ltr" value="' + escapeHtml(sagReportRange.from) + '" onchange="sagReportRange.from=this.value"></div>' +
+        '<div style="display:flex;gap:6px">' +
+        '<input type="date" id="sagReportFrom" dir="ltr" value="' + escapeHtml(sagReportRange.from.slice(0, 10)) + '" onchange="sagReportRangeChanged()">' +
+        '<input type="time" id="sagReportFromTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from_time', 'وقت البداية (اختياري)')) + '" value="' + escapeHtml(sagReportRange.from.slice(11, 16)) + '" onchange="sagReportRangeChanged()"></div></div>' +
         '<div class="tenant-field"><label for="sagReportTo">' + WFT('reports.range_to', 'إلى تاريخ') + '</label>' +
-        '<input type="date" id="sagReportTo" dir="ltr" value="' + escapeHtml(sagReportRange.to) + '" onchange="sagReportRange.to=this.value"></div>' +
+        '<div style="display:flex;gap:6px">' +
+        '<input type="date" id="sagReportTo" dir="ltr" value="' + escapeHtml(sagReportRange.to.slice(0, 10)) + '" onchange="sagReportRangeChanged()">' +
+        '<input type="time" id="sagReportToTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to_time', 'وقت النهاية (اختياري)')) + '" value="' + escapeHtml(sagReportRange.to.slice(11, 16)) + '" onchange="sagReportRangeChanged()"></div></div>' +
         '</div>' +
         reports.map(r =>
           '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
           '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">' +
           WFT('reports.download_pdf', 'تنزيل PDF') + '</button></div></div>'
         ).join('');
+    }
+
+    function sagReportRangeChanged() {
+      const fd = document.getElementById('sagReportFrom');
+      const ft = document.getElementById('sagReportFromTime');
+      const td = document.getElementById('sagReportTo');
+      const tt = document.getElementById('sagReportToTime');
+      sagReportRange.from = fd && fd.value ? fd.value + (ft && ft.value ? 'T' + ft.value : '') : '';
+      sagReportRange.to = td && td.value ? td.value + (tt && tt.value ? 'T' + tt.value : '') : '';
     }
 
     async function sagDownloadReport(name) {

@@ -4671,7 +4671,8 @@
     }
 
     .admin-range-select,
-    .admin-range-custom input[type="month"] {
+    .admin-range-custom input[type="date"],
+    .admin-range-custom input[type="time"] {
       min-height: 32px;
       padding: 0 8px;
       border: 1px solid var(--ui-border, #d8e0ea);

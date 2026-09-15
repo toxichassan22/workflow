@@ -6818,6 +6818,19 @@ def reset_all_company_balances(clear_usage=True):
     return result
 
 
+def _norm_range_bound(value, is_end=False):
+    """Normalize a UI date/datetime bound ('YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM')
+    to the stored 'YYYY-MM-DD HH:MM:SS' format so string comparison works."""
+    s = str(value or '').strip().replace('T', ' ')
+    if not s:
+        return ''
+    if len(s) == 10:
+        return s + (' 23:59:59' if is_end else ' 00:00:00')
+    if len(s) == 16:
+        return s + (':59' if is_end else ':00')
+    return s
+
+
 def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=None,
                        draft_id=None, presentation_id=None, actor=None):
     """Newest ledger entries for a tenant, with the t32 report filters:
@@ -6830,10 +6843,10 @@ def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=N
         params.append(str(kind))
     if from_date:
         clauses.append('created_at >= ?')
-        params.append(str(from_date))
+        params.append(_norm_range_bound(from_date))
     if to_date:
         clauses.append('created_at <= ?')
-        params.append(str(to_date) + 'T23:59:59' if len(str(to_date)) == 10 else str(to_date))
+        params.append(_norm_range_bound(to_date, is_end=True))
     if draft_id:
         clauses.append('draft_id = ?')
         params.append(str(draft_id))
@@ -10757,10 +10770,10 @@ def operational_overview(months=12, from_month=None, to_month=None):
         except Exception:
             return 0
 
-    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at', where='1 = 1'):
+    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at', where='1 = 1', bucket=7):
         try:
             rows = conn.execute(
-                'SELECT substr(' + date_col + ', 1, 7) AS m, ' + value_sql + ' AS v FROM ' + table +
+                'SELECT substr(' + date_col + ', 1, ' + str(int(bucket)) + ') AS m, ' + value_sql + ' AS v FROM ' + table +
                 ' WHERE ' + where + ' AND ' + date_col + ' IS NOT NULL GROUP BY m'
             ).fetchall()
             return {r['m']: float(r['v'] or 0) for r in rows if r['m']}
@@ -10769,24 +10782,54 @@ def operational_overview(months=12, from_month=None, to_month=None):
 
     now = _utcnow()
 
-    def _parse_month(value):
+    def _parse_range_dt(value, is_end=False):
+        s = str(value or '').strip()
         try:
-            year, month = str(value).split('-')[:2]
-            year, month = int(year), int(month)
-            return (year, month) if 1 <= month <= 12 else None
-        except Exception:
-            return None
+            if len(s) >= 16:
+                return datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]),
+                                int(s[11:13]), int(s[14:16])), True
+            if len(s) >= 10:
+                d = datetime(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+                return (d + timedelta(days=1) - timedelta(seconds=1)) if is_end else d, False
+            if len(s) == 7:
+                y, m = int(s[0:4]), int(s[5:7])
+                d = datetime(y, m, 1)
+                if is_end:
+                    d = datetime(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1) - timedelta(seconds=1)
+                return d, False
+        except (ValueError, IndexError):
+            pass
+        return None, False
 
-    pairs = []
-    start, end = _parse_month(from_month), _parse_month(to_month)
-    if start and end:
-        if start > end:
-            start, end = end, start
-        cur = start
-        while cur <= end and len(pairs) < 37:
-            pairs.append(cur)
-            cur = (cur[0] + (1 if cur[1] == 12 else 0),
-                   1 if cur[1] == 12 else cur[1] + 1)
+    pairs = []  # (display label, substr bucket key)
+    (start_dt, s_has_time), (end_dt, e_has_time) = _parse_range_dt(from_month), _parse_range_dt(to_month, is_end=True)
+    bucket = 7
+    if start_dt and end_dt:
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+        span = end_dt - start_dt
+        hourly = span <= timedelta(hours=48) if (s_has_time or e_has_time) else start_dt.date() == end_dt.date()
+        if hourly:
+            bucket = 13
+            cur = start_dt.replace(minute=0, second=0, microsecond=0)
+            while cur <= end_dt and len(pairs) < 96:
+                pairs.append(('%04d-%02d-%02d %02d:00' % (cur.year, cur.month, cur.day, cur.hour),
+                              '%04d-%02d-%02d %02d' % (cur.year, cur.month, cur.day, cur.hour)))
+                cur += timedelta(hours=1)
+        elif span <= timedelta(days=95):
+            bucket = 10
+            cur = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            while cur <= end_dt and len(pairs) < 96:
+                key = '%04d-%02d-%02d' % (cur.year, cur.month, cur.day)
+                pairs.append((key, key))
+                cur += timedelta(days=1)
+        else:
+            cur = start_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            while cur <= end_dt and len(pairs) < 37:
+                key = '%04d-%02d' % (cur.year, cur.month)
+                pairs.append((key, key))
+                cur = datetime(cur.year + (1 if cur.month == 12 else 0),
+                               1 if cur.month == 12 else cur.month + 1, 1)
     if not pairs:
         try:
             months = max(1, min(int(months or 12), 36))
@@ -10796,26 +10839,28 @@ def operational_overview(months=12, from_month=None, to_month=None):
             mm = now.month - i
             yy = now.year + (mm - 1) // 12
             mm = (mm - 1) % 12 + 1
-            pairs.append((yy, mm))
-    labels = ['%04d-%02d' % p for p in pairs]
+            key = '%04d-%02d' % (yy, mm)
+            pairs.append((key, key))
+    labels = [p[0] for p in pairs]
+    bucket_keys = [p[1] for p in pairs]
 
     series_maps = {
-        'companies': monthly_map('tenants', where='is_admin = 0'),
-        'presentations': monthly_map('presentations'),
-        'users': monthly_map('users'),
-        'ai_spend': monthly_map('ai_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
-        'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
+        'companies': monthly_map('tenants', where='is_admin = 0', bucket=bucket),
+        'presentations': monthly_map('presentations', bucket=bucket),
+        'users': monthly_map('users', bucket=bucket),
+        'ai_spend': monthly_map('ai_usage_events', 'COALESCE(SUM(cost_usd), 0)', bucket=bucket),
+        'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)', bucket=bucket),
         'revenue': monthly_map('recharge_requests', 'COALESCE(SUM(amount_usd), 0)',
-                               date_col='reviewed_at', where="status = 'approved'"),
-        'tickets': monthly_map('support_tickets'),
+                               date_col='reviewed_at', where="status = 'approved'", bucket=bucket),
+        'tickets': monthly_map('support_tickets', bucket=bucket),
     }
     trends = {'labels': labels}
     for key, mmap in series_maps.items():
-        trends[key] = [round(mmap.get(lb, 0), 2) for lb in labels]
+        trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
 
     def delta(mmap):
-        cur = mmap.get(labels[-1], 0)
-        prev = mmap.get(labels[-2], 0)
+        cur = mmap.get(bucket_keys[-1], 0)
+        prev = mmap.get(bucket_keys[-2], 0)
         if not prev:
             return None
         return round((cur - prev) / float(prev) * 100)
@@ -10847,11 +10892,11 @@ def operational_overview(months=12, from_month=None, to_month=None):
         },
         'tickets_by_status': ticket_status,
         'revenue': {
-            'month_usd': round(revenue_map.get(labels[-1], 0), 2),
+            'month_usd': round(revenue_map.get(bucket_keys[-1], 0), 2),
             'total_usd': round(sum(revenue_map.values()), 2),
         },
         'spend': {
-            'month_usd': round(spend_map.get(labels[-1], 0) + maps_map.get(labels[-1], 0), 2),
+            'month_usd': round(spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0), 2),
             'total_usd': round(sum(spend_map.values()) + sum(maps_map.values()), 2),
         },
         'trends': trends,
@@ -10859,7 +10904,7 @@ def operational_overview(months=12, from_month=None, to_month=None):
             'companies': delta(series_maps['companies']),
             'presentations': delta(series_maps['presentations']),
             'users': delta(series_maps['users']),
-            'spend': delta({k: spend_map.get(k, 0) + maps_map.get(k, 0) for k in labels}),
+            'spend': delta({k: spend_map.get(k, 0) + maps_map.get(k, 0) for k in bucket_keys}),
             'revenue': delta(revenue_map),
             'tickets': delta(series_maps['tickets']),
         },
@@ -11096,10 +11141,10 @@ def ledger_report_rows(tenant_id=None, from_date=None, to_date=None, kind=None, 
         params.append(str(kind))
     if from_date:
         clauses.append('l.created_at >= ?')
-        params.append(str(from_date))
+        params.append(_norm_range_bound(from_date))
     if to_date:
         clauses.append('l.created_at <= ?')
-        params.append(str(to_date) + 'T23:59:59' if len(str(to_date)) == 10 else str(to_date))
+        params.append(_norm_range_bound(to_date, is_end=True))
     query = ('SELECT l.*, t.company_name FROM tenant_ledger l '
              'LEFT JOIN tenants t ON t.id = l.tenant_id')
     if clauses:
@@ -11125,10 +11170,10 @@ def tickets_report_rows(tenant_id=None, from_date=None, to_date=None, limit=5000
         params.append(str(tenant_id))
     if from_date:
         clauses.append('t.created_at >= ?')
-        params.append(str(from_date))
+        params.append(_norm_range_bound(from_date))
     if to_date:
         clauses.append('t.created_at <= ?')
-        params.append(str(to_date) + 'T23:59:59' if len(str(to_date)) == 10 else str(to_date))
+        params.append(_norm_range_bound(to_date, is_end=True))
     query = ('SELECT t.*, tn.company_name FROM support_tickets t '
              'LEFT JOIN tenants tn ON tn.id = t.tenant_id')
     if clauses:
