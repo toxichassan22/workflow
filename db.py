@@ -4540,9 +4540,10 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
         changed = any(statuses.get(key) != value for key, value in updates.items())
         statuses.update(updates)
         # Toggling a section after the draft entered review or passed the section
-        # gate voids that state; the draft returns to a plain editable draft.
-        resets_approval = changed and norm_status in {'section_approval_pending', 'sections_approved'}
-        next_status = 'draft' if resets_approval else (draft.get('status') or 'draft')
+        # gate voids that state; the draft goes back to sections being worked on.
+        resets_approval = changed and norm_status in {
+            'section_approval_pending', 'sections_approved', 'generated_draft'}
+        next_status = 'sections_in_progress' if resets_approval else (draft.get('status') or 'draft')
         cursor = conn.execute(
             '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
                WHERE id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',
@@ -4555,6 +4556,26 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
         if resets_approval:
             _clear_draft_approval_fields(conn, draft['id'])
         conn.commit()
+        if resets_approval:
+            try:
+                record_audit_event(
+                    tenant_id=tenant_id,
+                    action='proposal_status_transition',
+                    entity_type='project_draft',
+                    entity_id=draft['id'],
+                    user_id=user_id,
+                    entity_name=draft.get('title') or 'مشروع',
+                    old_value={'status': norm_status},
+                    new_value={'status': 'sections_in_progress'},
+                    metadata={
+                        'from_status': norm_status,
+                        'to_status': 'sections_in_progress',
+                        'reason': 'تعديل حالة قسم أبطل حالة الاعتماد القائمة',
+                    },
+                    created_at=datetime.now().isoformat(),
+                )
+            except Exception:
+                pass
         return True
     print(f'[DRAFT SECTIONS] gave up merging {list(updates)} after repeated concurrent writes')
     return False
@@ -4579,12 +4600,16 @@ def update_draft_section_status_by_id(tenant_id, draft_id, updates):
         draft = get_project_draft_by_id(tenant_id, draft_id)
         if not draft:
             return False
+        norm_status = normalize_proposal_status(draft.get('status'))
+        if proposal_status_is_locked(norm_status):
+            raise DraftLocked(draft['id'], norm_status)
         statuses = dict(draft.get('section_statuses') or {})
         expected = json.dumps(statuses, ensure_ascii=False)
         changed = any(statuses.get(key) != value for key, value in updates.items())
         statuses.update(updates)
-        resets_approval = changed and draft.get('status') in {'pending_approval', 'approved'}
-        next_status = 'draft' if resets_approval else (draft.get('status') or 'draft')
+        resets_approval = changed and norm_status in {
+            'section_approval_pending', 'sections_approved', 'generated_draft'}
+        next_status = 'sections_in_progress' if resets_approval else (draft.get('status') or 'draft')
         cursor = conn.execute(
             '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
                WHERE id = ? AND tenant_id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',

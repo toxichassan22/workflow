@@ -12255,9 +12255,12 @@ def api_decide_section_version():
     if decided.get('error'):
         return jsonify({'error': 'Unable to record the version decision'}), 400
     mirror = 'approved' if decision == 'approved' else 'draft'
-    db.update_draft_section_status_by_id(
-        g.tenant_id, draft['id'], {version['section_key']: mirror}
-    )
+    try:
+        db.update_draft_section_status_by_id(
+            g.tenant_id, draft['id'], {version['section_key']: mirror}
+        )
+    except db.DraftLocked as locked:
+        return _draft_locked_response(locked.status)
     action = {'approved': 'اعتماد نسخة قسم', 'returned': 'إعادة نسخة قسم للتعديل', 'rejected': 'رفض نسخة قسم'}[decision]
     detail = f'القسم {_section_version_label(version["section_key"])}: لقطة رقم {version["version_number"]} — {action}'
     if decided.get('decision_note'):
