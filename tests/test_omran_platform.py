@@ -493,6 +493,174 @@ class OmranDbTests(unittest.TestCase):
         self.assertIn('workflows', overview)
         self.assertIn('open_support_tickets', overview['workflows'])
 
+    # ── t33/d09: receipt, tax and dedup on package purchase ──────────────
+
+    def test_recharge_approval_issues_receipt_with_tax_atomically(self):
+        row = db.create_recharge_request(
+            'tenant-1', 'باقة نمو', amount_usd=100, price_sar=375,
+            transfer_reference='TRX-1', requested_by='user-1',
+            requested_by_name='رئيس القسم')
+        decided = db.decide_recharge_request(
+            'tenant-1', row['id'], 'approved', 'admin-1', 'المدير')
+        self.assertEqual(decided['status'], 'approved')
+        receipts = db.list_topup_receipts('tenant-1')
+        self.assertEqual(len(receipts), 1)
+        receipt = receipts[0]
+        self.assertTrue(receipt['invoice_number'].startswith('INV-'))
+        self.assertAlmostEqual(receipt['tax_amount_sar'], round(375 * db.TAX_RATE_SAR, 2))
+        self.assertAlmostEqual(receipt['total_sar'], round(375 * (1 + db.TAX_RATE_SAR), 2))
+        self.assertEqual(receipt['recharge_request_id'], row['id'])
+        # A second decision attempt cannot mint a second receipt.
+        dup = db.decide_recharge_request('tenant-1', row['id'], 'approved', 'admin-1', 'المدير')
+        self.assertEqual(dup.get('error'), 'request_not_pending')
+        self.assertEqual(len(db.list_topup_receipts('tenant-1')), 1)
+
+    def test_recharge_rejects_duplicate_transfer_reference(self):
+        db.create_recharge_request(
+            'tenant-1', 'باقة نمو', amount_usd=100, transfer_reference='TRX-DUP')
+        dup = db.create_recharge_request(
+            'tenant-1', 'باقة أخرى', amount_usd=50, transfer_reference='TRX-DUP')
+        self.assertEqual(dup.get('error'), 'duplicate_transfer_reference')
+
+    def test_recharge_resolves_price_from_package_id(self):
+        package = db.create_billing_package('باقة اختبار', credit_usd=75, price_sar=281.25)
+        row = db.create_recharge_request(
+            'tenant-1', 'client-supplied-name', amount_usd=9999, price_sar=1,
+            package_id=package['id'], requested_by='user-1')
+        self.assertEqual(row['amount_usd'], 75)
+        self.assertEqual(row['price_sar'], 281.25)
+        self.assertEqual(row['package_name'], 'باقة اختبار')
+
+    # ── t30/t32: points overview and ledger adjustments ──────────────────
+
+    def test_points_overview_buckets(self):
+        overview = db.points_overview('tenant-1')
+        self.assertEqual(overview['balance_usd'], 100.0)
+        self.assertEqual(overview['balance_points'], int(100 * db.POINTS_PER_USD))
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        estimate['estimated_points'] = 500
+        estimate['estimated_cost_usd'] = 25.0
+        approval = db.create_generation_approval(
+            'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'boss-1', 'المدير', allow_self=True)
+        overview = db.points_overview('tenant-1')
+        self.assertGreater(overview['reserved_usd'], 0)
+        self.assertLess(overview['balance_usd'], 100.0)
+
+    def test_ledger_adjustment_kinds_and_reversal(self):
+        credit = db.record_ledger_credit('tenant-1', 25, note='شحن', actor='platform_admin')
+        entry_id = credit['entry']['id']
+        refund = db.record_ledger_adjustment(
+            'tenant-1', -10, 'refund', note='استرداد', actor='platform_admin',
+            reversal_of=entry_id)
+        self.assertTrue(refund['adjusted'])
+        self.assertEqual(refund['entry']['kind'], 'refund')
+        self.assertEqual(refund['entry']['reversal_of'], entry_id)
+        correction = db.record_ledger_adjustment(
+            'tenant-1', 5, 'correction', note='تصحيح', actor='platform_admin')
+        self.assertEqual(correction['entry']['kind'], 'correction')
+        bad = db.record_ledger_adjustment('tenant-1', 5, 'bogus')
+        self.assertEqual(bad.get('error'), 'invalid_kind')
+        overdraw = db.record_ledger_adjustment(
+            'tenant-1', -99999, 'refund', actor='platform_admin')
+        self.assertEqual(overdraw.get('error'), 'insufficient_balance')
+        missing = db.record_ledger_adjustment(
+            'tenant-1', -1, 'refund', reversal_of='nope')
+        self.assertEqual(missing.get('error'), 'original_entry_not_found')
+
+    def test_ledger_entries_filtered(self):
+        db.record_ledger_credit('tenant-1', 10, note='أ', actor='platform_admin')
+        db.record_ledger_adjustment('tenant-1', 5, 'correction', actor='platform_admin')
+        all_rows = db.get_ledger_entries('tenant-1')
+        credits = db.get_ledger_entries('tenant-1', kind='credit')
+        corrections = db.get_ledger_entries('tenant-1', kind='correction')
+        self.assertGreaterEqual(len(all_rows), 2)
+        self.assertTrue(all(r['kind'] == 'credit' for r in credits))
+        self.assertEqual(len(corrections), 1)
+        future = db.get_ledger_entries('tenant-1', from_date='2999-01-01')
+        self.assertEqual(len(future), 0)
+
+    # ── t40: seven-state support board ───────────────────────────────────
+
+    def test_support_reopen_counts_regression_and_categories(self):
+        ticket = db.create_support_ticket(
+            'tenant-1', 'مشكلة', category='billing', priority='high',
+            created_by='user-1', created_by_name='رئيس القسم')
+        self.assertEqual(ticket['category'], 'billing')
+        bad = db.create_support_ticket('tenant-1', 'مشكلة', category='bogus')
+        self.assertEqual(bad.get('error'), 'invalid_category')
+        db.update_support_ticket_status('tenant-1', ticket['id'], 'resolved')
+        reopened = db.update_support_ticket_status('tenant-1', ticket['id'], 'reopened')
+        self.assertEqual(reopened['status'], 'reopened')
+        self.assertEqual(reopened['reopened_count'], 1)
+        self.assertIsNone(reopened['resolved_at'])
+        early = db.update_support_ticket_status('tenant-1', ticket['id'], 'reopened')
+        self.assertEqual(early.get('error'), 'invalid_transition')
+        escalated = db.update_support_ticket_status('tenant-1', ticket['id'], 'escalated')
+        self.assertEqual(escalated['status'], 'escalated')
+
+    def test_support_assign_validates_member(self):
+        ticket = db.create_support_ticket('tenant-1', 'مشكلة', created_by='user-1')
+        missing = db.assign_support_ticket('tenant-1', ticket['id'], 'ghost-user')
+        self.assertEqual(missing.get('error'), 'assignee_not_found')
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO users (id, tenant_id, name, email, password_hash, role) "
+            "VALUES ('u-support', 'tenant-1', 'موظف الدعم', 's@x.test', 'h', 'support')")
+        conn.commit()
+        assigned = db.assign_support_ticket('tenant-1', ticket['id'], 'u-support')
+        self.assertEqual(assigned['assigned_to'], 'u-support')
+
+    # ── t41: email channel reaches the outbox ────────────────────────────
+
+    def test_notification_email_enqueues_outbox(self):
+        note = db.create_notification(
+            'tenant-1', 'تنبيه بالبريد', body='نص', email_to='user@x.test')
+        conn = db.get_db()
+        outbox = conn.execute(
+            'SELECT * FROM email_outbox WHERE notification_id = ?', (note['id'],)
+        ).fetchall()
+        self.assertEqual(len(outbox), 1)
+        self.assertEqual(outbox[0]['status'], 'queued')
+        deliveries = conn.execute(
+            'SELECT channel, status FROM notification_deliveries WHERE notification_id = ?',
+            (note['id'],),
+        ).fetchall()
+        channels = {row['channel']: row['status'] for row in deliveries}
+        self.assertEqual(channels.get('in_app'), 'delivered')
+        self.assertEqual(channels.get('email'), 'queued')
+
+    # ── t42: event tasks carry entity link and priority ──────────────────
+
+    def test_event_task_entity_link_and_priority(self):
+        task = db.create_event_task(
+            'tenant-1', 'مراجعة ملف', entity_type='project_draft', entity_id='draft-1',
+            priority='urgent', created_by='user-1')
+        self.assertEqual(task['entity_type'], 'project_draft')
+        self.assertEqual(task['entity_id'], 'draft-1')
+        self.assertEqual(task['priority'], 'urgent')
+        bad = db.create_event_task('tenant-1', 'مهمة', priority='bogus')
+        self.assertEqual(bad['priority'], 'normal')
+
+    # ── t52/d06: framework kind and retention enforcement ────────────────
+
+    def test_framework_contract_and_retention_sweep(self):
+        contract = db.create_tenant_contract(
+            'tenant-1', 'عقد إطاري', kind='framework',
+            expires_at='2020-01-01', signature_status='signed')
+        self.assertEqual(contract['kind'], 'framework')
+        self.assertEqual(contract['signature_status'], 'signed')
+        # A 2020 expiry means retention lapsed long ago: the first sweep marks
+        # it expired and past-window in the same pass.
+        result = db.enforce_contract_retention('tenant-1')
+        self.assertEqual(result['contracts_expired'], 1)
+        self.assertEqual(result['retention_lapsed'], 1)
+        self.assertIn('tenant-1', result['tenants_pending_review'])
+        updated = db.list_tenant_contracts('tenant-1')[0]
+        self.assertEqual(updated['status'], 'retention_expired')
+        self.assertTrue(updated['retention_until'])
+
 
 class OmranApiTests(unittest.TestCase):
     def setUp(self):

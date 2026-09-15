@@ -613,6 +613,8 @@ def _create_tables(conn):
         presentation_id TEXT,
         idempotency_key TEXT UNIQUE,
         note TEXT,
+        actor TEXT,
+        reversal_of TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON tenant_ledger(tenant_id);
@@ -1870,6 +1872,7 @@ def _migrate_workflow_gate_columns(conn):
         ('presentations', (('archived_at', 'TEXT'),)),
         ('section_versions', (('expires_at', 'TEXT'),)),
         ('tenant_branding', (('section_approval_days', 'INTEGER'),)),
+        ('tenant_ledger', (('actor', 'TEXT'), ('reversal_of', 'TEXT'))),
     )
     try:
         for table, cols in additions:
@@ -6763,17 +6766,130 @@ def reset_all_company_balances(clear_usage=True):
     return result
 
 
-def get_ledger_entries(tenant_id, limit=50):
-    """Newest ledger entries for a tenant."""
+def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=None,
+                       draft_id=None, presentation_id=None, actor=None):
+    """Newest ledger entries for a tenant, with the t32 report filters:
+    period, project file, presentation, movement kind and actor."""
     conn = get_db()
+    clauses = ['tenant_id = ?']
+    params = [tenant_id]
+    if kind:
+        clauses.append('kind = ?')
+        params.append(str(kind))
+    if from_date:
+        clauses.append('created_at >= ?')
+        params.append(str(from_date))
+    if to_date:
+        clauses.append('created_at <= ?')
+        params.append(str(to_date) + 'T23:59:59' if len(str(to_date)) == 10 else str(to_date))
+    if draft_id:
+        clauses.append('draft_id = ?')
+        params.append(str(draft_id))
+    if presentation_id:
+        clauses.append('presentation_id = ?')
+        params.append(str(presentation_id))
+    if actor:
+        clauses.append('actor = ?')
+        params.append(str(actor))
     rows = conn.execute(
         'SELECT id, kind, amount_usd, raw_cost_usd, multiplier, maps_cost_usd, '
         'ai_cost_usd, maps_events_count, ai_events_count, draft_id, '
-        'presentation_id, idempotency_key, note, created_at '
-        'FROM tenant_ledger WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?',
-        (tenant_id, int(limit))
+        'presentation_id, idempotency_key, note, actor, reversal_of, created_at '
+        'FROM tenant_ledger WHERE ' + ' AND '.join(clauses) +
+        ' ORDER BY created_at DESC LIMIT ?',
+        params + [int(limit)]
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def points_overview(tenant_id):
+    """t30: one read of the wallet — current balance, live holds, expired and
+    consumed totals, all in USD with the points conversion alongside."""
+    release_stale_reservations(tenant_id)
+    conn = get_db()
+    balance = get_tenant_balance(tenant_id)
+    rows = conn.execute(
+        '''SELECT status, COALESCE(SUM(cost_usd), 0) AS total, COUNT(*) AS n
+           FROM point_reservations WHERE tenant_id = ? GROUP BY status''',
+        (str(tenant_id),),
+    ).fetchall()
+    buckets = {row['status']: {'usd': float(row['total'] or 0), 'count': int(row['n'])}
+               for row in rows}
+    reserved_usd = buckets.get('reserved', {}).get('usd', 0.0)
+    expired_usd = buckets.get('expired', {}).get('usd', 0.0)
+    return {
+        'balance_usd': round(balance, 2),
+        'balance_points': int(round(balance * POINTS_PER_USD)),
+        'reserved_usd': round(reserved_usd, 2),
+        'reserved_points': int(round(reserved_usd * POINTS_PER_USD)),
+        'available_usd': round(balance, 2),
+        'available_points': int(round(balance * POINTS_PER_USD)),
+        'expired_usd': round(expired_usd, 2),
+        'consumed_usd': round(buckets.get('consumed', {}).get('usd', 0.0), 2),
+        'released_usd': round(buckets.get('released', {}).get('usd', 0.0), 2),
+        'reservations': buckets,
+    }
+
+
+LEDGER_ADJUSTMENT_KINDS = ('refund', 'correction', 'expiry')
+
+
+def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
+                             reversal_of=None, idempotency_key=None):
+    """t32: refund, correction and expiry movements on the wallet.
+
+    A positive amount credits the wallet, a negative amount debits it
+    (conditional — never overdrawn). ``reversal_of`` links the movement back
+    to the original ledger entry it reverses. Admin-only at the route level.
+    """
+    if kind not in LEDGER_ADJUSTMENT_KINDS:
+        return {'error': 'invalid_kind'}
+    amount = round(float(amount_usd or 0.0) + 1e-9, 2)
+    if amount == 0:
+        return {'error': 'amount_required'}
+    conn = get_db()
+    if reversal_of:
+        original = conn.execute(
+            'SELECT * FROM tenant_ledger WHERE id = ? AND tenant_id = ?',
+            (str(reversal_of), tenant_id),
+        ).fetchone()
+        if not original:
+            return {'error': 'original_entry_not_found'}
+    if idempotency_key:
+        existing = conn.execute(
+            'SELECT * FROM tenant_ledger WHERE tenant_id = ? AND idempotency_key = ?',
+            (tenant_id, idempotency_key),
+        ).fetchone()
+        if existing:
+            return {'adjusted': False, 'reason': 'idempotency_key_replayed',
+                    'entry': dict(existing)}
+    if amount < 0:
+        debit = conn.execute(
+            'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? '
+            'WHERE id = ? AND COALESCE(credit_balance, 0) >= ?',
+            (amount, tenant_id, -amount),
+        )
+        if (debit.rowcount or 0) <= 0:
+            return {'error': 'insufficient_balance',
+                    'available_usd': get_tenant_balance(tenant_id)}
+    else:
+        conn.execute(
+            'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? WHERE id = ?',
+            (amount, tenant_id),
+        )
+    ledger_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO tenant_ledger
+           (id, tenant_id, kind, amount_usd, idempotency_key, note, actor, reversal_of)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+        (ledger_id, tenant_id, kind, amount, idempotency_key,
+         str(note or '').strip() or None, actor, reversal_of),
+    )
+    conn.commit()
+    return {'adjusted': True,
+            'entry': dict(conn.execute(
+                'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)).fetchone()),
+            'balance_usd': get_tenant_balance(tenant_id)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -7686,7 +7802,12 @@ def get_ai_reconcile_by_scope(tenant_id, draft_ids=(), presentation_ids=()):
 # ═════════════════════════════════════════════════════════════════════════════
 
 GENERATION_APPROVAL_STATUSES = ('pending', 'approved', 'rejected', 'cancelled', 'consumed')
-SUPPORT_TICKET_STATUSES = ('open', 'in_progress', 'waiting_customer', 'resolved', 'closed')
+# t40: the seven-state support board — 'reopened' is a real state so a
+# regression never masquerades as a fresh ticket.
+SUPPORT_TICKET_STATUSES = ('open', 'in_progress', 'waiting_customer', 'escalated',
+                         'resolved', 'reopened', 'closed')
+SUPPORT_TICKET_CATEGORIES = ('general', 'billing', 'technical', 'generation',
+                           'files', 'account', 'other')
 SUPPORT_TICKET_PRIORITIES = ('low', 'normal', 'high', 'urgent')
 RECHARGE_REQUEST_STATUSES = ('pending', 'approved', 'rejected')
 
@@ -7955,6 +8076,8 @@ def _ensure_omran_columns(conn):
     # t23: ledger movements name the actor class so the duties matrix can flag
     # a credit that did not come from the platform-admin recharge path.
     _add('tenant_ledger', 'actor', 'actor TEXT')
+    # t32: a refund/correction/expiry movement links back to the entry it reverses.
+    _add('tenant_ledger', 'reversal_of', 'TEXT')
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -7968,6 +8091,10 @@ TENANT_COMPANY_PROFILE_FIELDS = (
 )
 
 CONTRACT_SIGNATURE_STATUSES = ('unsigned', 'pending_signature', 'signed', 'expired')
+# t52: 'framework' is a first-class kind — the UI offered it and the backend
+# used to silently coerce it to 'contract', losing the distinction.
+CONTRACT_KINDS = ('contract', 'nda', 'framework')
+CONTRACT_RETENTION_DAYS = int(os.environ.get('CONTRACT_RETENTION_DAYS', '365'))
 
 
 def _create_platform_tables(conn):
@@ -8340,8 +8467,27 @@ def _ensure_platform_columns(conn):
     _add('support_tickets', 'sla_resolve_due_at', 'TEXT')
     _add('support_tickets', 'reopened_count', 'INTEGER DEFAULT 0')
 
+    # t42: event tasks link back to the object that raised them and carry a
+    # priority so the board can escalate what matters first.
+    for column, definition in (
+            ('entity_type', 'TEXT'), ('entity_id', 'TEXT'),
+            ('priority', "TEXT DEFAULT 'normal'"), ('escalated_at', 'TEXT')):
+        _add('event_tasks', column, definition)
+
     # t60-04: a purchase request pins the package version it was priced from.
     _add('recharge_requests', 'package_version_id', 'TEXT')
+
+    # d09: the financial document carries the VAT breakdown on the SAR price.
+    _add('topup_receipts', 'tax_rate', 'REAL')
+    _add('topup_receipts', 'tax_amount_sar', 'REAL')
+    _add('topup_receipts', 'total_sar', 'REAL')
+    # t33: one bank transfer may only ever back one request.
+    try:
+        conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS ux_recharge_transfer_ref
+                        ON recharge_requests(transfer_reference)
+                        WHERE transfer_reference IS NOT NULL AND transfer_reference != '' ''')
+    except Exception as exc:
+        print(f'[DB] Migration notice: recharge transfer-ref index: {exc}')
 
     # t63: uploads carry their scan verdict so a quarantined file is visible.
     _add('project_files', 'scan_status', "TEXT DEFAULT 'clean'")
@@ -9759,10 +9905,18 @@ def create_notification(tenant_id, title, body=None, category='general', user_id
         (str(uuid.uuid4()), row_id, tenant_id, now),
     )
     if email_to:
+        delivery_id = str(uuid.uuid4())
         conn.execute(
             '''INSERT INTO notification_deliveries (id, notification_id, tenant_id, channel, status)
                VALUES (?, ?, ?, 'email', 'queued')''',
-            (str(uuid.uuid4()), row_id, tenant_id),
+            (delivery_id, row_id, tenant_id),
+        )
+        # t41: the email channel actually leaves through the outbox so the
+        # worker can retry it — a queued delivery row alone goes nowhere.
+        conn.execute(
+            '''INSERT INTO email_outbox (id, tenant_id, notification_id, to_email, subject, body_text)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (str(uuid.uuid4()), tenant_id, row_id, str(email_to), title, body),
         )
     conn.commit()
     return dict(conn.execute('SELECT * FROM notifications WHERE id = ?', (row_id,)).fetchone())
@@ -9945,9 +10099,35 @@ def escalate_overdue_approval_tasks(tenant_id, overdue_hours=24):
 def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=None,
                             transfer_reference=None, requested_by=None, requested_by_name=None,
                             package_id=None, receipt_file_id=None):
+    """File a package purchase request (t33).
+
+    When a ``package_id`` is supplied the amount and price come from the
+    catalog row, not the client; a bank-transfer reference may only back one
+    request so the same receipt cannot be submitted twice.
+    """
+    transfer_reference = str(transfer_reference or '').strip() or None
+    conn = get_db()
+    if transfer_reference:
+        duplicate = conn.execute(
+            """SELECT id FROM recharge_requests
+               WHERE transfer_reference = ? AND status != 'rejected'""",
+            (transfer_reference,),
+        ).fetchone()
+        if duplicate:
+            return {'error': 'duplicate_transfer_reference'}
+    if package_id:
+        package = conn.execute(
+            'SELECT * FROM billing_packages WHERE id = ? AND is_active = 1',
+            (str(package_id),),
+        ).fetchone()
+        if not package:
+            return {'error': 'package_not_found'}
+        package = dict(package)
+        package_name = package.get('name')
+        amount_usd = package.get('credit_usd') or 0
+        price_sar = package.get('price_sar')
     if not str(package_name or '').strip():
         return {'error': 'package_name_required'}
-    conn = get_db()
     row_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO recharge_requests
@@ -9964,7 +10144,12 @@ def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=Non
 
 def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, reviewed_by_name,
                             note=None, reference_number=None):
-    """Approve or reject a recharge request; approval credits the ledger wallet."""
+    """Approve or reject a recharge request atomically (t33/d09).
+
+    One commit covers the decision, the wallet credit and the financial
+    document: an approval that cannot credit rolls the decision back, and a
+    repeated approval cannot mint a second credit or a second invoice.
+    """
     if decision not in {'approved', 'rejected'}:
         return {'error': 'invalid_decision'}
     conn = get_db()
@@ -9995,17 +10180,33 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
          str(note or '').strip() or None, reference if decision == 'approved' else row['reference_number'],
          request_id),
     )
-    conn.commit()
     if decision == 'approved' and float(row['amount_usd'] or 0) > 0:
-        try:
-            record_ledger_credit(
-                target_tenant_id, float(row['amount_usd']),
-                note='شحن رصيد بالمرجع ' + reference,
-                idempotency_key='recharge:' + request_id,
-                actor='recharge_decision',
+        amount = round(float(row['amount_usd']) + 1e-9, 2)
+        existing = conn.execute(
+            'SELECT * FROM tenant_ledger WHERE tenant_id = ? AND idempotency_key = ?',
+            (target_tenant_id, 'recharge:' + request_id),
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? WHERE id = ?',
+                (amount, target_tenant_id),
             )
-        except Exception:
-            pass
+            conn.execute(
+                '''INSERT INTO tenant_ledger
+                   (id, tenant_id, kind, amount_usd, raw_cost_usd, multiplier,
+                    maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count,
+                    draft_id, presentation_id, idempotency_key, note, actor)
+                   VALUES (?, ?, 'credit', ?, 0, 1, 0, 0, 0, 0, NULL, NULL, ?, ?, ?)''',
+                (str(uuid.uuid4()), target_tenant_id, amount, 'recharge:' + request_id,
+                 'شحن رصيد بالمرجع ' + reference, 'recharge_decision'),
+            )
+        _create_topup_receipt_tx(
+            conn, target_tenant_id, recharge_request_id=request_id,
+            receipt_file_id=row['receipt_file_id'] if 'receipt_file_id' in row.keys() else None,
+            transfer_reference=row['transfer_reference'] if 'transfer_reference' in row.keys() else None,
+            amount_usd=amount, price_sar=row['price_sar'] if 'price_sar' in row.keys() else None,
+            issued_by=reviewed_by, issued_by_name=reviewed_by_name)
+    conn.commit()
     return dict(conn.execute('SELECT * FROM recharge_requests WHERE id = ?', (request_id,)).fetchone())
 
 
@@ -10038,6 +10239,8 @@ def create_support_ticket(tenant_id, subject, category='general', priority='norm
     subject = str(subject or '').strip()
     if not subject:
         return {'error': 'subject_required'}
+    if category not in SUPPORT_TICKET_CATEGORIES:
+        return {'error': 'invalid_category'}
     if priority not in SLA_HOURS_BY_PRIORITY:
         priority = 'normal'
     conn = get_db()
@@ -10198,6 +10401,10 @@ def update_support_ticket_status(tenant_id, ticket_id, new_status, actor_name=No
     ).fetchone()
     if not row:
         return {'error': 'ticket_not_found'}
+    # t40: a waiting/resolved/closed ticket can only move forward through
+    # 'reopened', which keeps the resolution timestamps and counts the regression.
+    if new_status == 'reopened' and row['status'] not in ('waiting_customer', 'resolved', 'closed'):
+        return {'error': 'invalid_transition', 'current_status': row['status']}
     now = datetime.now().isoformat()
     updates = ["status = ?", "updated_at = ?"]
     params = [new_status, now]
@@ -10207,12 +10414,43 @@ def update_support_ticket_status(tenant_id, ticket_id, new_status, actor_name=No
     if new_status == 'closed':
         updates.append('closed_at = ?')
         params.append(now)
+    if new_status == 'reopened':
+        updates.append('reopened_count = COALESCE(reopened_count, 0) + 1')
+        updates.append('resolved_at = NULL')
+        updates.append('closed_at = NULL')
     conn.execute(
         'UPDATE support_tickets SET ' + ', '.join(updates) + ' WHERE id = ?',
         [*params, ticket_id],
     )
     conn.commit()
     return dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
+
+
+def assign_support_ticket(tenant_id, ticket_id, assignee_id, actor_name=None):
+    """Route a ticket to a named owner; assignee must be a live tenant user."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?', (ticket_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return {'error': 'ticket_not_found'}
+    assignee_name = None
+    if assignee_id:
+        assignee = conn.execute(
+            'SELECT id, name FROM users WHERE id = ? AND tenant_id = ?',
+            (str(assignee_id), str(tenant_id)),
+        ).fetchone()
+        if not assignee:
+            return {'error': 'assignee_not_found'}
+        assignee_name = assignee['name']
+    conn.execute(
+        'UPDATE support_tickets SET assigned_to = ?, updated_at = ? WHERE id = ?',
+        (assignee_id, datetime.now().isoformat(), ticket_id),
+    )
+    conn.commit()
+    result = dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
+    result['assignee_name'] = assignee_name
+    return result
 
 
 # ── t52: contracts and NDAs ─────────────────────────────────────────────────
@@ -10222,7 +10460,7 @@ def create_tenant_contract(tenant_id, title, kind='contract', file_id=None, star
                            signature_status='unsigned', retention_until=None):
     if not str(title or '').strip():
         return {'error': 'title_required'}
-    if kind not in {'contract', 'nda'}:
+    if kind not in CONTRACT_KINDS:
         kind = 'contract'
     if signature_status not in CONTRACT_SIGNATURE_STATUSES:
         signature_status = 'unsigned'
@@ -10325,6 +10563,58 @@ def list_tenant_contracts(tenant_id, include_expired=True):
         if include_expired or not item['is_expired']:
             result.append(item)
     return result
+
+
+def enforce_contract_retention(tenant_id=None):
+    """d06: apply the retention policy — not just display it.
+
+    Expired contracts get stamped ``retention_until`` (expiry +
+    CONTRACT_RETENTION_DAYS, default 365) and flip to 'expired'. A contract
+    whose retention window has fully lapsed flips to 'retention_expired' and
+    the owning tenant is marked for purge review — the rows are listed so an
+    admin acts on them, never silently deleted. Returns the sweep counts.
+    """
+    conn = get_db()
+    now = datetime.now()
+    scope = 'AND c.tenant_id = ?' if tenant_id else ''
+    params = [str(tenant_id)] if tenant_id else []
+    expired = conn.execute(
+        """SELECT c.id, c.tenant_id, c.expires_at FROM tenant_contracts c
+           WHERE c.status = 'active' AND c.expires_at IS NOT NULL AND c.expires_at < ? """ + scope,
+        [now.isoformat()] + params,
+    ).fetchall()
+    marked = 0
+    for row in expired:
+        try:
+            expiry = datetime.fromisoformat(row['expires_at'])
+        except (TypeError, ValueError):
+            continue
+        retention_until = (expiry + timedelta(days=CONTRACT_RETENTION_DAYS)).isoformat()
+        conn.execute(
+            """UPDATE tenant_contracts SET status = 'expired',
+               retention_until = COALESCE(retention_until, ?), updated_at = ?
+               WHERE id = ? AND status = 'active'""",
+            (retention_until, now.isoformat(), row['id']),
+        )
+        marked += 1
+    # Lapse after stamping: a contract that expired long ago (retention window
+    # already in the past) flips in the same sweep, while one expiring now got
+    # a future retention_until and keeps its full window.
+    lapsed = conn.execute(
+        """SELECT c.id, c.tenant_id FROM tenant_contracts c
+           WHERE c.status = 'expired' AND c.retention_until IS NOT NULL
+           AND c.retention_until < ? """ + scope,
+        [now.isoformat()] + params,
+    ).fetchall()
+    for row in lapsed:
+        conn.execute(
+            "UPDATE tenant_contracts SET status = 'retention_expired', updated_at = ? WHERE id = ?",
+            (now.isoformat(), row['id']),
+        )
+    if expired or lapsed:
+        conn.commit()
+    return {'contracts_expired': marked, 'retention_lapsed': len(lapsed),
+            'tenants_pending_review': sorted({row['tenant_id'] for row in lapsed})}
 
 
 # ── t54: operational monitoring that never exposes client content ───────────
@@ -11669,6 +11959,10 @@ def _create_omran_event_tables(conn):
         event_date TEXT,
         due_at TEXT,
         assignee_user_id TEXT,
+        entity_type TEXT,
+        entity_id TEXT,
+        priority TEXT DEFAULT 'normal',
+        escalated_at TEXT,
         recurrence TEXT DEFAULT 'none',
         status TEXT DEFAULT 'open',
         completed_at TEXT,
@@ -11680,20 +11974,26 @@ def _create_omran_event_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_event_tasks ON event_tasks(tenant_id, status, due_at)')
 
 
+EVENT_TASK_PRIORITIES = ('low', 'normal', 'high', 'urgent')
+
+
 def create_event_task(tenant_id, title, description=None, event_date=None, due_at=None,
-                      assignee_user_id=None, recurrence='none', created_by=None, created_by_name=None):
+                      assignee_user_id=None, recurrence='none', created_by=None, created_by_name=None,
+                      entity_type=None, entity_id=None, priority='normal'):
     if not title or not str(title).strip():
         return {'error': 'title_required'}
     if recurrence not in ('none', 'daily', 'weekly', 'monthly'):
         return {'error': 'invalid_recurrence'}
+    if priority not in EVENT_TASK_PRIORITIES:
+        priority = 'normal'
     conn = get_db()
     task_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO event_tasks (id, tenant_id, title, description, event_date, due_at,
-           assignee_user_id, recurrence, created_by, created_by_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           assignee_user_id, entity_type, entity_id, priority, recurrence, created_by, created_by_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (task_id, tenant_id, str(title).strip(), description, event_date, due_at,
-         assignee_user_id, recurrence, created_by, created_by_name)
+         assignee_user_id, entity_type, entity_id, priority, recurrence, created_by, created_by_name)
     )
     conn.commit()
     return get_event_task(tenant_id, task_id)
@@ -12051,6 +12351,22 @@ def list_subscriptions(tenant_id):
     return [dict(r) for r in rows]
 
 
+def current_package_limits(tenant_id):
+    """d10: the limits dict of the tenant's active package version — empty
+    when no subscription pins one. Uploads read ``max_file_mb`` from it."""
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT v.limits_json FROM tenant_subscriptions s
+           JOIN billing_package_versions v ON v.id = s.package_version_id
+           WHERE s.tenant_id = ? AND s.status = 'active'
+           ORDER BY s.starts_at DESC LIMIT 1''',
+        (str(tenant_id),),
+    ).fetchone()
+    if not row:
+        return {}
+    return _json_or(row['limits_json'], {})
+
+
 def _next_invoice_number_tx(conn):
     """Sequential financial document number: INV-<year>-<six digits>."""
     year = datetime.now().year
@@ -12068,16 +12384,14 @@ def _next_invoice_number_tx(conn):
     return f'INV-{year}-{sequence:06d}'
 
 
-def create_topup_receipt(tenant_id, recharge_request_id=None, receipt_file_id=None,
-                         receipt_sha256=None, transfer_reference=None, amount_usd=0,
-                         price_sar=None, issued_by=None, issued_by_name=None):
-    """Issue the financial document for an approved top-up (d09/t60-04).
+TAX_RATE_SAR = float(os.environ.get('TOPUP_TAX_RATE', '0.15'))
 
-    The receipt is created once per recharge request — a repeat call returns
-    the existing row — and carries an immutable invoice number plus the
-    receipt fingerprint so a duplicate bank transfer can be detected.
-    """
-    conn = get_db()
+
+def _create_topup_receipt_tx(conn, tenant_id, recharge_request_id=None, receipt_file_id=None,
+                             receipt_sha256=None, transfer_reference=None, amount_usd=0,
+                             price_sar=None, issued_by=None, issued_by_name=None):
+    """d09: one financial document per approved top-up, inside the caller's
+    transaction — never commits. Carries the VAT breakdown on the SAR price."""
     if recharge_request_id:
         existing = conn.execute(
             'SELECT * FROM topup_receipts WHERE recharge_request_id = ?',
@@ -12087,23 +12401,47 @@ def create_topup_receipt(tenant_id, recharge_request_id=None, receipt_file_id=No
             return dict(existing)
     receipt_id = str(uuid.uuid4())
     invoice_number = _next_invoice_number_tx(conn)
+    subtotal = float(price_sar) if price_sar is not None else None
+    tax_amount = round(subtotal * TAX_RATE_SAR, 2) if subtotal is not None else None
+    total_sar = round(subtotal + tax_amount, 2) if subtotal is not None else None
     conn.execute(
         '''INSERT INTO topup_receipts
            (id, tenant_id, recharge_request_id, receipt_file_id, receipt_sha256,
-            transfer_reference, invoice_number, amount_usd, price_sar, status,
+            transfer_reference, invoice_number, amount_usd, price_sar,
+            tax_rate, tax_amount_sar, total_sar, status,
             issued_by, issued_by_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)''',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)''',
         (receipt_id, str(tenant_id),
          str(recharge_request_id) if recharge_request_id else None,
          str(receipt_file_id) if receipt_file_id else None,
          receipt_sha256, transfer_reference, invoice_number,
-         float(amount_usd or 0.0),
-         float(price_sar) if price_sar is not None else None,
+         float(amount_usd or 0.0), subtotal,
+         TAX_RATE_SAR if subtotal is not None else None,
+         tax_amount, total_sar,
          issued_by, issued_by_name),
     )
-    conn.commit()
     return dict(conn.execute(
         'SELECT * FROM topup_receipts WHERE id = ?', (receipt_id,)).fetchone())
+
+
+def create_topup_receipt(tenant_id, recharge_request_id=None, receipt_file_id=None,
+                         receipt_sha256=None, transfer_reference=None, amount_usd=0,
+                         price_sar=None, issued_by=None, issued_by_name=None):
+    """Issue the financial document for an approved top-up (d09/t60-04).
+
+    The receipt is created once per recharge request — a repeat call returns
+    the existing row — and carries an immutable invoice number, the VAT
+    breakdown and the receipt fingerprint so a duplicate bank transfer can be
+    detected.
+    """
+    conn = get_db()
+    row = _create_topup_receipt_tx(
+        conn, tenant_id, recharge_request_id=recharge_request_id,
+        receipt_file_id=receipt_file_id, receipt_sha256=receipt_sha256,
+        transfer_reference=transfer_reference, amount_usd=amount_usd,
+        price_sar=price_sar, issued_by=issued_by, issued_by_name=issued_by_name)
+    conn.commit()
+    return row
 
 
 def list_topup_receipts(tenant_id, limit=100):
@@ -13301,6 +13639,14 @@ def platform_alerts():
     if expiring:
         alerts.append({'kind': 'contract_expiry', 'severity': 'warning', 'count': expiring,
                        'message_ar': 'عقود تنتهي خلال ٣٠ يومًا'})
+    try:
+        retention = enforce_contract_retention()
+        lapsed = int(retention.get('retention_lapsed') or 0)
+    except Exception:
+        lapsed = 0
+    if lapsed:
+        alerts.append({'kind': 'retention_due', 'severity': 'critical', 'count': lapsed,
+                       'message_ar': 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'})
     try:
         breach_soon = int(conn.execute(
             """SELECT COUNT(*) AS n FROM support_tickets

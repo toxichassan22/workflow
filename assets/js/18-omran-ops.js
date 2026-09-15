@@ -12,6 +12,7 @@
         open: 'مفتوحة', completed: 'منجزة', cancelled: 'ملغاة',
         pending: 'قيد المراجعة', approved: 'معتمد', rejected: 'مرفوض',
         in_progress: 'قيد المعالجة', resolved: 'تم الحل', closed: 'مغلقة',
+        waiting_customer: 'بانتظار العميل', escalated: 'مصعّدة', reopened: 'معاد فتحها',
         consumed: 'مسوّى', expired: 'منتهية الصلاحية',
       };
       return labels[status] || status || '';
@@ -249,7 +250,11 @@
       const body = (document.getElementById('omTicketBody') || {}).value || '';
       const errBox = document.getElementById('omTicketsError');
       if (errBox) errBox.textContent = '';
-      const data = await api('POST', '/api/support/tickets', { subject: subject.trim(), body: body.trim(), category: 'general' }).catch(e => e);
+      const category = (document.getElementById('omTicketCategory') || {}).value || 'general';
+      const priority = (document.getElementById('omTicketPriority') || {}).value || 'normal';
+      const data = await api('POST', '/api/support/tickets', {
+        subject: subject.trim(), body: body.trim(), category: category, priority: priority
+      }).catch(e => e);
       if (!data || !data.success) {
         if (errBox) errBox.textContent = (data && data.error) || 'تعذر إنشاء التذكرة.';
         return;
@@ -301,28 +306,55 @@
       }).join('');
     }
 
+    let omRechargePackages = [];
+
+    async function omLoadRechargePackages() {
+      const select = document.getElementById('omRechargePackage');
+      if (!select) return;
+      const data = await api('GET', '/api/billing/packages').catch(() => null);
+      omRechargePackages = (data && data.success && data.packages) || [];
+      if (!omRechargePackages.length) return;
+      select.innerHTML = omRechargePackages.map(p =>
+        '<option value="' + omEscape(p.id) + '">' + omEscape(p.name) +
+        ' (' + (p.credit_usd || 0) + ' <span>دولار</span>' +
+        (p.price_sar ? ' — ' + p.price_sar + ' <span>ريال</span>' : '') + ')</option>'
+      ).join('');
+    }
+
+    async function omUploadRechargeReceipt() {
+      const input = document.getElementById('omRechargeReceipt');
+      if (!input || !input.files || !input.files[0]) return null;
+      const form = new FormData();
+      form.append('file', input.files[0]);
+      form.append('fileType', 'recharge_receipt');
+      const data = await api('POST', '/api/project-files', form, true).catch(e => e);
+      if (!data || !data.success) return { error: (data && data.error) || 'تعذر رفع الإيصال' };
+      return data.file;
+    }
+
     async function omCreateRechargeRequest() {
-      const pkg = (document.getElementById('omRechargePackage') || {}).value || 'باقة نمو';
+      const packageId = (document.getElementById('omRechargePackage') || {}).value || '';
       const ref = (document.getElementById('omRechargeRef') || {}).value || '';
       const errBox = document.getElementById('omRechargeError');
       if (errBox) errBox.textContent = '';
-      const amounts = {
-        'باقة نمو': { usd: 100, sar: 375 },
-        'باقة شركات': { usd: 250, sar: 937.5 },
-        'باقة احترافية': { usd: 500, sar: 1875 }
-      };
-      const sel = amounts[pkg] || { usd: 100, sar: 375 };
+      const receipt = await omUploadRechargeReceipt();
+      if (receipt && receipt.error) {
+        if (errBox) errBox.textContent = receipt.error;
+        return;
+      }
+      const pkg = omRechargePackages.find(p => p.id === packageId);
       const data = await api('POST', '/api/recharge-requests', {
-        packageName: pkg,
-        amountUsd: sel.usd,
-        priceSar: sel.sar,
-        referenceNumber: ref.trim()
+        packageId: packageId || null,
+        packageName: pkg ? pkg.name : packageId,
+        referenceNumber: ref.trim(),
+        receiptFileId: receipt ? receipt.id : null
       }).catch(e => e);
       if (!data || !data.success) {
         if (errBox) errBox.textContent = (data && data.error) || 'تعذر إرسال الطلب.';
         return;
       }
       if (document.getElementById('omRechargeRef')) document.getElementById('omRechargeRef').value = '';
+      if (document.getElementById('omRechargeReceipt')) document.getElementById('omRechargeReceipt').value = '';
       closeOmModal('omRechargeModal');
       toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
       await omLoadRechargeRequests();
@@ -372,17 +404,35 @@
     async function omCreateContract() {
       const title = (document.getElementById('omContractTitle') || {}).value || '';
       const kind = (document.getElementById('omContractKind') || {}).value || 'nda';
+      const startsAt = (document.getElementById('omContractStarts') || {}).value || '';
       const expiresAt = (document.getElementById('omContractExpires') || {}).value || '';
+      const signatureStatus = (document.getElementById('omContractSignature') || {}).value || 'unsigned';
       const errBox = document.getElementById('omContractError');
       if (errBox) errBox.textContent = '';
       if (!title.trim()) {
         if (errBox) errBox.textContent = 'مسمى العقد مطلوب.';
         return;
       }
+      let fileId = null;
+      const fileInput = document.getElementById('omContractFile');
+      if (fileInput && fileInput.files && fileInput.files[0]) {
+        const form = new FormData();
+        form.append('file', fileInput.files[0]);
+        form.append('fileType', 'contract_file');
+        const uploaded = await api('POST', '/api/project-files', form, true).catch(e => e);
+        if (!uploaded || !uploaded.success) {
+          if (errBox) errBox.textContent = (uploaded && uploaded.error) || 'تعذر رفع ملف الوثيقة.';
+          return;
+        }
+        fileId = uploaded.file.id;
+      }
       const data = await api('POST', '/api/contracts', {
         title: title.trim(),
         kind: kind,
-        expiresAt: expiresAt || null
+        fileId: fileId,
+        startsAt: startsAt || null,
+        expiresAt: expiresAt || null,
+        signatureStatus: signatureStatus
       }).catch(e => e);
       if (!data || !data.success) {
         if (errBox) errBox.textContent = (data && data.error) || 'تعذر حفظ العقد.';
@@ -390,6 +440,8 @@
       }
       if (document.getElementById('omContractTitle')) document.getElementById('omContractTitle').value = '';
       if (document.getElementById('omContractExpires')) document.getElementById('omContractExpires').value = '';
+      if (document.getElementById('omContractStarts')) document.getElementById('omContractStarts').value = '';
+      if (fileInput) fileInput.value = '';
       closeOmModal('omContractModal');
       toast(WFT('contracts.saved', 'تم حفظ العقد بنجاح'));
       await omLoadContracts();

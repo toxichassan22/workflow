@@ -1875,13 +1875,20 @@ def api_billing_ledger():
             limit = max(1, min(200, int(limit)))
         except (TypeError, ValueError):
             limit = 50
+        entries = db.get_ledger_entries(
+            g.tenant_id, limit=limit,
+            kind=request.args.get('kind'), from_date=request.args.get('from'),
+            to_date=request.args.get('to'), draft_id=request.args.get('draftId'),
+            presentation_id=request.args.get('presentationId'),
+            actor=request.args.get('actor'))
         return jsonify({
             'success': True,
             'balance_usd': db.get_tenant_balance(g.tenant_id),
             'multiplier': db.get_billing_multiplier(),
             'enforced': db.billing_enforcement_enabled(),
             'unbilled': db.get_unbilled_usage(g.tenant_id),
-            'entries': db.get_ledger_entries(g.tenant_id, limit=limit),
+            'points': db.points_overview(g.tenant_id),
+            'entries': entries,
         })
     except Exception as exc:
         print(f"[BILLING] ledger failed: {exc}")
@@ -18915,10 +18922,60 @@ PROJECT_FILE_EXTENSIONS = {
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
                       'regulation_reference', 'team_logo', 'competitor_logo', 'visual_reference',
-                      'conceptual_plan', 'project_logo'}
+                      'conceptual_plan', 'project_logo', 'recharge_receipt', 'contract_file'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
 PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference', 'project_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
+# d10: the upload `fileType` resolves to a file_type_registry rule; where a rule
+# exists it governs the accepted extensions and the size ceiling, and the
+# tenant's active package can tighten the ceiling further via limits_json.
+_UPLOAD_TYPE_REGISTRY_KEY = {
+    'land_document': 'deed_file',
+    'croquis': 'croquis_file',
+    'building_license': 'land_documents_files',
+    'regulation_reference': 'land_documents_files',
+    'land_image': 'land_photos',
+    'conceptual_plan': 'land_documents_files',
+    'team_logo': 'team_logo',
+    'competitor_logo': 'competitor_logo',
+    'visual_reference': 'land_photos',
+    'project_logo': 'project_logo',
+    'recharge_receipt': 'recharge_receipt',
+    'contract_file': 'contract_file',
+}
+
+
+def _upload_file_rule(file_type):
+    """Effective upload rule for a file type: registry row plus the tenant's
+    package limit when one is set. Returns (allowed_extensions, max_bytes)."""
+    registry_key = _UPLOAD_TYPE_REGISTRY_KEY.get(file_type)
+    allowed_exts = None
+    max_bytes = PROJECT_FILE_MAX_BYTES
+    rule = None
+    if registry_key:
+        try:
+            rule = db.get_file_type_rule(registry_key)
+        except Exception:
+            rule = None
+    if rule:
+        exts = rule.get('allowed_extensions') or []
+        if isinstance(exts, list) and exts:
+            allowed_exts = {str(e).lower() for e in exts}
+        try:
+            rule_mb = float(rule.get('max_size_mb') or 0)
+        except (TypeError, ValueError):
+            rule_mb = 0
+        if rule_mb > 0:
+            max_bytes = min(max_bytes, int(rule_mb * 1024 * 1024))
+    package_limit_mb = 0
+    try:
+        limits = db.current_package_limits(g.tenant_id)
+        package_limit_mb = float((limits or {}).get('max_file_mb') or 0)
+    except Exception:
+        package_limit_mb = 0
+    if package_limit_mb > 0:
+        max_bytes = min(max_bytes, int(package_limit_mb * 1024 * 1024))
+    return allowed_exts, max_bytes
 COMPETITOR_LOGO_MAX_BYTES = 2 * 1024 * 1024
 COMPETITOR_LOGO_MIMES = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp'}
 OFFICIAL_LOGO_PAGE_MAX_BYTES = 2 * 1024 * 1024
@@ -19248,6 +19305,9 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
         raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
     if file_type in PROJECT_IMAGE_ONLY_TYPES and not mime_type.startswith('image/'):
         raise ValueError('هذا الحقل يقبل الصور فقط (PNG أو JPG أو WEBP)')
+    allowed_exts, max_bytes = _upload_file_rule(file_type)
+    if allowed_exts and extension not in allowed_exts:
+        raise ValueError('امتداد الملف غير مسموح لهذا النوع')
 
     document_dir = os.path.join(UPLOADS_DIR, re.sub(r'[^A-Za-z0-9_-]', '', str(g.tenant_id)) or 'public', 'project-documents')
     os.makedirs(document_dir, exist_ok=True)
@@ -19261,8 +19321,8 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > PROJECT_FILE_MAX_BYTES:
-                    raise ValueError('Project files must be 30 MB or smaller')
+                if total > max_bytes:
+                    raise ValueError(f'Project files must be {max_bytes // (1024 * 1024)} MB or smaller')
                 digest.update(chunk)
                 output.write(chunk)
 
@@ -24641,14 +24701,24 @@ def api_list_notifications():
 @app.route('/api/notifications', methods=['POST'])
 @require_auth
 def api_create_notification():
-    """Create an in-app notification (also used by workflows to notify users)."""
+    """Create an in-app notification (t41).
+
+    A notification aimed at someone else — or broadcast to the whole company
+    (no ``userId``) — is an administrative act and needs ``manage_users``;
+    workflows notify through ``db.create_notification`` directly, not here.
+    """
     data = request.json or {}
     if not str(data.get('title') or '').strip():
         return jsonify({'error': 'A title is required', 'error_code': 'title_required'}), 400
+    target_user = data.get('userId')
+    if (not target_user or str(target_user) != str(g.user_id)) \
+            and not _omran_can('manage_users'):
+        return _omran_forbidden('إشعار مستخدم آخر أو إشعار عام يتطلب صلاحية إدارة المستخدمين')
     row = db.create_notification(
         g.tenant_id, data.get('title'), body=data.get('body'), category=data.get('category') or 'general',
-        user_id=data.get('userId') if data.get('userId') != g.user_id else None,
+        user_id=target_user if target_user != g.user_id else None,
         entity_type=data.get('entityType'), entity_id=data.get('entityId'),
+        email_to=data.get('emailTo'),
     )
     return jsonify({'success': True, 'notification': row})
 
@@ -24768,6 +24838,8 @@ def api_create_event_task():
         g.tenant_id, data.get('title'), description=data.get('description'),
         event_date=data.get('eventDate'), due_at=data.get('dueAt'),
         assignee_user_id=assignee_id, recurrence=data.get('recurrence') or 'none',
+        entity_type=data.get('entityType'), entity_id=data.get('entityId'),
+        priority=data.get('priority') or 'normal',
         created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
     )
     failure = _omran_error(row)
@@ -24916,6 +24988,7 @@ def api_create_recharge_request():
     row = db.create_recharge_request(
         g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
         price_sar=data.get('priceSar'), transfer_reference=data.get('referenceNumber'),
+        package_id=data.get('packageId'),
         receipt_file_id=data.get('receiptFileId'), requested_by=_omran_actor_id(),
         requested_by_name=_omran_actor_name(),
     )
@@ -24925,6 +24998,17 @@ def api_create_recharge_request():
     _record_audit_event('recharge.requested', 'recharge_request', row['id'],
                         entity_name=row.get('package_name'),
                         metadata={'amount_usd': row.get('amount_usd')})
+    # t33: the platform desk gets a task and a notification for the 24h SLA.
+    db.create_approval_task(
+        g.tenant_id, 'recharge',
+        f'طلب شحن رصيد — {row.get("package_name") or "باقة"}',
+        entity_type='recharge_request', entity_id=row['id'],
+        payload={'amount_usd': row.get('amount_usd'), 'price_sar': row.get('price_sar')},
+        due_hours=24)
+    db.create_notification(
+        g.tenant_id, 'طلب شحن جديد بانتظار المراجعة',
+        body=f'{row.get("package_name") or ""} — {row.get("price_sar") or row.get("amount_usd") or ""}',
+        category='billing', entity_type='recharge_request', entity_id=row['id'])
     return jsonify({'success': True, 'request': row})
 
 
@@ -24940,6 +25024,72 @@ def api_list_recharge_requests():
 def api_admin_list_recharge_requests():
     rows = db.list_recharge_requests(status=request.args.get('status'))
     return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/billing/packages', methods=['GET'])
+@require_auth
+def api_billing_packages():
+    """t33: the purchase screen lists the catalog, never hardcoded prices."""
+    packages = [p for p in db.list_billing_packages(active_only=True)
+                if not p.get('is_custom')]
+    return jsonify({'success': True, 'packages': packages, 'taxRate': db.TAX_RATE_SAR})
+
+
+@app.route('/api/billing/receipts', methods=['GET'])
+@require_permission('billing')
+def api_billing_receipts():
+    """d09: the tenant's issued financial documents for approved top-ups."""
+    return jsonify({'success': True, 'receipts': db.list_topup_receipts(g.tenant_id)})
+
+
+@app.route('/api/billing/receipts/<receipt_id>', methods=['GET'])
+@require_permission('billing')
+def api_billing_receipt(receipt_id):
+    row = db.get_topup_receipt(g.tenant_id, receipt_id)
+    if not row:
+        return jsonify({'error': 'المستند غير موجود', 'error_code': 'receipt_not_found'}), 404
+    return jsonify({'success': True, 'receipt': row})
+
+
+@app.route('/api/points/overview', methods=['GET'])
+@require_auth
+def api_points_overview():
+    """t30: current, reserved, available and expired balances in one read."""
+    return jsonify({'success': True, 'points': db.points_overview(g.tenant_id)})
+
+
+@app.route('/api/admin/ledger/adjust', methods=['POST'])
+@require_admin
+def api_admin_ledger_adjust():
+    """t32: refund, correction and expiry movements are a super-admin act,
+    linked to the original entry they reverse when one is given."""
+    data = request.json or {}
+    kind = data.get('kind')
+    if kind not in db.LEDGER_ADJUSTMENT_KINDS:
+        return jsonify({'error': 'نوع الحركة غير معروف', 'error_code': 'invalid_kind'}), 400
+    tenant_id = data.get('tenantId')
+    if not tenant_id:
+        return jsonify({'error': 'الشركة مطلوبة', 'error_code': 'tenant_required'}), 400
+    result = db.record_ledger_adjustment(
+        tenant_id, data.get('amountUsd'), kind, note=data.get('note'),
+        actor=_omran_actor_id() or 'platform_admin', reversal_of=data.get('reversalOf'),
+        idempotency_key=data.get('idempotencyKey'))
+    failure = _omran_error(result)
+    if failure:
+        return failure
+    _record_audit_event('ledger.adjusted', 'tenant_ledger',
+                        (result.get('entry') or {}).get('id') or '', entity_name=kind,
+                        metadata={'tenant_id': tenant_id, 'amount_usd': data.get('amountUsd'),
+                                  'reversal_of': data.get('reversalOf')})
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/api/admin/contracts/retention-sweep', methods=['POST'])
+@require_admin
+def api_admin_retention_sweep():
+    """d06: run the retention policy now — expire lapsed contracts and list
+    the tenants whose data is due for purge review."""
+    return jsonify({'success': True, 'result': db.enforce_contract_retention()})
 
 
 @app.route('/api/admin/recharge-requests/<request_id>/decision', methods=['POST'])
@@ -24970,10 +25120,21 @@ def api_create_support_ticket():
         g.tenant_id, data.get('subject'), category=data.get('category') or 'general',
         priority=data.get('priority') or 'normal', body=data.get('body'),
         created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+        draft_id=data.get('draftId'), project_id=data.get('projectId'),
     )
     failure = _omran_error(row)
     if failure:
         return failure
+    # t40/t42: the support desk sees new tickets as a task plus a notification.
+    db.create_approval_task(
+        g.tenant_id, 'support',
+        f'تذكرة دعم — {row.get("subject")}',
+        entity_type='support_ticket', entity_id=row['id'],
+        payload={'priority': row.get('priority'), 'category': row.get('category')})
+    db.create_notification(
+        g.tenant_id, 'تذكرة دعم جديدة',
+        body=row.get('subject'), category='support',
+        entity_type='support_ticket', entity_id=row['id'])
     return jsonify({'success': True, 'ticket': row})
 
 
@@ -25004,6 +25165,11 @@ def api_add_support_message(ticket_id):
     failure = _omran_error(row)
     if failure:
         return failure
+    # t40: a customer reply moves the ticket back onto the desk's radar.
+    ticket = db.get_support_ticket(g.tenant_id, ticket_id)
+    if ticket and ticket.get('status') in ('waiting_customer', 'resolved'):
+        db.update_support_ticket_status(g.tenant_id, ticket_id, 'reopened',
+                                        actor_name=_omran_actor_name())
     return jsonify({'success': True, 'message': row})
 
 
@@ -25028,6 +25194,14 @@ def api_update_support_ticket_status(ticket_id):
         return failure
     _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
                         new_value=row.get('status'))
+    # t40: the requester hears about every status move on their ticket.
+    ticket = db.get_support_ticket(g.tenant_id, ticket_id)
+    if ticket:
+        db.create_notification(
+            g.tenant_id, 'تحديث حالة التذكرة',
+            body=f'{ticket.get("subject") or ""} — {new_status}',
+            category='support', user_id=ticket.get('created_by'),
+            entity_type='support_ticket', entity_id=ticket_id)
     return jsonify({'success': True, 'ticket': row})
 
 
@@ -25064,6 +25238,12 @@ def api_admin_add_support_message(ticket_id):
     if failure:
         return failure
     _record_audit_event('support_ticket.replied', 'support_ticket', ticket_id)
+    # t40: the customer sees the desk's reply; the desk marks first response.
+    db.create_notification(
+        ticket['tenant_id'], 'رد جديد على تذكرة الدعم',
+        body=ticket.get('subject'), category='support',
+        user_id=ticket.get('created_by'),
+        entity_type='support_ticket', entity_id=ticket_id)
     return jsonify({'success': True, 'message': row})
 
 
@@ -25081,6 +25261,29 @@ def api_admin_update_support_ticket_status(ticket_id):
         return failure
     _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
                         new_value=row.get('status'))
+    db.create_notification(
+        ticket['tenant_id'], 'تحديث حالة التذكرة',
+        body=f'{ticket.get("subject") or ""} — {row.get("status")}',
+        category='support', user_id=ticket.get('created_by'),
+        entity_type='support_ticket', entity_id=ticket_id)
+    return jsonify({'success': True, 'ticket': row})
+
+
+@app.route('/api/admin/support/tickets/<ticket_id>/assign', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_admin_assign_support_ticket(ticket_id):
+    """t40: route a ticket to a named owner on the desk."""
+    ticket = db.get_support_ticket_admin(ticket_id)
+    if not ticket:
+        return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+    data = request.json or {}
+    row = db.assign_support_ticket(ticket['tenant_id'], ticket_id, data.get('assigneeId'),
+                                   actor_name=_omran_actor_name())
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('support_ticket.assigned', 'support_ticket', ticket_id,
+                        new_value=data.get('assigneeId'))
     return jsonify({'success': True, 'ticket': row})
 
 
@@ -25116,6 +25319,7 @@ def api_create_contract():
         g.tenant_id, data.get('title'), kind=data.get('kind') or 'contract',
         file_id=data.get('fileId'), starts_at=data.get('startsAt'), expires_at=data.get('expiresAt'),
         notes=data.get('notes'), created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
+        signature_status=data.get('signatureStatus'), retention_until=data.get('retentionUntil'),
     )
     failure = _omran_error(row)
     if failure:

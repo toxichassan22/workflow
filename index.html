@@ -1531,7 +1531,7 @@
       <div id="omTabPane_recharge" style="display:none">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <h3 class="dash-section-title" style="margin:0">طلبات الشحن</h3>
-          <button type="button" class="btn primary small" id="omRechargeNewBtn" onclick="openOmModal('omRechargeModal')">طلب شحن جديد</button>
+          <button type="button" class="btn primary small" id="omRechargeNewBtn" onclick="openOmModal('omRechargeModal');omLoadRechargePackages()">طلب شحن جديد</button>
         </div>
         <div id="omRechargeList" style="margin-bottom:24px"></div>
       </div>
@@ -1598,6 +1598,7 @@
               </select>
             </div>
             <div class="tenant-field"><label>رقم الحوالة البنكية</label><input type="text" id="omRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
+            <div class="tenant-field"><label>إيصال التحويل</label><input type="file" id="omRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omRechargeError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
@@ -1616,6 +1617,25 @@
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
             <div class="tenant-field full"><label>الموضوع</label><input type="text" id="omTicketSubject" placeholder="ملخص المشكلة"></div>
+            <div class="tenant-field"><label>الفئة</label>
+              <select id="omTicketCategory">
+                <option value="general">عام</option>
+                <option value="billing">الفوترة والرصيد</option>
+                <option value="technical">مشكلة تقنية</option>
+                <option value="generation">التوليد</option>
+                <option value="files">الملفات والتنزيلات</option>
+                <option value="account">الحساب والصلاحيات</option>
+                <option value="other">أخرى</option>
+              </select>
+            </div>
+            <div class="tenant-field"><label>الأولوية</label>
+              <select id="omTicketPriority">
+                <option value="normal">عادية</option>
+                <option value="low">منخفضة</option>
+                <option value="high">مرتفعة</option>
+                <option value="urgent">عاجلة</option>
+              </select>
+            </div>
             <div class="tenant-field full"><label>التفاصيل</label><textarea id="omTicketBody" rows="4" placeholder="تفاصيل المشكلة"></textarea></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omTicketsError"></div>
@@ -1641,7 +1661,16 @@
                 <option value="framework">عقد إطاري رئيسي</option>
               </select>
             </div>
+            <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="omContractStarts"></div>
             <div class="tenant-field"><label>تاريخ الانتهاء</label><input type="date" id="omContractExpires"></div>
+            <div class="tenant-field"><label>حالة التوقيع</label>
+              <select id="omContractSignature">
+                <option value="unsigned">غير موقعة</option>
+                <option value="pending_signature">بانتظار التوقيع</option>
+                <option value="signed">موقعة</option>
+              </select>
+            </div>
+            <div class="tenant-field"><label>ملف الوثيقة</label><input type="file" id="omContractFile" accept=".pdf"></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omContractError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
