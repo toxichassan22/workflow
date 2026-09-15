@@ -22438,6 +22438,7 @@ def api_training_chat():
 5. كن مباشراً، ودياً، وذكياً. لا تتظاهر بعدم معرفة النظام.
 6. بعد تنفيذ أي action اذكر القيمة القديمة والجديدة.
 7. إذا طلب المستخدم شيء خطير (حذف عروض، تعطيل موظفين)، نفذه مباشرة لكن حذّره بوضوح.
+   آخر مدير شركة نشط لا يمكن تعطيله؛ إذا طُلب ذلك فأخبر المستخدم أنه مرفوض بدل تنفيذه.
 8. **اسأل بدل أن تخمّن:** إذا كان الطلب غامضًا أو يقبل تنفيذين مختلفين، أو لم تعرف الحقل أو القسم أو
    الجهة أو الموظف المقصود، أو كان التنفيذ سيحذف أو يستبدل شيئًا قائمًا ولست متأكدًا أنه مقصود، أو
    أرفق المستخدم ملفًا دون أن يوضح المطلوب منه — أعد `ask` بسؤال واحد محدد ولا تنفّذ أي action آخر
@@ -23306,10 +23307,15 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 result['message'] = f'الموظف "{email}" غير موجود'
             else:
                 active_val = 1 if is_active in (True, 1, '1', 'true') else 0
-                db.update_user(target_user['id'], is_active=active_val)
-                db.log_ai_rule_change(tenant_id, 'agent_user', f'toggle_{email}', target_user.get('is_active'), active_val, risk_level='red')
-                status_text = 'تفعيل' if active_val else 'تعطيل'
-                result['message'] = f'تم {status_text} حساب الموظف {target_user["name"]}'
+                # The agent is bound by the same last-admin guard as the user routes.
+                if not active_val and db.is_last_active_company_admin(tenant_id, target_user['id']):
+                    result['status'] = 'error'
+                    result['message'] = 'لا يمكن تعطيل آخر مدير شركة نشط'
+                else:
+                    db.update_user(target_user['id'], is_active=active_val)
+                    db.log_ai_rule_change(tenant_id, 'agent_user', f'toggle_{email}', target_user.get('is_active'), active_val, risk_level='red')
+                    status_text = 'تفعيل' if active_val else 'تعطيل'
+                    result['message'] = f'تم {status_text} حساب الموظف {target_user["name"]}'
 
         # ── List Sections ─────────────────────────────────────────────
         elif tool == 'list_sections':

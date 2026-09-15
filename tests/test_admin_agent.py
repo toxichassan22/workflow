@@ -166,6 +166,28 @@ class AdminAgentTests(unittest.TestCase):
             with self.app.app_context():
                 db.delete_user(uid)
 
+    # ── The last-admin guard binds the agent like the user routes ──────────
+
+    def test_agent_cannot_disable_the_last_company_admin(self):
+        with self.app.app_context():
+            admin_id = db.create_user(self.tenant, 'مدير وحيد', 'solo-admin@agent.test',
+                                      'hash', role='company_admin')
+
+        refused = self._run('toggle_user', user_email='solo-admin@agent.test', is_active=False)
+        self.assertEqual(refused['status'], 'error')
+        self.assertIn('آخر مدير شركة', refused['message'])
+        with self.app.app_context():
+            self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 1)
+
+        # With a second active admin the same tool disables normally.
+        with self.app.app_context():
+            db.create_user(self.tenant, 'مدير ثان', 'second-admin@agent.test',
+                           'hash', role='company_admin')
+        allowed = self._run('toggle_user', user_email='solo-admin@agent.test', is_active=False)
+        self.assertEqual(allowed['status'], 'success', allowed.get('message'))
+        with self.app.app_context():
+            self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 0)
+
     # ── Company settings the agent could not reach before ─────────────────
 
     def test_agent_can_set_map_styles_and_lock_the_slide_count(self):
