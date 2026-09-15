@@ -571,11 +571,27 @@
       } catch (err) {
         console.warn('Generation approval estimate error:', err);
       }
-      const estimate = estimateData?.estimate || {};
-      const approval = estimateData?.approval || {};
+      // The request itself is the gate: when it cannot be opened there is
+      // nothing to approve, so generation does not proceed on a failure.
+      if (!estimateData || !estimateData.success) {
+        toast((estimateData && estimateData.error) || 'تعذر فتح طلب اعتماد التوليد');
+        return null;
+      }
+      const estimate = estimateData.estimate || {};
+      const approval = estimateData.approval || {};
       const approvalId = approval.id;
+      if (!approvalId) {
+        toast('تعذر فتح طلب اعتماد التوليد');
+        return null;
+      }
       const points = estimate.estimated_points ?? 500;
       const costUsd = Number(estimate.estimated_cost_usd ?? 25);
+
+      // d02: the requester never decides their own request. Only a
+      // company-level administrator may carry both hats; every other requester
+      // waits here while a generation approver decides from the approvals page.
+      const canSelfDecide = Boolean(tenantUser && tenantUser.isAdmin) ||
+        ((tenantUser && tenantUser._userRole) || 'company_admin') === 'company_admin';
 
       let remainingUsd = 0;
       let remainingSar = 0;
@@ -615,19 +631,39 @@
               'الرصيد المتاح في باقة الشركة غير كافٍ لتغطية التكلفة التقديرية. يرجى شحن الرصيد أولاً.' +
               '</div>'
             : '') +
-          '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+          '<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">' +
           '<button type="button" id="genApproveCancelBtn" class="btn ghost" style="padding:8px 18px;">إلغاء</button>' +
           (isBalanceSufficient
-            ? '<button type="button" id="genApproveConfirmBtn" class="btn primary" style="padding:8px 20px;">تعميد وبدء التوليد</button>'
+            ? (canSelfDecide
+              ? '<button type="button" id="genApproveConfirmBtn" class="btn primary" style="padding:8px 20px;">تعميد وبدء التوليد</button>'
+              : '<span class="tenant-hint" id="genApproveWaiting">أُرسل الطلب — بانتظار قرار معتمد التوليد</span>')
             : '<button type="button" id="genApproveRechargeBtn" class="btn primary" style="padding:8px 20px;">شحن الرصيد</button>') +
           '</div></div>';
 
         document.body.appendChild(modal);
 
+        let pollTimer = null;
         const close = (res) => {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
           if (modal.parentNode) modal.parentNode.removeChild(modal);
           resolve(res);
         };
+
+        if (!canSelfDecide) {
+          pollTimer = setInterval(async () => {
+            try {
+              const res = await api('GET', '/api/generation-approvals/' + encodeURIComponent(approvalId));
+              const status = res && res.approval && res.approval.status;
+              if (status === 'approved') {
+                window.currentGenerationApprovalId = approvalId;
+                close(approvalId);
+              } else if (status === 'rejected' || status === 'cancelled') {
+                toast('رُفض طلب اعتماد التوليد');
+                close(null);
+              }
+            } catch (err) { /* transient poll failure — keep waiting */ }
+          }, 4000);
+        }
 
         const cancelBtn = modal.querySelector('#genApproveCancelBtn');
         if (cancelBtn) {
@@ -692,6 +728,12 @@
 
       if (!(await preparePresentationGenerationTarget('full'))) return;
 
+      // Persist the project snapshot before the gate: the approval request needs a
+      // real draft row, and this snapshot is the one the presentation is built on.
+      resetDesignerChatForNewPresentation();
+      const draftSave = await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
+      if (draftSave && draftSave.draftId) tenantProjectData.draftId = draftSave.draftId;
+
       // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
       const gateApproved = await showGenerationApprovalModal({
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
@@ -699,11 +741,6 @@
         projectName: tenantPresentationTitle,
       });
       if (!gateApproved) return;
-
-      // Persist the project snapshot used to create this presentation without carrying the
-      // conversation from the previous presentation.
-      resetDesignerChatForNewPresentation();
-      await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
       // Navigate to the presentation page with the stage empty. Rendering the file's saved slides
       // here showed the previous deck for the whole planning wait, so the reader watched an old

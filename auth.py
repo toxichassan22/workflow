@@ -140,6 +140,24 @@ def decode_token(token):
 # Flask Middleware Decorators
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _load_token_user(payload):
+    """Return the live users row for a user-bound token.
+
+    A token without user_id is a tenant-direct login and returns (None, None).
+    A user-bound token whose row was deleted, disabled or belongs to another
+    tenant returns (None, error_response) — the JWT alone is never trusted,
+    because claims like role stay frozen until expiry while the account may
+    already be disabled or demoted.
+    """
+    user_id = payload.get('user_id')
+    if not user_id:
+        return None, None
+    user = db.get_user_by_id(user_id)
+    if not user or not user.get('is_active') or str(user.get('tenant_id')) != str(payload.get('sub')):
+        return None, (jsonify({'error': 'User account inactive or not found'}), 403)
+    return user, None
+
+
 def require_auth(f):
     """Decorator: require a valid JWT token. Sets g.tenant_id, g.tenant, g.is_admin, g.user_id, g.user_name, g.user_role."""
     @wraps(f)
@@ -157,12 +175,16 @@ def require_auth(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive or not found'}), 403
 
+        user_row, user_error = _load_token_user(payload)
+        if user_error:
+            return user_error
+
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = bool(tenant.get('is_admin'))
         g.user_id = payload.get('user_id')
-        g.user_name = payload.get('user_name')
-        g.user_role = payload.get('user_role')
+        g.user_name = (user_row or {}).get('name') or payload.get('user_name')
+        g.user_role = (user_row or {}).get('role') or payload.get('user_role')
         g.user_permissions = {}
         if g.user_id:
             g.user_permissions = db.get_user_permissions(g.user_id, g.user_role or 'employee')
@@ -187,7 +209,11 @@ def require_company_admin(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive'}), 403
 
-        user_role = payload.get('user_role')
+        user_row, user_error = _load_token_user(payload)
+        if user_error:
+            return user_error
+
+        user_role = (user_row or {}).get('role') or payload.get('user_role')
         user_id = payload.get('user_id')
         is_super_admin = bool(tenant.get('is_admin'))
         if not is_super_admin and user_role != 'company_admin' and user_id is not None:
@@ -197,7 +223,7 @@ def require_company_admin(f):
         g.tenant = tenant
         g.is_admin = is_super_admin
         g.user_id = payload.get('user_id')
-        g.user_name = payload.get('user_name')
+        g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = user_role
         return f(*args, **kwargs)
     return decorated
@@ -247,12 +273,16 @@ def require_permission(permission_key):
             if not tenant or not tenant.get('is_active'):
                 return jsonify({'error': 'Account inactive'}), 403
 
+            user_row, user_error = _load_token_user(payload)
+            if user_error:
+                return user_error
+
             g.tenant_id = payload['sub']
             g.tenant = tenant
             g.is_admin = bool(tenant.get('is_admin'))
             g.user_id = payload.get('user_id')
-            g.user_name = payload.get('user_name')
-            g.user_role = payload.get('user_role')
+            g.user_name = (user_row or {}).get('name') or payload.get('user_name')
+            g.user_role = (user_row or {}).get('role') or payload.get('user_role')
             g.user_permissions = {}
 
             is_super_admin = g.is_admin

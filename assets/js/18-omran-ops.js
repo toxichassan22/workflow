@@ -31,7 +31,7 @@
     }
 
     function showOmranOpsTab(tabKey) {
-      const tabs = ['tasks', 'recharge', 'tickets', 'contracts', 'system'];
+      const tabs = ['tasks', 'recharge', 'tickets', 'contracts'];
       tabs.forEach(t => {
         const pane = document.getElementById('omTabPane_' + t);
         const btn = document.getElementById('omTabBtn_' + t);
@@ -51,11 +51,6 @@
 
     async function openOmranOpsPage() {
       showTenantPage('tenantOmranOpsPage');
-      const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) ||
-                      Boolean((window.currentTenant || {}).is_admin);
-      const sysBtn = document.getElementById('omTabBtn_system');
-      if (sysBtn) sysBtn.style.display = isAdmin ? '' : 'none';
-
       showOmranOpsTab('tasks');
 
       await Promise.all([
@@ -63,8 +58,7 @@
         omLoadNotifications(),
         omLoadTickets(),
         omLoadRechargeRequests(),
-        omLoadContracts(),
-        isAdmin ? omLoadFileTypes() : Promise.resolve()
+        omLoadContracts()
       ]);
     }
 
@@ -87,12 +81,16 @@
         box.innerHTML = '<p class="tenant-hint">لا توجد مهام بعد.</p>';
         return;
       }
+      const myUserId = String((tenantUser && tenantUser._userId) || '');
+      const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
+      const canManageTasks = hasPermission('manage_users');
       box.innerHTML = tasks.map(t => {
         const due = (t.due_at || t.event_date || '').slice(0, 16).replace('T', ' ');
         const recurring = t.recurrence && t.recurrence !== 'none'
           ? ' | متكررة: ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
           : '';
-        const action = t.status === 'open'
+        const action = t.status === 'open' &&
+          (canManageTasks || String(t.assignee_user_id || '') === myUserId || String(t.created_by || '') === myActorId)
           ? '<button class="btn ghost" onclick="omCompleteTask(\'' + t.id + '\')">إتمام</button>'
           : '';
         return '<div class="tenant-presentation-card"><div><h3>' + omEscape(t.title) + '</h3>' +
@@ -126,8 +124,8 @@
     }
 
     // ── Notifications ────────────────────────────────────────────────────
-    async function omLoadNotifications() {
-      const box = document.getElementById('omNotificationsList');
+    async function omLoadNotifications(targetBoxId) {
+      const box = document.getElementById(targetBoxId || 'omNotificationsList');
       if (!box) return;
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const data = await api('GET', '/api/notifications').catch(() => null);
@@ -156,6 +154,7 @@
     async function omMarkAllRead() {
       await api('POST', '/api/notifications/read', {}).catch(() => null);
       await omLoadNotifications();
+      await omLoadNotifications('adminNotificationsList');
     }
 
     // ── Support tickets ──────────────────────────────────────────────────
@@ -203,15 +202,36 @@
         '<span style="font-size:11px;color:var(--muted)">' + omEscape((m.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
         '<p style="margin:4px 0 0;font-size:13px">' + omEscape(m.body) + '</p></div>'
       ).join('');
+      const myUserId = String((tenantUser && tenantUser._userId) || '');
+      const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
+      const canSupport = hasPermission('support_tickets');
+      const isCreator = String(t.created_by || '') === myActorId;
+      const statusActions = canSupport
+        ? '<div style="display:flex;gap:6px;margin:12px 0;flex-wrap:wrap">' +
+          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'in_progress\')">قيد المعالجة</button>' +
+          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'waiting_customer\')">بانتظار العميل</button>' +
+          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'resolved\')">تم الحل</button>' +
+          '<button class="btn small danger" onclick="omSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق التذكرة</button></div>'
+        : (t.status !== 'closed' && isCreator
+          ? '<div style="margin:12px 0"><button class="btn small danger" onclick="omSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق التذكرة</button></div>'
+          : '');
       detail.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — ' + omStatus(t.status) + '</h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'omTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
+        statusActions +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         (t.status !== 'closed'
           ? '<div style="display:flex;gap:8px"><input type="text" id="omReplyBody" style="flex:1">' +
             '<button class="btn primary" onclick="omReplyTicket(\'' + id + '\')">إرسال</button></div>'
           : '');
+    }
+
+    async function omSetTicketStatus(id, status) {
+      const res = await api('POST', '/api/support/tickets/' + id + '/status', { status }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الحالة'); return; }
+      await omOpenTicket(id);
+      await omLoadTickets();
     }
 
     async function omReplyTicket(id) {
@@ -315,8 +335,8 @@
         toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
         if (typeof omLoadRechargeRequests === 'function') {
           await omLoadRechargeRequests('omRechargeList');
-          await omLoadRechargeRequests('sagRechargeRequestsList');
         }
+        if (typeof adminLoadRecharges === 'function') await adminLoadRecharges();
       } else {
         toast(WFT('recharge.decision_failed', 'تعذر تسجيل القرار'));
       }
@@ -374,9 +394,9 @@
       await omLoadContracts();
     }
 
-    // ── File types registry (t62, d10) ───────────────────────────────────
-    async function omLoadFileTypes() {
-      const box = document.getElementById('omFileTypesList');
+    // ── File types registry (t62, d10) — lives on the platform settings page ──
+    async function omLoadFileTypes(targetBoxId) {
+      const box = document.getElementById(targetBoxId || 'adminFileTypesList');
       if (!box) return;
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const data = await api('GET', '/api/file-types').catch(() => null);
@@ -428,4 +448,127 @@
       } else {
         toast((res && res.error) || 'تعذر التحديث');
       }
+    }
+
+    // ── Super-admin pages: recharge queue, support inbox, platform settings ──
+
+    async function openAdminRechargePage() {
+      showTenantPage('tenantAdminRechargePage');
+      await adminLoadRecharges();
+    }
+
+    async function adminLoadRecharges() {
+      const box = document.getElementById('sagRechargeRequestsList');
+      if (!box) return;
+      await omLoadRechargeRequests('sagRechargeRequestsList');
+      const data = await api('GET', '/api/admin/recharge-requests').catch(() => null);
+      const requests = (data && data.success && data.requests) ? data.requests : [];
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('adminStatRechargePending', requests.filter(r => r.status === 'pending').length);
+      set('adminStatRechargeApproved', requests.filter(r => r.status === 'approved').length);
+      set('adminStatRechargeRejected', requests.filter(r => r.status === 'rejected').length);
+    }
+
+    async function openAdminTicketsPage() {
+      showTenantPage('tenantAdminTicketsPage');
+      const detail = document.getElementById('adminTicketDetail');
+      if (detail) detail.style.display = 'none';
+      await adminLoadTickets();
+    }
+
+    async function adminLoadTickets() {
+      const box = document.getElementById('adminTicketsList');
+      if (!box) return;
+      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const status = (document.getElementById('adminTicketsStatusFilter') || {}).value || '';
+      const url = '/api/admin/support/tickets' + (status ? '?status=' + encodeURIComponent(status) : '');
+      const data = await api('GET', url).catch(() => null);
+      if (!data || !data.success) {
+        box.innerHTML = '<p class="tenant-hint">تعذر تحميل التذاكر.</p>';
+        return;
+      }
+      const tickets = data.tickets || [];
+      const openCount = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length;
+      const overdueCount = tickets.filter(t => t.sla_overdue).length;
+      const openEl = document.getElementById('adminStatTicketsOpen');
+      const overdueEl = document.getElementById('adminStatTicketsOverdue');
+      if (openEl) openEl.textContent = openCount;
+      if (overdueEl) overdueEl.textContent = overdueCount;
+      if (!tickets.length) {
+        box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
+        return;
+      }
+      const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
+      box.innerHTML = tickets.map(t => {
+        const sla = t.sla_due_at
+          ? (' | <span' + (t.sla_overdue ? ' style="color:#c33;font-weight:700"' : '') + '>استحقاق SLA: ' +
+             omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')) + '</span>')
+          : '';
+        return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="adminOpenTicket(\'' + t.id + '\')">' +
+          '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
+          '<div class="meta"><span style="font-weight:700">' + omEscape(t.tenant_name || 'شركة') + '</span>' +
+          ' | <span>' + omStatus(t.status) + '</span>' +
+          ' | <span>الأولوية: ' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla +
+          (t.sla_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '') +
+          '</div></div></div>';
+      }).join('');
+    }
+
+    async function adminOpenTicket(id) {
+      const detail = document.getElementById('adminTicketDetail');
+      if (!detail) return;
+      detail.style.display = 'block';
+      detail.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const data = await api('GET', '/api/admin/support/tickets/' + id).catch(() => null);
+      if (!data || !data.success) {
+        detail.innerHTML = '<p class="tenant-hint">تعذر فتح التذكرة.</p>';
+        return;
+      }
+      const t = data.ticket || {};
+      const messages = (t.messages || []).map(m =>
+        '<div style="border-top:1px solid var(--line);padding:8px 0">' +
+        '<strong style="font-size:12px">' + omEscape(m.author_name) + '</strong>' +
+        (m.author_role === 'support' ? ' <span style="font-size:11px;color:var(--p)">(فريق المنصة)</span>' : '') +
+        ' <span style="font-size:11px;color:var(--muted)">' + omEscape((m.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
+        '<p style="margin:4px 0 0;font-size:13px">' + omEscape(m.body) + '</p></div>'
+      ).join('');
+      const statusActions = t.status !== 'closed'
+        ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' +
+          '<button type="button" class="btn small ghost" onclick="adminSetTicketStatus(\'' + id + '\', \'in_progress\')">قيد المعالجة</button>' +
+          '<button type="button" class="btn small green" onclick="adminSetTicketStatus(\'' + id + '\', \'resolved\')">تم الحل</button>' +
+          '<button type="button" class="btn small danger" onclick="adminSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px"><input type="text" id="adminReplyBody" style="flex:1">' +
+          '<button class="btn primary" onclick="adminReplyTicket(\'' + id + '\')">إرسال</button></div>'
+        : '';
+      detail.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+        '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — ' + omStatus(t.status) + '</h3>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'adminTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
+        '<div class="meta" style="margin-top:4px"><span>الشركة: ' + omEscape(t.tenant_name || '') + '</span></div>' +
+        '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
+        statusActions;
+      detail.scrollIntoView({ block: 'nearest' });
+    }
+
+    async function adminReplyTicket(id) {
+      const input = document.getElementById('adminReplyBody');
+      const body = (input || {}).value || '';
+      if (!body.trim()) return;
+      const res = await api('POST', '/api/admin/support/tickets/' + id + '/messages', { body: body.trim() }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر إرسال الرد'); return; }
+      await adminOpenTicket(id);
+      await adminLoadTickets();
+    }
+
+    async function adminSetTicketStatus(id, status) {
+      const res = await api('POST', '/api/admin/support/tickets/' + id + '/status', { status }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الحالة'); return; }
+      await adminOpenTicket(id);
+      await adminLoadTickets();
+    }
+
+    async function openAdminPlatformPage() {
+      showTenantPage('tenantAdminPlatformPage');
+      await omLoadFileTypes();
     }

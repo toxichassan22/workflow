@@ -20,7 +20,11 @@
       tenantTrainingPage: 'settings/training',
       tenantAIRulesPage: 'settings/ai-rules',
       tenantApprovalsPage: 'approvals',
-      tenantAdminPage: 'admin'
+      tenantAdminPage: 'admin',
+      tenantCompaniesPage: 'admin/companies',
+      tenantAdminRechargePage: 'admin/recharges',
+      tenantAdminTicketsPage: 'admin/tickets',
+      tenantAdminPlatformPage: 'admin/platform'
     };
     const TENANT_SUFFIX_PAGES = Object.fromEntries(Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]));
 
@@ -64,11 +68,16 @@
       return null;
     }
 
+    const TENANT_ADMIN_ONLY_PAGES = new Set([
+      'tenantAdminPage', 'tenantCompaniesPage', 'tenantAdminRechargePage',
+      'tenantAdminTicketsPage', 'tenantAdminPlatformPage'
+    ]);
+
     function enforceTenantRouteGuard(pageId, urlSlug) {
       if (!tenantUser) return pageId;
       const isSagAdmin = !!tenantUser.isAdmin;
       if (urlSlug && !isSagAdmin && urlSlug !== tenantUrlSlug() && tenantUrlSlug()) return 'TENANT_SLUG_MISMATCH';
-      if (pageId === 'tenantAdminPage' && !isSagAdmin) return 'TENANT_ADMIN_FORBIDDEN';
+      if (TENANT_ADMIN_ONLY_PAGES.has(pageId) && !isSagAdmin) return 'TENANT_ADMIN_FORBIDDEN';
       return pageId;
     }
 
@@ -120,6 +129,12 @@
     function showTenantPage(pageId, fromHistory = false) {
       if (!fromHistory && (TENANT_PAGE_ROUTES[pageId] || (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute(pageId)))) syncTenantBrowserHistory(pageId);
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
+      // Admin modals live outside the page sections (position:fixed needs a
+      // visible ancestor), so page switches have to close them explicitly.
+      ['sagTenantModal', 'sagCompanyCreateModal'].forEach(modalId => {
+        const modal = document.getElementById(modalId);
+        if (modal) modal.style.display = 'none';
+      });
       const el = document.getElementById(pageId);
       if (el) el.classList.add('active');
       updateTenantChrome(pageId);
@@ -170,7 +185,7 @@
           const draftId = new URLSearchParams(window.location.search).get('draftId');
           loadProjectPresentationsPage(draftId || currentProjectPresentationsDraftId());
         } else {
-          showTenantPage(pageId, true);
+          openTenantPageById(pageId);
         }
         return;
       }
@@ -180,6 +195,35 @@
       showTenantPage('tenantDashboardPage', true);
       syncTenantBrowserHistory('tenantDashboardPage', {}, true);
     });
+
+    // Pages whose content is loaded by a dedicated opener. Used by popstate so
+    // Back/Forward lands on a populated page, not an empty shell.
+    const TENANT_PAGE_OPENERS = {
+      tenantAdminPage: 'openTenantAdmin',
+      tenantCompaniesPage: 'openTenantCompanies',
+      tenantAdminRechargePage: 'openAdminRechargePage',
+      tenantAdminTicketsPage: 'openAdminTicketsPage',
+      tenantAdminPlatformPage: 'openAdminPlatformPage',
+      tenantOmranOpsPage: 'openOmranOpsPage',
+      tenantPresentationsPage: 'openTenantPresentations',
+      tenantSettingsPage: 'openTenantSettings',
+      tenantTeamPage: 'openTenantTeam',
+      tenantFieldsPage: 'openTenantFields',
+      tenantUsersPage: 'openTenantUsers',
+      tenantTrainingPage: 'openTenantTraining',
+      tenantAIRulesPage: 'openTenantAIRules',
+      tenantApprovalsPage: 'openTenantApprovals'
+    };
+
+    function openTenantPageById(pageId) {
+      const name = TENANT_PAGE_OPENERS[pageId];
+      const opener = name && window[name];
+      if (typeof opener === 'function') {
+        opener();
+        return;
+      }
+      showTenantPage(pageId, true);
+    }
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
@@ -541,7 +585,11 @@
       tenantTrainingPage: ['page.training', 'بيانات التدريب'],
       tenantAIRulesPage: ['page.ai_rules', 'قواعد AI'],
       tenantApprovalsPage: ['page.approvals', 'تعميد العروض'],
-      tenantAdminPage: ['page.super_admin', 'إدارة المنصة'],
+      tenantAdminPage: ['page.admin_dashboard', 'لوحة المدير'],
+      tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
+      tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
+      tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
+      tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'],
       tenantOmranOpsPage: ['page.operations', 'العمليات']
     });
 
@@ -558,11 +606,19 @@
       if (!app) return;
       const isSagAdmin = Boolean(tenantUser && tenantUser.isAdmin);
       const role = (tenantUser && tenantUser._userRole) || 'company_admin';
+      const roleBadges = {
+        section_editor: ['employee', 'role.section_editor', 'محرر أقسام'],
+        section_approver: ['employee', 'role.section_approver', 'معتمد أقسام'],
+        generation_approver: ['employee', 'role.generation_approver', 'معتمد توليد'],
+        final_file_approver: ['employee', 'role.final_file_approver', 'معتمد ملف'],
+        profile: ['employee', 'role.profile', 'بروفايل'],
+        support: ['employee', 'role.support', 'دعم'],
+      };
       const roleData = isSagAdmin
         ? ['superadmin', 'role.super_admin', 'سوبر أدمن']
         : role === 'company_admin'
           ? ['company-admin', 'role.company_admin', 'أدمن الشركة']
-          : ['employee', 'role.employee', 'موظف'];
+          : (roleBadges[role] || ['employee', 'role.employee', 'موظف']);
       app.dataset.role = roleData[0];
 
       const roleEl = document.getElementById('tenantWorkspaceRole');
@@ -801,6 +857,22 @@
             if (!tenantUser.isAdmin) return false;
             await openTenantAdmin();
             return true;
+          case 'tenantCompaniesPage':
+            if (!tenantUser.isAdmin) return false;
+            await openTenantCompanies();
+            return true;
+          case 'tenantAdminRechargePage':
+            if (!tenantUser.isAdmin) return false;
+            await openAdminRechargePage();
+            return true;
+          case 'tenantAdminTicketsPage':
+            if (!tenantUser.isAdmin) return false;
+            await openAdminTicketsPage();
+            return true;
+          case 'tenantAdminPlatformPage':
+            if (!tenantUser.isAdmin) return false;
+            await openAdminPlatformPage();
+            return true;
           default:
             clearTenantNavigationState();
             return false;
@@ -865,6 +937,7 @@
         tenantUser._userName = me.user.name;
         tenantUser._userRole = me.user.role;
         tenantUser._permissions = me.user.permissions || {};
+        tenantUser._userId = me.user.id || null;
       }
       setTenantUser(tenantUser);
       updateTenantTopbar();
@@ -956,6 +1029,14 @@
         } else if (requestedPage === 'tenantAdminPage') {
           if (tenantUser.isAdmin) await openTenantAdmin();
           else { showTenantPage('tenantDashboardPage', true); syncTenantBrowserHistory('tenantDashboardPage', {}, true); }
+        } else if (requestedPage === 'tenantCompaniesPage') {
+          await openTenantCompanies();
+        } else if (requestedPage === 'tenantAdminRechargePage') {
+          await openAdminRechargePage();
+        } else if (requestedPage === 'tenantAdminTicketsPage') {
+          await openAdminTicketsPage();
+        } else if (requestedPage === 'tenantAdminPlatformPage') {
+          await openAdminPlatformPage();
         } else {
           showTenantPage(requestedPage, true);
         }
@@ -988,9 +1069,15 @@
         const key = el.getAttribute('data-permission');
         el.style.display = hasPermission(key) ? '' : 'none';
       });
-      // Legacy admin-only elements still controlled by role (skip if already handled by data-permission)
+      // data-permission-any shows the element when the user holds any listed key
+      document.querySelectorAll('[data-permission-any]').forEach(el => {
+        const keys = (el.getAttribute('data-permission-any') || '')
+          .split(',').map(k => k.trim()).filter(Boolean);
+        el.style.display = keys.some(k => hasPermission(k)) ? '' : 'none';
+      });
+      // Legacy admin-only elements still controlled by role (skip if already handled by a permission attribute)
       document.querySelectorAll('.tenant-admin-only').forEach(el => {
-        if (el.hasAttribute('data-permission')) return;
+        if (el.hasAttribute('data-permission') || el.hasAttribute('data-permission-any')) return;
         el.style.display = isCompanyAdmin ? '' : 'none';
       });
       // Show user info in sidebar

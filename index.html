@@ -84,8 +84,18 @@
             <button type="button" class="tenant-sidebar-link tenant-hidden" data-permission="sag_admin_panel"
               data-nav-page="tenantAdminPage" id="tenantAdminBtn" onclick="openTenantAdmin()"
               data-i18n="nav.admin">لوحة المدير</button>
-            <button type="button" class="tenant-sidebar-link" data-nav-page="tenantOmranOpsPage"
-              onclick="openOmranOpsPage()" data-i18n="nav.operations">العمليات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantCompaniesPage" onclick="openTenantCompanies()"
+              data-i18n="nav.companies">إدارة الشركات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminRechargePage" onclick="openAdminRechargePage()"
+              data-i18n="nav.recharge_requests">طلبات الشحن</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminTicketsPage" onclick="openAdminTicketsPage()"
+              data-i18n="nav.support_desk">الدعم الفني</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPlatformPage" onclick="openAdminPlatformPage()"
+              data-i18n="nav.platform_settings">إعدادات المنصة</button>
           </div>
         </nav>
         <nav class="tenant-sidebar-nav" data-nav-role="tenant" aria-label="مساحة العمل" data-i18n-aria="chrome.workspace">
@@ -99,7 +109,7 @@
             <button type="button" class="tenant-sidebar-link" data-permission="view_presentations"
               data-nav-page="tenantPresentationsPage" onclick="openTenantPresentations()"
               data-i18n="nav.projects">المشاريع</button>
-            <button type="button" class="tenant-sidebar-link" data-permission="approvals"
+            <button type="button" class="tenant-sidebar-link" data-permission-any="approvals,approve_generation,approve_final_file"
               data-nav-page="tenantApprovalsPage" onclick="openTenantApprovals()"
               data-i18n="nav.approve_offers">تعميد العروض</button>
             <button type="button" class="tenant-sidebar-link" data-nav-page="tenantOmranOpsPage"
@@ -597,7 +607,7 @@
               <button type="button" class="btn ghost" onclick="showDownloadsLibraryModal(); closeTenantDropdown()">مكتبة التنزيلات</button>
             </div>
           </div>
-          <button type="button" class="btn slide-toolbar-btn ghost tenant-admin-only" data-permission="approvals" onclick="showFinalApprovalModal()">اعتماد الملف النهائي</button>
+          <button type="button" class="btn slide-toolbar-btn ghost" data-permission-any="create_presentation,approve_final_file" onclick="showFinalApprovalModal()">اعتماد الملف النهائي</button>
           <button type="button" class="btn slide-toolbar-btn ghost" onclick="showDownloadsLibraryModal()">مكتبة التنزيلات</button>
         </div>
       </div>
@@ -825,6 +835,8 @@
               <option value="section_approver">معتمد أقسام</option>
               <option value="generation_approver">معتمد بدء التوليد</option>
               <option value="final_file_approver">معتمد الملف النهائي</option>
+              <option value="profile">بروفايل</option>
+              <option value="support">دعم</option>
               <option value="company_admin">أدمن شركة</option>
             </select>
           </div>
@@ -986,19 +998,54 @@
 
     <!-- SAG Super Admin -->
     <section id="tenantAdminPage" class="tenant-page">
-      <div
-        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+      <div class="tenant-page-heading">
         <div>
-          <h2>لوحة تحكم SAG - المالك الرئيسي</h2>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.admin">لوحة المدير</h2>
         </div>
         <div class="tenant-actions">
-          <button class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
-          <button class="btn ghost" onclick="sagEnsureAllKeys()" id="sagEnsureKeysBtn" data-i18n="admin.keys_issue">إصدار مفاتيح الشركات</button>
+          <button type="button" class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
         </div>
       </div>
 
-      <!-- Stats Cards -->
-      <div id="sagAdminStats" class="tenant-dashboard-cards" style="margin-bottom:20px"></div>
+      <!-- KPI Cards -->
+      <div id="sagAdminStats" class="tenant-dashboard-stats"></div>
+
+      <div class="tenant-admin-grid">
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.pending_actions">إجراءات تحتاج انتباهك</h3>
+          </div>
+          <div id="sagPendingActions"><p class="tenant-hint">جاري التحميل...</p></div>
+        </div>
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.plan_distribution">الشركات حسب الباقة</h3>
+          </div>
+          <div id="sagPlanBars"></div>
+          <div class="tenant-panel-heading" style="margin-top:22px">
+            <h3 class="dash-section-title" data-i18n="admin.latest_notifications">آخر الإشعارات</h3>
+            <button type="button" class="btn small ghost" onclick="omMarkAllRead()">تحديد الكل كمقروء</button>
+          </div>
+          <div id="adminNotificationsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- SUPER ADMIN: companies, top-up requests, support, platform       -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section id="tenantCompaniesPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.companies">إدارة الشركات</h2>
+        </div>
+        <div class="tenant-actions">
+          <button type="button" class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
+          <button type="button" class="btn ghost" onclick="sagEnsureAllKeys()" id="sagEnsureKeysBtn" data-i18n="admin.keys_issue">إصدار مفاتيح الشركات</button>
+        </div>
+      </div>
 
       <!-- Search & Filter -->
       <div class="sag-filters">
@@ -1019,17 +1066,12 @@
 
       <!-- Tenants List -->
       <div id="sagTenantsList"></div>
+    </section>
 
-      <!-- Recharge Requests (SAG Admin) -->
-      <div style="margin-top:28px">
-        <h3 style="margin-bottom:12px">طلبات شحن الرصيد من الشركات</h3>
-        <div id="sagRechargeRequestsList"></div>
-      </div>
+    <!-- Company management modals (position:fixed — must live outside .tenant-page which is display:none) -->
+    <div id="sagTenantModal" style="display:none"></div>
 
-      <!-- Tenant Details Modal -->
-      <div id="sagTenantModal" style="display:none"></div>
-
-      <div id="sagCompanyCreateModal"
+    <div id="sagCompanyCreateModal"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
         <div style="background:#fff;border-radius:20px;padding:28px;max-width:760px;width:100%;max-height:90vh;overflow:auto">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px">
@@ -1097,6 +1139,86 @@
           </form>
           <div id="sagCompanyCreateResult" style="display:none"></div>
         </div>
+      </div>
+
+    <!-- Top-up requests: super-admin review queue -->
+    <section id="tenantAdminRechargePage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.recharge_requests">طلبات الشحن</h2>
+        </div>
+      </div>
+      <div class="ops-stat-grid">
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargePending">0</h3>
+          <p>بانتظار المراجعة</p>
+        </div>
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargeApproved">0</h3>
+          <p>معتمدة</p>
+        </div>
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargeRejected">0</h3>
+          <p>مرفوضة</p>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">طلبات الشحن من الشركات</h3>
+        </div>
+        <div id="sagRechargeRequestsList"></div>
+      </div>
+    </section>
+
+    <!-- Support inbox: tickets of every company -->
+    <section id="tenantAdminTicketsPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.support_desk">الدعم الفني</h2>
+        </div>
+        <select id="adminTicketsStatusFilter" onchange="adminLoadTickets()" class="tenant-filter-select">
+          <option value="">كل الحالات</option>
+          <option value="open">مفتوحة</option>
+          <option value="in_progress">قيد المعالجة</option>
+          <option value="waiting_customer">بانتظار العميل</option>
+          <option value="resolved">تم الحل</option>
+          <option value="closed">مغلقة</option>
+        </select>
+      </div>
+      <div class="ops-stat-grid">
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatTicketsOpen">0</h3>
+          <p>تذاكر مفتوحة</p>
+        </div>
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatTicketsOverdue">0</h3>
+          <p>متجاوزة لموعد SLA</p>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">تذاكر الشركات</h3>
+        </div>
+        <div id="adminTicketsList"></div>
+        <div id="adminTicketDetail" style="display:none;margin-top:16px"></div>
+      </div>
+    </section>
+
+    <!-- Platform settings -->
+    <section id="tenantAdminPlatformPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.platform_settings">إعدادات المنصة</h2>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">سجل أنواع الملفات المعتمدة</h3>
+        </div>
+        <div id="adminFileTypesList"></div>
       </div>
     </section>
 
@@ -1171,7 +1293,6 @@
         <button type="button" class="btn small ghost" id="omTabBtn_recharge" onclick="showOmranOpsTab('recharge')">المحفظة والشحن</button>
         <button type="button" class="btn small ghost" id="omTabBtn_tickets" onclick="showOmranOpsTab('tickets')">الدعم الفني</button>
         <button type="button" class="btn small ghost" id="omTabBtn_contracts" onclick="showOmranOpsTab('contracts')">العقود والاتفاقيات</button>
-        <button type="button" class="btn small ghost" id="omTabBtn_system" style="display:none" onclick="showOmranOpsTab('system')">إعدادات المنصة</button>
       </div>
 
       <!-- Tab 1: Tasks & Notifications -->
@@ -1215,14 +1336,6 @@
           <button type="button" class="btn primary small" id="omContractNewBtn" onclick="openOmModal('omContractModal')">تسجيل وثيقة</button>
         </div>
         <div id="omContractsList" style="margin-bottom:24px"></div>
-      </div>
-
-      <!-- Tab 5: System / File Types (Super Admin Only) -->
-      <div id="omTabPane_system" style="display:none">
-        <div style="margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0">سجل أنواع الملفات المعتمدة</h3>
-        </div>
-        <div id="omFileTypesList" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Modal 1: New Task -->

@@ -546,19 +546,69 @@
       const list = document.getElementById('approvalsList');
       if (!list) return;
       showInlineLoader(list, 'جاري التحميل...');
-      const data = await api('GET', '/api/approvals');
+      const [data, genData, finData] = await Promise.all([
+        api('GET', '/api/approvals'),
+        api('GET', '/api/generation-approvals?status=pending'),
+        api('GET', '/api/final-file-approvals?status=pending'),
+      ]);
       const approvals = (data.success && data.approvals) ? data.approvals : [];
-      if (!approvals.length) { list.innerHTML = '<p class="tenant-hint">لا توجد عروض في انتظار التعميد</p>'; return; }
-      list.innerHTML = approvals.map(a =>
+      const genApprovals = (genData && genData.success) ? (genData.approvals || []) : [];
+      const finApprovals = (finData && finData.success) ? (finData.approvals || []) : [];
+      if (!approvals.length && !genApprovals.length && !finApprovals.length) {
+        list.innerHTML = '<p class="tenant-hint">لا توجد عروض في انتظار التعميد</p>';
+        return;
+      }
+      const myUserId = String((tenantUser && tenantUser._userId) || '');
+      const isCompanyAdmin = Boolean(tenantUser && tenantUser.isAdmin) ||
+        (tenantUser && tenantUser._userRole) === 'company_admin';
+      // A decide control only appears for the matching permission holder, and
+      // never on the requester's own request unless they are a company admin.
+      const decideBtns = (fnName, id, requestedBy, permKey) =>
+        (hasPermission(permKey) && (isCompanyAdmin || !requestedBy || String(requestedBy) !== myUserId))
+          ? '<button class="btn small green" onclick="' + fnName + '(\'' + id + '\', \'approved\')">اعتماد</button>' +
+            '<button class="btn small danger" onclick="' + fnName + '(\'' + id + '\', \'rejected\')">رفض</button>'
+          : '<span class="tenant-hint">بانتظار قرار المعتمد</span>';
+      const presHtml = approvals.map(a =>
         '<div class="tenant-presentation-card">' +
         '<div><h3>' + escapeHtml(a.pres_title || 'عرض') + '</h3>' +
-        '<div class="meta"><span>طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') + ' | <span>' + (a.slide_count || 0) + '</span> <span>شريحة</span> | ' + escapeHtml(a.created_at || '') + '</div></div>' +
+        '<div class="meta"><span>تعميد عرض — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') + ' | <span>' + (a.slide_count || 0) + '</span> <span>شريحة</span> | ' + escapeHtml(a.created_at || '') + '</div></div>' +
         '<div class="tenant-actions">' +
         '<button class="btn small primary" onclick="openExistingPresentation(\'' + a.presentation_id + '\')">معاينة</button>' +
-        '<button class="btn small green" onclick="reviewApproval(\'' + a.id + '\', \'approved\')">اعتماد</button>' +
-        '<button class="btn small danger" onclick="reviewApproval(\'' + a.id + '\', \'rejected\')">رفض</button>' +
+        (hasPermission('approvals')
+          ? '<button class="btn small green" onclick="reviewApproval(\'' + a.id + '\', \'approved\')">اعتماد</button>' +
+            '<button class="btn small danger" onclick="reviewApproval(\'' + a.id + '\', \'rejected\')">رفض</button>'
+          : '') +
         '</div></div>'
       ).join('');
+      const genHtml = genApprovals.map(a =>
+        '<div class="tenant-presentation-card">' +
+        '<div><h3>' + escapeHtml(a.draft_title || 'طلب اعتماد توليد') + '</h3>' +
+        '<div class="meta"><span>اعتماد بدء التوليد — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') +
+        ' | <span>' + (a.estimated_points || 0) + '</span> <span>نقطة</span> | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
+        '<div class="tenant-actions">' + decideBtns('reviewGenerationApproval', a.id, a.requested_by, 'approve_generation') + '</div></div>'
+      ).join('');
+      const finHtml = finApprovals.map(a =>
+        '<div class="tenant-presentation-card">' +
+        '<div><h3>' + escapeHtml(a.presentation_title || 'طلب اعتماد ملف نهائي') + '</h3>' +
+        '<div class="meta"><span>اعتماد الملف النهائي — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') +
+        ' | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
+        '<div class="tenant-actions">' + decideBtns('reviewFinalFileApproval', a.id, a.requested_by, 'approve_final_file') + '</div></div>'
+      ).join('');
+      list.innerHTML = genHtml + finHtml + presHtml;
+    }
+
+    async function reviewGenerationApproval(approvalId, decision) {
+      const note = decision === 'rejected' ? prompt('سبب الرفض (اختياري):') || '' : '';
+      const data = await api('POST', '/api/generation-approvals/' + approvalId + '/decision', { decision, note });
+      if (data.success) { toast(decision === 'approved' ? 'تم اعتماد طلب التوليد' : 'تم رفض الطلب'); await loadApprovalsList(); }
+      else { toast(data.error || 'فشل'); }
+    }
+
+    async function reviewFinalFileApproval(approvalId, decision) {
+      const note = decision === 'rejected' ? prompt('سبب الرفض (اختياري):') || '' : '';
+      const data = await api('POST', '/api/final-file-approvals/' + approvalId + '/decision', { decision, note });
+      if (data.success) { toast(decision === 'approved' ? 'تم اعتماد الملف النهائي' : 'تم رفض الطلب'); await loadApprovalsList(); }
+      else { toast(data.error || 'فشل'); }
     }
 
     async function reviewApproval(approvalId, status) {
@@ -604,7 +654,7 @@
         return;
       }
       list.innerHTML = reportBanner + data.users.map(u => {
-        const roleLabel = u.role === 'company_admin' ? 'أدمن' : 'موظف';
+        const roleLabel = USER_ROLE_LABELS[u.role] || 'موظف';
         const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
           '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + '</div></div>' +
@@ -722,8 +772,22 @@
       ai_rules: 'قواعد AI',
       training_data: 'تدريب GLM',
       approvals: 'تعميد العروض',
+      approve_generation: 'اعتماد بدء التوليد',
+      approve_final_file: 'اعتماد الملف النهائي',
       export_files: 'تصدير الملفات',
+      support_tickets: 'تذاكر الدعم',
       sag_admin_panel: 'لوحة المدير العام',
+    };
+
+    const USER_ROLE_LABELS = {
+      employee: 'موظف',
+      company_admin: 'أدمن شركة',
+      section_editor: 'محرر أقسام',
+      section_approver: 'معتمد أقسام',
+      generation_approver: 'معتمد بدء التوليد',
+      final_file_approver: 'معتمد الملف النهائي',
+      profile: 'بروفايل',
+      support: 'دعم',
     };
 
     async function openUserPermissionsModal(userId, userName) {
@@ -784,12 +848,12 @@
 
     function applyRoleTemplateQuick(templateKey) {
       const templates = {
-        editor: ['create_presentation', 'view_presentations'],
-        section_approver: ['create_presentation', 'view_presentations', 'approvals'],
-        generation_approver: ['create_presentation', 'generate_images', 'generate_maps'],
-        final_file_approver: ['approvals', 'export_files'],
-        profile: ['company_settings', 'custom_fields'],
-        support: ['dashboard', 'view_presentations']
+        editor: ['dashboard', 'create_presentation', 'view_presentations', 'generate_images', 'generate_maps'],
+        section_approver: ['dashboard', 'view_presentations', 'approvals'],
+        generation_approver: ['dashboard', 'view_presentations', 'approve_generation'],
+        final_file_approver: ['dashboard', 'view_presentations', 'approve_final_file', 'export_files'],
+        profile: ['dashboard', 'company_settings', 'custom_fields'],
+        support: ['dashboard', 'view_presentations', 'support_tickets']
       };
       const allowed = templates[templateKey] || [];
       Object.keys(PERMISSION_LABELS).forEach(key => {

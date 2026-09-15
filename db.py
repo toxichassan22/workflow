@@ -2669,9 +2669,26 @@ PERMISSION_KEYS = [
     'ai_rules',
     'training_data',
     'approvals',
+    'approve_generation',
+    'approve_final_file',
     'export_files',
+    'support_tickets',
     'sag_admin_panel',
 ]
+
+# Roles the tenant may assign to its users (t20). company_admin holds every
+# permission through the role defaults below; the rest are least-privilege
+# presets that a company admin can still refine per user.
+USER_ROLES = (
+    'employee',
+    'company_admin',
+    'section_editor',
+    'section_approver',
+    'generation_approver',
+    'final_file_approver',
+    'profile',
+    'support',
+)
 
 DEFAULT_PERMISSIONS = {
     'company_admin': {
@@ -2686,7 +2703,10 @@ DEFAULT_PERMISSIONS = {
         'ai_rules': True,
         'training_data': True,
         'approvals': True,
+        'approve_generation': True,
+        'approve_final_file': True,
         'export_files': True,
+        'support_tickets': True,
         'sag_admin_panel': False,
     },
     'employee': {
@@ -2701,7 +2721,118 @@ DEFAULT_PERMISSIONS = {
         'ai_rules': False,
         'training_data': False,
         'approvals': False,
+        'approve_generation': False,
+        'approve_final_file': False,
         'export_files': False,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'section_editor': {
+        'dashboard': True,
+        'create_presentation': True,
+        'view_presentations': True,
+        'generate_images': True,
+        'generate_maps': True,
+        'company_settings': False,
+        'custom_fields': False,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': False,
+        'approve_generation': False,
+        'approve_final_file': False,
+        'export_files': False,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'section_approver': {
+        'dashboard': True,
+        'create_presentation': False,
+        'view_presentations': True,
+        'generate_images': False,
+        'generate_maps': False,
+        'company_settings': False,
+        'custom_fields': False,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': True,
+        'approve_generation': False,
+        'approve_final_file': False,
+        'export_files': False,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'generation_approver': {
+        'dashboard': True,
+        'create_presentation': False,
+        'view_presentations': True,
+        'generate_images': False,
+        'generate_maps': False,
+        'company_settings': False,
+        'custom_fields': False,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': False,
+        'approve_generation': True,
+        'approve_final_file': False,
+        'export_files': False,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'final_file_approver': {
+        'dashboard': True,
+        'create_presentation': False,
+        'view_presentations': True,
+        'generate_images': False,
+        'generate_maps': False,
+        'company_settings': False,
+        'custom_fields': False,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': False,
+        'approve_generation': False,
+        'approve_final_file': True,
+        'export_files': True,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'profile': {
+        'dashboard': True,
+        'create_presentation': False,
+        'view_presentations': False,
+        'generate_images': False,
+        'generate_maps': False,
+        'company_settings': True,
+        'custom_fields': True,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': False,
+        'approve_generation': False,
+        'approve_final_file': False,
+        'export_files': False,
+        'support_tickets': False,
+        'sag_admin_panel': False,
+    },
+    'support': {
+        'dashboard': True,
+        'create_presentation': False,
+        'view_presentations': True,
+        'generate_images': False,
+        'generate_maps': False,
+        'company_settings': False,
+        'custom_fields': False,
+        'manage_users': False,
+        'ai_rules': False,
+        'training_data': False,
+        'approvals': False,
+        'approve_generation': False,
+        'approve_final_file': False,
+        'export_files': False,
+        'support_tickets': True,
         'sag_admin_panel': False,
     },
 }
@@ -7393,8 +7524,14 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
     return dict(row)
 
 
-def decide_generation_approval(tenant_id, approval_id, decision, decided_by, decided_by_name, note=None):
-    """Approve, reject or cancel. Approval reserves the points atomically."""
+def decide_generation_approval(tenant_id, approval_id, decision, decided_by, decided_by_name,
+                               note=None, allow_self=False):
+    """Approve, reject or cancel. Approval reserves the points atomically.
+
+    Separation of duties (d02): the requester cannot approve or reject their own
+    request. Only a company-level administrator may combine both hats, which the
+    route expresses through allow_self.
+    """
     if decision not in {'approved', 'rejected', 'cancelled'}:
         return {'error': 'invalid_decision'}
     conn = get_db()
@@ -7408,6 +7545,16 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
         return {'error': 'approval_not_pending'}
     if decision == 'cancelled' and row['requested_by'] and str(row['requested_by']) != str(decided_by):
         return {'error': 'cancel_not_allowed'}
+    if decision in {'approved', 'rejected'} and not allow_self \
+            and row['requested_by'] and str(row['requested_by']) == str(decided_by):
+        return {'error': 'self_approval_not_allowed'}
+    if decision == 'approved' and row['draft_id']:
+        # Approving generation confirms the gate behind it: every tracked
+        # section of the draft must already be approved.
+        draft = get_project_draft_by_id(tenant_id, row['draft_id'])
+        statuses = (draft or {}).get('section_statuses') or {}
+        if statuses and any(value != 'approved' for value in statuses.values()):
+            return {'error': 'sections_not_approved', 'section_statuses': statuses}
     conn.execute(
         '''UPDATE generation_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
@@ -7554,17 +7701,16 @@ def get_generation_approval(tenant_id, approval_id):
 
 def list_generation_approvals(tenant_id, status=None, limit=50):
     conn = get_db()
+    query = ('SELECT ga.*, pd.title AS draft_title FROM generation_approvals ga '
+             'LEFT JOIN project_drafts pd ON pd.id = ga.draft_id AND pd.tenant_id = ga.tenant_id '
+             'WHERE ga.tenant_id = ?')
+    params = [tenant_id]
     if status:
-        rows = conn.execute(
-            'SELECT * FROM generation_approvals WHERE tenant_id = ? AND status = ? ORDER BY requested_at DESC LIMIT ?',
-            (tenant_id, status, int(limit)),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            'SELECT * FROM generation_approvals WHERE tenant_id = ? ORDER BY requested_at DESC LIMIT ?',
-            (tenant_id, int(limit)),
-        ).fetchall()
-    return [dict(row) for row in rows]
+        query += ' AND ga.status = ?'
+        params.append(status)
+    query += ' ORDER BY ga.requested_at DESC LIMIT ?'
+    params.append(int(limit))
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 # ── t15: final approval, digital stamp and the downloads library ────────────
@@ -7645,7 +7791,10 @@ def request_final_file_approval(tenant_id, presentation_id, requested_by, reques
     return dict(row)
 
 
-def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, decided_by_name, note=None):
+def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, decided_by_name,
+                               note=None, allow_self=False):
+    """Decide the final-file gate. The requester may not self-approve (d02);
+    allow_self is reserved for company-level administrators."""
     if decision not in {'approved', 'rejected'}:
         return {'error': 'invalid_decision'}
     conn = get_db()
@@ -7657,6 +7806,8 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
         return {'error': 'approval_not_found'}
     if row['status'] != 'pending':
         return {'error': 'approval_not_pending'}
+    if not allow_self and row['requested_by'] and str(row['requested_by']) == str(decided_by):
+        return {'error': 'self_approval_not_allowed'}
     conn.execute(
         '''UPDATE final_file_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
@@ -7674,15 +7825,17 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
 
 def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limit=50):
     conn = get_db()
-    query = 'SELECT * FROM final_file_approvals WHERE tenant_id = ?'
+    query = ('SELECT ffa.*, p.title AS presentation_title FROM final_file_approvals ffa '
+             'LEFT JOIN presentations p ON p.id = ffa.presentation_id AND p.tenant_id = ffa.tenant_id '
+             'WHERE ffa.tenant_id = ?')
     params = [tenant_id]
     if presentation_id:
-        query += ' AND presentation_id = ?'
+        query += ' AND ffa.presentation_id = ?'
         params.append(presentation_id)
     if status:
-        query += ' AND status = ?'
+        query += ' AND ffa.status = ?'
         params.append(status)
-    query += ' ORDER BY requested_at DESC LIMIT ?'
+    query += ' ORDER BY ffa.requested_at DESC LIMIT ?'
     params.append(int(limit))
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
@@ -7906,7 +8059,7 @@ def create_approval_task(tenant_id, kind, title, entity_type=None, entity_id=Non
     return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (row_id,)).fetchone())
 
 
-def list_approval_tasks(tenant_id, status='open', kind=None, limit=100):
+def list_approval_tasks(tenant_id, status='open', kind=None, assignee_id=None, limit=100):
     conn = get_db()
     query = 'SELECT * FROM approval_tasks WHERE tenant_id = ?'
     params = [tenant_id]
@@ -7916,6 +8069,9 @@ def list_approval_tasks(tenant_id, status='open', kind=None, limit=100):
     if kind:
         query += ' AND kind = ?'
         params.append(kind)
+    if assignee_id:
+        query += ' AND assignee_id = ?'
+        params.append(assignee_id)
     query += ' ORDER BY opened_at DESC LIMIT ?'
     params.append(int(limit))
     rows = [dict(row) for row in conn.execute(query, params).fetchall()]
@@ -8020,6 +8176,10 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
     if row['status'] != 'pending':
         return {'error': 'request_not_pending'}
     target_tenant_id = row['tenant_id']
+    if decision == 'approved':
+        target = conn.execute('SELECT is_admin FROM tenants WHERE id = ?', (target_tenant_id,)).fetchone()
+        if target and target['is_admin']:
+            return {'error': 'platform_tenant_recharge_forbidden'}
     reference = str(reference_number or '').strip()
     if decision == 'approved' and not reference:
         reference = 'RCH-' + datetime.now().strftime('%Y%m%d') + '-' + request_id[:8].upper()
@@ -8130,6 +8290,47 @@ def get_support_ticket(tenant_id, ticket_id):
     if not row:
         return None
     ticket = dict(row)
+    ticket['messages'] = [dict(m) for m in conn.execute(
+        'SELECT * FROM support_ticket_messages WHERE ticket_id = ? ORDER BY created_at', (ticket_id,),
+    ).fetchall()]
+    return ticket
+
+
+def _support_ticket_with_sla(row):
+    item = dict(row)
+    try:
+        item['sla_overdue'] = bool(item.get('sla_due_at')) and item['status'] not in {'resolved', 'closed'} \
+            and datetime.fromisoformat(item['sla_due_at']) < datetime.now()
+    except (TypeError, ValueError):
+        item['sla_overdue'] = False
+    return item
+
+
+def list_all_support_tickets(status=None, limit=200):
+    """Platform inbox: tickets of every company with the company name attached."""
+    conn = get_db()
+    query = ('SELECT t.*, tn.company_name AS tenant_name '
+             'FROM support_tickets t LEFT JOIN tenants tn ON tn.id = t.tenant_id')
+    params = []
+    if status:
+        query += ' WHERE t.status = ?'
+        params.append(status)
+    query += ' ORDER BY t.updated_at DESC LIMIT ?'
+    params.append(int(limit))
+    return [_support_ticket_with_sla(row) for row in conn.execute(query, params).fetchall()]
+
+
+def get_support_ticket_admin(ticket_id):
+    """Ticket plus its messages and owning company, without tenant scoping."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT t.*, tn.company_name AS tenant_name FROM support_tickets t '
+        'LEFT JOIN tenants tn ON tn.id = t.tenant_id WHERE t.id = ?',
+        (ticket_id,),
+    ).fetchone()
+    if not row:
+        return None
+    ticket = _support_ticket_with_sla(row)
     ticket['messages'] = [dict(m) for m in conn.execute(
         'SELECT * FROM support_ticket_messages WHERE ticket_id = ? ORDER BY created_at', (ticket_id,),
     ).fetchall()]
@@ -8425,6 +8626,33 @@ def separation_of_duties_matrix(tenant_id):
                 })
     except sqlite3.OperationalError:
         pass
+    for table, kind, name_col in (
+            ('generation_approvals', 'generation_approval', 'draft_id'),
+            ('final_file_approvals', 'final_file_approval', 'presentation_id')):
+        try:
+            rows = conn.execute(
+                f'SELECT id, {name_col} AS ref_id, requested_by, requested_by_name, decided_by,'
+                f' decided_by_name, decided_at, status, decision_note FROM {table}'
+                ' WHERE tenant_id = ? AND decided_at IS NOT NULL',
+                (tenant_id,)
+            ).fetchall()
+            for row in rows:
+                item = dict(row)
+                if item.get('decided_by') and item.get('requested_by') == item.get('decided_by'):
+                    matrix['self_approvals'].append({
+                        'kind': kind, 'entity_id': item['id'], 'ref_id': item.get('ref_id'),
+                        'sent_by': item.get('requested_by'), 'decided_by': item.get('decided_by'),
+                        'decided_by_name': item.get('decided_by_name'),
+                        'decision': item.get('status'), 'decided_at': item.get('decided_at'),
+                    })
+                if item.get('status') == 'rejected' and not item.get('decision_note'):
+                    matrix['missing_reason_decisions'].append({
+                        'kind': kind, 'entity_id': item['id'],
+                        'decision': item.get('status'), 'decided_by': item.get('decided_by'),
+                        'decided_at': item.get('decided_at'),
+                    })
+        except sqlite3.OperationalError:
+            pass
     matrix['self_approvals_count'] = len(matrix['self_approvals'])
     matrix['missing_reason_count'] = len(matrix['missing_reason_decisions'])
     return matrix
@@ -8483,7 +8711,7 @@ def get_event_task(tenant_id, task_id):
     return dict(row) if row else None
 
 
-def list_event_tasks(tenant_id, status=None, assignee_user_id=None, limit=100):
+def list_event_tasks(tenant_id, status=None, assignee_user_id=None, limit=100, own_actor_id=None):
     conn = get_db()
     query = 'SELECT * FROM event_tasks WHERE tenant_id = ?'
     params = [tenant_id]
@@ -8493,6 +8721,9 @@ def list_event_tasks(tenant_id, status=None, assignee_user_id=None, limit=100):
     if assignee_user_id:
         query += ' AND assignee_user_id = ?'
         params.append(assignee_user_id)
+    if own_actor_id:
+        query += ' AND (assignee_user_id = ? OR created_by = ?)'
+        params.extend([own_actor_id, own_actor_id])
     query += ' ORDER BY COALESCE(due_at, event_date, created_at) LIMIT ?'
     params.append(int(limit))
     return [dict(r) for r in conn.execute(query, params).fetchall()]

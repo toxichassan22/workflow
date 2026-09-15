@@ -8713,8 +8713,11 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_admin_approves_draft_directly_while_employee_request_stays_pending(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
+        with self.app.app_context():
+            employee_id = db.create_user(
+                self.tenant_a, 'Employee', 'employee@example.test', 'hash', role='employee')
         employee_token = auth.create_token(
-            self.tenant_a, 'employee@example.test', user_id='employee-1',
+            self.tenant_a, 'employee@example.test', user_id=employee_id,
             user_name='Employee', user_role='employee')
         employee_headers = self._headers(employee_token)
 

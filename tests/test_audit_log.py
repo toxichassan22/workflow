@@ -265,6 +265,11 @@ class AuditLogApiTests(unittest.TestCase):
             "VALUES (?, ?, ?, ?, ?, ?, 1)",
             ('tenant-1', 'Audit Test Co', 'audit-test', 'audit@example.test', 'hash', 'free'),
         )
+        conn.execute(
+            "INSERT INTO users (id, tenant_id, email, password_hash, name, role, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1)",
+            ('admin-1', 'tenant-1', 'audit@example.test', 'hash', 'مدير الاختبار', 'company_admin'),
+        )
         conn.commit()
 
     def tearDown(self):

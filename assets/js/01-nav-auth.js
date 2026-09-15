@@ -999,5 +999,9 @@
       tenantTrainingPage: '/app/settings/training',
       tenantAIRulesPage: '/app/settings/ai-rules',
       tenantApprovalsPage: '/app/approvals',
-      tenantAdminPage: '/app/admin'
+      tenantAdminPage: '/app/admin',
+      tenantCompaniesPage: '/app/admin/companies',
+      tenantAdminRechargePage: '/app/admin/recharges',
+      tenantAdminTicketsPage: '/app/admin/tickets',
+      tenantAdminPlatformPage: '/app/admin/platform'
     };

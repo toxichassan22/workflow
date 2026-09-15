@@ -14385,7 +14385,7 @@ def api_add_user():
         return jsonify({'error': 'Invalid email'}), 400
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
-    if role not in ('employee', 'company_admin'):
+    if role not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
 
     existing = db.get_user_by_email(email)
@@ -14412,6 +14412,8 @@ def api_update_user(user_id):
     for k in ['name', 'email', 'role', 'is_active']:
         if k in data:
             updates[k] = data[k]
+    if updates.get('role') is not None and updates['role'] not in db.USER_ROLES:
+        return jsonify({'error': 'Invalid role'}), 400
     if 'password' in data and data['password']:
         updates['password_hash'] = hash_password(data['password'])
 
@@ -20085,7 +20087,7 @@ def api_admin_add_tenant_user(tenant_id):
         return jsonify({'error': 'Invalid username'}), 400
     if not PHONE_RE.fullmatch(phone):
         return jsonify({'error': 'Invalid phone number'}), 400
-    if role not in {'employee', 'company_admin'}:
+    if role not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
     conflict = _identity_conflict(email, username)
     if conflict:
@@ -20144,7 +20146,7 @@ def api_admin_update_tenant_user(tenant_id, user_id):
         updates['phone'] = _normalize_phone(data.get('phone'))
         if not PHONE_RE.fullmatch(updates['phone']):
             return jsonify({'error': 'Invalid phone number'}), 400
-    if updates.get('role') not in {None, 'employee', 'company_admin'}:
+    if updates.get('role') is not None and updates['role'] not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
     email = updates.get('email', user['email'])
     username = updates.get('username', user.get('username'))
@@ -21691,6 +21693,9 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
             if not name or not email:
                 result['status'] = 'error'
                 result['message'] = 'name و email مطلوبان لإضافة الموظف'
+            elif role not in db.USER_ROLES:
+                result['status'] = 'error'
+                result['message'] = f'الدور "{role}" غير معروف. الأدوار المتاحة: {", ".join(db.USER_ROLES)}'
             else:
                 existing = db.get_user_by_email(email)
                 if existing:
@@ -22950,6 +22955,7 @@ _OMRAN_NOT_FOUND = {
     'reservation_not_found', 'ticket_not_found', 'task_not_found', 'approval_not_found',
 }
 _OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending', 'presentation_not_archived'}
+_OMRAN_FORBIDDEN = {'self_approval_not_allowed', 'cancel_not_allowed', 'platform_tenant_recharge_forbidden'}
 
 # Arabic-first messages: these strings land directly in UI toasts.
 _OMRAN_ERROR_MESSAGES_AR = {
@@ -22978,6 +22984,9 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'approval_not_approved': 'لم يُعتمد الاعتماد بعد',
     'approval_not_pending': 'انتهت مراجعة هذا الاعتماد بالفعل',
     'request_not_pending': 'انتهت مراجعة هذا الطلب بالفعل',
+    'self_approval_not_allowed': 'لا يمكن اعتماد أو رفض طلب قدّمه نفس المستخدم؛ القرار لمعتمد آخر',
+    'platform_tenant_recharge_forbidden': 'حساب المنصة لا يستقبل شحن محفظة',
+    'sections_not_approved': 'يجب اعتماد جميع أقسام المشروع قبل اعتماد التوليد',
     'task_not_open': 'المهمة مغلقة بالفعل',
     'key_and_label_required': 'المفتاح والتسمية العربية مطلوبان',
     'package_name_required': 'اختر الباقة المطلوب شراؤها',
@@ -22997,6 +23006,8 @@ def _omran_error(result):
         return jsonify({'error': default_message, 'error_code': code}), 404
     if code in _OMRAN_CONFLICT:
         return jsonify({'error': default_message, 'error_code': code}), 409
+    if code in _OMRAN_FORBIDDEN:
+        return jsonify({'error': default_message, 'error_code': code}), 403
     if code == 'insufficient_balance':
         return jsonify({'error': default_message, 'error_code': code}), 402
     return jsonify({'error': default_message, 'error_code': code}), 400
@@ -23010,10 +23021,30 @@ def _omran_actor_name():
     return g.user_name or 'Company administrator'
 
 
+def _omran_actor_is_admin():
+    """Company-level administrators may combine requester and approver hats (d02)."""
+    return bool(getattr(g, 'is_admin', False)) or getattr(g, 'user_id', None) is None \
+        or getattr(g, 'user_role', None) == 'company_admin'
+
+
+def _omran_can(permission_key):
+    """True when the actor holds permission_key; admins and tenant-direct logins always do."""
+    if _omran_actor_is_admin():
+        return True
+    perms = getattr(g, 'user_permissions', None)
+    if not perms:
+        perms = db.get_user_permissions(g.user_id, getattr(g, 'user_role', None) or 'employee')
+    return bool(perms.get(permission_key))
+
+
+def _omran_forbidden(message='هذا الإجراء يتطلب صلاحية الاعتماد المختصة'):
+    return jsonify({'error': message, 'error_code': 'permission_required'}), 403
+
+
 # ── t14: generation approval with cost estimate and points reservation ──────
 
 @app.route('/api/generation-approvals', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_create_generation_approval():
     """Open a generation approval carrying the estimate shown to the approver."""
     data = request.json or {}
@@ -23049,15 +23080,31 @@ def api_list_generation_approvals():
     return jsonify({'success': True, 'approvals': approvals})
 
 
+@app.route('/api/generation-approvals/<approval_id>', methods=['GET'])
+@require_auth
+def api_get_generation_approval(approval_id):
+    approval = db.get_generation_approval(g.tenant_id, approval_id)
+    if not approval:
+        return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
+    return jsonify({'success': True, 'approval': approval})
+
+
 @app.route('/api/generation-approvals/<approval_id>/decision', methods=['POST'])
 @require_auth
 def api_decide_generation_approval(approval_id):
-    """Approve, reject or cancel. Approval reserves the points atomically."""
+    """Approve, reject or cancel. Approval reserves the points atomically.
+
+    Decide acts need the dedicated approve_generation permission; cancelling a
+    pending request stays with its requester. Self-decisions are refused unless
+    the actor is a company-level administrator (d02).
+    """
     data = request.json or {}
     decision = data.get('decision')
+    if decision in {'approved', 'rejected'} and not _omran_can('approve_generation'):
+        return _omran_forbidden('اعتماد أو رفض طلب التوليد يتطلب صلاحية معتمد التوليد')
     result = db.decide_generation_approval(
         g.tenant_id, approval_id, decision, _omran_actor_id(), _omran_actor_name(),
-        note=data.get('note'),
+        note=data.get('note'), allow_self=_omran_actor_is_admin(),
     )
     failure = _omran_error(result)
     if failure:
@@ -23071,7 +23118,18 @@ def api_decide_generation_approval(approval_id):
 @app.route('/api/generation-approvals/<approval_id>/settle', methods=['POST'])
 @require_auth
 def api_settle_generation_approval(approval_id):
-    """After the generation job finishes: consume the reservation once, or release it."""
+    """After the generation job finishes: consume the reservation once, or release it.
+
+    Settlement is bookkeeping for a real run, so only the requester, a
+    generation approver, or an administrator may settle it — a random tenant
+    user cannot release somebody else's reservation.
+    """
+    approval = db.get_generation_approval(g.tenant_id, approval_id)
+    if not approval:
+        return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
+    if str(approval.get('requested_by')) != str(_omran_actor_id()) \
+            and not _omran_can('approve_generation'):
+        return _omran_forbidden('تسوية الحجز تخص مقدم الطلب أو معتمد التوليد')
     data = request.json or {}
     result = db.settle_generation_approval(
         g.tenant_id, approval_id, data.get('jobId') or 'unknown-job',
@@ -23096,7 +23154,7 @@ def api_list_point_reservations():
 # ── t15: final file approval, stamping and the downloads ledger ─────────────
 
 @app.route('/api/presentations/<presentation_id>/final-approval/request', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_request_final_file_approval(presentation_id):
     approval = db.request_final_file_approval(
         g.tenant_id, presentation_id, _omran_actor_id(), _omran_actor_name(),
@@ -23123,10 +23181,14 @@ def api_list_final_file_approvals():
 @app.route('/api/final-file-approvals/<approval_id>/decision', methods=['POST'])
 @require_auth
 def api_decide_final_file_approval(approval_id):
+    """Final-file gate decision: approve_final_file holders only, and never the
+    requester unless the actor is a company-level administrator (d02)."""
     data = request.json or {}
+    if data.get('decision') in {'approved', 'rejected'} and not _omran_can('approve_final_file'):
+        return _omran_forbidden('اعتماد أو رفض الملف النهائي يتطلب صلاحية معتمد الملف')
     result = db.decide_final_file_approval(
         g.tenant_id, approval_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
-        note=data.get('note'),
+        note=data.get('note'), allow_self=_omran_actor_is_admin(),
     )
     failure = _omran_error(result)
     if failure:
@@ -23261,11 +23323,37 @@ def api_mark_notifications_read():
 
 # ── t41: approval tasks feed ─────────────────────────────────────────────────
 
+_APPROVAL_TASK_KIND_PERMISSION = {
+    'section_approval': 'approvals',
+    'generation_approval': 'approve_generation',
+    'final_approval': 'approve_final_file',
+    'support': 'support_tickets',
+    'recharge': 'company_settings',
+}
+
+
+def _omran_is_approver():
+    """Any gate-keeping permission makes the actor part of the approver pool."""
+    return _omran_can('approvals') or _omran_can('approve_generation') \
+        or _omran_can('approve_final_file')
+
+
+def _omran_task_actor_allowed(task):
+    """Close/remind belong to the assigned approver or a holder of the task
+    kind's decision permission; administrators pass through _omran_can."""
+    if not task:
+        return False
+    if task.get('assignee_id') and str(task['assignee_id']) == str(g.user_id):
+        return True
+    return _omran_can(_APPROVAL_TASK_KIND_PERMISSION.get(task.get('kind'), 'approvals'))
+
+
 @app.route('/api/approval-tasks', methods=['GET'])
 @require_auth
 def api_list_approval_tasks():
     tasks = db.list_approval_tasks(
         g.tenant_id, status=request.args.get('status') or 'open', kind=request.args.get('kind'),
+        assignee_id=None if _omran_is_approver() else g.user_id,
     )
     return jsonify({'success': True, 'tasks': tasks})
 
@@ -23273,6 +23361,14 @@ def api_list_approval_tasks():
 @app.route('/api/approval-tasks/<task_id>/close', methods=['POST'])
 @require_auth
 def api_close_approval_task(task_id):
+    conn = db.get_db()
+    task_row = conn.execute(
+        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, g.tenant_id)
+    ).fetchone()
+    if not task_row:
+        return jsonify({'error': 'العنصر غير موجود', 'error_code': 'task_not_found'}), 404
+    if not _omran_task_actor_allowed(dict(task_row)):
+        return _omran_forbidden('إغلاق المهمة يخص المعتمد المكلف بها')
     data = request.json or {}
     result = db.close_approval_task(g.tenant_id, task_id, closed_by_name=_omran_actor_name(),
                                     cancel_reason=data.get('cancelReason'))
@@ -23288,6 +23384,14 @@ def api_close_approval_task(task_id):
 @app.route('/api/approval-tasks/<task_id>/remind', methods=['POST'])
 @require_auth
 def api_remind_approval_task(task_id):
+    conn = db.get_db()
+    task_row = conn.execute(
+        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, g.tenant_id)
+    ).fetchone()
+    if not task_row:
+        return jsonify({'error': 'العنصر غير موجود', 'error_code': 'task_not_found'}), 404
+    if not _omran_task_actor_allowed(dict(task_row)) and not _omran_is_approver():
+        return _omran_forbidden('التذكير بالمهمة يخص المعتمدين')
     result = db.remind_approval_task(g.tenant_id, task_id)
     failure = _omran_error(result)
     if failure:
@@ -23300,9 +23404,12 @@ def api_remind_approval_task(task_id):
 @app.route('/api/event-tasks', methods=['GET'])
 @require_auth
 def api_list_event_tasks():
+    # Staff see their own tasks (assigned to or created by them); managers and
+    # administrators keep the company-wide board.
+    own_only = None if _omran_can('manage_users') else _omran_actor_id()
     tasks = db.list_event_tasks(
         g.tenant_id, status=request.args.get('status'),
-        assignee_user_id=request.args.get('assigneeId'),
+        assignee_user_id=request.args.get('assigneeId'), own_actor_id=own_only,
     )
     return jsonify({'success': True, 'tasks': tasks})
 
@@ -23311,10 +23418,16 @@ def api_list_event_tasks():
 @require_auth
 def api_create_event_task():
     data = request.json or {}
+    assignee_id = data.get('assigneeId')
+    if assignee_id:
+        assignee = db.get_user_by_id(assignee_id)
+        if not assignee or str(assignee.get('tenant_id')) != str(g.tenant_id):
+            return jsonify({'error': 'المكلف بالمهمة غير موجود في هذه الشركة',
+                            'error_code': 'assignee_not_found'}), 404
     row = db.create_event_task(
         g.tenant_id, data.get('title'), description=data.get('description'),
         event_date=data.get('eventDate'), due_at=data.get('dueAt'),
-        assignee_user_id=data.get('assigneeId'), recurrence=data.get('recurrence') or 'none',
+        assignee_user_id=assignee_id, recurrence=data.get('recurrence') or 'none',
         created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
     )
     failure = _omran_error(row)
@@ -23328,8 +23441,15 @@ def api_create_event_task():
 @app.route('/api/event-tasks/<task_id>/status', methods=['POST'])
 @require_auth
 def api_update_event_task_status(task_id):
-    data = request.json or {}
-    result = db.update_event_task_status(g.tenant_id, task_id, data.get('status'),
+    task = db.get_event_task(g.tenant_id, task_id)
+    if not task:
+        return jsonify({'error': 'Task not found', 'error_code': 'task_not_found'}), 404
+    actor_id = _omran_actor_id()
+    if str(task.get('assignee_user_id') or '') != str(g.user_id or '') \
+            and str(task.get('created_by') or '') != actor_id \
+            and not _omran_can('manage_users'):
+        return _omran_forbidden('تحديث المهمة يخص المكلف بها أو منشئها')
+    result = db.update_event_task_status(g.tenant_id, task_id, (request.json or {}).get('status'),
                                          actor_name=_omran_actor_name())
     if result is None:
         return jsonify({'error': 'Task not found', 'error_code': 'task_not_found'}), 404
@@ -23423,6 +23543,10 @@ def api_sod_matrix():
 @app.route('/api/recharge-requests', methods=['POST'])
 @require_auth
 def api_create_recharge_request():
+    # The platform tenant reviews company top-ups; it must never request one for
+    # itself — that would let the super-admin mint wallet credit self-approved.
+    if getattr(g, 'is_admin', False):
+        return _omran_forbidden('طلبات الشحن تنشأ من حسابات الشركات فقط')
     data = request.json or {}
     row = db.create_recharge_request(
         g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
@@ -23521,8 +23645,18 @@ def api_add_support_message(ticket_id):
 @app.route('/api/support/tickets/<ticket_id>/status', methods=['POST'])
 @require_auth
 def api_update_support_ticket_status(ticket_id):
+    """Status moves belong to the support desk. The one exception is the ticket's
+    own creator closing it — a customer confirming the answer helped."""
     data = request.json or {}
-    row = db.update_support_ticket_status(g.tenant_id, ticket_id, data.get('status'),
+    new_status = data.get('status')
+    if not _omran_can('support_tickets'):
+        ticket = db.get_support_ticket(g.tenant_id, ticket_id)
+        if not ticket:
+            return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+        is_creator = str(ticket.get('created_by') or '') == str(_omran_actor_id())
+        if not (is_creator and new_status == 'closed'):
+            return _omran_forbidden('تغيير حالة التذكرة يتطلب صلاحية الدعم')
+    row = db.update_support_ticket_status(g.tenant_id, ticket_id, new_status,
                                           actor_name=_omran_actor_name())
     failure = _omran_error(row)
     if failure:
@@ -23530,6 +23664,68 @@ def api_update_support_ticket_status(ticket_id):
     _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
                         new_value=row.get('status'))
     return jsonify({'success': True, 'ticket': row})
+
+
+# ── Super-admin support inbox: tickets of every company land here ────────────
+
+@app.route('/api/admin/support/tickets', methods=['GET'])
+@require_permission('sag_admin_panel')
+def api_admin_list_support_tickets():
+    rows = db.list_all_support_tickets(status=request.args.get('status'))
+    return jsonify({'success': True, 'tickets': rows})
+
+
+@app.route('/api/admin/support/tickets/<ticket_id>', methods=['GET'])
+@require_permission('sag_admin_panel')
+def api_admin_get_support_ticket(ticket_id):
+    row = db.get_support_ticket_admin(ticket_id)
+    if not row:
+        return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+    return jsonify({'success': True, 'ticket': row})
+
+
+@app.route('/api/admin/support/tickets/<ticket_id>/messages', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_admin_add_support_message(ticket_id):
+    ticket = db.get_support_ticket_admin(ticket_id)
+    if not ticket:
+        return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+    data = request.json or {}
+    row = db.add_support_message(
+        ticket['tenant_id'], ticket_id, data.get('body'), author_id=_omran_actor_id(),
+        author_name=_omran_actor_name(), author_role='support',
+    )
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('support_ticket.replied', 'support_ticket', ticket_id)
+    return jsonify({'success': True, 'message': row})
+
+
+@app.route('/api/admin/support/tickets/<ticket_id>/status', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_admin_update_support_ticket_status(ticket_id):
+    ticket = db.get_support_ticket_admin(ticket_id)
+    if not ticket:
+        return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
+    data = request.json or {}
+    row = db.update_support_ticket_status(ticket['tenant_id'], ticket_id, data.get('status'),
+                                          actor_name=_omran_actor_name())
+    failure = _omran_error(row)
+    if failure:
+        return failure
+    _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
+                        new_value=row.get('status'))
+    return jsonify({'success': True, 'ticket': row})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/contracts', methods=['GET'])
+@require_admin
+def api_admin_tenant_contracts(tenant_id):
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    return jsonify({'success': True, 'contracts': db.list_tenant_contracts(tenant_id)})
 
 
 # ── t51: operational overview; t53: contracts; t63: file-type registry ──────

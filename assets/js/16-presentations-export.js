@@ -740,7 +740,12 @@
 
       const pendingApproval = approvals.find(a => a.status === 'pending');
       const latestApproved = approvals.find(a => a.status === 'approved');
-      const canApprove = hasPermission('approvals');
+      const canApprove = hasPermission('approve_final_file');
+      const isCompanyAdmin = Boolean(tenantUser && tenantUser.isAdmin) ||
+        ((tenantUser && tenantUser._userRole) === 'company_admin');
+      const isOwnRequest = Boolean(pendingApproval && pendingApproval.requested_by &&
+        String(pendingApproval.requested_by) === String((tenantUser && tenantUser._userId) || ''));
+      const canDecide = canApprove && (!isOwnRequest || isCompanyAdmin);
 
       const modal = document.createElement('div');
       modal.id = 'finalApprovalModal';
@@ -766,7 +771,7 @@
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
         '<button type="button" id="closeFinalApproveBtn" class="btn ghost" style="padding:8px 18px;">إغلاق</button>' +
-        (pendingApproval && canApprove
+        (pendingApproval && canDecide
           ? '<button type="button" id="decideFinalApproveBtn" class="btn primary green" style="padding:8px 20px;">اعتماد وختم الملف</button>'
           : (!pendingApproval && !latestApproved
             ? '<button type="button" id="requestFinalApproveBtn" class="btn primary" style="padding:8px 20px;">إرسال طلب الاعتماد</button>'
@@ -1075,18 +1080,80 @@
 
     async function openTenantAdmin() {
       showTenantPage('tenantAdminPage');
-      const list = document.getElementById('sagTenantsList');
+      await loadAdminDashboard();
+    }
+
+    async function loadAdminDashboard() {
       const statsEl = document.getElementById('sagAdminStats');
-      showInlineLoader(list, 'جاري التحميل...');
-      statsEl.innerHTML = '';
-      const [tenantsData, statsData] = await Promise.all([api('GET', '/api/admin/tenants'), api('GET', '/api/admin/stats')]);
-      sagAllTenants = (tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
-      const stats = (statsData.success && statsData.stats) ? statsData.stats : {};
-      renderSagStats(stats);
-      renderSagTenants(sagAllTenants);
-      if (typeof omLoadRechargeRequests === 'function') {
-        omLoadRechargeRequests('sagRechargeRequestsList');
+      const pendingEl = document.getElementById('sagPendingActions');
+      if (statsEl) statsEl.innerHTML = '';
+      if (pendingEl) showInlineLoader(pendingEl, 'جاري التحميل...');
+      const [overviewData, tenantsData] = await Promise.all([
+        api('GET', '/api/admin/operational-overview').catch(() => null),
+        api('GET', '/api/admin/tenants').catch(() => null)
+      ]);
+      const overview = (overviewData && overviewData.overview) || {};
+      sagAllTenants = (tenantsData && tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
+      renderAdminDashboard(overview);
+      if (typeof omLoadNotifications === 'function') omLoadNotifications('adminNotificationsList');
+    }
+
+    function renderAdminDashboard(overview) {
+      const statsEl = document.getElementById('sagAdminStats');
+      const pendingEl = document.getElementById('sagPendingActions');
+      const barsEl = document.getElementById('sagPlanBars');
+      const tenants = overview.tenants || {};
+      const users = overview.users || {};
+      const presentations = overview.presentations || {};
+      const workflows = overview.workflows || {};
+      if (statsEl) {
+        const cards = [
+          { label: 'إجمالي الشركات', value: tenants.total || sagAllTenants.length },
+          { label: 'شركات نشطة', value: tenants.active != null ? tenants.active : sagAllTenants.filter(t => t.isActive).length },
+          { label: 'مستخدمون نشطون', value: users.active || 0 },
+          { label: 'إجمالي العروض', value: presentations.total || 0 },
+          { label: 'طلبات شحن معلقة', value: workflows.pending_recharges || 0 },
+          { label: 'تذاكر مفتوحة', value: workflows.open_support_tickets || 0 },
+        ];
+        statsEl.innerHTML = cards.map(c =>
+          '<div class="tenant-dash-card stat"><h3>' + c.value + '</h3><p>' + c.label + '</p></div>'
+        ).join('');
       }
+      if (pendingEl) {
+        const items = [
+          { label: 'طلبات شحن بانتظار المراجعة', count: workflows.pending_recharges || 0, action: 'openAdminRechargePage()' },
+          { label: 'تذاكر دعم مفتوحة من الشركات', count: workflows.open_support_tickets || 0, action: 'openAdminTicketsPage()' },
+          { label: 'اعتمادات توليد معلقة داخل الشركات', count: workflows.pending_generation_approvals || 0, action: '' },
+          { label: 'اعتمادات ملفات نهائية معلقة', count: workflows.pending_final_approvals || 0, action: '' },
+        ];
+        pendingEl.innerHTML = items.map(item =>
+          '<div class="tenant-presentation-card">' +
+          '<div><h3>' + item.label + '</h3>' +
+          '<div class="meta"><span>' + item.count + '</span></div></div>' +
+          (item.action ? '<div><button type="button" class="btn small primary" onclick="' + item.action + '">مراجعة</button></div>' : '') +
+          '</div>'
+        ).join('');
+      }
+      if (barsEl) {
+        const planCounts = {};
+        sagAllTenants.forEach(t => { const p = t.plan || 'free'; planCounts[p] = (planCounts[p] || 0) + 1; });
+        const planOrder = ['free', 'pro', 'enterprise'];
+        const max = Math.max(1, ...planOrder.map(p => planCounts[p] || 0));
+        barsEl.innerHTML = planOrder.map(p =>
+          '<div class="admin-bar-row"><span class="admin-bar-label">' + p + '</span>' +
+          '<span class="admin-bar-track"><span class="admin-bar-fill" style="width:' + Math.round(((planCounts[p] || 0) / max) * 100) + '%"></span></span>' +
+          '<strong>' + (planCounts[p] || 0) + '</strong></div>'
+        ).join('') || '<p class="tenant-hint">لا توجد شركات</p>';
+      }
+    }
+
+    async function openTenantCompanies() {
+      showTenantPage('tenantCompaniesPage');
+      const list = document.getElementById('sagTenantsList');
+      showInlineLoader(list, 'جاري التحميل...');
+      const tenantsData = await api('GET', '/api/admin/tenants');
+      sagAllTenants = (tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
+      renderSagTenants(sagAllTenants);
     }
 
     async function sagEnsureAllKeys() {
@@ -1162,22 +1229,6 @@
       }
     }
 
-    function renderSagStats(stats) {
-      const el = document.getElementById('sagAdminStats');
-      const cards = [
-        { label: 'إجمالي الشركات', value: stats.tenants || stats.total_tenants || sagAllTenants.length },
-        { label: 'شركات نشطة', value: sagAllTenants.filter(t => t.isActive).length },
-        { label: 'إجمالي الأفراد (الموظفين)', value: stats.users || 0 },
-        { label: 'إجمالي العروض', value: stats.presentations || stats.total_presentations || 0 },
-        { label: 'إجمالي التصديرات', value: stats.exports || stats.total_exports || 0 },
-      ];
-      el.innerHTML = cards.map(c =>
-        '<div class="tenant-dash-card stat">' +
-        '<h3>' + c.value + '</h3>' +
-        '<p>' + c.label + '</p></div>'
-      ).join('');
-    }
-
     function renderSagTenants(tenants) {
       const list = document.getElementById('sagTenantsList');
       if (!tenants.length) { list.innerHTML = '<p class="tenant-hint">لا توجد شركات</p>'; return; }
@@ -1219,7 +1270,7 @@
       renderSagTenants(filtered);
     }
 
-    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity'];
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'contracts', 'activity'];
 
     function sagTenantPaneId(tab) {
       return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -1239,7 +1290,7 @@
         if (pane) pane.style.display = active ? '' : 'none';
         if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
       });
-      if (['drafts', 'presentations', 'exports', 'activity'].includes(tab)) {
+      if (['drafts', 'presentations', 'exports', 'contracts', 'activity'].includes(tab)) {
         sagLoadTenantDataPane(sagCurrentTenantId, tab);
       }
     }
@@ -1249,6 +1300,7 @@
         drafts: 'sagTenantDraftsList',
         presentations: 'sagTenantPresentationsList',
         exports: 'sagTenantExportsList',
+        contracts: 'sagTenantContractsList',
         activity: 'sagTenantActivityList'
       };
       const host = document.getElementById(bodies[tab]);
@@ -1260,6 +1312,7 @@
       if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
       else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
+      else if (tab === 'contracts') host.innerHTML = renderSagTenantContracts(data.contracts || []);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
     }
 
@@ -1369,6 +1422,24 @@
       }).join('');
     }
 
+    function renderSagTenantContracts(contracts) {
+      if (!contracts || !contracts.length) return '<p class="tenant-hint">لا توجد عقود مسجلة لهذه الشركة</p>';
+      return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
+        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
+        '<th style="padding:10px 8px;">العنوان</th><th style="padding:10px 8px;">النوع</th>' +
+        '<th style="padding:10px 8px;">البداية</th><th style="padding:10px 8px;">الانتهاء</th>' +
+        '<th style="padding:10px 8px;">الحالة</th></tr></thead><tbody>' +
+        contracts.map(c => {
+          const type = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد خدمة';
+          const status = c.is_expired
+            ? '<span style="color:#c33;font-weight:700">منتهي</span>'
+            : '<span style="color:var(--green)">سارٍ</span>';
+          return '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:10px 8px;">' + escapeHtml(c.title || '—') +
+            '</td><td style="padding:10px 8px;">' + type + '</td><td style="padding:10px 8px;">' + escapeHtml(c.starts_at || '—') +
+            '</td><td style="padding:10px 8px;">' + escapeHtml(c.expires_at || '—') + '</td><td style="padding:10px 8px;">' + status + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+
     function renderSagTenantActivity(activity) {
       if (!activity.length) return '<p class="tenant-hint">لا يوجد سجل تعديلات</p>';
       return activity.map(a => {
@@ -1407,6 +1478,7 @@
         '<button type="button" id="sagTabBtnDrafts" class="btn small ghost" onclick="showSagTenantTab(\'drafts\')">المشاريع</button>' +
         '<button type="button" id="sagTabBtnPresentations" class="btn small ghost" onclick="showSagTenantTab(\'presentations\')">العروض</button>' +
         '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
+        '<button type="button" id="sagTabBtnContracts" class="btn small ghost" onclick="showSagTenantTab(\'contracts\')">العقود والاتفاقيات</button>' +
         '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
         '</div>' +
         '<div id="sagTenantTabCompany">' +
@@ -1453,6 +1525,8 @@
         '<h3 class="dash-section-title">العروض</h3><div id="sagTenantPresentationsList"></div></div>' +
         '<div id="sagTenantTabExports" style="display:none">' +
         '<h3 class="dash-section-title">التصديرات</h3><div id="sagTenantExportsList"></div></div>' +
+        '<div id="sagTenantTabContracts" style="display:none">' +
+        '<h3 class="dash-section-title">العقود والاتفاقيات</h3><div id="sagTenantContractsList"></div></div>' +
         '<div id="sagTenantTabActivity" style="display:none">' +
         '<h3 class="dash-section-title">سجل التعديلات</h3><div id="sagTenantActivityList"></div></div>' +
         '</div>';
@@ -1503,7 +1577,7 @@
         return;
       }
       toast('تم حفظ بيانات الشركة');
-      await openTenantAdmin();
+      await openTenantCompanies();
       await showSagTenantDetails(tenantId);
     }
 
@@ -1538,7 +1612,7 @@
         return;
       }
       toast('تم تغيير مدير الحساب');
-      await openTenantAdmin();
+      await openTenantCompanies();
       await showSagTenantDetails(tenantId);
     }
 
@@ -1706,14 +1780,14 @@
 
     async function sagToggleTenant(tenantId, isActive) {
       const data = await api('PUT', '/api/admin/tenants/' + tenantId, { is_active: isActive });
-      if (data.success) { toast(isActive ? 'تم التفعيل' : 'تم التعطيل'); openTenantAdmin(); }
+      if (data.success) { toast(isActive ? 'تم التفعيل' : 'تم التعطيل'); openTenantCompanies(); }
       else { toast(data.error || 'فشل'); }
     }
 
     async function sagDeleteTenant(tenantId) {
       if (!confirm('حذف الشركة وكل بياناتها نهائياً؟')) return;
       const data = await api('DELETE', '/api/admin/tenants/' + tenantId);
-      if (data.success) { toast('تم حذف الشركة'); openTenantAdmin(); }
+      if (data.success) { toast('تم حذف الشركة'); openTenantCompanies(); }
       else { toast(data.error || 'فشل الحذف'); }
     }
 
