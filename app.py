@@ -15088,14 +15088,17 @@ def api_register():
         return jsonify({'error': 'Domain already registered'}), 409
 
     try:
-        tenant_id = db.create_tenant(company_name, email, hash_password(password), subdomain=subdomain)
+        # One hash feeds both rows — the primary admin is a single login
+        # identity, so its two records start with identical credentials (ISS-002).
+        password_hash = hash_password(password)
+        tenant_id = db.create_tenant(company_name, email, password_hash, subdomain=subdomain)
         if domain:
             db.update_tenant(tenant_id, **{'settings_json': json.dumps({'domain': domain})})
             conn = db.get_db()
             conn.execute('UPDATE tenants SET domain = ? WHERE id = ?', (domain, tenant_id))
             conn.commit()
         user_id = db.create_user(
-            tenant_id, company_name, email, hash_password(password), role='company_admin'
+            tenant_id, company_name, email, password_hash, role='company_admin'
         )
         db.update_tenant(
             tenant_id,
@@ -15138,7 +15141,41 @@ def api_login():
         return limited
 
     tenant = db.get_tenant_by_email(identity) or db.get_tenant_by_username(identity)
-    if tenant and verify_password(password, tenant['password_hash']):
+    user = db.get_user_by_email(identity) or db.get_user_by_username(identity)
+
+    # ISS-002: the primary company admin is a single login identity owned by
+    # the tenants row; its users row is the management record whose live state
+    # still gates whether the owner login may run at all.
+    primary = None
+    if tenant and tenant.get('primary_user_id'):
+        candidate = db.get_user_by_id(tenant['primary_user_id'])
+        if candidate and str(candidate.get('tenant_id')) == str(tenant['id']):
+            primary = candidate
+    elif not tenant and user and user.get('role') == 'company_admin' and user.get('is_active'):
+        owning = db.get_tenant_by_id(user['tenant_id'])
+        if owning and owning.get('primary_user_id') == user['id']:
+            tenant, primary, user = owning, user, None
+
+    owner_login_open = bool(
+        tenant and (
+            not tenant.get('primary_user_id')
+            or (primary is not None and primary.get('is_active')
+                and primary.get('role') == 'company_admin')
+        )
+    )
+    credential_ok = False
+    if owner_login_open:
+        if primary is not None:
+            # The primary's users row is the live credential record: a tenant
+            # hash that drifted from it is stale and must not authenticate
+            # (ISS-002). A verified password whose tenant copy lagged adopts
+            # the user hash, converging the pair.
+            credential_ok = verify_password(password, primary.get('password_hash') or '')
+            if credential_ok and not verify_password(password, tenant['password_hash'] or ''):
+                db.update_tenant(tenant['id'], password_hash=primary['password_hash'])
+        else:
+            credential_ok = verify_password(password, tenant['password_hash'])
+    if credential_ok:
         _rate_limit_clear('login:id', identity)
         if not tenant.get('is_active'):
             return jsonify({'error': 'Account is deactivated'}), 403
@@ -15163,6 +15200,8 @@ def api_login():
                              user_name=tenant['company_name'], user_role='company_admin',
                              mfa_pending=True)
         db.record_login(tenant['id'])
+        if primary is not None:
+            db.record_login(tenant['id'], primary['id'])
         return jsonify({
             'success': True,
             'token': token,
@@ -15183,7 +15222,6 @@ def api_login():
             }
         })
 
-    user = db.get_user_by_email(identity) or db.get_user_by_username(identity)
     if user and verify_password(password, user['password_hash']):
         _rate_limit_clear('login:id', identity)
         if not user.get('is_active'):

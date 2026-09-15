@@ -112,6 +112,10 @@ def _current_session_version(tenant_id, user_id):
     DB is unreachable, so the claim falls back to 0 — matching the column
     default of any account that never had its password rewritten."""
     try:
+        if user_id and db.is_primary_company_admin(tenant_id, user_id):
+            # A primary-admin user token is the tenant identity (ISS-002): its
+            # epoch lives on the tenants row the session is checked against.
+            return db.get_session_version('tenant', tenant_id)
         return db.get_session_version('user' if user_id else 'tenant', user_id or tenant_id)
     except Exception:
         return 0
@@ -292,7 +296,7 @@ def totp_otpauth_uri(secret, account_name):
 # Flask Middleware Decorators
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_token_user(payload):
+def _load_token_user(payload, tenant):
     """Return the live users row for a user-bound token.
 
     A token without user_id is a tenant-direct login and returns (None, None).
@@ -300,6 +304,12 @@ def _load_token_user(payload):
     tenant returns (None, error_response) — the JWT alone is never trusted,
     because claims like role stay frozen until expiry while the account may
     already be disabled or demoted.
+
+    ISS-002: a token bound to the tenant's primary company admin normalizes to
+    the tenant-direct session — the tenants row owns that login identity, so
+    MFA state, account status and project ownership must not split across the
+    pair. The user_id claim stays in the payload but the session runs as the
+    tenant account.
     """
     user_id = payload.get('user_id')
     if not user_id:
@@ -307,6 +317,9 @@ def _load_token_user(payload):
     user = db.get_user_by_id(user_id)
     if not user or not user.get('is_active') or str(user.get('tenant_id')) != str(payload.get('sub')):
         return None, (jsonify({'error': 'User account inactive or not found'}), 403)
+    if user.get('role') == 'company_admin' and tenant \
+            and db.is_primary_company_admin(tenant['id'], user_id):
+        return None, None
     return user, None
 
 
@@ -327,7 +340,9 @@ def _session_state_error(payload, tenant, user_row):
     jti = payload.get('jti')
     if jti and db.is_token_revoked(jti):
         return jsonify({'error': 'Session expired', 'error_code': 'session_revoked'}), 401
-    identity = user_row if payload.get('user_id') else tenant
+    # A normalized primary-admin session (user_id claim, no user row) is
+    # versioned against the tenants row it was stamped from (ISS-002).
+    identity = user_row if user_row is not None else tenant
     try:
         current = int((identity or {}).get('session_version') or 0)
     except (TypeError, ValueError):
@@ -379,7 +394,7 @@ def require_auth(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive or not found'}), 403
 
-        user_row, user_error = _load_token_user(payload)
+        user_row, user_error = _load_token_user(payload, tenant)
         if user_error:
             return user_error
 
@@ -394,7 +409,7 @@ def require_auth(f):
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = _is_platform_admin_session(tenant, payload)
-        g.user_id = payload.get('user_id')
+        g.user_id = (user_row or {}).get('id')
         g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = (user_row or {}).get('role') or payload.get('user_role')
         g.user_permissions = {}
@@ -422,7 +437,7 @@ def require_company_admin(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive'}), 403
 
-        user_row, user_error = _load_token_user(payload)
+        user_row, user_error = _load_token_user(payload, tenant)
         if user_error:
             return user_error
 
@@ -435,7 +450,7 @@ def require_company_admin(f):
             return mfa_block
 
         user_role = (user_row or {}).get('role') or payload.get('user_role')
-        user_id = payload.get('user_id')
+        user_id = (user_row or {}).get('id')
         is_super_admin = _is_platform_admin_session(tenant, payload)
         if not is_super_admin and user_role != 'company_admin' and user_id is not None:
             return jsonify({'error': 'Company admin access required'}), 403
@@ -443,7 +458,7 @@ def require_company_admin(f):
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = is_super_admin
-        g.user_id = payload.get('user_id')
+        g.user_id = user_id
         g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = user_role
         g.token_payload = payload
@@ -509,7 +524,7 @@ def require_permission(permission_key):
             if not tenant or not tenant.get('is_active'):
                 return jsonify({'error': 'Account inactive'}), 403
 
-            user_row, user_error = _load_token_user(payload)
+            user_row, user_error = _load_token_user(payload, tenant)
             if user_error:
                 return user_error
 
@@ -524,7 +539,7 @@ def require_permission(permission_key):
             g.tenant_id = payload['sub']
             g.tenant = tenant
             g.is_admin = _is_platform_admin_session(tenant, payload)
-            g.user_id = payload.get('user_id')
+            g.user_id = (user_row or {}).get('id')
             g.user_name = (user_row or {}).get('name') or payload.get('user_name')
             g.user_role = (user_row or {}).get('role') or payload.get('user_role')
             g.user_permissions = {}

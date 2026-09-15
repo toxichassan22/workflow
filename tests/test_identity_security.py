@@ -1043,5 +1043,224 @@ class IdentityApiTests(unittest.TestCase):
         self.assertNotEqual(denied.get_json().get('error_code'), 'mfa_setup_required')
 
 
+class PrimaryAdminIdentityTests(unittest.TestCase):
+    """ISS-002: the primary company admin is one login identity — the tenants
+    row owns the credential, the MFA factor and the sessions; its users row is
+    the management record whose live state still gates the owner login."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_db_path = db.DB_PATH
+        db.DB_PATH = os.path.join(self.temp_dir.name, 'primary-admin.db')
+        db.init_db()
+        import app as application_module
+        self.application_module = application_module
+        self.app = application_module.app
+        self.app.config.update(TESTING=True)
+        self.context = self.app.app_context()
+        self.context.push()
+        self.password = 'OwnerPass123'
+        pw_hash = application_module.hash_password(self.password)
+        self.tenant_id = db.create_tenant('شركة المالك', 'owner-co@x.test', pw_hash, 'ownerco')
+        self.primary_id = db.create_user(
+            self.tenant_id, 'المالك', 'owner-user@x.test', pw_hash, role='company_admin')
+        db.update_tenant(self.tenant_id, primary_user_id=self.primary_id)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        db.close_db()
+        self.context.pop()
+        db.DB_PATH = self.original_db_path
+        self.temp_dir.cleanup()
+
+    def headers(self, token):
+        return {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+
+    def _login(self, identity, password=None):
+        return self.client.post('/api/auth/login', json={
+            'email': identity, 'password': password or self.password})
+
+    def test_owner_login_via_user_email_issues_tenant_session(self):
+        res = self._login('owner-user@x.test')
+        body = res.get_json()
+        self.assertEqual(res.status_code, 200, body)
+        self.assertTrue(body.get('mfaSetupRequired'))
+        self.assertIsNone(auth.decode_token(body['token']).get('user_id'))
+        me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
+        self.assertEqual(me.status_code, 200, me.get_json())
+        self.assertNotIn('id', me.get_json()['user'])
+        self.assertEqual(me.get_json()['tenant']['id'], self.tenant_id)
+
+    def test_owner_login_via_tenant_email_issues_tenant_session(self):
+        res = self._login('owner-co@x.test')
+        body = res.get_json()
+        self.assertEqual(res.status_code, 200, body)
+        self.assertIsNone(auth.decode_token(body['token']).get('user_id'))
+        me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
+        self.assertNotIn('id', me.get_json()['user'])
+
+    def test_disabled_primary_row_blocks_both_login_paths(self):
+        db.update_user(self.primary_id, is_active=0)
+        via_company = self._login('owner-co@x.test')
+        self.assertIn(via_company.status_code, (401, 403))
+        via_user = self._login('owner-user@x.test')
+        self.assertEqual(via_user.status_code, 403)
+        self.assertEqual(via_user.get_json().get('error'), 'Account is deactivated')
+
+    def test_user_side_password_change_moves_the_owner_login(self):
+        db.update_user(
+            self.primary_id,
+            password_hash=self.application_module.hash_password('BrandNew!234'))
+        stale = self._login('owner-co@x.test')
+        self.assertEqual(stale.status_code, 401)
+        fresh = self._login('owner-co@x.test', 'BrandNew!234')
+        self.assertEqual(fresh.status_code, 200, fresh.get_json())
+        via_user = self._login('owner-user@x.test', 'BrandNew!234')
+        self.assertEqual(via_user.status_code, 200, via_user.get_json())
+        tenant_row = db.get_tenant_by_id(self.tenant_id)
+        self.assertTrue(auth.verify_password('BrandNew!234', tenant_row['password_hash']))
+
+    def test_legacy_drifted_password_heals_on_first_login(self):
+        # Rows written before the mirror can hold diverging hashes; the user
+        # record's live credential wins and is adopted onto the tenant row.
+        conn = db.get_db()
+        conn.execute(
+            'UPDATE users SET password_hash = ? WHERE id = ?',
+            (self.application_module.hash_password('Drifted!234'), self.primary_id))
+        conn.commit()
+        self.assertEqual(self._login('owner-co@x.test').status_code, 401)
+        healed = self._login('owner-co@x.test', 'Drifted!234')
+        self.assertEqual(healed.status_code, 200, healed.get_json())
+        tenant_row = db.get_tenant_by_id(self.tenant_id)
+        self.assertTrue(auth.verify_password('Drifted!234', tenant_row['password_hash']))
+
+    def test_primary_password_change_retires_tenant_direct_sessions(self):
+        token = auth.create_token(self.tenant_id, 'owner-co@x.test',
+                                  user_name='المالك', user_role='company_admin')
+        ok = self.client.get('/api/auth/me', headers=self.headers(token))
+        self.assertEqual(ok.status_code, 200)
+        db.update_user(
+            self.primary_id,
+            password_hash=self.application_module.hash_password('Retired!234'))
+        dead = self.client.get('/api/auth/me', headers=self.headers(token))
+        self.assertEqual(dead.status_code, 401)
+
+    def test_user_bound_primary_token_normalizes_to_tenant_session(self):
+        # The password-setup flow still mints a user-bound token for the owner;
+        # the session must run as the tenant identity, not a second account.
+        token = auth.create_token(self.tenant_id, 'owner-user@x.test',
+                                  user_id=self.primary_id, user_name='المالك',
+                                  user_role='company_admin')
+        me = self.client.get('/api/auth/me', headers=self.headers(token))
+        self.assertEqual(me.status_code, 200, me.get_json())
+        self.assertNotIn('id', me.get_json()['user'])
+        self.assertFalse(me.get_json()['mfa']['enabled'])
+        # The factor the session manages is the tenant-scope one.
+        secret = auth.generate_totp_secret()
+        db.set_mfa_pending_secret('tenant', self.tenant_id, secret)
+        db.activate_mfa('tenant', self.tenant_id)
+        again = self.client.get('/api/auth/me', headers=self.headers(token))
+        self.assertTrue(again.get_json()['mfa']['enabled'])
+        self.assertFalse(again.get_json()['mfa']['setupRequired'])
+
+    def test_setup_token_session_enrols_tenant_mfa_end_to_end(self):
+        pending = auth.create_token(self.tenant_id, 'owner-user@x.test',
+                                    user_id=self.primary_id, user_name='المالك',
+                                    user_role='company_admin', mfa_pending=True)
+        headers = self.headers(pending)
+        setup = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
+        self.assertEqual(setup.status_code, 200, setup.get_json())
+        enabled = self.client.post('/api/auth/mfa/enable', headers=headers,
+                                   json={'code': auth.totp_code(setup.get_json()['secret'])})
+        self.assertEqual(enabled.status_code, 200, enabled.get_json())
+        # The factor landed on the tenant identity; the user row stays clean.
+        self.assertTrue(db.get_mfa_state('tenant', self.tenant_id)['enabled'])
+        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
+        # The clean token handed back after enrolment is tenant-direct.
+        fresh = enabled.get_json().get('token')
+        self.assertIsNone(auth.decode_token(fresh).get('user_id'))
+        # The next login — by either identity — gets the same challenge.
+        res = self._login('owner-user@x.test')
+        self.assertTrue(res.get_json().get('mfaRequired'))
+
+    def test_tenant_mfa_enrolment_challenges_both_login_identities(self):
+        secret = auth.generate_totp_secret()
+        db.set_mfa_pending_secret('tenant', self.tenant_id, secret)
+        db.activate_mfa('tenant', self.tenant_id)
+        for identity in ('owner-co@x.test', 'owner-user@x.test'):
+            res = self._login(identity)
+            body = res.get_json()
+            self.assertTrue(body.get('mfaRequired'), body)
+            self.assertNotIn('token', body)
+            challenge = auth.verify_mfa_token(body['mfaToken'])
+            self.assertIsNone(challenge.get('user_id'))
+            verified = self.client.post('/api/auth/mfa/verify', json={
+                'mfaToken': body['mfaToken'], 'code': auth.totp_code(secret)})
+            self.assertEqual(verified.status_code, 200, verified.get_json())
+            self.assertIsNone(
+                auth.decode_token(verified.get_json()['token']).get('user_id'))
+
+    def test_migration_moves_stray_user_factor_onto_tenant(self):
+        secret = auth.generate_totp_secret()
+        db.set_mfa_pending_secret('user', self.primary_id, secret)
+        db.activate_mfa('user', self.primary_id)
+        codes = auth.generate_recovery_codes(3)
+        db.store_recovery_codes(self.tenant_id, self.primary_id, codes)
+        conn = db.get_db()
+        db._migrate_primary_admin_identity(conn)
+        conn.commit()
+        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
+        tenant_secrets = db.get_mfa_secrets('tenant', self.tenant_id)
+        self.assertEqual(tenant_secrets['mfa_secret'], secret)
+        self.assertTrue(tenant_secrets['mfa_enabled'])
+        # The recovery set moved with the factor to the tenant scope.
+        self.assertTrue(db.consume_recovery_code(self.tenant_id, None, codes[0]))
+        res = self._login('owner-user@x.test')
+        self.assertTrue(res.get_json().get('mfaRequired'))
+
+    def test_migration_drops_user_factor_when_tenant_already_has_one(self):
+        tenant_secret = auth.generate_totp_secret()
+        db.set_mfa_pending_secret('tenant', self.tenant_id, tenant_secret)
+        db.activate_mfa('tenant', self.tenant_id)
+        db.set_mfa_pending_secret('user', self.primary_id, auth.generate_totp_secret())
+        db.activate_mfa('user', self.primary_id)
+        conn = db.get_db()
+        db._migrate_primary_admin_identity(conn)
+        conn.commit()
+        self.assertEqual(
+            db.get_mfa_secrets('tenant', self.tenant_id)['mfa_secret'], tenant_secret)
+        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
+
+    def test_non_primary_company_admin_keeps_user_bound_session(self):
+        uid = db.create_user(
+            self.tenant_id, 'مدير ثان', 'second@x.test',
+            self.application_module.hash_password('secret123'), role='company_admin')
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'second@x.test', 'password': 'secret123'})
+        body = res.get_json()
+        self.assertEqual(res.status_code, 200, body)
+        self.assertEqual(auth.decode_token(body['token']).get('user_id'), uid)
+        me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
+        self.assertEqual(me.get_json()['user']['id'], uid)
+
+    def test_demoted_primary_loses_owner_login_but_keeps_own(self):
+        db.update_user(self.primary_id, role='employee')
+        owner = self._login('owner-co@x.test')
+        self.assertEqual(owner.status_code, 401)
+        own = self._login('owner-user@x.test')
+        body = own.get_json()
+        self.assertEqual(own.status_code, 200, body)
+        self.assertEqual(auth.decode_token(body['token']).get('user_role'), 'employee')
+        me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
+        self.assertEqual(me.get_json()['user']['role'], 'employee')
+
+    def test_deleted_primary_row_fails_closed(self):
+        # A dangling primary_user_id must not silently reopen the un-gated
+        # tenant credential; the platform admin repoints a new primary.
+        db.delete_user(self.primary_id)
+        self.assertEqual(self._login('owner-co@x.test').status_code, 401)
+        self.assertEqual(self._login('owner-user@x.test').status_code, 401)
+
+
 if __name__ == '__main__':
     unittest.main()

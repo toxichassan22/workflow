@@ -80,6 +80,7 @@ def init_db():
         _migrate_generation_approval_columns(conn)
         _migrate_point_reservation_columns(conn)
         _migrate_workflow_gate_columns(conn)
+        _migrate_primary_admin_identity(conn)
 
         try:
             conn.commit()
@@ -1964,6 +1965,52 @@ def _migrate_presentation_revision_schema(conn):
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_presentation_creation_key ON presentations(tenant_id, creation_key)')
 
 
+def _migrate_primary_admin_identity(conn):
+    """Fold a stray user-scope factor on a primary company admin into the
+    tenant identity the login actually consults (ISS-002).
+
+    Enrolments that landed on the primary's users row before this rule sit on a
+    record the company login never reads: move the factor and its recovery
+    codes onto the tenant row when the tenant has none, drop the stray copies
+    otherwise, then clear the users-side fields so the two records can never
+    hold diverging second factors again.
+    """
+    rows = conn.execute(
+        '''SELECT u.id AS user_id, u.tenant_id AS tenant_id,
+                  u.mfa_secret AS u_secret, u.mfa_pending_secret AS u_pending,
+                  u.mfa_enabled AS u_enabled
+           FROM users u JOIN tenants t ON t.primary_user_id = u.id
+           WHERE COALESCE(u.mfa_enabled, 0) = 1
+              OR u.mfa_secret IS NOT NULL
+              OR u.mfa_pending_secret IS NOT NULL'''
+    ).fetchall()
+    for row in rows:
+        tenant_state = conn.execute(
+            'SELECT mfa_secret, mfa_pending_secret, mfa_enabled FROM tenants WHERE id = ?',
+            (row['tenant_id'],)
+        ).fetchone()
+        tenant_has_factor = bool(
+            tenant_state and (tenant_state['mfa_enabled'] or tenant_state['mfa_secret']
+                              or tenant_state['mfa_pending_secret']))
+        if tenant_has_factor:
+            conn.execute(
+                'DELETE FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id = ?',
+                (row['tenant_id'], row['user_id']))
+        else:
+            conn.execute(
+                '''UPDATE tenants
+                   SET mfa_secret = ?, mfa_pending_secret = ?, mfa_enabled = ?
+                   WHERE id = ?''',
+                (row['u_secret'], row['u_pending'],
+                 int(bool(row['u_enabled'])), row['tenant_id']))
+            conn.execute(
+                'UPDATE mfa_recovery_codes SET user_id = NULL WHERE tenant_id = ? AND user_id = ?',
+                (row['tenant_id'], row['user_id']))
+        conn.execute(
+            'UPDATE users SET mfa_secret = NULL, mfa_pending_secret = NULL, mfa_enabled = 0 '
+            'WHERE id = ?', (row['user_id'],))
+
+
 def _migrate_presentation_draft_link(conn):
     try:
         cursor = conn.execute("PRAGMA table_info(presentations)")
@@ -2809,6 +2856,35 @@ def update_user(user_id, **fields):
     set_clause = ', '.join(set_parts)
     values = list(updates.values()) + [user_id]
     conn.execute(f'UPDATE users SET {set_clause} WHERE id = ?', values)
+    link = conn.execute(
+        'SELECT tenant_id FROM users WHERE id = ?', (user_id,)
+    ).fetchone()
+    # The primary company admin shares one login identity with the tenants row
+    # (ISS-002): credential and profile edits must land on both records, or the
+    # company login keeps authenticating with values the management record
+    # already replaced. ``is_active``/``role`` stay person-level — the login
+    # gate reads the primary row's live state itself.
+    if link and conn.execute(
+        'SELECT 1 FROM tenants WHERE id = ? AND primary_user_id = ?',
+        (link['tenant_id'], user_id)
+    ).fetchone():
+        mirror_map = {
+            'name': 'account_manager_name',
+            'username': 'username',
+            'phone': 'phone',
+            'email': 'email',
+            'password_hash': 'password_hash',
+            'require_password_change': 'require_password_change',
+        }
+        mirrored = {mirror_map[key]: value for key, value in updates.items() if key in mirror_map}
+        if mirrored:
+            mirror_parts = [f'{key} = ?' for key in mirrored]
+            if 'password_hash' in updates:
+                mirror_parts.append('session_version = COALESCE(session_version, 0) + 1')
+            conn.execute(
+                f"UPDATE tenants SET {', '.join(mirror_parts)} WHERE id = ?",
+                [*mirrored.values(), link['tenant_id']]
+            )
     if 'is_active' in updates and not updates['is_active']:
         _revoke_password_setup_tokens(conn, user_id=user_id)
     conn.commit()
@@ -2909,6 +2985,22 @@ def sync_primary_company_admin(tenant_id, **fields):
         conn.rollback()
         raise
     return True
+
+
+def is_primary_company_admin(tenant_id, user_id):
+    """True when this users row is the tenant's designated primary admin.
+
+    The primary admin and the tenant row are one login identity (ISS-002), so
+    auth code calls this wherever a user-bound credential might actually be the
+    company owner."""
+    if not user_id or not tenant_id:
+        return False
+    conn = get_db()
+    row = conn.execute(
+        'SELECT 1 FROM tenants WHERE id = ? AND primary_user_id = ?',
+        (tenant_id, user_id)
+    ).fetchone()
+    return row is not None
 
 
 def delete_user(user_id):
