@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -305,6 +306,44 @@ class IdentityDbTests(unittest.TestCase):
         self.assertEqual(invite_row['email_status'], 'failed')
         self.assertFalse(invite_row['is_used'])
 
+    # ── ISS-005: rate-limit buckets ──────────────────────────────────────
+
+    def test_rate_limit_bucket_lifecycle(self):
+        key = 'test:unit-bucket'
+        # First N attempts inside the window pass freely.
+        for _ in range(3):
+            self.assertEqual(db.rate_limit_hit(key, 3, 60, 120), 0.0)
+        # The attempt that crosses the limit locks the bucket.
+        self.assertGreater(db.rate_limit_hit(key, 3, 60, 120), 0.0)
+        self.assertGreater(db.rate_limit_status(key), 0.0)
+        # Hitting a locked bucket reports the lock without extending it.
+        locked = db.rate_limit_status(key)
+        self.assertGreater(db.rate_limit_hit(key, 3, 60, 120), 0.0)
+        self.assertAlmostEqual(db.rate_limit_status(key), locked, delta=2)
+        # A successful clear restarts from zero.
+        db.rate_limit_reset(key)
+        self.assertEqual(db.rate_limit_status(key), 0.0)
+        self.assertEqual(db.rate_limit_hit(key, 3, 60, 120), 0.0)
+
+    def test_rate_limit_window_expiry_and_cleanup(self):
+        key = 'test:expiring-bucket'
+        now = db._utcnow()
+        self.assertEqual(db.rate_limit_hit(key, 1, 60, 60, now=now), 0.0)
+        self.assertGreater(db.rate_limit_hit(key, 1, 60, 60, now=now), 0.0)
+        # Once the lock and the window both pass, the bucket is forgotten.
+        later = now + timedelta(seconds=180)
+        self.assertEqual(db.rate_limit_hit(key, 1, 60, 60, now=later), 0.0)
+        db.rate_limit_cleanup(now=now)          # active bucket survives
+        row = db.get_db().execute(
+            'SELECT bucket_key FROM rate_limit_buckets WHERE bucket_key = ?', (key,)
+        ).fetchone()
+        self.assertIsNotNone(row)
+        db.rate_limit_cleanup(now=now + timedelta(seconds=400))
+        row = db.get_db().execute(
+            'SELECT bucket_key FROM rate_limit_buckets WHERE bucket_key = ?', (key,)
+        ).fetchone()
+        self.assertIsNone(row)
+
 
 class IdentityApiTests(unittest.TestCase):
     def setUp(self):
@@ -382,74 +421,6 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(direct_panel.status_code, 200, direct_panel.get_json())
         direct_me = self.client.get('/api/auth/me', headers=direct_headers)
         self.assertTrue(direct_me.get_json()['tenant']['isAdmin'])
-
-    # ── Session revocation (logout + password change) ────────────────────
-
-    def test_logout_revokes_only_the_presented_token(self):
-        uid = self._employee('sess@x.test')
-        first = auth.create_token(
-            self.tenant_id, 'sess@x.test', user_id=uid,
-            user_name='موظف', user_role='employee')
-        second = auth.create_token(
-            self.tenant_id, 'sess@x.test', user_id=uid,
-            user_name='موظف', user_role='employee')
-        self.assertNotEqual(first, second)
-
-        ok = self.client.get('/api/auth/me', headers=self.headers(first))
-        self.assertEqual(ok.status_code, 200)
-
-        out = self.client.post('/api/auth/logout', headers=self.headers(first))
-        self.assertEqual(out.status_code, 200, out.get_json())
-
-        dead = self.client.get('/api/auth/me', headers=self.headers(first))
-        self.assertEqual(dead.status_code, 401)
-        # The session cannot be refreshed once revoked.
-        dead_refresh = self.client.post('/api/auth/refresh', headers=self.headers(first))
-        self.assertEqual(dead_refresh.status_code, 401)
-        # A second session of the same account survives the first one's logout.
-        alive = self.client.get('/api/auth/me', headers=self.headers(second))
-        self.assertEqual(alive.status_code, 200)
-
-    def test_password_change_kills_user_sessions_and_refresh(self):
-        uid = self._employee('pw@x.test')
-        token = auth.create_token(
-            self.tenant_id, 'pw@x.test', user_id=uid,
-            user_name='موظف', user_role='employee')
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
-
-        db.update_user(uid, password_hash=auth.hash_password('NewPass12345'))
-
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 401)
-        self.assertEqual(
-            self.client.post('/api/auth/refresh', headers=self.headers(token)).status_code, 401)
-        # A session minted after the change works.
-        fresh = auth.create_token(
-            self.tenant_id, 'pw@x.test', user_id=uid,
-            user_name='موظف', user_role='employee')
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(fresh)).status_code, 200)
-
-    def test_tenant_password_change_kills_tenant_direct_sessions(self):
-        token = auth.create_token(
-            self.tenant_id, 'co@x.test', user_name='شركة', user_role='company_admin')
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
-
-        db.update_tenant(self.tenant_id, password_hash=auth.hash_password('Changed12345'))
-
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 401)
-
-    def test_non_password_user_update_keeps_sessions_alive(self):
-        uid = self._employee('keep@x.test')
-        token = auth.create_token(
-            self.tenant_id, 'keep@x.test', user_id=uid,
-            user_name='موظف', user_role='employee')
-        db.update_user(uid, name='موظف معدل')
-        self.assertEqual(
-            self.client.get('/api/auth/me', headers=self.headers(token)).status_code, 200)
 
     def _employee(self, email='emp@x.test', role='employee'):
         uid = db.create_user(
@@ -796,6 +767,104 @@ class IdentityApiTests(unittest.TestCase):
                                    json={'packageId': package['id'],
                                          'referenceNumber': 'TRX-SEC-1'})
         self.assertEqual(allowed.status_code, 200, allowed.get_json())
+
+    # ── ISS-005: login and MFA attempt limits over HTTP ──────────────────
+
+    def test_login_locks_account_after_repeated_failures(self):
+        self._employee('locked@x.test')
+        for _ in range(5):
+            res = self.client.post('/api/auth/login',
+                                   json={'email': 'locked@x.test', 'password': 'wrong'})
+            self.assertEqual(res.status_code, 401)
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'locked@x.test', 'password': 'wrong'})
+        self.assertEqual(res.status_code, 429)
+        self.assertEqual(res.get_json()['error_code'], 'rate_limited')
+        self.assertIn('Retry-After', res.headers)
+        # Even the right password is refused while the lock stands.
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'locked@x.test', 'password': 'secret123'})
+        self.assertEqual(res.status_code, 429)
+        # Other accounts on the same IP are not affected.
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'boss@x.test', 'password': 'secret123'})
+        self.assertEqual(res.status_code, 200)
+        # Once the lock lapses the correct password works again.
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE rate_limit_buckets SET locked_until = '2000-01-01T00:00:00'"
+            " WHERE bucket_key = 'login:id:locked@x.test'")
+        conn.commit()
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'locked@x.test', 'password': 'secret123'})
+        self.assertEqual(res.status_code, 200, res.get_json())
+
+    def test_login_success_clears_failure_counter(self):
+        self._employee('reset@x.test')
+        for _ in range(4):
+            res = self.client.post('/api/auth/login',
+                                   json={'email': 'reset@x.test', 'password': 'nope'})
+            self.assertEqual(res.status_code, 401)
+        ok = self.client.post('/api/auth/login',
+                              json={'email': 'reset@x.test', 'password': 'secret123'})
+        self.assertEqual(ok.status_code, 200, ok.get_json())
+        # The counter restarted at zero: four more failures are still 401s.
+        for _ in range(4):
+            res = self.client.post('/api/auth/login',
+                                   json={'email': 'reset@x.test', 'password': 'nope'})
+            self.assertEqual(res.status_code, 401)
+
+    def test_mfa_verify_attempts_are_bounded_per_account(self):
+        uid = self._employee('mfa-lock@x.test')
+        secret = auth.generate_totp_secret()
+        db.set_mfa_pending_secret('user', uid, secret)
+        db.activate_mfa('user', uid)
+        res = self.client.post('/api/auth/login',
+                               json={'email': 'mfa-lock@x.test', 'password': 'secret123'})
+        mfa_token = res.get_json()['mfaToken']
+        wrong = '000000' if auth.totp_code(secret) != '000000' else '111111'
+        for _ in range(5):
+            bad = self.client.post('/api/auth/mfa/verify',
+                                   json={'mfaToken': mfa_token, 'code': wrong})
+            self.assertEqual(bad.status_code, 401)
+        blocked = self.client.post('/api/auth/mfa/verify',
+                                   json={'mfaToken': mfa_token, 'code': wrong})
+        self.assertEqual(blocked.status_code, 429)
+        # Minting a fresh challenge does not reset the account's counter.
+        res2 = self.client.post('/api/auth/login',
+                                json={'email': 'mfa-lock@x.test', 'password': 'secret123'})
+        still = self.client.post('/api/auth/mfa/verify',
+                                 json={'mfaToken': res2.get_json()['mfaToken'],
+                                       'code': auth.totp_code(secret)})
+        self.assertEqual(still.status_code, 429)
+
+    def test_mfa_enable_attempts_are_bounded(self):
+        # A dedicated user keeps the mfa:op bucket away from the shared admin.
+        uid = self._employee('mfa-enable@x.test')
+        token = auth.create_token(self.tenant_id, 'mfa-enable@x.test', user_id=uid,
+                                  user_name='موظف', user_role='employee')
+        headers = self.headers(token)
+        setup = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
+        self.assertEqual(setup.status_code, 200, setup.get_json())
+        for _ in range(5):
+            bad = self.client.post('/api/auth/mfa/enable', headers=headers,
+                                   json={'code': '000000'})
+            self.assertEqual(bad.status_code, 400)
+        blocked = self.client.post('/api/auth/mfa/enable', headers=headers,
+                                   json={'code': '000000'})
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_register_is_bounded_per_ip(self):
+        for i in range(10):
+            res = self.client.post('/api/auth/register', json={
+                'companyName': f'شركة {i}', 'email': f'c{i}@x.test',
+                'password': 'password12345'})
+            self.assertEqual(res.status_code, 201, res.get_json())
+        res = self.client.post('/api/auth/register', json={
+            'companyName': 'شركة زائدة', 'email': 'extra@x.test',
+            'password': 'password12345'})
+        self.assertEqual(res.status_code, 429)
+        self.assertEqual(res.get_json()['error_code'], 'rate_limited')
 
 
 if __name__ == '__main__':

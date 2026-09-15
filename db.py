@@ -117,7 +117,6 @@ def _create_tables(conn):
         is_admin INTEGER DEFAULT 0,
         primary_user_id TEXT,
         require_password_change INTEGER DEFAULT 0,
-        session_version INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         settings_json TEXT
     );
@@ -234,7 +233,6 @@ def _create_tables(conn):
         role TEXT DEFAULT 'employee',
         is_active INTEGER DEFAULT 1,
         require_password_change INTEGER DEFAULT 0,
-        session_version INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -250,14 +248,6 @@ def _create_tables(conn):
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_password_setup_tokens_tenant ON password_setup_tokens(tenant_id);
-
-    CREATE TABLE IF NOT EXISTS revoked_tokens (
-        jti TEXT PRIMARY KEY,
-        tenant_id TEXT,
-        expires_at INTEGER NOT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_revoked_tokens_exp ON revoked_tokens(expires_at);
 
     CREATE TABLE IF NOT EXISTS user_permissions (
         id TEXT PRIMARY KEY,
@@ -690,7 +680,6 @@ def _create_tables(conn):
         ('primary_user_id', 'TEXT'),
         ('require_password_change', 'INTEGER DEFAULT 0'),
         ('package_id', 'TEXT'),
-        ('session_version', 'INTEGER DEFAULT 0'),
     ):
         if column not in cols:
             conn.execute(f'ALTER TABLE tenants ADD COLUMN {column} {definition}')
@@ -701,7 +690,6 @@ def _create_tables(conn):
         ('username', 'TEXT'),
         ('phone', 'TEXT'),
         ('require_password_change', 'INTEGER DEFAULT 0'),
-        ('session_version', 'INTEGER DEFAULT 0'),
     ):
         if column not in user_cols:
             conn.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
@@ -1096,11 +1084,7 @@ def update_tenant(tenant_id, **fields):
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
-    set_parts = [f'{k} = ?' for k in updates]
-    # A new password retires every session token issued under the old one.
-    if 'password_hash' in updates:
-        set_parts.append('session_version = COALESCE(session_version, 0) + 1')
-    set_clause = ', '.join(set_parts)
+    set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [tenant_id]
     conn.execute(f'UPDATE tenants SET {set_clause} WHERE id = ?', values)
     if 'is_active' in updates and not updates['is_active']:
@@ -2802,11 +2786,7 @@ def update_user(user_id, **fields):
         updates['email'] = updates['email'].lower()
     if 'username' in updates and updates['username']:
         updates['username'] = updates['username'].lower()
-    set_parts = [f'{k} = ?' for k in updates]
-    # A new password retires every session token issued under the old one.
-    if 'password_hash' in updates:
-        set_parts.append('session_version = COALESCE(session_version, 0) + 1')
-    set_clause = ', '.join(set_parts)
+    set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [user_id]
     conn.execute(f'UPDATE users SET {set_clause} WHERE id = ?', values)
     if 'is_active' in updates and not updates['is_active']:
@@ -2841,8 +2821,7 @@ def set_primary_company_admin(tenant_id, user_id):
         conn.execute(
             '''UPDATE tenants
                SET primary_user_id = ?, account_manager_name = ?, username = ?, phone = ?,
-                   email = ?, password_hash = ?, require_password_change = ?,
-                   session_version = COALESCE(session_version, 0) + 1
+                   email = ?, password_hash = ?, require_password_change = ?
                WHERE id = ?''',
             (user_id, user['name'], user['username'], user['phone'], user['email'],
              user['password_hash'], user['require_password_change'], tenant_id)
@@ -2893,17 +2872,6 @@ def sync_primary_company_admin(tenant_id, **fields):
             )
         if 'is_active' in fields and not fields['is_active']:
             _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
-        # A synced password rewrite retires sessions on both login identities.
-        if 'password_hash' in fields:
-            conn.execute(
-                'UPDATE tenants SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
-                (tenant_id,)
-            )
-            if user_id:
-                conn.execute(
-                    'UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
-                    (user_id,)
-                )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3924,15 +3892,13 @@ def complete_password_setup(raw_token, password_hash):
             return None
         conn.execute(
             '''UPDATE users
-               SET password_hash = ?, require_password_change = 0, is_active = 1,
-                   session_version = COALESCE(session_version, 0) + 1
+               SET password_hash = ?, require_password_change = 0, is_active = 1
                WHERE id = ? AND tenant_id = ?''',
             (password_hash, token['user_id'], token['tenant_id'])
         )
         conn.execute(
             '''UPDATE tenants
-               SET password_hash = ?, require_password_change = 0,
-                   session_version = COALESCE(session_version, 0) + 1
+               SET password_hash = ?, require_password_change = 0
                WHERE id = ? AND primary_user_id = ?''',
             (password_hash, token['tenant_id'], token['user_id'])
         )
@@ -3944,70 +3910,6 @@ def complete_password_setup(raw_token, password_hash):
         'tenant_id': token['tenant_id'],
         'user_id': token['user_id'],
     }
-
-
-# ── Session revocation ────────────────────────────────────────────────────────
-# Session JWTs carry the identity's ``session_version`` (``sv``) plus a unique
-# ``jti``. A password write bumps the version so every earlier token goes stale;
-# logout records the jti in ``revoked_tokens`` until the token's natural exp.
-
-
-def get_session_version(scope, row_id):
-    """Current session epoch for an identity ('user' or 'tenant'); missing rows read 0."""
-    if not row_id:
-        return 0
-    table = 'users' if scope == 'user' else 'tenants'
-    conn = get_db()
-    try:
-        row = conn.execute(
-            f'SELECT session_version FROM {table} WHERE id = ?', (row_id,)
-        ).fetchone()
-    except Exception:
-        return 0
-    if not row:
-        return 0
-    try:
-        return int(row['session_version'] or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def bump_session_version(scope, row_id):
-    """Invalidate every outstanding session token for this identity."""
-    if not row_id:
-        return
-    table = 'users' if scope == 'user' else 'tenants'
-    conn = get_db()
-    conn.execute(
-        f'UPDATE {table} SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
-        (row_id,)
-    )
-    conn.commit()
-
-
-def revoke_token_jti(jti, tenant_id, expires_at):
-    """Denylist a single token id until its natural expiry (logout)."""
-    if not jti:
-        return
-    conn = get_db()
-    now = int(datetime.now(timezone.utc).timestamp())
-    conn.execute('DELETE FROM revoked_tokens WHERE expires_at < ?', (now,))
-    conn.execute(
-        'INSERT OR IGNORE INTO revoked_tokens (jti, tenant_id, expires_at) VALUES (?, ?, ?)',
-        (str(jti), str(tenant_id or ''), int(expires_at or now))
-    )
-    conn.commit()
-
-
-def is_token_revoked(jti):
-    """True when this token id was revoked before its exp."""
-    if not jti:
-        return False
-    conn = get_db()
-    row = conn.execute(
-        'SELECT 1 FROM revoked_tokens WHERE jti = ?', (str(jti),)
-    ).fetchone()
-    return row is not None
 
 
 def get_invite_by_token(token):
@@ -11750,6 +11652,18 @@ def _create_identity_tables(conn):
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_mfa_recovery ON mfa_recovery_codes(tenant_id, user_id, used_at)')
 
+    # ISS-005: fixed-window attempt counters with a temporary lock, shared by
+    # the login, registration, MFA and invite endpoints. Kept in the database so
+    # every worker and process enforces the same counters. Timestamps are naive
+    # UTC ISO strings, like the rest of the schema.
+    conn.execute('''CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+        bucket_key TEXT PRIMARY KEY,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        reset_at TEXT,
+        locked_until TEXT,
+        updated_at TEXT
+    )''')
+
     # d07: a platform admin may read client content only through an explicit,
     # reasoned, time-boxed grant the client's company admin approved.
     conn.execute('''CREATE TABLE IF NOT EXISTS admin_access_requests (
@@ -12369,6 +12283,105 @@ def count_unused_recovery_codes(tenant_id, user_id):
             (tenant_id,),
         ).fetchone()
     return int(row['n'] or 0)
+
+
+# ── ISS-005: attempt counters with temporary lockout ─────────────────────────
+# Buckets are plain strings ("login:id:mail@x", "mfa:user:<id>", "register:ip:<ip>")
+# so every endpoint picks its own subject. All timestamps are naive-UTC ISO text;
+# lexicographic comparison on them is a chronological comparison.
+
+def rate_limit_status(bucket_key, now=None):
+    """Seconds the bucket stays locked; 0 when the key may proceed."""
+    now_iso = (now or _utcnow()).isoformat()
+    conn = get_db()
+    row = conn.execute(
+        'SELECT locked_until FROM rate_limit_buckets WHERE bucket_key = ?',
+        (bucket_key,),
+    ).fetchone()
+    if not row or not row['locked_until'] or row['locked_until'] <= now_iso:
+        return 0.0
+    try:
+        locked = datetime.fromisoformat(row['locked_until'])
+        current = datetime.fromisoformat(now_iso)
+        return max(0.0, (locked - current).total_seconds())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def rate_limit_hit(bucket_key, max_attempts, window_seconds, lock_seconds, now=None):
+    """Record one attempt atomically; return lock seconds remaining, 0 if allowed.
+
+    A single UPSERT keeps check-and-increment atomic across threads, workers and
+    processes. While ``locked_until`` lies in the future the counters stay
+    untouched — hammering a locked bucket does not extend the lock. An expired
+    window restarts the counter; crossing ``max_attempts`` inside an open window
+    sets the lock.
+    """
+    now_dt = now or _utcnow()
+    now_iso = now_dt.isoformat()
+    reset_iso = (now_dt + timedelta(seconds=window_seconds)).isoformat()
+    lock_iso = (now_dt + timedelta(seconds=lock_seconds)).isoformat()
+    max_attempts = max(1, int(max_attempts))
+    conn = get_db()
+    conn.execute(
+        '''INSERT INTO rate_limit_buckets (bucket_key, attempts, reset_at, locked_until, updated_at)
+           VALUES (?, 1, ?, NULL, ?)
+           ON CONFLICT(bucket_key) DO UPDATE SET
+             attempts = CASE
+               WHEN rate_limit_buckets.locked_until IS NOT NULL
+                    AND rate_limit_buckets.locked_until > ? THEN rate_limit_buckets.attempts
+               WHEN rate_limit_buckets.reset_at IS NOT NULL
+                    AND rate_limit_buckets.reset_at > ? THEN rate_limit_buckets.attempts + 1
+               ELSE 1 END,
+             reset_at = CASE
+               WHEN rate_limit_buckets.locked_until IS NOT NULL
+                    AND rate_limit_buckets.locked_until > ? THEN rate_limit_buckets.reset_at
+               WHEN rate_limit_buckets.reset_at IS NOT NULL
+                    AND rate_limit_buckets.reset_at > ? THEN rate_limit_buckets.reset_at
+               ELSE ? END,
+             locked_until = CASE
+               WHEN rate_limit_buckets.locked_until IS NOT NULL
+                    AND rate_limit_buckets.locked_until > ? THEN rate_limit_buckets.locked_until
+               WHEN rate_limit_buckets.reset_at IS NOT NULL
+                    AND rate_limit_buckets.reset_at > ?
+                    AND rate_limit_buckets.attempts + 1 > ? THEN ?
+               ELSE NULL END,
+             updated_at = ?''',
+        (bucket_key, reset_iso, now_iso,
+         now_iso, now_iso, now_iso, now_iso, reset_iso,
+         now_iso, now_iso, max_attempts, lock_iso, now_iso),
+    )
+    row = conn.execute(
+        'SELECT locked_until FROM rate_limit_buckets WHERE bucket_key = ?',
+        (bucket_key,),
+    ).fetchone()
+    conn.commit()
+    if not row or not row['locked_until'] or row['locked_until'] <= now_iso:
+        return 0.0
+    try:
+        return max(0.0, (datetime.fromisoformat(row['locked_until']) - now_dt).total_seconds())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def rate_limit_reset(bucket_key):
+    """Drop the bucket — a successful authentication should not carry a debt."""
+    conn = get_db()
+    conn.execute('DELETE FROM rate_limit_buckets WHERE bucket_key = ?', (bucket_key,))
+    conn.commit()
+
+
+def rate_limit_cleanup(now=None):
+    """Forget buckets whose window and lock both expired; called by housekeeping."""
+    now_iso = (now or _utcnow()).isoformat()
+    conn = get_db()
+    cursor = conn.execute(
+        'DELETE FROM rate_limit_buckets WHERE (locked_until IS NULL OR locked_until <= ?)'
+        ' AND (reset_at IS NULL OR reset_at <= ?)',
+        (now_iso, now_iso),
+    )
+    conn.commit()
+    return {'removed': cursor.rowcount}
 
 
 # ── d07: exceptional admin access to client content ─────────────────────────

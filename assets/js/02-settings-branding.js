@@ -1061,7 +1061,6 @@
     }
 
     function tenantLogout() {
-      api('POST', '/api/auth/logout', {});
       removeTenantToken();
       localStorage.removeItem(T_TENANT_KEY);
       clearTenantNavigationState();

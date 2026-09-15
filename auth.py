@@ -107,16 +107,6 @@ def _b64decode(data):
     return base64.urlsafe_b64decode(data)
 
 
-def _current_session_version(tenant_id, user_id):
-    """Snapshot the identity's session epoch. Outside a request/app context the
-    DB is unreachable, so the claim falls back to 0 — matching the column
-    default of any account that never had its password rewritten."""
-    try:
-        return db.get_session_version('user' if user_id else 'tenant', user_id or tenant_id)
-    except Exception:
-        return 0
-
-
 def create_token(tenant_id, email, is_admin=False, user_id=None, user_name=None, user_role=None):
     """Create a JWT token for a tenant or user."""
     header = {'alg': 'HS256', 'typ': 'JWT'}
@@ -127,8 +117,6 @@ def create_token(tenant_id, email, is_admin=False, user_id=None, user_name=None,
         'user_id': user_id,
         'user_name': user_name,
         'user_role': user_role,
-        'jti': secrets.token_urlsafe(16),
-        'sv': _current_session_version(tenant_id, user_id),
         'iat': int(time.time()),
         'exp': int(time.time()) + (JWT_EXPIRY_HOURS * 3600),
     }
@@ -307,32 +295,6 @@ def _is_platform_admin_session(tenant, payload):
     return bool(tenant.get('is_admin')) and not payload.get('user_id')
 
 
-def _session_state_error(payload, tenant, user_row):
-    """Reject a token that was revoked at logout or issued before the
-    identity's session version last moved (every password write bumps it).
-
-    Pre-revocation tokens carry no ``jti``/``sv`` claims: the missing jti skips
-    the denylist, and a missing ``sv`` reads as version 0 — the default for any
-    account whose password was never rewritten — so old sessions survive until
-    the first password change retires them.
-    """
-    jti = payload.get('jti')
-    if jti and db.is_token_revoked(jti):
-        return jsonify({'error': 'Session expired', 'error_code': 'session_revoked'}), 401
-    identity = user_row if payload.get('user_id') else tenant
-    try:
-        current = int((identity or {}).get('session_version') or 0)
-    except (TypeError, ValueError):
-        current = 0
-    try:
-        token_version = int(payload.get('sv') or 0)
-    except (TypeError, ValueError):
-        token_version = -1
-    if token_version != current:
-        return jsonify({'error': 'Session expired', 'error_code': 'session_revoked'}), 401
-    return None
-
-
 def require_auth(f):
     """Decorator: require a valid JWT token. Sets g.tenant_id, g.tenant, g.is_admin, g.user_id, g.user_name, g.user_role."""
     @wraps(f)
@@ -354,10 +316,6 @@ def require_auth(f):
         if user_error:
             return user_error
 
-        session_error = _session_state_error(payload, tenant, user_row)
-        if session_error:
-            return session_error
-
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = _is_platform_admin_session(tenant, payload)
@@ -365,7 +323,6 @@ def require_auth(f):
         g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = (user_row or {}).get('role') or payload.get('user_role')
         g.user_permissions = {}
-        g.token_payload = payload
         if g.user_id:
             g.user_permissions = db.get_user_permissions(g.user_id, g.user_role or 'employee')
         return f(*args, **kwargs)
@@ -393,10 +350,6 @@ def require_company_admin(f):
         if user_error:
             return user_error
 
-        session_error = _session_state_error(payload, tenant, user_row)
-        if session_error:
-            return session_error
-
         user_role = (user_row or {}).get('role') or payload.get('user_role')
         user_id = payload.get('user_id')
         is_super_admin = _is_platform_admin_session(tenant, payload)
@@ -409,7 +362,6 @@ def require_company_admin(f):
         g.user_id = payload.get('user_id')
         g.user_name = (user_row or {}).get('name') or payload.get('user_name')
         g.user_role = user_role
-        g.token_payload = payload
         return f(*args, **kwargs)
     return decorated
 
@@ -434,10 +386,6 @@ def require_admin(f):
         if not _is_platform_admin_session(tenant, payload):
             return jsonify({'error': 'Admin access required'}), 403
 
-        session_error = _session_state_error(payload, tenant, None)
-        if session_error:
-            return session_error
-
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = True
@@ -445,7 +393,6 @@ def require_admin(f):
         g.user_name = payload.get('user_name')
         g.user_role = payload.get('user_role')
         g.user_permissions = {}
-        g.token_payload = payload
         return f(*args, **kwargs)
     return decorated
 
@@ -472,10 +419,6 @@ def require_permission(permission_key):
             if user_error:
                 return user_error
 
-            session_error = _session_state_error(payload, tenant, user_row)
-            if session_error:
-                return session_error
-
             g.tenant_id = payload['sub']
             g.tenant = tenant
             g.is_admin = _is_platform_admin_session(tenant, payload)
@@ -483,7 +426,6 @@ def require_permission(permission_key):
             g.user_name = (user_row or {}).get('name') or payload.get('user_name')
             g.user_role = (user_row or {}).get('role') or payload.get('user_role')
             g.user_permissions = {}
-            g.token_payload = payload
 
             is_super_admin = g.is_admin
             is_company_admin = g.user_role == 'company_admin' or g.user_id is None

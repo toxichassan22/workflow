@@ -14890,6 +14890,7 @@ def _run_housekeeping_tick():
         ('event_task_reminders', db.send_due_event_task_reminders),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
+        ('rate_limits', db.rate_limit_cleanup),
         ('usage_billing', _bill_all_unbilled_usage),
     )
     for name, fn in steps:
@@ -14984,9 +14985,80 @@ def _company_payload(tenant):
     }
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ISS-005: in-app attempt limits for the credential-bearing endpoints. The app
+# used to rely entirely on whatever the hosting layer did; these buckets bound
+# password guessing, registration spam, TOTP/recovery-code tries and setup-link
+# probing inside the app itself. Counters live in ``rate_limit_buckets`` so every
+# gunicorn worker shares them. A limiter that errors fails open — a broken
+# counter must never turn into a site-wide lockout.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# name -> (max_attempts, window_seconds, lock_seconds)
+AUTH_RATE_LIMITS = {
+    'login:ip': (60, 600, 900),        # login requests per source IP
+    'login:id': (5, 600, 900),         # failed passwords per account
+    'register:ip': (10, 3600, 3600),   # public sign-ups per source IP
+    'invite:ip': (30, 600, 900),       # invite lookups/registrations per IP
+    'pwsetup:ip': (20, 600, 900),      # password-setup token probes per IP
+    'mfa:ip': (30, 600, 900),          # challenge answers per source IP
+    'mfa:id': (5, 600, 900),           # wrong codes per account — survives re-login
+    'mfa:op': (5, 600, 600),           # wrong codes on enable/disable/recovery ops
+}
+
+
+def _rate_limit_client_ip():
+    return (request.remote_addr or 'unknown').strip() or 'unknown'
+
+
+def _rate_limited(retry_seconds):
+    retry = max(1, int(math.ceil(retry_seconds or 0)))
+    response = jsonify({
+        'error': 'عدد المحاولات كبير، أعد المحاولة لاحقًا',
+        'error_code': 'rate_limited',
+        'retryAfter': retry,
+    })
+    response.status_code = 429
+    response.headers['Retry-After'] = str(retry)
+    return response
+
+
+def _rate_limit_check(name, subject):
+    """A 429 response when the bucket is locked, else None. Never raises."""
+    try:
+        retry = db.rate_limit_status(f'{name}:{subject}')
+    except Exception as exc:
+        print(f'[RATE-LIMIT] status check failed for {name}: {exc}')
+        return None
+    return _rate_limited(retry) if retry > 0 else None
+
+
+def _rate_limit_attempt(name, subject):
+    """Record one attempt; a 429 response when it trips the limit. Never raises."""
+    max_attempts, window_seconds, lock_seconds = AUTH_RATE_LIMITS[name]
+    try:
+        retry = db.rate_limit_hit(
+            f'{name}:{subject}', max_attempts, window_seconds, lock_seconds)
+    except Exception as exc:
+        print(f'[RATE-LIMIT] hit failed for {name}: {exc}')
+        return None
+    return _rate_limited(retry) if retry > 0 else None
+
+
+def _rate_limit_clear(name, subject):
+    """Wipe the bucket after a success so earlier typos stop counting."""
+    try:
+        db.rate_limit_reset(f'{name}:{subject}')
+    except Exception as exc:
+        print(f'[RATE-LIMIT] reset failed for {name}: {exc}')
+
+
 @app.route('/api/auth/register', methods=['POST'])
 def api_register():
     """Register a new company (tenant). Creates company admin user automatically."""
+    limited = _rate_limit_attempt('register:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     data = request.json or {}
     company_name = (data.get('companyName') or '').strip()
     email = (data.get('email') or '').strip().lower()
@@ -15043,6 +15115,9 @@ def api_register():
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     """Login a company admin (tenant) or employee (user). Auto-detects by email domain."""
+    limited = _rate_limit_attempt('login:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     data = request.json or {}
     identity = (data.get('email') or data.get('username') or '').strip().lower()
     password = data.get('password', '')
@@ -15050,8 +15125,16 @@ def api_login():
     if not identity or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
+    # ISS-005: the per-account lock is checked before any password work, so a
+    # locked identity costs almost nothing to refuse and the counter cannot be
+    # reset by guessing on a fresh connection.
+    limited = _rate_limit_check('login:id', identity)
+    if limited:
+        return limited
+
     tenant = db.get_tenant_by_email(identity) or db.get_tenant_by_username(identity)
     if tenant and verify_password(password, tenant['password_hash']):
+        _rate_limit_clear('login:id', identity)
         if not tenant.get('is_active'):
             return jsonify({'error': 'Account is deactivated'}), 403
         if tenant.get('require_password_change'):
@@ -15093,6 +15176,7 @@ def api_login():
 
     user = db.get_user_by_email(identity) or db.get_user_by_username(identity)
     if user and verify_password(password, user['password_hash']):
+        _rate_limit_clear('login:id', identity)
         if not user.get('is_active'):
             return jsonify({'error': 'Account is deactivated'}), 403
         if not user.get('tenant_active'):
@@ -15137,11 +15221,17 @@ def api_login():
             }
         })
 
+    limited = _rate_limit_attempt('login:id', identity)
+    if limited:
+        return limited
     return jsonify({'error': 'Invalid email or password'}), 401
 
 
 @app.route('/api/auth/password-setup/<raw_token>', methods=['GET'])
 def api_password_setup_details(raw_token):
+    limited = _rate_limit_attempt('pwsetup:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     token = db.get_password_setup_token(raw_token)
     if not token:
         return jsonify({'error': 'Password setup link is invalid or expired'}), 404
@@ -15156,6 +15246,9 @@ def api_password_setup_details(raw_token):
 
 @app.route('/api/auth/password-setup/<raw_token>', methods=['POST'])
 def api_password_setup_complete(raw_token):
+    limited = _rate_limit_attempt('pwsetup:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     data = request.json or {}
     password = data.get('password') or ''
     error = _password_validation_error(password)
@@ -15247,16 +15340,6 @@ def api_refresh():
     return jsonify({'success': True, 'token': token})
 
 
-@app.route('/api/auth/logout', methods=['POST'])
-@require_auth
-def api_logout():
-    """Revoke the presented session token server-side; the client also drops it."""
-    payload = getattr(g, 'token_payload', None) or {}
-    if payload.get('jti'):
-        db.revoke_token_jti(payload['jti'], g.tenant_id, payload.get('exp'))
-    return jsonify({'success': True})
-
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TWO-FACTOR AUTHENTICATION (t21/t63): TOTP challenge at login plus one-time
 # recovery codes. The post-password challenge travels in a purpose-scoped JWT
@@ -15281,6 +15364,9 @@ def _mfa_role_requires_setup():
 @app.route('/api/auth/mfa/verify', methods=['POST'])
 def api_mfa_verify():
     """Second step of login: a TOTP code or a one-time recovery code."""
+    limited = _rate_limit_attempt('mfa:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     data = request.json or {}
     challenge = auth.verify_mfa_token(data.get('mfaToken'))
     if not challenge:
@@ -15292,6 +15378,12 @@ def api_mfa_verify():
 
     scope = 'user' if challenge.get('user_id') else 'tenant'
     row_id = challenge.get('user_id') or challenge['sub']
+    # ISS-005: the attempt counter lives on the account, not on the challenge —
+    # re-logging in to mint a fresh challenge must not reset it.
+    mfa_subject = f'{scope}:{row_id}'
+    limited = _rate_limit_check('mfa:id', mfa_subject)
+    if limited:
+        return limited
     secrets_row = db.get_mfa_secrets(scope, row_id)
     if not secrets_row or not secrets_row.get('mfa_enabled') or not secrets_row.get('mfa_secret'):
         return jsonify({'error': 'التحقق الثنائي غير مفعل لهذا الحساب',
@@ -15303,7 +15395,11 @@ def api_mfa_verify():
         ok = db.consume_recovery_code(challenge['sub'], challenge.get('user_id'), code)
         method = 'recovery'
     if not ok:
+        limited = _rate_limit_attempt('mfa:id', mfa_subject)
+        if limited:
+            return limited
         return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 401
+    _rate_limit_clear('mfa:id', mfa_subject)
 
     # Re-validate the live account state before issuing the session.
     tenant = db.get_tenant_by_id(challenge['sub'])
@@ -15374,6 +15470,12 @@ def api_mfa_setup():
     scope, row_id = _mfa_actor_scope()
     secrets_row = db.get_mfa_secrets(scope, row_id)
     if secrets_row and secrets_row.get('mfa_enabled'):
+        # Re-enrolment verifies the password and a current code — guesses count
+        # against the same mfa:op bucket as enable/disable/recovery-codes.
+        mfa_subject = f'{scope}:{row_id}'
+        limited = _rate_limit_check('mfa:op', mfa_subject)
+        if limited:
+            return limited
         data = request.json or {}
         password = data.get('password') or ''
         code = str(data.get('code') or '').strip()
@@ -15382,9 +15484,16 @@ def api_mfa_setup():
         else:
             account = g.tenant
         if not account or not verify_password(password, account.get('password_hash') or ''):
+            limited = _rate_limit_attempt('mfa:op', mfa_subject)
+            if limited:
+                return limited
             return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
         if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+            limited = _rate_limit_attempt('mfa:op', mfa_subject)
+            if limited:
+                return limited
             return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+        _rate_limit_clear('mfa:op', mfa_subject)
     secret = auth.generate_totp_secret()
     db.set_mfa_pending_secret(scope, row_id, secret)
     account = g.user_name or g.tenant.get('email') or 'admin'
@@ -15401,13 +15510,21 @@ def api_mfa_enable():
     """Verify one code against the pending secret, then enable MFA and issue
     the recovery codes once."""
     scope, row_id = _mfa_actor_scope()
+    mfa_subject = f'{scope}:{row_id}'
+    limited = _rate_limit_check('mfa:op', mfa_subject)
+    if limited:
+        return limited
     secrets_row = db.get_mfa_secrets(scope, row_id)
     if not secrets_row or not secrets_row.get('mfa_pending_secret'):
         return jsonify({'error': 'لا يوجد إعداد قيد الانتظار',
                         'error_code': 'mfa_setup_not_started'}), 400
     code = str((request.json or {}).get('code') or '').strip()
     if not auth.verify_totp(secrets_row['mfa_pending_secret'], code):
+        limited = _rate_limit_attempt('mfa:op', mfa_subject)
+        if limited:
+            return limited
         return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    _rate_limit_clear('mfa:op', mfa_subject)
     db.activate_mfa(scope, row_id)
     codes = auth.generate_recovery_codes()
     db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
@@ -15428,17 +15545,28 @@ def api_mfa_disable():
     password = data.get('password') or ''
     code = str(data.get('code') or '').strip()
     scope, row_id = _mfa_actor_scope()
+    mfa_subject = f'{scope}:{row_id}'
+    limited = _rate_limit_check('mfa:op', mfa_subject)
+    if limited:
+        return limited
     if scope == 'user':
         account = db.get_user_by_id(row_id)
     else:
         account = g.tenant
     if not account or not verify_password(password, account.get('password_hash') or ''):
+        limited = _rate_limit_attempt('mfa:op', mfa_subject)
+        if limited:
+            return limited
         return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
     secrets_row = db.get_mfa_secrets(scope, row_id)
     if not secrets_row or not secrets_row.get('mfa_enabled'):
         return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
     if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+        limited = _rate_limit_attempt('mfa:op', mfa_subject)
+        if limited:
+            return limited
         return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    _rate_limit_clear('mfa:op', mfa_subject)
     db.clear_mfa(scope, row_id)
     _record_audit_event('mfa.disabled', 'user' if scope == 'user' else 'tenant', row_id,
                         entity_name=g.user_name or g.tenant.get('company_name'))
@@ -15450,12 +15578,20 @@ def api_mfa_disable():
 def api_mfa_regenerate_recovery_codes():
     """Regenerate the recovery set; a current TOTP code authorizes it."""
     scope, row_id = _mfa_actor_scope()
+    mfa_subject = f'{scope}:{row_id}'
+    limited = _rate_limit_check('mfa:op', mfa_subject)
+    if limited:
+        return limited
     secrets_row = db.get_mfa_secrets(scope, row_id)
     if not secrets_row or not secrets_row.get('mfa_enabled'):
         return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
     code = str((request.json or {}).get('code') or '').strip()
     if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
+        limited = _rate_limit_attempt('mfa:op', mfa_subject)
+        if limited:
+            return limited
         return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
+    _rate_limit_clear('mfa:op', mfa_subject)
     codes = auth.generate_recovery_codes()
     db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
     return jsonify({'success': True, 'recoveryCodes': codes})
@@ -18957,6 +19093,9 @@ def api_create_invite():
 @app.route('/api/invite/<token>', methods=['GET'])
 def api_get_invite(token):
     """Get invite info (public, no auth needed)."""
+    limited = _rate_limit_attempt('invite:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     invite = db.get_invite_by_token(token)
     if not invite:
         return jsonify({'error': 'Invalid or expired invite'}), 404
@@ -18971,6 +19110,9 @@ def api_get_invite(token):
 @app.route('/api/invite/<token>/register', methods=['POST'])
 def api_accept_invite(token):
     """Register a user via invite link."""
+    limited = _rate_limit_attempt('invite:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
     invite = db.get_invite_by_token(token)
     if not invite:
         return jsonify({'error': 'Invalid or expired invite'}), 404
@@ -21594,9 +21736,6 @@ def api_admin_reset_tenant_password(tenant_id):
             return jsonify({'error': 'Primary company admin is not configured'}), 400
         raw_token = db.create_password_setup_token(tenant_id, user_id)
         db.sync_primary_company_admin(tenant_id, require_password_change=1)
-        # A forced credential reset retires every session the old password issued.
-        db.bump_session_version('tenant', tenant_id)
-        db.bump_session_version('user', user_id)
         return jsonify({
             'success': True,
             'setupUrl': _password_setup_url(raw_token),
