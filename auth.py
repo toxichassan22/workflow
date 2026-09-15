@@ -377,12 +377,24 @@ def require_admin(f):
         tenant = db.get_tenant_by_id(payload['sub'])
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive'}), 403
+
+        user_row, user_error = _load_token_user(payload)
+        if user_error:
+            return user_error
         if not tenant.get('is_admin'):
+            return jsonify({'error': 'Admin access required'}), 403
+        if payload.get('user_id') and (user_row or {}).get('role') != 'company_admin':
             return jsonify({'error': 'Admin access required'}), 403
 
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = True
+        g.user_id = payload.get('user_id')
+        g.user_name = (user_row or {}).get('name') or payload.get('user_name')
+        g.user_role = (user_row or {}).get('role') or payload.get('user_role')
+        g.user_permissions = {}
+        if g.user_id:
+            g.user_permissions = db.get_user_permissions(g.user_id, g.user_role or 'employee')
         return f(*args, **kwargs)
     return decorated
 

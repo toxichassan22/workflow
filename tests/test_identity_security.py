@@ -343,6 +343,35 @@ class IdentityApiTests(unittest.TestCase):
     def headers(self, token):
         return {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
 
+    def test_platform_user_admin_access_uses_live_account_and_role(self):
+        user_id = db.create_user(
+            self.admin_tenant_id, 'موظف المنصة', 'platform-employee@x.test',
+            'hash', role='employee')
+        token = auth.create_token(
+            self.admin_tenant_id, 'platform-employee@x.test', user_id=user_id,
+            user_name='موظف المنصة', user_role='employee')
+        headers = self.headers(token)
+
+        denied_by_role = self.client.get('/api/admin/tenants', headers=headers)
+        self.assertEqual(denied_by_role.status_code, 403)
+
+        db.update_user(user_id, role='company_admin')
+        allowed = self.client.get('/api/admin/tenants', headers=headers)
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+
+        db.update_user(user_id, is_active=0)
+        denied_when_disabled = self.client.get('/api/admin/tenants', headers=headers)
+        self.assertEqual(denied_when_disabled.status_code, 403)
+
+        db.update_user(user_id, is_active=1)
+        db.delete_user(user_id)
+        denied_when_deleted = self.client.get('/api/admin/tenants', headers=headers)
+        self.assertEqual(denied_when_deleted.status_code, 403)
+
+        direct_admin = self.client.get(
+            '/api/admin/tenants', headers=self.headers(self.admin_token))
+        self.assertEqual(direct_admin.status_code, 200, direct_admin.get_json())
+
     def _employee(self, email='emp@x.test', role='employee'):
         uid = db.create_user(
             self.tenant_id, 'موظف', email, self.application_module.hash_password('secret123'),
