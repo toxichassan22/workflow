@@ -4747,7 +4747,7 @@ def _record_slide_vision_state(available, error='', source='edit'):
         'available': bool(available),
         'error': str(error or '')[:300],
         'source': source,
-        'checkedAt': datetime.now().isoformat(timespec='seconds'),
+        'checkedAt': db._utcnow().isoformat(timespec='seconds'),
     })
 
 
@@ -12368,7 +12368,7 @@ def api_send_section_for_approval():
             entity_type='section_version', entity_id=version['id'],
             section_key=section_key,
             payload={'draft_id': draft['id'], 'version_number': version['version_number']},
-            due_hours=48)
+            due_hours=48, draft_id=draft['id'])
         for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
             try:
                 if not db.get_user_field_sections(approver['id'], g.tenant_id).get(section_key, True):
@@ -12494,7 +12494,8 @@ def api_decide_section_version():
                 entity_type='project_draft', entity_id=draft['id'],
                 section_key=version['section_key'],
                 assignee_id=None if sender.startswith('tenant-admin:') else sender or None,
-                payload={'version_id': version_id, 'note': decided.get('decision_note')})
+                payload={'version_id': version_id, 'note': decided.get('decision_note')},
+                draft_id=draft['id'])
         if sender and sender != str(actor_id):
             message = {'approved': 'اعتُمد قسمك',
                        'returned': 'أُعيد قسمك للتعديل',
@@ -12731,7 +12732,8 @@ def api_request_project_draft_approval():
             db.create_approval_task(
                 g.tenant_id, 'section_approval',
                 f'اعتماد مشروع «{draft.get("title") or "مشروع"}»',
-                entity_type='project_draft', entity_id=resolved_id, due_hours=48)
+                entity_type='project_draft', entity_id=resolved_id, due_hours=48,
+                draft_id=resolved_id)
             for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
                 db.create_notification(
                     g.tenant_id, 'مشروع بانتظار الاعتماد',
@@ -14194,7 +14196,10 @@ def api_export():
         chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', fallback_id)
         if os.path.isdir(chunk_dir) and isinstance(fallback_total, int) and (1 <= fallback_total <= 1024):
             try:
-                parts = [open(os.path.join(chunk_dir, f'{i}.part'), 'rb').read() for i in range(fallback_total)]
+                parts = []
+                for i in range(fallback_total):
+                    with open(os.path.join(chunk_dir, f'{i}.part'), 'rb') as part_fh:
+                        parts.append(part_fh.read())
                 raw = b''.join(parts)
                 if fallback_gzip:
                     import gzip as _gzip
@@ -18725,7 +18730,7 @@ def api_resend_invite(invite_id):
     if invite.get('used_at'):
         return jsonify({'error': 'Invite already used'}), 409
     try:
-        expired = invite.get('expires_at') and datetime.fromisoformat(invite['expires_at']) < datetime.now()
+        expired = invite.get('expires_at') and datetime.fromisoformat(invite['expires_at']) < datetime.now(timezone.utc).replace(tzinfo=None)
     except (TypeError, ValueError):
         expired = False
     if expired:
@@ -23973,7 +23978,7 @@ def deploy_webhook():
             log_fh = None
             try:
                 log_fh = open(deploy_log_path, 'a', encoding='utf-8')
-                log_fh.write(f"\n--- Deployment triggered at {datetime.now().isoformat()} for commit {requested_commit or 'latest'} ---\n")
+                log_fh.write(f"\n--- Deployment triggered at {db._utcnow().isoformat()} for commit {requested_commit or 'latest'} ---\n")
                 log_fh.flush()
             except OSError:
                 log_fh = None
@@ -23982,11 +23987,15 @@ def deploy_webhook():
             if log_fh is not None:
                 popen_kwargs['stdout'] = log_fh
                 popen_kwargs['stderr'] = subprocess.STDOUT
-            
-            subprocess.Popen(command, **popen_kwargs)
+
+            try:
+                subprocess.Popen(command, **popen_kwargs)
+            finally:
+                if log_fh is not None:
+                    log_fh.close()
             return jsonify({'status': 'Deployment triggered successfully',
                             'expected_commit': requested_commit,
-                            'timestamp': datetime.now().isoformat()}), 200
+                            'timestamp': db._utcnow().isoformat()}), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'deploy.sh not found'}), 404
@@ -24029,7 +24038,7 @@ def deploy_webhook_staging():
             log_fh = None
             try:
                 log_fh = open(deploy_log_path, 'a', encoding='utf-8')
-                log_fh.write(f"\n--- Staging deployment triggered at {datetime.now().isoformat()} for commit {requested_commit or 'latest'} ---\n")
+                log_fh.write(f"\n--- Staging deployment triggered at {db._utcnow().isoformat()} for commit {requested_commit or 'latest'} ---\n")
                 log_fh.flush()
             except OSError:
                 log_fh = None
@@ -24039,11 +24048,15 @@ def deploy_webhook_staging():
                 popen_kwargs['stdout'] = log_fh
                 popen_kwargs['stderr'] = subprocess.STDOUT
 
-            subprocess.Popen(command, **popen_kwargs)
+            try:
+                subprocess.Popen(command, **popen_kwargs)
+            finally:
+                if log_fh is not None:
+                    log_fh.close()
             return jsonify({'status': 'Staging deployment triggered successfully',
                             'target': 'staging',
                             'expected_commit': requested_commit,
-                            'timestamp': datetime.now().isoformat()}), 200
+                            'timestamp': db._utcnow().isoformat()}), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'deploy-staging.sh not found'}), 404
@@ -24338,7 +24351,7 @@ def api_create_generation_approval():
     input_snapshot = {
         'draft_hash': db.draft_generation_input_hash(draft.get('draft_data') or {}),
         'section_hashes': {key: meta.get('snapshot_hash') for key, meta in overview.items()},
-        'captured_at': datetime.now().isoformat(),
+        'captured_at': db._utcnow().isoformat(),
         'slides_count': estimate['slides_count'],
         'units': estimate['units'],
         'unit_prices': estimate['unit_prices'],
@@ -24361,7 +24374,7 @@ def api_create_generation_approval():
             entity_type='generation_approval', entity_id=approval['id'],
             payload={'draft_id': draft_id,
                      'estimated_points': approval.get('estimated_points')},
-            due_hours=48)
+            due_hours=48, draft_id=draft_id)
         for approver in db.get_users_with_permission(g.tenant_id, 'approve_generation'):
             db.create_notification(
                 g.tenant_id, 'طلب اعتماد توليد جديد',
@@ -24614,7 +24627,8 @@ def api_request_final_file_approval(presentation_id):
         db.create_approval_task(
             g.tenant_id, 'final_approval', f'اعتماد الملف النهائي «{title}»',
             entity_type='final_file_approval', entity_id=approval['id'],
-            payload={'presentation_id': presentation_id}, due_hours=48)
+            payload={'presentation_id': presentation_id}, due_hours=48,
+            draft_id=(presentation or {}).get('draft_id'))
         for approver in db.get_users_with_permission(g.tenant_id, 'approve_final_file'):
             db.create_notification(
                 g.tenant_id, 'طلب اعتماد ملف نهائي',
@@ -24851,6 +24865,8 @@ def api_list_approval_tasks():
     tasks = db.list_approval_tasks(
         g.tenant_id, status=request.args.get('status') or 'open', kind=request.args.get('kind'),
         assignee_id=None if _omran_is_approver() else g.user_id,
+        draft_id=request.args.get('draftId') or None,
+        section_key=request.args.get('sectionKey') or None,
     )
     return jsonify({'success': True, 'tasks': tasks})
 
@@ -25217,7 +25233,8 @@ def api_create_support_ticket():
         g.tenant_id, 'support',
         f'تذكرة دعم — {row.get("subject")}',
         entity_type='support_ticket', entity_id=row['id'],
-        payload={'priority': row.get('priority'), 'category': row.get('category')})
+        payload={'priority': row.get('priority'), 'category': row.get('category')},
+        draft_id=row.get('draft_id'))
     db.create_notification(
         g.tenant_id, 'تذكرة دعم جديدة',
         body=row.get('subject'), category='support',

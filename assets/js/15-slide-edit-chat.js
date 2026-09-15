@@ -1212,6 +1212,7 @@
       const select = document.getElementById('presentationFontSelect');
       if (!panel || !select) return;
       panel.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(panel);
       select.disabled = true;
       select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
       try {
@@ -1249,7 +1250,10 @@
 
     function closePresentationFontSettings() {
       const panel = document.getElementById('presentationFontSettingsPanel');
-      if (panel) panel.style.display = 'none';
+      if (panel) {
+        panel.style.display = 'none';
+        if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
+      }
     }
 
     // The chosen family is applied to the whole deck: both scripts and every weight. A family that

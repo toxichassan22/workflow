@@ -37,6 +37,14 @@ def close_db(e=None):
         db.close()
 
 
+def _utcnow():
+    """One clock for the whole layer: naive-UTC ISO strings, the same clock the
+    ``datetime('now')`` SQL column defaults already stamp. Python-side writes
+    used to run on the server's local time, so a row could hold two different
+    clocks in neighbouring columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def init_db():
     """Create all tables if they don't exist and seed defaults."""
     try:
@@ -946,7 +954,7 @@ def create_tenant(company_name, email, password_hash, subdomain=None, plan='free
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (tenant_id, company_name, account_manager_name, username, phone, subdomain, email,
          password_hash, plan, credit_balance, 1 if require_password_change else 0,
-         datetime.now().isoformat())
+         _utcnow().isoformat())
     )
     conn.execute(
         'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color, lock_slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -1096,11 +1104,11 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
         normalized_slug = _normalize_slug(slug)
         if not normalized_slug:
             raise ValueError('invalid_slug')
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     trial_ends_at = None
     if trial_days:
         from datetime import timedelta
-        trial_ends_at = (datetime.now() + timedelta(days=int(trial_days))).isoformat()
+        trial_ends_at = (_utcnow() + timedelta(days=int(trial_days))).isoformat()
     profile_columns = [c for c in TENANT_COMPANY_PROFILE_FIELDS if profile.get(c)]
     try:
         columns = ['id', 'company_name', 'account_manager_name', 'username', 'phone',
@@ -1250,7 +1258,7 @@ def update_branding(tenant_id, **fields):
     updates = {k: v for k, v in updates.items() if k in existing_cols}
     if not updates:
         return False
-    updates['updated_at'] = datetime.now().isoformat()
+    updates['updated_at'] = _utcnow().isoformat()
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [tenant_id]
     conn.execute(f'UPDATE tenant_branding SET {set_clause} WHERE tenant_id = ?', values)
@@ -1553,7 +1561,7 @@ def update_sag_font(font_id, **fields):
                 'UPDATE sag_fonts SET is_default = 0 WHERE script = ? AND weight = ?',
                 (current['script'], current['weight']),
             )
-    updates['updated_at'] = datetime.now().isoformat()
+    updates['updated_at'] = _utcnow().isoformat()
     clause = ', '.join(f'{key} = ?' for key in updates)
     get_db().execute(f'UPDATE sag_fonts SET {clause} WHERE id = ?', list(updates.values()) + [font_id])
     get_db().commit()
@@ -1578,7 +1586,7 @@ def get_tenant_font_selection(tenant_id, script, weight):
 
 def set_tenant_font_selection(tenant_id, script, weight, font_id=None, custom_font_path=None, custom_font_data=None):
     selection_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     get_db().execute(
         '''INSERT INTO tenant_font_selections
            (id, tenant_id, script, weight, font_id, custom_font_path, custom_font_data, created_at, updated_at)
@@ -2254,7 +2262,7 @@ def _insert_presentation_revision(conn, state, revision, *, user_id, user_name, 
                                   action, summary, details, previous_id=None, restored_from=None):
     """Transaction-internal append only. Never calls a committing legacy helper."""
     version_id, change_id = str(uuid.uuid4()), str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     details_json = json.dumps(details, ensure_ascii=False)
     slides = _presentation_json(state.get('slides_data'), 'slides_data')
     slide_count = len(slides) if isinstance(slides, list) else int(state.get('slide_count') or 0)
@@ -2424,7 +2432,7 @@ def commit_presentation_revision(tenant_id, presentation_id=None, *,
                 action=record_action, summary=summary, details=lines,
                 previous_id=previous_id, restored_from=restore_version_id)
         # No-op saves may update bookkeeping/status but never mutate a past snapshot.
-        updated_at = datetime.now().isoformat() if changed else current.get('updated_at')
+        updated_at = _utcnow().isoformat() if changed else current.get('updated_at')
         conn.execute('''UPDATE presentations SET title = ?, project_data = ?, slides_data = ?,
             slide_count = ?, draft_id = ?, status = ?, revision = ?, current_revision_id = ?, updated_at = ?
             WHERE id = ? AND tenant_id = ?''',
@@ -2577,7 +2585,7 @@ def update_presentation(pres_id, tenant_id=None, **fields):
         updates['project_data'] = json.dumps(updates['project_data'], ensure_ascii=False)
     if 'slides_data' in updates and updates['slides_data'] and not isinstance(updates['slides_data'], str):
         updates['slides_data'] = json.dumps(updates['slides_data'], ensure_ascii=False)
-    updates['updated_at'] = datetime.now().isoformat()
+    updates['updated_at'] = _utcnow().isoformat()
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [pres_id]
     if tenant_id:
@@ -3066,7 +3074,7 @@ def set_user_permission(user_id, permission_key, granted):
         return False
     conn = get_db()
     perm_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO user_permissions (id, user_id, permission_key, granted, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)
@@ -3111,7 +3119,7 @@ def set_user_field_section(user_id, section_key, granted):
     """Set or override visibility for a field section for a user."""
     conn = get_db()
     section_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO user_field_sections (id, user_id, section_key, granted, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)
@@ -3187,7 +3195,7 @@ def update_custom_section(tenant_id, section_key, **updates):
             vals.append(v)
     if not sets:
         return False
-    vals.append(datetime.now().isoformat())
+    vals.append(_utcnow().isoformat())
     sets.append('updated_at = ?')
     vals.extend([tenant_id, section_key])
     cursor = conn.execute(
@@ -3280,7 +3288,7 @@ def update_team_entity(tenant_id, entity_id, **updates):
     assignments = ', '.join(f'{key} = ?' for key in allowed)
     cursor = conn.execute(
         f'UPDATE tenant_team_entities SET {assignments}, updated_at = ? WHERE tenant_id = ? AND id = ?',
-        (*allowed.values(), datetime.now().isoformat(), tenant_id, entity_id)
+        (*allowed.values(), _utcnow().isoformat(), tenant_id, entity_id)
     )
     conn.commit()
     return cursor.rowcount > 0
@@ -3420,7 +3428,7 @@ def log_change(tenant_id, target_type, target_id, user_id, user_name, action,
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (change_id, tenant_id, target_type, str(target_id), user_id, user_name,
          source if source in CHANGE_SOURCES else 'manual', action, summary,
-         json.dumps(lines, ensure_ascii=False), datetime.now().isoformat(), revision_id, previous_revision_id)
+         json.dumps(lines, ensure_ascii=False), _utcnow().isoformat(), revision_id, previous_revision_id)
     )
     conn.commit()
     return change_id
@@ -3538,7 +3546,7 @@ def record_audit_event(tenant_id, action, entity_type, entity_id,
         raise ValueError('tenant_id, action, entity_type, and entity_id are required for audit events')
     conn = get_db()
     event_id = str(uuid.uuid4())
-    ts = created_at or datetime.now().isoformat()
+    ts = created_at or _utcnow().isoformat()
     old_str = _serialize_audit_value(old_value)
     new_str = _serialize_audit_value(new_value)
     meta_str = _serialize_audit_value(metadata)
@@ -3690,7 +3698,7 @@ def create_invite(tenant_id, email, expiry_days=7, role='employee', name=None,
     invite_id = str(uuid.uuid4())
     token = _secrets.token_urlsafe(32)
     from datetime import timedelta
-    expires = (datetime.now() + timedelta(days=expiry_days)).isoformat()
+    expires = (_utcnow() + timedelta(days=expiry_days)).isoformat()
     clean_role = role if role in USER_ROLES else 'employee'
     sections_json = json.dumps(list(sections), ensure_ascii=False) if sections is not None else None
     projects_json = json.dumps(list(projects), ensure_ascii=False) if projects is not None else None
@@ -3722,7 +3730,7 @@ def mark_invite_email(invite_id, status, error=None):
         '''UPDATE invite_links SET email_status = ?, email_error = ?,
            email_attempts = COALESCE(email_attempts, 0) + 1, email_sent_at = ?
            WHERE id = ?''',
-        (status, str(error or '')[:400] or None, datetime.now().isoformat(), invite_id),
+        (status, str(error or '')[:400] or None, _utcnow().isoformat(), invite_id),
     )
     conn.commit()
 
@@ -3761,12 +3769,12 @@ def create_password_setup_token(tenant_id, user_id, expiry_hours=24):
     raw_token = _secrets.token_urlsafe(32)
     token_hash = _hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
     token_id = str(uuid.uuid4())
-    expires_at = (datetime.now() + timedelta(hours=expiry_hours)).isoformat()
+    expires_at = (_utcnow() + timedelta(hours=expiry_hours)).isoformat()
     conn.execute(
         '''UPDATE password_setup_tokens
            SET used_at = ?
            WHERE tenant_id = ? AND user_id = ? AND used_at IS NULL''',
-        (datetime.now().isoformat(), tenant_id, user_id)
+        (_utcnow().isoformat(), tenant_id, user_id)
     )
     conn.execute(
         '''INSERT INTO password_setup_tokens
@@ -3788,7 +3796,7 @@ def get_password_setup_token(raw_token):
            FROM password_setup_tokens pst
            JOIN tenants t ON t.id = pst.tenant_id
            WHERE pst.token_hash = ? AND pst.used_at IS NULL AND pst.expires_at > ?''',
-        (token_hash, datetime.now().isoformat())
+        (token_hash, _utcnow().isoformat())
     ).fetchone()
     return dict(row) if row else None
 
@@ -3801,11 +3809,11 @@ def complete_password_setup(raw_token, password_hash):
     token = conn.execute(
         '''SELECT * FROM password_setup_tokens
            WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?''',
-        (token_hash, datetime.now().isoformat())
+        (token_hash, _utcnow().isoformat())
     ).fetchone()
     if not token:
         return None
-    used_at = datetime.now().isoformat()
+    used_at = _utcnow().isoformat()
     try:
         conn.execute(
             '''UPDATE users
@@ -3838,7 +3846,7 @@ def get_invite_by_token(token):
     conn = get_db()
     row = conn.execute(
         "SELECT * FROM invite_links WHERE token = ? AND used_at IS NULL AND expires_at > ?",
-        (token, datetime.now().isoformat())
+        (token, _utcnow().isoformat())
     ).fetchone()
     return dict(row) if row else None
 
@@ -3846,7 +3854,7 @@ def get_invite_by_token(token):
 def mark_invite_used(token):
     """Mark an invite as used."""
     conn = get_db()
-    conn.execute('UPDATE invite_links SET used_at = ? WHERE token = ?', (datetime.now().isoformat(), token))
+    conn.execute('UPDATE invite_links SET used_at = ? WHERE token = ?', (_utcnow().isoformat(), token))
     conn.commit()
 
 
@@ -4418,7 +4426,7 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     # Determine the stable draft id before serializing
     draft_id = existing['id'] if existing else (draft_id or str(uuid.uuid4()))
 
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
 
     # Strip client-supplied draftId so it doesn't trigger false data_changed or bloat the row
     save_data = dict(draft_data) if isinstance(draft_data, dict) else {}
@@ -4643,7 +4651,7 @@ def restore_draft_from_snapshot(tenant_id, draft_id, snapshot_data):
            SET title = ?, draft_data = ?, data_bytes = ?,
                revision = COALESCE(revision, 0) + 1, updated_at = ?
            WHERE id = ?''',
-        (title, draft_json, len(draft_json.encode('utf-8')), datetime.now().isoformat(), draft_id)
+        (title, draft_json, len(draft_json.encode('utf-8')), _utcnow().isoformat(), draft_id)
     )
     conn.commit()
     print(f'[DRAFT RESTORE] Draft {draft_id} regained {len(restored)} fields: {sorted(restored)[:12]}')
@@ -4803,7 +4811,7 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
         cursor = conn.execute(
             '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
                WHERE id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',
-            (json.dumps(statuses, ensure_ascii=False), next_status, datetime.now().isoformat(),
+            (json.dumps(statuses, ensure_ascii=False), next_status, _utcnow().isoformat(),
              draft['id'], expected, '' if expected == '{}' else expected)
         )
         if getattr(cursor, 'rowcount', 1) == 0:
@@ -4828,7 +4836,7 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
                         'to_status': 'sections_in_progress',
                         'reason': 'تعديل حالة قسم أبطل حالة الاعتماد القائمة',
                     },
-                    created_at=datetime.now().isoformat(),
+                    created_at=_utcnow().isoformat(),
                 )
             except Exception:
                 pass
@@ -4869,7 +4877,7 @@ def update_draft_section_status_by_id(tenant_id, draft_id, updates):
         cursor = conn.execute(
             '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
                WHERE id = ? AND tenant_id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',
-            (json.dumps(statuses, ensure_ascii=False), next_status, datetime.now().isoformat(),
+            (json.dumps(statuses, ensure_ascii=False), next_status, _utcnow().isoformat(),
              draft['id'], tenant_id, expected, '' if expected == '{}' else expected)
         )
         if getattr(cursor, 'rowcount', 1) == 0:
@@ -4945,7 +4953,7 @@ def _section_version_public(row, include_snapshot=False):
     item['is_expired'] = False
     if item.get('status') == 'approved' and item.get('expires_at'):
         try:
-            item['is_expired'] = datetime.fromisoformat(str(item['expires_at'])) < datetime.now()
+            item['is_expired'] = datetime.fromisoformat(str(item['expires_at'])) < _utcnow()
         except (TypeError, ValueError):
             item['is_expired'] = False
     return item
@@ -4987,7 +4995,7 @@ def create_section_version(tenant_id, draft_id, section_key, snapshot, created_b
     snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
     digest = section_snapshot_hash(snapshot)
     version_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     for _attempt in range(3):
         current = conn.execute(
             'SELECT COALESCE(MAX(version_number), 0) AS top FROM section_versions WHERE draft_id = ? AND section_key = ?',
@@ -5191,13 +5199,13 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
     if decision == 'approved':
         # d05: an approval is valid for a bounded window; after it the section
         # has to be sent and decided again before the file can move forward.
-        expires_at = (datetime.now() + timedelta(
+        expires_at = (_utcnow() + timedelta(
             days=get_section_approval_validity_days(tenant_id))).isoformat()
     conn.execute(
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
            decision_note = ?, decided_at = ?, expires_at = ? WHERE id = ?''',
         (decision, decided_by, decided_by_name, clean_note or None,
-         datetime.now().isoformat(), expires_at, version_id),
+         _utcnow().isoformat(), expires_at, version_id),
     )
     conn.commit()
     updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
@@ -5257,7 +5265,7 @@ def cancel_section_version(tenant_id, version_id, cancelled_by, cancelled_by_nam
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ? WHERE id = ?''',
         ('cancelled', cancelled_by, cancelled_by_name,
-         datetime.now().isoformat(), version_id),
+         _utcnow().isoformat(), version_id),
     )
     conn.commit()
     updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
@@ -5495,7 +5503,7 @@ def request_project_draft_approval(tenant_id, user_id, requested_by, requested_b
            requested_at = ?, reviewed_by = NULL,
            reviewed_by_name = NULL, review_note = NULL, reviewed_at = NULL, updated_at = ?
            WHERE id = ? AND tenant_id = ?''',
-        (requested_by, requested_by_name, datetime.now().isoformat(), datetime.now().isoformat(),
+        (requested_by, requested_by_name, _utcnow().isoformat(), _utcnow().isoformat(),
          draft['id'], tenant_id)
     )
     conn.commit()
@@ -5555,8 +5563,8 @@ def review_project_draft(tenant_id, draft_id, review_status, reviewed_by, review
     conn.execute(
         '''UPDATE project_drafts SET reviewed_by = ?, reviewed_by_name = ?,
            review_note = ?, reviewed_at = ?, updated_at = ? WHERE id = ?''',
-        (reviewed_by, reviewed_by_name, note, datetime.now().isoformat(),
-         datetime.now().isoformat(), draft_id)
+        (reviewed_by, reviewed_by_name, note, _utcnow().isoformat(),
+         _utcnow().isoformat(), draft_id)
     )
     conn.commit()
     return {'success': True, 'draft': res.get('draft')}
@@ -5604,7 +5612,7 @@ def transition_project_draft_status(tenant_id, draft_id, target_status,
         if not reason or not str(reason).strip():
             return {'error': 'reason_required', 'message': 'سبب إعادة العرض للتعديل إلزامي'}
 
-    now_iso = datetime.now().isoformat()
+    now_iso = _utcnow().isoformat()
     conn = get_db()
     conn.execute(
         '''UPDATE project_drafts SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ?''',
@@ -5804,7 +5812,7 @@ AI_COST_SOURCES = ('response', 'generation', 'review')
 
 
 def _ai_usage_now_text():
-    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    return _utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _ai_usage_columns(conn):
@@ -6077,7 +6085,7 @@ def claim_ai_usage_reconcile_row(event_id, delay_seconds=300):
     cols = _ai_usage_columns(conn)
     if {'reconcile_attempts', 'next_retry_at', 'updated_at'} <= cols:
         from datetime import timedelta
-        next_text = (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(delay_seconds or 0)))).strftime('%Y-%m-%d %H:%M:%S')
+        next_text = (_utcnow() + timedelta(seconds=max(1, int(delay_seconds or 0)))).strftime('%Y-%m-%d %H:%M:%S')
         cursor = conn.execute(
             'UPDATE ai_usage_events SET reconcile_attempts = COALESCE(reconcile_attempts, 0) + 1, '
             'next_retry_at = ?, updated_at = ? WHERE id = ? '
@@ -6446,7 +6454,7 @@ def set_maps_discovery_cache(tenant_id, cache_key, payload, ttl_days=30):
     try:
         from datetime import timedelta
         days = max(1, int(ttl_days or 30))
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        expires_at = (_utcnow() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         conn = get_db()
         conn.execute(
             'INSERT INTO maps_discovery_cache (cache_key, tenant_id, payload_json, expires_at) '
@@ -7061,7 +7069,7 @@ def set_tenant_openrouter_key(tenant_id, raw_key, key_label=None, limit_usd=None
     enc = encrypt_tenant_openrouter_key(raw)
     digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
     conn = get_db()
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    now = _utcnow().strftime('%Y-%m-%d %H:%M:%S')
     existing = conn.execute(
         'SELECT id FROM tenant_openrouter_keys WHERE tenant_id = ?', (tenant_id,)
     ).fetchone()
@@ -7131,11 +7139,11 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
         params.append(str(openrouter_key_hash or None))
     if last_limit_remaining is not None or last_usage is not None:
         assignments.append('last_checked_at = ?')
-        params.append(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        params.append(_utcnow().strftime('%Y-%m-%d %H:%M:%S'))
     if not assignments:
         return get_tenant_openrouter_key_meta(tenant_id)
     assignments.append('updated_at = ?')
-    params.append(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    params.append(_utcnow().strftime('%Y-%m-%d %H:%M:%S'))
     params.append(str(tenant_id))
     conn.execute(
         'UPDATE tenant_openrouter_keys SET ' + ', '.join(assignments) + ' WHERE tenant_id = ?',
@@ -7444,7 +7452,7 @@ def set_fx_rate(pair, rate, source='manual'):
         'INSERT INTO fx_rates (pair, rate, source, updated_at) VALUES (?, ?, ?, ?) '
         'ON CONFLICT (pair) DO UPDATE SET rate = excluded.rate, source = excluded.source, '
         "updated_at = datetime('now')",
-        (str(pair), value, source, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        (str(pair), value, source, _utcnow().strftime('%Y-%m-%d %H:%M:%S'))
     )
     conn.commit()
     return get_fx_rate(pair)
@@ -8462,7 +8470,7 @@ def _ensure_platform_columns(conn):
         conn.execute(
             'UPDATE tenants SET activated_at = COALESCE(created_at, ?) '
             'WHERE is_active = 1 AND activated_at IS NULL',
-            (datetime.now().isoformat(),),
+            (_utcnow().isoformat(),),
         )
         conn.commit()
     except Exception as exc:
@@ -8490,6 +8498,23 @@ def _ensure_platform_columns(conn):
             ('entity_type', 'TEXT'), ('entity_id', 'TEXT'),
             ('priority', "TEXT DEFAULT 'normal'"), ('escalated_at', 'TEXT')):
         _add('event_tasks', column, definition)
+
+    # t24: the approver task center filters by project — pin the draft the task
+    # belongs to instead of digging it back out of the payload JSON.
+    _add('approval_tasks', 'draft_id', 'TEXT')
+    try:
+        for row in conn.execute(
+                "SELECT id, payload FROM approval_tasks WHERE draft_id IS NULL").fetchall():
+            try:
+                payload = json.loads(row['payload'] or '{}')
+            except Exception:
+                payload = {}
+            if payload.get('draft_id'):
+                conn.execute('UPDATE approval_tasks SET draft_id = ? WHERE id = ?',
+                             (payload['draft_id'], row['id']))
+        conn.commit()
+    except Exception as exc:
+        print(f'[DB] Migration notice: approval_tasks.draft_id backfill: {exc}')
 
     # t60-04: a purchase request pins the package version it was priced from.
     _add('recharge_requests', 'package_version_id', 'TEXT')
@@ -8590,7 +8615,7 @@ def _json_or(value, fallback):
 def record_login(tenant_id, user_id=None):
     """Stamp last_login_at on the tenant row or the user row after a login."""
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if user_id:
         conn.execute('UPDATE users SET last_login_at = ? WHERE id = ?', (now, user_id))
     else:
@@ -8621,7 +8646,7 @@ def tenant_users_report(tenant_id):
         ).fetchall():
             invite = dict(row)
             try:
-                invite['is_expired'] = bool(invite['expires_at']) and datetime.fromisoformat(invite['expires_at']) < datetime.now()
+                invite['is_expired'] = bool(invite['expires_at']) and datetime.fromisoformat(invite['expires_at']) < _utcnow()
             except (TypeError, ValueError):
                 invite['is_expired'] = False
             invite['is_used'] = bool(invite.get('used_at'))
@@ -8644,7 +8669,7 @@ def tenant_users_report(tenant_id):
 def expire_stale_invites(tenant_id):
     """t21: invites past their expiry can no longer be accepted."""
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     cursor = conn.execute(
         'UPDATE invite_links SET used_at = ? WHERE tenant_id = ? AND used_at IS NULL AND expires_at < ?',
         (now, tenant_id, now),
@@ -8678,7 +8703,7 @@ def upsert_file_type(key, label_ar, kind='document', max_size_mb=25,
     conn = get_db()
     existing = conn.execute('SELECT * FROM file_type_registry WHERE key = ?', (key,)).fetchone()
     extensions_json = json.dumps(list(allowed_extensions or []))
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if existing:
         changed = (
             existing['label_ar'] != label_ar or existing['kind'] != kind
@@ -8892,7 +8917,7 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
     conn.execute(
         '''UPDATE generation_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
-        (decision, decided_by, decided_by_name, datetime.now().isoformat(), str(note or '').strip() or None, approval_id),
+        (decision, decided_by, decided_by_name, _utcnow().isoformat(), str(note or '').strip() or None, approval_id),
     )
     if decision == 'approved' and int(row['estimated_points'] or 0) > 0:
         # One commit covers the decision and the escrow: an approval that
@@ -9030,7 +9055,7 @@ def _hold_points_tx(conn, tenant_id, points, cost_usd, reserved_by=None, reserve
                 'available_usd': get_tenant_balance(tenant_id),
                 'required_usd': cost}
     reservation_id = str(uuid.uuid4())
-    now = datetime.now()
+    now = _utcnow()
     expires = (now + timedelta(hours=RESERVATION_TTL_HOURS)).isoformat()
     conn.execute(
         '''INSERT INTO point_reservations
@@ -9111,7 +9136,7 @@ def _settle_reservation_tx(conn, tenant_id, row, new_status, settled_by=None, no
     settled = conn.execute(
         "UPDATE point_reservations SET status = ?, settled_at = ?, settled_by = ?, note = ? "
         "WHERE id = ? AND status = 'reserved'",
-        (new_status, datetime.now().isoformat(), settled_by,
+        (new_status, _utcnow().isoformat(), settled_by,
          str(note or '').strip() or None, reservation_id),
     )
     if (settled.rowcount or 0) <= 0:
@@ -9244,7 +9269,7 @@ def release_stale_reservations(tenant_id=None):
     paths that touch the wallet (new holds, reservation lists).
     """
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     clauses = ["status = 'reserved'", "expires_at IS NOT NULL", 'expires_at < ?']
     params = [now]
     if tenant_id:
@@ -9490,7 +9515,7 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
     conn.execute(
         '''UPDATE final_file_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
            decided_at = ?, decision_note = ? WHERE id = ?''',
-        (decision, decided_by, decided_by_name, datetime.now().isoformat(),
+        (decision, decided_by, decided_by_name, _utcnow().isoformat(),
          clean_note or None, approval_id),
     )
     if decision == 'approved':
@@ -9626,7 +9651,7 @@ def record_download(tenant_id, file_name, presentation_id=None, draft_id=None, f
 
 def mark_download_downloaded(tenant_id, download_id, downloaded_by_name=None):
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     cursor = conn.execute(
         'UPDATE presentation_downloads SET downloaded_at = ?, downloaded_by_name = ? '
         'WHERE id = ? AND tenant_id = ? AND downloaded_at IS NULL',
@@ -9835,7 +9860,7 @@ def archive_presentation(tenant_id, presentation_id, archived_by, archived_by_na
     ).fetchone()
     if not row:
         return {'error': 'presentation_not_found'}
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         "UPDATE presentations SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
         (now, now, presentation_id),
@@ -9852,7 +9877,7 @@ def restore_presentation(tenant_id, presentation_id):
     ).fetchone()
     if not row:
         return {'error': 'presentation_not_archived'}
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         "UPDATE presentations SET status = 'draft', archived_at = NULL, updated_at = ? WHERE id = ?",
         (now, presentation_id),
@@ -9880,7 +9905,7 @@ def purge_expired_archives(tenant_id=None, retention_days=None):
     and only through this explicit admin-run sweep — never a user action.
     """
     days = int(retention_days or ARCHIVE_RETENTION_DAYS)
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    cutoff = (_utcnow() - timedelta(days=days)).isoformat()
     conn = get_db()
     clauses = ["status = 'archived'", 'archived_at IS NOT NULL', 'archived_at < ?']
     params = [cutoff]
@@ -9915,7 +9940,7 @@ def create_notification(tenant_id, title, body=None, category='general', user_id
         (row_id, tenant_id, user_id, category if category in NOTIFICATION_CATEGORIES else 'general',
          title, body, entity_type, entity_id),
     )
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO notification_deliveries (id, notification_id, tenant_id, channel, status, delivered_at)
            VALUES (?, ?, ?, 'in_app', 'delivered', ?)''',
@@ -9955,7 +9980,7 @@ def list_notifications(tenant_id, user_id=None, unread_only=False, limit=50):
 
 def mark_notifications_read(tenant_id, user_id, notification_ids=None):
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if notification_ids:
         placeholders = ','.join('?' for _ in notification_ids)
         cursor = conn.execute(
@@ -9977,41 +10002,53 @@ APPROVAL_TASK_KINDS = ('section_approval', 'generation_approval', 'final_approva
 
 def create_approval_task(tenant_id, kind, title, entity_type=None, entity_id=None,
                          section_key=None, assignee_id=None, assignee_name=None,
-                         payload=None, due_hours=None):
+                         payload=None, due_hours=None, draft_id=None):
     """t24: a task stays open until the approver or editor resolves it."""
     conn = get_db()
     row_id = str(uuid.uuid4())
     from datetime import timedelta
-    due_at = (datetime.now() + timedelta(hours=int(due_hours or 48))).isoformat() if due_hours else None
+    due_at = (_utcnow() + timedelta(hours=int(due_hours or 48))).isoformat() if due_hours else None
+    if draft_id is None and isinstance(payload, dict):
+        draft_id = payload.get('draft_id')
     conn.execute(
         '''INSERT INTO approval_tasks
-           (id, tenant_id, kind, title, entity_type, entity_id, section_key, assignee_id, assignee_name, payload, due_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           (id, tenant_id, kind, title, entity_type, entity_id, section_key, assignee_id, assignee_name, payload, due_at, draft_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (row_id, tenant_id, kind if kind in APPROVAL_TASK_KINDS else 'general', title,
          entity_type, entity_id, section_key, assignee_id, assignee_name,
-         json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else None, due_at),
+         json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else None, due_at,
+         draft_id),
     )
     conn.commit()
     return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (row_id,)).fetchone())
 
 
-def list_approval_tasks(tenant_id, status='open', kind=None, assignee_id=None, limit=100):
+def list_approval_tasks(tenant_id, status='open', kind=None, assignee_id=None, draft_id=None,
+                        section_key=None, limit=100):
     conn = get_db()
-    query = 'SELECT * FROM approval_tasks WHERE tenant_id = ?'
+    query = ('SELECT t.*, d.title AS project_name FROM approval_tasks t '
+             'LEFT JOIN project_drafts d ON d.id = t.draft_id AND d.tenant_id = t.tenant_id '
+             'WHERE t.tenant_id = ?')
     params = [tenant_id]
     if status and status != 'all':
-        query += ' AND status = ?'
+        query += ' AND t.status = ?'
         params.append(status)
     if kind:
-        query += ' AND kind = ?'
+        query += ' AND t.kind = ?'
         params.append(kind)
     if assignee_id:
-        query += ' AND assignee_id = ?'
+        query += ' AND t.assignee_id = ?'
         params.append(assignee_id)
-    query += ' ORDER BY opened_at DESC LIMIT ?'
+    if draft_id:
+        query += ' AND t.draft_id = ?'
+        params.append(draft_id)
+    if section_key:
+        query += ' AND t.section_key = ?'
+        params.append(section_key)
+    query += ' ORDER BY t.opened_at DESC LIMIT ?'
     params.append(int(limit))
     rows = [dict(row) for row in conn.execute(query, params).fetchall()]
-    now = datetime.now()
+    now = _utcnow()
     for item in rows:
         try:
             item['is_overdue'] = bool(item.get('due_at')) and datetime.fromisoformat(item['due_at']) < now
@@ -10032,7 +10069,7 @@ def close_approval_task(tenant_id, task_id, closed_by_name=None, cancel_reason=N
     cancel_reason = str(cancel_reason or '').strip() or None
     conn.execute(
         'UPDATE approval_tasks SET status = ?, closed_at = ?, closed_by_name = ?, cancel_reason = ? WHERE id = ?',
-        ('cancelled' if cancel_reason else 'done', datetime.now().isoformat(), closed_by_name,
+        ('cancelled' if cancel_reason else 'done', _utcnow().isoformat(), closed_by_name,
          cancel_reason, task_id),
     )
     conn.commit()
@@ -10115,7 +10152,7 @@ def remind_approval_task(tenant_id, task_id):
         return {'error': 'task_not_found'}
     if row['status'] != 'open':
         return {'error': 'task_not_open'}
-    conn.execute('UPDATE approval_tasks SET reminded_at = ? WHERE id = ?', (datetime.now().isoformat(), task_id))
+    conn.execute('UPDATE approval_tasks SET reminded_at = ? WHERE id = ?', (_utcnow().isoformat(), task_id))
     conn.commit()
     if row['assignee_id']:
         create_notification(
@@ -10132,7 +10169,7 @@ def send_due_approval_reminders(tenant_id=None, due_window_hours=12, cooldown_ho
     by email when they have a mailbox."""
     conn = get_db()
     from datetime import timedelta
-    now = datetime.now()
+    now = _utcnow()
     due_limit = (now + timedelta(hours=int(due_window_hours))).isoformat()
     cooldown = (now - timedelta(hours=int(cooldown_hours))).isoformat()
     clauses = [
@@ -10169,7 +10206,7 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
     tenant_id the pass covers every company."""
     conn = get_db()
     from datetime import timedelta
-    threshold = (datetime.now() - timedelta(hours=int(overdue_hours))).isoformat()
+    threshold = (_utcnow() - timedelta(hours=int(overdue_hours))).isoformat()
     clauses = ["status = 'open'", 'escalated_at IS NULL',
                'due_at IS NOT NULL', 'due_at < ?']
     params = [threshold]
@@ -10182,7 +10219,7 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
     ).fetchall()
     escalated = []
     for row in rows:
-        conn.execute('UPDATE approval_tasks SET escalated_at = ? WHERE id = ?', (datetime.now().isoformat(), row['id']))
+        conn.execute('UPDATE approval_tasks SET escalated_at = ? WHERE id = ?', (_utcnow().isoformat(), row['id']))
         escalated.append(row['id'])
     conn.commit()
     for row in rows:
@@ -10208,7 +10245,7 @@ def warn_tickets_approaching_sla(tenant_id=None, window_hours=4):
     (sla_warned_at), reaching the assignee and company admins by email."""
     conn = get_db()
     from datetime import timedelta
-    now = datetime.now()
+    now = _utcnow()
     horizon = (now + timedelta(hours=int(window_hours))).isoformat()
     clauses = [
         "status NOT IN ('resolved', 'closed')", 'sla_warned_at IS NULL',
@@ -10327,11 +10364,11 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
             return {'error': 'platform_tenant_recharge_forbidden'}
     reference = str(reference_number or '').strip()
     if decision == 'approved' and not reference:
-        reference = 'RCH-' + datetime.now().strftime('%Y%m%d') + '-' + request_id[:8].upper()
+        reference = 'RCH-' + _utcnow().strftime('%Y%m%d') + '-' + request_id[:8].upper()
     conn.execute(
         '''UPDATE recharge_requests SET status = ?, reviewed_by = ?, reviewed_by_name = ?,
            reviewed_at = ?, decision_note = ?, reference_number = ? WHERE id = ?''',
-        (decision, reviewed_by, reviewed_by_name, datetime.now().isoformat(),
+        (decision, reviewed_by, reviewed_by_name, _utcnow().isoformat(),
          str(note or '').strip() or None, reference if decision == 'approved' else row['reference_number'],
          request_id),
     )
@@ -10402,7 +10439,7 @@ def create_support_ticket(tenant_id, subject, category='general', priority='norm
     ticket_id = str(uuid.uuid4())
     from datetime import timedelta
     response_hours, resolve_hours = get_sla_for_ticket(tenant_id, priority)
-    now = datetime.now()
+    now = _utcnow()
     sla_due = (now + timedelta(hours=response_hours)).isoformat()
     sla_resolve_due = (now + timedelta(hours=resolve_hours)).isoformat()
     number = conn.execute(
@@ -10439,7 +10476,7 @@ def list_support_tickets(tenant_id, status=None, limit=100):
             'SELECT * FROM support_tickets WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?',
             (tenant_id, int(limit)),
         ).fetchall()
-    now = datetime.now()
+    now = _utcnow()
     result = []
     for row in rows:
         item = dict(row)
@@ -10474,7 +10511,7 @@ def _support_ticket_with_sla(row):
     item = dict(row)
     try:
         item['sla_overdue'] = bool(item.get('sla_due_at')) and item['status'] not in {'resolved', 'closed'} \
-            and datetime.fromisoformat(item['sla_due_at']) < datetime.now()
+            and datetime.fromisoformat(item['sla_due_at']) < _utcnow()
     except (TypeError, ValueError):
         item['sla_overdue'] = False
     return item
@@ -10525,7 +10562,7 @@ def add_support_message(tenant_id, ticket_id, body, author_id=None, author_name=
     ).fetchone()
     if not ticket:
         return {'error': 'ticket_not_found'}
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     message_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO support_ticket_messages (id, ticket_id, tenant_id, author_id, author_name, author_role, body)
@@ -10560,7 +10597,7 @@ def update_support_ticket_status(tenant_id, ticket_id, new_status, actor_name=No
     # 'reopened', which keeps the resolution timestamps and counts the regression.
     if new_status == 'reopened' and row['status'] not in ('waiting_customer', 'resolved', 'closed'):
         return {'error': 'invalid_transition', 'current_status': row['status']}
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     updates = ["status = ?", "updated_at = ?"]
     params = [new_status, now]
     if new_status == 'resolved':
@@ -10600,7 +10637,7 @@ def assign_support_ticket(tenant_id, ticket_id, assignee_id, actor_name=None):
         assignee_name = assignee['name']
     conn.execute(
         'UPDATE support_tickets SET assigned_to = ?, updated_at = ? WHERE id = ?',
-        (assignee_id, datetime.now().isoformat(), ticket_id),
+        (assignee_id, _utcnow().isoformat(), ticket_id),
     )
     conn.commit()
     result = dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
@@ -10621,7 +10658,7 @@ def create_tenant_contract(tenant_id, title, kind='contract', file_id=None, star
         signature_status = 'unsigned'
     conn = get_db()
     row_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO tenant_contracts
            (id, tenant_id, kind, title, file_id, starts_at, expires_at, notes, status,
@@ -10657,7 +10694,7 @@ def add_contract_version(tenant_id, contract_id, file_id=None, signature_status=
     next_version = int(head.get('version') or 0) + 1
     signature_status = signature_status if signature_status in CONTRACT_SIGNATURE_STATUSES \
         else (head.get('signature_status') or 'unsigned')
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO tenant_contract_versions
            (id, contract_id, tenant_id, version, file_id, signature_status,
@@ -10707,7 +10744,7 @@ def list_tenant_contracts(tenant_id, include_expired=True):
         'SELECT * FROM tenant_contracts WHERE tenant_id = ? ORDER BY expires_at IS NULL, expires_at',
         (tenant_id,),
     ).fetchall()
-    now = datetime.now()
+    now = _utcnow()
     result = []
     for row in rows:
         item = dict(row)
@@ -10730,7 +10767,7 @@ def enforce_contract_retention(tenant_id=None):
     admin acts on them, never silently deleted. Returns the sweep counts.
     """
     conn = get_db()
-    now = datetime.now()
+    now = _utcnow()
     scope = 'AND c.tenant_id = ?' if tenant_id else ''
     params = [str(tenant_id)] if tenant_id else []
     expired = conn.execute(
@@ -10794,7 +10831,7 @@ def operational_overview():
         except Exception:
             return {}
 
-    now = datetime.now()
+    now = _utcnow()
     labels = []
     for i in range(11, -1, -1):
         mm = now.month - i
@@ -10938,7 +10975,7 @@ def client_dashboard(tenant_id):
         except Exception:
             return 0
 
-    month_prefix = datetime.now().strftime('%Y-%m')
+    month_prefix = _utcnow().strftime('%Y-%m')
     month_ai = 0.0
     month_maps = 0.0
     try:
@@ -10990,7 +11027,7 @@ def company_admin_dashboard(tenant_id):
     """Company super-admin view: overdue sections, approval speed, spend split."""
     conn = get_db()
     tenant_id = str(tenant_id)
-    now = datetime.now()
+    now = _utcnow()
     from datetime import timedelta
 
     overdue_sections = []
@@ -11389,7 +11426,7 @@ def create_tenant_role(tenant_id, name, base_role, permissions):
         return {'error': 'name_required'}
     clean = {k: bool(v) for k, v in (permissions or {}).items() if k in PERMISSION_KEYS}
     role_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     existing = conn.execute(
         'SELECT id FROM tenant_roles WHERE tenant_id = ? AND name = ?',
         (tenant_id, str(name).strip())
@@ -11435,11 +11472,11 @@ def update_tenant_role(tenant_id, role_id, name=None, permissions=None):
         if not str(name).strip():
             return {'error': 'name_required'}
         conn.execute('UPDATE tenant_roles SET name = ?, updated_at = ? WHERE id = ?',
-                     (str(name).strip(), datetime.now().isoformat(), role_id))
+                     (str(name).strip(), _utcnow().isoformat(), role_id))
     if permissions is not None:
         clean = {k: bool(v) for k, v in permissions.items() if k in PERMISSION_KEYS}
         conn.execute('UPDATE tenant_roles SET permissions_json = ?, updated_at = ? WHERE id = ?',
-                     (json.dumps(clean), datetime.now().isoformat(), role_id))
+                     (json.dumps(clean), _utcnow().isoformat(), role_id))
     conn.commit()
     return get_tenant_role(tenant_id, role_id)
 
@@ -11918,7 +11955,7 @@ def consume_recovery_code(tenant_id, user_id, code):
         return False
     conn.execute(
         'UPDATE mfa_recovery_codes SET used_at = ? WHERE id = ?',
-        (datetime.now().isoformat(), row['id']),
+        (_utcnow().isoformat(), row['id']),
     )
     conn.commit()
     return True
@@ -12005,7 +12042,7 @@ def expire_admin_access_requests():
     conn.execute(
         "UPDATE admin_access_requests SET status = 'expired' "
         "WHERE status = 'approved' AND expires_at IS NOT NULL AND expires_at < ?",
-        (datetime.now().isoformat(),),
+        (_utcnow().isoformat(),),
     )
     conn.commit()
 
@@ -12028,7 +12065,7 @@ def decide_admin_access_request(request_id, tenant_id, decision, decided_by,
     if row['status'] != 'pending':
         return {'error': 'request_not_pending'}
     from datetime import timedelta
-    now = datetime.now()
+    now = _utcnow()
     expires_at = None
     if decision == 'approved':
         grant_hours = max(1, min(int(hours or 24), 72))
@@ -12059,7 +12096,7 @@ def revoke_admin_access_request(request_id, tenant_id, revoked_by_name):
     conn.execute(
         "UPDATE admin_access_requests SET status = 'revoked', decided_at = ?, "
         'decision_note = COALESCE(decision_note, \'\') || ? WHERE id = ?',
-        (datetime.now().isoformat(), f' [revoked by {revoked_by_name}]', request_id),
+        (_utcnow().isoformat(), f' [revoked by {revoked_by_name}]', request_id),
     )
     conn.commit()
     return dict(conn.execute(
@@ -12074,7 +12111,7 @@ def active_admin_access_grant(tenant_id, scope=None, target_id=None):
     """
     conn = get_db()
     expire_admin_access_requests()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     rows = conn.execute(
         "SELECT * FROM admin_access_requests WHERE tenant_id = ? AND status = 'approved' "
         'AND expires_at IS NOT NULL AND expires_at > ? ORDER BY decided_at DESC',
@@ -12094,7 +12131,7 @@ def mark_admin_access_used(grant_id):
     conn.execute(
         '''UPDATE admin_access_requests SET access_count = access_count + 1,
            first_accessed_at = COALESCE(first_accessed_at, ?) WHERE id = ?''',
-        (datetime.now().isoformat(), grant_id),
+        (_utcnow().isoformat(), grant_id),
     )
     conn.commit()
 
@@ -12189,7 +12226,7 @@ def update_event_task_status(tenant_id, task_id, new_status, actor_name=None):
     ).fetchone()
     if not existing:
         return None
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         'UPDATE event_tasks SET status = ?, completed_at = ?, completed_by_name = ? WHERE id = ?',
         (new_status, now if new_status == 'completed' else None, actor_name if new_status == 'completed' else None, task_id)
@@ -12197,7 +12234,7 @@ def update_event_task_status(tenant_id, task_id, new_status, actor_name=None):
     # Recurring tasks reopen themselves with the next due date pushed forward.
     if new_status == 'completed' and existing['recurrence'] and existing['recurrence'] != 'none':
         from datetime import timedelta
-        base = datetime.now()
+        base = _utcnow()
         step = {'daily': timedelta(days=1), 'weekly': timedelta(weeks=1), 'monthly': timedelta(days=30)}[existing['recurrence']]
         conn.execute(
             '''INSERT INTO event_tasks (id, tenant_id, title, description, event_date, due_at,
@@ -12381,7 +12418,7 @@ def set_tenant_active(tenant_id, is_active, actor_id=None, actor_name=None, reas
     if not tenant:
         return {'error': 'tenant_not_found'}
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if is_active:
         checklist = tenant_activation_checklist(tenant)
         if not checklist['complete'] and not tenant.get('activated_at'):
@@ -12476,7 +12513,7 @@ def create_subscription(tenant_id, package_id=None, package_version_id=None,
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (row_id, str(tenant_id), str(package_id) if package_id else None,
          str(package_version_id) if package_version_id else None, status,
-         starts_at or datetime.now().isoformat(), ends_at, trial_ends_at,
+         starts_at or _utcnow().isoformat(), ends_at, trial_ends_at,
          created_by, created_by_name),
     )
     conn.commit()
@@ -12524,7 +12561,7 @@ def current_package_limits(tenant_id):
 
 def _next_invoice_number_tx(conn):
     """Sequential financial document number: INV-<year>-<six digits>."""
-    year = datetime.now().year
+    year = _utcnow().year
     row = conn.execute(
         "SELECT invoice_number FROM topup_receipts WHERE invoice_number LIKE ? "
         "ORDER BY invoice_number DESC LIMIT 1",
@@ -12634,7 +12671,7 @@ def queue_notification_deliveries(notification_id, tenant_id, channels=None, ema
     """
     conn = get_db()
     channels = list(channels or ('in_app',))
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     deliveries = []
     for channel in channels:
         if channel not in NOTIFICATION_CHANNELS:
@@ -12677,7 +12714,7 @@ def record_delivery_attempt(delivery_id, status, error=None):
     if status not in DELIVERY_STATUSES:
         return {'error': 'invalid_status'}
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     sent_at = now if status in ('sent', 'delivered') else None
     conn.execute(
         '''UPDATE notification_deliveries
@@ -12696,7 +12733,7 @@ def record_delivery_attempt(delivery_id, status, error=None):
 def mark_notification_read(notification_id, tenant_id):
     """Stamp read_at on the in-app delivery when the feed marks it read."""
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''UPDATE notification_deliveries SET read_at = ?
            WHERE notification_id = ? AND tenant_id = ? AND channel = 'in_app' AND read_at IS NULL''',
@@ -12778,7 +12815,7 @@ def upsert_sla_policy(priority, first_response_hours, resolve_hours,
         'SELECT id FROM support_sla_policies WHERE COALESCE(package_id, \'\') = ? AND priority = ?',
         (str(package_id or ''), priority),
     ).fetchone()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if existing:
         conn.execute(
             '''UPDATE support_sla_policies SET first_response_hours = ?, resolve_hours = ?,
@@ -12901,7 +12938,7 @@ def update_generation_job(job_id, status=None, progress=None, slides_done=None,
     row = dict(row)
     updates = []
     params = []
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     if status is not None:
         if status not in GENERATION_JOB_STATUSES:
             return {'error': 'invalid_status'}
@@ -12950,7 +12987,7 @@ def sweep_stale_generation_jobs(tenant_id=None, timeout_minutes=None):
     """
     conn = get_db()
     limit = int(timeout_minutes or GENERATION_JOB_TIMEOUT_MINUTES)
-    cutoff = (datetime.now() - timedelta(minutes=limit)).isoformat()
+    cutoff = (_utcnow() - timedelta(minutes=limit)).isoformat()
     clauses = ["status IN ('queued', 'running')",
                "COALESCE(heartbeat_at, started_at, created_at) < ?"]
     params = [cutoff]
@@ -12967,7 +13004,7 @@ def sweep_stale_generation_jobs(tenant_id=None, timeout_minutes=None):
     for job in rows:
         conn.execute(
             "UPDATE generation_jobs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
-            ('job_timeout', datetime.now().isoformat(), job['id']),
+            ('job_timeout', _utcnow().isoformat(), job['id']),
         )
         conn.commit()
         if job['approval_id']:
@@ -13079,7 +13116,7 @@ def enqueue_job(job_type, payload=None, tenant_id=None, priority=100, run_after=
 def claim_due_jobs(worker_id, limit=5, now=None):
     """Atomically mark due queued jobs running for this worker and return them."""
     conn = get_db()
-    now = now or datetime.now().isoformat()
+    now = now or _utcnow().isoformat()
     conn.execute(
         '''UPDATE job_queue SET status = 'running', locked_by = ?, locked_at = ?,
            started_at = COALESCE(started_at, ?), attempts = attempts + 1
@@ -13108,7 +13145,7 @@ def complete_job(job_id, worker_id=None):
     conn.execute(
         "UPDATE job_queue SET status = 'done', finished_at = ?, locked_by = NULL "
         "WHERE id = ? AND status = 'running'",
-        (datetime.now().isoformat(), str(job_id)),
+        (_utcnow().isoformat(), str(job_id)),
     )
     conn.commit()
 
@@ -13119,7 +13156,7 @@ def fail_job(job_id, error=None, retry_delay_seconds=60, worker_id=None):
     row = conn.execute('SELECT * FROM job_queue WHERE id = ?', (str(job_id),)).fetchone()
     if not row:
         return
-    now = datetime.now()
+    now = _utcnow()
     from datetime import timedelta
     error_text = str(error or '')[:2000]
     if int(row['attempts'] or 0) < int(row['max_attempts'] or 1):
@@ -13149,7 +13186,7 @@ def requeue_dead_jobs(job_type=None, limit=100):
         'SELECT id FROM job_queue WHERE ' + ' AND '.join(clauses) + ' LIMIT ?',
         list(params) + [int(limit)],
     ).fetchall()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     for row in rows:
         conn.execute(
             """UPDATE job_queue SET status = 'queued', attempts = 0, run_after = ?,
@@ -13226,7 +13263,7 @@ def mark_email_sent(email_id):
     conn = get_db()
     conn.execute(
         "UPDATE email_outbox SET status = 'sent', sent_at = ? WHERE id = ?",
-        (datetime.now().isoformat(), str(email_id)),
+        (_utcnow().isoformat(), str(email_id)),
     )
     conn.commit()
 
@@ -13236,7 +13273,7 @@ def mark_email_delivery(notification_id, status, error=None):
     if not notification_id:
         return
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         """UPDATE notification_deliveries
            SET status = ?, attempts = attempts + 1, last_attempt_at = ?,
@@ -13444,7 +13481,7 @@ def set_feature_flag(flag_key, enabled, tenant_id=None, actor_id=None, actor_nam
     if not flag_key or not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{1,80}', flag_key):
         return {'error': 'invalid_flag'}
     conn = get_db()
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     existing = conn.execute(
         "SELECT id FROM feature_flags WHERE flag_key = ? AND COALESCE(tenant_id, '') = ?",
         (flag_key, str(tenant_id or '')),
@@ -13622,7 +13659,7 @@ def record_backup(kind='full', path=None, size_bytes=None, sha256=None,
                   encrypted=False, note=None):
     conn = get_db()
     row_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = _utcnow().isoformat()
     conn.execute(
         '''INSERT INTO backup_history
            (id, kind, status, path, size_bytes, sha256, encrypted, note, created_at, completed_at)
@@ -13653,7 +13690,7 @@ def mark_backup_restore_tested(backup_id, note=None):
     conn = get_db()
     conn.execute(
         "UPDATE backup_history SET restore_tested_at = ?, note = COALESCE(?, note) WHERE id = ?",
-        (datetime.now().isoformat(), note, str(backup_id)),
+        (_utcnow().isoformat(), note, str(backup_id)),
     )
     conn.commit()
     row = conn.execute('SELECT * FROM backup_history WHERE id = ?', (str(backup_id),)).fetchone()
@@ -13698,7 +13735,7 @@ def generation_job_metrics():
             metrics['by_status'][r['status']] = int(r['n'] or 0)
         metrics['total'] = sum(metrics['by_status'].values())
         from datetime import timedelta
-        cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+        cutoff = (_utcnow() - timedelta(hours=24)).isoformat()
         metrics['failed_24h'] = int(conn.execute(
             "SELECT COUNT(*) AS n FROM generation_jobs WHERE status = 'failed' AND finished_at >= ?",
             (cutoff,),
@@ -13735,7 +13772,7 @@ def platform_alerts():
     """Computed alert list: SLA breaches, failures, overdue backups (t54)."""
     conn = get_db()
     alerts = []
-    now = datetime.now()
+    now = _utcnow()
     from datetime import timedelta
 
     def _overdue(table, column, status_clause):

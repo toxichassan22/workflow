@@ -736,4 +736,74 @@
         return WFT('lifecycle.' + s, meta.label);
       }
       return meta.label;
-    }
+    }
+
+    // ── Accessibility (t63): shared modal behaviour ──────────────────────
+    // Any overlay carrying data-a11y-modal gets Escape-to-close, a Tab focus
+    // trap, and focus restoration. Openers call a11yModalDidOpen(modal) so the
+    // first field is focused and the previously focused element is remembered.
+    const A11Y_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), ' +
+      'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    let a11yPreviousFocus = null;
+
+    function a11yVisibleModal() {
+      let top = null;
+      document.querySelectorAll('[data-a11y-modal]').forEach(el => {
+        if (window.getComputedStyle(el).display !== 'none') top = el;
+      });
+      return top;
+    }
+
+    function a11yModalDidOpen(modal) {
+      if (!modal) return;
+      a11yPreviousFocus = document.activeElement;
+      const first = modal.querySelector(A11Y_FOCUSABLE);
+      if (first) {
+        try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); }
+      }
+    }
+
+    function a11yModalDidClose() {
+      const back = a11yPreviousFocus;
+      a11yPreviousFocus = null;
+      if (back && document.contains(back)) {
+        try { back.focus({ preventScroll: true }); } catch (e) {}
+      }
+    }
+
+    document.addEventListener('keydown', function (event) {
+      const modal = a11yVisibleModal();
+      if (event.key === 'Escape' && modal) {
+        modal.style.display = 'none';
+        a11yModalDidClose();
+        return;
+      }
+      if (event.key === 'Tab' && modal) {
+        const focusables = Array.prototype.slice.call(modal.querySelectorAll(A11Y_FOCUSABLE));
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (!modal.contains(document.activeElement)) {
+          event.preventDefault();
+          first.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      // Elements opted into button behaviour activate on Enter/Space like a
+      // native button; real <button>/<a> keep their own handling, so a nested
+      // control inside a clickable card still fires its own action.
+      if ((event.key === 'Enter' || event.key === ' ') && event.target && event.target.closest) {
+        if (event.target.closest('button, a[href], input, select, textarea, [contenteditable]')) return;
+        const pseudo = event.target.closest('[role="button"]');
+        if (pseudo && pseudo.tagName !== 'BUTTON' && pseudo.tagName !== 'A') {
+          event.preventDefault();
+          pseudo.click();
+        }
+      }
+    });

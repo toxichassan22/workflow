@@ -24,12 +24,16 @@
         m.style.display = 'flex';
         const err = m.querySelector('[id$="Error"]');
         if (err) err.textContent = '';
+        if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(m);
       }
     }
 
     function closeOmModal(id) {
       const m = document.getElementById(id);
-      if (m) m.style.display = 'none';
+      if (m) {
+        m.style.display = 'none';
+        if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
+      }
     }
 
     function showOmranOpsTab(tabKey) {
@@ -87,7 +91,40 @@
       const openCount = omAllTasks.filter(t => t.status === 'open').length;
       const stat = document.getElementById('omStatTasks');
       if (stat) stat.textContent = openCount;
+      omPopulateTaskFilters();
       omRenderTasks();
+    }
+
+    // t24: project and section filter options follow whatever the loaded
+    // tasks actually reference — the list stays honest even mid-review.
+    function omPopulateTaskFilters() {
+      const projectSelect = document.getElementById('omTasksProjectFilter');
+      const sectionSelect = document.getElementById('omTasksSectionFilter');
+      if (projectSelect) {
+        const previous = projectSelect.value;
+        const projects = {};
+        omAllTasks.forEach(t => {
+          if (t.draft_id) projects[t.draft_id] = t.project_name || t.draft_id;
+        });
+        projectSelect.innerHTML = '<option value="">كل المشاريع</option>' +
+          Object.keys(projects).sort((a, b) => String(projects[a]).localeCompare(String(projects[b])))
+            .map(id => '<option value="' + omEscape(id) + '">' + omEscape(projects[id]) + '</option>').join('');
+        projectSelect.value = projects[previous] ? previous : '';
+      }
+      if (sectionSelect) {
+        const previous = sectionSelect.value;
+        const sections = {};
+        omAllTasks.forEach(t => {
+          if (t.section_key) {
+            sections[t.section_key] = (typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined'
+              && PROJECT_SECTION_PRESENTATION_TITLES[t.section_key]) || t.section_key;
+          }
+        });
+        sectionSelect.innerHTML = '<option value="">كل الأقسام</option>' +
+          Object.keys(sections).sort((a, b) => String(sections[a]).localeCompare(String(sections[b])))
+            .map(key => '<option value="' + omEscape(key) + '">' + omEscape(sections[key]) + '</option>').join('');
+        sectionSelect.value = sections[previous] ? previous : '';
+      }
     }
 
     function omRenderTasks() {
@@ -96,12 +133,16 @@
       const kindFilter = (document.getElementById('omTasksKindFilter') || {}).value || '';
       const prioFilter = (document.getElementById('omTasksPriorityFilter') || {}).value || '';
       const statusFilter = (document.getElementById('omTasksStatusFilter') || {}).value || 'open';
+      const projectFilter = (document.getElementById('omTasksProjectFilter') || {}).value || '';
+      const sectionFilter = (document.getElementById('omTasksSectionFilter') || {}).value || '';
       const filtered = omAllTasks.filter(t => {
         const kind = t._kind === 'approval' ? (t.kind || 'approval') : 'manual';
         if (kindFilter && kind !== kindFilter) return false;
         if (prioFilter && (t.priority || 'normal') !== prioFilter) return false;
         if (statusFilter === 'open' && t.status !== 'open') return false;
         if (statusFilter === 'done' && ['done', 'completed', 'cancelled'].indexOf(t.status) === -1) return false;
+        if (projectFilter && String(t.draft_id || '') !== projectFilter) return false;
+        if (sectionFilter && String(t.section_key || '') !== sectionFilter) return false;
         return true;
       });
       if (!filtered.length) {
@@ -126,6 +167,7 @@
           : '';
         const kind = t._kind === 'approval'
           ? ' | <span style="color:#8a5a00;">' + omEscape(kindLabel[t.kind] || 'اعتماد') + '</span>' : '';
+        const project = t.project_name ? ' | <span>المشروع:</span> ' + omEscape(t.project_name) : '';
         const assignee = t.assignee_name ? ' | <span>المكلف:</span> ' + omEscape(t.assignee_name) : '';
         const escalated = t.escalated_at ? ' | <span style="color:#c33;font-weight:700">مصعّدة</span>' : '';
         const overdue = t.is_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '';
@@ -139,7 +181,7 @@
             : '<button class="btn ghost" onclick="omCompleteTask(\'' + t.id + '\')">إتمام</button>')
           : '';
         return '<div class="tenant-presentation-card"><div><h3>' + omEscape(t.title) + '</h3>' +
-          '<div class="meta"><span>' + omStatus(t.status) + '</span>' + kind +
+          '<div class="meta"><span>' + omStatus(t.status) + '</span>' + kind + project +
           (due ? ' | <span>الاستحقاق:</span> ' + omEscape(due) : '') + recurring + prio + assignee + escalated + overdue + '</div></div>' +
           '<div style="display:flex;gap:6px">' + remindBtn + action + '</div></div>';
       }).join('');
@@ -234,10 +276,9 @@
       }
       box.innerHTML = tickets.map(t => {
         const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
-        const sla = t.sla_due_at ? (' | <span>استحقاق SLA:</span> ' + omEscape(t.sla_due_at.slice(0, 16).replace('T', ' '))) : '';
-        return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="omOpenTicket(\'' + t.id + '\')">' +
+        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="omOpenTicket(\'' + t.id + '\')">' +
           '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
-          '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla + '</div></div></div>';
+          '<div class="meta"><span>' + omStatus(t.status) + '</span> | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span></div></div></div>';
       }).join('');
     }
 
@@ -634,27 +675,19 @@
       }
       const tickets = data.tickets || [];
       const openCount = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length;
-      const overdueCount = tickets.filter(t => t.sla_overdue).length;
       const openEl = document.getElementById('adminStatTicketsOpen');
-      const overdueEl = document.getElementById('adminStatTicketsOverdue');
       if (openEl) openEl.textContent = openCount;
-      if (overdueEl) overdueEl.textContent = overdueCount;
       if (!tickets.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
         return;
       }
       const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
       box.innerHTML = tickets.map(t => {
-        const sla = t.sla_due_at
-          ? (' | <span' + (t.sla_overdue ? ' style="color:#c33;font-weight:700"' : '') + '>استحقاق SLA:</span> ' +
-             omEscape(t.sla_due_at.slice(0, 16).replace('T', ' ')))
-          : '';
-        return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="adminOpenTicket(\'' + t.id + '\')">' +
+        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="adminOpenTicket(\'' + t.id + '\')">' +
           '<div><h3>#' + omEscape(t.number) + ' ' + omEscape(t.subject) + '</h3>' +
           '<div class="meta"><span style="font-weight:700">' + omEscape(t.tenant_name || 'شركة') + '</span>' +
           ' | <span>' + omStatus(t.status) + '</span>' +
-          ' | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' + sla +
-          (t.sla_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '') +
+          ' | <span>الأولوية:</span> <span>' + omEscape(priorityLabels[t.priority] || t.priority) + '</span>' +
           '</div></div></div>';
       }).join('');
     }
@@ -740,7 +773,7 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([omLoadFileTypes(), adminLoadSlaPolicies(), adminLoadFeatureFlags(), adminLoadPackages()]);
+      await Promise.all([omLoadFileTypes(), adminLoadFeatureFlags(), adminLoadPackages()]);
     }
 
     // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──
@@ -755,8 +788,8 @@
       }
       box.innerHTML = packages.map(p =>
         '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(p.name) + '</h3>' +
-        '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' ريال' : 'بلا سعر') + '</span>' +
-        ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' دولار رصيد</span>' +
+        '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
+        ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' <span>دولار رصيد</span></span>' +
         ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
         '<div class="tenant-actions"><button type="button" class="btn small ' + (p.is_active ? 'danger' : 'green') +
         '" onclick="adminTogglePackage(\'' + omEscape(p.id) + '\', ' + (p.is_active ? 0 : 1) + ')">' +
@@ -782,46 +815,6 @@
       const res = await api('PUT', '/api/admin/packages/' + packageId, { isActive: !!active }).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الباقة'); return; }
       await adminLoadPackages();
-    }
-
-    // ── SLA policies (d08): response/resolve targets per priority ──
-    async function adminLoadSlaPolicies() {
-      const box = document.getElementById('adminSlaPoliciesList');
-      if (!box) return;
-      const data = await api('GET', '/api/admin/support/sla-policies').catch(() => null);
-      const policies = (data && data.success && data.policies) ? data.policies : [];
-      const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
-      if (!policies.length) {
-        box.innerHTML = '<p class="tenant-hint">الأهداف الافتراضية مطبقة: حرجة ٤/٢٤، عاجلة ٨/٤٨، عادية ٢٤/٧٢، منخفضة ٤٨/١٢٠ ساعة.</p>';
-        return;
-      }
-      box.innerHTML =
-        '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">' +
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
-        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
-        '<th style="padding:10px 8px;">الأولوية</th><th style="padding:10px 8px;">الباقة</th>' +
-        '<th style="padding:10px 8px;">أول استجابة</th><th style="padding:10px 8px;">الحل</th>' +
-        '</tr></thead><tbody>' +
-        policies.map(p =>
-          '<tr style="border-bottom:1px solid #e2e8f0;">' +
-          '<td style="padding:10px 8px;font-weight:600;">' + omEscape(priorityLabels[p.priority] || p.priority) + '</td>' +
-          '<td style="padding:10px 8px;">' + omEscape(p.package_name || 'الكل') + '</td>' +
-          '<td style="padding:10px 8px;">' + (p.first_response_hours || 0) + ' <span>ساعة</span></td>' +
-          '<td style="padding:10px 8px;">' + (p.resolve_hours || 0) + ' <span>ساعة</span></td></tr>'
-        ).join('') +
-        '</tbody></table></div>';
-    }
-
-    async function adminSaveSlaPolicy(event) {
-      event.preventDefault();
-      const res = await api('PUT', '/api/admin/support/sla-policies', {
-        priority: document.getElementById('adminSlaPriority').value,
-        firstResponseHours: Number(document.getElementById('adminSlaFirstResponse').value),
-        resolveHours: Number(document.getElementById('adminSlaResolve').value)
-      }).catch(e => e);
-      if (!res || !res.success) { toast((res && res.error) || WFT('sla.save_failed', 'تعذر حفظ الهدف')); return; }
-      toast(WFT('sla.saved', 'تم حفظ هدف الاستجابة'));
-      await adminLoadSlaPolicies();
     }
 
     // ── Feature flags (t62): platform-wide switches with rollback history ──

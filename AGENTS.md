@@ -1283,3 +1283,21 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
 5. **Tracking files stay local-only.** `tasks/task.html`, `tasks/Omran_AI_System_Analysis_AR.pdf`
    and every `tasks/<task>/...html` breakdown are owner trackers like the root `task.html` rule
    above: never commit them and never push them to any branch, even as part of another change.
+
+## Housekeeping, clocks and Postgres parity
+
+- `_run_housekeeping_tick()` (outbox drain, approval reminders/escalations, SLA
+  warnings, stale reservation/job sweeps) runs on an in-process daemon thread
+  started on the first request (`HOUSEKEEPING_INTERVAL_SECONDS`, default 300s;
+  `HOUSEKEEPING_DISABLED=1` turns it off). Under Passenger/cPanel the app process
+  can idle-die, so production should also schedule
+  `POST /api/admin/housekeeping/run` (super-admin token) via cron or an external
+  scheduler.
+- All Python-side timestamps are **UTC-naive** via `db._utcnow()`, matching the
+  SQL `datetime('now')` defaults, so stored strings compare cleanly on both
+  SQLite and Postgres. Never reintroduce `datetime.now()` (server-local) or
+  `datetime.utcnow()`; use `db._utcnow()` / `datetime.now(timezone.utc)
+  .replace(tzinfo=None)` and keep `fromisoformat` comparisons naive.
+- `tests/test_postgres_parity.py` only executes when `TEST_DATABASE_URL` points
+  at a reachable disposable Postgres DSN; without it the suite skips. Run it
+  before claiming Postgres parity for a change.

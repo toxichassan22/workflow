@@ -572,7 +572,7 @@
         const textColor = isActive ? '#0369a1' : 'var(--txt)';
         const count = (s.messages || []).filter(m => m.role === 'user').length;
         return `
-          <div onclick="selectChatSession('training', '${s.id}')" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
+          <div onclick="selectChatSession('training', '${s.id}')" role="button" tabindex="0" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
             <div style="overflow:hidden;flex:1;">
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
@@ -600,7 +600,7 @@
         const textColor = isActive ? '#0369a1' : 'var(--txt)';
         const count = (s.messages || []).filter(m => m.role === 'user').length;
         return `
-          <div onclick="selectChatSession('ai_rules', '${s.id}')" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
+          <div onclick="selectChatSession('ai_rules', '${s.id}')" role="button" tabindex="0" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
             <div style="overflow:hidden;flex:1;">
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
@@ -942,10 +942,12 @@
       form.style.display = 'block';
       toggleSagCompanyPassword();
       modal.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
     }
 
     function closeSagCompanyCreate() {
       document.getElementById('sagCompanyCreateModal').style.display = 'none';
+      if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
     }
 
     function toggleSagCompanyPassword() {
@@ -1105,7 +1107,7 @@
       const statsEl = document.getElementById('sagAdminStats');
       const pendingEl = document.getElementById('sagPendingActions');
       if (statsEl) statsEl.innerHTML = '';
-      if (pendingEl) showInlineLoader(pendingEl, 'جاري التحميل...');
+      if (pendingEl) showInlineLoader(pendingEl, WFT('common.loading', 'جاري التحميل...'));
       const [overviewData, tenantsData] = await Promise.all([
         api('GET', '/api/admin/operational-overview').catch(() => null),
         api('GET', '/api/admin/tenants').catch(() => null)
@@ -1229,34 +1231,6 @@
       return svg + '</svg>';
     }
 
-    function sagBarChart(labels, series) {
-      const W = 660, H = 240, padL = 40, padR = 10, padT = 16, padB = 28;
-      const innerW = W - padL - padR, innerH = H - padT - padB;
-      const maxV = Math.max(0.01, ...series.flatMap(s => s.values));
-      const sc = sagNiceScale(maxV), top = sc.top;
-      const n = labels.length, groupW = innerW / n, barW = Math.min(16, (groupW - 10) / series.length);
-      const y = v => padT + innerH - (v / top) * innerH;
-      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
-      for (let g = 0; g <= 3; g++) {
-        const gv = sc.step * g, gy = y(gv);
-        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
-          '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
-      }
-      labels.forEach((lb, i) => {
-        if (n > 8 && i % 2 === 1) return;
-        const cx = padL + i * groupW + groupW / 2;
-        svg += '<text x="' + cx + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
-        series.forEach((s, si) => {
-          const v = s.values[i] || 0;
-          const bx = cx - (series.length * barW + (series.length - 1) * 3) / 2 + si * (barW + 3);
-          const bh = Math.max(v > 0 ? 2 : 0, innerH * v / top);
-          svg += '<rect x="' + bx.toFixed(1) + '" y="' + (padT + innerH - bh).toFixed(1) + '" width="' + barW + '" height="' + bh.toFixed(1) + '" rx="3" fill="' + s.color + '">' +
-            '<title>' + s.name + ': ' + sagFmtNum(v) + ' — ' + sagMonthLabel(lb) + '</title></rect>';
-        });
-      });
-      return svg + '</svg>';
-    }
-
     function sagDonut(segments, centerLabel) {
       const r = 56, C = 2 * Math.PI * r, size = 150;
       const total = segments.reduce((a, s) => a + (s.value || 0), 0);
@@ -1290,8 +1264,6 @@
       const statsEl = document.getElementById('sagAdminStats');
       const pendingEl = document.getElementById('sagPendingActions');
       const tenants = overview.tenants || {};
-      const users = overview.users || {};
-      const presentations = overview.presentations || {};
       const workflows = overview.workflows || {};
       const trends = overview.trends || {};
       const deltas = overview.deltas || {};
@@ -1303,8 +1275,6 @@
       if (statsEl) {
         const kpis = [
           { label: WFT('admin.kpi_companies', 'إجمالي الشركات'), value: sagFmtNum(tenants.companies != null ? tenants.companies : tenants.total || sagAllTenants.filter(t => !t.isAdmin).length), sub: WFT('admin.kpi_active', '{n} نشطة', { n: sagFmtNum(tenants.active_companies != null ? tenants.active_companies : tenants.active || 0) }), delta: deltas.companies, spark: trends.companies, color: 'var(--chart-1)' },
-          { label: WFT('admin.kpi_users', 'المستخدمون النشطون'), value: sagFmtNum(users.active || 0), sub: WFT('admin.kpi_users_total', 'من أصل {n}', { n: sagFmtNum(users.total || 0) }), delta: deltas.users, spark: trends.users, color: 'var(--chart-2)' },
-          { label: WFT('admin.kpi_presentations', 'العروض المولدة'), value: sagFmtNum(presentations.total || 0), sub: WFT('admin.kpi_approved', '{n} معتمد', { n: sagFmtNum(presentations.approved || 0) }), delta: deltas.presentations, spark: trends.presentations, color: 'var(--chart-4)' },
           { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoney(spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
           { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoney(revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue, color: 'var(--chart-5)' },
         ];
@@ -1326,16 +1296,6 @@
         ];
         activityEl.innerHTML = sagLineChart(labels, series);
         sagLegend(document.getElementById('sagActivityLegend'), series);
-      }
-
-      const spendEl = document.getElementById('sagSpendChart');
-      if (spendEl && labels.length) {
-        const series = [
-          { name: WFT('admin.legend_ai', 'ذكاء اصطناعي'), values: trends.ai_spend || [], color: 'var(--chart-3)' },
-          { name: WFT('admin.legend_maps', 'خرائط'), values: trends.maps_spend || [], color: 'var(--chart-4)' },
-        ];
-        spendEl.innerHTML = sagBarChart(labels, series);
-        sagLegend(document.getElementById('sagSpendLegend'), series);
       }
 
       const donutEl = document.getElementById('sagPlanDonut');
@@ -1386,60 +1346,51 @@
       }
 
       renderSagOpsAlerts(overview.alerts || []);
-      renderSagOpsMetrics(overview);
       renderSagReportsPanel();
     }
+
+    // Alert text follows the UI language: the backend sends a stable `kind`
+    // plus an Arabic message, so the label resolves through WFT and re-renders
+    // on the wf:lang pass like every other dashboard string.
+    const SAG_ALERT_LABELS = {
+      recharge_sla: ['admin.alert_recharge_sla', 'طلبات شحن تجاوزت مهلة المراجعة ٢٤ ساعة'],
+      generation_failures: ['admin.alert_generation_failures', 'مهام توليد فاشلة خلال ٢٤ ساعة'],
+      dead_jobs: ['admin.alert_dead_jobs', 'مهام خلفية استنفدت محاولاتها'],
+      zero_balance: ['admin.alert_zero_balance', 'شركات نشطة برصيد صفري'],
+      backup_overdue: ['admin.alert_backup_overdue', 'لا توجد نسخة احتياطية ناجحة ضمن هدف الاسترداد'],
+      contract_expiry: ['admin.alert_contract_expiry', 'عقود تنتهي خلال ٣٠ يومًا'],
+      retention_due: ['admin.alert_retention_due', 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'],
+    };
 
     function renderSagOpsAlerts(alerts) {
       const el = document.getElementById('sagOpsAlerts');
       if (!el) return;
       if (!alerts.length) { el.innerHTML = ''; return; }
       const colors = { critical: '#c33', warning: '#b45309', info: 'var(--p)' };
-      el.innerHTML = alerts.map(a =>
-        '<div class="tenant-presentation-card" style="border-right:4px solid ' + (colors[a.severity] || 'var(--p)') + '">' +
-        '<div><h3>' + escapeHtml(a.message_ar || a.kind) + '</h3>' +
-        '<div class="meta"><span>' + sagFmtNum(a.count || 0) + '</span></div></div></div>'
-      ).join('');
-    }
-
-    function renderSagOpsMetrics(overview) {
-      const el = document.getElementById('sagOpsMetrics');
-      if (!el) return;
-      const gen = overview.generation || {};
-      const queue = overview.queue || {};
-      const email = overview.email || {};
-      const storage = overview.storage || {};
-      const backup = overview.backup || {};
-      const latest = backup.latest || null;
-      const storageMb = Math.round((storage.total_bytes || 0) / (1024 * 1024) * 10) / 10;
-      const cards = [
-        { label: 'مهام التوليد', value: sagFmtNum(gen.total || 0), sub: 'نسبة النجاح ' + (gen.success_rate != null ? gen.success_rate + '%' : '—') },
-        { label: 'فشل خلال ٢٤ ساعة', value: sagFmtNum(gen.failed_24h || 0), sub: 'متوسط المدة ' + (gen.avg_duration_seconds != null ? gen.avg_duration_seconds + ' ث' : '—') },
-        { label: 'طابور الخلفية', value: sagFmtNum(queue.queued || 0), sub: 'ميتة ' + sagFmtNum(queue.dead || 0) },
-        { label: 'البريد الصادر', value: sagFmtNum(email.queued || 0), sub: 'فاشل ' + sagFmtNum(email.failed || 0) },
-        { label: 'التخزين الكلي', value: sagFmtNum(storageMb) + ' MB', sub: sagFmtNum((storage.per_tenant || []).length) + ' شركة' },
-        { label: 'آخر نسخة احتياطية', value: latest ? String(latest.created_at || '').slice(0, 10) : '—', sub: 'هدف RPO ' + sagFmtNum(backup.rpo_hours || 24) + ' ساعة' },
-      ];
-      el.innerHTML = cards.map(c =>
-        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + c.label + '</h3>' +
-        '<div class="meta"><strong style="font-size:16px">' + c.value + '</strong> <span>' + c.sub + '</span></div></div></div>'
-      ).join('');
+      el.innerHTML = alerts.map(a => {
+        const known = SAG_ALERT_LABELS[a.kind];
+        const text = known ? WFT(known[0], known[1]) : (a.message_ar || a.kind);
+        return '<div class="tenant-presentation-card" style="border-right:4px solid ' + (colors[a.severity] || 'var(--p)') + '">' +
+          '<div><h3>' + escapeHtml(text) + '</h3>' +
+          '<div class="meta"><span>' + sagFmtNum(a.count || 0) + '</span></div></div></div>';
+      }).join('');
     }
 
     function renderSagReportsPanel() {
       const el = document.getElementById('sagReportsPanel');
       if (!el) return;
       const reports = [
-        { key: 'ledger', label: 'حركات الرصيد' },
-        { key: 'approvals', label: 'قرارات الاعتماد' },
-        { key: 'downloads', label: 'مكتبة التنزيلات' },
-        { key: 'tickets', label: 'تذاكر الدعم' },
-        { key: 'user-activity', label: 'نشاط المستخدمين' },
-        { key: 'files', label: 'سجل الملفات' },
+        { key: 'ledger', label: WFT('admin.report_ledger', 'حركات الرصيد') },
+        { key: 'approvals', label: WFT('admin.report_approvals', 'قرارات الاعتماد') },
+        { key: 'downloads', label: WFT('admin.report_downloads', 'مكتبة التنزيلات') },
+        { key: 'tickets', label: WFT('admin.report_tickets', 'تذاكر الدعم') },
+        { key: 'user-activity', label: WFT('admin.report_user_activity', 'نشاط المستخدمين') },
+        { key: 'files', label: WFT('admin.report_files', 'سجل الملفات') },
       ];
       el.innerHTML = reports.map(r =>
         '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + r.label + '</h3></div>' +
-        '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">تنزيل CSV</button></div></div>'
+        '<div><button type="button" class="btn small primary" onclick="sagDownloadReport(\'' + r.key + '\')">' +
+        WFT('reports.download_csv', 'تنزيل CSV') + '</button></div></div>'
       ).join('');
     }
 
@@ -1858,10 +1809,10 @@
       const modal = document.getElementById('sagTenantModal');
       modal.style.display = 'flex';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div class="sag-modal-card">' +
+      modal.innerHTML = '<div class="sag-modal-card" role="dialog" aria-modal="true" aria-labelledby="sagTenantModalTitle">' +
         '<div class="sag-modal-head">' +
-        '<h2>' + escapeHtml(t.companyName) + '</h2>' +
-        '<button class="btn ghost" onclick="document.getElementById(\'sagTenantModal\').style.display=\'none\'">إغلاق</button></div>' +
+        '<h2 id="sagTenantModalTitle">' + escapeHtml(t.companyName) + '</h2>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'sagTenantModal\').style.display=\'none\';if(typeof a11yModalDidClose===\'function\')a11yModalDidClose()">إغلاق</button></div>' +
         '<div class="tenant-dashboard-cards" style="margin-bottom:14px">' +
         '<div class="tenant-dash-card stat"><h3>' + c.users + '</h3><p>مستخدمون</p></div>' +
         '<div class="tenant-dash-card stat"><h3>' + c.projects + '</h3><p>دراسات</p></div>' +
@@ -1880,24 +1831,24 @@
         '</div>' +
         '<div id="sagTenantTabCompany">' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label>اسم الشركة</label><input id="sagDetailCompanyName" value="' + escapeHtml(t.companyName || '') + '" required></div>' +
-        '<div class="tenant-field"><label>اسم مدير الحساب</label><input id="sagDetailManagerName" value="' + escapeHtml(t.accountManagerName || '') + '" required></div>' +
-        '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagDetailEmail" value="' + escapeHtml(t.email || '') + '" required></div>' +
-        '<div class="tenant-field"><label>رقم الجوال</label><input id="sagDetailPhone" value="' + escapeHtml(t.phone || '') + '" required></div>' +
-        '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagDetailUsername" value="' + escapeHtml(t.username || '') + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailCompanyName">اسم الشركة</label><input id="sagDetailCompanyName" value="' + escapeHtml(t.companyName || '') + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailManagerName">اسم مدير الحساب</label><input id="sagDetailManagerName" value="' + escapeHtml(t.accountManagerName || '') + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailEmail">البريد الإلكتروني</label><input type="email" id="sagDetailEmail" value="' + escapeHtml(t.email || '') + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailPhone">رقم الجوال</label><input id="sagDetailPhone" value="' + escapeHtml(t.phone || '') + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailUsername">اسم المستخدم</label><input id="sagDetailUsername" value="' + escapeHtml(t.username || '') + '" required></div>' +
         '<div class="tenant-field"><label>تاريخ إنشاء الحساب</label><p style="margin:0">' + escapeHtml(t.createdAt || '') + '</p></div>' +
-        '<div class="tenant-field"><label>رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
-        '<div class="tenant-field"><label>الباقة</label><select id="sagDetailPlan">' +
+        '<div class="tenant-field"><label for="sagDetailSlug">رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailPlan">الباقة</label><select id="sagDetailPlan">' +
         '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
         '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
         '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
-        '<div class="tenant-field"><label>الرصيد</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalance || 0) + '" required></div>' +
-        '<div class="tenant-field"><label>الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
-        '<div class="tenant-field"><label>الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
-        '<div class="tenant-field"><label>السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
-        '<div class="tenant-field"><label>الدولة</label><input id="sagDetailCountry" maxlength="80" value="' + escapeHtml(t.country || '') + '"></div>' +
-        '<div class="tenant-field"><label>نهاية التجربة</label><input type="date" id="sagDetailTrialEnds" dir="ltr" value="' + escapeHtml((t.trialEndsAt || '').slice(0, 10)) + '"></div>' +
-        '<div class="tenant-field"><label>حالة الحساب</label><select id="sagDetailStatus">' +
+        '<div class="tenant-field"><label for="sagDetailCredit">الرصيد</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalance || 0) + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailCountry">الدولة</label><input id="sagDetailCountry" maxlength="80" value="' + escapeHtml(t.country || '') + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailTrialEnds">نهاية التجربة</label><input type="date" id="sagDetailTrialEnds" dir="ltr" value="' + escapeHtml((t.trialEndsAt || '').slice(0, 10)) + '"></div>' +
+        '<div class="tenant-field"><label for="sagDetailStatus">حالة الحساب</label><select id="sagDetailStatus">' +
         '<option value="active"' + (t.isActive ? ' selected' : '') + '>نشط</option>' +
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
         '<div class="tenant-field"><label>التفعيل</label><p style="margin:0">' +
@@ -1911,11 +1862,11 @@
         '<div id="sagTenantUsers">' + renderSagTenantUsers(tenantId, t.primaryUserId, users) + '</div>' +
         '<h3 class="dash-section-title" style="margin-top:18px">إضافة مستخدم</h3>' +
         '<form onsubmit="sagAddTenantUser(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label>الاسم</label><input id="sagNewUserName" required></div>' +
-        '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagNewUserEmail" required></div>' +
-        '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagNewUserUsername" minlength="3" maxlength="40" required></div>' +
-        '<div class="tenant-field"><label>رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
-        '<div class="tenant-field full"><label>الدور</label><select id="sagNewUserRole">' +
+        '<div class="tenant-field"><label for="sagNewUserName">الاسم</label><input id="sagNewUserName" required></div>' +
+        '<div class="tenant-field"><label for="sagNewUserEmail">البريد الإلكتروني</label><input type="email" id="sagNewUserEmail" required></div>' +
+        '<div class="tenant-field"><label for="sagNewUserUsername">اسم المستخدم</label><input id="sagNewUserUsername" minlength="3" maxlength="40" required></div>' +
+        '<div class="tenant-field"><label for="sagNewUserPhone">رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
+        '<div class="tenant-field full"><label for="sagNewUserRole">الدور</label><select id="sagNewUserRole">' +
         '<option value="employee">موظف</option>' +
         '<option value="section_editor">محرر أقسام</option>' +
         '<option value="section_approver">معتمد أقسام</option>' +
@@ -1934,15 +1885,15 @@
         '<div id="sagTenantTabContracts" style="display:none">' +
         '<h3 class="dash-section-title">العقود والاتفاقيات</h3>' +
         '<form onsubmit="sagAddTenantContract(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label>العنوان</label><input id="sagContractTitle" maxlength="160" required></div>' +
-        '<div class="tenant-field"><label>النوع</label><select id="sagContractKind">' +
+        '<div class="tenant-field"><label for="sagContractTitle">العنوان</label><input id="sagContractTitle" maxlength="160" required></div>' +
+        '<div class="tenant-field"><label for="sagContractKind">النوع</label><select id="sagContractKind">' +
         '<option value="contract">عقد خدمة</option><option value="nda">اتفاقية سرية</option></select></div>' +
-        '<div class="tenant-field"><label>البداية</label><input type="date" id="sagContractStart" dir="ltr"></div>' +
-        '<div class="tenant-field"><label>الانتهاء</label><input type="date" id="sagContractEnd" dir="ltr"></div>' +
-        '<div class="tenant-field"><label>حالة التوقيع</label><select id="sagContractSignature">' +
+        '<div class="tenant-field"><label for="sagContractStart">البداية</label><input type="date" id="sagContractStart" dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagContractEnd">الانتهاء</label><input type="date" id="sagContractEnd" dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagContractSignature">حالة التوقيع</label><select id="sagContractSignature">' +
         '<option value="unsigned">غير موقع</option><option value="pending_signature">بانتظار التوقيع</option>' +
         '<option value="signed">موقع</option></select></div>' +
-        '<div class="tenant-field"><label>الاحتفاظ حتى</label><input type="date" id="sagContractRetention" dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagContractRetention">الاحتفاظ حتى</label><input type="date" id="sagContractRetention" dir="ltr"></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الوثيقة</button></div></form>' +
         '<div id="sagTenantContractsList"></div></div>' +
         '<div id="sagTenantTabActivity" style="display:none">' +
@@ -1950,17 +1901,18 @@
         '<div id="sagTenantTabAccess" style="display:none">' +
         '<h3 class="dash-section-title">' + escapeHtml(WFT('admin.access_tab', 'طلبات الوصول')) + '</h3>' +
         '<form onsubmit="sagCreateAccessRequest(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_scope', 'النطاق')) + '</label><select id="sagAccessScope">' +
+        '<div class="tenant-field"><label for="sagAccessScope">' + escapeHtml(WFT('admin.access_scope', 'النطاق')) + '</label><select id="sagAccessScope">' +
         '<option value="tenant">' + escapeHtml(WFT('admin.access_scope_tenant', 'الشركة كاملة')) + '</option>' +
         '<option value="presentation">' + escapeHtml(WFT('admin.access_scope_presentation', 'عرض محدد')) + '</option>' +
         '<option value="draft">' + escapeHtml(WFT('admin.access_scope_draft', 'ملف مشروع محدد')) + '</option></select></div>' +
-        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_target', 'معرف الهدف')) + '</label><input id="sagAccessTarget" dir="ltr"></div>' +
-        '<div class="tenant-field"><label>' + escapeHtml(WFT('admin.access_hours', 'المدة بالساعات')) + '</label><input type="number" id="sagAccessHours" min="1" max="72" value="24" dir="ltr"></div>' +
-        '<div class="tenant-field full"><label>' + escapeHtml(WFT('admin.access_reason', 'السبب')) + '</label><input id="sagAccessReason" maxlength="300" required></div>' +
+        '<div class="tenant-field"><label for="sagAccessTarget">' + escapeHtml(WFT('admin.access_target', 'معرف الهدف')) + '</label><input id="sagAccessTarget" dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagAccessHours">' + escapeHtml(WFT('admin.access_hours', 'المدة بالساعات')) + '</label><input type="number" id="sagAccessHours" min="1" max="72" value="24" dir="ltr"></div>' +
+        '<div class="tenant-field full"><label for="sagAccessReason">' + escapeHtml(WFT('admin.access_reason', 'السبب')) + '</label><input id="sagAccessReason" maxlength="300" required></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">' + escapeHtml(WFT('admin.access_request_btn', 'إرسال طلب وصول')) + '</button></div></form>' +
         '<div id="sagTenantAccessList"></div></div>' +
         '</div>';
       showSagTenantTab(sagTenantActiveTab);
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
     }
 
     function renderSagTenantUsers(tenantId, primaryUserId, users) {

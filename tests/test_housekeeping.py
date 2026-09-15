@@ -101,7 +101,7 @@ class HousekeepingDbTests(unittest.TestCase):
             assignee_id=self.assignee_id, assignee_name='المعتمد', due_hours=1)
         db.get_db().execute(
             'UPDATE approval_tasks SET due_at = ? WHERE id = ?',
-            ((datetime.now() - timedelta(hours=30)).isoformat(), task['id']),
+            ((db._utcnow() - timedelta(hours=30)).isoformat(), task['id']),
         )
         db.get_db().commit()
         escalated = db.escalate_overdue_approval_tasks()
@@ -125,7 +125,7 @@ class HousekeepingDbTests(unittest.TestCase):
         ticket = db.create_support_ticket(
             'tenant-1', 'مشكلة في التوليد', created_by=self.assignee_id,
             priority='high')
-        soon = (datetime.now() + timedelta(hours=2)).isoformat()
+        soon = (db._utcnow() + timedelta(hours=2)).isoformat()
         db.get_db().execute(
             'UPDATE support_tickets SET sla_due_at = ?, assigned_to = ? WHERE id = ?',
             (soon, self.assignee_id, ticket['id']),
@@ -144,7 +144,7 @@ class HousekeepingDbTests(unittest.TestCase):
     def test_ticket_far_from_sla_is_not_warned(self):
         ticket = db.create_support_ticket(
             'tenant-1', 'سؤال عام', created_by=self.assignee_id)
-        far = (datetime.now() + timedelta(hours=72)).isoformat()
+        far = (db._utcnow() + timedelta(hours=72)).isoformat()
         db.get_db().execute(
             'UPDATE support_tickets SET sla_due_at = ? WHERE id = ?',
             (far, ticket['id']),

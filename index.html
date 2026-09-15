@@ -782,7 +782,7 @@
       </div>
     </div>
 
-    <div id="presentationFontSettingsPanel" class="presentation-font-overlay"
+    <div id="presentationFontSettingsPanel" class="presentation-font-overlay" data-a11y-modal
       onclick="if(event.target === this) closePresentationFontSettings()">
       <div class="presentation-font-card" role="dialog" aria-modal="true"
         aria-labelledby="presentationFontSettingsTitle" onclick="event.stopPropagation()">
@@ -1116,21 +1116,6 @@
       <div class="admin-charts-grid">
         <div class="tenant-content-panel admin-chart-panel">
           <div class="tenant-panel-heading">
-            <h3 class="dash-section-title">العمليات والبنية</h3>
-          </div>
-          <div id="sagOpsMetrics"></div>
-        </div>
-        <div class="tenant-content-panel admin-chart-panel">
-          <div class="tenant-panel-heading">
-            <h3 class="dash-section-title">التقارير القابلة للتصدير</h3>
-          </div>
-          <div id="sagReportsPanel"></div>
-        </div>
-      </div>
-
-      <div class="admin-charts-grid">
-        <div class="tenant-content-panel admin-chart-panel">
-          <div class="tenant-panel-heading">
             <h3 class="dash-section-title" data-i18n="admin.chart_activity">نشاط المنصة</h3>
             <div class="admin-chart-legend" id="sagActivityLegend"></div>
           </div>
@@ -1147,16 +1132,15 @@
       <div class="admin-charts-grid">
         <div class="tenant-content-panel admin-chart-panel">
           <div class="tenant-panel-heading">
-            <h3 class="dash-section-title" data-i18n="admin.chart_spend">استهلاك التوليد والخرائط</h3>
-            <div class="admin-chart-legend" id="sagSpendLegend"></div>
-          </div>
-          <div id="sagSpendChart" class="admin-chart"></div>
-        </div>
-        <div class="tenant-content-panel admin-chart-panel">
-          <div class="tenant-panel-heading">
             <h3 class="dash-section-title" data-i18n="admin.chart_tickets">تذاكر الدعم حسب الحالة</h3>
           </div>
           <div id="sagTicketBars"></div>
+        </div>
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.reports_title">التقارير القابلة للتصدير</h3>
+          </div>
+          <div id="sagReportsPanel"></div>
         </div>
       </div>
 
@@ -1214,78 +1198,79 @@
     </section>
 
     <!-- Company management modals (position:fixed — must live outside .tenant-page which is display:none) -->
-    <div id="sagTenantModal" style="display:none"></div>
+    <div id="sagTenantModal" style="display:none" data-a11y-modal></div>
 
-    <div id="sagCompanyCreateModal"
+    <div id="sagCompanyCreateModal" data-a11y-modal
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
-        <div style="background:#fff;border-radius:20px;padding:28px;max-width:760px;width:100%;max-height:90vh;overflow:auto">
+        <div role="dialog" aria-modal="true" aria-labelledby="sagCompanyCreateTitle"
+            style="background:#fff;border-radius:20px;padding:28px;max-width:760px;width:100%;max-height:90vh;overflow:auto">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px">
-            <h2 style="margin:0">إضافة شركة جديدة</h2>
+            <h2 id="sagCompanyCreateTitle" style="margin:0">إضافة شركة جديدة</h2>
             <button type="button" class="btn ghost" onclick="closeSagCompanyCreate()">إغلاق</button>
           </div>
           <div id="sagCompanyCreateError" class="auth-error"></div>
           <form id="sagCompanyCreateForm" onsubmit="createSagCompany(event)">
             <div class="tenant-grid">
               <div class="tenant-field">
-                <label>اسم الشركة</label>
+                <label for="sagCreateCompanyName">اسم الشركة</label>
                 <input type="text" id="sagCreateCompanyName" maxlength="120" required>
               </div>
               <div class="tenant-field">
-                <label>اسم مدير الحساب</label>
+                <label for="sagCreateManagerName">اسم مدير الحساب</label>
                 <input type="text" id="sagCreateManagerName" maxlength="120" required>
               </div>
               <div class="tenant-field">
-                <label>البريد الإلكتروني</label>
+                <label for="sagCreateEmail">البريد الإلكتروني</label>
                 <input type="email" id="sagCreateEmail" autocomplete="off" required>
               </div>
               <div class="tenant-field">
-                <label>رقم الجوال</label>
+                <label for="sagCreatePhone">رقم الجوال</label>
                 <input type="tel" id="sagCreatePhone" inputmode="tel" autocomplete="off" required>
               </div>
               <div class="tenant-field">
-                <label>اسم المستخدم</label>
+                <label for="sagCreateUsername">اسم المستخدم</label>
                 <input type="text" id="sagCreateUsername" autocomplete="off" minlength="3" maxlength="40" required>
               </div>
               <div class="tenant-field">
-                <label>رابط الشركة (slug)</label>
+                <label for="sagCreateSlug">رابط الشركة (slug)</label>
                 <input type="text" id="sagCreateSlug" autocomplete="off" maxlength="60" dir="ltr">
               </div>
               <div class="tenant-field">
-                <label>حالة الحساب</label>
+                <label for="sagCreateStatus">حالة الحساب</label>
                 <select id="sagCreateStatus">
                   <option value="active">نشط</option>
                   <option value="inactive">موقوف</option>
                 </select>
               </div>
               <div class="tenant-field">
-                <label>مدة التجربة بالأيام</label>
+                <label for="sagCreateTrialDays">مدة التجربة بالأيام</label>
                 <input type="number" id="sagCreateTrialDays" min="0" max="365" dir="ltr">
               </div>
               <div class="tenant-field">
-                <label>الاسم القانوني</label>
+                <label for="sagCreateLegalName">الاسم القانوني</label>
                 <input type="text" id="sagCreateLegalName" maxlength="160">
               </div>
               <div class="tenant-field">
-                <label>الرقم الضريبي</label>
+                <label for="sagCreateTaxNumber">الرقم الضريبي</label>
                 <input type="text" id="sagCreateTaxNumber" maxlength="40" dir="ltr">
               </div>
               <div class="tenant-field">
-                <label>السجل التجاري</label>
+                <label for="sagCreateCrNumber">السجل التجاري</label>
                 <input type="text" id="sagCreateCrNumber" maxlength="40" dir="ltr">
               </div>
               <div class="tenant-field">
-                <label>الدولة</label>
+                <label for="sagCreateCountry">الدولة</label>
                 <input type="text" id="sagCreateCountry" maxlength="80">
               </div>
               <div class="tenant-field">
-                <label>إعداد كلمة المرور</label>
+                <label for="sagCreatePasswordMode">إعداد كلمة المرور</label>
                 <select id="sagCreatePasswordMode" onchange="toggleSagCompanyPassword()">
                   <option value="set_link">رابط تعيين كلمة المرور</option>
                   <option value="manual">كلمة مرور يحددها المدير</option>
                 </select>
               </div>
               <div class="tenant-field" id="sagCreatePasswordWrap" style="display:none">
-                <label>كلمة المرور</label>
+                <label for="sagCreatePassword">كلمة المرور</label>
                 <div style="display:flex;gap:8px">
                   <div style="position:relative;flex:1;min-width:0">
                     <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password" style="width:100%;padding-left:64px">
@@ -1321,20 +1306,20 @@
       <div class="ops-stat-grid">
         <div class="tenant-dash-card stat">
           <h3 id="adminStatRechargePending">0</h3>
-          <p>بانتظار المراجعة</p>
+          <p data-i18n="admin.recharge_pending_stat">بانتظار المراجعة</p>
         </div>
         <div class="tenant-dash-card stat">
           <h3 id="adminStatRechargeApproved">0</h3>
-          <p>معتمدة</p>
+          <p data-i18n="admin.recharge_approved_stat">معتمدة</p>
         </div>
         <div class="tenant-dash-card stat">
           <h3 id="adminStatRechargeRejected">0</h3>
-          <p>مرفوضة</p>
+          <p data-i18n="admin.recharge_rejected_stat">مرفوضة</p>
         </div>
       </div>
       <div class="tenant-content-panel">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">طلبات الشحن من الشركات</h3>
+          <h3 class="dash-section-title" data-i18n="admin.recharge_inbox">طلبات الشحن من الشركات</h3>
         </div>
         <div id="sagRechargeRequestsList"></div>
       </div>
@@ -1359,16 +1344,12 @@
       <div class="ops-stat-grid">
         <div class="tenant-dash-card stat">
           <h3 id="adminStatTicketsOpen">0</h3>
-          <p>تذاكر مفتوحة</p>
-        </div>
-        <div class="tenant-dash-card stat">
-          <h3 id="adminStatTicketsOverdue">0</h3>
-          <p>متجاوزة لموعد SLA</p>
+          <p data-i18n="admin.tickets_open_stat">تذاكر مفتوحة</p>
         </div>
       </div>
       <div class="tenant-content-panel">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">تذاكر الشركات</h3>
+          <h3 class="dash-section-title" data-i18n="admin.tickets_inbox">تذاكر الشركات</h3>
         </div>
         <div id="adminTicketsList"></div>
         <div id="adminTicketDetail" style="display:none;margin-top:16px"></div>
@@ -1385,77 +1366,50 @@
       </div>
       <div class="tenant-content-panel">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">أهداف زمن الاستجابة والحل (SLA)</h3>
-        </div>
-        <div id="adminSlaPoliciesList"></div>
-        <form onsubmit="adminSaveSlaPolicy(event)" style="margin-top:12px"><div class="tenant-grid">
-          <div class="tenant-field">
-            <label>الأولوية</label>
-            <select id="adminSlaPriority">
-              <option value="low">منخفضة</option>
-              <option value="normal" selected>عادية</option>
-              <option value="high">عاجلة</option>
-              <option value="urgent">حرجة</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>ساعات أول استجابة</label>
-            <input type="number" id="adminSlaFirstResponse" min="1" value="24" required dir="ltr">
-          </div>
-          <div class="tenant-field">
-            <label>ساعات الحل</label>
-            <input type="number" id="adminSlaResolve" min="1" value="72" required dir="ltr">
-          </div>
-        </div><div class="sag-modal-actions">
-          <button type="submit" class="btn primary">حفظ الهدف</button></div>
-        </form>
-      </div>
-      <div class="tenant-content-panel" style="margin-top:16px">
-        <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">مفاتيح الميزات</h3>
+          <h3 class="dash-section-title" data-i18n="admin.flags_title">مفاتيح الميزات</h3>
         </div>
         <div id="adminFeatureFlagsList"></div>
         <form onsubmit="adminAddFeatureFlag(event)" style="margin-top:12px"><div class="tenant-grid">
           <div class="tenant-field">
-            <label>مفتاح الميزة</label>
+            <label data-i18n="admin.flag_key">مفتاح الميزة</label>
             <input type="text" id="adminFlagKey" maxlength="80" dir="ltr" required>
           </div>
           <div class="tenant-field">
-            <label>الحالة</label>
+            <label data-i18n="admin.flag_state">الحالة</label>
             <select id="adminFlagEnabled">
-              <option value="1">مفعّلة</option>
-              <option value="0">موقوفة</option>
+              <option value="1" data-i18n="admin.flag_enabled">مفعّلة</option>
+              <option value="0" data-i18n="admin.flag_disabled">موقوفة</option>
             </select>
           </div>
         </div><div class="sag-modal-actions">
-          <button type="submit" class="btn primary">حفظ المفتاح</button></div>
+          <button type="submit" class="btn primary" data-i18n="admin.flag_save">حفظ المفتاح</button></div>
         </form>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">الباقات والأسعار</h3>
+          <h3 class="dash-section-title" data-i18n="admin.packages_title">الباقات والأسعار</h3>
         </div>
         <div id="adminPackagesList"></div>
         <form onsubmit="adminSavePackage(event)" style="margin-top:12px"><div class="tenant-grid">
           <div class="tenant-field">
-            <label>اسم الباقة</label>
+            <label data-i18n="admin.package_name">اسم الباقة</label>
             <input type="text" id="adminPackageName" maxlength="80" required>
           </div>
           <div class="tenant-field">
-            <label>السعر بالريال</label>
+            <label data-i18n="admin.package_price_sar">السعر بالريال</label>
             <input type="number" id="adminPackagePrice" min="0" step="0.01" required dir="ltr">
           </div>
           <div class="tenant-field">
-            <label>الرصيد بالدولار</label>
+            <label data-i18n="admin.package_credit_usd">الرصيد بالدولار</label>
             <input type="number" id="adminPackageCredit" min="0" step="0.01" required dir="ltr">
           </div>
         </div><div class="sag-modal-actions">
-          <button type="submit" class="btn primary">حفظ الباقة</button></div>
+          <button type="submit" class="btn primary" data-i18n="admin.package_save">حفظ الباقة</button></div>
         </form>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">سجل أنواع الملفات المعتمدة</h3>
+          <h3 class="dash-section-title" data-i18n="admin.file_types_title">سجل أنواع الملفات المعتمدة</h3>
         </div>
         <div id="adminFileTypesList"></div>
       </div>
@@ -1563,6 +1517,12 @@
             <option value="done">المغلقة</option>
             <option value="all">الكل</option>
           </select>
+          <select id="omTasksProjectFilter" onchange="omRenderTasks()" class="tenant-filter-select" aria-label="فلترة حسب المشروع">
+            <option value="">كل المشاريع</option>
+          </select>
+          <select id="omTasksSectionFilter" onchange="omRenderTasks()" class="tenant-filter-select" aria-label="فلترة حسب القسم">
+            <option value="">كل الأقسام</option>
+          </select>
         </div>
         <div id="omTasksList" style="margin-bottom:24px"></div>
 
@@ -1603,16 +1563,16 @@
       </div>
 
       <!-- Modal 1: New Task -->
-      <div id="omTaskModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omTaskModal')">
+      <div id="omTaskModal" class="om-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeOmModal('omTaskModal')">
         <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omTaskModalTitle">
           <div class="sag-modal-head">
             <h2 id="omTaskModalTitle">مهمة جديدة</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omTaskModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label>عنوان المهمة</label><input type="text" id="omTaskTitle" placeholder="اجتماع تسليم المعرض"></div>
-            <div class="tenant-field"><label>موعد الاستحقاق</label><input type="datetime-local" id="omTaskDue"></div>
-            <div class="tenant-field"><label>التكرار</label>
+            <div class="tenant-field"><label for="omTaskTitle">عنوان المهمة</label><input type="text" id="omTaskTitle" placeholder="اجتماع تسليم المعرض"></div>
+            <div class="tenant-field"><label for="omTaskDue">موعد الاستحقاق</label><input type="datetime-local" id="omTaskDue"></div>
+            <div class="tenant-field"><label for="omTaskRecurrence">التكرار</label>
               <select id="omTaskRecurrence">
                 <option value="none">بدون تكرار</option>
                 <option value="daily">يوميًا</option>
@@ -1630,14 +1590,14 @@
       </div>
 
       <!-- Modal 2: Recharge Request -->
-      <div id="omRechargeModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omRechargeModal')">
+      <div id="omRechargeModal" class="om-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeOmModal('omRechargeModal')">
         <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omRechargeModalTitle">
           <div class="sag-modal-head">
             <h2 id="omRechargeModalTitle">طلب شحن رصيد جديد</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omRechargeModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label>الباقة</label>
+            <div class="tenant-field"><label for="omRechargePackage">الباقة</label>
               <select id="omRechargePackage" onchange="omShowPackageInfo()">
                 <option value="باقة نمو">باقة نمو (100 دولار - 375 ريال)</option>
                 <option value="باقة شركات">باقة شركات (250 دولار - 937.5 ريال)</option>
@@ -1645,8 +1605,8 @@
               </select>
               <div id="omRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
             </div>
-            <div class="tenant-field"><label>رقم الحوالة البنكية</label><input type="text" id="omRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
-            <div class="tenant-field"><label>إيصال التحويل</label><input type="file" id="omRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
+            <div class="tenant-field"><label for="omRechargeRef">رقم الحوالة البنكية</label><input type="text" id="omRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
+            <div class="tenant-field"><label for="omRechargeReceipt">إيصال التحويل</label><input type="file" id="omRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omRechargeError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
@@ -1657,15 +1617,15 @@
       </div>
 
       <!-- Modal 3: New Support Ticket -->
-      <div id="omTicketModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omTicketModal')">
+      <div id="omTicketModal" class="om-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeOmModal('omTicketModal')">
         <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omTicketModalTitle">
           <div class="sag-modal-head">
             <h2 id="omTicketModalTitle">تذكرة دعم جديدة</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omTicketModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field full"><label>الموضوع</label><input type="text" id="omTicketSubject" placeholder="ملخص المشكلة"></div>
-            <div class="tenant-field"><label>الفئة</label>
+            <div class="tenant-field full"><label for="omTicketSubject">الموضوع</label><input type="text" id="omTicketSubject" placeholder="ملخص المشكلة"></div>
+            <div class="tenant-field"><label for="omTicketCategory">الفئة</label>
               <select id="omTicketCategory">
                 <option value="general">عام</option>
                 <option value="billing">الفوترة والرصيد</option>
@@ -1676,7 +1636,7 @@
                 <option value="other">أخرى</option>
               </select>
             </div>
-            <div class="tenant-field"><label>الأولوية</label>
+            <div class="tenant-field"><label for="omTicketPriority">الأولوية</label>
               <select id="omTicketPriority">
                 <option value="normal">عادية</option>
                 <option value="low">منخفضة</option>
@@ -1684,7 +1644,7 @@
                 <option value="urgent">عاجلة</option>
               </select>
             </div>
-            <div class="tenant-field full"><label>التفاصيل</label><textarea id="omTicketBody" rows="4" placeholder="تفاصيل المشكلة"></textarea></div>
+            <div class="tenant-field full"><label for="omTicketBody">التفاصيل</label><textarea id="omTicketBody" rows="4" placeholder="تفاصيل المشكلة"></textarea></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omTicketsError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
@@ -1695,30 +1655,30 @@
       </div>
 
       <!-- Modal 4: New Contract / NDA -->
-      <div id="omContractModal" class="om-modal-overlay" onclick="if(event.target===this)closeOmModal('omContractModal')">
+      <div id="omContractModal" class="om-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeOmModal('omContractModal')">
         <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omContractModalTitle">
           <div class="sag-modal-head">
             <h2 id="omContractModalTitle">تسجيل عقد أو اتفاقية سرية</h2>
             <button type="button" class="btn ghost small" onclick="closeOmModal('omContractModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label>مسمى الوثيقة</label><input type="text" id="omContractTitle" placeholder="اتفاقية سرية المعلومات"></div>
-            <div class="tenant-field"><label>نوع الوثيقة</label>
+            <div class="tenant-field"><label for="omContractTitle">مسمى الوثيقة</label><input type="text" id="omContractTitle" placeholder="اتفاقية سرية المعلومات"></div>
+            <div class="tenant-field"><label for="omContractKind">نوع الوثيقة</label>
               <select id="omContractKind">
                 <option value="nda">اتفاقية سرية المعلومات (NDA)</option>
                 <option value="framework">عقد إطاري رئيسي</option>
               </select>
             </div>
-            <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="omContractStarts"></div>
-            <div class="tenant-field"><label>تاريخ الانتهاء</label><input type="date" id="omContractExpires"></div>
-            <div class="tenant-field"><label>حالة التوقيع</label>
+            <div class="tenant-field"><label for="omContractStarts">تاريخ البداية</label><input type="date" id="omContractStarts"></div>
+            <div class="tenant-field"><label for="omContractExpires">تاريخ الانتهاء</label><input type="date" id="omContractExpires"></div>
+            <div class="tenant-field"><label for="omContractSignature">حالة التوقيع</label>
               <select id="omContractSignature">
                 <option value="unsigned">غير موقعة</option>
                 <option value="pending_signature">بانتظار التوقيع</option>
                 <option value="signed">موقعة</option>
               </select>
             </div>
-            <div class="tenant-field"><label>ملف الوثيقة</label><input type="file" id="omContractFile" accept=".pdf"></div>
+            <div class="tenant-field"><label for="omContractFile">ملف الوثيقة</label><input type="file" id="omContractFile" accept=".pdf"></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omContractError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">

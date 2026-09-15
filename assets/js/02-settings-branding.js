@@ -725,7 +725,7 @@
       list.innerHTML = recent.map(p => {
         const statusLabel = p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
-        return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="openExistingPresentation(\'' + p.id + '\')">' +
+        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="openExistingPresentation(\'' + p.id + '\')">' +
           '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
           '<div class="meta"><span>' + (p.slideCount || 0) + '</span> <span>شريحة</span> | <span>' + statusLabel + '</span> | ' + date + '</div></div>' +
           '</div>';

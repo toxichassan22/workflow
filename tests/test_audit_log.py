@@ -250,6 +250,7 @@ class AuditLogApiTests(unittest.TestCase):
     def setUpClass(cls):
         import app as app_module
         cls.flask_app = app_module.app
+        cls.flask_app.config.update(TESTING=True)
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
