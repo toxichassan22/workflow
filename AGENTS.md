@@ -94,15 +94,42 @@ the very next line then stripped. Do not wire it back in.
   UPDATE on the balance, so a lost race raises `InsufficientBalance` (HTTP 402
   `INSUFFICIENT_BALANCE`) instead of overdrawing. One commit covers claim,
   ledger row and debit; any failure rolls back.
+- Billing runs automatically, not just on demand: every housekeeping tick calls
+  `_bill_all_unbilled_usage()` (over `db.list_tenants_with_billable_usage()`),
+  and each generation-approval/job settlement fires
+  `_bill_tenant_unbilled_usage_async`. `POST /api/billing/checkout` (idempotent
+  via `X-Idempotency-Key`) stays as the manual path; top-up is
+  `POST /api/billing/topup` (`require_company_admin`), history is
+  `GET /api/billing/ledger`.
+- Only settled rows bill: the claim requires `package_id IS NULL` (package
+  usage is consumed from package credit, not the wallet) and, for AI rows, a
+  billable `attempt_status` — legacy rows with a recorded cost count as
+  `settled`, while `in_flight`/`pending` rows stay unbilled until
+  reconciliation prices them. Never mark pending rows billed at $0.
+- `package_id` must be stored as real NULL when no package applies — an older
+  write path stored the literal string `'None'`; a migration normalizes it.
+- `db.BALANCE_CHANGE_HOOK` fires after every wallet mutation (credits,
+  debits, reservations, releases, adjustments). `app.py` registers
+  `_schedule_tenant_limit_sync` on it, which re-syncs the tenant's OpenRouter
+  key limit off the request path. The provider cap is
+  (balance + active holds + package remaining) / `BILLING_MULTIPLIER` — holds
+  count because an approved run already paid, and dividing by the multiplier
+  keeps every future checkout affordable by construction. A drained wallet
+  disables the key; a funded one re-enables it.
+- `TENANT_OPENROUTER_DEFAULT_RESET` controls the provider `limit_reset`:
+  `daily`/`weekly`/`monthly` pass through, `none` (the default) sends `null` —
+  a lifetime cap tied to the wallet. Never default to `monthly`: a top-up must
+  not silently grant a renewing allowance, so renewal stays a deliberate
+  super-admin act (recharge approval or a manual limit edit).
 - Google free usage caps are intentionally NOT subtracted: recorded cost is the
   billable figure and free allowance stays a platform margin.
-- Checkout is explicit only: `POST /api/billing/checkout` (idempotent via
-  `X-Idempotency-Key`), top-up is `POST /api/billing/topup`
-  (`require_company_admin`), history is `GET /api/billing/ledger`.
 - Pre-flight (`_require_billing_balance`) guards analyze-site, site-analysis,
   map-image, slide-plan, slide-single, market jobs and croquis, but runs only
   when `BILLING_ENFORCE=1` (default 0). Never enforce unconditionally: tests
   create zero-balance tenants and expect generation to succeed.
+- `REQUIRE_TENANT_OPENROUTER_KEY=1` refuses AI calls for companies without an
+  active managed key (super-admin ops always use the global key). Only enable
+  it with `OPENROUTER_MANAGEMENT_KEY` set.
 
 ## Schema gotchas
 

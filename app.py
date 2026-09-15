@@ -251,9 +251,12 @@ except (TypeError, ValueError):
     TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 0.0
 if TENANT_OPENROUTER_DEFAULT_LIMIT_USD < 0:
     TENANT_OPENROUTER_DEFAULT_LIMIT_USD = 0.0
-TENANT_OPENROUTER_DEFAULT_RESET = (os.environ.get('TENANT_OPENROUTER_DEFAULT_RESET') or 'monthly').strip().lower()
-if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly'):
-    TENANT_OPENROUTER_DEFAULT_RESET = 'monthly'
+# 'none' = a lifetime cap: the key's limit is the wallet, not a renewing
+# monthly budget. Renewal is then always a deliberate super-admin act
+# (recharge approval / manual limit), never an automatic provider reset.
+TENANT_OPENROUTER_DEFAULT_RESET = (os.environ.get('TENANT_OPENROUTER_DEFAULT_RESET') or 'none').strip().lower()
+if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly', 'none'):
+    TENANT_OPENROUTER_DEFAULT_RESET = 'none'
 # Strict per-company spend: when 1, a company without an active key of its
 # own is refused before any provider call instead of silently burning the
 # shared global key. Super-admin operations always use the global key.
@@ -388,7 +391,20 @@ def _openrouter_management_key():
     return OPENROUTER_MANAGEMENT_KEY
 
 
-def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
+def _openrouter_reset_for_provider(limit_reset):
+    """Map a stored reset policy to the provider payload.
+
+    OpenRouter accepts daily/weekly/monthly verbatim; our 'none' means a
+    lifetime cap and must be sent as an explicit null — omitting the field
+    on a PATCH would leave an old monthly reset in place.
+    """
+    value = str(limit_reset or '').strip().lower()
+    if value in ('daily', 'weekly', 'monthly'):
+        return value
+    return None
+
+
+def _openrouter_create_managed_key(name, limit_usd, limit_reset='none'):
     """Provision a dashboard-visible key. Returns the parsed JSON body."""
     mgmt = _openrouter_management_key()
     if not mgmt:
@@ -397,7 +413,8 @@ def _openrouter_create_managed_key(name, limit_usd, limit_reset='monthly'):
         response = requests.post(
             f"{OPENROUTER_BASE}/keys",
             headers={"Authorization": f"Bearer {mgmt}", "Content-Type": "application/json"},
-            json={"name": name, "limit": float(limit_usd), "limit_reset": limit_reset},
+            json={"name": name, "limit": float(limit_usd),
+                  "limit_reset": _openrouter_reset_for_provider(limit_reset)},
             timeout=30,
         )
     except Exception as exc:
@@ -448,7 +465,7 @@ def _openrouter_update_managed_key(key_hash, limit_usd=None, limit_reset=None, d
         except (TypeError, ValueError):
             pass
     if limit_reset is not None:
-        payload['limit_reset'] = str(limit_reset).strip().lower()
+        payload['limit_reset'] = _openrouter_reset_for_provider(limit_reset)
     if disabled is not None:
         payload['disabled'] = bool(disabled)
     if not payload:
@@ -778,8 +795,47 @@ def _find_managed_key_hash_for_tenant(tenant_id, tenant=None, existing_meta=None
     return matched_hash
 
 
-def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
-    """Sync a tenant's credit balance to its OpenRouter key limit (best-effort). Never raises."""
+def _tenant_provider_cap_usd(tenant_id):
+    """Raw provider dollars the tenant may still burn on its own key.
+
+    The wallet is billed in client dollars (raw cost x BILLING_MULTIPLIER at
+    checkout, or flat reservation fees), so the provider-side cap converts
+    the remaining entitlement back: (free balance + live holds) / multiplier.
+    Holds count because an approved run already paid for its spend. Package
+    credit adds verbatim: it is consumed in raw provider dollars with no
+    multiplier. This keeps every future checkout bill affordable by
+    construction.
+    """
+    try:
+        balance = db.get_tenant_balance(tenant_id)
+    except Exception:
+        balance = 0.0
+    try:
+        holds = db.get_active_hold_total_usd(tenant_id)
+    except Exception:
+        holds = 0.0
+    try:
+        package_remaining = db.get_package_remaining_usd(tenant_id)
+    except Exception:
+        package_remaining = 0.0
+    try:
+        multiplier = float(db.get_billing_multiplier() or 0.0)
+    except (TypeError, ValueError):
+        multiplier = 0.0
+    if multiplier <= 0:
+        multiplier = 1.0
+    wallet_raw = (float(balance or 0.0) + float(holds or 0.0)) / multiplier
+    return max(0.0, wallet_raw + float(package_remaining or 0.0))
+
+
+def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd=None):
+    """Sync a tenant's spend cap to its OpenRouter key (best-effort). Never raises.
+
+    ``new_limit_usd`` is the raw provider cap; None recomputes it from the
+    current wallet (balance + holds) / multiplier. The reset policy is
+    always pushed too, so an older monthly-resetting key is normalized to
+    the configured default — renewal stays a manual super-admin act.
+    """
     if not tenant_id:
         return None
     try:
@@ -789,13 +845,18 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
     except Exception:
         tenant = None
     try:
-        new_limit = max(0.0, float(new_limit_usd if new_limit_usd is not None else 0.0))
+        if new_limit_usd is None:
+            new_limit = _tenant_provider_cap_usd(tenant_id)
+        else:
+            new_limit = max(0.0, float(new_limit_usd))
     except (TypeError, ValueError):
         return None
+    reset_policy = TENANT_OPENROUTER_DEFAULT_RESET
     try:
         existing = db.get_tenant_openrouter_key_meta(tenant_id)
         if existing and existing.get('has_key'):
-            db.update_tenant_openrouter_key_meta(tenant_id, limit_usd=new_limit)
+            db.update_tenant_openrouter_key_meta(
+                tenant_id, limit_usd=new_limit, limit_reset=reset_policy)
             key_hash = existing.get('openrouter_key_hash')
             if not key_hash and existing.get('provenance') == 'auto':
                 key_hash = _find_managed_key_hash_for_tenant(tenant_id, tenant=tenant, existing_meta=existing)
@@ -803,16 +864,60 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd):
                 res = _openrouter_update_managed_key(
                     key_hash,
                     limit_usd=new_limit,
-                    limit_reset=existing.get('limit_reset') or 'monthly'
+                    limit_reset=reset_policy,
+                    # A drained wallet blocks the key; a funded one reopens
+                    # it. An admin-disabled key (is_active=0) stays disabled.
+                    disabled=(new_limit <= 0) if existing.get('is_active') else None,
                 )
                 if not res.get('ok') and not res.get('skipped'):
                     print(f"[OPENROUTER KEYS] update key limit returned {res}")
             return db.get_tenant_openrouter_key_meta(tenant_id)
         else:
-            return _ensure_tenant_openrouter_key(tenant_id, limit_usd=new_limit)
+            return _ensure_tenant_openrouter_key(
+                tenant_id, limit_usd=new_limit, limit_reset=reset_policy)
     except Exception as exc:
         print(f"[OPENROUTER KEYS] sync credit to key failed for tenant {tenant_id}: {exc}")
         return None
+
+
+_BALANCE_SYNC_LOCKS = {}
+_BALANCE_SYNC_LOCKS_GUARD = threading.Lock()
+
+
+def _balance_sync_lock(tenant_id):
+    with _BALANCE_SYNC_LOCKS_GUARD:
+        lock = _BALANCE_SYNC_LOCKS.get(tenant_id)
+        if lock is None:
+            lock = threading.Lock()
+            _BALANCE_SYNC_LOCKS[tenant_id] = lock
+        return lock
+
+
+def _schedule_tenant_limit_sync(tenant_id):
+    """db.BALANCE_CHANGE_HOOK entry point: re-sync the provider cap off the
+    request path. Per-tenant serialization plus a fresh cap read inside the
+    lock collapses rapid wallet movements onto the newest state instead of
+    racing stale PATCHes upstream."""
+    if not tenant_id or not _openrouter_management_key():
+        return
+    tenant_key = str(tenant_id)
+
+    def _run():
+        try:
+            with app.app_context():
+                with _balance_sync_lock(tenant_key):
+                    _sync_tenant_credit_to_openrouter(tenant_key)
+        except Exception as exc:
+            print(f"[BILLING] provider-cap sync failed for {tenant_key}: {exc}")
+
+    try:
+        threading.Thread(target=_run, daemon=True,
+                         name=f'cap-sync-{tenant_key[:8]}').start()
+    except Exception as exc:
+        print(f"[BILLING] provider-cap sync spawn failed: {exc}")
+
+
+db.BALANCE_CHANGE_HOOK = _schedule_tenant_limit_sync
 
 
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
@@ -1971,8 +2076,6 @@ def api_billing_topup():
             g.tenant_id, amount, note=data.get('note'),
             idempotency_key=idempotency_key,
             actor='platform_admin' if getattr(g, 'is_admin', False) else 'client_admin')
-        if result.get('credited') and result.get('balance_usd') is not None:
-            _sync_tenant_credit_to_openrouter(g.tenant_id, result.get('balance_usd'))
     except Exception as exc:
         print(f"[BILLING] topup failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
@@ -14667,6 +14770,53 @@ def _drain_email_outbox(limit=20):
     return {'sent': sent, 'failed': failed}
 
 
+def _bill_tenant_unbilled_usage(tenant_id):
+    """Checkout one tenant's billable usage. Best-effort: an overdrawn scope
+    just stays unbilled for the next sweep — it is already capped upstream
+    by the provider key limit."""
+    try:
+        result = db.bill_unbilled_usage(tenant_id)
+    except db.InsufficientBalance:
+        return {'billed': False, 'reason': 'insufficient_balance'}
+    except Exception as exc:
+        return {'billed': False, 'reason': f'error:{exc}'}
+    return {'billed': bool(result.get('billed')), 'reason': result.get('reason')}
+
+
+def _bill_all_unbilled_usage():
+    """Housekeeping step: convert every tenant's settled spend into a wallet
+    debit, so usage outside the reservation flow is collected automatically
+    instead of accumulating unbilled forever."""
+    billed = skipped = 0
+    for tenant_id in db.list_tenants_with_billable_usage():
+        outcome = _bill_tenant_unbilled_usage(tenant_id)
+        if outcome.get('billed'):
+            billed += 1
+        else:
+            skipped += 1
+    return {'tenants_billed': billed, 'tenants_skipped': skipped}
+
+
+def _bill_tenant_unbilled_usage_async(tenant_id):
+    """Post-settlement convenience: bill right after a run's escrow resolves
+    instead of waiting for the sweep tick."""
+    if not tenant_id:
+        return
+
+    def _run():
+        try:
+            with app.app_context():
+                _bill_tenant_unbilled_usage(tenant_id)
+        except Exception as exc:
+            print(f"[BILLING] post-settle billing failed for {tenant_id}: {exc}")
+
+    try:
+        threading.Thread(target=_run, daemon=True,
+                         name=f'usage-bill-{str(tenant_id)[:8]}').start()
+    except Exception as exc:
+        print(f"[BILLING] usage billing spawn failed: {exc}")
+
+
 def _run_housekeeping_tick():
     """One bounded pass over every standing sweep: outbound mail, approval-task
     reminders and escalations, stale point holds and silent generation jobs.
@@ -14678,6 +14828,7 @@ def _run_housekeeping_tick():
         ('escalations', db.escalate_overdue_approval_tasks),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
+        ('usage_billing', _bill_all_unbilled_usage),
     )
     for name, fn in steps:
         try:
@@ -20336,7 +20487,8 @@ def api_admin_tenants():
         # Best-effort managed OpenRouter key so the company spends on its own
         # dashboard-visible limit from day one. Never fails tenant creation.
         try:
-            _ensure_tenant_openrouter_key(tenant_id, limit_usd=credit_balance)
+            _ensure_tenant_openrouter_key(
+                tenant_id, limit_usd=_tenant_provider_cap_usd(tenant_id))
         except Exception as exc:
             print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
@@ -20459,13 +20611,9 @@ def api_admin_update_tenant(tenant_id):
         if primary_user_id and primary_user_id != tenant.get('primary_user_id'):
             if not db.set_primary_company_admin(tenant_id, primary_user_id):
                 return jsonify({'error': 'User not found'}), 404
-        balance_to_sync = synced_credit_balance
-        if balance_to_sync is None:
-            t_row = db.get_tenant_by_id(tenant_id)
-            if t_row and t_row.get('credit_balance') is not None:
-                balance_to_sync = t_row.get('credit_balance')
-        if balance_to_sync is not None:
-            _sync_tenant_credit_to_openrouter(tenant_id, balance_to_sync)
+        # credit_balance may have been written directly (no ledger entry, no
+        # hook) — re-sync the provider cap from the freshest entitlement.
+        _sync_tenant_credit_to_openrouter(tenant_id)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or username already registered'}), 409
     return jsonify({
@@ -20552,7 +20700,7 @@ def api_admin_tenant_key_provision(tenant_id):
         return jsonify({'error': 'Invalid limitUsd'}), 400
     limit_reset = str(data.get('limitReset') or data.get('limit_reset')
                       or TENANT_OPENROUTER_DEFAULT_RESET).strip().lower()
-    if limit_reset not in ('daily', 'weekly', 'monthly'):
+    if limit_reset not in ('daily', 'weekly', 'monthly', 'none'):
         return jsonify({'error': 'Invalid limitReset'}), 400
     force = bool(data.get('force') or data.get('rotate'))
     existing = db.get_tenant_openrouter_key_meta(tenant_id)
@@ -20589,7 +20737,7 @@ def api_admin_tenant_keys_ensure_all():
         return jsonify({'error': 'Invalid limitUsd'}), 400
     limit_reset = str(data.get('limitReset') or data.get('limit_reset')
                       or TENANT_OPENROUTER_DEFAULT_RESET).strip().lower()
-    if limit_reset not in ('daily', 'weekly', 'monthly'):
+    if limit_reset not in ('daily', 'weekly', 'monthly', 'none'):
         return jsonify({'error': 'Invalid limitReset'}), 400
     try:
         batch = max(1, min(50, int(data.get('batch') or 25)))
@@ -20747,7 +20895,7 @@ def api_admin_tenant_key_manual(tenant_id):
     limit_reset = data.get('limitReset') or data.get('limit_reset')
     if limit_reset is not None:
         limit_reset = str(limit_reset).strip().lower()
-        if limit_reset not in ('daily', 'weekly', 'monthly'):
+        if limit_reset not in ('daily', 'weekly', 'monthly', 'none'):
             return jsonify({'error': 'Invalid limitReset'}), 400
     limit_usd = data.get('limitUsd', data.get('limit_usd'))
     if limit_usd is not None:
@@ -20809,7 +20957,7 @@ def api_admin_tenant_key_update(tenant_id):
     limit_reset = data.get('limitReset', data.get('limit_reset'))
     if limit_reset is not None:
         limit_reset = str(limit_reset).strip().lower()
-        if limit_reset not in ('daily', 'weekly', 'monthly'):
+        if limit_reset not in ('daily', 'weekly', 'monthly', 'none'):
             return jsonify({'error': 'Invalid limitReset'}), 400
     is_active = data.get('isActive', data.get('is_active'))
     if is_active is not None:
@@ -21026,23 +21174,9 @@ def api_admin_tenant_package_assign(tenant_id):
         return jsonify({'error': str(exc)}), 400
     key = db.get_tenant_openrouter_key_meta(tenant_id)
     if package is not None:
-        try:
-            credit = float(package.get('credit_usd') or 0.0)
-        except (TypeError, ValueError):
-            credit = 0.0
-        if key.get('has_key') and key.get('is_active'):
-            try:
-                db.update_tenant_openrouter_key_meta(tenant_id, limit_usd=credit)
-                if key.get('provenance') == 'auto' and key.get('openrouter_key_hash'):
-                    _openrouter_update_managed_key(key.get('openrouter_key_hash'),
-                                                   limit_usd=credit)
-                key = db.get_tenant_openrouter_key_meta(tenant_id)
-            except (ValueError, Exception) as exc:
-                print(f"[PACKAGES] key limit sync failed: {exc}")
-        else:
-            ensured = _ensure_tenant_openrouter_key(tenant_id, limit_usd=credit)
-            if ensured:
-                key = ensured
+        # The new package credit joins the provider-cap entitlement; the
+        # sync recomputes wallet + holds + package remaining itself.
+        key = _sync_tenant_credit_to_openrouter(tenant_id) or key
     return jsonify({'success': True, 'tenantId': tenant_id,
                     'package': package, 'key': key})
 
@@ -21147,7 +21281,7 @@ def api_admin_tenant_details(tenant_id):
         return jsonify({'error': 'Tenant not found'}), 404
     if not tenant.get('is_admin') and _openrouter_management_key() and tenant.get('credit_balance') is not None:
         try:
-            _sync_tenant_credit_to_openrouter(tenant_id, tenant.get('credit_balance'))
+            _sync_tenant_credit_to_openrouter(tenant_id)
         except Exception as exc:
             print(f"[OPENROUTER KEYS] tenant details auto-sync failed: {exc}")
     users = db.get_users_by_tenant(tenant_id)
@@ -24531,6 +24665,7 @@ def api_settle_generation_approval(approval_id):
         return failure
     _record_audit_event('generation_approval.settled', 'generation_approval', approval_id,
                         new_value=result.get('status'), metadata={'job_id': data.get('jobId')})
+    _bill_tenant_unbilled_usage_async(g.tenant_id)
     return jsonify({'success': True, 'result': result})
 
 
@@ -24653,6 +24788,7 @@ def api_finish_generation_job(job_id):
                 note=str(data.get('note') or data.get('error') or '').strip() or None)
         except Exception:
             pass
+    _bill_tenant_unbilled_usage_async(g.tenant_id)
     return jsonify({'success': True, 'job': updated})
 
 
@@ -25262,9 +25398,6 @@ def api_admin_decide_recharge_request(request_id):
     failure = _omran_error(row)
     if failure:
         return failure
-    if decision == 'approved' and isinstance(row, dict) and row.get('tenant_id'):
-        new_balance = db.get_tenant_balance(row['tenant_id'])
-        _sync_tenant_credit_to_openrouter(row['tenant_id'], new_balance)
     return jsonify({'success': True, 'request': row})
 
 

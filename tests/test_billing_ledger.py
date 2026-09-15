@@ -168,6 +168,80 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertEqual(result['entry']['draft_id'], 'draft-a')
         self.assertEqual(unbilled_b['ai_calls'], 1)
 
+    def test_checkout_skips_unpriced_attempts(self):
+        """In-flight/pending rows must not be claimed at $0: they stay
+        unbilled until the reconcile loop prices them."""
+        tenant_id = self._fresh_tenant('checkout-pending', balance=10.0)
+        self._seed_usage(tenant_id)  # one settled AI row ($1.00) + one maps row
+        with self.app.app_context():
+            pending_id = db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=50,
+                generation_id='gen-pending', draft_id='draft-bill')
+            inflight_id = db.begin_ai_usage_attempt(
+                tenant_id, 'model-x', flow='slide', draft_id='draft-bill')
+            result = db.bill_unbilled_usage(
+                tenant_id, draft_id='draft-bill', multiplier=2.0)
+            conn = db.get_db()
+            cols = {row['name'] for row in conn.execute(
+                'PRAGMA table_info(ai_usage_events)').fetchall()}
+            rows = {
+                dict(r)['id']: dict(r)
+                for r in conn.execute(
+                    'SELECT id, billed_ledger_id, attempt_status FROM ai_usage_events '
+                    'WHERE tenant_id = ?', (tenant_id,)).fetchall()
+            } if 'billed_ledger_id' in cols else {}
+        self.assertTrue(result['billed'])
+        self.assertEqual(result['entry']['ai_events_count'], 1)
+        self.assertAlmostEqual(result['entry']['ai_cost_usd'], 1.0)
+        if rows:
+            self.assertIsNone(rows[pending_id]['billed_ledger_id'])
+            self.assertIsNone(rows[inflight_id]['billed_ledger_id'])
+
+    def test_checkout_never_bills_package_consumed_usage(self):
+        """A row burned under an assigned package is consumed against that
+        package — the wallet must not charge it a second time."""
+        tenant_id = self._fresh_tenant('checkout-pkg', balance=10.0)
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=100,
+                cost_usd=1.0, draft_id='draft-bill', package_id='pkg-1')
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=100,
+                cost_usd=2.0, draft_id='draft-bill')
+            result = db.bill_unbilled_usage(
+                tenant_id, draft_id='draft-bill', multiplier=1.0)
+            unbilled = db.get_unbilled_usage(tenant_id, draft_id='draft-bill')
+        self.assertTrue(result['billed'])
+        self.assertEqual(result['entry']['ai_events_count'], 1)
+        self.assertAlmostEqual(result['entry']['ai_cost_usd'], 2.0)
+        self.assertEqual(unbilled['ai_calls'], 0)
+
+    def test_balance_change_hook_fires_on_credit_and_debit(self):
+        tenant_id = self._fresh_tenant('hook-tenant', balance=10.0)
+        fired = []
+        previous = db.BALANCE_CHANGE_HOOK
+        db.BALANCE_CHANGE_HOOK = fired.append
+        try:
+            with self.app.app_context():
+                db.record_ledger_credit(tenant_id, 5.0, note='شحن')
+                db.record_ai_usage_event(
+                    tenant_id, 'model-x', flow='slide', total_tokens=10,
+                    cost_usd=1.0, draft_id='draft-bill')
+                db.bill_unbilled_usage(tenant_id, draft_id='draft-bill')
+        finally:
+            db.BALANCE_CHANGE_HOOK = previous
+        self.assertEqual(fired, [tenant_id, tenant_id])
+
+    def test_hold_total_and_billable_tenant_feed(self):
+        tenant_id = self._fresh_tenant('sweep-feed', balance=10.0)
+        with self.app.app_context():
+            self.assertEqual(db.get_active_hold_total_usd(tenant_id), 0.0)
+            self.assertNotIn(tenant_id, db.list_tenants_with_billable_usage())
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=1.0, draft_id='draft-bill')
+            self.assertIn(tenant_id, db.list_tenants_with_billable_usage())
+
     # ── Credits ────────────────────────────────────────────────────────
 
     def test_topup_records_credit_and_adds_balance(self):

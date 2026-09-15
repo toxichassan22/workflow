@@ -712,6 +712,14 @@ def _create_tables(conn):
         if _usage_cols and 'package_id' not in _usage_cols:
             conn.execute(f'ALTER TABLE {_usage_table} ADD COLUMN package_id TEXT')
             print(f'[DB] Migration: added package_id column to {_usage_table}')
+        # Legacy rows stored the literal string 'None' where no package was
+        # active — normalize it to NULL so package filters read real data.
+        try:
+            conn.execute(
+                f"UPDATE {_usage_table} SET package_id = NULL "
+                "WHERE package_id IN ('', 'None', 'none')")
+        except Exception:
+            pass
     try:
         conn.execute('CREATE INDEX IF NOT EXISTS idx_aiusage_billed ON ai_usage_events(billed_ledger_id)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_mapusage_billed ON map_usage_events(billed_ledger_id)')
@@ -5970,7 +5978,7 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
              int(total_tokens or 0), cost_value, generation_id,
              cost_source, derived, int(reconcile_attempts or 0), next_retry_at, now_text,
              response_cost_usd, generation_cost_usd, cost_raw)
-            + ((str(package_id),) if has_package_col else ())
+            + ((package_id,) if has_package_col else ())
         )
     else:
         conn.execute(
@@ -6534,6 +6542,23 @@ class InsufficientBalance(Exception):
         )
 
 
+# The app layer registers a callable here that re-syncs the tenant's
+# provider-side spend cap whenever the wallet moves (top-up, debit, hold,
+# release, adjustment). Assigned once at import; None in tests and CLI use.
+BALANCE_CHANGE_HOOK = None
+
+
+def _fire_balance_change(tenant_id):
+    """Notify the registered listener that a wallet moved. Never raises."""
+    hook = BALANCE_CHANGE_HOOK
+    if not hook or not tenant_id:
+        return
+    try:
+        hook(tenant_id)
+    except Exception as exc:
+        print(f'[BILLING] balance-change hook failed for {tenant_id}: {exc}')
+
+
 def get_billing_multiplier():
     """Markup applied to raw provider cost at billing time. Env-overridable."""
     try:
@@ -6619,9 +6644,26 @@ def get_tenant_balance(tenant_id):
         return 0.0
 
 
-def _unbilled_scope_clause(tenant_id, draft_id=None, presentation_id=None):
-    clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL']
+# AI events checkout may claim: a verified cost ('settled'), a completed call
+# with nothing left to reconcile ('unresolved'), or a legacy row that predates
+# attempt tracking but already carries a cost. 'pending', 'in_flight' and
+# 'needs_review' rows stay unbilled until the reconcile loop prices them —
+# claiming them early would lock them at $0 forever.
+_AI_BILLABLE_STATUS_CLAUSE = (
+    "COALESCE(attempt_status, CASE WHEN cost_usd IS NOT NULL THEN 'settled' "
+    "ELSE 'pending' END) IN ('settled', 'unresolved')"
+)
+
+
+def _unbilled_scope_clause(tenant_id, draft_id=None, presentation_id=None,
+                           ai_settled_only=False):
+    # package_id IS NULL: a usage row burned under an assigned package is
+    # consumed against that package's credit — it is never wallet-billable
+    # and must not be double-charged by checkout or counted as unbilled.
+    clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL', 'package_id IS NULL']
     params = [tenant_id]
+    if ai_settled_only:
+        clauses.append(_AI_BILLABLE_STATUS_CLAUSE)
     if draft_id:
         clauses.append('draft_id = ?')
         params.append(draft_id)
@@ -6686,7 +6728,8 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
         except (TypeError, ValueError):
             active_multiplier = get_billing_multiplier()
         active_multiplier = max(0.0, active_multiplier)
-        ai_where, ai_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
+        ai_where, ai_params = _unbilled_scope_clause(
+            tenant_id, draft_id, presentation_id, ai_settled_only=True)
         maps_where, maps_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
         ai_claim = conn.execute(
             'UPDATE ai_usage_events SET billed_ledger_id = ? ' + ai_where,
@@ -6738,6 +6781,7 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
         except Exception:
             pass
         raise
+    _fire_balance_change(tenant_id)
     entry = conn.execute(
         'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
     ).fetchone()
@@ -6785,6 +6829,7 @@ def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None,
         except Exception:
             pass
         raise
+    _fire_balance_change(tenant_id)
     entry = conn.execute(
         'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
     ).fetchone()
@@ -6798,6 +6843,11 @@ def reset_all_company_balances(clear_usage=True):
     Provider key rows stay (identity only); limits re-sync on next assign."""
     conn = get_db()
     scope = 'COALESCE(is_admin, 0) != 1'
+    try:
+        affected_tenants = [row[0] for row in conn.execute(
+            f'SELECT id FROM tenants WHERE {scope}').fetchall()]
+    except Exception:
+        affected_tenants = []
     wallets = conn.execute(
         f'UPDATE tenants SET credit_balance = 0, package_id = NULL WHERE {scope}')
     result = {'tenants_reset': wallets.rowcount or 0, 'ai_deleted': 0,
@@ -6815,6 +6865,8 @@ def reset_all_company_balances(clear_usage=True):
             except Exception:
                 pass
     conn.commit()
+    for _tid in affected_tenants:
+        _fire_balance_change(_tid)
     return result
 
 
@@ -6954,6 +7006,7 @@ def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
          str(note or '').strip() or None, actor, reversal_of),
     )
     conn.commit()
+    _fire_balance_change(tenant_id)
     return {'adjusted': True,
             'entry': dict(conn.execute(
                 'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)).fetchone()),
@@ -6968,7 +7021,7 @@ def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
 # ─────────────────────────────────────────────────────────────────────────────
 
 TENANT_KEY_PROVENANCES = ('auto', 'manual')
-TENANT_KEY_LIMIT_RESETS = ('daily', 'weekly', 'monthly')
+TENANT_KEY_LIMIT_RESETS = ('daily', 'weekly', 'monthly', 'none')
 
 
 def _tenant_key_secret():
@@ -8946,6 +8999,8 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
             return reservation
         reservation_id = reservation['id']
     conn.commit()
+    if reservation_id:
+        _fire_balance_change(tenant_id)
     updated = dict(conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone())
     if decision == 'approved':
         if reservation_id:
@@ -9225,6 +9280,7 @@ def reserve_points(tenant_id, points, cost_usd=0, reserved_by=None, reserved_by_
         conn.rollback()
         return result
     conn.commit()
+    _fire_balance_change(tenant_id)
     return result
 
 
@@ -9250,6 +9306,7 @@ def consume_points(tenant_id, reservation_id, settled_by=None, note=None):
         conn.rollback()
         return result
     conn.commit()
+    _fire_balance_change(tenant_id)
     return result
 
 
@@ -9270,6 +9327,7 @@ def release_points(tenant_id, reservation_id, settled_by=None, note=None):
         conn.rollback()
         return result
     conn.commit()
+    _fire_balance_change(tenant_id)
     return result
 
 
@@ -9311,6 +9369,8 @@ def release_stale_reservations(tenant_id=None):
                 ('reservation-expired', row['generation_approval_id']),
             )
     conn.commit()
+    for _tid in {row['tenant_id'] for row in released}:
+        _fire_balance_change(_tid)
     for row in released:
         # After the money is settled, bring back a draft the dead run left in
         # 'generating'. Transitions commit themselves — they stay out of the
@@ -9346,6 +9406,82 @@ def list_point_reservations(tenant_id, status=None, limit=100):
             (tenant_id, int(limit)),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_active_hold_total_usd(tenant_id):
+    """Wallet amount currently escrowed in live generation holds.
+
+    Held money is already spent from the wallet but still entitles the run
+    to provider spend, so the key-limit sync adds it back on top of the
+    free balance. Pure read — the stale sweep is the caller's job.
+    """
+    try:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM point_reservations "
+            "WHERE tenant_id = ? AND status = 'reserved'", (str(tenant_id),),
+        ).fetchone()
+        return float(dict(row).get('total') or 0.0)
+    except Exception:
+        return 0.0
+
+
+def get_package_remaining_usd(tenant_id):
+    """Unburned credit of the tenant's assigned package, in raw USD.
+
+    Package consumption is implicit — usage rows tagged with the package id
+    at write time — so remaining = package credit minus tagged spend. No
+    assigned package means no package credit, never an error.
+    """
+    try:
+        conn = get_db()
+        tenant = conn.execute(
+            'SELECT package_id FROM tenants WHERE id = ?', (str(tenant_id),),
+        ).fetchone()
+        package_id = dict(tenant).get('package_id') if tenant else None
+        if not package_id:
+            return 0.0
+        package = get_billing_package(package_id)
+        if not package:
+            return 0.0
+        credit = float(package.get('credit_usd') or 0.0)
+        consumed = 0.0
+        for table in ('ai_usage_events', 'map_usage_events'):
+            try:
+                row = conn.execute(
+                    f'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM {table} '
+                    'WHERE tenant_id = ? AND package_id = ?',
+                    (str(tenant_id), str(package_id)),
+                ).fetchone()
+                consumed += float(dict(row).get('total') or 0.0)
+            except Exception:
+                pass
+        return max(0.0, credit - consumed)
+    except Exception:
+        return 0.0
+
+
+def list_tenants_with_billable_usage(limit=200):
+    """Tenants holding usage a ledger entry could bill right now.
+
+    Feeds the periodic billing sweep: AI rows qualify only once their cost
+    is settled (the checkout claim uses the same clause), Maps rows always
+    qualify. Super admins are never billed.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT tenant_id FROM ('
+        '  SELECT DISTINCT tenant_id FROM ai_usage_events '
+        '   WHERE billed_ledger_id IS NULL AND tenant_id IS NOT NULL '
+        '     AND package_id IS NULL AND ' + _AI_BILLABLE_STATUS_CLAUSE +
+        '  UNION '
+        '  SELECT DISTINCT tenant_id FROM map_usage_events '
+        '   WHERE billed_ledger_id IS NULL AND tenant_id IS NOT NULL '
+        '     AND package_id IS NULL'
+        ') WHERE tenant_id NOT IN (SELECT id FROM tenants WHERE COALESCE(is_admin, 0) = 1) '
+        'LIMIT ?', (int(limit),),
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def get_generation_approval(tenant_id, approval_id):
@@ -10376,6 +10512,8 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
             amount_usd=amount, price_sar=row['price_sar'] if 'price_sar' in row.keys() else None,
             issued_by=reviewed_by, issued_by_name=reviewed_by_name)
     conn.commit()
+    if decision == 'approved' and float(row['amount_usd'] or 0) > 0:
+        _fire_balance_change(target_tenant_id)
     return dict(conn.execute('SELECT * FROM recharge_requests WHERE id = ?', (request_id,)).fetchone())
 
 
