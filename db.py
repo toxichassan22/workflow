@@ -6644,6 +6644,27 @@ def get_tenant_balance(tenant_id):
         return 0.0
 
 
+def get_tenant_wallet_credited(tenant_id):
+    """Total USD ever placed in the wallet: top-ups plus positive adjustments.
+
+    A release is excluded — it is held money coming back, not new credit —
+    while holds and debits carry positive amounts but move money out, so the
+    sum whitelists incoming kinds only. The dashboard balance card reads this
+    as the wallet's effective limit; consumed = credited - balance.
+    """
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT COALESCE(SUM(amount_usd), 0) AS total FROM tenant_ledger '
+            "WHERE tenant_id = ? AND amount_usd > 0 "
+            "AND kind IN ('credit', 'refund', 'correction', 'expiry')",
+            (str(tenant_id),)
+        ).fetchone()
+        return round(float(dict(row).get('total') or 0.0), 2)
+    except Exception:
+        return 0.0
+
+
 # AI events checkout may claim: a verified cost ('settled'), a completed call
 # with nothing left to reconcile ('unresolved'), or a legacy row that predates
 # attempt tracking but already carries a cost. 'pending', 'in_flight' and

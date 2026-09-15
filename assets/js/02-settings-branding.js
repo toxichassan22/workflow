@@ -842,14 +842,12 @@
       if (!card) return;
       tenantLastOverview = data || null;
       const pkg = (data && data.package) || null;
-      // A real package carries its own credit; a bare wallet has no cap, so
-      // its "total" is what was ever credited: remaining plus lifetime burn.
-      const isWallet = !pkg || pkg.id === 'wallet';
+      // The server resolves the quota: a real package carries its own credit,
+      // and a bare wallet reports everything the platform ever credited.
       const balance = Number((data && data.balance_usd) || 0);
-      const lifetime = Number((data && data.lifetime && data.lifetime.consumed_usd) || 0);
-      const remaining = isWallet ? balance : Number(pkg.remaining_usd || 0);
-      const consumed = isWallet ? lifetime : Number(pkg.consumed_usd || 0);
-      const credit = isWallet ? remaining + consumed : Number(pkg.credit_usd || 0);
+      const remaining = pkg ? Number(pkg.remaining_usd || 0) : balance;
+      const consumed = pkg ? Number(pkg.consumed_usd || 0) : 0;
+      const credit = pkg ? Number(pkg.credit_usd || 0) : remaining;
       const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;
       const valueEl = document.getElementById('dashBalanceValue');
       if (valueEl) valueEl.textContent = sagFmtMoney(remaining);

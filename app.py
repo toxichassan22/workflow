@@ -21276,19 +21276,24 @@ def api_client_overview():
             package['credit_sar'] = db.usd_to_sar(package.get('credit_usd'), fx.get('rate'))
             package['consumed_sar'] = db.usd_to_sar(package.get('consumed_usd'), fx.get('rate'))
             package['remaining_sar'] = db.usd_to_sar(package.get('remaining_usd'), fx.get('rate'))
-        elif balance_usd > 0:
-            package = {
-                'id': 'wallet',
-                'name': 'رصيد المحفظة',
-                'credit_usd': balance_usd,
-                'consumed_usd': view.get('consumption_usd') or 0.0,
-                'remaining_usd': balance_usd,
-                'status': 'active',
-                'assigned_at': None,
-                'credit_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
-                'consumed_sar': db.usd_to_sar(view.get('consumption_usd') or 0.0, fx.get('rate')),
-                'remaining_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
-            }
+        else:
+            # A bare wallet has no package cap; its limit is everything the
+            # platform ever credited, and what left since is the consumed share.
+            credited_usd = db.get_tenant_wallet_credited(g.tenant_id)
+            if balance_usd > 0 or credited_usd > 0:
+                consumed_usd = max(0.0, round(credited_usd - balance_usd, 2))
+                package = {
+                    'id': 'wallet',
+                    'name': 'رصيد المحفظة',
+                    'credit_usd': credited_usd,
+                    'consumed_usd': consumed_usd,
+                    'remaining_usd': balance_usd,
+                    'status': 'active',
+                    'assigned_at': None,
+                    'credit_sar': db.usd_to_sar(credited_usd, fx.get('rate')),
+                    'consumed_sar': db.usd_to_sar(consumed_usd, fx.get('rate')),
+                    'remaining_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+                }
         return jsonify({
             'success': True,
             'totals': {
