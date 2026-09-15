@@ -455,12 +455,12 @@ class OmranDbTests(unittest.TestCase):
 
     # ── t50: support tickets ─────────────────────────────────────────────
 
-    def test_support_ticket_lifecycle_and_sla(self):
+    def test_support_ticket_lifecycle(self):
         ticket = db.create_support_ticket(
             'tenant-1', 'مشكلة توليد', priority='urgent', body='العرض توقف',
             created_by='user-1', created_by_name='رئيس القسم')
         self.assertEqual(ticket['status'], 'open')
-        self.assertTrue(ticket['sla_due_at'])
+        self.assertEqual(ticket['priority'], 'urgent')
         db.add_support_message('tenant-1', ticket['id'], 'سنراجع الأمر',
                                author_name='الدعم', author_role='support')
         detail = db.get_support_ticket('tenant-1', ticket['id'])

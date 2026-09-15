@@ -1,6 +1,6 @@
 """Housekeeping passes (t24/t40/t41/d08).
 
-Covers the automatic reminder/escalation/SLA sweeps and the email outbox
+Covers the automatic reminder/escalation sweeps and the email outbox
 drain: each runs on a timer or an explicit admin call, reaches the assignee
 and company admins in-app and by email, and stays idempotent so a repeated
 tick never notifies twice. Runs against a temporary SQLite database and never
@@ -119,39 +119,6 @@ class HousekeepingDbTests(unittest.TestCase):
             'tenant-1', 'section_approval', 'اعتماد قسم', due_hours=48)
         self.assertEqual(db.escalate_overdue_approval_tasks(), [])
 
-    # ── t40/d08: proactive SLA warning ───────────────────────────────────
-
-    def test_ticket_approaching_sla_warns_once(self):
-        ticket = db.create_support_ticket(
-            'tenant-1', 'مشكلة في التوليد', created_by=self.assignee_id,
-            priority='high')
-        soon = (db._utcnow() + timedelta(hours=2)).isoformat()
-        db.get_db().execute(
-            'UPDATE support_tickets SET sla_due_at = ?, assigned_to = ? WHERE id = ?',
-            (soon, self.assignee_id, ticket['id']),
-        )
-        db.get_db().commit()
-        warned = db.warn_tickets_approaching_sla(window_hours=4)
-        self.assertIn(ticket['id'], warned)
-        updated = db.get_db().execute(
-            'SELECT sla_warned_at FROM support_tickets WHERE id = ?', (ticket['id'],)
-        ).fetchone()
-        self.assertTrue(updated['sla_warned_at'])
-        self.assertTrue(self._notifications(self.assignee_id))
-        self.assertTrue(self._notifications(self.admin_id))
-        self.assertEqual(db.warn_tickets_approaching_sla(window_hours=4), [])
-
-    def test_ticket_far_from_sla_is_not_warned(self):
-        ticket = db.create_support_ticket(
-            'tenant-1', 'سؤال عام', created_by=self.assignee_id)
-        far = (db._utcnow() + timedelta(hours=72)).isoformat()
-        db.get_db().execute(
-            'UPDATE support_tickets SET sla_due_at = ? WHERE id = ?',
-            (far, ticket['id']),
-        )
-        db.get_db().commit()
-        self.assertEqual(db.warn_tickets_approaching_sla(window_hours=4), [])
-
     # ── t41/t61: the outbox drain ────────────────────────────────────────
 
     def test_claim_due_emails_claims_each_row_once(self):
@@ -238,7 +205,7 @@ class HousekeepingApiTests(unittest.TestCase):
             headers=self.headers(self.admin_token), json={})
         self.assertEqual(response.status_code, 200, response.get_json())
         summary = response.get_json()['summary']
-        for step in ('email', 'reminders', 'escalations', 'sla_warnings',
+        for step in ('email', 'reminders', 'escalations',
                      'stale_reservations', 'stale_generation_jobs'):
             self.assertIn(step, summary)
 

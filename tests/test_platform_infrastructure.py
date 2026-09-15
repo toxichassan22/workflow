@@ -1,8 +1,8 @@
 """Mission-5 platform infrastructure tests (t50/t51/t54/t55/t60/t61/t62/t63).
 
 Covers the graph-model tables, company slugs and redirects, the activation
-gate, package versions and subscriptions, support SLA policies, generation
-jobs, the durable job queue, email outbox, feature flags, study-type and
+gate, package versions and subscriptions, generation
+jobs, the durable job queue, email outbox, study-type and
 generator registries, backup history, dashboards and CSV reports, and the
 matching admin endpoints. Runs against a temporary SQLite database.
 """
@@ -64,11 +64,10 @@ class Mission5DbTests(unittest.TestCase):
         tables = {r['name'] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         for table in ('notification_deliveries', 'support_ticket_attachments',
-                      'support_sla_policies', 'tenant_contract_versions',
+                      'tenant_contract_versions',
                       'tenant_subscriptions', 'billing_package_versions',
                       'topup_receipts', 'generation_jobs', 'document_versions',
                       'tenant_slug_redirects', 'study_types', 'generator_registry',
-                      'feature_flags', 'feature_flag_history',
                       'field_schema_versions', 'job_queue', 'email_outbox',
                       'backup_history'):
             self.assertIn(table, tables, table)
@@ -257,18 +256,6 @@ class Mission5DbTests(unittest.TestCase):
         self.assertEqual(
             db.register_generator('bogus', 'x'), {'error': 'invalid_kind'})
 
-    def test_feature_flags_scope_and_rollback(self):
-        db.set_feature_flag('new.exports', True, actor_name='مدير')
-        self.assertTrue(db.get_feature_flag('new.exports'))
-        self.assertTrue(db.get_feature_flag('new.exports', tenant_id='tenant-1'))
-        db.set_feature_flag('new.exports', False, tenant_id='tenant-1')
-        self.assertFalse(db.get_feature_flag('new.exports', tenant_id='tenant-1'))
-        self.assertTrue(db.get_feature_flag('new.exports'))
-        db.rollback_feature_flag('new.exports', tenant_id='tenant-1')
-        self.assertTrue(db.get_feature_flag('new.exports', tenant_id='tenant-1'))
-        history = db.list_feature_flag_history('new.exports', tenant_id='tenant-1')
-        self.assertEqual(len(history), 2)
-
     def test_field_schema_snapshot_versions(self):
         snap1 = db.snapshot_field_schema('tenant-1')
         snap2 = db.snapshot_field_schema('tenant-1')
@@ -321,17 +308,10 @@ class Mission5DbTests(unittest.TestCase):
 
     # ── t54/t63: monitoring and backups ───────────────────────────────────
 
-    def test_platform_alerts_flags_overdue_backup_and_sla(self):
+    def test_platform_alerts_flags_overdue_backup(self):
         alerts = db.platform_alerts()
         kinds = {a['kind'] for a in alerts}
         self.assertIn('backup_overdue', kinds)
-        conn = db.get_db()
-        conn.execute(
-            "INSERT INTO support_tickets (id, tenant_id, number, subject, status, "
-            "sla_due_at) VALUES ('t1', 'tenant-1', 1, 'عاجل', 'open', '2000-01-01')")
-        conn.commit()
-        kinds = {a['kind'] for a in db.platform_alerts()}
-        self.assertIn('ticket_sla', kinds)
 
     def test_backup_registry_cycle(self):
         row = db.record_backup(kind='full', path='/tmp/x.enc',
@@ -383,24 +363,9 @@ class Mission5DbTests(unittest.TestCase):
         self.assertIn('شحن', ledger)
         self.assertIn('Tenant One', ledger)
 
-    # ── d08: package-aware SLA ────────────────────────────────────────────
-
-    def test_sla_policy_package_scope_wins(self):
-        db.upsert_sla_policy('normal', 12, 48, package_id='pkg-1')
-        db.upsert_sla_policy('normal', 24, 72)  # global fallback
-        db.create_subscription('tenant-1', package_id='pkg-1')
-        response, resolve = db.get_sla_for_ticket('tenant-1', 'normal')
-        self.assertEqual((response, resolve), (12, 48))
-        response, resolve = db.get_sla_for_ticket('tenant-2', 'normal')
-        self.assertEqual((response, resolve), (24, 72))
-        response, resolve = db.get_sla_for_ticket('tenant-x', 'urgent')
-        self.assertEqual((response, resolve), (4, 24))
-
-    def test_ticket_carries_resolve_deadline(self):
+    def test_ticket_carries_project_link(self):
         ticket = db.create_support_ticket(
             'tenant-1', 'مشكلة', priority='high', draft_id='draft-9')
-        self.assertTrue(ticket['sla_due_at'])
-        self.assertTrue(ticket['sla_resolve_due_at'])
         self.assertEqual(ticket['draft_id'], 'draft-9')
 
 
@@ -514,34 +479,6 @@ class Mission5ApiTests(unittest.TestCase):
             f'/api/admin/tenants/{self.company_id}/contracts/{contract_id}/versions',
             headers=self.admin_headers)
         self.assertEqual(len(res.get_json()['versions']), 2)
-
-    def test_feature_flags_endpoints(self):
-        res = self.client.put('/api/admin/feature-flags',
-                              headers=self.admin_headers,
-                              json={'flag': 'beta.pptx', 'enabled': True})
-        self.assertEqual(res.status_code, 200)
-        res = self.client.get('/api/admin/feature-flags',
-                              headers=self.admin_headers)
-        flags = {f['flag_key']: f['enabled'] for f in res.get_json()['flags']}
-        self.assertEqual(flags.get('beta.pptx'), 1)
-        res = self.client.get('/api/admin/feature-flags/beta.pptx/history',
-                              headers=self.admin_headers)
-        self.assertEqual(len(res.get_json()['history']), 1)
-
-    def test_sla_policy_endpoint(self):
-        res = self.client.put('/api/admin/support/sla-policies',
-                              headers=self.admin_headers,
-                              json={'priority': 'urgent', 'firstResponseHours': 2,
-                                    'resolveHours': 12})
-        self.assertEqual(res.status_code, 200, res.get_json())
-        res = self.client.get('/api/admin/support/sla-policies',
-                              headers=self.admin_headers)
-        self.assertTrue(res.get_json()['policies'])
-        bad = self.client.put('/api/admin/support/sla-policies',
-                              headers=self.admin_headers,
-                              json={'priority': 'bogus', 'firstResponseHours': 1,
-                                    'resolveHours': 2})
-        self.assertEqual(bad.status_code, 400)
 
     def test_reports_csv_export(self):
         res = self.client.get('/api/admin/reports/ledger',

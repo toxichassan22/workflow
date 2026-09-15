@@ -7996,8 +7996,8 @@ def _create_omran_tables(conn):
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_recharge_requests_tenant ON recharge_requests(tenant_id, status, requested_at DESC)')
 
-    # t40: support tickets with statuses, categories, SLA due times and one
-    # linear comment thread per ticket.
+    # t40: support tickets with statuses, categories and one linear comment
+    # thread per ticket.
     conn.execute('''CREATE TABLE IF NOT EXISTS support_tickets (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -8009,7 +8009,6 @@ def _create_omran_tables(conn):
         created_by TEXT,
         created_by_name TEXT,
         assigned_to TEXT,
-        sla_due_at TEXT,
         first_response_at TEXT,
         resolved_at TEXT,
         closed_at TEXT,
@@ -8140,8 +8139,7 @@ def _create_platform_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_notif_deliveries_notification ON notification_deliveries(notification_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_notif_deliveries_tenant ON notification_deliveries(tenant_id, status, created_at DESC)')
 
-    # t60-02: ticket attachments point at stored files, and per-package SLA
-    # policies replace the single fixed priority table.
+    # t60-02: ticket attachments point at stored files.
     conn.execute('''CREATE TABLE IF NOT EXISTS support_ticket_attachments (
         id TEXT PRIMARY KEY,
         ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
@@ -8151,18 +8149,6 @@ def _create_platform_tables(conn):
         created_at TEXT DEFAULT (datetime('now'))
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_ticket_attachments ON support_ticket_attachments(ticket_id)')
-
-    conn.execute('''CREATE TABLE IF NOT EXISTS support_sla_policies (
-        id TEXT PRIMARY KEY,
-        package_id TEXT REFERENCES billing_packages(id) ON DELETE CASCADE,
-        priority TEXT NOT NULL,
-        first_response_hours INTEGER NOT NULL DEFAULT 24,
-        resolve_hours INTEGER NOT NULL DEFAULT 72,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        updated_at TEXT DEFAULT (datetime('now')),
-        updated_by_name TEXT
-    )''')
-    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_sla_policy ON support_sla_policies(COALESCE(package_id, \'\'), priority)')
 
     # t60-03: contract versions carry the signed document and signature state;
     # tenant_contracts stays the head row pointing at the latest version.
@@ -8327,31 +8313,6 @@ def _create_platform_tables(conn):
     )''')
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_generator_registry ON generator_registry(kind, key, version)')
 
-    # t62: feature flags per company or platform-wide (tenant_id IS NULL), with
-    # a history table so a flag change can be rolled back to any earlier value.
-    conn.execute('''CREATE TABLE IF NOT EXISTS feature_flags (
-        id TEXT PRIMARY KEY,
-        flag_key TEXT NOT NULL,
-        tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
-        enabled INTEGER NOT NULL DEFAULT 0,
-        updated_by TEXT,
-        updated_by_name TEXT,
-        updated_at TEXT DEFAULT (datetime('now')),
-        created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_feature_flags ON feature_flags(flag_key, COALESCE(tenant_id, \'\'))')
-
-    conn.execute('''CREATE TABLE IF NOT EXISTS feature_flag_history (
-        id TEXT PRIMARY KEY,
-        flag_key TEXT NOT NULL,
-        tenant_id TEXT,
-        enabled INTEGER NOT NULL DEFAULT 0,
-        changed_by TEXT,
-        changed_by_name TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_flag_history ON feature_flag_history(flag_key, COALESCE(tenant_id, \'\'), created_at DESC)')
-
     # t62: versioned input-schema snapshots; drafts record which schema version
     # they were captured against.
     conn.execute('''CREATE TABLE IF NOT EXISTS field_schema_versions (
@@ -8482,15 +8443,10 @@ def _ensure_platform_columns(conn):
     _add('tenant_contracts', 'retention_until', 'TEXT')
     _add('tenant_contracts', 'updated_at', 'TEXT')
 
-    # t60-02: tickets can hang off a project file/draft and carry an SLA
-    # resolve deadline next to the existing response deadline.
+    # t60-02: tickets can hang off a project file/draft.
     _add('support_tickets', 'draft_id', 'TEXT')
     _add('support_tickets', 'project_id', 'TEXT')
-    _add('support_tickets', 'sla_resolve_due_at', 'TEXT')
     _add('support_tickets', 'reopened_count', 'INTEGER DEFAULT 0')
-    # t40/d08: stamped once the pre-breach warning has reached the tenant so
-    # the housekeeping pass notifies each ticket exactly once.
-    _add('support_tickets', 'sla_warned_at', 'TEXT')
 
     # t42: event tasks link back to the object that raised them and carry a
     # priority so the board can escalate what matters first.
@@ -10239,53 +10195,6 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
     return escalated
 
 
-def warn_tickets_approaching_sla(tenant_id=None, window_hours=4):
-    """t40/d08: proactive SLA warning — an open ticket whose response or
-    resolve deadline lands inside the window notifies the tenant once
-    (sla_warned_at), reaching the assignee and company admins by email."""
-    conn = get_db()
-    from datetime import timedelta
-    now = _utcnow()
-    horizon = (now + timedelta(hours=int(window_hours))).isoformat()
-    clauses = [
-        "status NOT IN ('resolved', 'closed')", 'sla_warned_at IS NULL',
-        "((sla_due_at IS NOT NULL AND sla_due_at <= ?)"
-        " OR (sla_resolve_due_at IS NOT NULL AND sla_resolve_due_at <= ?))",
-    ]
-    params = [horizon, horizon]
-    if tenant_id:
-        clauses.insert(0, 'tenant_id = ?')
-        params.insert(0, tenant_id)
-    rows = conn.execute(
-        'SELECT * FROM support_tickets WHERE ' + ' AND '.join(clauses), params,
-    ).fetchall()
-    warned = []
-    for row in rows:
-        conn.execute(
-            'UPDATE support_tickets SET sla_warned_at = ? WHERE id = ?',
-            (now.isoformat(), row['id']),
-        )
-        warned.append(row['id'])
-    conn.commit()
-    for row in rows:
-        title = 'تذكرة تقترب من تجاوز زمن الاستجابة'
-        body = f"{row['subject']} (#{row['number'] or row['id']})"
-        notified = set()
-        recipients = [row['assigned_to'], row['created_by']]
-        recipients += [a['id'] for a in tenant_admin_contacts(row['tenant_id'])]
-        admin_emails = {a['id']: a['email'] for a in tenant_admin_contacts(row['tenant_id'])}
-        for user_id in recipients:
-            if not user_id or user_id in notified:
-                continue
-            notified.add(user_id)
-            create_notification(
-                row['tenant_id'], title, body=body, category='support',
-                entity_type='support_ticket', entity_id=row['id'],
-                user_id=user_id,
-                email_to=admin_emails.get(user_id) or _user_email(user_id))
-    return warned
-
-
 # ── t32/t33: recharge (package purchase) requests ───────────────────────────
 
 def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=None,
@@ -10422,9 +10331,6 @@ def list_recharge_requests(tenant_id=None, status=None, limit=100):
 
 # ── t40: support tickets ────────────────────────────────────────────────────
 
-SLA_HOURS_BY_PRIORITY = {'urgent': 4, 'high': 8, 'normal': 24, 'low': 72}
-
-
 def create_support_ticket(tenant_id, subject, category='general', priority='normal',
                           created_by=None, created_by_name=None, body=None,
                           draft_id=None, project_id=None):
@@ -10433,15 +10339,10 @@ def create_support_ticket(tenant_id, subject, category='general', priority='norm
         return {'error': 'subject_required'}
     if category not in SUPPORT_TICKET_CATEGORIES:
         return {'error': 'invalid_category'}
-    if priority not in SLA_HOURS_BY_PRIORITY:
+    if priority not in SUPPORT_TICKET_PRIORITIES:
         priority = 'normal'
     conn = get_db()
     ticket_id = str(uuid.uuid4())
-    from datetime import timedelta
-    response_hours, resolve_hours = get_sla_for_ticket(tenant_id, priority)
-    now = _utcnow()
-    sla_due = (now + timedelta(hours=response_hours)).isoformat()
-    sla_resolve_due = (now + timedelta(hours=resolve_hours)).isoformat()
     number = conn.execute(
         'SELECT COALESCE(MAX(number), 0) + 1 AS next FROM support_tickets WHERE tenant_id = ?',
         (tenant_id,),
@@ -10449,10 +10350,10 @@ def create_support_ticket(tenant_id, subject, category='general', priority='norm
     conn.execute(
         '''INSERT INTO support_tickets
            (id, tenant_id, number, subject, category, priority, status, created_by, created_by_name,
-            sla_due_at, sla_resolve_due_at, draft_id, project_id)
-           VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)''',
+            draft_id, project_id)
+           VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)''',
         (ticket_id, tenant_id, int(number['next']), subject, category, priority,
-         created_by, created_by_name, sla_due, sla_resolve_due, draft_id, project_id),
+         created_by, created_by_name, draft_id, project_id),
     )
     if body:
         conn.execute(
@@ -10476,17 +10377,7 @@ def list_support_tickets(tenant_id, status=None, limit=100):
             'SELECT * FROM support_tickets WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?',
             (tenant_id, int(limit)),
         ).fetchall()
-    now = _utcnow()
-    result = []
-    for row in rows:
-        item = dict(row)
-        try:
-            item['sla_overdue'] = bool(item.get('sla_due_at')) and item['status'] not in {'resolved', 'closed'} \
-                and datetime.fromisoformat(item['sla_due_at']) < now
-        except (TypeError, ValueError):
-            item['sla_overdue'] = False
-        result.append(item)
-    return result
+    return [dict(row) for row in rows]
 
 
 def get_support_ticket(tenant_id, ticket_id):
@@ -10507,16 +10398,6 @@ def get_support_ticket(tenant_id, ticket_id):
     return ticket
 
 
-def _support_ticket_with_sla(row):
-    item = dict(row)
-    try:
-        item['sla_overdue'] = bool(item.get('sla_due_at')) and item['status'] not in {'resolved', 'closed'} \
-            and datetime.fromisoformat(item['sla_due_at']) < _utcnow()
-    except (TypeError, ValueError):
-        item['sla_overdue'] = False
-    return item
-
-
 def list_all_support_tickets(status=None, limit=200):
     """Platform inbox: tickets of every company with the company name attached."""
     conn = get_db()
@@ -10528,7 +10409,7 @@ def list_all_support_tickets(status=None, limit=200):
         params.append(status)
     query += ' ORDER BY t.updated_at DESC LIMIT ?'
     params.append(int(limit))
-    return [_support_ticket_with_sla(row) for row in conn.execute(query, params).fetchall()]
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 def get_support_ticket_admin(ticket_id):
@@ -10541,7 +10422,7 @@ def get_support_ticket_admin(ticket_id):
     ).fetchone()
     if not row:
         return None
-    ticket = _support_ticket_with_sla(row)
+    ticket = dict(row)
     ticket['messages'] = [dict(m) for m in conn.execute(
         'SELECT * FROM support_ticket_messages WHERE ticket_id = ? ORDER BY created_at', (ticket_id,),
     ).fetchall()]
@@ -11250,7 +11131,7 @@ def export_downloads_csv(tenant_id=None, from_date=None, to_date=None, limit=500
 
 
 def export_tickets_csv(tenant_id=None, from_date=None, to_date=None, limit=5000):
-    """Support tickets report with SLA columns."""
+    """Support tickets report."""
     conn = get_db()
     clauses = []
     params = []
@@ -11272,10 +11153,9 @@ def export_tickets_csv(tenant_id=None, from_date=None, to_date=None, limit=5000)
     rows = conn.execute(query, params).fetchall()
     return _csv_response(
         ['الرقم', 'الشركة', 'العنوان', 'الفئة', 'الأولوية', 'الحالة', 'المنشئ',
-         'أول استجابة', 'موعد الاستجابة', 'موعد الحل', 'أنشئت', 'حُلّت', 'أُغلقت'],
+         'أول استجابة', 'أنشئت', 'حُلّت', 'أُغلقت'],
         [[r['number'], r['company_name'], r['subject'], r['category'], r['priority'],
-          r['status'], r['created_by_name'], r['first_response_at'], r['sla_due_at'],
-          r['sla_resolve_due_at'] if 'sla_resolve_due_at' in r.keys() else '',
+          r['status'], r['created_by_name'], r['first_response_at'],
           r['created_at'], r['resolved_at'], r['closed_at']]
          for r in rows])
 
@@ -12757,7 +12637,7 @@ def notification_delivery_report(tenant_id=None, limit=200):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# t60-02: ticket attachments, project links and per-package SLA policies
+# t60-02: ticket attachments and project links
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -12798,91 +12678,6 @@ def list_support_ticket_attachments(ticket_id):
         (str(ticket_id),),
     ).fetchall()
     return [dict(r) for r in rows]
-
-
-def upsert_sla_policy(priority, first_response_hours, resolve_hours,
-                      package_id=None, updated_by_name=None):
-    """Create or replace the SLA row for a (package, priority) pair."""
-    if priority not in SUPPORT_TICKET_PRIORITIES:
-        return {'error': 'invalid_priority'}
-    try:
-        first_response_hours = max(1, int(first_response_hours))
-        resolve_hours = max(first_response_hours, int(resolve_hours))
-    except (TypeError, ValueError):
-        return {'error': 'invalid_hours'}
-    conn = get_db()
-    existing = conn.execute(
-        'SELECT id FROM support_sla_policies WHERE COALESCE(package_id, \'\') = ? AND priority = ?',
-        (str(package_id or ''), priority),
-    ).fetchone()
-    now = _utcnow().isoformat()
-    if existing:
-        conn.execute(
-            '''UPDATE support_sla_policies SET first_response_hours = ?, resolve_hours = ?,
-               is_active = 1, updated_at = ?, updated_by_name = ? WHERE id = ?''',
-            (first_response_hours, resolve_hours, now, updated_by_name, existing['id']),
-        )
-        row_id = existing['id']
-    else:
-        row_id = str(uuid.uuid4())
-        conn.execute(
-            '''INSERT INTO support_sla_policies
-               (id, package_id, priority, first_response_hours, resolve_hours, updated_at, updated_by_name)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (row_id, str(package_id) if package_id else None, priority,
-             first_response_hours, resolve_hours, now, updated_by_name),
-        )
-    conn.commit()
-    return dict(conn.execute(
-        'SELECT * FROM support_sla_policies WHERE id = ?', (row_id,)).fetchone())
-
-
-def list_sla_policies():
-    conn = get_db()
-    rows = conn.execute(
-        '''SELECT s.*, p.name AS package_name FROM support_sla_policies s
-           LEFT JOIN billing_packages p ON p.id = s.package_id
-           WHERE s.is_active = 1 ORDER BY s.package_id, s.priority'''
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-SUPPORT_SLA_DEFAULTS = {
-    'urgent': (4, 24),
-    'high': (8, 48),
-    'normal': (24, 72),
-    'low': (48, 120),
-}
-
-
-def get_sla_for_ticket(tenant_id, priority):
-    """Resolve (first_response_hours, resolve_hours) for a ticket (d08).
-
-    The company's active package policy wins; a global row (package_id NULL)
-    is the fallback, then the built-in defaults per priority.
-    """
-    conn = get_db()
-    package_id = None
-    try:
-        sub = current_subscription(tenant_id)
-        if sub and sub.get('package_id'):
-            package_id = sub['package_id']
-        else:
-            tenant = conn.execute(
-                'SELECT package_id FROM tenants WHERE id = ?', (str(tenant_id),)
-            ).fetchone()
-            package_id = tenant['package_id'] if tenant else None
-    except Exception:
-        package_id = None
-    for scope in ([str(package_id)] if package_id else []) + ['']:
-        row = conn.execute(
-            '''SELECT first_response_hours, resolve_hours FROM support_sla_policies
-               WHERE COALESCE(package_id, '') = ? AND priority = ? AND is_active = 1''',
-            (scope, priority),
-        ).fetchone()
-        if row:
-            return int(row['first_response_hours']), int(row['resolve_hours'])
-    return SUPPORT_SLA_DEFAULTS.get(priority, SUPPORT_SLA_DEFAULTS['normal'])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -13475,124 +13270,6 @@ def get_generator(kind, key, version=None):
     return item
 
 
-def set_feature_flag(flag_key, enabled, tenant_id=None, actor_id=None, actor_name=None):
-    """Set a flag globally (tenant_id NULL) or for one company, with history."""
-    flag_key = str(flag_key or '').strip().lower()
-    if not flag_key or not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{1,80}', flag_key):
-        return {'error': 'invalid_flag'}
-    conn = get_db()
-    now = _utcnow().isoformat()
-    existing = conn.execute(
-        "SELECT id FROM feature_flags WHERE flag_key = ? AND COALESCE(tenant_id, '') = ?",
-        (flag_key, str(tenant_id or '')),
-    ).fetchone()
-    if existing:
-        conn.execute(
-            'UPDATE feature_flags SET enabled = ?, updated_by = ?, updated_by_name = ?, updated_at = ? WHERE id = ?',
-            (1 if enabled else 0, actor_id, actor_name, now, existing['id']),
-        )
-        flag_id = existing['id']
-    else:
-        flag_id = str(uuid.uuid4())
-        conn.execute(
-            '''INSERT INTO feature_flags (id, flag_key, tenant_id, enabled, updated_by, updated_by_name, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (flag_id, flag_key, str(tenant_id) if tenant_id else None,
-             1 if enabled else 0, actor_id, actor_name, now),
-        )
-    conn.execute(
-        '''INSERT INTO feature_flag_history (id, flag_key, tenant_id, enabled, changed_by, changed_by_name)
-           VALUES (?, ?, ?, ?, ?, ?)''',
-        (str(uuid.uuid4()), flag_key, str(tenant_id) if tenant_id else None,
-         1 if enabled else 0, actor_id, actor_name),
-    )
-    conn.commit()
-    return dict(conn.execute('SELECT * FROM feature_flags WHERE id = ?', (flag_id,)).fetchone())
-
-
-def get_feature_flag(flag_key, tenant_id=None):
-    """Effective flag: the company's own row wins, then the global row."""
-    conn = get_db()
-    flag_key = str(flag_key or '').strip().lower()
-    if tenant_id:
-        row = conn.execute(
-            'SELECT enabled FROM feature_flags WHERE flag_key = ? AND tenant_id = ?',
-            (flag_key, str(tenant_id)),
-        ).fetchone()
-        if row:
-            return bool(row['enabled'])
-    row = conn.execute(
-        'SELECT enabled FROM feature_flags WHERE flag_key = ? AND tenant_id IS NULL',
-        (flag_key,),
-    ).fetchone()
-    return bool(row['enabled']) if row else False
-
-
-def list_feature_flags(tenant_id=None):
-    conn = get_db()
-    if tenant_id:
-        rows = conn.execute(
-            'SELECT * FROM feature_flags WHERE tenant_id = ? OR tenant_id IS NULL '
-            'ORDER BY flag_key', (str(tenant_id),),
-        ).fetchall()
-    else:
-        rows = conn.execute('SELECT * FROM feature_flags ORDER BY flag_key').fetchall()
-    return [dict(r) for r in rows]
-
-
-def rollback_feature_flag(flag_key, tenant_id=None, history_id=None,
-                          actor_id=None, actor_name=None):
-    """Roll a flag back to a recorded history value (latest before now if no id)."""
-    conn = get_db()
-    flag_key = str(flag_key or '').strip().lower()
-    if history_id:
-        row = conn.execute(
-            "SELECT * FROM feature_flag_history WHERE id = ? AND flag_key = ? "
-            "AND COALESCE(tenant_id, '') = ?",
-            (str(history_id), flag_key, str(tenant_id or '')),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT * FROM feature_flag_history WHERE flag_key = ? AND COALESCE(tenant_id, '') = ? "
-            "ORDER BY created_at DESC LIMIT 1 OFFSET 1",
-            (flag_key, str(tenant_id or '')),
-        ).fetchone()
-    if not row:
-        # No earlier value in this scope: rollback removes the override so the
-        # company falls back to the platform default (or the flag simply turns
-        # off when no global row exists either).
-        current = conn.execute(
-            "SELECT enabled FROM feature_flags WHERE flag_key = ? AND COALESCE(tenant_id, '') = ?",
-            (flag_key, str(tenant_id or '')),
-        ).fetchone()
-        if not current:
-            return {'error': 'history_not_found'}
-        conn.execute(
-            "DELETE FROM feature_flags WHERE flag_key = ? AND COALESCE(tenant_id, '') = ?",
-            (flag_key, str(tenant_id or '')),
-        )
-        conn.execute(
-            '''INSERT INTO feature_flag_history (id, flag_key, tenant_id, enabled, changed_by, changed_by_name)
-               VALUES (?, ?, ?, ?, ?, ?)''',
-            (str(uuid.uuid4()), flag_key, str(tenant_id) if tenant_id else None,
-             int(current['enabled']), actor_id, actor_name),
-        )
-        conn.commit()
-        return {'flag_key': flag_key, 'tenant_id': tenant_id, 'removed': True}
-    return set_feature_flag(flag_key, bool(row['enabled']), tenant_id=tenant_id,
-                            actor_id=actor_id, actor_name=actor_name)
-
-
-def list_feature_flag_history(flag_key, tenant_id=None, limit=50):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM feature_flag_history WHERE flag_key = ? AND COALESCE(tenant_id, '') = ? "
-        "ORDER BY created_at DESC LIMIT ?",
-        (str(flag_key or '').strip().lower(), str(tenant_id or ''), int(limit)),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def snapshot_field_schema(tenant_id, created_by=None, created_by_name=None):
     """Freeze the tenant's active input fields as the next schema version."""
     conn = get_db()
@@ -13769,20 +13446,11 @@ def generation_job_metrics():
 
 
 def platform_alerts():
-    """Computed alert list: SLA breaches, failures, overdue backups (t54)."""
+    """Computed alert list: failures, stale work, overdue backups (t54)."""
     conn = get_db()
     alerts = []
     now = _utcnow()
     from datetime import timedelta
-
-    def _overdue(table, column, status_clause):
-        try:
-            return int(conn.execute(
-                f'SELECT COUNT(*) AS n FROM {table} WHERE {column} IS NOT NULL AND {column} < ? AND {status_clause}',
-                (now.isoformat(),),
-            ).fetchone()['n'] or 0)
-        except Exception:
-            return 0
 
     stale_recharges = 0
     try:
@@ -13797,11 +13465,6 @@ def platform_alerts():
         alerts.append({'kind': 'recharge_sla', 'severity': 'warning',
                        'count': stale_recharges,
                        'message_ar': 'طلبات شحن تجاوزت مهلة المراجعة ٢٤ ساعة'})
-    sla_breached = _overdue('support_tickets', 'sla_due_at',
-                            "status NOT IN ('resolved', 'closed')")
-    if sla_breached:
-        alerts.append({'kind': 'ticket_sla', 'severity': 'warning', 'count': sla_breached,
-                       'message_ar': 'تذاكر دعم تجاوزت زمن الاستجابة المستهدف'})
     try:
         failed_jobs = int(conn.execute(
             "SELECT COUNT(*) AS n FROM generation_jobs WHERE status = 'failed' AND finished_at >= ?",
@@ -13862,18 +13525,6 @@ def platform_alerts():
     if lapsed:
         alerts.append({'kind': 'retention_due', 'severity': 'critical', 'count': lapsed,
                        'message_ar': 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'})
-    try:
-        breach_soon = int(conn.execute(
-            """SELECT COUNT(*) AS n FROM support_tickets
-               WHERE status NOT IN ('resolved', 'closed')
-               AND sla_due_at IS NOT NULL AND sla_due_at >= ? AND sla_due_at < ?""",
-            (now.isoformat(), (now + timedelta(hours=4)).isoformat()),
-        ).fetchone()['n'] or 0)
-    except Exception:
-        breach_soon = 0
-    if breach_soon:
-        alerts.append({'kind': 'ticket_sla_warning', 'severity': 'info', 'count': breach_soon,
-                       'message_ar': 'تذاكر تقترب من تجاوز زمن الاستجابة'})
     return alerts
 
 

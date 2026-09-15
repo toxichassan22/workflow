@@ -33,7 +33,7 @@ rollout.
   tenant-scoped queries in `db.py`.
 - Append-only stores: `audit_events` (UPDATE/DELETE rejected by triggers on
   both engines), `tenant_ledger`, `ai_usage_events`, `map_usage_events`,
-  `notification_deliveries`, `feature_flag_history`.
+  `notification_deliveries`.
 - Immutable version chains: `section_versions`, `tenant_contract_versions`,
   `billing_package_versions`, `document_versions`, `field_schema_versions`,
   `study_types`, `generator_registry`. A head row holds the latest version;

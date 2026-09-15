@@ -189,7 +189,7 @@
 
     async function omRemindApprovalTask(id) {
       const data = await api('POST', '/api/approval-tasks/' + id + '/remind', {}).catch(() => null);
-      if (data && data.success) toast('أُرسل التذكير');
+      if (data && data.success) toast(WFT('tasks.reminder_sent', 'أُرسل التذكير'));
       await omLoadEventTasks();
     }
 
@@ -773,7 +773,7 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([omLoadFileTypes(), adminLoadFeatureFlags(), adminLoadPackages()]);
+      await Promise.all([omLoadFileTypes(), adminLoadPackages()]);
     }
 
     // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──
@@ -815,45 +815,4 @@
       const res = await api('PUT', '/api/admin/packages/' + packageId, { isActive: !!active }).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الباقة'); return; }
       await adminLoadPackages();
-    }
-
-    // ── Feature flags (t62): platform-wide switches with rollback history ──
-    async function adminLoadFeatureFlags() {
-      const box = document.getElementById('adminFeatureFlagsList');
-      if (!box) return;
-      const data = await api('GET', '/api/admin/feature-flags').catch(() => null);
-      const flags = (data && data.success && data.flags) ? data.flags : [];
-      if (!flags.length) {
-        box.innerHTML = '<p class="tenant-hint">لا توجد مفاتيح ميزات مسجلة.</p>';
-        return;
-      }
-      box.innerHTML = flags.map(f =>
-        '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(f.flag_key) + '</h3>' +
-        '<div class="meta"><span>' + (f.tenant_id ? 'شركة محددة' : 'المنصة') + '</span>' +
-        ' | <span>' + omEscape((f.updated_at || '').slice(0, 16).replace('T', ' ')) + '</span></div></div>' +
-        '<div class="tenant-actions"><button type="button" class="btn small ' + (f.enabled ? 'danger' : 'green') +
-        '" onclick="adminToggleFeatureFlag(\'' + omEscape(f.flag_key) + '\', ' + (f.enabled ? 0 : 1) + ', ' +
-        (f.tenant_id ? ('\'' + omEscape(f.tenant_id) + '\'') : 'null') + ')">' +
-        (f.enabled ? 'إيقاف' : 'تفعيل') + '</button></div></div>'
-      ).join('');
-    }
-
-    async function adminToggleFeatureFlag(flagKey, enabled, tenantId) {
-      const res = await api('PUT', '/api/admin/feature-flags', {
-        flag: flagKey, enabled: !!enabled, tenantId: tenantId || null
-      }).catch(e => e);
-      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث المفتاح'); return; }
-      await adminLoadFeatureFlags();
-    }
-
-    async function adminAddFeatureFlag(event) {
-      event.preventDefault();
-      const res = await api('PUT', '/api/admin/feature-flags', {
-        flag: document.getElementById('adminFlagKey').value.trim(),
-        enabled: document.getElementById('adminFlagEnabled').value === '1'
-      }).catch(e => e);
-      if (!res || !res.success) { toast((res && res.error) || WFT('flags.save_failed', 'تعذر حفظ المفتاح')); return; }
-      document.getElementById('adminFlagKey').value = '';
-      toast(WFT('flags.saved', 'تم حفظ مفتاح الميزة'));
-      await adminLoadFeatureFlags();
     }

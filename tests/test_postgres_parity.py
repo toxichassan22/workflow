@@ -150,13 +150,12 @@ class PostgresParityTests(unittest.TestCase):
             db.consume_points(tenant_id, held['id']).get('error'),
             'reservation_not_reserved')
 
-    def test_support_ticket_isolation_and_sla_fields(self):
+    def test_support_ticket_isolation(self):
         db.init_db()
         first = _make_tenant('pg-a')
         second = _make_tenant('pg-b')
         ticket = db.create_support_ticket(first, 'مشكلة', priority='high')
-        self.assertTrue(ticket['sla_due_at'])
-        self.assertTrue(ticket['sla_resolve_due_at'])
+        self.assertEqual(ticket['priority'], 'high')
         other_feed = db.list_support_tickets(second)
         self.assertNotIn(ticket['id'], [t['id'] for t in other_feed])
 

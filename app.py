@@ -14624,15 +14624,13 @@ def _drain_email_outbox(limit=20):
 
 def _run_housekeeping_tick():
     """One bounded pass over every standing sweep: outbound mail, approval-task
-    reminders and escalations, pre-breach SLA warnings, stale point holds and
-    silent generation jobs. Each step is isolated so one failure never stops
-    the rest."""
+    reminders and escalations, stale point holds and silent generation jobs.
+    Each step is isolated so one failure never stops the rest."""
     summary = {}
     steps = (
         ('email', _drain_email_outbox),
         ('reminders', db.send_due_approval_reminders),
         ('escalations', db.escalate_overdue_approval_tasks),
-        ('sla_warnings', db.warn_tickets_approaching_sla),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
     )
@@ -25101,7 +25099,7 @@ def api_create_recharge_request():
     _record_audit_event('recharge.requested', 'recharge_request', row['id'],
                         entity_name=row.get('package_name'),
                         metadata={'amount_usd': row.get('amount_usd')})
-    # t33: the platform desk gets a task and a notification for the 24h SLA.
+    # t33: the platform desk gets a task and a notification for the 24h review window.
     db.create_approval_task(
         g.tenant_id, 'recharge',
         f'طلب شحن رصيد — {row.get("package_name") or "باقة"}',
@@ -25629,7 +25627,7 @@ def api_admin_package_versions(package_id):
     return jsonify({'success': True, 'version': row}), 201
 
 
-# ── Mission 5: registries, flags, SLA policies, queue, outbox, backups ──────
+# ── Mission 5: registries, flags, queue, outbox, backups ────────────────────
 
 @app.route('/api/admin/study-types', methods=['GET', 'POST'])
 @require_admin
@@ -25673,71 +25671,6 @@ def api_admin_generators():
     _record_audit_event('generator.registered', 'generator_registry',
                         f"{row['kind']}:{row['key']}", new_value=row.get('version'))
     return jsonify({'success': True, 'generator': row}), 201
-
-
-@app.route('/api/admin/feature-flags', methods=['GET', 'PUT'])
-@require_admin
-def api_admin_feature_flags():
-    """t62: platform and per-company feature flags."""
-    if request.method == 'GET':
-        return jsonify({'success': True,
-                        'flags': db.list_feature_flags(tenant_id=request.args.get('tenantId'))})
-    data = request.json or {}
-    row = db.set_feature_flag(
-        data.get('flag'), bool(data.get('enabled')),
-        tenant_id=data.get('tenantId'),
-        actor_id=_omran_actor_id(), actor_name=_omran_actor_name(),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('feature_flag.changed', 'feature_flag', row['flag_key'],
-                        new_value=row.get('enabled'))
-    return jsonify({'success': True, 'flag': row})
-
-
-@app.route('/api/admin/feature-flags/<flag_key>/history', methods=['GET'])
-@require_admin
-def api_admin_feature_flag_history(flag_key):
-    return jsonify({'success': True, 'history': db.list_feature_flag_history(
-        flag_key, tenant_id=request.args.get('tenantId'))})
-
-
-@app.route('/api/admin/feature-flags/<flag_key>/rollback', methods=['POST'])
-@require_admin
-def api_admin_feature_flag_rollback(flag_key):
-    data = request.json or {}
-    row = db.rollback_feature_flag(
-        flag_key, tenant_id=data.get('tenantId'), history_id=data.get('historyId'),
-        actor_id=_omran_actor_id(), actor_name=_omran_actor_name(),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('feature_flag.rolled_back', 'feature_flag', flag_key,
-                        new_value=row.get('enabled'))
-    return jsonify({'success': True, 'flag': row})
-
-
-@app.route('/api/admin/support/sla-policies', methods=['GET', 'PUT'])
-@require_admin
-def api_admin_sla_policies():
-    """d08: response/resolve targets per package and priority."""
-    if request.method == 'GET':
-        return jsonify({'success': True, 'policies': db.list_sla_policies()})
-    data = request.json or {}
-    row = db.upsert_sla_policy(
-        data.get('priority'), data.get('firstResponseHours'), data.get('resolveHours'),
-        package_id=data.get('packageId'), updated_by_name=_omran_actor_name(),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('sla_policy.updated', 'support_sla_policy', row['id'],
-                        new_value={'priority': row['priority'],
-                                   'first_response_hours': row['first_response_hours'],
-                                   'resolve_hours': row['resolve_hours']})
-    return jsonify({'success': True, 'policy': row})
 
 
 @app.route('/api/admin/jobs', methods=['GET'])

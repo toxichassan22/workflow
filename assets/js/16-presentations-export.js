@@ -1766,7 +1766,7 @@
 
     function renderSagTenantContracts(contracts) {
       if (!contracts || !contracts.length) return '<p class="tenant-hint">لا توجد عقود مسجلة لهذه الشركة</p>';
-      const sigLabels = { unsigned: 'غير موقع', pending_signature: 'بانتظار التوقيع', signed: 'موقع', expired: 'منتهي التوقيع' };
+      const sigLabels = { unsigned: 'غير موقّع', pending_signature: 'بانتظار التوقيع', signed: 'موقّع', expired: 'منتهي التوقيع' };
       return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
         '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
         '<th style="padding:10px 8px;">العنوان</th><th style="padding:10px 8px;">النوع</th>' +
@@ -1891,8 +1891,8 @@
         '<div class="tenant-field"><label for="sagContractStart">البداية</label><input type="date" id="sagContractStart" dir="ltr"></div>' +
         '<div class="tenant-field"><label for="sagContractEnd">الانتهاء</label><input type="date" id="sagContractEnd" dir="ltr"></div>' +
         '<div class="tenant-field"><label for="sagContractSignature">حالة التوقيع</label><select id="sagContractSignature">' +
-        '<option value="unsigned">غير موقع</option><option value="pending_signature">بانتظار التوقيع</option>' +
-        '<option value="signed">موقع</option></select></div>' +
+        '<option value="unsigned">غير موقّع</option><option value="pending_signature">بانتظار التوقيع</option>' +
+        '<option value="signed">موقّع</option></select></div>' +
         '<div class="tenant-field"><label for="sagContractRetention">الاحتفاظ حتى</label><input type="date" id="sagContractRetention" dir="ltr"></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الوثيقة</button></div></form>' +
         '<div id="sagTenantContractsList"></div></div>' +
