@@ -95,17 +95,18 @@ class IdentityDbTests(unittest.TestCase):
         self.assertFalse(db.get_mfa_state('user', uid)['enabled'])
 
     def test_recovery_codes_are_hashed_and_one_time(self):
+        uid = db.create_user('tenant-1', 'RC', 'rc@x.test', 'hash', role='employee')
         codes = auth.generate_recovery_codes(3)
-        db.store_recovery_codes('tenant-1', 'user-1', codes)
-        self.assertEqual(db.count_unused_recovery_codes('tenant-1', 'user-1'), 3)
-        self.assertTrue(db.consume_recovery_code('tenant-1', 'user-1', codes[0]))
+        db.store_recovery_codes('tenant-1', uid, codes)
+        self.assertEqual(db.count_unused_recovery_codes('tenant-1', uid), 3)
+        self.assertTrue(db.consume_recovery_code('tenant-1', uid, codes[0]))
         # One-time: the same code cannot be spent twice.
-        self.assertFalse(db.consume_recovery_code('tenant-1', 'user-1', codes[0]))
-        self.assertEqual(db.count_unused_recovery_codes('tenant-1', 'user-1'), 2)
-        self.assertFalse(db.consume_recovery_code('tenant-1', 'user-1', '99999999'))
+        self.assertFalse(db.consume_recovery_code('tenant-1', uid, codes[0]))
+        self.assertEqual(db.count_unused_recovery_codes('tenant-1', uid), 2)
+        self.assertFalse(db.consume_recovery_code('tenant-1', uid, '99999999'))
         # Codes live hashed, never in clear.
         row = db.get_db().execute(
-            'SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ?', ('user-1',)
+            'SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ?', (uid,)
         ).fetchone()
         self.assertNotEqual(row['code_hash'], codes[1])
 
@@ -258,7 +259,7 @@ class IdentityDbTests(unittest.TestCase):
             '''INSERT INTO change_log (id, tenant_id, target_type, target_id, user_id, user_name,
                 action, created_at)
                VALUES ('cl-1', 'tenant-1', 'presentation', 'pres-1', 'user-9',
-                       'المعتمد المشترك', 'edit', '2026-01-01T12:00:00')''')
+                       'المعتمد المشترك', 'edit', '2026-01-04T00:00:00')''')
         conn.execute(
             '''INSERT INTO change_log (id, tenant_id, target_type, target_id, user_id, user_name,
                 action, created_at)
@@ -267,6 +268,13 @@ class IdentityDbTests(unittest.TestCase):
         conn.execute(
             "INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active) "
             "VALUES ('user-7', 'tenant-1', 'محرر', 'u7@x.test', 'h', 'employee', 1)")
+        conn.execute(
+            "INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active) "
+            "VALUES ('user-9', 'tenant-1', 'معتمد', 'u9@x.test', 'h', 'employee', 1)")
+        conn.commit()
+        # user-9 may legitimately edit after approval, but must not also be the
+        # approver of the file they last touched.
+        db.set_user_permission('user-9', 'post_approval_edit', True)
         conn.execute(
             "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_usd, note, actor, created_at) "
             "VALUES ('led-1', 'tenant-1', 'credit', 10, 'شحن يدوي', 'user-7', '2026-01-04T00:00:00')")

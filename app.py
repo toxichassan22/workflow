@@ -18512,13 +18512,14 @@ def api_set_user_field_sections(user_id):
     return jsonify({'success': True, 'sections': sections})
 
 
-def _send_invite_email(invite, tenant):
+def _send_invite_email(invite, tenant, email=None):
     """Deliver one invite email and record the outcome on the row (t21)."""
+    recipient = email or invite.get('email')
     company_name = (tenant and tenant.get('company_name')) or 'الشركة'
     base_url = _current_base_url().rstrip('/')
     full_invite_url = f"{base_url}/invite/{invite['token']}"
     ok = send_platform_email(
-        invite['email'],
+        recipient,
         f'دعوة للانضمام إلى {company_name}',
         f'مرحبًا،\n\nتمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
         f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
@@ -18548,7 +18549,7 @@ def api_create_invite():
         projects=data.get('projects') if isinstance(data.get('projects'), list) else None,
     )
     tenant = db.get_tenant_by_id(g.tenant_id)
-    email_sent = _send_invite_email(invite, tenant)
+    email_sent = _send_invite_email(invite, tenant, email)
     invite_url = f"/invite/{invite['token']}"
     _record_audit_event('invite.created', 'invite_link', invite['id'], entity_name=email,
                         metadata={'role': role, 'email_sent': email_sent})
