@@ -579,39 +579,6 @@ class AdminCompanyAccountTests(unittest.TestCase):
         with self.app.app_context():
             self.assertFalse(db.get_user_by_id(user_id)['is_active'])
 
-    def test_password_setup_returns_mfa_challenge_when_factor_enabled(self):
-        result = self._create_company('mfalink')
-        user_id = result['tenant']['primaryUserId']
-        raw_token = result['setupUrl'].rsplit('/', 1)[-1]
-
-        with self.app.app_context():
-            secret = auth.generate_totp_secret()
-            db.set_mfa_pending_secret('user', user_id, secret)
-            db.activate_mfa('user', user_id)
-
-        completed = self.client.post(
-            f'/api/auth/password-setup/{raw_token}',
-            json={'password': 'SecurePass123'},
-        )
-        body = completed.get_json()
-        self.assertEqual(completed.status_code, 200, body)
-        self.assertTrue(body['mfaRequired'])
-        self.assertNotIn('token', body)
-
-        # The challenge token cannot authenticate API calls.
-        denied = self.client.get(
-            '/api/auth/me',
-            headers={'Authorization': 'Bearer ' + body['mfaToken']},
-        )
-        self.assertEqual(denied.status_code, 401)
-
-        verified = self.client.post(
-            '/api/auth/mfa/verify',
-            json={'mfaToken': body['mfaToken'], 'code': auth.totp_code(secret)},
-        )
-        self.assertEqual(verified.status_code, 200, verified.get_json())
-        self.assertTrue(verified.get_json()['token'])
-
     def test_password_setup_replay_does_not_overwrite_password(self):
         result = self._create_company('onetimelink')
         raw_token = result['setupUrl'].rsplit('/', 1)[-1]

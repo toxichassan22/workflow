@@ -67,12 +67,6 @@
           </div>
           <button type="submit" class="auth-btn">دخول</button>
         </form>
-        <form id="mfaForm" class="auth-form" onsubmit="handleMfaVerify(event)" style="display:none">
-          <label data-i18n="auth.mfa_code">رمز التحقق الثنائي</label>
-          <input type="text" id="mfaCode" inputmode="numeric" autocomplete="one-time-code" dir="ltr" required>
-          <button type="submit" class="auth-btn" data-i18n="auth.mfa_verify">تحقق</button>
-          <button type="button" class="btn ghost" onclick="cancelMfaChallenge()" data-i18n="common.back">رجوع</button>
-        </form>
       </div>
     </div>
   </div>
@@ -992,11 +986,6 @@
         </div>
         <div id="inviteResult" style="margin-top:12px"></div>
         <div id="tenantInvitesList" style="margin-top:12px"></div>
-      </div>
-
-      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
-        <h3 style="margin-bottom:8px" data-i18n="users.mfa_title">التحقق الثنائي</h3>
-        <div id="mfaCard"></div>
       </div>
 
       <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">

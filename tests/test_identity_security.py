@@ -1,10 +1,9 @@
-"""Identity, roles and security subsystems (t20-t23, d01, d07, t63-MFA).
+"""Identity, roles and security subsystems (t20-t23, d01, d07).
 
-Covers TOTP two-factor login (RFC 6238) with one-time recovery codes, the
-purpose-scoped MFA challenge token, per-user project scopes, last-company-admin
-protection, the d01 section self-approval policy, the d07 client-approved admin
-access grant, the expanded separation-of-duties matrix and extended invites.
-Runs against a temporary SQLite database and never calls Google or an AI API.
+Covers per-user project scopes, last-company-admin protection, the d01 section
+self-approval policy, the d07 client-approved admin access grant, the expanded
+separation-of-duties matrix and extended invites. Runs against a temporary
+SQLite database and never calls Google or an AI API.
 """
 
 import os
@@ -56,60 +55,6 @@ class IdentityDbTests(unittest.TestCase):
         self.context.pop()
         db.DB_PATH = self.original_db_path
         self.temp_dir.cleanup()
-
-    # ── t21/t63: TOTP + recovery codes ───────────────────────────────────
-
-    def test_totp_round_trip_and_rejects_bad_code(self):
-        secret = auth.generate_totp_secret()
-        code = auth.totp_code(secret)
-        self.assertTrue(auth.verify_totp(secret, code))
-        self.assertFalse(auth.verify_totp(secret, '000000'))
-        self.assertFalse(auth.verify_totp(secret, 'not-a-code'))
-        self.assertFalse(auth.verify_totp('', code))
-        uri = auth.totp_otpauth_uri(secret, 'user@x.test')
-        self.assertIn(secret, uri)
-        self.assertIn('otpauth://totp/', uri)
-
-    def test_mfa_challenge_token_cannot_act_as_session(self):
-        token = auth.create_mfa_token('tenant-1', 'u@x.test', user_id='user-1',
-                                      user_name='U', user_role='employee')
-        payload = auth.verify_mfa_token(token)
-        self.assertEqual(payload['sub'], 'tenant-1')
-        self.assertEqual(payload['user_id'], 'user-1')
-        # The purpose claim bars the challenge token from session use.
-        self.assertIsNone(auth.decode_token(token))
-        self.assertIsNone(auth.verify_mfa_token('garbage'))
-
-    def test_mfa_state_lifecycle(self):
-        uid = db.create_user('tenant-1', 'U1', 'u1@x.test', 'hash', role='employee')
-        self.assertFalse(db.get_mfa_state('user', uid)['enabled'])
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('user', uid, secret)
-        state = db.get_mfa_state('user', uid)
-        self.assertFalse(state['enabled'])
-        self.assertTrue(state['pending'])
-        db.activate_mfa('user', uid)
-        state = db.get_mfa_state('user', uid)
-        self.assertTrue(state['enabled'])
-        self.assertFalse(state['pending'])
-        db.clear_mfa('user', uid)
-        self.assertFalse(db.get_mfa_state('user', uid)['enabled'])
-
-    def test_recovery_codes_are_hashed_and_one_time(self):
-        uid = db.create_user('tenant-1', 'RC', 'rc@x.test', 'hash', role='employee')
-        codes = auth.generate_recovery_codes(3)
-        db.store_recovery_codes('tenant-1', uid, codes)
-        self.assertEqual(db.count_unused_recovery_codes('tenant-1', uid), 3)
-        self.assertTrue(db.consume_recovery_code('tenant-1', uid, codes[0]))
-        # One-time: the same code cannot be spent twice.
-        self.assertFalse(db.consume_recovery_code('tenant-1', uid, codes[0]))
-        self.assertEqual(db.count_unused_recovery_codes('tenant-1', uid), 2)
-        self.assertFalse(db.consume_recovery_code('tenant-1', uid, '99999999'))
-        # Codes live hashed, never in clear.
-        row = db.get_db().execute(
-            'SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ?', (uid,)
-        ).fetchone()
-        self.assertNotEqual(row['code_hash'], codes[1])
 
     # ── t20: project scope ───────────────────────────────────────────────
 
@@ -496,119 +441,14 @@ class IdentityApiTests(unittest.TestCase):
             role=role)
         return uid
 
-    # ── MFA login flow over HTTP ─────────────────────────────────────────
-
-    def test_login_challenges_mfa_then_issues_session(self):
-        uid = self._employee()
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('user', uid, secret)
-        db.activate_mfa('user', uid)
-        res = self.client.post('/api/auth/login', json={'email': 'emp@x.test', 'password': 'secret123'})
-        body = res.get_json()
-        self.assertTrue(body['mfaRequired'])
-        self.assertNotIn('token', body)
-        # The challenge token cannot authenticate API calls.
-        denied = self.client.get('/api/auth/me', headers=self.headers(body['mfaToken']))
-        self.assertEqual(denied.status_code, 401)
-        bad = self.client.post('/api/auth/mfa/verify',
-                               json={'mfaToken': body['mfaToken'], 'code': '000000'})
-        self.assertEqual(bad.status_code, 401)
-        good = self.client.post('/api/auth/mfa/verify',
-                                json={'mfaToken': body['mfaToken'], 'code': auth.totp_code(secret)})
-        self.assertEqual(good.status_code, 200, good.get_json())
-        session = good.get_json()
-        self.assertEqual(session['mfaMethod'], 'totp')
-        me = self.client.get('/api/auth/me', headers=self.headers(session['token']))
-        self.assertEqual(me.status_code, 200)
-
-    def test_login_with_recovery_code_counts_down(self):
-        uid = self._employee('emp2@x.test')
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('user', uid, secret)
-        db.activate_mfa('user', uid)
-        codes = auth.generate_recovery_codes(3)
-        db.store_recovery_codes(self.tenant_id, uid, codes)
-        res = self.client.post('/api/auth/login', json={'email': 'emp2@x.test', 'password': 'secret123'})
-        verified = self.client.post('/api/auth/mfa/verify',
-                                    json={'mfaToken': res.get_json()['mfaToken'], 'code': codes[0]})
-        body = verified.get_json()
-        self.assertEqual(verified.status_code, 200, body)
-        self.assertEqual(body['mfaMethod'], 'recovery')
-        self.assertEqual(body['recoveryCodesRemaining'], 2)
-        # The spent code cannot open a second session.
-        res2 = self.client.post('/api/auth/login', json={'email': 'emp2@x.test', 'password': 'secret123'})
-        again = self.client.post('/api/auth/mfa/verify',
-                                 json={'mfaToken': res2.get_json()['mfaToken'], 'code': codes[0]})
-        self.assertEqual(again.status_code, 401)
-
-    def test_company_admin_login_flags_missing_mfa_setup(self):
-        res = self.client.post('/api/auth/login', json={'email': 'boss@x.test', 'password': 'secret123'})
-        body = res.get_json()
+    def test_employee_session_lacks_manage_users(self):
+        self._employee('plain@x.test')
+        login = self.client.post('/api/auth/login',
+                                 json={'email': 'plain@x.test', 'password': 'secret123'})
+        body = login.get_json()
         self.assertTrue(body.get('token'))
-        self.assertTrue(body.get('mfaSetupRequired'))
-
-    def test_mfa_setup_enable_and_status_over_http(self):
-        setup = self.client.post('/api/auth/mfa/setup', headers=self.headers(self.admin_user_token), json={})
-        self.assertEqual(setup.status_code, 200, setup.get_json())
-        secret = setup.get_json()['secret']
-        bad = self.client.post('/api/auth/mfa/enable', headers=self.headers(self.admin_user_token),
-                               json={'code': '000000'})
-        self.assertEqual(bad.status_code, 400)
-        enabled = self.client.post('/api/auth/mfa/enable', headers=self.headers(self.admin_user_token),
-                                   json={'code': auth.totp_code(secret)})
-        body = enabled.get_json()
-        self.assertTrue(body['enabled'])
-        self.assertEqual(len(body['recoveryCodes']), 8)
-        status = self.client.get('/api/auth/mfa/status', headers=self.headers(self.admin_user_token))
-        self.assertTrue(status.get_json()['mfa']['enabled'])
-        # Disabling is refused while the role mandates MFA.
-        refused = self.client.post('/api/auth/mfa/disable', headers=self.headers(self.admin_user_token),
-                                   json={'password': 'secret123', 'code': auth.totp_code(secret)})
-        self.assertEqual(refused.status_code, 400)
-        self.assertEqual(refused.get_json()['error_code'], 'mfa_required_role')
-
-    def test_mfa_resetup_requires_password_and_current_code(self):
-        uid = self._employee()
-        emp_token = auth.create_token(self.tenant_id, 'emp@x.test', user_id=uid,
-                                      user_name='موظف', user_role='employee')
-        headers = self.headers(emp_token)
-        first = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
-        self.assertEqual(first.status_code, 200, first.get_json())
-        old_secret = first.get_json()['secret']
-        enabled = self.client.post('/api/auth/mfa/enable', headers=headers,
-                                   json={'code': auth.totp_code(old_secret)})
-        self.assertTrue(enabled.get_json()['enabled'])
-
-        # A session alone cannot replace the factor: re-enrolment demands the
-        # same proof as disabling — the password plus a current TOTP code.
-        naked = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
-        self.assertEqual(naked.status_code, 400)
-        self.assertEqual(naked.get_json()['error_code'], 'password_invalid')
-        wrong_pw = self.client.post('/api/auth/mfa/setup', headers=headers,
-                                    json={'password': 'nope',
-                                          'code': auth.totp_code(old_secret)})
-        self.assertEqual(wrong_pw.status_code, 400)
-        self.assertEqual(wrong_pw.get_json()['error_code'], 'password_invalid')
-        wrong_code = self.client.post('/api/auth/mfa/setup', headers=headers,
-                                      json={'password': 'secret123', 'code': '000000'})
-        self.assertEqual(wrong_code.status_code, 400)
-        self.assertEqual(wrong_code.get_json()['error_code'], 'mfa_code_invalid')
-        # Refused calls never planted a pending secret nor touched the live one.
-        secrets_row = db.get_mfa_secrets('user', uid)
-        self.assertEqual(secrets_row['mfa_secret'], old_secret)
-        self.assertFalse(secrets_row['mfa_pending_secret'])
-
-        # The right proof rotates the factor end to end.
-        again = self.client.post('/api/auth/mfa/setup', headers=headers,
-                                 json={'password': 'secret123',
-                                       'code': auth.totp_code(old_secret)})
-        self.assertEqual(again.status_code, 200, again.get_json())
-        new_secret = again.get_json()['secret']
-        self.assertNotEqual(new_secret, old_secret)
-        rotated = self.client.post('/api/auth/mfa/enable', headers=headers,
-                                   json={'code': auth.totp_code(new_secret)})
-        self.assertTrue(rotated.get_json()['enabled'])
-        self.assertEqual(db.get_mfa_secrets('user', uid)['mfa_secret'], new_secret)
+        denied = self.client.get('/api/users', headers=self.headers(body['token']))
+        self.assertEqual(denied.status_code, 403)
 
     # ── Last-admin protection over HTTP ──────────────────────────────────
 
@@ -887,7 +727,7 @@ class IdentityApiTests(unittest.TestCase):
                                          'referenceNumber': 'TRX-SEC-1'})
         self.assertEqual(allowed.status_code, 200, allowed.get_json())
 
-    # ── ISS-005: login and MFA attempt limits over HTTP ──────────────────
+    # ── ISS-005: login attempt limits over HTTP ──────────────────────────
 
     def test_login_locks_account_after_repeated_failures(self):
         self._employee('locked@x.test')
@@ -933,46 +773,6 @@ class IdentityApiTests(unittest.TestCase):
                                    json={'email': 'reset@x.test', 'password': 'nope'})
             self.assertEqual(res.status_code, 401)
 
-    def test_mfa_verify_attempts_are_bounded_per_account(self):
-        uid = self._employee('mfa-lock@x.test')
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('user', uid, secret)
-        db.activate_mfa('user', uid)
-        res = self.client.post('/api/auth/login',
-                               json={'email': 'mfa-lock@x.test', 'password': 'secret123'})
-        mfa_token = res.get_json()['mfaToken']
-        wrong = '000000' if auth.totp_code(secret) != '000000' else '111111'
-        for _ in range(5):
-            bad = self.client.post('/api/auth/mfa/verify',
-                                   json={'mfaToken': mfa_token, 'code': wrong})
-            self.assertEqual(bad.status_code, 401)
-        blocked = self.client.post('/api/auth/mfa/verify',
-                                   json={'mfaToken': mfa_token, 'code': wrong})
-        self.assertEqual(blocked.status_code, 429)
-        # Minting a fresh challenge does not reset the account's counter.
-        res2 = self.client.post('/api/auth/login',
-                                json={'email': 'mfa-lock@x.test', 'password': 'secret123'})
-        still = self.client.post('/api/auth/mfa/verify',
-                                 json={'mfaToken': res2.get_json()['mfaToken'],
-                                       'code': auth.totp_code(secret)})
-        self.assertEqual(still.status_code, 429)
-
-    def test_mfa_enable_attempts_are_bounded(self):
-        # A dedicated user keeps the mfa:op bucket away from the shared admin.
-        uid = self._employee('mfa-enable@x.test')
-        token = auth.create_token(self.tenant_id, 'mfa-enable@x.test', user_id=uid,
-                                  user_name='موظف', user_role='employee')
-        headers = self.headers(token)
-        setup = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
-        self.assertEqual(setup.status_code, 200, setup.get_json())
-        for _ in range(5):
-            bad = self.client.post('/api/auth/mfa/enable', headers=headers,
-                                   json={'code': '000000'})
-            self.assertEqual(bad.status_code, 400)
-        blocked = self.client.post('/api/auth/mfa/enable', headers=headers,
-                                   json={'code': '000000'})
-        self.assertEqual(blocked.status_code, 429)
-
     def test_register_is_bounded_per_ip(self):
         for i in range(10):
             res = self.client.post('/api/auth/register', json={
@@ -985,67 +785,10 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.get_json()['error_code'], 'rate_limited')
 
-    # ── ISS-003: a session that still owes MFA enrolment is confined ─────
-
-    def test_pending_mfa_session_only_reaches_enrolment_endpoints(self):
-        login = self.client.post('/api/auth/login',
-                                 json={'email': 'boss@x.test', 'password': 'secret123'})
-        body = login.get_json()
-        self.assertTrue(body.get('mfaSetupRequired'))
-        pending = self.headers(body['token'])
-
-        gated = self.client.get('/api/users', headers=pending)
-        self.assertEqual(gated.status_code, 403)
-        self.assertEqual(gated.get_json()['error_code'], 'mfa_setup_required')
-        # The enrolment surface stays reachable under the same token.
-        me = self.client.get('/api/auth/me', headers=pending)
-        self.assertEqual(me.status_code, 200)
-        self.assertTrue(me.get_json()['mfa']['setupRequired'])
-        self.assertEqual(self.client.get('/api/auth/mfa/status', headers=pending).status_code, 200)
-        setup = self.client.post('/api/auth/mfa/setup', headers=pending, json={})
-        self.assertEqual(setup.status_code, 200, setup.get_json())
-        enabled = self.client.post('/api/auth/mfa/enable', headers=pending,
-                                   json={'code': auth.totp_code(setup.get_json()['secret'])})
-        self.assertEqual(enabled.status_code, 200, enabled.get_json())
-        fresh = enabled.get_json().get('token')
-        self.assertTrue(fresh)
-        self.assertEqual(self.client.get('/api/users', headers=self.headers(fresh)).status_code, 200)
-        # The restricted token never upgrades itself and cannot renew.
-        still = self.client.get('/api/users', headers=pending)
-        self.assertEqual(still.status_code, 403)
-        self.assertEqual(still.get_json()['error_code'], 'mfa_setup_required')
-        self.assertEqual(self.client.post('/api/auth/refresh', headers=pending).status_code, 403)
-
-    def test_tenant_direct_login_flags_and_gates_mfa_setup(self):
-        conn = db.get_db()
-        conn.execute('UPDATE tenants SET password_hash = ? WHERE id = ?',
-                     (self.application_module.hash_password('secret123'), self.tenant_id))
-        conn.commit()
-        login = self.client.post('/api/auth/login',
-                                 json={'email': 'co@x.test', 'password': 'secret123'})
-        body = login.get_json()
-        # A tenant-direct login is the company-admin identity: the flag applies
-        # to every company, not only the platform tenant.
-        self.assertTrue(body.get('mfaSetupRequired'))
-        gated = self.client.get('/api/users', headers=self.headers(body['token']))
-        self.assertEqual(gated.status_code, 403)
-        self.assertEqual(gated.get_json()['error_code'], 'mfa_setup_required')
-
-    def test_employee_session_is_not_mfa_gated(self):
-        self._employee('plain@x.test')
-        login = self.client.post('/api/auth/login',
-                                 json={'email': 'plain@x.test', 'password': 'secret123'})
-        body = login.get_json()
-        self.assertTrue(body.get('token'))
-        self.assertFalse(body.get('mfaSetupRequired'))
-        denied = self.client.get('/api/users', headers=self.headers(body['token']))
-        self.assertEqual(denied.status_code, 403)
-        self.assertNotEqual(denied.get_json().get('error_code'), 'mfa_setup_required')
-
 
 class PrimaryAdminIdentityTests(unittest.TestCase):
     """ISS-002: the primary company admin is one login identity — the tenants
-    row owns the credential, the MFA factor and the sessions; its users row is
+    row owns the credential and the sessions; its users row is
     the management record whose live state still gates the owner login."""
 
     def setUp(self):
@@ -1084,7 +827,6 @@ class PrimaryAdminIdentityTests(unittest.TestCase):
         res = self._login('owner-user@x.test')
         body = res.get_json()
         self.assertEqual(res.status_code, 200, body)
-        self.assertTrue(body.get('mfaSetupRequired'))
         self.assertIsNone(auth.decode_token(body['token']).get('user_id'))
         me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
         self.assertEqual(me.status_code, 200, me.get_json())
@@ -1154,82 +896,6 @@ class PrimaryAdminIdentityTests(unittest.TestCase):
         me = self.client.get('/api/auth/me', headers=self.headers(token))
         self.assertEqual(me.status_code, 200, me.get_json())
         self.assertNotIn('id', me.get_json()['user'])
-        self.assertFalse(me.get_json()['mfa']['enabled'])
-        # The factor the session manages is the tenant-scope one.
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('tenant', self.tenant_id, secret)
-        db.activate_mfa('tenant', self.tenant_id)
-        again = self.client.get('/api/auth/me', headers=self.headers(token))
-        self.assertTrue(again.get_json()['mfa']['enabled'])
-        self.assertFalse(again.get_json()['mfa']['setupRequired'])
-
-    def test_setup_token_session_enrols_tenant_mfa_end_to_end(self):
-        pending = auth.create_token(self.tenant_id, 'owner-user@x.test',
-                                    user_id=self.primary_id, user_name='المالك',
-                                    user_role='company_admin', mfa_pending=True)
-        headers = self.headers(pending)
-        setup = self.client.post('/api/auth/mfa/setup', headers=headers, json={})
-        self.assertEqual(setup.status_code, 200, setup.get_json())
-        enabled = self.client.post('/api/auth/mfa/enable', headers=headers,
-                                   json={'code': auth.totp_code(setup.get_json()['secret'])})
-        self.assertEqual(enabled.status_code, 200, enabled.get_json())
-        # The factor landed on the tenant identity; the user row stays clean.
-        self.assertTrue(db.get_mfa_state('tenant', self.tenant_id)['enabled'])
-        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
-        # The clean token handed back after enrolment is tenant-direct.
-        fresh = enabled.get_json().get('token')
-        self.assertIsNone(auth.decode_token(fresh).get('user_id'))
-        # The next login — by either identity — gets the same challenge.
-        res = self._login('owner-user@x.test')
-        self.assertTrue(res.get_json().get('mfaRequired'))
-
-    def test_tenant_mfa_enrolment_challenges_both_login_identities(self):
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('tenant', self.tenant_id, secret)
-        db.activate_mfa('tenant', self.tenant_id)
-        for identity in ('owner-co@x.test', 'owner-user@x.test'):
-            res = self._login(identity)
-            body = res.get_json()
-            self.assertTrue(body.get('mfaRequired'), body)
-            self.assertNotIn('token', body)
-            challenge = auth.verify_mfa_token(body['mfaToken'])
-            self.assertIsNone(challenge.get('user_id'))
-            verified = self.client.post('/api/auth/mfa/verify', json={
-                'mfaToken': body['mfaToken'], 'code': auth.totp_code(secret)})
-            self.assertEqual(verified.status_code, 200, verified.get_json())
-            self.assertIsNone(
-                auth.decode_token(verified.get_json()['token']).get('user_id'))
-
-    def test_migration_moves_stray_user_factor_onto_tenant(self):
-        secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('user', self.primary_id, secret)
-        db.activate_mfa('user', self.primary_id)
-        codes = auth.generate_recovery_codes(3)
-        db.store_recovery_codes(self.tenant_id, self.primary_id, codes)
-        conn = db.get_db()
-        db._migrate_primary_admin_identity(conn)
-        conn.commit()
-        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
-        tenant_secrets = db.get_mfa_secrets('tenant', self.tenant_id)
-        self.assertEqual(tenant_secrets['mfa_secret'], secret)
-        self.assertTrue(tenant_secrets['mfa_enabled'])
-        # The recovery set moved with the factor to the tenant scope.
-        self.assertTrue(db.consume_recovery_code(self.tenant_id, None, codes[0]))
-        res = self._login('owner-user@x.test')
-        self.assertTrue(res.get_json().get('mfaRequired'))
-
-    def test_migration_drops_user_factor_when_tenant_already_has_one(self):
-        tenant_secret = auth.generate_totp_secret()
-        db.set_mfa_pending_secret('tenant', self.tenant_id, tenant_secret)
-        db.activate_mfa('tenant', self.tenant_id)
-        db.set_mfa_pending_secret('user', self.primary_id, auth.generate_totp_secret())
-        db.activate_mfa('user', self.primary_id)
-        conn = db.get_db()
-        db._migrate_primary_admin_identity(conn)
-        conn.commit()
-        self.assertEqual(
-            db.get_mfa_secrets('tenant', self.tenant_id)['mfa_secret'], tenant_secret)
-        self.assertFalse(db.get_mfa_state('user', self.primary_id)['enabled'])
 
     def test_non_primary_company_admin_keeps_user_bound_session(self):
         uid = db.create_user(

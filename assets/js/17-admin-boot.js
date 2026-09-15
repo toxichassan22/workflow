@@ -660,11 +660,8 @@
         const lastLogin = reportUser.last_login_at
           ? ' | <span>' + escapeHtml(WFT('users.last_login', 'آخر دخول')) + ':</span> ' + escapeHtml(String(reportUser.last_login_at).slice(0, 16).replace('T', ' '))
           : '';
-        const mfaBadge = reportUser.mfa_enabled
-          ? ' | <span style="color:#1c7a2e">' + escapeHtml(WFT('users.mfa_on', 'التحقق الثنائي مفعل')) + '</span>'
-          : '';
         return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
-          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + mfaBadge + '</div></div>' +
+          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
           '<button class="btn small primary" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">صلاحيات</button>' +
           '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + (u.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
@@ -674,7 +671,6 @@
       list.innerHTML = reportBanner + usersHtml;
       renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
       renderTenantRoles();
-      renderMfaCard();
       renderTenantAccessRequests();
       populateInviteScopePickers();
     }
@@ -843,59 +839,6 @@
       if (!confirm(WFT('users.access_revoke_confirm', 'إلغاء الوصول المعتمد؟'))) return;
       const data = await api('POST', '/api/access-requests/' + requestId + '/revoke', {});
       if (data && data.success) { toast(WFT('users.access_revoked_ok', 'ألغي الوصول')); renderTenantAccessRequests(); }
-      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
-    }
-
-    async function renderMfaCard() {
-      const box = document.getElementById('mfaCard');
-      if (!box) return;
-      const data = await api('GET', '/api/auth/mfa/status').catch(() => null);
-      const mfa = (data && data.mfa) || {};
-      const enabled = !!mfa.enabled;
-      let html = '<p style="margin:0 0 10px;font-size:13px;color:#475569">' +
-        escapeHtml(enabled ? WFT('users.mfa_status_on', 'التحقق الثنائي مفعل لهذا الحساب') : WFT('users.mfa_status_off', 'التحقق الثنائي غير مفعل')) +
-        (enabled && typeof mfa.recoveryCodesRemaining === 'number'
-          ? ' — ' + escapeHtml(WFT('users.mfa_codes_left', 'رموز متبقية')) + ': ' + mfa.recoveryCodesRemaining : '') +
-        '</p>';
-      if (!enabled) {
-        html += '<button type="button" class="btn primary" onclick="openMfaSetupModal(false)">' + escapeHtml(WFT('auth.mfa_enable', 'تفعيل')) + '</button>';
-      } else {
-        html += '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-          '<button type="button" class="btn ghost" onclick="rotateMfa()">' + escapeHtml(WFT('users.mfa_rotate', 'إعادة الإعداد')) + '</button>' +
-          '<button type="button" class="btn ghost" onclick="regenerateMfaCodes()">' + escapeHtml(WFT('users.mfa_regen', 'تجديد رموز الاسترداد')) + '</button>' +
-          '<button type="button" class="btn danger" onclick="disableMfa()">' + escapeHtml(WFT('users.mfa_disable', 'تعطيل')) + '</button></div>';
-      }
-      box.innerHTML = html;
-    }
-
-    function rotateMfa() {
-      const password = prompt(WFT('users.mfa_password_prompt', 'كلمة المرور:'));
-      if (password === null) return;
-      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
-      if (code === null) return;
-      openMfaSetupModal(false, { password: password, code: code.trim() });
-    }
-
-    async function regenerateMfaCodes() {
-      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
-      if (!code) return;
-      const data = await api('POST', '/api/auth/mfa/recovery-codes', { code: code.trim() });
-      if (data && data.success) {
-        const codes = (data.recoveryCodes || []).join('\n');
-        alert(WFT('users.mfa_recovery_title', 'رموز الاسترداد') + ':\n' + codes);
-        renderMfaCard();
-      } else {
-        toast((data && data.error) || WFT('auth.mfa_invalid', 'رمز التحقق غير صحيح'));
-      }
-    }
-
-    async function disableMfa() {
-      const password = prompt(WFT('users.mfa_password_prompt', 'كلمة المرور:'));
-      if (password === null) return;
-      const code = prompt(WFT('users.mfa_code_prompt', 'رمز التحقق الحالي:'));
-      if (code === null) return;
-      const data = await api('POST', '/api/auth/mfa/disable', { password, code: code.trim() });
-      if (data && data.success) { toast(WFT('users.mfa_disabled_ok', 'عطل التحقق الثنائي')); renderMfaCard(); }
       else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
     }
 
@@ -1540,8 +1483,6 @@
       togglePasswordVisibility(inputId, btn);
     }
 
-    let pendingSetupMfaToken = null;
-
     async function handlePasswordSetup(event, rawToken) {
       event.preventDefault();
       const password = document.getElementById('passwordSetupValue').value;
@@ -1559,57 +1500,10 @@
         '/api/auth/password-setup/' + encodeURIComponent(rawToken),
         { password }
       );
-      if (data.success && data.mfaRequired) {
-        pendingSetupMfaToken = data.mfaToken;
-        showPasswordSetupMfa();
-        return;
-      }
       if (!data.success || !data.token) {
         errorHost.textContent = data.error || 'تعذر اعتماد كلمة المرور';
         return;
       }
-      setTenantToken(data.token);
-      setTenantUser(data.tenant);
-      try {
-        tenantUser = data.tenant;
-        const next = (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute('tenantDashboardPage')) || '/app/dashboard';
-        window.history.replaceState({}, '', next);
-      } catch (e) { window.history.replaceState({}, '', '/app/dashboard'); }
-      // A session that still owes MFA enrolment is refused everywhere but the
-      // enrolment endpoints, so bootstrap only after the dialog completes it.
-      if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') {
-        pendingMfaSetup = true;
-        openMfaSetupModal(true);
-        return;
-      }
-      await bootstrapTenant();
-    }
-
-    function showPasswordSetupMfa() {
-      const authPage = document.getElementById('tenantAuthPage');
-      authPage.innerHTML = '<div class="auth-card">' +
-        '<h2>التحقق الثنائي</h2>' +
-        '<div id="passwordSetupError" class="auth-error"></div>' +
-        '<form class="auth-form active" onsubmit="handlePasswordSetupMfa(event)">' +
-        '<label>رمز التحقق الثنائي</label>' +
-        '<input type="text" id="passwordSetupMfaCode" inputmode="numeric" autocomplete="one-time-code" dir="ltr" required>' +
-        '<button type="submit" class="auth-btn">تحقق</button>' +
-        '</form></div>';
-    }
-
-    async function handlePasswordSetupMfa(event) {
-      event.preventDefault();
-      const errorHost = document.getElementById('passwordSetupError');
-      const code = (document.getElementById('passwordSetupMfaCode') || {}).value || '';
-      const data = await api('POST', '/api/auth/mfa/verify', {
-        mfaToken: pendingSetupMfaToken,
-        code: code.trim(),
-      });
-      if (!data.success || !data.token) {
-        if (errorHost) errorHost.textContent = data.error || 'رمز التحقق غير صحيح';
-        return;
-      }
-      pendingSetupMfaToken = null;
       setTenantToken(data.token);
       setTenantUser(data.tenant);
       try {
@@ -1657,11 +1551,6 @@
         setTenantToken(data.token);
         setTenantUser(data.tenant);
         window.history.replaceState({}, '', '/');
-        if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') {
-          pendingMfaSetup = true;
-          openMfaSetupModal(true);
-          return;
-        }
         await bootstrapTenant();
       } else {
         showTenantError('inviteError', data.error || 'فشل إنشاء الحساب');

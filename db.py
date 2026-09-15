@@ -80,7 +80,6 @@ def init_db():
         _migrate_generation_approval_columns(conn)
         _migrate_point_reservation_columns(conn)
         _migrate_workflow_gate_columns(conn)
-        _migrate_primary_admin_identity(conn)
 
         try:
             conn.commit()
@@ -1965,52 +1964,6 @@ def _migrate_presentation_revision_schema(conn):
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_presentation_creation_key ON presentations(tenant_id, creation_key)')
 
 
-def _migrate_primary_admin_identity(conn):
-    """Fold a stray user-scope factor on a primary company admin into the
-    tenant identity the login actually consults (ISS-002).
-
-    Enrolments that landed on the primary's users row before this rule sit on a
-    record the company login never reads: move the factor and its recovery
-    codes onto the tenant row when the tenant has none, drop the stray copies
-    otherwise, then clear the users-side fields so the two records can never
-    hold diverging second factors again.
-    """
-    rows = conn.execute(
-        '''SELECT u.id AS user_id, u.tenant_id AS tenant_id,
-                  u.mfa_secret AS u_secret, u.mfa_pending_secret AS u_pending,
-                  u.mfa_enabled AS u_enabled
-           FROM users u JOIN tenants t ON t.primary_user_id = u.id
-           WHERE COALESCE(u.mfa_enabled, 0) = 1
-              OR u.mfa_secret IS NOT NULL
-              OR u.mfa_pending_secret IS NOT NULL'''
-    ).fetchall()
-    for row in rows:
-        tenant_state = conn.execute(
-            'SELECT mfa_secret, mfa_pending_secret, mfa_enabled FROM tenants WHERE id = ?',
-            (row['tenant_id'],)
-        ).fetchone()
-        tenant_has_factor = bool(
-            tenant_state and (tenant_state['mfa_enabled'] or tenant_state['mfa_secret']
-                              or tenant_state['mfa_pending_secret']))
-        if tenant_has_factor:
-            conn.execute(
-                'DELETE FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id = ?',
-                (row['tenant_id'], row['user_id']))
-        else:
-            conn.execute(
-                '''UPDATE tenants
-                   SET mfa_secret = ?, mfa_pending_secret = ?, mfa_enabled = ?
-                   WHERE id = ?''',
-                (row['u_secret'], row['u_pending'],
-                 int(bool(row['u_enabled'])), row['tenant_id']))
-            conn.execute(
-                'UPDATE mfa_recovery_codes SET user_id = NULL WHERE tenant_id = ? AND user_id = ?',
-                (row['tenant_id'], row['user_id']))
-        conn.execute(
-            'UPDATE users SET mfa_secret = NULL, mfa_pending_secret = NULL, mfa_enabled = 0 '
-            'WHERE id = ?', (row['user_id'],))
-
-
 def _migrate_presentation_draft_link(conn):
     try:
         cursor = conn.execute("PRAGMA table_info(presentations)")
@@ -2828,7 +2781,7 @@ def get_users_by_tenant(tenant_id):
     conn = get_db()
     rows = conn.execute(
         '''SELECT id, name, username, phone, email, role, is_active,
-                  require_password_change, mfa_enabled, last_login_at, created_at
+                  require_password_change, last_login_at, created_at
            FROM users WHERE tenant_id = ? ORDER BY created_at''',
         (tenant_id,)
     ).fetchall()
@@ -2967,8 +2920,6 @@ def sync_primary_company_admin(tenant_id, **fields):
                 f'UPDATE users SET {set_clause} WHERE id = ? AND tenant_id = ?',
                 [*user_updates.values(), user_id, tenant_id]
             )
-        if 'is_active' in fields and not fields['is_active']:
-            _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
         # A synced password rewrite retires sessions on both login identities.
         if 'password_hash' in fields:
             conn.execute(
@@ -2980,6 +2931,8 @@ def sync_primary_company_admin(tenant_id, **fields):
                     'UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?',
                     (user_id,)
                 )
+        if 'is_active' in fields and not fields['is_active']:
+            _revoke_password_setup_tokens(conn, tenant_id=tenant_id)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -8430,13 +8383,6 @@ def _ensure_omran_columns(conn):
     _add('users', 'last_login_at', 'last_login_at TEXT')
     _add('tenants', 'last_login_at', 'last_login_at TEXT')
 
-    # t21/t63: TOTP two-factor state on both login identities (tenant account
-    # and individual users). mfa_pending_secret holds a not-yet-verified setup.
-    for table in ('users', 'tenants'):
-        _add(table, 'mfa_secret', 'mfa_secret TEXT')
-        _add(table, 'mfa_pending_secret', 'mfa_pending_secret TEXT')
-        _add(table, 'mfa_enabled', 'mfa_enabled INTEGER DEFAULT 0')
-
     # t21: an invite carries the pre-assigned identity and scope, plus the
     # delivery state of its email so a failed send can be retried.
     _add('invite_links', 'name', 'name TEXT')
@@ -8964,12 +8910,10 @@ def tenant_users_report(tenant_id):
     users = []
     for row in conn.execute(
         'SELECT id, name, email, username, role, is_active, require_password_change, '
-        'mfa_enabled, last_login_at, created_at FROM users WHERE tenant_id = ? ORDER BY created_at DESC',
+        'last_login_at, created_at FROM users WHERE tenant_id = ? ORDER BY created_at DESC',
         (tenant_id,),
     ).fetchall():
-        item = dict(row)
-        item['mfa_enabled'] = bool(item.get('mfa_enabled'))
-        users.append(item)
+        users.append(dict(row))
     invites = []
     try:
         for row in conn.execute(
@@ -11831,19 +11775,8 @@ def _create_identity_tables(conn):
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_user_project_scopes ON user_project_scopes(user_id, draft_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_user_project_scopes_tenant ON user_project_scopes(tenant_id, user_id)')
 
-    # t63: one-time recovery codes for the second factor, stored hashed.
-    conn.execute('''CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
-        id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-        code_hash TEXT NOT NULL,
-        used_at TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_mfa_recovery ON mfa_recovery_codes(tenant_id, user_id, used_at)')
-
     # ISS-005: fixed-window attempt counters with a temporary lock, shared by
-    # the login, registration, MFA and invite endpoints. Kept in the database so
+    # the login, registration and invite endpoints. Kept in the database so
     # every worker and process enforces the same counters. Timestamps are naive
     # UTC ISO strings, like the rest of the schema.
     conn.execute('''CREATE TABLE IF NOT EXISTS rate_limit_buckets (
@@ -12343,140 +12276,8 @@ def set_user_project_scope(tenant_id, user_id, draft_ids):
     return {'scope': sorted(wanted), 'limited': bool(wanted)}
 
 
-# ── t21/t63: two-factor state (TOTP + one-time recovery codes) ──────────────
-
-def get_mfa_state(scope, row_id):
-    """{enabled, has_secret} for a 'user' or 'tenant' login identity."""
-    if scope not in ('user', 'tenant') or not row_id:
-        return {'enabled': False}
-    conn = get_db()
-    table = 'users' if scope == 'user' else 'tenants'
-    row = conn.execute(
-        f'SELECT mfa_enabled, mfa_secret, mfa_pending_secret FROM {table} WHERE id = ?',
-        (row_id,),
-    ).fetchone()
-    if not row:
-        return {'enabled': False}
-    return {
-        'enabled': bool(row['mfa_enabled']),
-        'has_secret': bool(row['mfa_secret']),
-        'pending': bool(row['mfa_pending_secret']),
-    }
-
-
-def get_mfa_secrets(scope, row_id):
-    """Internal: the active and pending TOTP secrets for verification."""
-    conn = get_db()
-    table = 'users' if scope == 'user' else 'tenants'
-    row = conn.execute(
-        f'SELECT mfa_enabled, mfa_secret, mfa_pending_secret FROM {table} WHERE id = ?',
-        (row_id,),
-    ).fetchone()
-    if not row:
-        return None
-    return dict(row)
-
-
-def set_mfa_pending_secret(scope, row_id, secret):
-    conn = get_db()
-    table = 'users' if scope == 'user' else 'tenants'
-    conn.execute(f'UPDATE {table} SET mfa_pending_secret = ? WHERE id = ?', (secret, row_id))
-    conn.commit()
-
-
-def activate_mfa(scope, row_id):
-    """Move the verified pending secret into place and flag MFA on."""
-    conn = get_db()
-    table = 'users' if scope == 'user' else 'tenants'
-    row = conn.execute(
-        f'SELECT mfa_pending_secret FROM {table} WHERE id = ?', (row_id,)
-    ).fetchone()
-    if not row or not row['mfa_pending_secret']:
-        return False
-    conn.execute(
-        f'UPDATE {table} SET mfa_secret = mfa_pending_secret, mfa_pending_secret = NULL,'
-        ' mfa_enabled = 1 WHERE id = ?',
-        (row_id,),
-    )
-    conn.commit()
-    return True
-
-
-def clear_mfa(scope, row_id):
-    conn = get_db()
-    table = 'users' if scope == 'user' else 'tenants'
-    conn.execute(
-        f'UPDATE {table} SET mfa_secret = NULL, mfa_pending_secret = NULL, mfa_enabled = 0'
-        ' WHERE id = ?',
-        (row_id,),
-    )
-    if scope == 'user':
-        conn.execute('DELETE FROM mfa_recovery_codes WHERE user_id = ?', (row_id,))
-    else:
-        conn.execute('DELETE FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id IS NULL', (row_id,))
-    conn.commit()
-
-
-def store_recovery_codes(tenant_id, user_id, codes):
-    """Replace the recovery set with freshly generated codes (stored hashed)."""
-    import hashlib as _hashlib
-    conn = get_db()
-    if user_id:
-        conn.execute('DELETE FROM mfa_recovery_codes WHERE user_id = ?', (user_id,))
-    else:
-        conn.execute('DELETE FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id IS NULL', (tenant_id,))
-    for code in codes:
-        conn.execute(
-            'INSERT INTO mfa_recovery_codes (id, tenant_id, user_id, code_hash) VALUES (?, ?, ?, ?)',
-            (str(uuid.uuid4()), tenant_id, user_id,
-             _hashlib.sha256(str(code).encode('utf-8')).hexdigest()),
-        )
-    conn.commit()
-
-
-def consume_recovery_code(tenant_id, user_id, code):
-    """Mark a matching unused recovery code as spent. True when it matched."""
-    import hashlib as _hashlib
-    digest = _hashlib.sha256(str(code or '').strip().encode('utf-8')).hexdigest()
-    conn = get_db()
-    if user_id:
-        row = conn.execute(
-            'SELECT id FROM mfa_recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',
-            (user_id, digest),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            'SELECT id FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id IS NULL'
-            ' AND code_hash = ? AND used_at IS NULL',
-            (tenant_id, digest),
-        ).fetchone()
-    if not row:
-        return False
-    conn.execute(
-        'UPDATE mfa_recovery_codes SET used_at = ? WHERE id = ?',
-        (_utcnow().isoformat(), row['id']),
-    )
-    conn.commit()
-    return True
-
-
-def count_unused_recovery_codes(tenant_id, user_id):
-    conn = get_db()
-    if user_id:
-        row = conn.execute(
-            'SELECT COUNT(*) AS n FROM mfa_recovery_codes WHERE user_id = ? AND used_at IS NULL',
-            (user_id,),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            'SELECT COUNT(*) AS n FROM mfa_recovery_codes WHERE tenant_id = ? AND user_id IS NULL AND used_at IS NULL',
-            (tenant_id,),
-        ).fetchone()
-    return int(row['n'] or 0)
-
-
 # ── ISS-005: attempt counters with temporary lockout ─────────────────────────
-# Buckets are plain strings ("login:id:mail@x", "mfa:user:<id>", "register:ip:<ip>")
+# Buckets are plain strings ("login:id:mail@x", "register:ip:<ip>")
 # so every endpoint picks its own subject. All timestamps are naive-UTC ISO text;
 # lexicographic comparison on them is a chronological comparison.
 

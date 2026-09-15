@@ -14988,7 +14988,7 @@ def _company_payload(tenant):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ISS-005: in-app attempt limits for the credential-bearing endpoints. The app
 # used to rely entirely on whatever the hosting layer did; these buckets bound
-# password guessing, registration spam, TOTP/recovery-code tries and setup-link
+# password guessing, registration spam and setup-link
 # probing inside the app itself. Counters live in ``rate_limit_buckets`` so every
 # gunicorn worker shares them. A limiter that errors fails open — a broken
 # counter must never turn into a site-wide lockout.
@@ -15001,9 +15001,6 @@ AUTH_RATE_LIMITS = {
     'register:ip': (10, 3600, 3600),   # public sign-ups per source IP
     'invite:ip': (30, 600, 900),       # invite lookups/registrations per IP
     'pwsetup:ip': (20, 600, 900),      # password-setup token probes per IP
-    'mfa:ip': (30, 600, 900),          # challenge answers per source IP
-    'mfa:id': (5, 600, 900),           # wrong codes per account — survives re-login
-    'mfa:op': (5, 600, 600),           # wrong codes on enable/disable/recovery ops
 }
 
 
@@ -15107,14 +15104,11 @@ def api_register():
         )
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or subdomain already registered'}), 409
-    # A tenant-direct session is the company-admin identity, so it must enrol
-    # MFA before doing anything else — the token carries the pending flag.
     token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name,
-                         user_role='company_admin', mfa_pending=True)
+                         user_role='company_admin')
     return jsonify({
         'success': True,
         'token': token,
-        'mfaSetupRequired': True,
         'tenant': {'id': tenant_id, 'companyName': company_name, 'email': email, 'domain': domain,
                    'slug': db.tenant_slug({'id': tenant_id, 'subdomain': subdomain, 'username': None})}
     }), 201
@@ -15184,28 +15178,14 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
-        mfa = db.get_mfa_state('tenant', tenant['id'])
-        if mfa.get('enabled'):
-            return jsonify({
-                'success': True,
-                'mfaRequired': True,
-                'mfaToken': auth.create_mfa_token(
-                    tenant['id'], tenant['email'],
-                    user_name=tenant['company_name'], user_role='company_admin'),
-            })
-        # Reaching this line means MFA is not enabled; a tenant-direct login is
-        # always the company-admin identity, which must enrol (t21) — not only
-        # when it also happens to be the platform tenant.
         token = create_token(tenant['id'], tenant['email'], is_admin=bool(tenant.get('is_admin')),
-                             user_name=tenant['company_name'], user_role='company_admin',
-                             mfa_pending=True)
+                             user_name=tenant['company_name'], user_role='company_admin')
         db.record_login(tenant['id'])
         if primary is not None:
             db.record_login(tenant['id'], primary['id'])
         return jsonify({
             'success': True,
             'token': token,
-            'mfaSetupRequired': True,
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -15233,25 +15213,13 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
-        mfa = db.get_mfa_state('user', user['id'])
-        if mfa.get('enabled'):
-            return jsonify({
-                'success': True,
-                'mfaRequired': True,
-                'mfaToken': auth.create_mfa_token(
-                    user['tenant_id'], user['email'], user_id=user['id'],
-                    user_name=user['name'], user_role=user['role']),
-            })
-        mfa_pending = user.get('role') == 'company_admin'
         token = create_token(user['tenant_id'], user['email'], is_admin=False,
-                             user_id=user['id'], user_name=user['name'], user_role=user['role'],
-                             mfa_pending=mfa_pending)
+                             user_id=user['id'], user_name=user['name'], user_role=user['role'])
         db.record_login(user['tenant_id'], user['id'])
         tenant = db.get_tenant_by_id(user['tenant_id'])
         return jsonify({
             'success': True,
             'token': token,
-            'mfaSetupRequired': mfa_pending,
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -15310,28 +15278,16 @@ def api_password_setup_complete(raw_token):
     user = db.get_user_by_id(completed['user_id'])
     if not tenant or not user:
         return jsonify({'error': 'Password setup link is invalid or expired'}), 404
-    mfa = db.get_mfa_state('user', user['id'])
-    if mfa.get('enabled'):
-        return jsonify({
-            'success': True,
-            'mfaRequired': True,
-            'mfaToken': auth.create_mfa_token(
-                tenant['id'], user['email'], user_id=user['id'],
-                user_name=user['name'], user_role=user['role']),
-        })
     db.record_login(tenant['id'], user['id'])
-    mfa_pending = user.get('role') == 'company_admin'
     token = create_token(
         tenant['id'], user['email'], is_admin=False,
         user_id=user['id'], user_name=user['name'], user_role=user['role'],
-        mfa_pending=mfa_pending,
     )
     tenant_payload = _company_payload(tenant)
     tenant_payload['isAdmin'] = False
     return jsonify({
         'success': True,
         'token': token,
-        'mfaSetupRequired': mfa_pending,
         'tenant': tenant_payload,
         'user': {
             'id': user['id'],
@@ -15368,32 +15324,23 @@ def api_me():
             'role': g.user_role,
             'permissions': g.user_permissions,
         }
-        result['mfa'] = db.get_mfa_state('user', g.user_id)
-        result['mfa']['setupRequired'] = _mfa_role_requires_setup() and not result['mfa']['enabled']
     else:
         result['user'] = {
             'name': t['company_name'],
             'role': 'company_admin',
             'permissions': {k: True for k in db.PERMISSION_KEYS},
         }
-        result['mfa'] = db.get_mfa_state('tenant', t['id'])
-        result['mfa']['setupRequired'] = _mfa_role_requires_setup() and not result['mfa']['enabled']
     return jsonify(result)
 
 
 @app.route('/api/auth/refresh', methods=['POST'])
 @require_auth
 def api_refresh():
-    """Refresh the JWT token. A pending-enrolment session never reaches this:
-    the gate refuses it, and a claim-less legacy token is re-evaluated so the
-    renewed session still carries the restriction when the role demands MFA."""
+    """Refresh the JWT token."""
     t = g.tenant
-    scope, row_id = ('user', g.user_id) if g.user_id else ('tenant', t['id'])
-    mfa_pending = _mfa_role_requires_setup() and not db.get_mfa_state(scope, row_id).get('enabled')
     token = create_token(t['id'], t['email'], is_admin=bool(g.is_admin),
-                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role,
-                         mfa_pending=mfa_pending)
-    return jsonify({'success': True, 'token': token, 'mfaSetupRequired': mfa_pending})
+                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
+    return jsonify({'success': True, 'token': token})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -15404,271 +15351,6 @@ def api_logout():
     if payload.get('jti'):
         db.revoke_token_jti(payload['jti'], g.tenant_id, payload.get('exp'))
     return jsonify({'success': True})
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TWO-FACTOR AUTHENTICATION (t21/t63): TOTP challenge at login plus one-time
-# recovery codes. The post-password challenge travels in a purpose-scoped JWT
-# that can never act as a session token.
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def _mfa_actor_scope():
-    """Which login identity the authenticated caller manages: their user row or
-    the tenant account itself (tenant-direct login)."""
-    if getattr(g, 'user_id', None):
-        return 'user', g.user_id
-    return 'tenant', g.tenant_id
-
-
-def _mfa_role_requires_setup():
-    """Company super admins and the platform admin must enrol (t21)."""
-    if getattr(g, 'is_admin', False):
-        return True
-    return getattr(g, 'user_role', None) == 'company_admin' or getattr(g, 'user_id', None) is None
-
-
-@app.route('/api/auth/mfa/verify', methods=['POST'])
-def api_mfa_verify():
-    """Second step of login: a TOTP code or a one-time recovery code."""
-    limited = _rate_limit_attempt('mfa:ip', _rate_limit_client_ip())
-    if limited:
-        return limited
-    data = request.json or {}
-    challenge = auth.verify_mfa_token(data.get('mfaToken'))
-    if not challenge:
-        return jsonify({'error': 'انتهت مهلة رمز التحقق، أعد تسجيل الدخول',
-                        'error_code': 'mfa_challenge_expired'}), 401
-    code = str(data.get('code') or '').strip()
-    if not code:
-        return jsonify({'error': 'رمز التحقق مطلوب', 'error_code': 'mfa_code_required'}), 400
-
-    scope = 'user' if challenge.get('user_id') else 'tenant'
-    row_id = challenge.get('user_id') or challenge['sub']
-    # ISS-005: the attempt counter lives on the account, not on the challenge —
-    # re-logging in to mint a fresh challenge must not reset it.
-    mfa_subject = f'{scope}:{row_id}'
-    limited = _rate_limit_check('mfa:id', mfa_subject)
-    if limited:
-        return limited
-    secrets_row = db.get_mfa_secrets(scope, row_id)
-    if not secrets_row or not secrets_row.get('mfa_enabled') or not secrets_row.get('mfa_secret'):
-        return jsonify({'error': 'التحقق الثنائي غير مفعل لهذا الحساب',
-                        'error_code': 'mfa_not_enabled'}), 400
-
-    ok = auth.verify_totp(secrets_row['mfa_secret'], code)
-    method = 'totp'
-    if not ok:
-        ok = db.consume_recovery_code(challenge['sub'], challenge.get('user_id'), code)
-        method = 'recovery'
-    if not ok:
-        limited = _rate_limit_attempt('mfa:id', mfa_subject)
-        if limited:
-            return limited
-        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 401
-    _rate_limit_clear('mfa:id', mfa_subject)
-
-    # Re-validate the live account state before issuing the session.
-    tenant = db.get_tenant_by_id(challenge['sub'])
-    if not tenant or not tenant.get('is_active'):
-        return jsonify({'error': 'Account inactive or not found'}), 403
-    user_id = challenge.get('user_id')
-    if user_id:
-        user = db.get_user_by_id(user_id)
-        if not user or not user.get('is_active') or str(user.get('tenant_id')) != str(challenge['sub']):
-            return jsonify({'error': 'User account inactive or not found'}), 403
-        db.record_login(challenge['sub'], user_id)
-    else:
-        user = None
-        db.record_login(challenge['sub'])
-
-    session_is_admin = bool(tenant.get('is_admin')) and not user_id
-    token = create_token(
-        challenge['sub'], challenge.get('email'),
-        is_admin=session_is_admin,
-        user_id=user_id, user_name=challenge.get('user_name'),
-        user_role=challenge.get('user_role'),
-    )
-    payload = {
-        'success': True,
-        'token': token,
-        'mfaMethod': method,
-        'tenant': {
-            'id': tenant['id'],
-            'companyName': tenant['company_name'],
-            'email': tenant['email'],
-            'isAdmin': session_is_admin,
-            'plan': tenant.get('plan', 'free'),
-            'domain': tenant.get('domain'),
-            'slug': db.tenant_slug(tenant),
-        },
-        'user': {
-            'id': user_id,
-            'name': challenge.get('user_name'),
-            'email': challenge.get('email'),
-            'role': challenge.get('user_role'),
-        },
-    }
-    if method == 'recovery':
-        payload['recoveryCodesRemaining'] = db.count_unused_recovery_codes(
-            challenge['sub'], user_id)
-    return jsonify(payload)
-
-
-@app.route('/api/auth/mfa/status', methods=['GET'])
-@require_auth
-def api_mfa_status():
-    scope, row_id = _mfa_actor_scope()
-    state = db.get_mfa_state(scope, row_id)
-    state['setupRequired'] = _mfa_role_requires_setup() and not state.get('enabled')
-    state['recoveryCodesRemaining'] = db.count_unused_recovery_codes(
-        g.tenant_id, g.user_id if scope == 'user' else None)
-    return jsonify({'success': True, 'mfa': state})
-
-
-@app.route('/api/auth/mfa/setup', methods=['POST'])
-@require_auth
-def api_mfa_setup():
-    """Start enrolment: returns the new secret; it activates only after a code verifies.
-
-    When MFA is already enabled this rotates the second factor, so it demands
-    the same proof as disabling: the account password plus a current TOTP code.
-    A session token alone must never be enough to replace the factor."""
-    scope, row_id = _mfa_actor_scope()
-    secrets_row = db.get_mfa_secrets(scope, row_id)
-    if secrets_row and secrets_row.get('mfa_enabled'):
-        # Re-enrolment verifies the password and a current code — guesses count
-        # against the same mfa:op bucket as enable/disable/recovery-codes.
-        mfa_subject = f'{scope}:{row_id}'
-        limited = _rate_limit_check('mfa:op', mfa_subject)
-        if limited:
-            return limited
-        data = request.json or {}
-        password = data.get('password') or ''
-        code = str(data.get('code') or '').strip()
-        if scope == 'user':
-            account = db.get_user_by_id(row_id)
-        else:
-            account = g.tenant
-        if not account or not verify_password(password, account.get('password_hash') or ''):
-            limited = _rate_limit_attempt('mfa:op', mfa_subject)
-            if limited:
-                return limited
-            return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
-        if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
-            limited = _rate_limit_attempt('mfa:op', mfa_subject)
-            if limited:
-                return limited
-            return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
-        _rate_limit_clear('mfa:op', mfa_subject)
-    secret = auth.generate_totp_secret()
-    db.set_mfa_pending_secret(scope, row_id, secret)
-    account = g.user_name or g.tenant.get('email') or 'admin'
-    return jsonify({
-        'success': True,
-        'secret': secret,
-        'otpauthUri': auth.totp_otpauth_uri(secret, account),
-    })
-
-
-@app.route('/api/auth/mfa/enable', methods=['POST'])
-@require_auth
-def api_mfa_enable():
-    """Verify one code against the pending secret, then enable MFA and issue
-    the recovery codes once."""
-    scope, row_id = _mfa_actor_scope()
-    mfa_subject = f'{scope}:{row_id}'
-    limited = _rate_limit_check('mfa:op', mfa_subject)
-    if limited:
-        return limited
-    secrets_row = db.get_mfa_secrets(scope, row_id)
-    if not secrets_row or not secrets_row.get('mfa_pending_secret'):
-        return jsonify({'error': 'لا يوجد إعداد قيد الانتظار',
-                        'error_code': 'mfa_setup_not_started'}), 400
-    code = str((request.json or {}).get('code') or '').strip()
-    if not auth.verify_totp(secrets_row['mfa_pending_secret'], code):
-        limited = _rate_limit_attempt('mfa:op', mfa_subject)
-        if limited:
-            return limited
-        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
-    _rate_limit_clear('mfa:op', mfa_subject)
-    db.activate_mfa(scope, row_id)
-    codes = auth.generate_recovery_codes()
-    db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
-    _record_audit_event('mfa.enabled', 'user' if scope == 'user' else 'tenant', row_id,
-                        entity_name=g.user_name or g.tenant.get('company_name'))
-    # Enrolment may have run under an mfa_pending session, and that token can
-    # never shed the restriction — hand back a clean one the client swaps in.
-    email = g.tenant.get('email')
-    if scope == 'user':
-        enabled_user = db.get_user_by_id(row_id)
-        email = (enabled_user or {}).get('email') or email
-    token = create_token(g.tenant_id, email, is_admin=bool(g.is_admin),
-                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
-    return jsonify({'success': True, 'enabled': True, 'recoveryCodes': codes, 'token': token})
-
-
-@app.route('/api/auth/mfa/disable', methods=['POST'])
-@require_auth
-def api_mfa_disable():
-    """Disable MFA. Requires the password plus a current code, and is refused
-    for roles where MFA is mandatory (t21)."""
-    if _mfa_role_requires_setup():
-        return jsonify({'error': 'التحقق الثنائي إلزامي لهذا الحساب ولا يمكن تعطيله',
-                        'error_code': 'mfa_required_role'}), 400
-    data = request.json or {}
-    password = data.get('password') or ''
-    code = str(data.get('code') or '').strip()
-    scope, row_id = _mfa_actor_scope()
-    mfa_subject = f'{scope}:{row_id}'
-    limited = _rate_limit_check('mfa:op', mfa_subject)
-    if limited:
-        return limited
-    if scope == 'user':
-        account = db.get_user_by_id(row_id)
-    else:
-        account = g.tenant
-    if not account or not verify_password(password, account.get('password_hash') or ''):
-        limited = _rate_limit_attempt('mfa:op', mfa_subject)
-        if limited:
-            return limited
-        return jsonify({'error': 'كلمة المرور غير صحيحة', 'error_code': 'password_invalid'}), 400
-    secrets_row = db.get_mfa_secrets(scope, row_id)
-    if not secrets_row or not secrets_row.get('mfa_enabled'):
-        return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
-    if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
-        limited = _rate_limit_attempt('mfa:op', mfa_subject)
-        if limited:
-            return limited
-        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
-    _rate_limit_clear('mfa:op', mfa_subject)
-    db.clear_mfa(scope, row_id)
-    _record_audit_event('mfa.disabled', 'user' if scope == 'user' else 'tenant', row_id,
-                        entity_name=g.user_name or g.tenant.get('company_name'))
-    return jsonify({'success': True, 'enabled': False})
-
-
-@app.route('/api/auth/mfa/recovery-codes', methods=['POST'])
-@require_auth
-def api_mfa_regenerate_recovery_codes():
-    """Regenerate the recovery set; a current TOTP code authorizes it."""
-    scope, row_id = _mfa_actor_scope()
-    mfa_subject = f'{scope}:{row_id}'
-    limited = _rate_limit_check('mfa:op', mfa_subject)
-    if limited:
-        return limited
-    secrets_row = db.get_mfa_secrets(scope, row_id)
-    if not secrets_row or not secrets_row.get('mfa_enabled'):
-        return jsonify({'error': 'التحقق الثنائي غير مفعل', 'error_code': 'mfa_not_enabled'}), 400
-    code = str((request.json or {}).get('code') or '').strip()
-    if not auth.verify_totp(secrets_row.get('mfa_secret') or '', code):
-        limited = _rate_limit_attempt('mfa:op', mfa_subject)
-        if limited:
-            return limited
-        return jsonify({'error': 'رمز التحقق غير صحيح', 'error_code': 'mfa_code_invalid'}), 400
-    _rate_limit_clear('mfa:op', mfa_subject)
-    codes = auth.generate_recovery_codes()
-    db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
-    return jsonify({'success': True, 'recoveryCodes': codes})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -19226,16 +18908,11 @@ def api_accept_invite(token):
     db.record_login(invite['tenant_id'], user_id)
 
     tenant = db.get_tenant_by_id(invite['tenant_id'])
-    # An invite can name a company_admin, and that role must enrol MFA before
-    # the new session reaches anything beyond the enrolment endpoints (t21).
-    mfa_pending = invite_role == 'company_admin'
     jwt_token = create_token(tenant['id'], invite['email'], is_admin=False,
-                             user_id=user_id, user_name=name, user_role=invite_role,
-                             mfa_pending=mfa_pending)
+                             user_id=user_id, user_name=name, user_role=invite_role)
     return jsonify({
         'success': True,
         'token': jwt_token,
-        'mfaSetupRequired': mfa_pending,
         'tenant': {
             'id': tenant['id'],
             'companyName': tenant['company_name'],
@@ -26774,4 +26451,11 @@ if __name__ == '__main__':
     print(f"  Output Dir: {OUTPUT_DIR}")
     print("=" * 60)
     port = int(os.environ.get('PORT', 7860))
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+    print(f"  Image Model: {IMAGE_MODEL}")
+    print(f"  Output Dir: {OUTPUT_DIR}")
+    print("=" * 60)
+    port = int(os.environ.get('PORT', 7860))
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
     app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)

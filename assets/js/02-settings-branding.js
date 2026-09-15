@@ -948,126 +948,19 @@
       if (tenantLastTrends) renderTenantActivityChart(tenantLastTrends);
     });
 
-    let pendingMfaToken = null;
-    let pendingMfaSetup = false;
-
     async function handleLogin(e) {
       e.preventDefault();
       showTenantError('loginError', '');
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
       const data = await api('POST', '/api/auth/login', { email, password });
-      if (data.success && data.mfaRequired) {
-        pendingMfaToken = data.mfaToken;
-        document.getElementById('loginForm').style.display = 'none';
-        const mfaForm = document.getElementById('mfaForm');
-        if (mfaForm) {
-          mfaForm.style.display = 'block';
-          const codeInput = document.getElementById('mfaCode');
-          if (codeInput) { codeInput.value = ''; codeInput.focus(); }
-        }
-        return;
-      }
       if (data.success && data.token) {
         setTenantToken(data.token);
         setTenantUser(data.tenant);
-        pendingMfaSetup = !!data.mfaSetupRequired;
-        // A pending session only reaches the enrolment endpoints, so boot the
-        // enrolment dialog instead of a bootstrap that would just collect 403s.
-        if (pendingMfaSetup) {
-          openMfaSetupModal(true);
-          return;
-        }
         await bootstrapTenant();
       } else {
         showTenantError('loginError', data.error || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
       }
-    }
-
-    async function handleMfaVerify(e) {
-      e.preventDefault();
-      showTenantError('loginError', '');
-      const code = (document.getElementById('mfaCode') || {}).value || '';
-      const data = await api('POST', '/api/auth/mfa/verify', { mfaToken: pendingMfaToken, code: code.trim() });
-      if (data.success && data.token) {
-        pendingMfaToken = null;
-        document.getElementById('mfaForm').style.display = 'none';
-        document.getElementById('loginForm').style.display = 'block';
-        setTenantToken(data.token);
-        setTenantUser(data.tenant);
-        await bootstrapTenant();
-        if (data.mfaMethod === 'recovery' && typeof data.recoveryCodesRemaining === 'number' && data.recoveryCodesRemaining <= 2) {
-          toast(WFT('auth.mfa_recovery_low', 'رموز الاسترداد المتبقية قليلة'));
-        }
-      } else {
-        showTenantError('loginError', data.error || WFT('auth.mfa_invalid', 'رمز التحقق غير صحيح'));
-      }
-    }
-
-    function cancelMfaChallenge() {
-      pendingMfaToken = null;
-      const mfaForm = document.getElementById('mfaForm');
-      if (mfaForm) mfaForm.style.display = 'none';
-      const loginForm = document.getElementById('loginForm');
-      if (loginForm) loginForm.style.display = 'block';
-    }
-
-    async function openMfaSetupModal(mandatory, reauth) {
-      document.getElementById('mfaSetupModal')?.remove();
-      const modal = document.createElement('div');
-      modal.id = 'mfaSetupModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;';
-      modal.innerHTML =
-        '<div style="background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:85vh;overflow:auto;padding:24px;direction:rtl;text-align:right;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-        '<h3 style="margin:0;color:#1a3a52;font-size:18px;">' + escapeHtml(WFT('auth.mfa_setup_title', 'تفعيل التحقق الثنائي')) + '</h3>' +
-        (mandatory ? '' : '<button type="button" class="btn ghost small" onclick="document.getElementById(\'mfaSetupModal\').remove()">' + escapeHtml(WFT('common.close', 'إغلاق')) + '</button>') +
-        '</div>' +
-        '<div id="mfaSetupBody"><p class="tenant-hint">' + escapeHtml(WFT('common.loading', 'جاري التحميل...')) + '</p></div>' +
-        '</div>';
-      document.body.appendChild(modal);
-      const data = await api('POST', '/api/auth/mfa/setup', reauth || {});
-      const body = document.getElementById('mfaSetupBody');
-      if (!body) return;
-      if (!data || !data.success) {
-        body.innerHTML = '<p style="color:#c33">' + escapeHtml((data && data.error) || WFT('common.error', 'حدث خطأ')) + '</p>';
-        return;
-      }
-      body.innerHTML =
-        '<p class="tenant-hint" style="margin:0 0 8px">' + escapeHtml(WFT('auth.mfa_secret_label', 'المفتاح السري')) + '</p>' +
-        '<input type="text" readonly dir="ltr" value="' + escapeHtml(data.secret) + '" style="width:100%;font-size:13px;margin-bottom:8px" onclick="this.select()">' +
-        '<input type="text" readonly dir="ltr" value="' + escapeHtml(data.otpauthUri || '') + '" style="width:100%;font-size:11px;margin-bottom:12px;color:#64748b" onclick="this.select()">' +
-        '<label style="display:block;margin-bottom:4px">' + escapeHtml(WFT('auth.mfa_code', 'رمز التحقق الثنائي')) + '</label>' +
-        '<input type="text" id="mfaSetupCode" inputmode="numeric" autocomplete="one-time-code" dir="ltr" style="width:100%;margin-bottom:12px">' +
-        '<div id="mfaSetupError" style="color:#c33;font-size:12px;min-height:16px;margin-bottom:8px"></div>' +
-        '<button type="button" class="btn primary" onclick="enableMfaFromModal()">' + escapeHtml(WFT('auth.mfa_enable', 'تفعيل')) + '</button>';
-    }
-
-    async function enableMfaFromModal() {
-      const code = ((document.getElementById('mfaSetupCode') || {}).value || '').trim();
-      const errBox = document.getElementById('mfaSetupError');
-      if (errBox) errBox.textContent = '';
-      const data = await api('POST', '/api/auth/mfa/enable', { code });
-      if (!data || !data.success) {
-        if (errBox) errBox.textContent = (data && data.error) || WFT('auth.mfa_invalid', 'رمز التحقق غير صحيح');
-        return;
-      }
-      // Enrolment under a restricted session hands back a clean token — the old
-      // one stays confined to the setup endpoints and is never upgraded.
-      if (data.token) setTenantToken(data.token);
-      const needsBootstrap = pendingMfaSetup;
-      pendingMfaSetup = false;
-      if (needsBootstrap) bootstrapTenant();
-      const body = document.getElementById('mfaSetupBody');
-      if (!body) return;
-      const codes = (data.recoveryCodes || []).map(c =>
-        '<code dir="ltr" style="display:block;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;margin-bottom:4px;font-size:13px;">' + escapeHtml(c) + '</code>'
-      ).join('');
-      body.innerHTML =
-        '<p style="margin:0 0 8px;color:#1c7a2e;font-weight:700">' + escapeHtml(WFT('auth.mfa_enabled_ok', 'تم تفعيل التحقق الثنائي')) + '</p>' +
-        '<p class="tenant-hint" style="margin:0 0 8px">' + escapeHtml(WFT('auth.mfa_recovery_title', 'رموز الاسترداد')) + '</p>' +
-        '<div style="margin-bottom:12px">' + codes + '</div>' +
-        '<button type="button" class="btn primary" onclick="document.getElementById(\'mfaSetupModal\').remove()">' + escapeHtml(WFT('common.close', 'إغلاق')) + '</button>';
     }
 
     function tenantLogout() {
@@ -1261,13 +1154,6 @@
       ]);
       if (!me.success || !me.tenant) {
         showAuthPage();
-        return;
-      }
-      // A reload with a session that still owes MFA enrolment: every other
-      // route is refused, so open the enrolment dialog instead of the app.
-      if (me.mfa && me.mfa.setupRequired) {
-        pendingMfaSetup = true;
-        openMfaSetupModal(true);
         return;
       }
       tenantUser = me.tenant;

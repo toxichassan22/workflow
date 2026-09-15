@@ -49,20 +49,6 @@ def make_json(resp):
     return resp.get_json() or {}
 
 
-def enrol_mfa(client, token):
-    """Complete mandatory MFA enrolment for a fresh session (ISS-003): a login
-    that still owes setup is restricted to the enrolment endpoints until
-    /api/auth/mfa/enable hands back a clean token."""
-    import auth
-    headers = {'Authorization': f'Bearer {token}'}
-    r = client.post('/api/auth/mfa/setup', headers=headers, json={})
-    assert r.status_code == 200, make_json(r)
-    r = client.post('/api/auth/mfa/enable', headers=headers,
-                    json={'code': auth.totp_code(make_json(r)['secret'])})
-    assert r.status_code == 200, make_json(r)
-    return make_json(r)['token']
-
-
 def test_flow():
     app.call_zai_chat = mock_call_zai_chat
     # /api/slide-plan queues a background job outside TESTING; the script asserts
@@ -89,8 +75,6 @@ def test_flow():
     r = client.post('/api/auth/login', json={'email': email, 'password': password})
     assert r.status_code == 200, make_json(r)
     token = make_json(r)['token']
-    if make_json(r).get('mfaSetupRequired'):
-        token = enrol_mfa(client, token)
 
     headers = {'Authorization': f'Bearer {token}'}
 
@@ -197,8 +181,6 @@ def test_flow():
     r = client.post('/api/auth/register', json={'companyName': f'Other {uid2}', 'email': email2, 'password': password})
     assert r.status_code == 201
     token2 = make_json(r)['token']
-    if make_json(r).get('mfaSetupRequired'):
-        token2 = enrol_mfa(client, token2)
     headers2 = {'Authorization': f'Bearer {token2}'}
 
     r = client.get('/api/presentations', headers=headers2)
@@ -223,8 +205,6 @@ def test_flow():
     r = client.post('/api/auth/login', json={'email': admin_email, 'password': 'adminpass123456'})
     assert r.status_code == 200, make_json(r)
     admin_token = make_json(r)['token']
-    if make_json(r).get('mfaSetupRequired'):
-        admin_token = enrol_mfa(client, admin_token)
     admin_headers = {'Authorization': f'Bearer {admin_token}'}
 
     print('--- Fetching admin stats...')
