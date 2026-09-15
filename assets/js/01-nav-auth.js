@@ -309,6 +309,14 @@
           removeTenantToken();
           showAuthPage();
         }
+        // A session that still owes mandatory MFA enrolment is refused on every
+        // other route; funnel it into the enrolment dialog instead of letting
+        // each call dead-end on its own.
+        if (data.error_code === 'mfa_setup_required' && typeof openMfaSetupModal === 'function'
+            && !document.getElementById('mfaSetupModal')) {
+          pendingMfaSetup = true;
+          openMfaSetupModal(true);
+        }
         return data;
       });
     }

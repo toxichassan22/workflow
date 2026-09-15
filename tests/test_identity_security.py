@@ -985,6 +985,63 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.get_json()['error_code'], 'rate_limited')
 
+    # ── ISS-003: a session that still owes MFA enrolment is confined ─────
+
+    def test_pending_mfa_session_only_reaches_enrolment_endpoints(self):
+        login = self.client.post('/api/auth/login',
+                                 json={'email': 'boss@x.test', 'password': 'secret123'})
+        body = login.get_json()
+        self.assertTrue(body.get('mfaSetupRequired'))
+        pending = self.headers(body['token'])
+
+        gated = self.client.get('/api/users', headers=pending)
+        self.assertEqual(gated.status_code, 403)
+        self.assertEqual(gated.get_json()['error_code'], 'mfa_setup_required')
+        # The enrolment surface stays reachable under the same token.
+        me = self.client.get('/api/auth/me', headers=pending)
+        self.assertEqual(me.status_code, 200)
+        self.assertTrue(me.get_json()['mfa']['setupRequired'])
+        self.assertEqual(self.client.get('/api/auth/mfa/status', headers=pending).status_code, 200)
+        setup = self.client.post('/api/auth/mfa/setup', headers=pending, json={})
+        self.assertEqual(setup.status_code, 200, setup.get_json())
+        enabled = self.client.post('/api/auth/mfa/enable', headers=pending,
+                                   json={'code': auth.totp_code(setup.get_json()['secret'])})
+        self.assertEqual(enabled.status_code, 200, enabled.get_json())
+        fresh = enabled.get_json().get('token')
+        self.assertTrue(fresh)
+        self.assertEqual(self.client.get('/api/users', headers=self.headers(fresh)).status_code, 200)
+        # The restricted token never upgrades itself and cannot renew.
+        still = self.client.get('/api/users', headers=pending)
+        self.assertEqual(still.status_code, 403)
+        self.assertEqual(still.get_json()['error_code'], 'mfa_setup_required')
+        self.assertEqual(self.client.post('/api/auth/refresh', headers=pending).status_code, 403)
+
+    def test_tenant_direct_login_flags_and_gates_mfa_setup(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET password_hash = ? WHERE id = ?',
+                     (self.application_module.hash_password('secret123'), self.tenant_id))
+        conn.commit()
+        login = self.client.post('/api/auth/login',
+                                 json={'email': 'co@x.test', 'password': 'secret123'})
+        body = login.get_json()
+        # A tenant-direct login is the company-admin identity: the flag applies
+        # to every company, not only the platform tenant.
+        self.assertTrue(body.get('mfaSetupRequired'))
+        gated = self.client.get('/api/users', headers=self.headers(body['token']))
+        self.assertEqual(gated.status_code, 403)
+        self.assertEqual(gated.get_json()['error_code'], 'mfa_setup_required')
+
+    def test_employee_session_is_not_mfa_gated(self):
+        self._employee('plain@x.test')
+        login = self.client.post('/api/auth/login',
+                                 json={'email': 'plain@x.test', 'password': 'secret123'})
+        body = login.get_json()
+        self.assertTrue(body.get('token'))
+        self.assertFalse(body.get('mfaSetupRequired'))
+        denied = self.client.get('/api/users', headers=self.headers(body['token']))
+        self.assertEqual(denied.status_code, 403)
+        self.assertNotEqual(denied.get_json().get('error_code'), 'mfa_setup_required')
+
 
 if __name__ == '__main__':
     unittest.main()

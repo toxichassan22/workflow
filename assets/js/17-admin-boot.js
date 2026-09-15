@@ -1575,8 +1575,14 @@
         const next = (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute('tenantDashboardPage')) || '/app/dashboard';
         window.history.replaceState({}, '', next);
       } catch (e) { window.history.replaceState({}, '', '/app/dashboard'); }
+      // A session that still owes MFA enrolment is refused everywhere but the
+      // enrolment endpoints, so bootstrap only after the dialog completes it.
+      if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') {
+        pendingMfaSetup = true;
+        openMfaSetupModal(true);
+        return;
+      }
       await bootstrapTenant();
-      if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') openMfaSetupModal(true);
     }
 
     function showPasswordSetupMfa() {
@@ -1651,6 +1657,11 @@
         setTenantToken(data.token);
         setTenantUser(data.tenant);
         window.history.replaceState({}, '', '/');
+        if (data.mfaSetupRequired && typeof openMfaSetupModal === 'function') {
+          pendingMfaSetup = true;
+          openMfaSetupModal(true);
+          return;
+        }
         await bootstrapTenant();
       } else {
         showTenantError('inviteError', data.error || 'فشل إنشاء الحساب');

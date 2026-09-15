@@ -117,8 +117,14 @@ def _current_session_version(tenant_id, user_id):
         return 0
 
 
-def create_token(tenant_id, email, is_admin=False, user_id=None, user_name=None, user_role=None):
-    """Create a JWT token for a tenant or user."""
+def create_token(tenant_id, email, is_admin=False, user_id=None, user_name=None,
+                 user_role=None, mfa_pending=False):
+    """Create a JWT token for a tenant or user.
+
+    ``mfa_pending`` marks a session issued to a mandatory-MFA identity that has
+    not enrolled a factor yet; the decorators confine it to the enrolment
+    endpoints until ``mfa/enable`` hands back a clean token.
+    """
     header = {'alg': 'HS256', 'typ': 'JWT'}
     payload = {
         'sub': tenant_id,
@@ -132,6 +138,8 @@ def create_token(tenant_id, email, is_admin=False, user_id=None, user_name=None,
         'iat': int(time.time()),
         'exp': int(time.time()) + (JWT_EXPIRY_HOURS * 3600),
     }
+    if mfa_pending:
+        payload['mfa_pending'] = True
 
     header_b64 = _b64encode(json.dumps(header, separators=(',', ':')).encode())
     payload_b64 = _b64encode(json.dumps(payload, separators=(',', ':')).encode())
@@ -333,6 +341,27 @@ def _session_state_error(payload, tenant, user_row):
     return None
 
 
+# A session carrying ``mfa_pending`` may only reach the enrolment surface: who
+# am I, the factor status, and the setup/enable calls themselves. Everything
+# else answers 403 until enrolment completes and a clean token is issued.
+MFA_SETUP_EXEMPT_ENDPOINTS = frozenset({
+    'api_me', 'api_logout', 'api_mfa_status', 'api_mfa_setup', 'api_mfa_enable',
+})
+
+
+def _mfa_pending_gate(payload):
+    """403 when the session still owes mandatory MFA enrolment (t21)."""
+    if not payload.get('mfa_pending'):
+        return None
+    if request.endpoint in MFA_SETUP_EXEMPT_ENDPOINTS:
+        return None
+    return (jsonify({
+        'error': 'يجب إكمال إعداد التحقق الثنائي قبل المتابعة',
+        'error_code': 'mfa_setup_required',
+        'mfaSetupRequired': True,
+    }), 403)
+
+
 def require_auth(f):
     """Decorator: require a valid JWT token. Sets g.tenant_id, g.tenant, g.is_admin, g.user_id, g.user_name, g.user_role."""
     @wraps(f)
@@ -357,6 +386,10 @@ def require_auth(f):
         session_error = _session_state_error(payload, tenant, user_row)
         if session_error:
             return session_error
+
+        mfa_block = _mfa_pending_gate(payload)
+        if mfa_block:
+            return mfa_block
 
         g.tenant_id = payload['sub']
         g.tenant = tenant
@@ -396,6 +429,10 @@ def require_company_admin(f):
         session_error = _session_state_error(payload, tenant, user_row)
         if session_error:
             return session_error
+
+        mfa_block = _mfa_pending_gate(payload)
+        if mfa_block:
+            return mfa_block
 
         user_role = (user_row or {}).get('role') or payload.get('user_role')
         user_id = payload.get('user_id')
@@ -438,6 +475,10 @@ def require_admin(f):
         if session_error:
             return session_error
 
+        mfa_block = _mfa_pending_gate(payload)
+        if mfa_block:
+            return mfa_block
+
         g.tenant_id = payload['sub']
         g.tenant = tenant
         g.is_admin = True
@@ -475,6 +516,10 @@ def require_permission(permission_key):
             session_error = _session_state_error(payload, tenant, user_row)
             if session_error:
                 return session_error
+
+            mfa_block = _mfa_pending_gate(payload)
+            if mfa_block:
+                return mfa_block
 
             g.tenant_id = payload['sub']
             g.tenant = tenant

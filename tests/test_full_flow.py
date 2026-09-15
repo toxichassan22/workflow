@@ -10,8 +10,8 @@ import db
 from app import app as flask_app
 
 
-def mock_call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300):
-    if max_tokens == 4000:
+def mock_call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, **kwargs):
+    if max_tokens >= 10000:
         return {
             'choices': [
                 {
@@ -49,8 +49,25 @@ def make_json(resp):
     return resp.get_json() or {}
 
 
+def enrol_mfa(client, token):
+    """Complete mandatory MFA enrolment for a fresh session (ISS-003): a login
+    that still owes setup is restricted to the enrolment endpoints until
+    /api/auth/mfa/enable hands back a clean token."""
+    import auth
+    headers = {'Authorization': f'Bearer {token}'}
+    r = client.post('/api/auth/mfa/setup', headers=headers, json={})
+    assert r.status_code == 200, make_json(r)
+    r = client.post('/api/auth/mfa/enable', headers=headers,
+                    json={'code': auth.totp_code(make_json(r)['secret'])})
+    assert r.status_code == 200, make_json(r)
+    return make_json(r)['token']
+
+
 def test_flow():
     app.call_zai_chat = mock_call_zai_chat
+    # /api/slide-plan queues a background job outside TESTING; the script asserts
+    # on the synchronous plan payload.
+    flask_app.config['TESTING'] = True
 
     client = flask_app.test_client()
 
@@ -72,6 +89,8 @@ def test_flow():
     r = client.post('/api/auth/login', json={'email': email, 'password': password})
     assert r.status_code == 200, make_json(r)
     token = make_json(r)['token']
+    if make_json(r).get('mfaSetupRequired'):
+        token = enrol_mfa(client, token)
 
     headers = {'Authorization': f'Bearer {token}'}
 
@@ -104,14 +123,15 @@ def test_flow():
     r = client.post('/api/slide-plan', headers=headers, json={'projectData': project_data})
     assert r.status_code == 200, make_json(r)
     plan = make_json(r)['plan']
-    assert len(plan['slides']) == 8
+    # The mock proposes 8 slides; normalization may insert section dividers.
+    assert len(plan['slides']) >= 8
 
     # Generate slides
     print('--- Generating slides HTML...')
     r = client.post('/api/generate-slides', headers=headers, json={'projectData': project_data, 'slidePlan': plan})
     assert r.status_code == 200, make_json(r)
     slides = make_json(r)['slides']
-    assert len(slides) == 8
+    assert len(slides) == len(plan['slides'])
     assert all('slide' in s['html'] for s in slides)
 
     # Save presentation
@@ -152,13 +172,19 @@ def test_flow():
     assert r.status_code == 200
     assert len(make_json(r)['presentations']) >= 1
 
-    print('--- Deleting presentation...')
+    print('--- Archiving presentation...')
+    # t18: delete is refused once the file carries workflow history (exports,
+    # approvals, change log) — the client archives instead.
     r = client.delete(f'/api/presentations/{pres_id}', headers=headers)
+    if r.status_code == 409 and make_json(r).get('error_code') == 'archive_required':
+        r = client.post(f'/api/presentations/{pres_id}/archive', headers=headers, json={})
     assert r.status_code == 200, make_json(r)
     r = client.get('/api/presentations', headers=headers)
-    assert all(p['id'] != pres_id for p in make_json(r)['presentations'])
+    # Archive keeps the row (audit trail); it leaves the active set by status.
+    remaining = [p for p in make_json(r)['presentations'] if p['id'] == pres_id]
+    assert all(p.get('status') == 'archived' for p in remaining)
 
-    print('--- Fetching exports list after deletion...')
+    print('--- Fetching exports list after archiving...')
     r = client.get('/api/exports', headers=headers)
     assert r.status_code == 200
     exports_after_delete = make_json(r)['exports']
@@ -171,6 +197,8 @@ def test_flow():
     r = client.post('/api/auth/register', json={'companyName': f'Other {uid2}', 'email': email2, 'password': password})
     assert r.status_code == 201
     token2 = make_json(r)['token']
+    if make_json(r).get('mfaSetupRequired'):
+        token2 = enrol_mfa(client, token2)
     headers2 = {'Authorization': f'Bearer {token2}'}
 
     r = client.get('/api/presentations', headers=headers2)
@@ -195,6 +223,8 @@ def test_flow():
     r = client.post('/api/auth/login', json={'email': admin_email, 'password': 'adminpass123456'})
     assert r.status_code == 200, make_json(r)
     admin_token = make_json(r)['token']
+    if make_json(r).get('mfaSetupRequired'):
+        admin_token = enrol_mfa(client, admin_token)
     admin_headers = {'Authorization': f'Bearer {admin_token}'}
 
     print('--- Fetching admin stats...')

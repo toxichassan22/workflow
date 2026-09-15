@@ -15104,10 +15104,14 @@ def api_register():
         )
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or subdomain already registered'}), 409
-    token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name, user_role='company_admin')
+    # A tenant-direct session is the company-admin identity, so it must enrol
+    # MFA before doing anything else — the token carries the pending flag.
+    token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name,
+                         user_role='company_admin', mfa_pending=True)
     return jsonify({
         'success': True,
         'token': token,
+        'mfaSetupRequired': True,
         'tenant': {'id': tenant_id, 'companyName': company_name, 'email': email, 'domain': domain,
                    'slug': db.tenant_slug({'id': tenant_id, 'subdomain': subdomain, 'username': None})}
     }), 201
@@ -15152,13 +15156,17 @@ def api_login():
                     tenant['id'], tenant['email'],
                     user_name=tenant['company_name'], user_role='company_admin'),
             })
+        # Reaching this line means MFA is not enabled; a tenant-direct login is
+        # always the company-admin identity, which must enrol (t21) — not only
+        # when it also happens to be the platform tenant.
         token = create_token(tenant['id'], tenant['email'], is_admin=bool(tenant.get('is_admin')),
-                             user_name=tenant['company_name'], user_role='company_admin')
+                             user_name=tenant['company_name'], user_role='company_admin',
+                             mfa_pending=True)
         db.record_login(tenant['id'])
         return jsonify({
             'success': True,
             'token': token,
-            'mfaSetupRequired': bool(tenant.get('is_admin')) and not mfa.get('enabled'),
+            'mfaSetupRequired': True,
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -15196,14 +15204,16 @@ def api_login():
                     user['tenant_id'], user['email'], user_id=user['id'],
                     user_name=user['name'], user_role=user['role']),
             })
+        mfa_pending = user.get('role') == 'company_admin'
         token = create_token(user['tenant_id'], user['email'], is_admin=False,
-                             user_id=user['id'], user_name=user['name'], user_role=user['role'])
+                             user_id=user['id'], user_name=user['name'], user_role=user['role'],
+                             mfa_pending=mfa_pending)
         db.record_login(user['tenant_id'], user['id'])
         tenant = db.get_tenant_by_id(user['tenant_id'])
         return jsonify({
             'success': True,
             'token': token,
-            'mfaSetupRequired': user.get('role') == 'company_admin' and not mfa.get('enabled'),
+            'mfaSetupRequired': mfa_pending,
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
@@ -15272,16 +15282,18 @@ def api_password_setup_complete(raw_token):
                 user_name=user['name'], user_role=user['role']),
         })
     db.record_login(tenant['id'], user['id'])
+    mfa_pending = user.get('role') == 'company_admin'
     token = create_token(
         tenant['id'], user['email'], is_admin=False,
-        user_id=user['id'], user_name=user['name'], user_role=user['role']
+        user_id=user['id'], user_name=user['name'], user_role=user['role'],
+        mfa_pending=mfa_pending,
     )
     tenant_payload = _company_payload(tenant)
     tenant_payload['isAdmin'] = False
     return jsonify({
         'success': True,
         'token': token,
-        'mfaSetupRequired': user.get('role') == 'company_admin' and not mfa.get('enabled'),
+        'mfaSetupRequired': mfa_pending,
         'tenant': tenant_payload,
         'user': {
             'id': user['id'],
@@ -15319,7 +15331,7 @@ def api_me():
             'permissions': g.user_permissions,
         }
         result['mfa'] = db.get_mfa_state('user', g.user_id)
-        result['mfa']['setupRequired'] = g.user_role == 'company_admin' and not result['mfa']['enabled']
+        result['mfa']['setupRequired'] = _mfa_role_requires_setup() and not result['mfa']['enabled']
     else:
         result['user'] = {
             'name': t['company_name'],
@@ -15327,18 +15339,23 @@ def api_me():
             'permissions': {k: True for k in db.PERMISSION_KEYS},
         }
         result['mfa'] = db.get_mfa_state('tenant', t['id'])
-        result['mfa']['setupRequired'] = bool(t.get('is_admin')) and not result['mfa']['enabled']
+        result['mfa']['setupRequired'] = _mfa_role_requires_setup() and not result['mfa']['enabled']
     return jsonify(result)
 
 
 @app.route('/api/auth/refresh', methods=['POST'])
 @require_auth
 def api_refresh():
-    """Refresh the JWT token."""
+    """Refresh the JWT token. A pending-enrolment session never reaches this:
+    the gate refuses it, and a claim-less legacy token is re-evaluated so the
+    renewed session still carries the restriction when the role demands MFA."""
     t = g.tenant
+    scope, row_id = ('user', g.user_id) if g.user_id else ('tenant', t['id'])
+    mfa_pending = _mfa_role_requires_setup() and not db.get_mfa_state(scope, row_id).get('enabled')
     token = create_token(t['id'], t['email'], is_admin=bool(g.is_admin),
-                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
-    return jsonify({'success': True, 'token': token})
+                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role,
+                         mfa_pending=mfa_pending)
+    return jsonify({'success': True, 'token': token, 'mfaSetupRequired': mfa_pending})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -15541,7 +15558,15 @@ def api_mfa_enable():
     db.store_recovery_codes(g.tenant_id, g.user_id if scope == 'user' else None, codes)
     _record_audit_event('mfa.enabled', 'user' if scope == 'user' else 'tenant', row_id,
                         entity_name=g.user_name or g.tenant.get('company_name'))
-    return jsonify({'success': True, 'enabled': True, 'recoveryCodes': codes})
+    # Enrolment may have run under an mfa_pending session, and that token can
+    # never shed the restriction — hand back a clean one the client swaps in.
+    email = g.tenant.get('email')
+    if scope == 'user':
+        enabled_user = db.get_user_by_id(row_id)
+        email = (enabled_user or {}).get('email') or email
+    token = create_token(g.tenant_id, email, is_admin=bool(g.is_admin),
+                         user_id=g.user_id, user_name=g.user_name, user_role=g.user_role)
+    return jsonify({'success': True, 'enabled': True, 'recoveryCodes': codes, 'token': token})
 
 
 @app.route('/api/auth/mfa/disable', methods=['POST'])
@@ -19163,11 +19188,16 @@ def api_accept_invite(token):
     db.record_login(invite['tenant_id'], user_id)
 
     tenant = db.get_tenant_by_id(invite['tenant_id'])
+    # An invite can name a company_admin, and that role must enrol MFA before
+    # the new session reaches anything beyond the enrolment endpoints (t21).
+    mfa_pending = invite_role == 'company_admin'
     jwt_token = create_token(tenant['id'], invite['email'], is_admin=False,
-                             user_id=user_id, user_name=name, user_role=invite_role)
+                             user_id=user_id, user_name=name, user_role=invite_role,
+                             mfa_pending=mfa_pending)
     return jsonify({
         'success': True,
         'token': jwt_token,
+        'mfaSetupRequired': mfa_pending,
         'tenant': {
             'id': tenant['id'],
             'companyName': tenant['company_name'],

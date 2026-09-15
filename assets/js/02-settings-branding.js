@@ -972,8 +972,13 @@
         setTenantToken(data.token);
         setTenantUser(data.tenant);
         pendingMfaSetup = !!data.mfaSetupRequired;
+        // A pending session only reaches the enrolment endpoints, so boot the
+        // enrolment dialog instead of a bootstrap that would just collect 403s.
+        if (pendingMfaSetup) {
+          openMfaSetupModal(true);
+          return;
+        }
         await bootstrapTenant();
-        if (pendingMfaSetup) openMfaSetupModal(true);
       } else {
         showTenantError('loginError', data.error || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
       }
@@ -1047,7 +1052,12 @@
         if (errBox) errBox.textContent = (data && data.error) || WFT('auth.mfa_invalid', 'رمز التحقق غير صحيح');
         return;
       }
+      // Enrolment under a restricted session hands back a clean token — the old
+      // one stays confined to the setup endpoints and is never upgraded.
+      if (data.token) setTenantToken(data.token);
+      const needsBootstrap = pendingMfaSetup;
       pendingMfaSetup = false;
+      if (needsBootstrap) bootstrapTenant();
       const body = document.getElementById('mfaSetupBody');
       if (!body) return;
       const codes = (data.recoveryCodes || []).map(c =>
@@ -1251,6 +1261,13 @@
       ]);
       if (!me.success || !me.tenant) {
         showAuthPage();
+        return;
+      }
+      // A reload with a session that still owes MFA enrolment: every other
+      // route is refused, so open the enrolment dialog instead of the app.
+      if (me.mfa && me.mfa.setupRequired) {
+        pendingMfaSetup = true;
+        openMfaSetupModal(true);
         return;
       }
       tenantUser = me.tenant;
