@@ -1363,25 +1363,6 @@
       applyTenantBrandingData(data);
     }
 
-    function brandingHexRgb(hex) {
-      const h = String(hex || '').trim().replace('#', '');
-      if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-      return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
-    }
-
-    function brandingLuminance(rgb) {
-      const f = c => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
-    }
-
-    function brandingShade(hex, pct) {
-      const rgb = brandingHexRgb(hex);
-      if (!rgb) return hex;
-      const f = pct / 100;
-      const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
-      return '#' + rgb.map(c => clamp(f < 0 ? c * (1 + f) : c + (255 - c) * f).toString(16).padStart(2, '0')).join('');
-    }
-
     function updateTenantLogoMark() {
       const markEl = document.getElementById('tenantLogoMark');
       if (!markEl) return;
@@ -1393,48 +1374,8 @@
       if (!data || !data.success || !data.branding) return false;
       tenantBranding = data.branding;
       const b = data.branding;
-      // Apply CSS variables
-      const root = document.documentElement;
-      const primaryRgb = brandingHexRgb(b.primary_color);
-      if (b.primary_color) {
-        root.style.setProperty('--p', b.primary_color);
-        if (primaryRgb) {
-          const [r, g, bl] = primaryRgb;
-          root.style.setProperty('--muted', `rgba(${r},${g},${bl},0.6)`);
-          root.style.setProperty('--line', `rgba(${r},${g},${bl},0.2)`);
-          root.style.setProperty('--soft', `rgba(${r},${g},${bl},0.08)`);
-          root.style.setProperty('--p-soft', `rgba(${r},${g},${bl},0.10)`);
-          root.style.setProperty('--focus-ring', `rgba(${r},${g},${bl},0.18)`);
-        }
-      }
-      if (b.secondary_color) root.style.setProperty('--pd', b.secondary_color);
-      if (b.accent_color) root.style.setProperty('--g', b.accent_color);
-      if (b.background_color) root.style.setProperty('--bg', b.background_color);
-      if (b.text_color) root.style.setProperty('--txt', b.text_color);
-      // The workspace is white-labeled on the platform's 50/45/5 split:
-      // the company's primary fills the dark sidebar share, its secondary
-      // is the 5% accent, and content stays white. A light primary is
-      // deepened so the chrome never turns pale.
-      if (b.primary_color && primaryRgb) {
-        const sideA = brandingLuminance(primaryRgb) > 0.30 ? brandingShade(b.primary_color, -62) : b.primary_color;
-        root.style.setProperty('--sidebar-bg', sideA);
-        root.style.setProperty('--sidebar-bg-deep', brandingShade(sideA, -26));
-        root.style.setProperty('--brand-mark',
-          brandingLuminance(primaryRgb) > 0.45 ? '#0f2333' : b.primary_color);
-      }
-      // The accent stays a deliberate 5%: CTA, active marker, small details.
-      // Dark secondaries are lifted so they still read on the dark sidebar.
-      const accentColor = b.secondary_color || b.accent_color;
-      if (accentColor) {
-        const accentRgb = brandingHexRgb(accentColor);
-        if (accentRgb) {
-          const accent = brandingLuminance(accentRgb) < 0.07 ? brandingShade(accentColor, 55) : accentColor;
-          root.style.setProperty('--sidebar-accent', accent);
-          const accentSafe = brandingHexRgb(accent) || accentRgb;
-          root.style.setProperty('--on-accent',
-            brandingLuminance(accentSafe) > 0.5 ? '#07182c' : '#ffffff');
-        }
-      }
+      // The workspace keeps the platform palette: company colors reach the
+      // generated slides only, so no CSS variables are written here.
       // Logo: an uploaded logo wins; otherwise the company initial stands in
       // for it (the product ships no placeholder images).
       const logoEl = document.getElementById('tenantLogo');
