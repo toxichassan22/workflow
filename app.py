@@ -14644,7 +14644,9 @@ def _export_is_official_row(export_row):
 def api_download_export(export_id):
     """Serve an export. Only officially approved files download without the
     draft marker — anything else needs the explicit ?draft=1 flag and ships
-    with a DRAFT- filename prefix and an X-Draft-Mode header (t15-06)."""
+    with a DRAFT- filename prefix and an X-Draft-Mode header (t15-06).
+    Financial study reports never enter the final-file approval flow, so the
+    gate does not apply to them."""
     exported_file = db.get_export(export_id, g.tenant_id)
     if not exported_file:
         return jsonify({'error': 'Export not found'}), 404
@@ -14658,7 +14660,7 @@ def api_download_export(export_id):
     tenant_output_dir = os.path.abspath(os.path.join(OUTPUT_DIR, g.tenant_id))
     if os.path.commonpath([file_path, tenant_output_dir]) != tenant_output_dir or not os.path.isfile(file_path):
         return jsonify({'error': 'Export file unavailable'}), 404
-    official = _export_is_official_row(exported_file)
+    official = exported_file.get('format') == 'financial_pdf' or _export_is_official_row(exported_file)
     draft_requested = request.args.get('draft') in ('1', 'true')
     if not official and not draft_requested:
         return jsonify({'error': 'الملف غير معتمد نهائيًا — التنزيل الرسمي بعد الاعتماد فقط',

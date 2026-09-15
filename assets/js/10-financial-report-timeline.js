@@ -281,7 +281,10 @@
         updateLoaderProgress(80, 'تم إنشاء الملف، جاري تحميله...');
         const token = getTenantToken();
         const download = await fetch(response.url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
-        if (!download.ok) throw new Error(download.status === 403 ? 'لا توجد صلاحية لتحميل الملف' : 'Download failed');
+        if (!download.ok) {
+          const body = await download.json().catch(() => null);
+          throw new Error(body?.error || (download.status === 403 ? 'لا توجد صلاحية لتحميل الملف' : 'Download failed'));
+        }
         const blob = await download.blob();
         const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');

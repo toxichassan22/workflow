@@ -421,6 +421,24 @@ class ExportDownloadGateTests(unittest.TestCase):
         self.assertEqual(draft.headers.get('X-Draft-Mode'), '1')
         self.assertIn('DRAFT-', draft.headers.get('Content-Disposition', ''))
 
+    def test_financial_study_export_downloads_without_final_approval(self):
+        client = self.app.test_client()
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('DELETE FROM exports')
+            conn.execute('DELETE FROM final_file_approvals')
+            conn.commit()
+            out_dir = os.path.join(self.application_module.OUTPUT_DIR, self.tenant)
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(out_dir, 'study.pdf')
+            with open(path, 'wb') as handle:
+                handle.write(b'%PDF-study')
+            export_id = db.create_export(None, self.tenant, 'financial_pdf', path)
+        response = client.get(f'/api/exports/{export_id}/download', headers=self.headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.headers.get('X-Draft-Mode'))
+        self.assertNotIn('DRAFT-', response.headers.get('Content-Disposition', ''))
+
     def test_approved_export_downloads_officially(self):
         client = self.app.test_client()
         export_id = self._fixture()

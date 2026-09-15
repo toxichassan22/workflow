@@ -16,7 +16,12 @@ This is a standing owner rule. After a requested change is done and verified:
 - If the user asked to implement something, shipping means commit **and** push.
   A local-only commit is unfinished work.
 
-Remote: `github` → `https://github.com/toxichassan22/workflow.git`.
+- **No AI attribution or Co-Authored-By trailers:** Never include `Co-Authored-By:`,
+  `Co-authored-by:`, `Generated with ...`, or any bot/agent signatures or trailers
+  in git commit messages, author metadata, or PR descriptions. Write clean commit
+  messages as a regular author and push normally using standard `git push`.
+
+Remote: `github` → `https://github.com/toxichassan22/workflow.git`. 
 
 ## Hosting autodeploy
 
@@ -1160,6 +1165,10 @@ wide tables (`cashflowTable`, `sensitivityTable`) in `break-inside:avoid` or the
 clipped. Strip «ترتيب / حذف» from both the print snapshot and the server table renderer.
 `POST /api/financial-study/export` is authenticated only (`@require_auth`); do not put
 `export_files` back on it — employees who can fill the study must be able to download it.
+The download side follows the same rule: `financial_pdf` rows bypass the final-file gate in
+`GET /api/exports/<id>/download` — the study never enters `final_file_approvals`, so the gate
+could never pass for it. Do not route its URL through `?draft=1` either; the report is a
+finished deliverable, not a draft awaiting approval.
 The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
 `generate_financial_pdf()` has three engines and the order matters. Playwright is only available
 locally; hosting has no Chromium, so the real engine there is
