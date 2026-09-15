@@ -90,7 +90,7 @@
         ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
         '</span></div>' +
         (n.body ? '<p>' + omEscape(n.body) + '</p>' : '') +
-        '<div class="tenant-notif-meta">' + cat + '<span>' + omEscape(when) + '</span></div></div>';
+        '<div class="tenant-notif-meta">' + cat + '<bdi>' + omEscape(when) + '</bdi></div></div>';
     }
 
     // ── Click-through: entity type → its screen ─────────────────────────
@@ -223,14 +223,20 @@
         list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
         return;
       }
-      list.innerHTML = notifLastItems.map(n =>
-        '<div class="tenant-presentation-card tenant-notif-card' + (!n.read_at ? ' unread' : '') + '"' +
+      list.innerHTML = notifLastItems.map(n => notifCardHtml(n)).join('');
+    }
+
+    // One card layout shared by the full page, the operations tab and the
+    // admin dashboard's latest-notifications panel.
+    function notifCardHtml(n) {
+      const unread = !n.read_at;
+      return '<div class="tenant-presentation-card tenant-notif-card' + (unread ? ' unread' : '') + '"' +
         ' role="button" tabindex="0" onclick="notificationOpen(\'' + omEscape(n.id) + '\')"' +
         ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + omEscape(n.id) + '\')">' +
         '<div class="tenant-notif-main">' +
-        '<h3>' + (!n.read_at ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
+        '<h3>' + (unread ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
         omEscape(n.title) +
-        (!n.read_at ? ' <span class="tenant-notif-new">(' + omEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
+        (unread ? ' <span class="tenant-notif-new">(' + omEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
         (n.body ? '<p class="tenant-notif-body">' + omEscape(n.body) + '</p>' : '') +
         '<div class="meta">' +
         '<span class="tenant-notif-cat">' + omEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
@@ -240,7 +246,7 @@
         '<button type="button" class="btn small ghost"' +
         ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')"' +
         ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
-        '</div></div>').join('');
+        '</div></div>';
     }
 
     // ── Per-user category preferences ────────────────────────────────────

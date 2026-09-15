@@ -255,18 +255,9 @@
         box.innerHTML = '<p class="tenant-hint">لا توجد تنبيهات.</p>';
         return;
       }
-      box.innerHTML = items.map(n => {
-        const unread = !n.read_at;
-        const when = (n.created_at || '').slice(0, 16).replace('T', ' ');
-        return '<div class="tenant-presentation-card" style="' + (unread ? 'border-color:var(--p);' : 'opacity:.75;') + '">' +
-          '<div><h3>' + omEscape(n.title) + (unread ? ' <span style="color:var(--p);font-size:11px">(جديد)</span>' : '') + '</h3>' +
-          '<div class="meta">' + (n.body ? '<span>' + omEscape(n.body) + '</span> | ' : '') + omEscape(when) + '</div></div>' +
-          '<div class="tenant-actions">' +
-          '<button type="button" class="btn small ghost"' +
-          ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')">' +
-          omEscape(WFT('common.delete', 'حذف')) + '</button></div></div>';
-      }).join('') +
-      '<button class="btn ghost" onclick="omMarkAllRead()">تحديد الكل كمقروء</button>';
+      box.innerHTML = items.map(n => notifCardHtml(n)).join('') +
+      '<button class="btn ghost" onclick="omMarkAllRead()">' +
+      omEscape(WFT('admin.mark_all_read', 'تحديد الكل كمقروء')) + '</button>';
     }
 
     async function omMarkAllRead() {
