@@ -796,76 +796,157 @@
     async function loadDashboard() {
       const totalEl = document.getElementById('dashStatTotal');
       const pendingEl = document.getElementById('dashStatPending');
-      const list = document.getElementById('dashboardRecentList');
-      if (!list) return;
-      list.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      // The dashboard renders five recent titles only, so fetch five metadata
-      // rows instead of the default page of full presentation payloads. When
-      // boot already started these requests, reuse them instead of refetching.
+      // The presentation count needs metadata only, so fetch the small page.
+      // When boot already started these requests, reuse them instead of
+      // refetching.
       const boot = (typeof consumeTenantBootPrefetch === 'function') ? consumeTenantBootPrefetch() : null;
-      const [presData, approvalsData, dashData] = await Promise.all([
+      const wantsBalance = hasPermission('billing');
+      const [presData, approvalsData, dashData, overviewData] = await Promise.all([
         withBootTimeout((boot && boot.pres) || apiWithTimeout('GET', '/api/presentations?limit=5', null, 25000)),
         withBootTimeout((boot && boot.appr) || api('GET', '/api/approvals').catch(() => ({ success: false }))),
-        api('GET', '/api/dashboard').catch(() => null)
+        api('GET', '/api/dashboard').catch(() => null),
+        wantsBalance ? api('GET', '/api/client/overview').catch(() => null) : Promise.resolve(null)
       ]);
       renderDashboardOverview(dashData && dashData.dashboard);
-      if (!presData || !presData.success) {
-        renderListLoadError(list, 'loadDashboard()');
-        return;
+      renderDashboardBalance(overviewData);
+      tenantApplyChartRange();
+      if (presData && presData.success && totalEl) {
+        totalEl.textContent = Number.isFinite(Number(presData.total)) ? presData.total : (presData.presentations || []).length;
       }
-      const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
-      const approvals = (approvalsData.success && approvalsData.approvals) ? approvalsData.approvals : [];
-      if (totalEl) totalEl.textContent = (presData.success && Number.isFinite(Number(presData.total))) ? presData.total : presentations.length;
-      if (pendingEl) pendingEl.textContent = approvals.length;
-      const recent = presentations.slice().sort((a, b) => {
-        const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        return tb - ta;
-      }).slice(0, 5);
-      if (!recent.length) {
-        list.innerHTML = '<p class="tenant-hint">لا توجد عروض بعد. ابدأ بإنشاء عرض جديد.</p>';
-        return;
+      if (approvalsData && approvalsData.success && pendingEl) {
+        pendingEl.textContent = (approvalsData.approvals || []).length;
       }
-      list.innerHTML = recent.map(p => {
-        const statusLabel = p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
-        const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
-        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="openExistingPresentation(\'' + p.id + '\')">' +
-          '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta"><span>' + (p.slideCount || 0) + '</span> <span>شريحة</span> | <span>' + statusLabel + '</span> | ' + date + '</div></div>' +
-          '</div>';
-      }).join('');
     }
 
     function renderDashboardOverview(dash) {
       const lifecycleEl = document.getElementById('dashboardLifecycle');
-      const workEl = document.getElementById('dashboardOpenWork');
-      if (!lifecycleEl && !workEl) return;
+      if (!lifecycleEl) return;
       if (!dash) {
-        if (lifecycleEl) lifecycleEl.innerHTML = '';
-        if (workEl) workEl.innerHTML = '';
+        lifecycleEl.innerHTML = '';
         return;
       }
-      if (lifecycleEl) {
-        const buckets = (dash.lifecycle || []).filter(b => b.count > 0 || ['draft', 'approved'].includes(b.key));
-        lifecycleEl.innerHTML = buckets.map(b =>
-          '<div class="tenant-dash-card stat"><h3>' + (b.count || 0) + '</h3><p>' + escapeHtml(b.label || b.key) + '</p></div>'
-        ).join('');
+      const buckets = (dash.lifecycle || []).filter(b => b.count > 0 || ['draft', 'approved'].includes(b.key));
+      lifecycleEl.innerHTML = buckets.map(b =>
+        '<div class="tenant-dash-card stat"><h3>' + (b.count || 0) + '</h3><p>' + escapeHtml(b.label || b.key) + '</p></div>'
+      ).join('');
+    }
+
+    var tenantLastOverview = null;
+    var tenantLastTrends = null;
+    var tenantChartRange = { preset: '12', from: '', to: '' };
+
+    function renderDashboardBalance(data) {
+      const card = document.getElementById('dashboardBalanceCard');
+      if (!card) return;
+      tenantLastOverview = data || null;
+      const pkg = (data && data.package) || null;
+      // A real package carries its own credit; a bare wallet has no cap, so
+      // its "total" is what was ever credited: remaining plus lifetime burn.
+      const isWallet = !pkg || pkg.id === 'wallet';
+      const balance = Number((data && data.balance_usd) || 0);
+      const lifetime = Number((data && data.lifetime && data.lifetime.consumed_usd) || 0);
+      const remaining = isWallet ? balance : Number(pkg.remaining_usd || 0);
+      const consumed = isWallet ? lifetime : Number(pkg.consumed_usd || 0);
+      const credit = isWallet ? remaining + consumed : Number(pkg.credit_usd || 0);
+      const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;
+      const valueEl = document.getElementById('dashBalanceValue');
+      if (valueEl) valueEl.textContent = sagFmtMoney(remaining);
+      const pillEl = document.getElementById('dashBalancePill');
+      if (pillEl) {
+        const name = pkg && pkg.name ? String(pkg.name) : '';
+        pillEl.textContent = name;
+        pillEl.hidden = !name;
       }
-      if (workEl) {
-        const items = [
-          { n: dash.open_approval_tasks, label: 'مهام اعتماد مفتوحة' },
-          { n: dash.open_event_tasks, label: 'مهام أحداث مفتوحة' },
-          { n: dash.open_tickets, label: 'تذاكر دعم مفتوحة' },
-          { n: dash.unread_notifications, label: 'إشعارات غير مقروءة' },
-          { n: dash.month_consumption_usd, label: 'استهلاك الشهر', money: true },
-        ];
-        workEl.innerHTML = items.map(i =>
-          '<div class="tenant-dash-card stat"><h3>' +
-          (i.money ? ('$' + Number(i.n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })) : (i.n || 0)) +
-          '</h3><p>' + i.label + '</p></div>'
-        ).join('');
+      const barEl = document.getElementById('dashBalanceBar');
+      if (barEl) barEl.style.width = pct.toFixed(1) + '%';
+      const subEl = document.getElementById('dashBalanceSub');
+      if (subEl) {
+        subEl.textContent = credit > 0
+          ? WFT('dashboard.consumed_of', 'مستهلك {used} من {total}', { used: sagFmtMoney(consumed), total: sagFmtMoney(credit) })
+          : '';
       }
     }
+
+    // The company activity chart mirrors the super-admin platform chart — same
+    // builders, same range presets — but every series is tenant-scoped and the
+    // second line counts this company's new presentations instead of new
+    // companies.
+    function renderTenantActivityChart(trends) {
+      trends = trends || {};
+      tenantLastTrends = trends;
+      const el = document.getElementById('tenantActivityChart');
+      if (!el || typeof sagLineChart !== 'function') return;
+      const labels = trends.labels || [];
+      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+      const series = [
+        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
+        { name: WFT('dashboard.legend_presentations', 'عروض جديدة'), values: trends.presentations || [], color: 'var(--chart-2)', fmt: sagFmtNum },
+      ];
+      const chart = sagLineChart(labels, series);
+      el.innerHTML = labels.length ? chart.svg : '';
+      if (labels.length) sagBindChartTooltip(el, labels, series, chart.geom);
+      sagLegend(document.getElementById('tenantActivityLegend'), series);
+      renderTenantRangeControls();
+    }
+
+    function renderTenantRangeControls() {
+      const box = document.getElementById('tenantActivityRange');
+      if (!box) return;
+      const presets = [
+        { v: '3', t: WFT('admin.range_3m', 'آخر 3 شهور') },
+        { v: '6', t: WFT('admin.range_6m', 'آخر 6 شهور') },
+        { v: '12', t: WFT('admin.range_12m', 'آخر 12 شهرًا') },
+        { v: '24', t: WFT('admin.range_24m', 'آخر سنتين') },
+        { v: 'ytd', t: WFT('admin.range_ytd', 'هذه السنة') },
+        { v: 'custom', t: WFT('admin.range_custom', 'نطاق مخصص') },
+      ];
+      box.innerHTML =
+        '<select id="tenantRangePreset" class="admin-range-select" onchange="tenantChartRange.preset=this.value; renderTenantRangeControls(); tenantApplyChartRange()">' +
+        presets.map(p => '<option value="' + p.v + '"' + (tenantChartRange.preset === p.v ? ' selected' : '') + '>' + p.t + '</option>').join('') +
+        '</select>' +
+        '<span class="admin-range-custom" style="display:' + (tenantChartRange.preset === 'custom' ? 'inline-flex' : 'none') + '">' +
+        '<input type="date" id="tenantRangeFromDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from', 'من')) + '" value="' + escapeHtml(tenantChartRange.from.slice(0, 10)) + '" onchange="tenantRangeChanged()">' +
+        '<input type="time" id="tenantRangeFromTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from_time', 'وقت البداية (اختياري)')) + '" value="' + escapeHtml(tenantChartRange.from.slice(11, 16)) + '" onchange="tenantRangeChanged()">' +
+        '<input type="date" id="tenantRangeToDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to', 'إلى')) + '" value="' + escapeHtml(tenantChartRange.to.slice(0, 10)) + '" onchange="tenantRangeChanged()">' +
+        '<input type="time" id="tenantRangeToTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to_time', 'وقت النهاية (اختياري)')) + '" value="' + escapeHtml(tenantChartRange.to.slice(11, 16)) + '" onchange="tenantRangeChanged()">' +
+        '</span>';
+    }
+
+    function tenantRangeChanged() {
+      const fd = document.getElementById('tenantRangeFromDate');
+      const ft = document.getElementById('tenantRangeFromTime');
+      const td = document.getElementById('tenantRangeToDate');
+      const tt = document.getElementById('tenantRangeToTime');
+      tenantChartRange.from = fd && fd.value ? fd.value + (ft && ft.value ? 'T' + ft.value : '') : '';
+      tenantChartRange.to = td && td.value ? td.value + (tt && tt.value ? 'T' + tt.value : '') : '';
+      tenantApplyChartRange();
+    }
+
+    async function tenantApplyChartRange() {
+      const params = new URLSearchParams();
+      if (tenantChartRange.preset === 'custom') {
+        if (!tenantChartRange.from || !tenantChartRange.to) return;
+        params.set('from', tenantChartRange.from);
+        params.set('to', tenantChartRange.to);
+      } else if (tenantChartRange.preset === 'ytd') {
+        params.set('months', String(new Date().getMonth() + 1));
+      } else {
+        params.set('months', tenantChartRange.preset);
+      }
+      const data = await api('GET', '/api/dashboard/activity?' + params.toString()).catch(() => null);
+      if (data && data.trends) {
+        renderTenantActivityChart(data.trends);
+      }
+    }
+
+    // Re-render the dashboard widgets on language toggle, same contract the
+    // super-admin charts follow: labels rebuild through WFT at render time.
+    document.addEventListener('wf:lang', function () {
+      const page = document.getElementById('tenantDashboardPage');
+      if (!page || !page.classList.contains('active')) return;
+      renderDashboardBalance(tenantLastOverview);
+      if (tenantLastTrends) renderTenantActivityChart(tenantLastTrends);
+    });
 
     let pendingMfaToken = null;
     let pendingMfaSetup = false;

@@ -249,18 +249,27 @@
           <h3 id="dashStatPending">0</h3>
           <p data-i18n="dashboard.pending_approvals">بانتظار التعميد</p>
         </div>
+        <div class="tenant-dash-card tenant-balance-card tenant-admin-only" data-permission="billing"
+          id="dashboardBalanceCard">
+          <p data-i18n="dashboard.balance_remaining">الرصيد المتبقي</p>
+          <div class="tenant-balance-main">
+            <h3 id="dashBalanceValue">$0</h3>
+            <span class="tenant-balance-pill" id="dashBalancePill" hidden></span>
+          </div>
+          <div class="tenant-balance-bar"><span id="dashBalanceBar"></span></div>
+          <div class="tenant-balance-sub" id="dashBalanceSub"></div>
+        </div>
       </div>
       <div id="dashboardLifecycle" class="tenant-dashboard-stats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))"></div>
-      <div id="dashboardOpenWork" class="tenant-dashboard-stats"></div>
-      <div class="tenant-content-panel">
+      <div class="tenant-content-panel admin-chart-panel">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title" data-i18n="dashboard.recent">آخر العروض</h3>
-          <button type="button" class="btn small ghost" data-permission="view_presentations"
-            onclick="openTenantPresentations()" data-i18n="dashboard.view_projects">عرض المشاريع</button>
+          <h3 class="dash-section-title" data-i18n="dashboard.company_activity">نشاط الشركة</h3>
+          <div class="admin-chart-heading-side">
+            <div class="admin-chart-legend" id="tenantActivityLegend"></div>
+            <div class="admin-range" id="tenantActivityRange"></div>
+          </div>
         </div>
-        <div id="dashboardRecentList">
-          <p class="tenant-hint">جاري التحميل...</p>
-        </div>
+        <div id="tenantActivityChart" class="admin-chart"></div>
       </div>
     </section>
 

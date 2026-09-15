@@ -26162,6 +26162,17 @@ def api_client_dashboard():
     return jsonify({'success': True, 'dashboard': db.client_dashboard(g.tenant_id)})
 
 
+@app.route('/api/dashboard/activity', methods=['GET'])
+@require_auth
+def api_client_dashboard_activity():
+    """Company activity chart series scoped to the caller's tenant."""
+    return jsonify({'success': True, 'trends': db.client_activity_trends(
+        g.tenant_id,
+        months=request.args.get('months'),
+        from_month=request.args.get('from'),
+        to_month=request.args.get('to'))})
+
+
 @app.route('/api/company/dashboard', methods=['GET'])
 @require_permission('company_settings')
 def api_company_dashboard():

@@ -11048,26 +11048,12 @@ def enforce_contract_retention(tenant_id=None):
 
 # ── t54: operational monitoring that never exposes client content ───────────
 
-def operational_overview(months=12, from_month=None, to_month=None):
-    """Counts and activity shape only: the super-admin never sees client content."""
-    conn = get_db()
-    def count(table, where='1 = 1', params=()):
-        try:
-            row = conn.execute('SELECT COUNT(*) AS n FROM ' + table + ' WHERE ' + where, params).fetchone()
-            return int(row['n'] or 0)
-        except Exception:
-            return 0
+def _activity_bucket_pairs(months=12, from_month=None, to_month=None):
+    """Bucket grid shared by the platform and company activity charts.
 
-    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at', where='1 = 1', bucket=7):
-        try:
-            rows = conn.execute(
-                'SELECT substr(' + date_col + ', 1, ' + str(int(bucket)) + ') AS m, ' + value_sql + ' AS v FROM ' + table +
-                ' WHERE ' + where + ' AND ' + date_col + ' IS NOT NULL GROUP BY m'
-            ).fetchall()
-            return {r['m']: float(r['v'] or 0) for r in rows if r['m']}
-        except Exception:
-            return {}
-
+    Returns (labels, bucket_keys, bucket): display labels, the substr() prefix
+    per bucket, and the prefix width (7 = month, 10 = day, 13 = hour).
+    """
     now = _utcnow()
 
     def _parse_range_dt(value, is_end=False):
@@ -11129,8 +11115,31 @@ def operational_overview(months=12, from_month=None, to_month=None):
             mm = (mm - 1) % 12 + 1
             key = '%04d-%02d' % (yy, mm)
             pairs.append((key, key))
-    labels = [p[0] for p in pairs]
-    bucket_keys = [p[1] for p in pairs]
+    return [p[0] for p in pairs], [p[1] for p in pairs], bucket
+
+
+def operational_overview(months=12, from_month=None, to_month=None):
+    """Counts and activity shape only: the super-admin never sees client content."""
+    conn = get_db()
+    def count(table, where='1 = 1', params=()):
+        try:
+            row = conn.execute('SELECT COUNT(*) AS n FROM ' + table + ' WHERE ' + where, params).fetchone()
+            return int(row['n'] or 0)
+        except Exception:
+            return 0
+
+    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at', where='1 = 1', bucket=7):
+        try:
+            rows = conn.execute(
+                'SELECT substr(' + date_col + ', 1, ' + str(int(bucket)) + ') AS m, ' + value_sql + ' AS v FROM ' + table +
+                ' WHERE ' + where + ' AND ' + date_col + ' IS NOT NULL GROUP BY m'
+            ).fetchall()
+            return {r['m']: float(r['v'] or 0) for r in rows if r['m']}
+        except Exception:
+            return {}
+
+    now = _utcnow()
+    labels, bucket_keys, bucket = _activity_bucket_pairs(months, from_month, to_month)
 
     series_maps = {
         'companies': monthly_map('tenants', where='is_admin = 0', bucket=bucket),
@@ -11312,6 +11321,37 @@ def client_dashboard(tenant_id):
         'pending_generation': _count('generation_approvals', "status = 'pending'"),
         'pending_final': _count('final_file_approvals', "status = 'pending'"),
     }
+
+
+def client_activity_trends(tenant_id, months=12, from_month=None, to_month=None):
+    """Company-scoped series for the dashboard activity chart.
+
+    Same bucket grid as the super-admin platform chart, but every series is
+    filtered to the tenant: spend (AI + maps) and newly created presentations.
+    """
+    conn = get_db()
+    tenant_id = str(tenant_id)
+    labels, bucket_keys, bucket = _activity_bucket_pairs(months, from_month, to_month)
+
+    def monthly_map(table, value_sql='COUNT(*)', date_col='created_at'):
+        try:
+            rows = conn.execute(
+                'SELECT substr(' + date_col + ', 1, ' + str(int(bucket)) + ') AS m, ' + value_sql + ' AS v FROM ' + table +
+                ' WHERE tenant_id = ? AND ' + date_col + ' IS NOT NULL GROUP BY m',
+                (tenant_id,)).fetchall()
+            return {r['m']: float(r['v'] or 0) for r in rows if r['m']}
+        except Exception:
+            return {}
+
+    series_maps = {
+        'presentations': monthly_map('presentations'),
+        'ai_spend': monthly_map('ai_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
+        'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
+    }
+    trends = {'labels': labels}
+    for key, mmap in series_maps.items():
+        trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
+    return trends
 
 
 def company_admin_dashboard(tenant_id):
