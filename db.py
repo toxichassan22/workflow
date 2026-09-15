@@ -9633,12 +9633,11 @@ def copy_project_draft(tenant_id, source_draft_id, new_title, copied_by, copied_
             conn.execute(
                 '''INSERT INTO project_files
                    (id, tenant_id, draft_id, project_id, file_type, original_name, storage_path,
-                    mime_type, file_size, sha256, uploaded_by, uploaded_by_name)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    mime_type, file_size, sha256)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (file_id_map[file_row['id']], tenant_id, new_draft_id, file_row['project_id'],
                  file_row['file_type'], file_row['original_name'], file_row['storage_path'],
-                 file_row['mime_type'], file_row['file_size'], file_row['sha256'],
-                 copied_by, copied_by_name),
+                 file_row['mime_type'], file_row['file_size'], file_row['sha256']),
             )
     except Exception:
         pass

@@ -7237,9 +7237,15 @@ class MeetingRequirementsTests(unittest.TestCase):
             presentation_id = response.get_json()['presentationId']
             presentation_ids.append(presentation_id)
             if status != 'draft':
-                updated = client.put(
-                    f'/api/presentations/{presentation_id}', headers=headers, json={'status': status})
-                self.assertEqual(updated.status_code, 200)
+                # Operational states belong to the approval gates — a save
+                # payload can never walk into them, so the fixture writes the
+                # state directly the way a decided gate would leave it.
+                with self.app.app_context():
+                    connection = db.get_db()
+                    connection.execute(
+                        "UPDATE presentations SET status = ? WHERE id = ?",
+                        (status, presentation_id))
+                    connection.commit()
         beta_presentation = client.post('/api/presentations', headers=headers, json={
             'title': 'Beta Presentation',
             'projectData': {'draftId': draft_beta, 'project_name': 'Beta Project'},
