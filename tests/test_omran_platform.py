@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -647,6 +648,103 @@ class OmranDbTests(unittest.TestCase):
         bad = db.create_event_task('tenant-1', 'مهمة', priority='bogus')
         self.assertEqual(bad['priority'], 'normal')
 
+    # ── smart notifications: categories, prefs, reminders ────────────────
+
+    def test_notification_new_categories(self):
+        for category in ('billing', 'job', 'platform'):
+            item = db.create_notification('tenant-1', f'ن {category}', category=category)
+            self.assertEqual(item['category'], category)
+        legacy = db.create_notification('tenant-1', 'ق', category='unknown-cat')
+        self.assertEqual(legacy['category'], 'general')
+
+    def test_notification_list_filters_and_counts(self):
+        db.create_notification('tenant-1', 'مهمة', category='task', user_id='user-1')
+        db.create_notification('tenant-1', 'رصيد', category='billing', user_id='user-1')
+        db.create_notification('tenant-1', 'عام', user_id='user-2')
+        listed = db.list_notifications('tenant-1', user_id='user-1', category='billing')
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['category'], 'billing')
+        self.assertEqual(db.count_notifications('tenant-1', user_id='user-1', unread_only=True), 2)
+        self.assertEqual(db.count_notifications('tenant-1', user_id='user-2', unread_only=True), 1)
+        self.assertEqual(db.count_notifications('tenant-1', user_id='missing', unread_only=True), 0)
+        db.mark_notifications_read('tenant-1', 'user-1')
+        self.assertEqual(db.count_notifications('tenant-1', user_id='user-1', unread_only=True), 0)
+        read = db.list_notifications('tenant-1', user_id='user-1', read_state='read')
+        self.assertEqual(len(read), 2)
+        unread = db.list_notifications('tenant-1', user_id='user-2', read_state='unread')
+        self.assertEqual(len(unread), 1)
+
+    def test_notification_preferences_roundtrip_and_mute(self):
+        defaults = db.get_notification_preferences('tenant-1', 'user-1')
+        self.assertEqual(set(defaults), set(db.NOTIFICATION_CATEGORIES))
+        self.assertTrue(all(defaults.values()))
+        self.assertEqual(db.set_notification_preference('tenant-1', 'user-1', 'billing', False),
+                         {'ok': True})
+        self.assertEqual(db.set_notification_preference('tenant-1', 'user-1', 'junk', True),
+                         {'error': 'invalid_category'})
+        prefs = db.get_notification_preferences('tenant-1', 'user-1')
+        self.assertFalse(prefs['billing'])
+        self.assertTrue(prefs['task'])
+        self.assertTrue(db.get_notification_preferences('tenant-1', 'user-2')['billing'])
+        db.create_notification('tenant-1', 'رصيد', category='billing', user_id='user-1')
+        db.create_notification('tenant-1', 'مهمة', category='task', user_id='user-1')
+        items = db.list_notifications('tenant-1', user_id='user-1', muted_categories=['billing'])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['category'], 'task')
+        self.assertEqual(
+            db.count_notifications('tenant-1', user_id='user-1', muted_categories=['billing']), 1)
+
+    def test_recent_notification_exists_dedup(self):
+        db.create_notification('tenant-1', 'قاعدة', entity_type='wallet', entity_id='w1')
+        self.assertTrue(db.recent_notification_exists('tenant-1', 'wallet', 'w1'))
+        self.assertFalse(db.recent_notification_exists('tenant-1', 'wallet', 'w2'))
+        self.assertFalse(db.recent_notification_exists('tenant-2', 'wallet', 'w1'))
+        self.assertFalse(db.recent_notification_exists('tenant-1', 'wallet', 'w1', since_hours=0))
+
+    def test_event_task_reminders_once(self):
+        due = (db._utcnow() + timedelta(hours=6)).isoformat()
+        db.create_event_task('tenant-1', 'قريبة', assignee_user_id='user-1', due_at=due)
+        db.create_event_task('tenant-1', 'بدون إسناد', due_at=due)
+        far = (db._utcnow() + timedelta(hours=30)).isoformat()
+        db.create_event_task('tenant-1', 'بعيدة', assignee_user_id='user-1', due_at=far)
+        done = db.create_event_task('tenant-1', 'منجزة', assignee_user_id='user-1', due_at=due)
+        db.update_event_task_status('tenant-1', done['id'], 'completed')
+        self.assertEqual(len(db.send_due_event_task_reminders()), 2)
+        self.assertEqual(db.send_due_event_task_reminders(), [])
+        items = db.list_notifications('tenant-1', user_id='user-1', category='task')
+        self.assertEqual(len(items), 1)
+        owner = db.list_notifications(
+            'tenant-1', user_id='tenant-admin:tenant-1', category='task')
+        self.assertEqual(len(owner), 1)
+
+    def test_stale_generation_job_notifies_creator_once(self):
+        job = db.create_generation_job('tenant-1', draft_id='draft-1', created_by='user-1')
+        stale = (db._utcnow() - timedelta(hours=20)).isoformat()
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE generation_jobs SET status = 'running', heartbeat_at = ?, started_at = ? WHERE id = ?",
+            (stale, stale, job['id']))
+        conn.commit()
+        self.assertEqual(db.sweep_stale_generation_jobs(), 1)
+        self.assertEqual(db.sweep_stale_generation_jobs(), 0)
+        self.assertEqual(db.get_generation_job(job['id'])['status'], 'failed')
+        items = db.list_notifications('tenant-1', user_id='user-1', category='job')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['entity_id'], job['id'])
+
+    def test_list_admin_tenant_ids(self):
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, email, password_hash, is_active, is_admin) "
+            "VALUES ('adm-live', 'المنصة', 'root@x.test', 'hash', 1, 1)")
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, email, password_hash, is_active, is_admin) "
+            "VALUES ('adm-dead', 'المنصة القديمة', 'old@x.test', 'hash', 0, 1)")
+        conn.commit()
+        ids = db.list_admin_tenant_ids()
+        self.assertIn('adm-live', ids)
+        self.assertNotIn('adm-dead', ids)
+
     # ── t52/d06: framework kind and retention enforcement ────────────────
 
     def test_framework_contract_and_retention_sweep(self):
@@ -988,6 +1086,122 @@ class OmranApiTests(unittest.TestCase):
             '/api/project-draft/copy', headers=self.headers(self.token),
             json={'newTitle': 'نسخة'})
         self.assertEqual(response.status_code, 404)
+
+    # ── smart notifications: API surface ──────────────────────────────────
+
+    def test_notification_unread_count_and_filters(self):
+        created = self.client.post(
+            '/api/notifications', headers=self.headers(self.token),
+            json={'title': 'فاتورة', 'category': 'billing', 'userId': self.user_id})
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.get_json()['notification']['category'], 'billing')
+        count = self.client.get(
+            '/api/notifications/unread-count', headers=self.headers(self.token))
+        self.assertEqual(count.status_code, 200)
+        self.assertGreaterEqual(count.get_json()['unread'], 1)
+        listed = self.client.get(
+            '/api/notifications?category=billing', headers=self.headers(self.token))
+        payload = listed.get_json()
+        self.assertTrue(payload['notifications'])
+        self.assertTrue(all(n['category'] == 'billing' for n in payload['notifications']))
+        self.assertIn('total', payload)
+        self.assertIn('unreadCount', payload)
+        self.assertIn('categories', payload)
+        self.assertEqual(
+            self.client.get('/api/notifications?status=read',
+                            headers=self.headers(self.token)).get_json()['notifications'],
+            [])
+        read = self.client.post(
+            '/api/notifications/read', headers=self.headers(self.token),
+            json={'ids': [created.get_json()['notification']['id']]})
+        self.assertEqual(read.get_json()['updated'], 1)
+        unread_after = self.client.get(
+            '/api/notifications?status=unread', headers=self.headers(self.token))
+        self.assertFalse(any(n['category'] == 'billing'
+                             for n in unread_after.get_json()['notifications']))
+
+    def test_notification_preferences_endpoint(self):
+        got = self.client.get(
+            '/api/notifications/preferences', headers=self.headers(self.token))
+        self.assertEqual(got.status_code, 200)
+        prefs = got.get_json()['preferences']
+        self.assertTrue(all(prefs.values()))
+        updated = self.client.put(
+            '/api/notifications/preferences', headers=self.headers(self.token),
+            json={'categories': {'billing': False, 'junk': False}})
+        self.assertEqual(updated.status_code, 200)
+        self.assertFalse(updated.get_json()['preferences']['billing'])
+        self.assertTrue(updated.get_json()['preferences']['task'])
+        db.create_notification(self.tenant_id, 'فاتورة', category='billing',
+                               user_id=self.user_id)
+        db.create_notification(self.tenant_id, 'مهمة', category='task',
+                               user_id=self.user_id)
+        listed = self.client.get('/api/notifications', headers=self.headers(self.token))
+        cats = {n['category'] for n in listed.get_json()['notifications']}
+        self.assertNotIn('billing', cats)
+        self.assertIn('task', cats)
+        restored = self.client.put(
+            '/api/notifications/preferences', headers=self.headers(self.token),
+            json={'category': 'billing', 'enabled': True})
+        self.assertTrue(restored.get_json()['preferences']['billing'])
+        listed = self.client.get('/api/notifications', headers=self.headers(self.token))
+        self.assertIn('billing', {n['category'] for n in listed.get_json()['notifications']})
+
+    def test_notification_self_target_is_not_broadcast(self):
+        emp_id, emp_token = self._user_token('موظف', 'emp-n@x.test', 'employee')
+        created = self.client.post(
+            '/api/notifications', headers=self.headers(emp_token),
+            json={'title': 'خاص', 'userId': emp_id})
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.get_json()['notification']['user_id'], emp_id)
+        _, emp2_token = self._user_token('موظفة', 'emp2-n@x.test', 'employee')
+        colleague_feed = self.client.get('/api/notifications', headers=self.headers(emp2_token))
+        self.assertFalse(any(n['title'] == 'خاص'
+                             for n in colleague_feed.get_json()['notifications']))
+        # A missing userId means broadcast, which needs manage_users.
+        broadcast = self.client.post(
+            '/api/notifications', headers=self.headers(emp2_token),
+            json={'title': 'عام'})
+        self.assertEqual(broadcast.status_code, 403)
+        foreign = self.client.post(
+            '/api/notifications', headers=self.headers(emp2_token),
+            json={'title': 'لآخر', 'userId': emp_id})
+        self.assertEqual(foreign.status_code, 403)
+
+    def test_event_task_assignment_notifies_assignee(self):
+        assignee_id, assignee_token = self._user_token('مكلف', 'assignee@x.test', 'employee')
+        created = self.client.post(
+            '/api/event-tasks', headers=self.headers(self.token),
+            json={'title': 'تجهيز العرض', 'assigneeId': assignee_id})
+        self.assertEqual(created.status_code, 200)
+        listed = self.client.get('/api/notifications', headers=self.headers(assignee_token))
+        tasks = [n for n in listed.get_json()['notifications'] if n['category'] == 'task']
+        self.assertTrue(tasks)
+        self.assertEqual(tasks[0]['entity_type'], 'event_task')
+        foreign = self.client.post(
+            '/api/event-tasks', headers=self.headers(self.token),
+            json={'title': 'خارجية', 'assigneeId': 'not-in-tenant'})
+        self.assertEqual(foreign.status_code, 404)
+
+    def test_super_admin_feed_and_tenant_isolation(self):
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, email, password_hash, is_active, is_admin) "
+            "VALUES ('platform-admin', 'المنصة', 'root@x.test', 'hash', 1, 1)")
+        conn.commit()
+        admin_token = auth.create_token(
+            'platform-admin', 'root@x.test', is_admin=True, user_name='مدير المنصة')
+        self.application_module._notify_super_admins(
+            'شركة جديدة انضمت إلى المنصة', 'شركة الاختبار',
+            entity_type='tenant', entity_id=self.tenant_id)
+        listed = self.client.get('/api/notifications', headers=self.headers(admin_token))
+        feed = listed.get_json()['notifications']
+        self.assertTrue(feed)
+        self.assertEqual(feed[0]['category'], 'platform')
+        self.assertEqual(feed[0]['entity_id'], self.tenant_id)
+        company_feed = self.client.get('/api/notifications', headers=self.headers(self.token))
+        self.assertFalse(any(n['entity_id'] == self.tenant_id and n['category'] == 'platform'
+                             for n in company_feed.get_json()['notifications']))
 
 
 if __name__ == '__main__':

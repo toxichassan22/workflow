@@ -8210,6 +8210,9 @@ def _ensure_omran_columns(conn):
     # t32: a refund/correction/expiry movement links back to the entry it reverses.
     _add('tenant_ledger', 'reversal_of', 'TEXT')
 
+    # Event tasks got the reminder clock approval tasks always had.
+    _add('event_tasks', 'reminded_at', 'reminded_at TEXT')
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Mission-5 graph completion (t50/t51/t54/t60/t61/t62/t63): every statement is
@@ -8248,6 +8251,19 @@ def _create_platform_tables(conn):
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_notif_deliveries_notification ON notification_deliveries(notification_id)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_notif_deliveries_tenant ON notification_deliveries(tenant_id, status, created_at DESC)')
+
+    # Per-actor category switches: one row per (tenant, user_key, category).
+    # user_key is the user id for staff logins or 'tenant-admin:<tenant_id>'
+    # for the direct company login — the same address list_notifications
+    # filters by, so a muted category hides broadcast and addressed rows alike.
+    conn.execute('''CREATE TABLE IF NOT EXISTS notification_preferences (
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_key TEXT NOT NULL,
+        category TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT,
+        PRIMARY KEY (tenant_id, user_key, category)
+    )''')
 
     # t60-02: ticket attachments point at stored files.
     conn.execute('''CREATE TABLE IF NOT EXISTS support_ticket_attachments (
@@ -10087,7 +10103,8 @@ def purge_expired_archives(tenant_id=None, retention_days=None):
 
 # ── t41/t24/t42: notifications and the approval task center ─────────────────
 
-NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge', 'support', 'task', 'general')
+NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge',
+                           'billing', 'support', 'task', 'job', 'platform', 'general')
 
 
 def create_notification(tenant_id, title, body=None, category='general', user_id=None,
@@ -10124,18 +10141,109 @@ def create_notification(tenant_id, title, body=None, category='general', user_id
     return dict(conn.execute('SELECT * FROM notifications WHERE id = ?', (row_id,)).fetchone())
 
 
-def list_notifications(tenant_id, user_id=None, unread_only=False, limit=50):
-    conn = get_db()
-    query = 'SELECT * FROM notifications WHERE tenant_id = ?'
+def _notification_feed_clauses(tenant_id, user_id, unread_only, category, muted_categories, read_state):
+    """Shared WHERE for the notification feed and its count.
+
+    ``user_id`` is the actor's recipient key — a user id for staff logins or
+    'tenant-admin:<tenant_id>' for the direct company login — so rows
+    addressed to the owner stay invisible to employee accounts while
+    broadcasts (user_id NULL) reach everyone."""
+    clauses = ['tenant_id = ?']
     params = [tenant_id]
     if user_id:
-        query += ' AND (user_id IS NULL OR user_id = ?)'
+        clauses.append('(user_id IS NULL OR user_id = ?)')
         params.append(user_id)
-    if unread_only:
-        query += ' AND read_at IS NULL'
-    query += ' ORDER BY created_at DESC LIMIT ?'
-    params.append(int(limit))
+    state = read_state or ('unread' if unread_only else None)
+    if state == 'unread':
+        clauses.append('read_at IS NULL')
+    elif state == 'read':
+        clauses.append('read_at IS NOT NULL')
+    if category:
+        clauses.append('category = ?')
+        params.append(category)
+    muted = [c for c in (muted_categories or []) if c]
+    if muted:
+        clauses.append('category NOT IN (' + ','.join('?' * len(muted)) + ')')
+        params.extend(muted)
+    return clauses, params
+
+
+def list_notifications(tenant_id, user_id=None, unread_only=False, limit=50,
+                       category=None, muted_categories=None, offset=0, read_state=None):
+    conn = get_db()
+    clauses, params = _notification_feed_clauses(
+        tenant_id, user_id, unread_only, category, muted_categories, read_state)
+    query = ('SELECT * FROM notifications WHERE ' + ' AND '.join(clauses)
+             + ' ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    params.extend([int(limit), max(0, int(offset or 0))])
     return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def count_notifications(tenant_id, user_id=None, unread_only=False,
+                        category=None, muted_categories=None, read_state=None):
+    """Cheap COUNT over the same feed clauses — the badge polls this."""
+    conn = get_db()
+    clauses, params = _notification_feed_clauses(
+        tenant_id, user_id, unread_only, category, muted_categories, read_state)
+    row = conn.execute(
+        'SELECT COUNT(*) AS c FROM notifications WHERE ' + ' AND '.join(clauses), params,
+    ).fetchone()
+    return int((dict(row) if row else {}).get('c') or 0)
+
+
+def get_notification_preferences(tenant_id, user_key):
+    """Effective category switches for one actor; every category defaults on."""
+    prefs = {category: True for category in NOTIFICATION_CATEGORIES}
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            'SELECT category, enabled FROM notification_preferences WHERE tenant_id = ? AND user_key = ?',
+            (tenant_id, str(user_key)),
+        ).fetchall()
+    except Exception:
+        return prefs
+    for row in rows:
+        if row['category'] in prefs:
+            prefs[row['category']] = bool(row['enabled'])
+    return prefs
+
+
+def set_notification_preference(tenant_id, user_key, category, enabled):
+    if category not in NOTIFICATION_CATEGORIES:
+        return {'error': 'invalid_category'}
+    conn = get_db()
+    conn.execute(
+        '''INSERT INTO notification_preferences (tenant_id, user_key, category, enabled, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (tenant_id, user_key, category)
+           DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at''',
+        (tenant_id, str(user_key), category, 1 if enabled else 0, _utcnow().isoformat()),
+    )
+    conn.commit()
+    return {'ok': True}
+
+
+def list_admin_tenant_ids():
+    """Active platform-admin tenant ids — the super-admin notification feed."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT id FROM tenants WHERE COALESCE(is_admin, 0) = 1 AND COALESCE(is_active, 1) = 1'
+    ).fetchall()
+    return [r['id'] for r in rows]
+
+
+def recent_notification_exists(tenant_id, entity_type, entity_id, since_hours=24):
+    """Dedup helper: did this exact event already notify within the window?"""
+    conn = get_db()
+    from datetime import timedelta
+    cutoff = (_utcnow() - timedelta(hours=int(since_hours))).isoformat()
+    row = conn.execute(
+        '''SELECT 1 AS x FROM notifications
+           WHERE tenant_id = ? AND entity_type = ? AND entity_id = ? AND created_at >= ?
+           LIMIT 1''',
+        (tenant_id, entity_type, entity_id, cutoff),
+    ).fetchone()
+    return row is not None
 
 
 def mark_notifications_read(tenant_id, user_id, notification_ids=None):
@@ -10144,8 +10252,9 @@ def mark_notifications_read(tenant_id, user_id, notification_ids=None):
     if notification_ids:
         placeholders = ','.join('?' for _ in notification_ids)
         cursor = conn.execute(
-            f'UPDATE notifications SET read_at = ? WHERE tenant_id = ? AND read_at IS NULL AND id IN ({placeholders})',
-            [now, tenant_id, *notification_ids],
+            f'UPDATE notifications SET read_at = ? WHERE tenant_id = ? AND read_at IS NULL '
+            f'AND (user_id IS NULL OR user_id = ?) AND id IN ({placeholders})',
+            [now, tenant_id, user_id, *notification_ids],
         )
     else:
         cursor = conn.execute(
@@ -10397,6 +10506,47 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
                 user_id=user_id,
                 email_to=admin_emails.get(user_id) or _user_email(user_id))
     return escalated
+
+
+def send_due_event_task_reminders(tenant_id=None, due_window_hours=12, cooldown_hours=24):
+    """Event tasks whose due time is near or past remind once per cooldown
+    window — the assignee when there is one, otherwise the company-owner
+    login (an unassigned task is the owner's job)."""
+    conn = get_db()
+    from datetime import timedelta
+    now = _utcnow()
+    due_limit = (now + timedelta(hours=int(due_window_hours))).isoformat()
+    cooldown = (now - timedelta(hours=int(cooldown_hours))).isoformat()
+    clauses = [
+        "status = 'open'", 'due_at IS NOT NULL', 'due_at <= ?',
+        '(reminded_at IS NULL OR reminded_at < ?)',
+    ]
+    params = [due_limit, cooldown]
+    if tenant_id:
+        clauses.insert(0, 'tenant_id = ?')
+        params.insert(0, tenant_id)
+    try:
+        rows = conn.execute(
+            'SELECT * FROM event_tasks WHERE ' + ' AND '.join(clauses), params,
+        ).fetchall()
+    except Exception:
+        return []
+    reminded = []
+    for row in rows:
+        conn.execute(
+            'UPDATE event_tasks SET reminded_at = ? WHERE id = ?',
+            (now.isoformat(), row['id']),
+        )
+        reminded.append(row['id'])
+    conn.commit()
+    for row in rows:
+        assignee = row['assignee_user_id']
+        create_notification(
+            row['tenant_id'], 'مهمة تقترب من موعدها', body=row['title'], category='task',
+            entity_type='event_task', entity_id=row['id'],
+            user_id=assignee or 'tenant-admin:' + str(row['tenant_id']),
+            email_to=_user_email(assignee))
+    return reminded
 
 
 # ── t32/t33: recharge (package purchase) requests ───────────────────────────
@@ -12172,6 +12322,7 @@ def _create_omran_event_tables(conn):
         entity_id TEXT,
         priority TEXT DEFAULT 'normal',
         escalated_at TEXT,
+        reminded_at TEXT,
         recurrence TEXT DEFAULT 'none',
         status TEXT DEFAULT 'open',
         completed_at TEXT,
@@ -12939,6 +13090,14 @@ def sweep_stale_generation_jobs(tenant_id=None, timeout_minutes=None):
             ('job_timeout', _utcnow().isoformat(), job['id']),
         )
         conn.commit()
+        try:
+            create_notification(
+                job['tenant_id'], 'فشلت مهمة التوليد',
+                'انتهت مهلة التوليد — حُرر الحجز تلقائيًا',
+                category='job', user_id=job['created_by'] or None,
+                entity_type='generation_job', entity_id=job['id'])
+        except Exception:
+            pass
         if job['approval_id']:
             try:
                 settle_generation_approval(

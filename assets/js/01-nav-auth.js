@@ -999,6 +999,8 @@
       tenantTrainingPage: '/app/settings/training',
       tenantAIRulesPage: '/app/settings/ai-rules',
       tenantApprovalsPage: '/app/approvals',
+      tenantOmranOpsPage: '/app/operations',
+      tenantNotificationsPage: '/app/notifications',
       tenantAdminPage: '/app/admin',
       tenantCompaniesPage: '/app/admin/companies',
       tenantAdminRechargePage: '/app/admin/recharges',

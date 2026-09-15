@@ -20,6 +20,7 @@
       tenantTrainingPage: 'settings/training',
       tenantAIRulesPage: 'settings/ai-rules',
       tenantApprovalsPage: 'approvals',
+      tenantOmranOpsPage: 'operations',
       tenantAdminPage: 'admin',
       tenantCompaniesPage: 'admin/companies',
       tenantAdminRechargePage: 'admin/recharges',
@@ -139,6 +140,7 @@
       if (el) el.classList.add('active');
       updateTenantChrome(pageId);
       closeTenantSidebar();
+      closeTenantBellPanel();
 
       const appPage = document.getElementById('tenantAppPage');
       if (appPage) {
@@ -212,7 +214,8 @@
       tenantUsersPage: 'openTenantUsers',
       tenantTrainingPage: 'openTenantTraining',
       tenantAIRulesPage: 'openTenantAIRules',
-      tenantApprovalsPage: 'openTenantApprovals'
+      tenantApprovalsPage: 'openTenantApprovals',
+      tenantNotificationsPage: 'openNotificationsPage'
     };
 
     function openTenantPageById(pageId) {
@@ -585,6 +588,7 @@
       tenantTrainingPage: ['page.training', 'بيانات التدريب'],
       tenantAIRulesPage: ['page.ai_rules', 'قواعد AI'],
       tenantApprovalsPage: ['page.approvals', 'تعميد العروض'],
+      tenantNotificationsPage: ['page.notifications', 'الإشعارات'],
       tenantAdminPage: ['page.admin_dashboard', 'لوحة المدير'],
       tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
       tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
@@ -598,6 +602,43 @@
         const visible = Array.from(group.querySelectorAll('.tenant-sidebar-link')).some(link =>
           link.style.display !== 'none' && !link.classList.contains('tenant-hidden'));
         group.style.display = visible ? '' : 'none';
+      });
+    }
+
+    const TENANT_NAV_COLLAPSED_KEY = 'wf.navCollapsed';
+
+    function getCollapsedTenantNavGroups() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(TENANT_NAV_COLLAPSED_KEY) || '[]');
+        return new Set(Array.isArray(raw) ? raw : []);
+      } catch (e) {
+        return new Set();
+      }
+    }
+
+    function setTenantNavGroupCollapsed(group, collapsed, persist = true) {
+      group.classList.toggle('nav-collapsed', collapsed);
+      const toggle = group.querySelector('.tenant-nav-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      if (!persist) return;
+      const stored = getCollapsedTenantNavGroups();
+      const key = group.getAttribute('data-nav-group');
+      if (collapsed) stored.add(key); else stored.delete(key);
+      try { localStorage.setItem(TENANT_NAV_COLLAPSED_KEY, JSON.stringify(Array.from(stored))); } catch (e) {}
+    }
+
+    function toggleTenantNavGroup(groupKey) {
+      const group = document.querySelector('.tenant-nav-collapsible[data-nav-group="' + groupKey + '"]');
+      if (!group) return;
+      setTenantNavGroupCollapsed(group, !group.classList.contains('nav-collapsed'));
+    }
+
+    // Collapse choices are per device; the group holding the active page
+    // always reopens in updateTenantChrome so the current link stays visible.
+    function applyTenantNavGroupState() {
+      const stored = getCollapsedTenantNavGroups();
+      document.querySelectorAll('.tenant-nav-collapsible').forEach(group => {
+        setTenantNavGroupCollapsed(group, stored.has(group.getAttribute('data-nav-group')), false);
       });
     }
 
@@ -639,6 +680,17 @@
         titleEl.dataset.i18n = pageData[0];
         titleEl.textContent = WFT(pageData[0], pageData[1]);
       }
+      const searchWrap = document.querySelector('.tenant-topbar-search');
+      const searchInput = document.getElementById('tenantGlobalSearch');
+      if (searchWrap) {
+        const canSearch = isSagAdmin || hasPermission('view_presentations');
+        searchWrap.classList.toggle('tenant-hidden', !canSearch);
+        if (searchInput && canSearch) {
+          const searchKey = isSagAdmin ? 'chrome.search_companies' : 'chrome.search_projects';
+          searchInput.setAttribute('data-i18n-ph', searchKey);
+          searchInput.placeholder = WFT(searchKey, isSagAdmin ? 'بحث في الشركات' : 'بحث في المشاريع');
+        }
+      }
       const parentPages = {
         tenantProjectPresentationsPage: 'tenantPresentationsPage',
         tenantVisualConceptPage: 'tenantProjectPage',
@@ -646,11 +698,16 @@
         tenantSlidesPage: 'tenantProjectPage'
       };
       const activePageId = parentPages[pageId] || pageId;
+      const activeTab = (typeof omActiveTab !== 'undefined' && omActiveTab) || 'tasks';
       document.querySelectorAll('[data-nav-page]').forEach(link => {
-        const active = link.dataset.navPage === activePageId;
+        const navTab = link.getAttribute('data-nav-tab');
+        const active = link.dataset.navPage === activePageId && (!navTab || navTab === activeTab);
         link.classList.toggle('active', active);
         if (active) link.setAttribute('aria-current', 'page');
         else link.removeAttribute('aria-current');
+      });
+      document.querySelectorAll('.tenant-nav-collapsible').forEach(group => {
+        if (group.querySelector('.tenant-sidebar-link.active')) setTenantNavGroupCollapsed(group, false, false);
       });
       refreshTenantNavGroups();
     }
@@ -682,8 +739,55 @@
       document.querySelectorAll('.tenant-dropdown').forEach(d => d.classList.remove('open'));
     }
 
+    function closeTenantBellPanel() {
+      const panel = document.getElementById('tenantBellPanel');
+      if (panel) panel.hidden = true;
+      if (typeof closeNotificationsDropdown === 'function') closeNotificationsDropdown();
+    }
+
+    // The bell prefers the real notification dropdown once that module ships;
+    // until then it opens the visual placeholder panel.
+    function tenantBellClicked(event) {
+      if (typeof toggleNotificationsDropdown === 'function') {
+        toggleNotificationsDropdown();
+        return;
+      }
+      const panel = document.getElementById('tenantBellPanel');
+      if (panel) panel.hidden = !panel.hidden;
+    }
+
+    // Placeholder until the smart-notification feed ships: the dot turns on
+    // with any positive unread count.
+    function setTenantBellDot(unreadCount) {
+      const dot = document.getElementById('tenantBellDot');
+      if (dot) dot.classList.toggle('hidden', !(Number(unreadCount) > 0));
+    }
+
+    function tenantGlobalSearchKeydown(event) {
+      if (!event || event.key !== 'Enter') return;
+      event.preventDefault();
+      runTenantGlobalSearch();
+    }
+
+    async function runTenantGlobalSearch() {
+      const input = document.getElementById('tenantGlobalSearch');
+      const q = String((input && input.value) || '').trim();
+      if (tenantUser && tenantUser.isAdmin) {
+        const box = document.getElementById('sagSearchInput');
+        if (box) box.value = q;
+        await openTenantCompanies();
+        if (typeof filterSagTenants === 'function') filterSagTenants();
+        return;
+      }
+      if (!hasPermission('view_presentations')) return;
+      const box = document.getElementById('projectArchiveSearch');
+      if (box) box.value = q;
+      await openTenantPresentations(true);
+    }
+
     document.addEventListener('click', function (e) {
       if (!e.target.closest('.tenant-dropdown')) closeTenantDropdown();
+      if (!e.target.closest('.tenant-bellbox')) closeTenantBellPanel();
       document.querySelectorAll('.project-multi-select[open]').forEach(dropdown => {
         if (!dropdown.contains(e.target)) dropdown.open = false;
       });
@@ -1087,6 +1191,7 @@
         };
       }
       showTenantApp();
+      if (typeof startNotificationsPolling === 'function') startNotificationsPolling();
       if (resolvedRequested && typeof enforceTenantRouteGuard === 'function') {
         const guard = enforceTenantRouteGuard(requestedPage, resolvedRequested.urlSlug);
         if (guard === 'TENANT_SLUG_MISMATCH' || guard === 'TENANT_ADMIN_FORBIDDEN') {
@@ -1156,6 +1261,8 @@
           await openTenantAIRules();
         } else if (requestedPage === 'tenantApprovalsPage') {
           await openTenantApprovals();
+        } else if (requestedPage === 'tenantNotificationsPage') {
+          await openNotificationsPage();
         } else if (requestedPage === 'tenantAdminPage') {
           if (tenantUser.isAdmin) await openTenantAdmin();
           else { showTenantPage('tenantDashboardPage', true); syncTenantBrowserHistory('tenantDashboardPage', {}, true); }
@@ -1219,6 +1326,7 @@
           el.style.display = 'none';
         });
       }
+      applyTenantNavGroupState();
       updateTenantChrome(tgrCurrentPageId() || (isSagAdmin ? 'tenantAdminPage' : 'tenantDashboardPage'));
     }
 

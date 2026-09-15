@@ -36,28 +36,42 @@
       }
     }
 
-    function showOmranOpsTab(tabKey) {
-      const tabs = ['tasks', 'recharge', 'tickets', 'contracts'];
-      tabs.forEach(t => {
-        const pane = document.getElementById('omTabPane_' + t);
-        const btn = document.getElementById('omTabBtn_' + t);
-        const isActive = (t === tabKey);
-        if (pane) pane.style.display = isActive ? 'block' : 'none';
-        if (btn) {
-          if (isActive) {
-            btn.classList.add('primary');
-            btn.classList.remove('ghost');
-          } else {
-            btn.classList.add('ghost');
-            btn.classList.remove('primary');
-          }
-        }
-      });
+    const OMRAN_OPS_TABS = ['tasks', 'recharge', 'tickets', 'contracts'];
+    let omActiveTab = 'tasks';
+
+    function omranOpsTabVisible(t) {
+      const btn = document.getElementById('omTabBtn_' + t);
+      return btn && btn.style.display !== 'none';
     }
 
-    async function openOmranOpsPage() {
+    function showOmranOpsTab(tabKey) {
+      // Permission-gated tabs hide their button; a request for a hidden tab
+      // lands on the first one the member may see.
+      const target = omranOpsTabVisible(tabKey)
+        ? tabKey
+        : (OMRAN_OPS_TABS.find(omranOpsTabVisible) || 'tasks');
+      omActiveTab = target;
+      OMRAN_OPS_TABS.forEach(t => {
+        const pane = document.getElementById('omTabPane_' + t);
+        const btn = document.getElementById('omTabBtn_' + t);
+        const isActive = (t === target);
+        if (pane) pane.style.display = isActive ? 'block' : 'none';
+        if (btn) {
+          btn.classList.toggle('primary', isActive);
+          btn.classList.toggle('ghost', !isActive);
+        }
+      });
+      // The sidebar carries one link per tab, so its active marker follows
+      // in-page tab switches too.
+      const opsPage = document.getElementById('tenantOmranOpsPage');
+      if (typeof updateTenantChrome === 'function' && opsPage && opsPage.classList.contains('active')) {
+        updateTenantChrome('tenantOmranOpsPage');
+      }
+    }
+
+    async function openOmranOpsPage(tabKey) {
       showTenantPage('tenantOmranOpsPage');
-      showOmranOpsTab('tasks');
+      showOmranOpsTab(tabKey || 'tasks');
 
       await Promise.all([
         omLoadEventTasks(),
@@ -367,6 +381,7 @@
     async function omLoadPointsOverview() {
       const box = document.getElementById('omPointsOverview');
       if (!box) return;
+      if (!hasPermission('billing')) { box.innerHTML = ''; return; }
       const data = await api('GET', '/api/points/overview').catch(() => null);
       if (!data || !data.success || !data.points) {
         box.innerHTML = '';
@@ -388,6 +403,7 @@
     async function omLoadRechargeRequests(targetBoxId) {
       const box = document.getElementById(targetBoxId || 'omRechargeList');
       if (!box) return;
+      if (!hasPermission('billing')) { box.innerHTML = ''; return; }
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) || targetBoxId === 'sagRechargeRequestsList';
       const url = isAdmin ? '/api/admin/recharge-requests' : '/api/recharge-requests';
@@ -514,6 +530,7 @@
     async function omLoadContracts() {
       const box = document.getElementById('omContractsList');
       if (!box) return;
+      if (!hasPermission('company_settings')) { box.innerHTML = ''; return; }
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const data = await api('GET', '/api/contracts').catch(() => null);
       if (!data || !data.success) {

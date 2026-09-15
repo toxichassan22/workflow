@@ -917,7 +917,33 @@ def _schedule_tenant_limit_sync(tenant_id):
         print(f"[BILLING] provider-cap sync spawn failed: {exc}")
 
 
-db.BALANCE_CHANGE_HOOK = _schedule_tenant_limit_sync
+LOW_BALANCE_NOTIFY_USD = float(os.environ.get('LOW_BALANCE_NOTIFY_USD') or 10.0)
+
+
+def _maybe_notify_low_balance(tenant_id):
+    """Once-a-day ping to the billing audience when the wallet drops under
+    the spend floor — every debit path funnels through the balance hook, so
+    this catches automatic and manual spend alike without spamming."""
+    try:
+        balance = db.get_tenant_balance(tenant_id)
+        if balance is None or float(balance) >= LOW_BALANCE_NOTIFY_USD:
+            return
+        if db.recent_notification_exists(tenant_id, 'wallet', 'low-balance', since_hours=24):
+            return
+        _notify_tenant_billing(
+            tenant_id, 'رصيد المحفظة منخفض',
+            f'الرصيد الحالي ${float(balance):.2f}',
+            entity_type='wallet', entity_id='low-balance')
+    except Exception as exc:
+        print(f'[NOTIFY] low-balance check failed for {tenant_id}: {exc}')
+
+
+def _on_balance_changed(tenant_id):
+    _schedule_tenant_limit_sync(tenant_id)
+    _maybe_notify_low_balance(tenant_id)
+
+
+db.BALANCE_CHANGE_HOOK = _on_balance_changed
 
 
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
@@ -2030,6 +2056,14 @@ def api_billing_checkout():
     if not result.get('billed'):
         return jsonify({'success': True, 'billed': False, 'reason': result.get('reason'),
                         'balance_usd': db.get_tenant_balance(g.tenant_id)})
+    try:
+        entry = result.get('entry') or {}
+        _notify_tenant_billing(
+            g.tenant_id, 'خُصم من المحفظة',
+            f'${float(entry.get("amount_usd") or 0):.2f} — الرصيد الحالي ${float(result.get("balance_usd") or 0):.2f}',
+            entity_type='wallet', entity_id='debit:' + str(entry.get('id') or ''))
+    except Exception:
+        pass
     return jsonify({'success': True, 'billed': True, 'entry': result.get('entry'),
                     'balance_usd': result.get('balance_usd')})
 
@@ -2079,6 +2113,15 @@ def api_billing_topup():
     except Exception as exc:
         print(f"[BILLING] topup failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
+    if result.get('credited'):
+        try:
+            entry = result.get('entry') or {}
+            _notify_tenant_billing(
+                g.tenant_id, 'أُضيف رصيد إلى المحفظة',
+                f'${amount:.2f} — الرصيد الحالي ${float(result.get("balance_usd") or 0):.2f}',
+                entity_type='wallet', entity_id='topup:' + str(entry.get('id') or ''))
+        except Exception:
+            pass
     return jsonify({'success': True, 'credited': result.get('credited'),
                     'entry': result.get('entry'), 'balance_usd': result.get('balance_usd')})
 
@@ -14826,6 +14869,7 @@ def _run_housekeeping_tick():
         ('email', _drain_email_outbox),
         ('reminders', db.send_due_approval_reminders),
         ('escalations', db.escalate_overdue_approval_tasks),
+        ('event_task_reminders', db.send_due_event_task_reminders),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
         ('usage_billing', _bill_all_unbilled_usage),
@@ -20492,6 +20536,9 @@ def api_admin_tenants():
         except Exception as exc:
             print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
+        _notify_super_admins(
+            'شركة جديدة انضمت إلى المنصة', company_name,
+            entity_type='tenant', entity_id=tenant_id)
         return jsonify({
             'success': True,
             'tenant': _company_payload(tenant),
@@ -21489,6 +21536,53 @@ def _notify_tenant_admins(tenant_id, title, body, entity_type=None, entity_id=No
             email_to=(tenant or {}).get('email'))
     except Exception as exc:
         print(f'[ACCESS REQUEST] client notification failed: {exc}')
+
+
+def _notify_super_admins(title, body, entity_type=None, entity_id=None, category='platform'):
+    """A platform event lands in every active super admin's feed — the admin
+    tenant's own notification stream, visible to all of its logins."""
+    try:
+        for admin_tenant_id in db.list_admin_tenant_ids():
+            db.create_notification(
+                admin_tenant_id, title, body, category=category,
+                user_id=None, entity_type=entity_type, entity_id=entity_id)
+    except Exception as exc:
+        print(f'[NOTIFY] super-admin notification failed: {exc}')
+
+
+def _notify_tenant_billing(tenant_id, title, body, entity_type=None, entity_id=None):
+    """Wallet movements reach the users holding the billing permission plus
+    the company-owner login (addressed as 'tenant-admin:<id>', which employee
+    accounts never match)."""
+    try:
+        notified = set()
+        for user in db.get_users_with_permission(tenant_id, 'billing'):
+            if user['id'] in notified:
+                continue
+            notified.add(user['id'])
+            db.create_notification(
+                tenant_id, title, body, category='billing', user_id=user['id'],
+                entity_type=entity_type, entity_id=entity_id)
+        db.create_notification(
+            tenant_id, title, body, category='billing',
+            user_id='tenant-admin:' + str(tenant_id),
+            entity_type=entity_type, entity_id=entity_id)
+    except Exception as exc:
+        print(f'[NOTIFY] billing notification failed: {exc}')
+
+
+def _notification_recipient_key():
+    """The actor's notification address: their user id for staff logins, or
+    the tenant-admin address for the direct company login."""
+    return getattr(g, 'user_id', None) or 'tenant-admin:' + str(g.tenant_id)
+
+
+def _notification_muted_categories():
+    try:
+        prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())
+    except Exception:
+        return []
+    return [category for category, enabled in prefs.items() if not enabled]
 
 
 def _require_admin_content_access(tenant_id, scope, target_id=None):
@@ -23922,6 +24016,7 @@ FRONTEND_JS_ORDER = (
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
     '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '19-notifications.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}
@@ -24788,6 +24883,18 @@ def api_finish_generation_job(job_id):
                 note=str(data.get('note') or data.get('error') or '').strip() or None)
         except Exception:
             pass
+    try:
+        titles = {'completed': 'اكتمل توليد العرض', 'failed': 'فشل توليد العرض',
+                  'cancelled': 'أُلغيت مهمة التوليد'}
+        draft = db.get_project_draft_by_id(
+            g.tenant_id, job['draft_id']) if job.get('draft_id') else None
+        db.create_notification(
+            g.tenant_id, titles.get(status, 'تحديث مهمة التوليد'),
+            body=(draft or {}).get('title') or data.get('error'),
+            category='job', user_id=job.get('created_by') or None,
+            entity_type='generation_job', entity_id=job_id)
+    except Exception:
+        pass
     _bill_tenant_unbilled_usage_async(g.tenant_id)
     return jsonify({'success': True, 'job': updated})
 
@@ -24983,11 +25090,68 @@ def api_purge_expired_archives():
 @app.route('/api/notifications', methods=['GET'])
 @require_auth
 def api_list_notifications():
+    recipient = _notification_recipient_key()
+    muted = _notification_muted_categories()
+    category = request.args.get('category')
+    if category not in db.NOTIFICATION_CATEGORIES:
+        category = None
+    read_state = (request.args.get('status') or '').strip()
+    if read_state not in ('unread', 'read'):
+        read_state = None
+    unread_only = read_state == 'unread' or request.args.get('unreadOnly') == '1'
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 50), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get('offset') or 0))
+    except (TypeError, ValueError):
+        offset = 0
     items = db.list_notifications(
-        g.tenant_id, user_id=g.user_id,
-        unread_only=request.args.get('unreadOnly') == '1',
-    )
-    return jsonify({'success': True, 'notifications': items})
+        g.tenant_id, user_id=recipient, unread_only=unread_only, limit=limit,
+        offset=offset, category=category, muted_categories=muted,
+        read_state=read_state)
+    total = db.count_notifications(
+        g.tenant_id, user_id=recipient, category=category,
+        muted_categories=muted, read_state=read_state)
+    unread = db.count_notifications(
+        g.tenant_id, user_id=recipient, unread_only=True, muted_categories=muted)
+    return jsonify({'success': True, 'notifications': items, 'total': total,
+                    'unreadCount': unread, 'categories': list(db.NOTIFICATION_CATEGORIES)})
+
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@require_auth
+def api_notifications_unread_count():
+    """The topbar badge polls this — a COUNT, not the feed."""
+    count = db.count_notifications(
+        g.tenant_id, user_id=_notification_recipient_key(), unread_only=True,
+        muted_categories=_notification_muted_categories())
+    return jsonify({'success': True, 'unread': count})
+
+
+@app.route('/api/notifications/preferences', methods=['GET'])
+@require_auth
+def api_get_notification_preferences():
+    prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())
+    return jsonify({'success': True, 'preferences': prefs,
+                    'categories': list(db.NOTIFICATION_CATEGORIES)})
+
+
+@app.route('/api/notifications/preferences', methods=['PUT'])
+@require_auth
+def api_set_notification_preferences():
+    data = request.json or {}
+    updates = dict(data.get('categories') or {})
+    if data.get('category'):
+        updates[data['category']] = data.get('enabled')
+    recipient = _notification_recipient_key()
+    for category, enabled in updates.items():
+        if category in db.NOTIFICATION_CATEGORIES:
+            db.set_notification_preference(g.tenant_id, recipient, category, bool(enabled))
+    prefs = db.get_notification_preferences(g.tenant_id, recipient)
+    return jsonify({'success': True, 'preferences': prefs,
+                    'categories': list(db.NOTIFICATION_CATEGORIES)})
 
 
 @app.route('/api/notifications', methods=['POST'])
@@ -25008,7 +25172,7 @@ def api_create_notification():
         return _omran_forbidden('إشعار مستخدم آخر أو إشعار عام يتطلب صلاحية إدارة المستخدمين')
     row = db.create_notification(
         g.tenant_id, data.get('title'), body=data.get('body'), category=data.get('category') or 'general',
-        user_id=target_user if target_user != g.user_id else None,
+        user_id=target_user,
         entity_type=data.get('entityType'), entity_id=data.get('entityId'),
         email_to=data.get('emailTo'),
     )
@@ -25019,7 +25183,8 @@ def api_create_notification():
 @require_auth
 def api_mark_notifications_read():
     data = request.json or {}
-    result = db.mark_notifications_read(g.tenant_id, g.user_id, notification_ids=data.get('ids'))
+    result = db.mark_notifications_read(
+        g.tenant_id, _notification_recipient_key(), notification_ids=data.get('ids'))
     return jsonify({'success': True, 'updated': result})
 
 
@@ -25141,6 +25306,14 @@ def api_create_event_task():
         return failure
     _record_audit_event('event_task.created', 'event_task', row['id'], entity_name=row['title'],
                         metadata={'recurrence': row.get('recurrence'), 'due_at': row.get('due_at')})
+    if row.get('assignee_user_id'):
+        try:
+            db.create_notification(
+                g.tenant_id, 'أُسندت إليك مهمة جديدة', body=row.get('title'),
+                category='task', user_id=row['assignee_user_id'],
+                entity_type='event_task', entity_id=row['id'])
+        except Exception:
+            pass
     return jsonify({'success': True, 'task': row})
 
 
@@ -25302,7 +25475,12 @@ def api_create_recharge_request():
     db.create_notification(
         g.tenant_id, 'طلب شحن جديد بانتظار المراجعة',
         body=f'{row.get("package_name") or ""} — {row.get("price_sar") or row.get("amount_usd") or ""}',
-        category='billing', entity_type='recharge_request', entity_id=row['id'])
+        category='recharge', entity_type='recharge_request', entity_id=row['id'])
+    _notify_super_admins(
+        'طلب شحن جديد',
+        f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("package_name") or ""}'
+        f' — {row.get("price_sar") or row.get("amount_usd") or ""}',
+        entity_type='recharge_request', entity_id=row['id'])
     return jsonify({'success': True, 'request': row})
 
 
@@ -25398,6 +25576,16 @@ def api_admin_decide_recharge_request(request_id):
     failure = _omran_error(row)
     if failure:
         return failure
+    try:
+        approved = row.get('status') == 'approved'
+        _notify_tenant_billing(
+            row['tenant_id'],
+            'اعتُمد طلب الشحن' if approved else 'رُفض طلب الشحن',
+            f'{row.get("package_name") or ""} — {row.get("amount_usd") or ""}'
+            + (f' — {data.get("note")}' if data.get('note') else ''),
+            entity_type='recharge_request', entity_id=row['id'])
+    except Exception:
+        pass
     return jsonify({'success': True, 'request': row})
 
 
@@ -25437,6 +25625,10 @@ def api_create_support_ticket():
     db.create_notification(
         g.tenant_id, 'تذكرة دعم جديدة',
         body=row.get('subject'), category='support',
+        entity_type='support_ticket', entity_id=row['id'])
+    _notify_super_admins(
+        'تذكرة دعم جديدة',
+        f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("subject") or ""}',
         entity_type='support_ticket', entity_id=row['id'])
     return jsonify({'success': True, 'ticket': row})
 
@@ -25742,6 +25934,10 @@ def api_admin_set_tenant_activation(tenant_id):
     _record_audit_event('tenant.activated' if is_active else 'tenant.deactivated',
                         'tenant', tenant_id, entity_name=tenant.get('company_name'),
                         new_value={'reason': data.get('reason')} if not is_active else None)
+    _notify_super_admins(
+        'فُعّلت شركة' if is_active else 'عُلّقت شركة',
+        tenant.get('company_name') or '',
+        entity_type='tenant', entity_id=tenant_id)
     return jsonify({'success': True, 'tenant': _company_payload(result)})
 
 
