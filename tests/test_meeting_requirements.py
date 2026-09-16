@@ -8913,6 +8913,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("api('POST', '/api/visual-concept/plans-verify'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-prompts'", index_source)
+        self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض')", index_source)
+        self.assertIn("WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')", index_source)
         self.assertIn('data-visual-action="delete-plan"', index_source)
         self.assertNotIn('data-visual-plan-title', index_source)
         self.assertNotIn('data-visual-plan-description', index_source)

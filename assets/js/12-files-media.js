@@ -1810,13 +1810,15 @@
       const boundaryApproved = Boolean(boundary.approved);
       const promptReady = Boolean(workflow.promptReady);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
-      const checkRows = checks.length ? checks.map(item =>
+      const conflicts = checks.filter(item => item.result === 'متعارض');
+      const checkRows = conflicts.length ? conflicts.map(item =>
         '<tr><td>' + escapeHtml(item.item || '') + '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
         (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
         escapeHtml(item.action || '') + '</td></tr>'
-      ).join('') : '<tr><td colspan="5" class="plans-workflow-empty">لا توجد نتائج تحقق.</td></tr>';
-      const issueList = Array.isArray(verification.issues) && verification.issues.length
-        ? '<ul class="plans-issue-list plans-issue-summary">' + verification.issues.flatMap(item => (item.points || []).map(point => '<li>' + escapeHtml(point) + '</li>')).join('') + '</ul>'
+      ).join('') : '<tr><td colspan="5" class="plans-workflow-empty">' + escapeHtml(WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</td></tr>';
+      const conflictPoints = conflicts.flatMap(item => Array.isArray(item.issues) ? item.issues : []).filter(Boolean);
+      const issueList = conflictPoints.length
+        ? '<ul class="plans-issue-list plans-issue-summary">' + conflictPoints.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul>'
         : '';
       const promptCards = promptReady
         ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
@@ -1828,10 +1830,10 @@
         '<ol class="plans-workflow-steps"><li class="' + (!verified ? 'is-active' : 'is-complete') + '">التحقق من التضارب</li><li class="' + (verified && !boundaryApproved ? 'is-active' : (boundaryApproved ? 'is-complete' : '')) + '">رسم حدود الأرض</li><li class="' + (boundaryApproved ? 'is-active' : '') + '">توليد المخططات</li></ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify">' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
-        '<p class="tenant-hint" data-plans-verification-summary>' + escapeHtml(verification.summary || '') + '</p>' +
+        '<p class="tenant-hint" data-plans-verification-summary>' + escapeHtml(conflicts.length ? WFT('plans.conflicts_count', 'عدد التعارضات المباشرة: ') + conflicts.length : WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</p>' +
         (issueList ? '<div class="plans-workflow-notice">' + issueList + '</div>' : '') +
         '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' +
-        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!checks.length || !verification.canProceed ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!verification.canProceed ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary" ' + (!verified ? 'hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div>' +
@@ -1936,7 +1938,7 @@
 
     function approveVisualConceptPlansVerification() {
       const workflow = visualConceptPlansWorkflowState();
-      if (!workflow.verification.checks.length || !workflow.verification.canProceed) return;
+      if (!workflow.verification.canProceed) return;
       workflow.verification.approved = true;
       workflow.status = 'verified';
       if (!workflow.boundary.points.length) workflow.boundary.points = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);

@@ -369,6 +369,8 @@
     "plans.prompts_loading": "جاري إعداد برومبتات المخططات",
     "plans.prompts_loading_detail": "يتم بناء البرومبتات من البيانات المعتمدة وحدود الأرض...",
     "plans.prompts_failed": "تعذر إعداد برومبتات المخططات",
+    "plans.no_conflicts": "لا توجد تعارضات مباشرة.",
+    "plans.conflicts_count": "عدد التعارضات المباشرة: ",
     "notif.cat.platform": "المنصة"
   }/*I18N_AR_END*/;
 
@@ -707,6 +709,8 @@
     "plans.prompts_loading": "Preparing plan prompts",
     "plans.prompts_loading_detail": "Building prompts from the approved data and land boundary...",
     "plans.prompts_failed": "Could not prepare the plan prompts",
+    "plans.no_conflicts": "No direct conflicts.",
+    "plans.conflicts_count": "Direct conflicts: ",
     "notif.cat.platform": "Platform"
   }/*I18N_EN_END*/;
 
