@@ -4589,36 +4589,19 @@ def _visual_concept_plan_context_text(context):
 
 def _visual_concept_plan_prompt_header(kind, context):
     titles = {
-        'site': ('CONCEPTUAL SITE PLAN', 'top-down orthographic flat architectural diagram'),
-        'uses': ('VERTICAL PROGRAM DISTRIBUTION', 'clean architectural program diagram'),
-        'massing': ('CONCEPTUAL MASSING', 'clean high-corner isometric architectural diagram'),
+        'site': ('CONCEPTUAL SITE PLAN', 'simplified flat 2D site plan, top-down orthographic view'),
+        'uses': ('VERTICAL PROGRAM DISTRIBUTION', 'clean vertical stacked-floor program diagram'),
+        'massing': ('CONCEPTUAL MASSING', 'clean high-corner isometric conceptual massing diagram'),
     }
     title, description = titles.get(kind) or titles['massing']
     name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
     location = ', '.join(part for part in (
         _visual_concept_text(context.get('district'), 100),
         _visual_concept_text(context.get('city'), 80)) if part)
-    components = [item for item in context.get('components') or []
-                  if isinstance(item, dict) and item.get('name')]
-    if kind == 'site':
-        return (f'Create a top-down orthographic conceptual site-plan diagram for the Saudi '
-                f'real-estate project "{name}"'
-                + (f' in {location}' if location else '')
-                + ', on a clean white background. Conceptual and NOT TO SCALE.')
-    fidelity = {
-        'site': 'Use only the recorded facts below; do not invent, infer, or recalculate any value.',
-        'uses': (f'Show {len(components)} separate vertical program stacks, one for each recorded '
-                 'approved project component. ' if components else
-                 'Show one vertical program stack for each recorded approved project component. ')
-                + 'Do not add, merge, split, or rename components. Do not invent floor assignments, '
-                  'floor ranges, buildings, unit counts, dimensions, or areas.',
-        'massing': 'Use only recorded geometry and controls; do not invent, infer, or recalculate '
-                   'building footprints, placements, floor ranges, heights, or dimensions.',
-    }
     return (
-        f'DRAWING REQUESTED — {title}. Create a {description} on a white background for "{name}"'
+        f'DRAWING REQUESTED — "{title}": a {description} on a white background for "{name}"'
         + (f' in {location}' if location else '')
-        + '. The result is conceptual and NOT TO SCALE. ' + fidelity[kind]
+        + '. Flat pastel architectural style; the result is conceptual and NOT TO SCALE.'
     )
 
 
@@ -4637,9 +4620,9 @@ def _visual_concept_plan_parcel_sentence(context):
             f"N {_visual_concept_plan_coordinate_text(item.get('northings'))}"
             for item in points)
         return (
-            f'Draw the irregular {len(points)}-vertex parcel faithfully from these surveyed boundary '
-            f'points, preserving every vertex, break, and relative proportion: {listing}. '
-            'Number every vertex on the drawing.')
+            f'Match the attached map footprint exactly: the irregular {len(points)}-vertex parcel, '
+            f'preserving every corner, boundary break, orientation, and relative proportion, '
+            f'from these surveyed boundary points only: {listing}.')
     return ('No surveyed boundary points are recorded; draw a plain generic parcel outline and '
             'label it "Parcel boundary not recorded."')
 
@@ -4670,28 +4653,83 @@ def _visual_concept_plan_area_sentence(context):
 
 
 def _visual_concept_plan_direction_key(direction):
-    labels = {'شمال': 'north', 'جنوب': 'south', 'شرق': 'east', 'غرب': 'west',
-              'north': 'north', 'south': 'south', 'east': 'east', 'west': 'west'}
+    labels = {'شمال': 'north', 'الشمال': 'north', 'الشمالي': 'north',
+              'northern': 'north', 'north': 'north',
+              'جنوب': 'south', 'الجنوب': 'south', 'الجنوبي': 'south',
+              'southern': 'south', 'south': 'south',
+              'شرق': 'east', 'الشرق': 'east', 'الشرقي': 'east',
+              'eastern': 'east', 'east': 'east',
+              'غرب': 'west', 'الغرب': 'west', 'الغربي': 'west',
+              'western': 'west', 'west': 'west'}
     return labels.get(str(direction or '').strip().lower(), '')
 
 
-def _visual_concept_plan_surroundings_sentence(context):
-    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
-    parts = []
+def _visual_concept_plan_edges_sentence(context, regulations):
+    length_by_dir = {}
+    unmatched_lengths = []
+    lengths_text = _visual_concept_plan_sanitize_text(regulations.get('boundary_lengths'))
+    if lengths_text:
+        for segment in re.split(r'[;؛]', lengths_text):
+            segment = segment.strip()
+            if not segment:
+                continue
+            match = re.match(r'(north|south|east|west|شمال|جنوب|شرق|غرب)\b\s*[:\-–—]?\s*(.+)',
+                             segment, flags=re.IGNORECASE)
+            key = _visual_concept_plan_direction_key(match.group(1)) if match else ''
+            if key and key not in length_by_dir:
+                length_by_dir[key] = (segment, match.group(2))
+            else:
+                unmatched_lengths.append(segment)
+    edge_parts = []
+    direction_order = {'north': 0, 'south': 1, 'east': 2, 'west': 3}
+    direction_items = []
     for item in context.get('directions') or []:
-        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
+        text = _visual_concept_plan_edge_text(item.get('regulation_text'))
+        if not text:
+            continue
         direction = _visual_concept_plan_direction_key(item.get('direction'))
-        direction = direction.title() if direction else _visual_concept_plan_sanitize_text(item.get('direction'))
-        if text:
-            parts.append(f'{direction}: {text}' if direction else text)
+        direction_items.append((direction_order.get(direction, 9), direction, text))
+    for _order, direction, text in sorted(direction_items, key=lambda row: row[0]):
+        pair = length_by_dir.pop(direction, None) if direction else None
+        preposition = ('adjoining' if re.search(r'neighbor|adjacent|propert|مجاور|جار', text,
+                                                flags=re.IGNORECASE) else 'beside')
+        if direction and pair:
+            edge_parts.append(f'{direction} boundary '
+                              f'{_visual_concept_plan_boundary_length_text(pair[1])} '
+                              f'{preposition} {text}')
+        elif direction:
+            edge_parts.append(f'{text} along the {direction} boundary')
+        else:
+            edge_parts.append(text)
     streets = _visual_concept_plan_sanitize_text(
         context.get('surrounding_streets') or regulations.get('surrounding_streets'))
     if streets:
-        parts.append(streets)
-    if not parts:
+        edge_parts.append(streets)
+    leftover = unmatched_lengths + [pair[0] for pair in length_by_dir.values()]
+    if leftover:
+        edge_parts.append('recorded boundary lengths: ' + '; '.join(leftover))
+    if not edge_parts:
         return 'No surroundings are recorded; keep the context around the parcel empty.'
-    return ('Show only the recorded surroundings — ' + '; '.join(parts) +
-            '. Do not add unrecorded streets, neighbors, water, or greenery.')
+    joined = '; '.join(edge_parts)
+    sentence = f'Preserve the recorded boundary structure: {joined}.'
+    render = ('Render and label the recorded surroundings: neighboring properties as restrained '
+              'neutral fields labeled "Neighbor", recorded streets as light-grey corridors labeled '
+              'with their recorded names and widths, and recorded landscaping or beautification '
+              'strips as pale green')
+    if re.search(r'sea|shore|coast|corniche|بحر|كورنيش|شاطئ', joined, flags=re.IGNORECASE):
+        render += ', plus a pale-cyan sea band labeled "Sea" beyond the waterfront edge'
+    return sentence + ' ' + render + '.'
+
+
+def _visual_concept_plan_facts_sentences(context, regulations):
+    parts = [_visual_concept_plan_parcel_sentence(context)]
+    area = _visual_concept_plan_area_sentence(context)
+    if area:
+        parts.append(area)
+    parts.append(_visual_concept_plan_edges_sentence(context, regulations))
+    parts.append(_visual_concept_plan_setbacks_sentence(context))
+    parts.append('Keep north upward and include a simple north-arrow symbol.')
+    return [part for part in parts if part]
 
 
 def _visual_concept_plan_setbacks_sentence(context):
@@ -4700,7 +4738,7 @@ def _visual_concept_plan_setbacks_sentence(context):
         context.get('setbacks') or regulations.get('setbacks') or regulations.get('building_ratio_setbacks'))
     if not text:
         return 'No setbacks are recorded; draw no setback envelope.'
-    return (f'Show setback information diagrammatically without extrapolation: {text}. '
+    return (f'Show setback information diagrammatically without extrapolation: {text.rstrip(".")}. '
             'Do not infer or extend setbacks beyond the recorded ranges.')
 
 
@@ -4770,253 +4808,302 @@ def _visual_concept_plan_color_sentence(context, placement_recorded, for_stacks=
     return base
 
 
-def _visual_concept_plan_title_block(context, title):
-    name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
-    location = ', '.join(part for part in (
-        _visual_concept_text(context.get('district'), 100),
-        _visual_concept_text(context.get('city'), 80)) if part)
-    block = f'Title block top-left: "{name}"'
-    if location:
-        block += f' over "{location}"'
-    return block + f' over "{title} (NOT TO SCALE)".'
-
-
-def _visual_concept_plan_component_summary(item):
-    name = _visual_concept_plan_sanitize_text(item.get('name'))
-    details = []
-    if item.get('units') not in (None, ''):
-        details.append(f"{item['units']} units")
-    area = item.get('builtArea') or item.get('unitArea')
-    if area not in (None, ''):
-        details.append(f'built area {area} m²')
-    use_type = _visual_concept_plan_sanitize_text(item.get('useType'))
-    if use_type:
-        details.append(f'use {use_type}')
-    return name + (f" ({'; '.join(details)})" if details else '')
-
-
 def _visual_concept_plan_boundary_length_text(value):
     text = _visual_concept_plan_sanitize_text(value).rstrip('.')
     text = re.sub(r'\s*\+\s*', ' followed by a break and ', text)
-    return re.sub(r'\s*\(\s*total\s*([^)]+)\)', r', total \1', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*\(\s*total\s*([^)]+)\)', r', total \1', text, flags=re.IGNORECASE)
+    if text and not re.search(r'\bm(?:eters?|etres?)?\b|متر|م\b', text, flags=re.IGNORECASE):
+        text = re.sub(r'(\d(?:[\d.,]*\d)?)', r'\1 m', text)
+    return text
+
+
+def _visual_concept_plan_edge_text(text):
+    text = _visual_concept_plan_sanitize_text(text).rstrip('.')
+    if not text:
+        return ''
+    if re.match(r'^[A-Z][a-z]+\s+[A-Z]', text):
+        return text
+    if re.match(r'^[A-Z]', text):
+        return text[:1].lower() + text[1:]
+    return text
+
+
+# Fixed stack order for the derived concept distribution: tuple order is both the
+# keyword-match priority and the vertical band order (parking lowest, service on
+# the roof). Each category maps to a fixed palette use.
+_VISUAL_PLAN_USE_CATEGORIES = (
+    ('parking', 'Parking/Service',
+     ('parking', 'garage', 'basement', 'car park', 'جراج', 'مواقف', 'باركينج', 'سرداب')),
+    ('retail', 'Retail & F&B',
+     ('retail', 'restaurant', 'f&b', 'food', 'shop', 'showroom', 'cafe', 'café',
+      'تجزئة', 'مطاعم', 'مطعم', 'محلات', 'تجاري', 'كافيه')),
+    ('office', 'Amenities',
+     ('office', 'admin', 'workspace', 'مكاتب', 'مكتبي', 'إداري', 'اداري')),
+    ('amenity', 'Amenities',
+     ('amenit', 'spa', 'wellness', 'hall', 'event', 'gym', 'club', 'lounge', 'recreation',
+      'سبا', 'قاعات', 'قاعة', 'مرافق', 'ترفيه', 'نادي')),
+    ('hotel', 'Hotel',
+     ('hotel', 'hospitality', 'resort', 'motel', 'فندق', 'فنادق', 'فندقي', 'ضيافة', 'منتجع')),
+    ('residential', 'Residential',
+     ('residential', 'apartment', 'housing', 'villa', 'duplex', 'flat',
+      'سكني', 'سكن', 'شقق', 'شقة', 'فلل', 'فيلا')),
+    ('service', 'Parking/Service',
+     ('service', 'mechanical', 'facilit', 'maintenance', 'utility',
+      'خدمات', 'تشغيل', 'ميكانيكا', 'صيانة')),
+    ('landscape', 'Landscape/Open space',
+     ('landscape', 'open space', 'green', 'park', 'plaza',
+      'لاندسكيب', 'فراغات', 'حدائق', 'مسطحات', 'بلازا')),
+)
+_VISUAL_PLAN_USE_ORDER = {key: index for index, (key, _label, _kw)
+                          in enumerate(_VISUAL_PLAN_USE_CATEGORIES)}
+_VISUAL_PLAN_USE_LABEL = {key: label for key, label, _kw in _VISUAL_PLAN_USE_CATEGORIES}
+
+
+def _visual_concept_plan_use_category(item):
+    text = ' '.join(filter(None, (
+        str(item.get('useType') or ''), str(item.get('name') or ''),
+        str(item.get('notes') or '')))).lower()
+    for key, _label, keywords in _VISUAL_PLAN_USE_CATEGORIES:
+        if any(keyword in text for keyword in keywords):
+            return _VISUAL_PLAN_USE_ORDER[key], key
+    return _VISUAL_PLAN_USE_ORDER['amenity'], 'amenity'
+
+
+def _visual_concept_plan_sector_hints(regulations):
+    text = ' '.join(str(regulations.get(key) or '') for key in (
+        'floor_area_ratio', 'table_floors', 'max_floors_height', 'land_use',
+        'allowed_uses', 'allowed_uses_restrictions', 'zoning_code', 'regulatory_constraints'))
+    patterns = (
+        r'(western|eastern|northern|southern|west|east|north|south|الغربي?|الشرقي?|الشمالي?|الجنوبي?)'
+        r'[\w\u0600-\u06FF\- ]{0,30}?sector',
+        r'(?:القطاع|النطاق|قطاع|نطاق)\s+(الغربي|الشرقي|الشمالي|الجنوبي|غرب|شرق|شمال|جنوب)',
+    )
+    matches = []
+    for pattern in patterns:
+        matches.extend(re.finditer(pattern, text, flags=re.IGNORECASE))
+    matches.sort(key=lambda match: match.start())
+    hints = {}
+    for index, match in enumerate(matches):
+        direction = _visual_concept_plan_direction_key(match.group(1))
+        if not direction:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        window = text[match.start():min(end, match.start() + 320)]
+        cap = re.search(
+            r'(?:up to|max(?:imum)?(?: number of)?|حتى|بحد\s*أقصى)\s*(?:about\s*)?(\d+)\s*'
+            r'(?:residential\s+|above[\w\- ]*\s+)?(?:floors?|أدوار|ادوار|طوابق|طابق|دور)',
+            window, flags=re.IGNORECASE)
+        if direction not in hints or (cap and not hints[direction].get('cap')):
+            hints[direction] = {'direction': direction,
+                                'cap': int(cap.group(1)) if cap else None}
+    return list(hints.values())
+
+
+def _visual_concept_plan_component_brief(item):
+    name = _visual_concept_plan_sanitize_text(item.get('name'))
+    bits = []
+    if item.get('units') not in (None, ''):
+        units = str(item['units']).strip()
+        bits.append(f"{units} {'unit' if units in ('1', '1.0') else 'units'}")
+    area = item.get('builtArea') or item.get('unitArea')
+    if area not in (None, ''):
+        bits.append(f'{area} m²')
+    if item.get('floorRange') not in (None, ''):
+        bits.append(f"floors {item['floorRange']}")
+    if item.get('building') not in (None, ''):
+        bits.append(f"building {item['building']}")
+    return name + (f" ({'; '.join(bits)})" if bits else '')
+
+
+def _visual_concept_plan_distribution(context, regulations):
+    """Derive one concept distribution from the recorded program + controls and
+    describe it verbatim so every diagram renders the same scheme."""
+    components = [item for item in context.get('components') or []
+                  if isinstance(item, dict) and item.get('name')]
+    if not components:
+        return ''
+    below, roof, bands, open_uses = [], [], [], []
+    for index, item in enumerate(components):
+        order, category = _visual_concept_plan_use_category(item)
+        entry = (order, index, item, category)
+        if category == 'parking':
+            below.append(entry)
+        elif category == 'service':
+            roof.append(entry)
+        elif category == 'landscape':
+            open_uses.append(entry)
+        else:
+            bands.append(entry)
+    bands.sort(key=lambda row: (row[0], row[1]))
+
+    hints = _visual_concept_plan_sector_hints(regulations)
+    capped = [hint for hint in hints if hint.get('cap')]
+    low_sector = min(capped, key=lambda hint: hint['cap']) if capped else None
+    uncapped = [hint for hint in hints if not hint.get('cap')]
+    high_sector = uncapped[0] if uncapped else max(
+        (hint for hint in hints if hint is not low_sector),
+        key=lambda hint: hint['cap'] or 0, default=None)
+
+    floor_count = _visual_concept_plan_sanitize_text(context.get('floor_count'))
+    tower_dir = (f"the {high_sector['direction']} high-rise sector" if high_sector
+                 else 'the primary buildable zone')
+    groups = []
+    for _order, _index, item, category in bands:
+        if groups and groups[-1][0] == category:
+            groups[-1][1].append(item)
+        else:
+            groups.append((category, [item]))
+    band_texts = []
+    for position, (category, items) in enumerate(groups):
+        names = '; '.join(_visual_concept_plan_component_brief(part) for part in items)
+        tier = 'podium' if position == 0 else ('crown' if position == len(groups) - 1 else 'band')
+        band_texts.append(f"{_VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')} {tier} ({names})")
+    tower = ('a ' + (f'{floor_count}-storey ' if floor_count else '')
+             + f'mixed-use tower standing in {tower_dir}')
+    if band_texts:
+        tower += ', its bands bottom to top: ' + '; '.join(band_texts)
+    lines = ['- Tower: ' + tower + '.']
+
+    has_residential = any(category == 'residential' for _o, _i, _c, category in bands)
+    if low_sector:
+        share = ('a share of the residential component' if has_residential
+                 else 'a share of the program')
+        block = (f"a low-rise block (up to {low_sector['cap']} floors) in the "
+                 f"{low_sector['direction']} sector carrying {share}")
+        if low_sector.get('direction'):
+            block += f', labeled "{low_sector["direction"].title()} Block"'
+        lines.append('- Low block: ' + block + '.')
+    if below:
+        names = '; '.join(_visual_concept_plan_component_brief(entry[2]) for entry in below)
+        lines.append('- Parking/Service: basement parking below grade across the parcel ('
+                     + names + ').')
+    else:
+        lines.append('- Parking/Service: parking provision below grade across the parcel '
+                     '(levels not recorded).')
+    if roof:
+        names = '; '.join(_visual_concept_plan_component_brief(entry[2]) for entry in roof)
+        lines.append('- A light-grey service/mechanical rooftop cap on the tower ('
+                     + names + ').')
+    if open_uses:
+        names = '; '.join(str(item.get('name')) for _o, _i, item, _c in open_uses)
+        lines.append('- Recorded open-space components: ' + names + '.')
+
+    street_dirs = []
+    for item in context.get('directions') or []:
+        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
+        if re.search(r'street|road|corniche|شارع|طريق|كورنيش', text, flags=re.IGNORECASE):
+            key = _visual_concept_plan_direction_key(item.get('direction'))
+            if key and key not in street_dirs:
+                street_dirs.append(key)
+    main = f'the {street_dirs[0]} frontage' if street_dirs else 'the primary street frontage'
+    secondary = f'the {street_dirs[1]} edge' if len(street_dirs) > 1 else 'a secondary street edge'
+    lines.append(f'- Entries: the main lobby entry on {main}; residential and service entries on '
+                 f'{secondary}.')
+    lines.append('- Open areas: landscaping on all remaining open ground inside the setback '
+                 'envelope.')
+    return ('DERIVED CONCEPT DISTRIBUTION — one consistent scheme for every diagram; render '
+            'exactly this, invent nothing:\n' + '\n'.join(lines))
 
 
 def _visual_concept_plan_site_body(context, components, regulations):
-    has_placement = any(item.get('building') or item.get('floorRange') for item in components)
-    parts = []
-    points = context.get('boundary_points') or []
-    if len(points) >= 3:
-        listing = '; '.join(
-            f"{item.get('point')}: E {_visual_concept_plan_coordinate_text(item.get('eastings'))} / "
-            f"N {_visual_concept_plan_coordinate_text(item.get('northings'))}"
-            for item in points)
+    parts = ['Recorded site facts — use them verbatim:\n'
+             + '\n'.join(_visual_concept_plan_facts_sentences(context, regulations))]
+    distribution = _visual_concept_plan_distribution(context, regulations)
+    if distribution:
+        parts.append(distribution)
         parts.append(
-            'Match the attached map footprint exactly, preserving the irregular '
-            f'{len(points)}-vertex parcel, every corner and boundary break, its orientation, and its '
-            f'relative proportions. Use the attached footprint and only these surveyed points as '
-            f'the geometric basis: {listing}.')
+            'Inside the traced parcel draw the dashed setback envelope, then the derived footprints '
+            'as flat use-colored fields labeled with their names: the tower and its podium field on '
+            'their derived sector, the low block on its recorded sector, and a light-grey '
+            'service/parking-access pocket. Pale-green landscaping with trees fills the remaining '
+            'open ground, with a forecourt at each entry. Draw the derived entries as labeled '
+            'arrows on the recorded street edges.')
     else:
-        parts.append('No surveyed boundary points are recorded; draw a plain generic parcel outline.')
-    regulations_area = _visual_concept_plan_area_text(regulations.get('croquis_land_area'))
-    official = regulations_area or _visual_concept_plan_area_text(context.get('land_area'))
-    if official:
-        other = _visual_concept_plan_area_text(context.get('design_area'))
-        sentence = f'The official regulatory land area is {official}'
-        if (other and _visual_concept_number(other) is not None
-                and _visual_concept_number(other) != _visual_concept_number(official)):
-            sentence += f'; do not use the other recorded figure of {other} as the design basis'
-        parts.append(sentence + '.')
-    parts.append('Keep north upward and include a simple dark-navy north-arrow symbol without lettering.')
-
-    length_by_dir = {}
-    unmatched_lengths = []
-    lengths_text = _visual_concept_plan_sanitize_text(regulations.get('boundary_lengths'))
-    if lengths_text:
-        for segment in re.split(r'[;؛]', lengths_text):
-            segment = segment.strip()
-            if not segment:
-                continue
-            match = re.match(r'(north|south|east|west|شمال|جنوب|شرق|غرب)\b\s*[:\-–—]?\s*(.+)',
-                             segment, flags=re.IGNORECASE)
-            key = _visual_concept_plan_direction_key(match.group(1)) if match else ''
-            if key and key not in length_by_dir:
-                length_by_dir[key] = (segment, match.group(2))
-            else:
-                unmatched_lengths.append(segment)
-    edge_parts = []
-    direction_order = {'north': 0, 'south': 1, 'east': 2, 'west': 3}
-    direction_items = []
-    for item in context.get('directions') or []:
-        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
-        if not text:
-            continue
-        direction = _visual_concept_plan_direction_key(item.get('direction'))
-        direction_items.append((direction_order.get(direction, 9), direction, text))
-    for _order, direction, text in sorted(direction_items, key=lambda row: row[0]):
-        pair = length_by_dir.pop(direction, None) if direction else None
-        preposition = ('adjoining' if re.search(r'neighbor|adjacent|propert|مجاور|جار', text,
-                                                flags=re.IGNORECASE) else 'beside')
-        lowered = text[:1].lower() + text[1:] if re.match(r'[A-Z][a-z]', text) else text
-        if direction and pair:
-            edge_parts.append(f'{direction} boundary '
-                              f'{_visual_concept_plan_boundary_length_text(pair[1])} '
-                              f'{preposition} {lowered}')
-        elif direction:
-            edge_parts.append(f'{lowered} along the {direction} boundary')
-        else:
-            edge_parts.append(text)
-    streets = _visual_concept_plan_sanitize_text(
-        context.get('surrounding_streets') or regulations.get('surrounding_streets'))
-    if streets:
-        edge_parts.append(streets)
-    leftover = unmatched_lengths + [pair[0] for pair in length_by_dir.values()]
-    if leftover:
-        edge_parts.append('recorded boundary lengths: ' + '; '.join(leftover))
-    if edge_parts:
-        joined = '; '.join(edge_parts)
-        parts.append(f'Preserve the recorded boundary structure: {joined}.')
-        render = ('Render recorded neighboring properties as restrained neutral fields, recorded '
-                  'streets as light-grey corridors, and recorded landscaping or beautification '
-                  'strips as pale green')
-        if re.search(r'sea|shore|coast|corniche|بحر|كورنيش|شاطئ', joined, flags=re.IGNORECASE):
-            render += (', with restrained pale-cyan sea context beyond the waterfront edge without '
-                       'assigning any undocumented distance')
-        parts.append(render + '.')
-    else:
-        parts.append('No surroundings are recorded; keep the context around the parcel empty.')
-
-    if has_placement:
-        names = '; '.join(item.get('name') for item in components if item.get('name'))
-        parts.append('Draw only the recorded approved component footprints as flat unlabeled fields: '
-                     + names + '. Do not enlarge, merge, or reshape them. Entrance positions are not '
-                     'recorded; draw no entry arrows. Do not draw an internal zoning division.')
-    else:
-        missing = ['approved building footprints', 'entrance positions']
-        if not _visual_concept_plan_sanitize_text(context.get('open_area')):
-            missing.append('open-space area')
-        zoning_text = ' '.join(
-            _visual_concept_plan_sanitize_text(regulations.get(key))
-            for key in ('floor_area_ratio', 'land_use', 'zoning_code', 'allowed_uses',
-                        'allowed_uses_restrictions', 'table_floors', 'max_floors_height'))
-        if re.search(r'sector|zone|قطاع|نطاق', zoning_text, flags=re.IGNORECASE):
-            missing.append('the exact internal boundary between the zoning sectors')
-        listing = (missing[0] if len(missing) == 1
-                   else ', '.join(missing[:-1]) + ', and ' + missing[-1])
-        parts.append(f'Keep the parcel interior as a neutral regulated-development field because '
-                     f'{listing} are not recorded. Draw no tower, podium, building mass, entrance, '
-                     'entry arrow, parking layout, vehicle, pedestrian route, service route, or '
-                     'speculative circulation. Do not draw an internal zoning division.')
-
-    setbacks_text = _visual_concept_plan_sanitize_text(
-        context.get('setbacks') or regulations.get('setbacks') or regulations.get('building_ratio_setbacks'))
-    if setbacks_text:
-        parts.append('Indicate only the recorded setback conditions through precise dashed nested '
-                     'offset lines and crisp dimension ticks without numerals: '
-                     f'{setbacks_text}. Do not extrapolate setbacks beyond the recorded ranges.')
-    else:
-        parts.append('No setbacks are recorded; draw no offset lines.')
-
+        parts.append(
+            'No approved building footprints or entrance positions are recorded; keep the parcel '
+            'interior a neutral regulated-development field, draw no buildings and no entry '
+            'arrows, and add an English note reading "Approved building footprints not recorded."')
     controls = (_visual_concept_plan_control_lines(context, regulations)
                 + _visual_concept_plan_operational_lines(regulations))
     if controls:
-        parts.append('Visually maintain the recorded controls without speculative geometry: '
+        parts.append('Add a compact control panel with the recorded facts: '
                      + '; '.join(controls) + '.')
-    if components:
-        program = '; '.join(
-            _visual_concept_plan_component_summary(item) for item in components if item.get('name'))
-        if program:
-            parts.append(f'The approved program consists of {program}; do not translate these '
-                         'quantities into masses or footprints.')
-    palette = ', '.join(
-        f"{str(item['use']).lower()} {item['color']}"
-        for item in context.get('colors') or [] if item.get('use'))
-    if palette:
-        if has_placement:
-            parts.append('Use only this fixed palette for the recorded fields: ' + palette + '.')
-        else:
-            parts.append('Show only a small row of unlabeled color swatches outside the parcel using '
-                         'the fixed palette: ' + palette + '.')
-    parts.append('Use dark-navy parcel outlines, restrained line weights, small vertex markers, '
-                 'clean dimension ticks without visible numerals, minimal linework, and a flat '
-                 'professional cartographic composition.')
-    parts.append('Do not render any visible words, letters, numbers, title blocks, labels, logos, '
-                 'people, cars, satellite imagery, photorealistic elements, or watermarks.')
+    parts.append(
+        'Bottom-left legend with the fixed color chips plus "Parcel Boundary" and "Setback '
+        'Envelope" line keys. Top-left title "CONCEPTUAL SITE PLAN". Bottom-right caption '
+        '"ILLUSTRATIVE REFERENCE - NOT TO SCALE". '
+        + _visual_concept_plan_color_sentence(context, bool(distribution))
+        + ' Flat cartographic style, muted pastel fills, dark navy outlines and labels, minimal '
+        'linework. No satellite imagery, no photorealism, no people, no cars. Only recorded or '
+        'derived labels — no invented dimensions.')
+    parts.append('All visible image labels must be English only.')
     return '\n\n'.join(part for part in parts if part)
 
 
 def _visual_concept_plan_uses_body(context, components, regulations):
-    has_ranges = any(item.get('floorRange') for item in components)
     parts = []
-    if components:
+    distribution = _visual_concept_plan_distribution(context, regulations)
+    if distribution:
+        parts.append(distribution)
+        parts.append(
+            'Draw one labeled vertical stack per derived building, side by side on a shared dark '
+            'navy "Ground Level" line: the bands bottom to top exactly as specified in the '
+            'distribution — light-grey below-grade parking bands below the line, use-colored bands '
+            'above it, and a thin grey service rooftop cap where a service component exists. Give '
+            'every band a dotted-leader English callout naming its use and recorded component '
+            '(name, units, and built area where recorded).')
+        floor_count = _visual_concept_plan_sanitize_text(context.get('floor_count'))
+        if floor_count:
+            parts.append(f'Cap the tower stack at the recorded overall floor count; its callout '
+                         f'reads "Tower — {floor_count} storeys".')
+    else:
         lines = [_visual_concept_plan_component_line(item, index)
                  for index, item in enumerate(components, 1)]
-        parts.append('Recorded components, in this order:\n' + '\n'.join(lines) +
-                     '\nUnder each stack, list only the fields recorded for it, exactly as given.')
-    if has_ranges:
-        parts.append("Draw each stack's height from its recorded floor range only and label the range "
-                     'on the stack; a component without a recorded range gets a generic stack marked '
-                     '"floor range not recorded".')
-    else:
-        parts.append('No component floor ranges are recorded; draw generic stacks with no labeled floors.')
-    floor_count = _visual_concept_plan_sanitize_text(
-        context.get('floor_count') or regulations.get('table_floors') or regulations.get('max_floors_height'))
-    datum = []
-    if floor_count:
-        datum.append(f'Approved overall floor count: {floor_count}')
-    if not has_ranges:
-        datum.append('Component floor ranges not recorded.')
-    if datum:
-        parts.append('Add a "Project datum" panel reading: '
-                     + '; '.join(f'"{line}"' for line in datum) + '.')
-    controls = _visual_concept_plan_control_lines(context, regulations)
-    if controls:
-        parts.append('Add a "Regulatory context" panel with the recorded facts: '
-                     + '; '.join(controls) + '.')
-    parts.append(_visual_concept_plan_color_sentence(context, True, for_stacks=True))
+        if lines:
+            parts.append('Recorded components, in this order:\n' + '\n'.join(lines))
+        parts.append('No distribution is recorded; draw one generic stack per recorded component '
+                     'with no labeled floors.')
     parts.append(
-        _visual_concept_plan_title_block(context, 'Vertical program distribution')
-        + ' Clean infographic style: flat pastel stacks with thin floor lines, dark navy outlines '
-          'and text, dotted leader callouts. No photorealism, no people, no furniture.')
+        'Bottom-left legend with the fixed color chips for the uses present. Top-left title '
+        '"VERTICAL PROGRAM DISTRIBUTION". Bottom-right caption "ILLUSTRATIVE REFERENCE - NOT TO '
+        'SCALE". ' + _visual_concept_plan_color_sentence(context, True, for_stacks=True)
+        + ' Clean infographic style: flat pastel bands with thin floor lines, dark navy outlines '
+        'and text, dotted leader callouts. No photorealism, no people, no furniture. Do not invent '
+        'floors, buildings, uses, unit counts, or dimensions beyond the recorded facts and the '
+        'derived distribution.')
     parts.append('All visible image labels must be English only.')
     return '\n\n'.join(part for part in parts if part)
 
 
 def _visual_concept_plan_massing_body(context, components, regulations):
-    has_placement = any(item.get('building') or item.get('floorRange') for item in components)
-    parts = [_visual_concept_plan_parcel_sentence(context)]
-    area = _visual_concept_plan_area_sentence(context)
-    if area:
-        parts.append(area)
-    parts.append('Represent the site as a thin matte base plate. '
-                 + _visual_concept_plan_surroundings_sentence(context)
-                 + ' Keep recorded zoning sectors visibly distinct as flat zoning fields where the '
-                   'recorded controls define them.')
-    if has_placement:
-        lines = '; '.join(
-            item.get('name') + (f" (floors {item['floorRange']})" if item.get('floorRange') else '')
-            for item in components if item.get('name'))
-        parts.append('Extrude only the recorded approved components as simple matte volumes: ' + lines +
-                     '. Place each volume on its recorded zone inside the development field; do not '
-                     'invent footprint shapes or extra buildings.')
+    parts = ['Recorded site facts — use them verbatim:\n'
+             + '\n'.join(_visual_concept_plan_facts_sentences(context, regulations))]
+    distribution = _visual_concept_plan_distribution(context, regulations)
+    if distribution:
+        parts.append(distribution)
+        parts.append(
+            'Represent the site as a thin matte base plate matching the attached surveyed '
+            'footprint. Extrude each derived building as simple matte volumes: the tower extruded '
+            'band by band in the fixed colors with thin white floor lines and dark navy outlines, '
+            'each higher band stepped slightly inward; the low block beside it on its recorded '
+            'sector; pale-green landscaping with round trees in the open areas; a pale-cyan sea '
+            'band beyond the waterfront edge where recorded. Give every band and block an English '
+            'callout on a dotted leader line, and label the recorded streets and neighbors.')
     else:
-        parts.append('No approved building-footprint geometry, component placement, or '
-                     'component-specific floor ranges are recorded. Therefore, do not place or '
-                     'extrude speculative building masses. Show a restrained dashed development field '
-                     'inside the parcel and an English note reading "Approved building footprints and '
-                     'component floor ranges not recorded."')
-    floor_count = _visual_concept_plan_sanitize_text(
-        context.get('floor_count') or regulations.get('table_floors') or regulations.get('max_floors_height'))
-    if floor_count:
-        parts.append(f'The only recorded overall approved floor count is {floor_count}; show it as a '
-                     f'vertical datum labeled "Approved overall floor count: {floor_count}," not as '
-                     'an invented building volume.')
+        parts.append(
+            'No approved building masses are recorded; do not extrude speculative volumes — show a '
+            'restrained dashed development field with an English note "Approved building footprints '
+            'not recorded."')
     controls = _visual_concept_plan_control_lines(context, regulations)
     if controls:
-        parts.append('Add a compact control panel with the recorded facts: ' + '; '.join(controls) + '.')
-    parts.append(_visual_concept_plan_setbacks_sentence(context))
-    parts.append(_visual_concept_plan_title_block(context, 'Conceptual massing')
-                 + ' Use simple matte geometry, subtle shadows, crisp edges, and minimal linework. '
-                 + _visual_concept_plan_color_sentence(context, has_placement))
+        parts.append('Add a compact control panel with the recorded facts: '
+                     + '; '.join(controls) + '.')
+    parts.append(
+        'Bottom-left legend with the fixed color chips. Top-left title "CONCEPTUAL MASSING". '
+        'Bottom-right caption "ILLUSTRATIVE REFERENCE - NOT TO SCALE". '
+        + _visual_concept_plan_color_sentence(context, bool(distribution))
+        + ' Flat vector look, muted pastel palette, subtle shadows, crisp edges, dark navy text. '
+        'No photorealism, no people, no cars.')
     parts.append('All visible image labels must be English only.')
     return '\n\n'.join(part for part in parts if part)
 
