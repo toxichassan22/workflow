@@ -463,7 +463,7 @@
                 <div id="visualConceptPlansWorkflowImages" class="plans-workflow-results"></div>
               </section>
             </div>
-            <div class="visual-concept-card">
+            <div class="visual-concept-card plans-legacy-extra" aria-hidden="true">
               <div class="visual-concept-head">
                 <h3 data-i18n="plans.extra_title">مخططات إضافية</h3>
                 <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
@@ -472,7 +472,7 @@
                 <button type="button" class="btn primary small" id="visualConceptAddPlanBtn" data-i18n="plans.add_button">إضافة مخطط</button>
               </div>
             </div>
-            <div id="visualConceptPlansGenerateList" class="visual-concept-page"></div>
+            <div id="visualConceptPlansGenerateList" class="visual-concept-page plans-legacy-extra" aria-hidden="true"></div>
           </div>
           <div id="visualConceptPlansUploadPanel" data-visual-plans-panel="upload" hidden>
             <div class="visual-concept-card">
