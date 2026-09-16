@@ -16,6 +16,7 @@
         angleHtml + '</div>';
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
+      renderVisualConceptPlansWizard();
       const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
       bindRoot.querySelectorAll('[data-visual-prompt]').forEach(input => {
         input.addEventListener('input', () => {

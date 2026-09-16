@@ -836,6 +836,13 @@
     const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
     const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;
     const VISUAL_CONCEPT_MAX_PLANS = 30;
+    const VISUAL_CONCEPT_PLAN_KINDS = [
+      { kind: 'site', id: 'plan_site', label: 'مخطط الموقع العام', labelKey: 'plans.kind_site' },
+      { kind: 'uses', id: 'plan_uses', label: 'توزيع الاستخدامات', labelKey: 'plans.kind_uses' },
+      { kind: 'massing', id: 'plan_massing', label: 'المنظور الكتلي', labelKey: 'plans.kind_massing' }
+    ];
+    const VISUAL_CONCEPT_PLAN_KIND_IDS = new Set(VISUAL_CONCEPT_PLAN_KINDS.map(item => item.id));
+    const VISUAL_CONCEPT_PLAN_KIND_SET = new Set(VISUAL_CONCEPT_PLAN_KINDS.map(item => item.kind));
     const VISUAL_CONCEPT_SLOT_ALIASES = {
       cover: ['cover', 'main', 'hero'],
       right: ['right', 'east', 'east_facade'],
@@ -851,6 +858,7 @@
 
     function visualConceptDefaultSlotLabel(slotId) {
       return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
+        || visualConceptPlanLabel(slotId)
         || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : (isVisualConceptPlanSlot(slotId) ? 'مخطط' : 'الصورة'));
     }
 
@@ -930,6 +938,162 @@
       }
     }
 
+    function visualConceptPlanKindDefinition(value) {
+      const raw = value && typeof value === 'object' ? value : { id: value };
+      const kind = String(raw.kind || '').trim().toLowerCase();
+      const id = String(raw.id || '').trim();
+      return VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === kind || item.id === id) || null;
+    }
+
+    function visualConceptPlanLabel(value) {
+      const definition = visualConceptPlanKindDefinition(value);
+      return definition ? WFT(definition.labelKey, definition.label) : '';
+    }
+
+    function isVisualConceptWorkflowPlan(plan) {
+      return Boolean(visualConceptPlanKindDefinition(plan));
+    }
+
+    function visualConceptPlanKind(planOrId) {
+      return visualConceptPlanKindDefinition(planOrId)?.kind || '';
+    }
+
+    function visualConceptPlanWorkflowNumber(value) {
+      if (value === null || value === undefined || value === '') return '';
+      const number = Number(String(value).replace(/,/g, ''));
+      return Number.isFinite(number) ? number : '';
+    }
+
+    function visualConceptPlansWorkflowText(value, limit = 1200) {
+      return String(value === null || value === undefined ? '' : value).trim().slice(0, limit);
+    }
+
+    function emptyVisualConceptPlansWorkflow() {
+      return {
+        status: 'idle',
+        dataVersion: '',
+        verification: { checks: [], blockingIssues: [], canDistribute: false, summary: '', dataVersion: '' },
+        distribution: {
+          rows: [], reconciliation: [], explanation: '', assumptions: [], impacts: [], warnings: [], dataVersion: ''
+        },
+        feedback: '',
+        approved: false,
+        approval: null,
+        approvedDataVersion: '',
+        approvedDistributionHash: '',
+        approvedSpec: null,
+        disclaimer: '',
+        generatedKinds: [],
+        generatedAt: ''
+      };
+    }
+
+    function normalizeVisualConceptPlansWorkflow(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const source = value && typeof value === 'object' ? value : {};
+      const empty = emptyVisualConceptPlansWorkflow();
+      const verificationSource = source.verification && typeof source.verification === 'object'
+        ? source.verification : {};
+      const distributionSource = source.distribution && typeof source.distribution === 'object'
+        ? source.distribution : {};
+      const checks = Array.isArray(verificationSource.checks) ? verificationSource.checks.slice(0, 40).map(item => ({
+        item: visualConceptPlansWorkflowText(item?.item || item?.check, 200),
+        project: visualConceptPlansWorkflowText(item?.project || item?.project_value, 400),
+        reference: visualConceptPlansWorkflowText(item?.reference || item?.constraint, 400),
+        result: visualConceptPlansWorkflowText(item?.result || item?.status, 80),
+        note: visualConceptPlansWorkflowText(item?.note || item?.action, 600)
+      })).filter(item => item.item) : [];
+      const rows = Array.isArray(distributionSource.rows) ? distributionSource.rows.slice(0, 120).map(item => ({
+        building: visualConceptPlansWorkflowText(item?.building, 80),
+        floor_span: visualConceptPlansWorkflowText(item?.floor_span || item?.floorRange, 120),
+        floor_count: visualConceptPlanWorkflowNumber(item?.floor_count ?? item?.floorCount),
+        component: visualConceptPlansWorkflowText(item?.component, 160),
+        use: visualConceptPlansWorkflowText(item?.use, 80),
+        units_per_floor: visualConceptPlanWorkflowNumber(item?.units_per_floor ?? item?.unitsPerFloor),
+        total_units: visualConceptPlanWorkflowNumber(item?.total_units ?? item?.totalUnits),
+        floor_area: visualConceptPlanWorkflowNumber(item?.floor_area ?? item?.floorArea),
+        group_area: visualConceptPlanWorkflowNumber(item?.group_area ?? item?.groupArea),
+        services_share: visualConceptPlansWorkflowText(item?.services_share || item?.servicesShare, 200),
+        notes: visualConceptPlansWorkflowText(item?.notes, 400)
+      })).filter(item => item.building || item.component || item.floor_span) : [];
+      const reconciliation = Array.isArray(distributionSource.reconciliation)
+        ? distributionSource.reconciliation.slice(0, 60).map(item => ({
+          component: visualConceptPlansWorkflowText(item?.component, 160),
+          required_units: visualConceptPlanWorkflowNumber(item?.required_units ?? item?.requiredUnits),
+          proposed_units: visualConceptPlanWorkflowNumber(item?.proposed_units ?? item?.proposedUnits),
+          required_area: visualConceptPlanWorkflowNumber(item?.required_area ?? item?.requiredArea),
+          proposed_area: visualConceptPlanWorkflowNumber(item?.proposed_area ?? item?.proposedArea),
+          difference: visualConceptPlansWorkflowText(item?.difference || item?.explanation, 400)
+        })).filter(item => item.component) : [];
+      const approvedSpec = source.approvedSpec && typeof source.approvedSpec === 'object'
+        ? source.approvedSpec : null;
+      const status = ['idle', 'verified', 'blocked', 'distributed', 'approved', 'generating', 'generated', 'partial']
+        .includes(source.status) ? source.status : (rows.length ? 'distributed' : 'idle');
+      return {
+        ...empty,
+        status,
+        dataVersion: visualConceptPlansWorkflowText(source.dataVersion || source.data_version, 120),
+        verification: {
+          checks,
+          blockingIssues: Array.isArray(verificationSource.blockingIssues || verificationSource.blocking_issues)
+            ? (verificationSource.blockingIssues || verificationSource.blocking_issues).map(item => visualConceptPlansWorkflowText(item, 400)).filter(Boolean).slice(0, 20)
+            : [],
+          canDistribute: Boolean(verificationSource.canDistribute ?? verificationSource.can_distribute),
+          summary: visualConceptPlansWorkflowText(verificationSource.summary, 1200),
+          dataVersion: visualConceptPlansWorkflowText(verificationSource.dataVersion || verificationSource.data_version, 120)
+        },
+        distribution: {
+          rows,
+          reconciliation,
+          explanation: visualConceptPlansWorkflowText(distributionSource.explanation, 2000),
+          assumptions: Array.isArray(distributionSource.assumptions) ? distributionSource.assumptions.map(item => visualConceptPlansWorkflowText(item, 300)).filter(Boolean).slice(0, 20) : [],
+          impacts: Array.isArray(distributionSource.impacts) ? distributionSource.impacts.map(item => visualConceptPlansWorkflowText(item, 300)).filter(Boolean).slice(0, 20) : [],
+          warnings: Array.isArray(distributionSource.warnings) ? distributionSource.warnings.map(item => visualConceptPlansWorkflowText(item, 300)).filter(Boolean).slice(0, 20) : [],
+          dataVersion: visualConceptPlansWorkflowText(distributionSource.dataVersion || distributionSource.data_version, 120)
+        },
+        feedback: visualConceptPlansWorkflowText(source.feedback, 4000),
+        approved: Boolean(source.approved),
+        approval: source.approval && typeof source.approval === 'object' ? { ...source.approval } : null,
+        approvedDataVersion: visualConceptPlansWorkflowText(source.approvedDataVersion || source.approved_data_version, 120),
+        approvedDistributionHash: visualConceptPlansWorkflowText(source.approvedDistributionHash || source.approved_distribution_hash, 120),
+        approvedSpec,
+        disclaimer: visualConceptPlansWorkflowText(source.disclaimer, 400),
+        generatedKinds: Array.isArray(source.generatedKinds || source.generated_kinds)
+          ? (source.generatedKinds || source.generated_kinds).filter(kind => VISUAL_CONCEPT_PLAN_KIND_SET.has(kind)).slice(0, 3) : [],
+        generatedAt: visualConceptPlansWorkflowText(source.generatedAt || source.generated_at, 80)
+      };
+    }
+
+    function ensureVisualConceptWorkflowPlans() {
+      tenantVisualConceptState = tenantVisualConceptState || normalizeVisualConceptState({});
+      const plans = Array.isArray(tenantVisualConceptState.plans2d) ? tenantVisualConceptState.plans2d : [];
+      const added = [];
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+        let plan = plans.find(item => visualConceptPlanKind(item) === definition.kind || item.id === definition.id);
+        if (!plan) {
+          plan = { id: definition.id, kind: definition.kind, mode: 'ai', title: visualConceptPlanLabel(definition), description: '', fileId: '', fileName: '', imageUrl: '' };
+          plans.unshift(plan);
+          added.push(plan);
+        } else {
+          plan.kind = definition.kind;
+          plan.id = definition.id;
+          if (!plan.title) plan.title = visualConceptPlanLabel(definition);
+        }
+        if (!tenantVisualConceptState.slots[plan.id]) {
+          tenantVisualConceptState.slots[plan.id] = visualConceptPlanSeed(plan) || emptyVisualConceptSlot(plan.id);
+        }
+      });
+      const workflowPlans = VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
+        plans.find(item => item.id === definition.id)).filter(Boolean);
+      const extraPlans = plans.filter(plan => !isVisualConceptWorkflowPlan(plan))
+        .slice(0, Math.max(0, VISUAL_CONCEPT_MAX_PLANS - workflowPlans.length));
+      tenantVisualConceptState.plans2d = workflowPlans.concat(extraPlans);
+      return added.length;
+    }
+
     // A plan is a slot too: plans2d keeps the durable record the slides and exports read
     // (title, description, file, published image), while slots[plan.id] carries the working
     // state (mode, prompt, chat, approval) so plans run through the same prompt-edit-
@@ -950,10 +1114,12 @@
         const fileId = String(source.fileId || source.file_id || '');
         const imageUrl = durableImageUrl(source.imageUrl || source.image_url);
         const mode = ['ai', 'upload'].includes(source.mode) ? source.mode : (fileId ? 'upload' : 'ai');
+        const definition = visualConceptPlanKindDefinition({ id, kind: source.kind });
         return {
           id,
+          kind: definition?.kind || '',
           mode,
-          title: String(source.title || '').slice(0, 120),
+          title: String(source.title || definition?.label || '').slice(0, 120),
           description: String(source.description || '').slice(0, 2000),
           fileId,
           fileName: String(source.fileName || source.file_name || ''),
@@ -966,7 +1132,8 @@
       if (!plan) return null;
       return {
         mode: plan.mode === 'upload' ? 'upload' : 'ai',
-        label: plan.title || '',
+        kind: plan.kind || visualConceptPlanKind(plan) || '',
+        label: plan.title || visualConceptDefaultSlotLabel(plan.id),
         caption: plan.description || '',
         sourceFileId: plan.fileId || '',
         sourceFileName: plan.fileName || '',
@@ -994,6 +1161,8 @@
         });
       }
       const plans = normalizeVisualConceptPlans(source.plans2d);
+      const plansWorkflow = normalizeVisualConceptPlansWorkflow(
+        source.plansWorkflow || source.plans_workflow);
       const styleReferenceFileIds = savedReferenceIds.slice(0, 5);
       const styleReferenceNames = visualConceptReferenceList(source.styleReferenceNames || source.style_reference_names);
       const legacyReferenceName = String(source.styleReferenceName || '').trim();
@@ -1046,8 +1215,10 @@
             ? rawStatus
             : (approved ? 'approved' : imageUrl ? 'review' : 'pending'));
         stated[id] = Boolean(slot.status || approved || imageUrl);
+        const plan = plans.find(item => item.id === id);
         slots[id] = {
           id,
+          kind: plan?.kind || visualConceptPlanKind(plan) || '',
           mode,
           prompt: String(slot.prompt || '').slice(0, 12000),
           imageUrl,
@@ -1083,6 +1254,7 @@
         version: 1,
         slots,
         plans2d: plans,
+        plansWorkflow,
         styleReferenceFileIds,
         styleReferenceFileId: styleReferenceFileIds[0] || '',
         styleReferenceNames,
@@ -1097,12 +1269,15 @@
       const previousMoodboard = Array.isArray(previousImages.moodboard) ? previousImages.moodboard : [];
       const previousPrompts = Array.isArray(previousImages.moodboard_prompts) ? previousImages.moodboard_prompts : [];
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
+      tenantVisualConceptState.plansWorkflow = normalizeVisualConceptPlansWorkflow(
+        tenantVisualConceptState.plansWorkflow);
       tenantProjectData.visual_concept = tenantVisualConceptState;
       // The durable plan record mirrors its slot so slides and exports keep reading plans2d.
       (tenantVisualConceptState.plans2d || []).forEach(plan => {
         const slot = tenantVisualConceptState.slots[plan.id];
         if (!slot) return;
         plan.mode = slot.mode === 'upload' ? 'upload' : 'ai';
+        plan.kind = plan.kind || slot.kind || visualConceptPlanKind(plan) || '';
         plan.title = String(slot.label || '').slice(0, 120);
         plan.description = String(slot.caption || '').slice(0, 2000);
         plan.fileId = String(slot.sourceFileId || '');
@@ -1155,7 +1330,11 @@
       if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
         projectData.financial_study_model = collectFinancialStudyModel();
       }
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      projectData.visual_concept = tenantVisualConceptState;
       tenantProjectData = projectData;
+      const plan = visualConceptPlans().find(item => item.id === slotId);
+      const plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
       return {
         slotId,
         projectData,
@@ -1174,8 +1353,15 @@
           ? visualConceptInteriorReferenceIds(slotId)
           : [],
         planDescription: isVisualConceptPlanSlot(slotId)
-          ? (visualConceptPlans().find(item => item.id === slotId)?.description || '')
-          : ''
+          ? (plan?.description || '')
+          : '',
+        planKind: isVisualConceptPlanSlot(slotId)
+          ? (plan?.kind || visualConceptPlanKind(plan) || visualConceptPlanKind(slotId) || '')
+          : '',
+        approvedSpec: isVisualConceptPlanSlot(slotId) ? (plansWorkflow.approvedSpec || null) : null,
+        distribution: isVisualConceptPlanSlot(slotId) ? (plansWorkflow.distribution || null) : null,
+        plansWorkflow: isVisualConceptPlanSlot(slotId) ? plansWorkflow : null,
+        dataVersion: isVisualConceptPlanSlot(slotId) ? (plansWorkflow.dataVersion || '') : ''
       };
     }
 
@@ -1620,8 +1806,10 @@
       const uploadHost = document.getElementById('visualConceptPlansUploadList');
       const count = document.getElementById('visualConceptPlansCount');
       const input = document.getElementById('visualConceptPlansUploadInput');
+      ensureVisualConceptWorkflowPlans();
       const plans = visualConceptPlans();
-      if (count) count.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
+      const extraPlans = plans.filter(plan => !isVisualConceptWorkflowPlan(plan));
+      if (count) count.textContent = extraPlans.length ? extraPlans.length + ' مخطط' : 'لا توجد مخططات إضافية';
       if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
       const addButton = document.getElementById('visualConceptAddPlanBtn');
       if (addButton) addButton.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
@@ -1631,7 +1819,7 @@
         }
       });
       const groups = { generate: [], upload: [] };
-      plans.forEach(plan => groups[visualConceptPlanMode(plan)].push(plan));
+      extraPlans.forEach(plan => groups[visualConceptPlanMode(plan)].push(plan));
       const renderGroup = group => group.length
         ? '<div class="visual-concept-stack">' + group.map(plan =>
           renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)
@@ -1639,6 +1827,486 @@
         : '';
       if (generateHost) generateHost.innerHTML = renderGroup(groups.generate) || '<p class="tenant-hint">لا توجد مخططات مولّدة.</p>';
       if (uploadHost) uploadHost.innerHTML = renderGroup(groups.upload) || '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
+    }
+
+    function visualConceptPlansWorkflowState() {
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
+      tenantVisualConceptState.plansWorkflow = normalizeVisualConceptPlansWorkflow(
+        tenantVisualConceptState.plansWorkflow);
+      return tenantVisualConceptState.plansWorkflow;
+    }
+
+    function plansStableValue(value) {
+      if (Array.isArray(value)) return value.map(item => plansStableValue(item));
+      if (value && typeof value === 'object') {
+        return Object.keys(value).sort().reduce((result, key) => {
+          result[key] = plansStableValue(value[key]);
+          return result;
+        }, {});
+      }
+      return value;
+    }
+
+    function plansHash(value) {
+      const text = typeof value === 'string' ? value : JSON.stringify(plansStableValue(value));
+      let hash = 2166136261;
+      for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      return (hash >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function plansDataVersion(projectData) {
+      let source = {};
+      try { source = JSON.parse(JSON.stringify(projectData || {})); } catch (error) { source = {}; }
+      [
+        'visual_concept', 'tenantCreativeImages', 'visual_style_reference_file_id',
+        'visual_style_reference_file_ids', 'creativeImages', 'creativeSlots', 'slides'
+      ].forEach(key => { delete source[key]; });
+      return 'plans-v1-' + plansHash(source);
+    }
+
+    function plansDistributionHash(distribution) {
+      return plansHash({
+        rows: distribution?.rows || [],
+        reconciliation: distribution?.reconciliation || [],
+        feedback: distribution?.feedback || ''
+      });
+    }
+
+    function plansWorkflowResetForVersion(dataVersion) {
+      const current = visualConceptPlansWorkflowState();
+      const feedback = current.feedback || '';
+      const next = emptyVisualConceptPlansWorkflow();
+      next.dataVersion = dataVersion || '';
+      next.feedback = feedback;
+      tenantVisualConceptState.plansWorkflow = next;
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+        const slot = tenantVisualConceptState.slots[definition.id];
+        if (!slot) return;
+        if (slot.approvedImageUrl) slot.imageUrl = slot.imageUrl || slot.approvedImageUrl;
+        slot.approvedImageUrl = '';
+        slot.status = slot.imageUrl ? 'review' : 'pending';
+      });
+      return next;
+    }
+
+    async function collectVisualConceptPlansPayload() {
+      ensureVisualConceptWorkflowPlans();
+      const payload = await collectVisualConceptPayload('plan_site');
+      const dataVersion = plansDataVersion(payload.projectData);
+      let workflow = visualConceptPlansWorkflowState();
+      if (workflow.dataVersion && workflow.dataVersion !== dataVersion) {
+        workflow = plansWorkflowResetForVersion(dataVersion);
+      } else {
+        workflow.dataVersion = dataVersion;
+      }
+      payload.dataVersion = dataVersion;
+      payload.plansDataVersion = dataVersion;
+      payload.workflowStatus = workflow.status;
+      payload.feedback = workflow.feedback || '';
+      payload.verification = workflow.verification || {};
+      payload.previousDistribution = workflow.distribution || {};
+      payload.distribution = workflow.distribution || {};
+      payload.approval = workflow.approval || null;
+      payload.approvedSpec = workflow.approvedSpec || null;
+      payload.plansWorkflow = workflow;
+      payload.projectData.visual_concept = tenantVisualConceptState;
+      return payload;
+    }
+
+    function plansWorkflowError(response, fallbackKey, fallbackText) {
+      return visualConceptMissingMessage(response)
+        || response?.error
+        || WFT(fallbackKey, fallbackText);
+    }
+
+    function plansWorkflowStatusText(workflow) {
+      if (workflow.status === 'generated') return WFT('plans.status_generated', 'تم توليد المخططات');
+      if (workflow.status === 'generating') return WFT('plans.status_generating', 'جاري توليد المخططات');
+      if (workflow.approved) return WFT('plans.status_approved', 'التوزيع معتمد');
+      if (workflow.status === 'distributed') return WFT('plans.status_distributed', 'التوزيع جاهز للمراجعة');
+      if (workflow.status === 'blocked') return WFT('plans.status_blocked', 'بيانات تحتاج مراجعة');
+      if (workflow.status === 'verified') return WFT('plans.status_verified', 'البيانات متحققة ضمن النطاق');
+      return WFT('plans.status_idle', 'لم يبدأ سير العمل');
+    }
+
+    function plansWorkflowRenderResultImages(workflow) {
+      const host = document.getElementById('visualConceptPlansWorkflowImages');
+      if (!host) return;
+      const cards = VISUAL_CONCEPT_PLAN_KINDS.map(definition => {
+        const slot = tenantVisualConceptState.slots[definition.id] || {};
+        const image = isSessionOnlyImageUrl(slot.approvedImageUrl || slot.imageUrl)
+          ? '' : (slot.approvedImageUrl || slot.imageUrl || '');
+        const label = visualConceptPlanLabel(definition);
+        return '<article class="plans-workflow-result-card">' +
+          '<div class="plans-workflow-result-head"><h5>' + escapeHtml(label) + '</h5>' +
+          '<span class="visual-concept-status ' + escapeHtml(slot.status || 'pending') + '">' +
+          escapeHtml(slot.status === 'review' ? WFT('plans.image_review', 'مسودة') : (slot.status === 'approved' ? WFT('plans.image_approved', 'معتمدة') : WFT('plans.image_pending', 'غير مولدة'))) +
+          '</span></div>' +
+          (image ? '<div class="plans-workflow-result-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(label) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(label) + '"></div>' : '<div class="plans-workflow-result-empty">' + escapeHtml(WFT('plans.image_empty', 'لا توجد معاينة')) + '</div>') +
+          '</article>';
+      }).join('');
+      host.innerHTML = '<div class="plans-workflow-result-grid">' + cards + '</div>';
+      host.querySelectorAll('[data-visual-zoom]').forEach(element => {
+        element.addEventListener('click', () => openVisualConceptLightbox(
+          element.getAttribute('data-visual-zoom'), element.getAttribute('data-visual-title')));
+      });
+    }
+
+    function renderVisualConceptPlansWizard() {
+      const root = document.getElementById('visualConceptPlansWizard');
+      if (!root) return;
+      const added = ensureVisualConceptWorkflowPlans();
+      if (added) persistVisualConceptDraftState();
+      const workflow = visualConceptPlansWorkflowState();
+      const version = workflow.dataVersion;
+      const hasVerification = workflow.verification.checks.length > 0;
+      const hasDistribution = workflow.distribution.rows.length > 0;
+      const versionIsCurrent = Boolean(version) && (!workflow.approvedDataVersion || workflow.approvedDataVersion === version);
+      const status = document.getElementById('visualConceptPlansWorkflowStatus');
+      if (status) {
+        status.textContent = plansWorkflowStatusText(workflow);
+        status.className = 'visual-concept-status ' + (workflow.approved ? 'approved' : (workflow.status === 'blocked' ? 'review' : 'pending'));
+      }
+      const stepOrder = ['verify', 'distribute', 'approve', 'generate'];
+      const completed = {
+        verify: hasVerification && workflow.verification.canDistribute,
+        distribute: hasDistribution,
+        approve: workflow.approved && versionIsCurrent,
+        generate: workflow.generatedKinds.length === VISUAL_CONCEPT_PLAN_KINDS.length
+      };
+      root.querySelectorAll('[data-plans-step]').forEach(step => {
+        const name = step.getAttribute('data-plans-step');
+        const index = stepOrder.indexOf(name);
+        const active = !completed[name] && (index === 0 || completed[stepOrder[index - 1]]);
+        step.classList.toggle('is-complete', Boolean(completed[name]));
+        step.classList.toggle('is-active', active);
+      });
+      const verifySummary = document.getElementById('visualConceptPlansVerifySummary');
+      if (verifySummary) verifySummary.textContent = workflow.verification.summary || '';
+      const blocking = document.getElementById('visualConceptPlansBlocking');
+      if (blocking) {
+        blocking.hidden = !workflow.verification.blockingIssues.length;
+        blocking.textContent = workflow.verification.blockingIssues.join('، ');
+      }
+      const verifyRows = document.getElementById('visualConceptPlansVerifyRows');
+      if (verifyRows) {
+        verifyRows.innerHTML = workflow.verification.checks.length ? workflow.verification.checks.map(item =>
+          '<tr><td>' + escapeHtml(item.item) + '</td><td>' + escapeHtml(item.project) + '</td><td>' + escapeHtml(item.reference) + '</td><td><span class="plans-check-result">' + escapeHtml(item.result) + '</span></td><td>' + escapeHtml(item.note) + '</td></tr>'
+        ).join('') : '<tr><td colspan="5" class="plans-workflow-empty">' + escapeHtml(WFT('plans.no_checks', 'لا توجد نتائج تحقق')) + '</td></tr>';
+      }
+      const feedback = document.getElementById('visualConceptPlansFeedback');
+      if (feedback && document.activeElement !== feedback) feedback.value = workflow.feedback || '';
+      const distributionRows = document.getElementById('visualConceptPlansDistributionRows');
+      const numericFields = new Set(['floor_count', 'units_per_floor', 'total_units', 'floor_area', 'group_area']);
+      if (distributionRows) {
+        distributionRows.innerHTML = workflow.distribution.rows.length ? workflow.distribution.rows.map((row, index) => {
+          const cell = field => '<input class="plans-workflow-input" data-plans-row="' + index + '" data-plans-field="' + field + '" type="' + (numericFields.has(field) ? 'number' : 'text') + '" value="' + escapeHtml(row[field] ?? '') + '">';
+          return '<tr><td>' + cell('building') + '</td><td>' + cell('floor_span') + '</td><td>' + cell('component') + '</td><td>' + cell('use') + '</td><td>' + cell('units_per_floor') + '</td><td>' + cell('total_units') + '</td><td>' + cell('floor_area') + '</td><td>' + cell('group_area') + '</td><td>' + cell('services_share') + '</td><td>' + cell('notes') + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="plans-workflow-empty">' + escapeHtml(WFT('plans.no_distribution', 'لا يوجد توزيع')) + '</td></tr>';
+      }
+      const reconciliationRows = document.getElementById('visualConceptPlansReconciliationRows');
+      if (reconciliationRows) {
+        reconciliationRows.innerHTML = workflow.distribution.reconciliation.length ? workflow.distribution.reconciliation.map(row =>
+          '<tr><td>' + escapeHtml(row.component) + '</td><td>' + escapeHtml(row.required_units ?? '') + '</td><td>' + escapeHtml(row.proposed_units ?? '') + '</td><td>' + escapeHtml(row.required_area ?? '') + '</td><td>' + escapeHtml(row.proposed_area ?? '') + '</td><td>' + escapeHtml(row.difference) + '</td></tr>'
+        ).join('') : '<tr><td colspan="6" class="plans-workflow-empty">' + escapeHtml(WFT('plans.no_reconciliation', 'لا توجد مطابقة')) + '</td></tr>';
+      }
+      const notes = [workflow.distribution.explanation]
+        .concat(workflow.distribution.assumptions, workflow.distribution.impacts, workflow.distribution.warnings)
+        .filter(Boolean);
+      const notesHost = document.getElementById('visualConceptPlansDistributionNotes');
+      if (notesHost) notesHost.textContent = notes.join('، ');
+      const approvalStatus = document.getElementById('visualConceptPlansApprovalStatus');
+      if (approvalStatus) approvalStatus.textContent = workflow.approved
+        ? WFT('plans.approval_current', 'التوزيع الحالي معتمد')
+        : (hasDistribution ? WFT('plans.approval_pending', 'التوزيع الحالي غير معتمد') : '');
+      const specStatus = document.getElementById('visualConceptPlansSpecStatus');
+      if (specStatus) specStatus.textContent = workflow.approvedSpec
+        ? WFT('plans.spec_ready', 'المواصفة الهندسية جاهزة') : '';
+      const disclaimer = document.getElementById('visualConceptPlansDisclaimer');
+      if (disclaimer) disclaimer.textContent = workflow.disclaimer || WFT('plans.disclaimer', 'تصور مبدئي لدراسة الفرصة الاستثمارية — غير مخصص للتنفيذ');
+      const verifyButton = document.getElementById('visualConceptPlansVerifyBtn');
+      const distributeButton = document.getElementById('visualConceptPlansDistributeBtn');
+      const recheckButton = document.getElementById('visualConceptPlansRecheckBtn');
+      const approveButton = document.getElementById('visualConceptPlansApproveBtn');
+      const generateButton = document.getElementById('visualConceptPlansGenerateAllBtn');
+      if (verifyButton) verifyButton.disabled = workflow.status === 'generating';
+      if (distributeButton) distributeButton.disabled = !workflow.verification.canDistribute || workflow.status === 'generating';
+      if (recheckButton) recheckButton.disabled = !hasDistribution || workflow.status === 'generating';
+      if (approveButton) approveButton.disabled = !hasDistribution || workflow.status === 'generating' || workflow.approved;
+      if (generateButton) generateButton.disabled = !workflow.approved || !versionIsCurrent || workflow.status === 'generating';
+      bindVisualConceptPlansWorkflowInputs();
+      plansWorkflowRenderResultImages(workflow);
+    }
+
+    function markVisualConceptPlansDistributionDirty() {
+      const workflow = visualConceptPlansWorkflowState();
+      workflow.approved = false;
+      workflow.approval = null;
+      workflow.approvedDataVersion = '';
+      workflow.approvedDistributionHash = '';
+      workflow.approvedSpec = null;
+      workflow.generatedKinds = [];
+      workflow.status = workflow.distribution.rows.length ? 'distributed' : 'verified';
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+        const slot = tenantVisualConceptState.slots[definition.id];
+        if (!slot) return;
+        if (slot.approvedImageUrl) slot.imageUrl = slot.imageUrl || slot.approvedImageUrl;
+        slot.approvedImageUrl = '';
+        slot.status = slot.imageUrl ? 'review' : 'pending';
+      });
+      persistVisualConceptDraftState();
+      setDraftDirty(true);
+      const approval = document.getElementById('visualConceptPlansApprovalStatus');
+      if (approval) approval.textContent = WFT('plans.approval_pending', 'التوزيع الحالي غير معتمد');
+      const generate = document.getElementById('visualConceptPlansGenerateAllBtn');
+      if (generate) generate.disabled = true;
+    }
+
+    function bindVisualConceptPlansWorkflowInputs() {
+      const feedback = document.getElementById('visualConceptPlansFeedback');
+      if (feedback && !feedback.dataset.plansBound) {
+        feedback.dataset.plansBound = '1';
+        feedback.addEventListener('input', () => {
+          visualConceptPlansWorkflowState().feedback = String(feedback.value || '').slice(0, 4000);
+          persistVisualConceptDraftState();
+          setDraftDirty(true);
+        });
+      }
+      document.querySelectorAll('#visualConceptPlansDistributionRows [data-plans-row]').forEach(input => {
+        input.addEventListener('input', () => {
+          const rowIndex = Number(input.getAttribute('data-plans-row'));
+          const field = input.getAttribute('data-plans-field');
+          const workflow = visualConceptPlansWorkflowState();
+          const row = workflow.distribution.rows[rowIndex];
+          if (!row || !field) return;
+          row[field] = ['floor_count', 'units_per_floor', 'total_units', 'floor_area', 'group_area'].includes(field)
+            ? visualConceptPlanWorkflowNumber(input.value) : String(input.value || '').slice(0, 400);
+          markVisualConceptPlansDistributionDirty();
+        });
+      });
+    }
+
+    async function verifyVisualConceptPlans() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      showLoader(WFT('plans.verify_loading', 'جاري التحقق من بيانات المخططات'), WFT('plans.verify_loading_detail', 'يتم فحص بيانات المشروع والاشتراطات الموثقة...'), 18);
+      try {
+        const payload = await collectVisualConceptPlansPayload();
+        const response = await api('POST', '/api/visual-concept/plans-verify', payload);
+        hideLoader();
+        if (!response?.success) {
+          toast(plansWorkflowError(response, 'plans.verify_failed', 'تعذر التحقق من بيانات المخططات'));
+          return;
+        }
+        const workflow = visualConceptPlansWorkflowState();
+        workflow.dataVersion = payload.dataVersion;
+        workflow.verification = {
+          checks: response.checks || [],
+          blockingIssues: response.blockingIssues || [],
+          canDistribute: Boolean(response.canDistribute),
+          summary: response.summary || '',
+          dataVersion: response.dataVersion || payload.dataVersion
+        };
+        workflow.status = response.canDistribute ? 'verified' : 'blocked';
+        workflow.distribution = emptyVisualConceptPlansWorkflow().distribution;
+        workflow.approved = false;
+        workflow.approval = null;
+        workflow.approvedSpec = null;
+        workflow.generatedKinds = [];
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast(WFT('plans.verify_done', 'تم تحديث نتيجة التحقق'));
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.verify_failed', 'تعذر التحقق من بيانات المخططات'));
+      }
+    }
+
+    async function distributeVisualConceptPlans(mode = 'initial') {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const current = visualConceptPlansWorkflowState();
+      if (!current.verification.canDistribute) {
+        toast(WFT('plans.verify_required', 'نتيجة التحقق لا تسمح باقتراح التوزيع'));
+        return;
+      }
+      showLoader(WFT('plans.distribute_loading', 'جاري إعداد توزيع المخططات'), WFT('plans.distribute_loading_detail', 'يتم بناء التوزيع من بيانات الدراسة...'), 32);
+      try {
+        const payload = await collectVisualConceptPlansPayload();
+        const workflow = visualConceptPlansWorkflowState();
+        if (workflow.dataVersion !== payload.dataVersion) {
+          toast(WFT('plans.stale_data', 'تغيرت بيانات المشروع وتحتاج المخططات إلى تحقق جديد'));
+          hideLoader();
+          renderVisualConceptPage();
+          return;
+        }
+        payload.workflowStatus = mode;
+        payload.feedback = workflow.feedback || '';
+        payload.verification = workflow.verification;
+        payload.previousDistribution = workflow.distribution;
+        const response = await api('POST', '/api/visual-concept/plans-distribute', payload);
+        hideLoader();
+        if (!response?.success) {
+          toast(plansWorkflowError(response, 'plans.distribute_failed', 'تعذر إعداد توزيع المخططات'));
+          return;
+        }
+        const live = visualConceptPlansWorkflowState();
+        live.dataVersion = payload.dataVersion;
+        live.distribution = {
+          rows: response.rows || [],
+          reconciliation: response.reconciliation || [],
+          explanation: response.explanation || '',
+          assumptions: response.assumptions || [],
+          impacts: response.impacts || [],
+          warnings: response.warnings || [],
+          dataVersion: response.dataVersion || payload.dataVersion
+        };
+        live.status = 'distributed';
+        live.approved = false;
+        live.approval = null;
+        live.approvedSpec = null;
+        live.generatedKinds = [];
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast(WFT('plans.distribute_done', 'تم تحديث توزيع المخططات'));
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.distribute_failed', 'تعذر إعداد توزيع المخططات'));
+      }
+    }
+
+    function recheckVisualConceptPlans() {
+      return distributeVisualConceptPlans('recheck');
+    }
+
+    async function approveVisualConceptPlansDistribution() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const payload = await collectVisualConceptPlansPayload();
+      const workflow = visualConceptPlansWorkflowState();
+      if (!workflow.distribution.rows.length) {
+        toast(WFT('plans.distribution_required', 'توزيع المخططات غير متوفر'));
+        return;
+      }
+      if (workflow.dataVersion !== payload.dataVersion) {
+        toast(WFT('plans.stale_data', 'تغيرت بيانات المشروع وتحتاج المخططات إلى تحقق جديد'));
+        renderVisualConceptPage();
+        return;
+      }
+      workflow.approved = true;
+      workflow.status = 'approved';
+      workflow.approvedDataVersion = payload.dataVersion;
+      workflow.approvedDistributionHash = plansDistributionHash(workflow.distribution);
+      workflow.approval = {
+        approved: true,
+        dataVersion: payload.dataVersion,
+        distributionHash: workflow.approvedDistributionHash,
+        approvedAt: new Date().toISOString()
+      };
+      workflow.approvedSpec = null;
+      workflow.generatedKinds = [];
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast(WFT('plans.approve_done', 'تم اعتماد توزيع المخططات'));
+    }
+
+    async function generateAllVisualConceptPlans() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const initial = visualConceptPlansWorkflowState();
+      if (!initial.approved) {
+        toast(WFT('plans.approve_required', 'اعتماد توزيع المخططات مطلوب قبل التوليد'));
+        return;
+      }
+      showLoader(WFT('plans.spec_loading', 'جاري بناء المواصفة الهندسية'), WFT('plans.spec_loading_detail', 'يتم توحيد أرقام التوزيع للمخططات الثلاثة...'), 42);
+      try {
+        const payload = await collectVisualConceptPlansPayload();
+        let workflow = visualConceptPlansWorkflowState();
+        if (!workflow.approved || workflow.approvedDataVersion !== payload.dataVersion) {
+          hideLoader();
+          toast(WFT('plans.stale_approval', 'الاعتماد الحالي لا يطابق بيانات المشروع'));
+          renderVisualConceptPage();
+          return;
+        }
+        payload.approval = workflow.approval;
+        payload.distribution = workflow.distribution;
+        payload.dataVersion = workflow.approvedDataVersion;
+        const specResponse = await api('POST', '/api/visual-concept/plans-spec', payload);
+        if (!specResponse?.success || !specResponse.spec) {
+          hideLoader();
+          toast(plansWorkflowError(specResponse, 'plans.spec_failed', 'تعذر بناء المواصفة الهندسية للمخططات'));
+          return;
+        }
+        workflow = visualConceptPlansWorkflowState();
+        workflow.approvedSpec = specResponse.spec;
+        workflow.disclaimer = specResponse.disclaimer || WFT('plans.disclaimer', 'تصور مبدئي لدراسة الفرصة الاستثمارية — غير مخصص للتنفيذ');
+        workflow.status = 'generating';
+        workflow.generatedKinds = [];
+        markVisualConceptDirty();
+        for (let index = 0; index < VISUAL_CONCEPT_PLAN_KINDS.length; index += 1) {
+          const definition = VISUAL_CONCEPT_PLAN_KINDS[index];
+          let plan = visualConceptPlans().find(item => item.id === definition.id);
+          if (!plan) {
+            plan = { id: definition.id, kind: definition.kind, mode: 'ai', title: visualConceptPlanLabel(definition), description: '', fileId: '', fileName: '', imageUrl: '' };
+            visualConceptPlans().push(plan);
+          }
+          plan.kind = definition.kind;
+          plan.title = plan.title || visualConceptPlanLabel(definition);
+          if (!tenantVisualConceptState.slots[definition.id]) tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id);
+          tenantVisualConceptState.slots[definition.id].mode = 'ai';
+          tenantVisualConceptState.slots[definition.id].status = 'generating';
+          persistVisualConceptDraftState();
+          const currentWorkflow = visualConceptPlansWorkflowState();
+          const stepPayload = await collectVisualConceptPayload(definition.id);
+          stepPayload.planKind = definition.kind;
+          stepPayload.slotId = definition.id;
+          stepPayload.approvedSpec = currentWorkflow.approvedSpec;
+          stepPayload.distribution = currentWorkflow.distribution;
+          stepPayload.approval = currentWorkflow.approval;
+          stepPayload.plansWorkflow = currentWorkflow;
+          stepPayload.dataVersion = currentWorkflow.approvedDataVersion;
+          const promptResponse = await api('POST', '/api/visual-concept/prompt', stepPayload);
+          if (!promptResponse?.success || !promptResponse.prompt) {
+            throw new Error(plansWorkflowError(promptResponse, 'plans.prompt_failed', 'تعذر إعداد وصف المخطط'));
+          }
+          tenantVisualConceptState.slots[definition.id].prompt = promptResponse.prompt;
+          const imageResponse = await apiWithTimeout(
+            'POST', '/api/visual-concept/generate',
+            { ...stepPayload, prompt: promptResponse.prompt },
+            180000,
+            WFT('plans.image_timeout', 'انتهت مهلة توليد المخطط؛ أعد المحاولة.')
+          );
+          if (!imageResponse?.success || !imageResponse.image) {
+            throw new Error(plansWorkflowError(imageResponse, 'plans.image_failed', 'تعذر توليد المخطط'));
+          }
+          const slot = tenantVisualConceptState.slots[definition.id];
+          slot.imageUrl = visualConceptImageUrl(imageResponse.image);
+          slot.approvedImageUrl = '';
+          slot.status = 'review';
+          const livePlan = visualConceptPlans().find(item => item.id === definition.id);
+          if (livePlan) livePlan.imageUrl = slot.imageUrl;
+          visualConceptPlansWorkflowState().generatedKinds.push(definition.kind);
+          persistVisualConceptDraftState();
+          updateLoaderProgress(45 + Math.round(((index + 1) / VISUAL_CONCEPT_PLAN_KINDS.length) * 50), WFT('plans.generate_progress', 'جاري توليد المخططات ({current}/{total})...', { current: index + 1, total: VISUAL_CONCEPT_PLAN_KINDS.length }));
+        }
+        const completed = visualConceptPlansWorkflowState();
+        completed.status = 'generated';
+        completed.generatedAt = new Date().toISOString();
+        markVisualConceptDirty();
+        hideLoader();
+        renderVisualConceptPage();
+        toast(WFT('plans.generate_done', 'تم توليد المخططات الثلاثة'));
+      } catch (error) {
+        hideLoader();
+        const failed = visualConceptPlansWorkflowState();
+        failed.status = failed.generatedKinds.length ? 'partial' : 'approved';
+        VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+          const slot = tenantVisualConceptState.slots[definition.id];
+          if (slot?.status === 'generating') slot.status = slot.imageUrl ? 'review' : 'pending';
+        });
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast(error.message || WFT('plans.generate_failed', 'تعذر توليد المخططات'));
+      }
     }
 
     function addVisualConceptPlan() {
