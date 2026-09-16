@@ -9135,7 +9135,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(
             self.application_module._visual_concept_slot_label('plan_site', {}), 'الموقع العام المبسط')
 
-        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Plan prompt', 'تم')):
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', side_effect=AssertionError('plan drafts ship verbatim')):
             plan_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
@@ -9144,7 +9144,19 @@ class MeetingRequirementsTests(unittest.TestCase):
             })
         self.assertEqual(plan_prompt.status_code, 200, plan_prompt.get_json())
         self.assertEqual(plan_prompt.get_json()['slotId'], 'plan_site')
-        self.assertEqual(plan_prompt.get_json()['prompt'], 'Plan prompt')
+        self.assertIn('APPROVED DISTRIBUTION MODEL', plan_prompt.get_json()['prompt'])
+        self.assertIn('DRAWING REQUESTED', plan_prompt.get_json()['prompt'])
+
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Edited plan prompt', 'تم')):
+            plan_edit = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_site',
+                'planDescription': 'مخطط موقع عام مبسط',
+                'instruction': 'وسّع اللاندسكيب',
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
+                'projectData': facts,
+            })
+        self.assertEqual(plan_edit.status_code, 200, plan_edit.get_json())
+        self.assertEqual(plan_edit.get_json()['prompt'], 'Edited plan prompt')
 
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,CCCC') as plan_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
@@ -9227,10 +9239,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(boundary.get_json()['referenceUrl'], '/uploads/creative/parcel-ref.png')
         self.assertEqual(len(boundary.get_json()['points']), 3)
 
-        prompt_response = {'prompts': {'site': 'SITE PROMPT', 'uses': 'USES PROMPT', 'massing': 'MASSING PROMPT'}}
-        with patch.object(module, 'call_openrouter_chat', return_value={
-            'choices': [{'message': {'content': json.dumps(prompt_response)}}]
-        }) as prompt_call:
+        with patch.object(module, 'call_openrouter_chat', side_effect=AssertionError('plan prompts must not call a text model')):
             prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
                 'projectData': project_data,
                 'plansWorkflow': {
@@ -9239,12 +9248,16 @@ class MeetingRequirementsTests(unittest.TestCase):
                 }
             })
         self.assertEqual(prompts.status_code, 200, prompts.get_json())
-        self.assertEqual(prompts.get_json()['prompts']['site'], 'SITE PROMPT')
-        self.assertTrue(prompt_call.called)
-        self.assertIn('APPROVED PLAN CONTEXT', prompt_call.call_args.args[1])
-        self.assertIn('Luxury Apartments', prompt_call.call_args.args[1])
-        self.assertNotIn('اشتراطات1', prompt_call.call_args.args[1])
-        self.assertNotIn('اشتراطات2', prompt_call.call_args.args[1])
+        site_prompt = prompts.get_json()['prompts']['site']
+        self.assertIn('اسم المشروع: The View', site_prompt)
+        self.assertIn('APPROVED DISTRIBUTION MODEL', site_prompt)
+        self.assertIn('DRAWING REQUESTED', site_prompt)
+        self.assertIn('Luxury Apartments', site_prompt)
+        for kind in ('uses', 'massing'):
+            self.assertIn('APPROVED DISTRIBUTION MODEL', prompts.get_json()['prompts'][kind])
+        serialized_prompts = json.dumps(prompts.get_json()['prompts'], ensure_ascii=False)
+        self.assertNotIn('اشتراطات1', serialized_prompts)
+        self.assertNotIn('اشتراطات2', serialized_prompts)
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,CCCC') as image_call, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'), \

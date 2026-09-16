@@ -2927,6 +2927,15 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
 def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None, usage_ctx=None):
     current = _visual_concept_sanitize_prompt(current_prompt)
     request_text = _visual_concept_text(instruction, 4000)
+    is_plan = _visual_concept_is_plan_slot(slot_id)
+    banned_clause = (
+        'Never invent a generic building style and never copy a previous project signature. '
+        'Plan diagrams REQUIRE their English labels, title, legend, entry arrows, and the '
+        "'ILLUSTRATIVE REFERENCE - NOT TO SCALE' caption — never remove them. "
+        if is_plan else
+        'Never invent a generic building style, never copy a previous project signature, '
+        'and never add text, logos, people, or watermarks. '
+    )
     if current and request_text:
         system_prompt = (
             'You are a smart editor of an existing English architectural image prompt. '
@@ -2935,8 +2944,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
             'explicitly asks to rewrite, replace, or start over. '
             'If the user asks to add something, insert it into the existing prompt. '
             'If they ask to change one detail, change that detail only. '
-            'Never invent a generic building style, never copy a previous project signature, '
-            'and never add text, logos, people, or watermarks. '
+            + banned_clause +
             'Return JSON only: {"prompt":"...","reply":"..."}.'
         )
         user_prompt = (
@@ -2949,8 +2957,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
         system_prompt = (
             'You write one English architectural image prompt for a Saudi real-estate project. '
             'Use only the supplied project facts and attached references. '
-            'Never invent a generic building style, never copy a previous project signature, '
-            'and never add text, logos, people, or watermarks. '
+            + banned_clause +
             'Match the attached site/map footprint and any attached land photos. '
             'Return JSON only: {"prompt":"..."}.'
         )
@@ -5400,36 +5407,9 @@ def api_visual_concept_plans_prompts():
     context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
-    spec = _visual_concept_plan_context_text(context)
-    drafts = _visual_concept_plan_prompt_templates(context)
-    system_prompt = (
-        'أنت SOL، محرّر برومبتات مخططات معمارية مفاهيمية. أمامك ثلاث مسودات مكتملة الحقائق '
-        '(site وuses وmassing) مبنية من بيانات المشروع المعتمدة أدناه. أعد صياغة كل مسودة إلى '
-        'برومبت إنجليزي نهائي سليم: يجوز لك فقط تحسين الصياغة وترتيب الجمل وترجمة أي نص مصدر غير '
-        'إنجليزي إلى إنجليزية موجزة دقيقة. كل رقم وكل حقيقة وكل شرط وكل جملة «not recorded» تبقى '
-        'كما هي — لا تضف ولا تحذف ولا تلطّف ولا تستنتج قيمة. لا تذكر أسماء ملفات أو مصادر أو صفحات، '
-        'ولا تستخدم نصوصًا عربية داخل البرومبت النهائي. أخرج JSON فقط: '
-        '{"prompts":{"site":"","uses":"","massing":""}}.'
-    )
-    user_prompt = (
-        spec + '\n\nAPPROVED DRAFT PROMPTS — polish only; keep every fact verbatim:\n'
-        + json.dumps(drafts, ensure_ascii=False)
-    )
-    prompts = {}
-    try:
-        response = call_openrouter_chat(
-            system_prompt, user_prompt, temperature=None, max_tokens=12000,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
-            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
-        parsed = parse_json_object(_get_chat_response_text(response))
-        raw_prompts = parsed.get('prompts') if isinstance(parsed, dict) else {}
-        if isinstance(raw_prompts, dict):
-            prompts = {kind: _visual_concept_sanitize_prompt(raw_prompts.get(kind)) for kind in ('site', 'uses', 'massing')}
-    except Exception:
-        prompts = {}
-    for kind in ('site', 'uses', 'massing'):
-        if not prompts.get(kind):
-            prompts[kind] = drafts[kind]
+    # Plan prompts ship verbatim: a text-model pass was observed dropping approved
+    # facts (e.g. the East Block mass) and swapping entry directions.
+    prompts = _visual_concept_plan_prompt_templates(context)
     return jsonify({'success': True, 'prompts': prompts, 'context': context, 'referenceUrl': boundary.get('referenceUrl') or ''})
 
 
@@ -5483,6 +5463,19 @@ def api_visual_concept_prompt():
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
+    if _visual_concept_is_plan_slot(slot_id):
+        plan_draft = _visual_concept_sanitize_prompt(facts.get('plan_prompt_draft'))
+        if plan_draft and not instruction:
+            return jsonify({
+                'success': True,
+                'slotId': slot_id,
+                'prompt': plan_draft,
+                'reply': '',
+                'referenceCount': len(references),
+                'model': 'deterministic',
+            })
+        if plan_draft and not current_prompt:
+            current_prompt = plan_draft
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
