@@ -1789,17 +1789,6 @@
         '</svg>';
     }
 
-    function renderVisualConceptBoundaryRows(host, workflow) {
-      if (!host) return;
-      const points = workflow.boundary.points || [];
-      host.innerHTML = points.length ? points.map((item, index) =>
-        '<tr><td><input type="text" data-plan-boundary-field="point" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.point || index + 1) + '"></td>' +
-        '<td><input type="number" step="any" data-plan-boundary-field="eastings" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.eastings) + '"></td>' +
-        '<td><input type="number" step="any" data-plan-boundary-field="northings" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.northings) + '"></td>' +
-        '<td><button type="button" class="btn danger small" data-plan-boundary-action="remove" data-plan-boundary-index="' + index + '">حذف</button></td></tr>'
-      ).join('') : '<tr><td colspan="4" class="plans-workflow-empty">لا توجد نقاط حدود.</td></tr>';
-    }
-
     function renderVisualConceptPlansWorkflow() {
       const root = document.getElementById('visualConceptPlansWorkflow');
       if (!root) return;
@@ -1841,9 +1830,8 @@
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="back-verify">مراجعة التحقق</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
-        '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-table-wrap"><table class="plans-workflow-table"><thead><tr><th>النقطة</th><th>الشرقيات</th><th>الشماليات</th><th></th></tr></thead>' +
-        '<tbody data-plans-boundary-rows></tbody></table><button type="button" class="btn ghost small" data-plans-boundary-action="add">إضافة نقطة</button></div></div>' +
+        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="back-verify">مراجعة التحقق</button><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
+        '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-meta"><p class="tenant-hint">حدود الرسم مأخوذة من جدول الإحداثيات المعتمد في الأرض والكروكي.</p></div></div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="boundary-ai">تعديل الحدود بالذكاء الاصطناعي</button><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
         '<label>ملاحظات تعديل الحدود</label><textarea rows="3" data-plans-boundary-instruction>' + escapeHtml(boundary.instruction || '') + '</textarea>' +
         '</section>' +
@@ -1854,34 +1842,6 @@
         '</section></div>';
       const preview = root.querySelector('[data-plans-boundary-preview]');
       renderVisualConceptBoundarySvg(preview, boundary.points);
-      renderVisualConceptBoundaryRows(root.querySelector('[data-plans-boundary-rows]'), workflow);
-      root.querySelectorAll('[data-plan-boundary-field]').forEach(input => {
-        input.addEventListener('input', () => {
-          const index = Number(input.getAttribute('data-plan-boundary-index'));
-          const field = input.getAttribute('data-plan-boundary-field');
-          const item = workflow.boundary.points[index];
-          if (!item) return;
-          item[field] = field === 'point' ? input.value : Number(input.value);
-          workflow.boundary.approved = false;
-          workflow.promptReady = false;
-          workflow.status = 'verified';
-          renderVisualConceptBoundarySvg(preview, workflow.boundary.points);
-          persistVisualConceptDraftState();
-          setDraftDirty(true);
-        });
-      });
-      root.querySelectorAll('[data-plan-boundary-action]').forEach(button => {
-        button.addEventListener('click', () => {
-          const action = button.getAttribute('data-plan-boundary-action');
-          if (action === 'add') workflow.boundary.points.push({ point: String(workflow.boundary.points.length + 1), eastings: '', northings: '' });
-          if (action === 'remove') workflow.boundary.points.splice(Number(button.getAttribute('data-plan-boundary-index')), 1);
-          workflow.boundary.approved = false;
-          workflow.promptReady = false;
-          workflow.status = 'verified';
-          persistVisualConceptDraftState();
-          renderVisualConceptPlans();
-        });
-      });
       root.querySelectorAll('[data-plans-workflow-action]').forEach(button => {
         button.addEventListener('click', () => {
           const action = button.getAttribute('data-plans-workflow-action');
@@ -1898,6 +1858,13 @@
             workflow.status = 'verified';
             markVisualConceptDirty();
             renderVisualConceptPage();
+          } else if (action === 'open-land-data') {
+            workflow.verification.approved = false;
+            workflow.boundary.approved = false;
+            workflow.promptReady = false;
+            workflow.status = 'idle';
+            markVisualConceptDirty();
+            if (typeof showSection === 'function') showSection('land_croquis');
           } else if (action === 'verify') verifyVisualConceptPlans();
           else if (action === 'approve-verification') approveVisualConceptPlansVerification();
           else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
@@ -1970,6 +1937,8 @@
     async function refreshVisualConceptPlansBoundary() {
       const payload = await collectVisualConceptPlansWorkflowPayload();
       const workflow = visualConceptPlansWorkflowState();
+      const sourcePoints = visualConceptBoundaryPoints(payload.projectData?.survey_coordinates);
+      if (sourcePoints.length >= 3) workflow.boundary.points = sourcePoints;
       payload.points = workflow.boundary.points;
       payload.mode = 'manual';
       showLoader(WFT('plans.boundary_loading', 'جاري تجهيز رسم حدود الأرض'), WFT('plans.boundary_loading_detail', 'يتم بناء الرسم من الإحداثيات المحفوظة...'), 35);
