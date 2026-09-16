@@ -1826,13 +1826,12 @@
         ).join('') + '</div>'
         : '<p class="tenant-hint">لم تُجهز برومبتات المخططات بعد.</p>';
       root.innerHTML =
-        '<div class="visual-concept-mode-selector plans-workflow-stage-tabs">' +
-        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'verify' ? ' active' : '') + '" data-plans-workflow-tab="verify">التحقق</button>' +
-        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'boundary' ? ' active' : '') + '" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود</button>' +
-        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'generate' ? ' active' : '') + '" data-plans-workflow-tab="generate" ' + (!boundaryApproved ? 'disabled' : '') + '>توليد المخططات</button>' +
-        '</div>' +
         '<div class="plans-workflow-card">' +
-        '<ol class="plans-workflow-steps"><li class="' + (!verified ? 'is-active' : 'is-complete') + '">التحقق من التضارب</li><li class="' + (verified && !boundaryApproved ? 'is-active' : (boundaryApproved ? 'is-complete' : '')) + '">رسم حدود الأرض</li><li class="' + (boundaryApproved ? 'is-active' : '') + '">توليد المخططات</li></ol>' +
+        '<ol class="plans-workflow-steps">' +
+        '<li class="' + (activeStage === 'verify' ? 'is-active' : (verified ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="verify">التحقق من التضارب</button></li>' +
+        '<li class="' + (activeStage === 'boundary' ? 'is-active' : (boundaryApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم حدود الأرض</button></li>' +
+        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!boundaryApproved ? 'disabled' : '') + '>توليد المخططات</button></li>' +
+        '</ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
         '<p class="' + (conflicts.length ? 'tenant-hint' : 'plans-workflow-success') + '" data-plans-verification-summary>' + escapeHtml(conflicts.length ? WFT('plans.conflicts_count', 'عدد التعارضات المباشرة: ') + conflicts.length : WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</p>' +

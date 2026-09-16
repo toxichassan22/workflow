@@ -221,8 +221,6 @@
     }
 
     .plans-workflow-steps li {
-      min-height: 42px;
-      padding: 10px;
       border: 1px solid var(--line);
       border-radius: 10px;
       background: #f7fafc;
@@ -230,6 +228,25 @@
       font-size: 12px;
       font-weight: 800;
       text-align: center;
+    }
+
+    .plans-workflow-steps li button {
+      display: block;
+      width: 100%;
+      min-height: 42px;
+      padding: 10px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .plans-workflow-steps li button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     .plans-workflow-steps li.is-active {
