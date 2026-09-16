@@ -2913,20 +2913,31 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
             user_prompt += '\n\nCurrent prompt to keep as the base:\n' + current
         if request_text:
             user_prompt += '\n\nUser request:\n' + request_text
-    response = call_openrouter_chat(
-        system_prompt,
-        user_prompt,
-        temperature=None,
-        max_tokens=4000,
-        model=SLIDE_TEXT_MODEL,
-        reasoning_effort='medium',
-        response_format={'type': 'json_object'},
-        image_references=image_references or None,
-        usage_ctx=usage_ctx or _usage_ctx('image'),
-    )
-    parsed = _designer_json_response(_get_chat_response_text(response) or extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT'))
-    prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
-    return prompt, parsed.get('reply') or ''
+    references = list(image_references or [])
+    response = {}
+    for _attempt in range(2):
+        response = call_openrouter_chat(
+            system_prompt,
+            user_prompt,
+            temperature=None,
+            max_tokens=8000,
+            model=SLIDE_TEXT_MODEL,
+            reasoning_effort='medium',
+            response_format={'type': 'json_object'},
+            image_references=references or None,
+            usage_ctx=usage_ctx or _usage_ctx('image'),
+        )
+        text = _get_chat_response_text(response)
+        parsed = _designer_json_response(text) if text else {}
+        prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
+        if prompt:
+            return prompt, parsed.get('reply') or ''
+        if not references:
+            break
+        # A rejected or unreadable reference should not kill prompt writing: retry on facts alone.
+        references = []
+    extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT')
+    return '', ''
 
 
 def _visual_concept_cover_image(data):
@@ -4417,9 +4428,10 @@ def api_visual_concept_prompt():
             'referenceCount': len(references),
             'model': SLIDE_TEXT_MODEL,
         })
-    except Exception:
+    except Exception as exc:
         app.logger.exception('Visual concept prompt failed')
-        return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+        return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري',
+                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
 
 @app.route('/api/visual-concept/generate', methods=['POST'])
@@ -4505,9 +4517,10 @@ def api_visual_concept_chat():
             'reply': reply or 'تم تحديث وصف الصورة حسب طلبك.',
             'referenceCount': len(references),
         })
-    except Exception:
+    except Exception as exc:
         app.logger.exception('Visual concept chat failed')
-        return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+        return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
+                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
 
 @app.route('/api/designer-generate', methods=['POST'])
