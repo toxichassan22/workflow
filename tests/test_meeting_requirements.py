@@ -3345,7 +3345,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # A stored blob: URL is dropped on load and republished from the file id.
         self.assertIn('const approved = durableImageUrl(slot.approvedImageUrl);', index_source)
         self.assertIn('const imageUrl = durableImageUrl(slot.imageUrl);', index_source)
-        self.assertIn('imageUrl: durableImageUrl(source.imageUrl || source.image_url)', index_source)
+        self.assertIn('const imageUrl = durableImageUrl(source.imageUrl || source.image_url);', index_source)
         self.assertIn('async function repairVisualConceptStoredImages()', index_source)
         self.assertIn('repairVisualConceptStoredImages();', index_source)
         self.assertNotIn('liveSlot().imageUrl = await getProjectFileObjectUrl(fileId)', index_source)
@@ -8884,27 +8884,37 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-visual-title', index_source)
         self.assertIn('function visualConceptCanRenameSlot(slotId)', index_source)
         self.assertNotIn('visual-concept-grid', index_source)
-        # The legacy floor-design page is gone: 2D plans and isometric are cards here now.
+        # The legacy floor-design page is gone: plans are cards here, and the isometric
+        # placeholder section was removed entirely.
         self.assertNotIn('tenantFloorDesignPage', index_source)
         self.assertNotIn('floor_visual_design', index_source)
         self.assertNotIn('/api/floor-design/', index_source)
         self.assertNotIn('/api/floor-design/', (ROOT / 'app.py').read_text(encoding='utf-8'))
         self.assertIn('data-visual-concept-target="plans2d"', index_source)
-        self.assertIn('data-visual-concept-target="isometric" disabled', index_source)
+        self.assertNotIn('data-visual-concept-target="isometric"', index_source)
         self.assertIn('id="visualConceptPlansView"', index_source)
-        self.assertIn('id="visualConceptIsometricView"', index_source)
-        # 2D plans: unlimited client uploads, each with its own title and description,
-        # and AI generation is not built yet.
+        self.assertNotIn('visualConceptIsometricView', index_source)
+        self.assertNotIn('visualConceptHomeIsometricStatus', index_source)
+        # Plans run the same slot flow as every other visual card: each plan record is
+        # mirrored by slots[plan.id], so prompt → edit → generate → approve all reuse the
+        # existing pipeline, while plans2d stays the durable record slides read.
         self.assertIn('VISUAL_CONCEPT_MAX_PLANS = 30', index_source)
         self.assertIn('function normalizeVisualConceptPlans(raw)', index_source)
         self.assertIn('function renderVisualConceptPlans()', index_source)
+        self.assertIn('function addVisualConceptPlan()', index_source)
+        self.assertIn('function isVisualConceptPlanSlot(slotId)', index_source)
+        self.assertIn('function visualConceptPlanSeed(plan)', index_source)
         self.assertIn('async function uploadVisualConceptPlanImages(input)', index_source)
         self.assertIn('function deleteVisualConceptPlan(planId)', index_source)
-        self.assertIn('data-visual-plan-title', index_source)
-        self.assertIn('data-visual-plan-description', index_source)
-        self.assertIn('id="visualConceptPlansGenerateButton" disabled', index_source)
-        self.assertIn("new Set(['home', 'external', 'internal', 'plans2d', 'isometric'])", index_source)
+        self.assertIn('id="visualConceptAddPlanBtn"', index_source)
+        self.assertIn('data-visual-action="delete-plan"', index_source)
+        self.assertNotIn('data-visual-plan-title', index_source)
+        self.assertNotIn('data-visual-plan-description', index_source)
+        self.assertNotIn('visualConceptPlansGenerateButton', index_source)
+        self.assertIn("new Set(['home', 'external', 'internal', 'plans2d'])", index_source)
         self.assertIn('plans2d: plans', index_source)
+        self.assertIn('<h3>المخططات</h3>', index_source)
+        self.assertNotIn('المخططات 2D', index_source)
         self.assertNotIn('نفس المبنى المعتمد', index_source)
         self.assertNotIn('tenantMainImagePage', index_source)
         self.assertNotIn('tenantMoodboardPage', index_source)
@@ -9089,6 +9099,41 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(references), 6)
         self.assertIn('cover.png', str(references[0]))
         self.assertTrue(any('ref-a' in str(item) for item in references))
+
+        # Plan slots are the planning diagrams: they do not wait for the hero image —
+        # their geometry reference is the approved land map, not the cover render.
+        self.assertTrue(self.application_module._visual_concept_is_plan_slot('plan_site'))
+        self.assertFalse(self.application_module._visual_concept_is_plan_slot('right'))
+        self.assertEqual(
+            self.application_module._visual_concept_normalize_slot('plan_1700_abc'), 'plan_1700_abc')
+        self.assertEqual(
+            self.application_module._visual_concept_slot_label('plan_site', {}), 'مخطط')
+
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Plan prompt', 'تم')):
+            plan_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_site',
+                'planDescription': 'مخطط موقع عام مبسط',
+                'projectData': facts,
+            })
+        self.assertEqual(plan_prompt.status_code, 200, plan_prompt.get_json())
+        self.assertEqual(plan_prompt.get_json()['slotId'], 'plan_site')
+        self.assertEqual(plan_prompt.get_json()['prompt'], 'Plan prompt')
+
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,CCCC') as plan_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+            plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_site',
+                'prompt': 'Conceptual site plan',
+                'projectData': facts,
+            })
+        self.assertEqual(plan.status_code, 200, plan.get_json())
+        self.assertEqual(plan.get_json()['slotId'], 'plan_site')
+        self.assertEqual(plan.get_json()['image'], '/uploads/creative/plan.png')
+        self.assertTrue(plan_call.called)
+        self.assertEqual(plan_call.call_args.kwargs.get('model'), self.application_module.VISUAL_CONCEPT_IMAGE_MODEL)
+        plan_refs = plan_call.call_args.args[1]
+        self.assertTrue(any('overview.png' in str(item) for item in plan_refs))
 
         index_source = read_frontend_text()
         self.assertIn('visualConceptInteriorComponentSelect', index_source)

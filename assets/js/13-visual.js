@@ -52,6 +52,7 @@
           else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
           else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
           else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
+          else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
           else if (action === 'add-interior') addVisualConceptInteriorView();
           else if (action === 'set-mode') {
@@ -120,6 +121,11 @@
           try { url = await publishProjectFileImageUrl(plan.fileId); } catch (error) { url = ''; }
           if (!url) continue;
           plan.imageUrl = url;
+          const planSlot = tenantVisualConceptState.slots?.[plan.id];
+          if (planSlot) {
+            planSlot.imageUrl = url;
+            if (!planSlot.sourceFileId) planSlot.sourceFileId = plan.fileId;
+          }
           healed += 1;
         }
       } finally {
@@ -158,7 +164,7 @@
     }
 
     function showVisualConceptView(view) {
-      const allowed = new Set(['home', 'external', 'internal', 'plans2d', 'isometric']);
+      const allowed = new Set(['home', 'external', 'internal', 'plans2d']);
       const next = allowed.has(view) ? view : 'home';
       document.querySelectorAll('#section-visual-concept [data-visual-concept-view], #tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
         node.hidden = node.dataset.visualConceptView !== next;

@@ -851,11 +851,15 @@
 
     function visualConceptDefaultSlotLabel(slotId) {
       return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
-        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة');
+        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : (isVisualConceptPlanSlot(slotId) ? 'مخطط' : 'الصورة'));
     }
 
     function visualConceptCanRenameSlot(slotId) {
-      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId);
+      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId) || isVisualConceptPlanSlot(slotId);
+    }
+
+    function isVisualConceptPlanSlot(slotId) {
+      return String(slotId || '').startsWith('plan_');
     }
 
     function visualConceptInteriorSlotId(componentId, viewIndex = 1) {
@@ -926,8 +930,10 @@
       }
     }
 
-    // The 2D plans are client uploads only: every plan carries the client's own title and
-    // description, and AI generation for them is not built yet.
+    // A plan is a slot too: plans2d keeps the durable record the slides and exports read
+    // (title, description, file, published image), while slots[plan.id] carries the working
+    // state (mode, prompt, chat, approval) so plans run through the same prompt-edit-
+    // generate-approve flow as every other visual card.
     function normalizeVisualConceptPlans(raw) {
       let value = raw;
       if (typeof value === 'string') {
@@ -938,17 +944,35 @@
       return list.map((item, index) => {
         const source = item && typeof item === 'object' ? item : {};
         let id = String(source.id || '').trim() || ('plan_' + (index + 1));
+        if (!id.startsWith('plan_')) id = 'plan_' + id;
         while (seen.has(id)) id = id + '_' + (index + 1);
         seen.add(id);
+        const fileId = String(source.fileId || source.file_id || '');
+        const imageUrl = durableImageUrl(source.imageUrl || source.image_url);
+        const mode = ['ai', 'upload'].includes(source.mode) ? source.mode : (fileId ? 'upload' : 'ai');
         return {
           id,
+          mode,
           title: String(source.title || '').slice(0, 120),
           description: String(source.description || '').slice(0, 2000),
-          fileId: String(source.fileId || source.file_id || ''),
+          fileId,
           fileName: String(source.fileName || source.file_name || ''),
-          imageUrl: durableImageUrl(source.imageUrl || source.image_url)
+          imageUrl
         };
-      }).filter(item => item.fileId || item.imageUrl).slice(0, VISUAL_CONCEPT_MAX_PLANS);
+      }).filter(item => item.fileId || item.imageUrl || item.mode === 'ai').slice(0, VISUAL_CONCEPT_MAX_PLANS);
+    }
+
+    function visualConceptPlanSeed(plan) {
+      if (!plan) return null;
+      return {
+        mode: plan.mode === 'upload' ? 'upload' : 'ai',
+        label: plan.title || '',
+        caption: plan.description || '',
+        sourceFileId: plan.fileId || '',
+        sourceFileName: plan.fileName || '',
+        imageUrl: plan.imageUrl || '',
+        status: plan.imageUrl ? 'review' : 'pending'
+      };
     }
 
     function normalizeVisualConceptState(raw) {
@@ -983,7 +1007,9 @@
       const slotIds = new Set(VISUAL_CONCEPT_SLOTS.map(item => item.id));
       Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
         if (isVisualConceptInteriorSlot(id) && !deletedInteriorSlots.has(id)) slotIds.add(id);
+        if (isVisualConceptPlanSlot(id) && plans.some(plan => plan.id === id)) slotIds.add(id);
       });
+      plans.forEach(plan => slotIds.add(plan.id));
       visualConceptInteriorComponents().forEach(item => {
         const firstId = visualConceptInteriorSlotId(item.id, 1);
         if (!deletedInteriorSlots.has(firstId)) slotIds.add(firstId);
@@ -1000,7 +1026,8 @@
           const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + visualConceptInteriorComponentIdFromSlot(id);
           if ((!source.slots || !source.slots[id]) && source.slots && source.slots[legacyId]) sourceId = legacyId;
         }
-        const slot = visualConceptSlotSource(source.slots, sourceId) || visualConceptSlotSource(source.slots, id) || emptyVisualConceptSlot(id);
+        const slot = visualConceptSlotSource(source.slots, sourceId) || visualConceptSlotSource(source.slots, id)
+          || visualConceptPlanSeed(plans.find(plan => plan.id === id)) || emptyVisualConceptSlot(id);
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000)
@@ -1071,6 +1098,17 @@
       const previousPrompts = Array.isArray(previousImages.moodboard_prompts) ? previousImages.moodboard_prompts : [];
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
       tenantProjectData.visual_concept = tenantVisualConceptState;
+      // The durable plan record mirrors its slot so slides and exports keep reading plans2d.
+      (tenantVisualConceptState.plans2d || []).forEach(plan => {
+        const slot = tenantVisualConceptState.slots[plan.id];
+        if (!slot) return;
+        plan.mode = slot.mode === 'upload' ? 'upload' : 'ai';
+        plan.title = String(slot.label || '').slice(0, 120);
+        plan.description = String(slot.caption || '').slice(0, 2000);
+        plan.fileId = String(slot.sourceFileId || '');
+        plan.fileName = String(slot.sourceFileName || '');
+        plan.imageUrl = durableImageUrl(slot.approvedImageUrl) || durableImageUrl(slot.imageUrl);
+      });
       const referenceIds = Array.isArray(tenantVisualConceptState.styleReferenceFileIds)
         ? tenantVisualConceptState.styleReferenceFileIds.slice(0, 5) : [];
       tenantProjectData.visual_style_reference_file_ids = referenceIds;
@@ -1134,11 +1172,16 @@
           : '',
         referenceFileIds: isVisualConceptInteriorSlot(slotId)
           ? visualConceptInteriorReferenceIds(slotId)
-          : []
+          : [],
+        planDescription: isVisualConceptPlanSlot(slotId)
+          ? (visualConceptPlans().find(item => item.id === slotId)?.description || '')
+          : ''
       };
     }
 
     function visualConceptSlotLocked(slotId) {
+      // Plans draw from the project facts and the approved land map, not the hero render.
+      if (isVisualConceptPlanSlot(slotId)) return false;
       if (isVisualConceptInteriorSlot(slotId)) {
         return !tenantVisualConceptState.slots.cover.approvedImageUrl || !visualConceptInteriorComponents().length;
       }
@@ -1301,7 +1344,9 @@
         : '';
       const deleteFieldBtn = isVisualConceptInteriorSlot(slotDef.id)
         ? '<button type="button" class="btn danger small" data-visual-action="delete-interior-field" data-visual-slot="' + slotDef.id + '">حذف الحقل</button>'
-        : '';
+        : (isVisualConceptPlanSlot(slotDef.id)
+          ? '<button type="button" class="btn danger small" data-visual-action="delete-plan" data-visual-slot="' + slotDef.id + '">حذف المخطط</button>'
+          : '');
 
       let bodyControls = '';
       if (mode === 'upload') {
@@ -1310,7 +1355,7 @@
           '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
           (slot.sourceFileName ? '<div class="visual-concept-file-info">الملف الحالي: ' + escapeHtml(slot.sourceFileName) + '</div>' : '') +
           '</div>' +
-          '<label>وصف الصورة</label>' +
+          (isVisualConceptPlanSlot(slotDef.id) ? '<label>وصف المخطط</label>' : '<label>وصف الصورة</label>') +
           '<textarea data-visual-caption="' + slotDef.id + '" rows="3" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
           '<div class="visual-concept-actions">' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
@@ -1319,6 +1364,9 @@
       } else {
         bodyControls = '<label>وصف التوليد</label>' +
           '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
+          (isVisualConceptPlanSlot(slotDef.id)
+            ? '<label>وصف المخطط</label><textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>'
+            : '') +
           '<div class="visual-concept-actions">' +
           '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
           '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
@@ -1555,73 +1603,34 @@
       const count = document.getElementById('visualConceptPlansCount');
       const input = document.getElementById('visualConceptPlansUploadInput');
       const plans = visualConceptPlans();
-      if (count) count.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات مرفوعة';
+      if (count) count.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
       if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
+      const addButton = document.getElementById('visualConceptAddPlanBtn');
+      if (addButton) addButton.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
       if (!host) return;
+      plans.forEach(plan => {
+        if (!tenantVisualConceptState.slots[plan.id]) tenantVisualConceptState.slots[plan.id] = emptyVisualConceptSlot(plan.id);
+      });
       if (!plans.length) {
-        host.innerHTML = '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
+        host.innerHTML = '<p class="tenant-hint">لا توجد مخططات.</p>';
         return;
       }
-      host.innerHTML = '<div class="visual-concept-stack">' + plans.map((plan, index) => {
-        const title = plan.title || plan.fileName || ('مخطط ' + (index + 1));
-        if (isSessionOnlyImageUrl(plan.imageUrl)) plan.imageUrl = '';
-        const image = plan.imageUrl
-          ? '<div class="visual-concept-preview has-image" data-visual-zoom="' + escapeHtml(plan.imageUrl) + '" data-visual-title="' + escapeHtml(title) + '">' +
-          '<img src="' + escapeHtml(plan.imageUrl) + '" alt="' + escapeHtml(title) + '">' +
-          '<button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(plan.imageUrl) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button>' +
-          '</div>'
-          : '<div class="visual-concept-preview empty" data-visual-plan-thumb="' + escapeHtml(plan.id) + '"></div>';
-        return '<article class="visual-concept-card" data-visual-plan="' + escapeHtml(plan.id) + '">' +
-          '<div class="visual-concept-head">' +
-          '<h3>' + escapeHtml('مخطط ' + (index + 1)) + '</h3>' +
-          (plan.fileName ? '<span class="visual-concept-status pending">' + escapeHtml(plan.fileName) + '</span>' : '') +
-          '</div>' +
-          image +
-          '<label>عنوان المخطط</label>' +
-          '<input type="text" data-visual-plan-title="' + escapeHtml(plan.id) + '" value="' + escapeHtml(plan.title || '') + '">' +
-          '<label>وصف المخطط</label>' +
-          '<textarea data-visual-plan-description="' + escapeHtml(plan.id) + '" rows="3">' + escapeHtml(plan.description || '') + '</textarea>' +
-          '<div class="visual-concept-actions">' +
-          '<button type="button" class="btn danger small" data-visual-plan-action="delete" data-visual-plan-id="' + escapeHtml(plan.id) + '">حذف المخطط</button>' +
-          '</div>' +
-          '</article>';
-      }).join('') + '</div>';
-      plans.forEach(plan => {
-        if (plan.imageUrl || !plan.fileId) return;
-        const box = host.querySelector('[data-visual-plan-thumb="' + plan.id.replace(/"/g, '\\"') + '"]');
-        if (!box) return;
-        const img = document.createElement('img');
-        img.alt = plan.title || plan.fileName || 'مخطط';
-        box.textContent = '';
-        box.appendChild(img);
-        attachProjectFileThumbnail(img, plan.fileId);
-      });
-      host.querySelectorAll('[data-visual-plan-title]').forEach(field => {
-        field.addEventListener('input', () => {
-          const plan = visualConceptPlans().find(item => item.id === field.getAttribute('data-visual-plan-title'));
-          if (!plan) return;
-          plan.title = String(field.value || '').slice(0, 120);
-          markVisualConceptDirty();
-        });
-      });
-      host.querySelectorAll('[data-visual-plan-description]').forEach(field => {
-        field.addEventListener('input', () => {
-          const plan = visualConceptPlans().find(item => item.id === field.getAttribute('data-visual-plan-description'));
-          if (!plan) return;
-          plan.description = String(field.value || '').slice(0, 2000);
-          markVisualConceptDirty();
-        });
-      });
-      host.querySelectorAll('[data-visual-plan-action="delete"]').forEach(button => {
-        button.addEventListener('click', () => deleteVisualConceptPlan(button.getAttribute('data-visual-plan-id')));
-      });
-      host.querySelectorAll('[data-visual-zoom]').forEach(el => {
-        el.addEventListener('click', (e) => {
-          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-          const url = el.getAttribute('data-visual-zoom');
-          if (url) openVisualConceptLightbox(url, el.getAttribute('data-visual-title'));
-        });
-      });
+      host.innerHTML = '<div class="visual-concept-stack">' + plans.map(plan =>
+        renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)
+      ).join('') + '</div>';
+    }
+
+    function addVisualConceptPlan() {
+      if (visualConceptPlans().length >= VISUAL_CONCEPT_MAX_PLANS) {
+        toast('تم الوصول إلى الحد الأقصى للمخططات');
+        return;
+      }
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      const id = 'plan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      visualConceptPlans().push({ id, mode: 'ai', title: '', description: '', fileId: '', fileName: '', imageUrl: '' });
+      tenantVisualConceptState.slots[id] = emptyVisualConceptSlot(id);
+      markVisualConceptDirty();
+      renderVisualConceptPage();
     }
 
     async function uploadVisualConceptPlanImages(input) {
@@ -1634,7 +1643,7 @@
         input.value = '';
         return;
       }
-      showLoader('جاري رفع المخططات 2D', 'يتم حفظ ' + Math.min(files.length, remaining) + ' مخطط...');
+      showLoader('جاري رفع المخططات', 'يتم حفظ ' + Math.min(files.length, remaining) + ' مخطط...');
       input.disabled = true;
       try {
         input.dataset.projectFileType = 'visual_reference';
@@ -1648,6 +1657,7 @@
           if (plans.some(plan => plan.fileId === String(file.id))) continue;
           plans.push({
             id: 'plan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            mode: 'upload',
             title: '',
             description: '',
             fileId: String(file.id),
@@ -1676,9 +1686,9 @@
       const index = plans.findIndex(item => item.id === planId);
       if (index < 0) return;
       plans.splice(index, 1);
+      if (tenantVisualConceptState.slots) delete tenantVisualConceptState.slots[planId];
       markVisualConceptDirty();
-      renderVisualConceptPlans();
-      updateVisualConceptHomeCards();
+      renderVisualConceptPage();
       toast('تم حذف المخطط');
     }
 
@@ -1713,6 +1723,6 @@
       const plansStatus = document.getElementById('visualConceptHomePlansStatus');
       if (plansStatus) {
         const plans = visualConceptPlans();
-        plansStatus.textContent = plans.length ? plans.length + ' مخطط مرفوع' : 'لا توجد مخططات مرفوعة';
+        plansStatus.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
       }
     }

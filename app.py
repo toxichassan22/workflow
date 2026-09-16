@@ -2303,6 +2303,7 @@ VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
 VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
 VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior'
+VISUAL_CONCEPT_PLAN_PREFIX = 'plan'
 VISUAL_CONCEPT_SLOT_LABELS = {
     'cover': 'الصورة الرئيسية',
     'right': 'يمين',
@@ -2645,6 +2646,10 @@ def _visual_concept_is_internal_slot(slot_id):
     return value == VISUAL_CONCEPT_INTERNAL_PREFIX or value.startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_')
 
 
+def _visual_concept_is_plan_slot(slot_id):
+    return str(slot_id or '').startswith(VISUAL_CONCEPT_PLAN_PREFIX + '_')
+
+
 def _visual_concept_interior_component_id(slot_id):
     value = str(slot_id or '')
     prefix = VISUAL_CONCEPT_INTERNAL_PREFIX + '_'
@@ -2664,6 +2669,9 @@ def _visual_concept_normalize_slot(slot_id):
     if folded.startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_'):
         suffix = value.split('_', 1)[1].strip()
         return f'{VISUAL_CONCEPT_INTERNAL_PREFIX}_{suffix}' if suffix else None
+    if folded.startswith(VISUAL_CONCEPT_PLAN_PREFIX + '_'):
+        suffix = value.split('_', 1)[1].strip()
+        return f'{VISUAL_CONCEPT_PLAN_PREFIX}_{suffix}' if suffix else None
     aliases = {
         'main': 'cover', 'cover_image': 'cover', 'hero': 'cover',
         'east': 'right', 'east_facade': 'right', 'يمين': 'right',
@@ -2679,7 +2687,8 @@ def _visual_concept_slot_label(slot_id, facts=None):
     custom = ''
     if isinstance(facts, dict):
         custom = _visual_concept_text(facts.get('slot_label'), 80)
-    return custom or VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, 'تصور داخلي للمكون')
+    return custom or VISUAL_CONCEPT_SLOT_LABELS.get(
+        slot_id, 'مخطط' if _visual_concept_is_plan_slot(slot_id) else 'تصور داخلي للمكون')
 
 
 def _visual_concept_slot_instruction(slot_id, facts):
@@ -2724,6 +2733,19 @@ def _visual_concept_slot_instruction(slot_id, facts):
             + '. Do not invent another program, mix other components, or change the exterior architecture. '
             'If component-specific interior references are attached, follow their materials and atmosphere. '
             'Composition is 16:9, no people, no text, no logos.'
+        )
+    if _visual_concept_is_plan_slot(slot_id):
+        plan_title = _visual_concept_slot_label(slot_id, facts)
+        description = str(facts.get('plan_description') or '').strip()
+        scope = f"The client's brief for this diagram: {description}. " if description else ''
+        return (
+            f'Create a clean conceptual "{plan_title}" planning diagram for {name}. ' + scope +
+            'Flat schematic architectural style on a white background: muted pastel color coding, '
+            'dark navy outlines, English labels only, a compact legend, and a "NOT TO SCALE" caption. '
+            'When a site or map image is attached, trace the parcel outline, setbacks, surrounding '
+            'streets, and entrances exactly. Use only the approved program, floor ranges, and areas '
+            'from the project facts. No photorealism, no people, no furniture, no room-level detail, '
+            'no invented dimensions.'
         )
     component_names = '، '.join(item['name'] for item in (facts.get('components') or []) if item.get('name'))
     return (
@@ -2935,6 +2957,9 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             max_images=VISUAL_CONCEPT_MAX_REFERENCE_IMAGES + 1,
             urls_first=True,
         )
+    if _visual_concept_is_plan_slot(slot_id):
+        map_url = facts.get('overview_map_url')
+        return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
     return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True)
 
 
@@ -2963,6 +2988,9 @@ def _visual_concept_request_bundle(data, slot_id):
         facts['interior_reference_file_ids'] = _visual_concept_list(
             data.get('referenceFileIds') or data.get('interiorReferenceFileIds')
         )[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
+    if _visual_concept_is_plan_slot(slot_id):
+        facts['plan_description'] = _visual_concept_text(
+            data.get('planDescription') or data.get('plan_description'), 2000)
     missing = _visual_concept_missing_fields(facts, slot_id)
     if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
         missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
@@ -4365,7 +4393,7 @@ def api_visual_concept_prompt():
             'missingFields': missing,
         }), 400
     cover_image = _visual_concept_cover_image(data)
-    if slot_id != 'cover' and not cover_image:
+    if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور البصري',
@@ -4413,7 +4441,7 @@ def api_visual_concept_generate():
     if not prompt:
         return jsonify({'success': False, 'error': 'وصف التصور البصري مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
     cover_image = _visual_concept_cover_image(data)
-    if slot_id != 'cover' and not cover_image:
+    if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل توليد التصور البصري',
@@ -4456,7 +4484,7 @@ def api_visual_concept_chat():
         }), 400
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     cover_image = _visual_concept_cover_image(data)
-    if slot_id != 'cover' and not cover_image:
+    if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',

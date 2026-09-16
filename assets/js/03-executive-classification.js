@@ -304,13 +304,8 @@
             </button>
             <button type="button" class="visual-concept-home-card" data-visual-concept-target="plans2d">
               <span class="visual-concept-home-badge">القسم الثالث</span>
-              <h3>المخططات 2D</h3>
-              <span class="visual-concept-home-status" id="visualConceptHomePlansStatus">لا توجد مخططات مرفوعة</span>
-            </button>
-            <button type="button" class="visual-concept-home-card" data-visual-concept-target="isometric" disabled>
-              <span class="visual-concept-home-badge">القسم الرابع</span>
-              <h3>مخططات الإيزومتريك</h3>
-              <span class="visual-concept-home-status locked" id="visualConceptHomeIsometricStatus">تحت الإنشاء</span>
+              <h3>المخططات</h3>
+              <span class="visual-concept-home-status" id="visualConceptHomePlansStatus">لا توجد مخططات</span>
             </button>
           </div>
         </div>
@@ -361,43 +356,28 @@
         <div id="visualConceptPlansView" class="visual-concept-section" data-visual-concept-view="plans2d" hidden>
           <div class="visual-concept-view-head">
             <div>
-              <h3>المخططات 2D</h3>
+              <h3>المخططات</h3>
             </div>
             <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
           </div>
           <div class="visual-concept-card">
             <div class="visual-concept-head">
-              <h3>توليد المخططات بالذكاء الاصطناعي</h3>
-              <span class="visual-concept-status pending">تحت الإنشاء</span>
+              <h3>إضافة مخطط</h3>
+              <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
             </div>
             <div class="visual-concept-actions">
-              <button type="button" class="btn primary small" id="visualConceptPlansGenerateButton" disabled>توليد المخططات بالذكاء الاصطناعي</button>
+              <button type="button" class="btn primary small" id="visualConceptAddPlanBtn">إضافة مخطط</button>
             </div>
           </div>
           <div class="visual-concept-card">
             <div class="visual-concept-head">
               <h3>رفع مخططات العميل</h3>
-              <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
             </div>
             <input id="visualConceptPlansUploadInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
           </div>
           <div id="visualConceptPlansWorkspace" class="visual-concept-page"></div>
           <div class="visual-concept-actions">
             <button type="button" class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
-          </div>
-        </div>
-        <div id="visualConceptIsometricView" class="visual-concept-section" data-visual-concept-view="isometric" hidden>
-          <div class="visual-concept-view-head">
-            <div>
-              <h3>مخططات الإيزومتريك</h3>
-            </div>
-            <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
-          </div>
-          <div class="visual-concept-card">
-            <div class="visual-concept-head">
-              <h3>مخططات الإيزومتريك</h3>
-              <span class="visual-concept-status pending">تحت الإنشاء</span>
-            </div>
           </div>
         </div>
         <input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">
@@ -415,6 +395,8 @@
       if (intInput) intInput.addEventListener('change', () => uploadVisualConceptInteriorReferences(intInput));
       const plansInput = body.querySelector('#visualConceptPlansUploadInput');
       if (plansInput) plansInput.addEventListener('change', () => uploadVisualConceptPlanImages(plansInput));
+      const addPlanButton = body.querySelector('#visualConceptAddPlanBtn');
+      if (addPlanButton) addPlanButton.addEventListener('click', () => addVisualConceptPlan());
       const intSelect = body.querySelector('#visualConceptInteriorComponentSelect');
       if (intSelect) {
         intSelect.addEventListener('change', () => {
