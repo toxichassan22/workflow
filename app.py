@@ -2304,6 +2304,22 @@ VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
 VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior'
 VISUAL_CONCEPT_PLAN_PREFIX = 'plan'
+VISUAL_CONCEPT_PLAN_DEFINITIONS = (
+    {'kind': 'site', 'id': 'plan_site', 'label': 'الموقع العام المبسط'},
+    {'kind': 'uses', 'id': 'plan_uses', 'label': 'توزيع الاستخدامات على الأدوار'},
+    {'kind': 'massing', 'id': 'plan_massing', 'label': 'المنظور الكتلي ثلاثي الأبعاد'},
+)
+VISUAL_CONCEPT_PLAN_KIND_BY_ID = {item['id']: item['kind'] for item in VISUAL_CONCEPT_PLAN_DEFINITIONS}
+VISUAL_CONCEPT_PLAN_LABEL_BY_ID = {item['id']: item['label'] for item in VISUAL_CONCEPT_PLAN_DEFINITIONS}
+VISUAL_CONCEPT_PLAN_COLORS = (
+    ('Residential', 'soft blue'),
+    ('Hotel', 'soft yellow'),
+    ('Retail & F&B', 'soft teal'),
+    ('Amenities', 'soft pink'),
+    ('Parking/Service', 'light grey'),
+    ('Landscape/Open space', 'pale green'),
+    ('Sea', 'pale cyan'),
+)
 VISUAL_CONCEPT_SLOT_LABELS = {
     'cover': 'الصورة الرئيسية',
     'right': 'يمين',
@@ -2395,9 +2411,14 @@ def _visual_concept_components(project_data):
             'id': component_id or f'component_{len(output) + 1}',
             'name': name,
             'useType': _visual_concept_text(item.get('useType') or item.get('type'), 80),
-            'units': _visual_concept_number(item.get('units')),
-            'unitArea': _visual_concept_number(item.get('unitArea')),
-            'builtArea': _visual_concept_number(item.get('builtArea') or item.get('totalArea')),
+            'units': _visual_concept_number(item.get('units') or item.get('count')),
+            'unitArea': _visual_concept_number(item.get('unitArea') or item.get('area_sqm')),
+            'builtArea': _visual_concept_number(item.get('builtArea') or item.get('totalArea') or item.get('area_sqm')),
+            'floorRange': _visual_concept_text(
+                item.get('floorRange') or item.get('floor_range') or item.get('floor_span')
+                or item.get('floors') or item.get('levels'), 120),
+            'building': _visual_concept_text(item.get('building') or item.get('buildingName'), 100),
+            'notes': _visual_concept_text(item.get('description') or item.get('notes'), 300),
         })
         if len(output) >= 40:
             break
@@ -2613,6 +2634,12 @@ def _visual_concept_facts(project_data):
 
 def _visual_concept_missing_fields(facts, slot_id='cover'):
     missing = []
+    if _visual_concept_is_plan_slot(slot_id):
+        if not facts.get('project_name'):
+            missing.append({'key': 'project_name', 'label': 'اسم المشروع'})
+        if not facts.get('components') and not facts.get('approved_plan_context'):
+            missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
+        return missing
     if not facts.get('project_name'):
         missing.append({'key': 'project_name', 'label': 'اسم المشروع'})
     if not facts.get('project_idea'):
@@ -2688,7 +2715,8 @@ def _visual_concept_slot_label(slot_id, facts=None):
     if isinstance(facts, dict):
         custom = _visual_concept_text(facts.get('slot_label'), 80)
     return custom or VISUAL_CONCEPT_SLOT_LABELS.get(
-        slot_id, 'مخطط' if _visual_concept_is_plan_slot(slot_id) else 'تصور داخلي للمكون')
+        slot_id, VISUAL_CONCEPT_PLAN_LABEL_BY_ID.get(slot_id, 'مخطط')
+        if _visual_concept_is_plan_slot(slot_id) else 'تصور داخلي للمكون')
 
 
 def _visual_concept_slot_instruction(slot_id, facts):
@@ -2737,6 +2765,17 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if _visual_concept_is_plan_slot(slot_id):
         plan_title = _visual_concept_slot_label(slot_id, facts)
         description = str(facts.get('plan_description') or '').strip()
+        kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
+        approved_context = str(facts.get('approved_plan_context') or '').strip()
+        if approved_context and kind:
+            return (
+                f'Create the approved {kind} diagram titled "{plan_title}". '
+                'The approved plan context below is the only source of geometry, numbers, uses, and labels. '
+                + _visual_concept_plan_drawing_instruction(kind) + ' '
+                + (f"Client visual note: {description}. " if description else '')
+                + 'Do not mention sources, files, pages, or internal review. Do not invent missing values. '
+                + approved_context
+            )
         scope = f"The client's brief for this diagram: {description}. " if description else ''
         return (
             f'Create a clean conceptual "{plan_title}" planning diagram for {name}. ' + scope +
@@ -2788,7 +2827,8 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"صور مرجعية للمكون الداخلي: {'مرفقة' if facts.get('interior_reference_file_ids') else 'غير مرفوعة'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
         f"نوع الصورة المطلوبة: {_visual_concept_slot_label(slot_id, facts)}\n"
-        f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
+        + (f"المواصفة المعتمدة للمخطط: {facts.get('approved_plan_context')}\n" if facts.get('approved_plan_context') else '')
+        + f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
     )
 
 
@@ -2898,6 +2938,8 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
         user_prompt = (
             'Current prompt (do not discard):\n' + current
             + '\n\nUser request:\n' + request_text
+            + (('\n\nApproved plan context; do not change its facts:\n' + facts.get('approved_plan_context'))
+               if facts.get('approved_plan_context') else '')
         )
     else:
         system_prompt = (
@@ -2969,6 +3011,12 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             urls_first=True,
         )
     if _visual_concept_is_plan_slot(slot_id):
+        kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
+        boundary_url = facts.get('plan_boundary_reference_url')
+        if kind == 'uses':
+            return []
+        if kind in ('site', 'massing') and boundary_url:
+            return _visual_concept_reference_uris(urls=[boundary_url])
         map_url = facts.get('overview_map_url')
         return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
     return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True)
@@ -3002,6 +3050,17 @@ def _visual_concept_request_bundle(data, slot_id):
     if _visual_concept_is_plan_slot(slot_id):
         facts['plan_description'] = _visual_concept_text(
             data.get('planDescription') or data.get('plan_description'), 2000)
+        workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+        boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
+        boundary_points = _visual_concept_plan_boundary_points(
+            boundary.get('points') or data.get('planBoundaryPoints') or project_data.get('survey_coordinates'))
+        context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
+        context = context or _visual_concept_plan_context(project_data, boundary_points, workflow.get('verification'))
+        context['boundary_points'] = boundary_points or context.get('boundary_points') or []
+        facts['plan_kind'] = _visual_concept_plan_kind(slot_id, data.get('planKind'))
+        facts['approved_plan_context'] = _visual_concept_plan_context_text(context)
+        facts['plan_boundary_reference_url'] = _visual_concept_text(
+            boundary.get('referenceUrl') or data.get('planBoundaryReferenceUrl'), 500)
     missing = _visual_concept_missing_fields(facts, slot_id)
     if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
         missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
@@ -4366,6 +4425,478 @@ def api_get_image_prompts():
     })
 
 
+def _visual_concept_plan_kind(slot_id, value=''):
+    candidate = _visual_concept_text(value, 40).lower()
+    if candidate in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values():
+        return candidate
+    return VISUAL_CONCEPT_PLAN_KIND_BY_ID.get(str(slot_id or '').strip().lower(), '')
+
+
+def _visual_concept_plan_boundary_points(value):
+    parsed = value
+    if isinstance(value, str):
+        parsed = _visual_concept_parse_json(value, value)
+    if isinstance(parsed, dict):
+        parsed = parsed.get('points') or parsed.get('survey_coordinates') or parsed.get('coordinates') or []
+    if not isinstance(parsed, list):
+        return []
+    points = []
+    for index, item in enumerate(parsed):
+        if isinstance(item, dict):
+            east = item.get('eastings') or item.get('easting') or item.get('x')
+            north = item.get('northings') or item.get('northing') or item.get('y')
+            point = item.get('point') or item.get('point_number') or str(index + 1)
+            parcel_id = item.get('parcel_id') or item.get('parcelId') or ''
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            east, north = item[0], item[1]
+            point, parcel_id = str(index + 1), ''
+        else:
+            continue
+        east_number = _visual_concept_number(east)
+        north_number = _visual_concept_number(north)
+        if east_number is None or north_number is None:
+            continue
+        points.append({
+            'parcel_id': _visual_concept_text(parcel_id, 80),
+            'point': _visual_concept_text(point, 40) or str(index + 1),
+            'eastings': east_number,
+            'northings': north_number,
+        })
+        if len(points) >= 60:
+            break
+    return points if len(points) >= 3 else []
+
+
+def _visual_concept_plan_regulation_facts(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    analysis = source.get('land_documents_analysis')
+    if isinstance(analysis, str):
+        analysis = _visual_concept_parse_json(analysis, {})
+    analysis = analysis if isinstance(analysis, dict) else {}
+    parcels = analysis.get('parcels') if isinstance(analysis.get('parcels'), list) else []
+    parcel = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+    keys = (
+        'plot_number_croquis', 'plan_number', 'croquis_land_area', 'boundary_lengths',
+        'surrounding_streets', 'north_direction', 'building_ratio', 'coverage_ratio',
+        'building_ratio_coverage', 'building_ratio_setbacks', 'setbacks', 'floor_area_ratio',
+        'table_floors', 'max_floors_height', 'allowed_uses', 'regulatory_constraints',
+        'parking_requirements', 'entrances_exits_requirements', 'land_use', 'zoning_code',
+        'document_summary', 'summary', 'allowed_uses_restrictions', 'directions',
+    )
+    facts = {}
+    for key in keys:
+        value = parcel.get(key)
+        if value in (None, ''):
+            value = analysis.get(key)
+        if value in (None, ''):
+            value = source.get(key)
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False)
+        text = _visual_concept_plan_sanitize_text(_visual_concept_text(value, 1800))
+        if text:
+            facts[key] = text
+    conflicts = analysis.get('conflicts') if isinstance(analysis.get('conflicts'), list) else []
+    coordinate_rows = parcel.get('survey_coordinates') or analysis.get('survey_coordinates') or source.get('survey_coordinates') or []
+    facts['survey_coordinate_count'] = len(coordinate_rows) if isinstance(coordinate_rows, list) else 0
+    facts['existing_review_points'] = [
+        _visual_concept_plan_sanitize_text(
+            item if isinstance(item, str) else item.get('description') or item.get('field') or '')
+        for item in conflicts
+    ]
+    facts['existing_review_points'] = [item for item in facts['existing_review_points'] if item][:30]
+    return facts
+
+
+def _visual_concept_plan_context(project_data, boundary_points=None, verification=None):
+    source = project_data if isinstance(project_data, dict) else {}
+    points = _visual_concept_plan_boundary_points(
+        boundary_points or source.get('survey_coordinates') or source.get('regulation_coordinates'))
+    directions = _visual_concept_directions(source)
+    components = _visual_concept_components(source)
+    context = {
+        'project_name': _visual_concept_text(_visual_concept_read(source, 'project_name', 'projectName'), 160),
+        'city': _visual_concept_text(_visual_concept_read(source, 'city'), 80),
+        'district': _visual_concept_text(_visual_concept_read(source, 'district'), 100),
+        'land_brief': _visual_concept_plan_sanitize_text(
+            _visual_concept_text(_visual_concept_read(source, 'land_and_building_summary'), 6000)),
+        'land_area': _visual_concept_text(_visual_concept_read(source, 'croquis_land_area', 'land_area', 'total_area_sqm'), 80),
+        'coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio', 'coverage_ratio'), 120),
+        'open_area': _visual_concept_text(_visual_concept_read(source, 'open_area', 'open_spaces', 'open_space_area'), 120),
+        'floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count', 'max_floors_height', 'table_floors'), 120),
+        'north_direction': _visual_concept_text(_visual_concept_read(source, 'north_direction'), 80),
+        'directions': directions,
+        'surrounding_streets': _visual_concept_text(_visual_concept_read(source, 'surrounding_streets'), 1800),
+        'setbacks': _visual_concept_text(_visual_concept_read(source, 'setbacks', 'building_ratio_setbacks'), 1800),
+        'components': components,
+        'boundary_points': points,
+        'regulations': _visual_concept_plan_regulation_facts(source),
+        'verification': verification if isinstance(verification, dict) else {},
+        'colors': [{'use': use, 'color': color} for use, color in VISUAL_CONCEPT_PLAN_COLORS],
+    }
+    return context
+
+
+def _visual_concept_plan_context_text(context):
+    context = context if isinstance(context, dict) else {}
+    location = '، '.join(item for item in (context.get('city'), context.get('district')) if item)
+    boundary = context.get('boundary_points') or []
+    boundary_text = '; '.join(
+        f"{item.get('point')}: E {item.get('eastings')} / N {item.get('northings')}"
+        for item in boundary)
+    directions = '\n'.join(
+        f"- {item.get('direction')}: {item.get('regulation_text')}"
+        for item in context.get('directions') or [] if item.get('regulation_text')) or 'غير متوفر'
+    components = []
+    for item in context.get('components') or []:
+        parts = [item.get('name') or 'مكون غير مسمى']
+        for label, key in (
+            ('use', 'useType'), ('building', 'building'), ('floors', 'floorRange'),
+            ('units', 'units'), ('area', 'unitArea'), ('built area', 'builtArea'), ('notes', 'notes')):
+            if item.get(key) not in (None, ''):
+                parts.append(f'{label}={item[key]}')
+        components.append('- ' + '; '.join(parts))
+    regulations = json.dumps(context.get('regulations') or {}, ensure_ascii=False)
+    colors = ', '.join(f"{item['use']}={item['color']}" for item in context.get('colors') or [])
+    return (
+        'APPROVED PLAN CONTEXT — use only these recorded facts; do not invent or recalculate values.\n'
+        f"Project: {context.get('project_name') or 'unnamed'}\n"
+        f"Location: {location or 'not recorded'}\n"
+        f"Recorded land brief: {context.get('land_brief') or 'not recorded'}\n"
+        f"Land area: {context.get('land_area') or 'not recorded'}\n"
+        f"Coverage ratio: {context.get('coverage_ratio') or 'not recorded'}\n"
+        f"Open area: {context.get('open_area') or 'not recorded'}\n"
+        f"Approved floor count/height: {context.get('floor_count') or 'not recorded'}\n"
+        f"North direction: {context.get('north_direction') or 'not recorded'}\n"
+        f"Setbacks: {context.get('setbacks') or 'not recorded'}\n"
+        f"Surrounding streets: {context.get('surrounding_streets') or 'not recorded'}\n"
+        f"Surveyed boundary points: {boundary_text or 'not recorded'}\n"
+        f"Directions and edges:\n{directions}\n"
+        f"Approved project components:\n{chr(10).join(components) or 'not recorded'}\n"
+        f"Regulatory facts:\n{regulations}\n"
+        f"Fixed color code: {colors}\n"
+        'All image labels must be English. The result is conceptual and NOT TO SCALE.\n'
+    )
+
+
+def _visual_concept_plan_drawing_instruction(kind):
+    if kind == 'site':
+        return (
+            "DRAWING REQUESTED — CONCEPTUAL SITE PLAN: top-down orthographic flat diagram on white. "
+            "Trace the attached surveyed parcel reference exactly and preserve every vertex and proportion. "
+            "Show the north arrow, documented street edges, documented setback envelope, approved building footprints, "
+            "open/landscape areas, documented entrances, and a compact legend. Do not use satellite imagery."
+        )
+    if kind == 'uses':
+        return (
+            "DRAWING REQUESTED — VERTICAL PROGRAM DISTRIBUTION: show the approved buildings as clear vertical floor stacks. "
+            "Use one stack per recorded building, group only recorded floor ranges, and show recorded units and areas when available. "
+            "Do not invent floors, buildings, uses, unit counts, or dimensions."
+        )
+    return (
+        "DRAWING REQUESTED — CONCEPTUAL MASSING: clean high-corner isometric massing diagram on white. "
+        "Extrude only the approved building footprints and recorded floor ranges as simple matte volumes. "
+        "Keep the parcel outline and relative placement faithful to the attached surveyed boundary."
+    )
+
+
+def _visual_concept_plan_prompt_templates(context):
+    common = _visual_concept_plan_context_text(context)
+    return {
+        definition['kind']: common + _visual_concept_plan_drawing_instruction(definition['kind']) +
+        " Use muted pastel fills, dark navy outlines, crisp English callouts, the fixed color code, "
+        "the caption 'ILLUSTRATIVE REFERENCE - NOT TO SCALE', no photorealism, no people, no cars, "
+        "no furniture, no room detail, no logos, no watermarks, and no unrecorded dimensions."
+        for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS
+    }
+
+
+def _visual_concept_plan_sanitize_text(value):
+    text = str(value or '').strip()
+    text = re.sub(r'اشتراطات\s*[12](?:\.pdf)?', 'المرجع التنظيمي', text, flags=re.IGNORECASE)
+    text = re.sub(r'(?:صفحة|صفحات|ص)\s*[0-9٠-٩]+(?:\s*[-–—]\s*[0-9٠-٩]+)?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(?:source_file|filename|source|document_processing)\b\s*[:=][^،\n]+', '', text, flags=re.IGNORECASE)
+    return re.sub(r'\s{2,}', ' ', text).strip(' -–—')
+
+
+def _visual_concept_plan_bullets(value, limit=12):
+    values = value if isinstance(value, list) else re.split(r'\n+|•|\s+-\s+', str(value or ''))
+    result = []
+    for item in values:
+        text = _visual_concept_plan_sanitize_text(item)
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _visual_concept_plan_normalize_verification(raw):
+    source = raw if isinstance(raw, dict) else {}
+    checks = []
+    for item in (source.get('checks') if isinstance(source.get('checks'), list) else [])[:40]:
+        if not isinstance(item, dict):
+            continue
+        name = _visual_concept_plan_sanitize_text(item.get('item') or item.get('check'))
+        if not name:
+            continue
+        result = _visual_concept_plan_sanitize_text(item.get('result') or item.get('status'))
+        if result not in {'مطابق', 'متعارض', 'يحتاج تأكيد', 'غير متوفر'}:
+            result = 'يحتاج تأكيد'
+        issues = _visual_concept_plan_bullets(item.get('issues') or item.get('note') or item.get('action'))
+        checks.append({
+            'item': name,
+            'project': _visual_concept_plan_sanitize_text(item.get('project') or item.get('project_value'))[:600],
+            'regulatory': _visual_concept_plan_sanitize_text(item.get('regulatory') or item.get('reference') or item.get('constraint'))[:600],
+            'result': result,
+            'issues': issues,
+            'action': _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))[:600],
+        })
+    issue_source = source.get('issues') or source.get('blocking_issues') or []
+    issues = []
+    for index, item in enumerate(issue_source if isinstance(issue_source, list) else [issue_source], 1):
+        if isinstance(item, dict):
+            title = _visual_concept_plan_sanitize_text(item.get('title') or item.get('item') or f'ملاحظة {index}')
+            bullets = _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))
+            action = _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))
+            severity = _visual_concept_plan_sanitize_text(item.get('severity') or 'medium')
+        else:
+            title = f'ملاحظة {index}'
+            bullets = _visual_concept_plan_bullets(item)
+            action = ''
+            severity = 'medium'
+        if bullets or title:
+            issues.append({'id': str(index), 'title': title, 'points': bullets, 'action': action, 'severity': severity})
+    summary = _visual_concept_plan_sanitize_text(source.get('summary'))
+    return {
+        'checks': checks,
+        'issues': issues[:30],
+        'summary': summary[:1600],
+        'canProceed': bool(source.get('canProceed', source.get('can_proceed', True))),
+        'approved': False,
+    }
+
+
+def _visual_concept_plan_fallback_verification(context):
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    checks = []
+    pairs = (
+        ('مساحة الأرض', context.get('land_area'), regulations.get('croquis_land_area')),
+        ('نسبة التغطية', context.get('coverage_ratio'), regulations.get('coverage_ratio') or regulations.get('building_ratio_coverage')),
+        ('عدد الأدوار', context.get('floor_count'), regulations.get('table_floors') or regulations.get('max_floors_height')),
+        ('الارتدادات', context.get('setbacks'), regulations.get('setbacks') or regulations.get('building_ratio_setbacks')),
+        ('الإحداثيات', len(context.get('boundary_points') or []), regulations.get('survey_coordinate_count') or 0),
+        ('مكونات المشروع', len(context.get('components') or []), len(context.get('components') or [])),
+    )
+    for name, project_value, regulatory_value in pairs:
+        project_text = _visual_concept_plan_sanitize_text(project_value) if not isinstance(project_value, int) else str(project_value)
+        regulatory_text = _visual_concept_plan_sanitize_text(regulatory_value) if not isinstance(regulatory_value, int) else str(regulatory_value)
+        result = 'مطابق' if project_text and regulatory_text and project_text == regulatory_text else ('يحتاج تأكيد' if project_text or regulatory_text else 'غير متوفر')
+        checks.append({'item': name, 'project': project_text, 'regulatory': regulatory_text, 'result': result, 'issues': [], 'action': ''})
+    issues = []
+    for item in checks:
+        if item['result'] in {'يحتاج تأكيد', 'غير متوفر'}:
+            issues.append({'id': str(len(issues) + 1), 'title': item['item'], 'points': ['القيمة تحتاج مراجعة يدوية قبل اعتمادها.'], 'action': 'مراجعة القيمة وتأكيدها.', 'severity': 'medium'})
+    return {'checks': checks, 'issues': issues, 'summary': 'تمت مقارنة المدخلات المتاحة مع البيانات التنظيمية المسجلة.', 'canProceed': True, 'approved': False}
+
+
+def _visual_concept_render_plan_boundary_reference(points, tenant_id):
+    points = _visual_concept_plan_boundary_points(points)
+    if len(points) < 3:
+        return ''
+    try:
+        from io import BytesIO
+        from PIL import Image, ImageDraw
+        eastings = [float(item['eastings']) for item in points]
+        northings = [float(item['northings']) for item in points]
+        min_e, max_e = min(eastings), max(eastings)
+        min_n, max_n = min(northings), max(northings)
+        span = max(max_e - min_e, max_n - min_n) or 1
+        width = height = 1200
+        margin = 150
+        scale = (width - 2 * margin) / span
+        def to_pixel(east, north):
+            x = margin + (east - min_e) * scale + (width - 2 * margin - (max_e - min_e) * scale) / 2
+            y = height - (margin + (north - min_n) * scale + (height - 2 * margin - (max_n - min_n) * scale) / 2)
+            return int(round(x)), int(round(y))
+        image = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(image)
+        polygon = [to_pixel(east, north) for east, north in zip(eastings, northings)]
+        draw.polygon(polygon, fill=(232, 240, 232), outline=(23, 43, 77))
+        draw.line(polygon + [polygon[0]], fill=(23, 43, 77), width=8, joint='curve')
+        for point in polygon:
+            draw.ellipse([point[0] - 9, point[1] - 9, point[0] + 9, point[1] + 9], fill=(23, 43, 77))
+        arrow_x, arrow_y = margin, margin
+        draw.line([(arrow_x, arrow_y + 75), (arrow_x, arrow_y)], fill=(23, 43, 77), width=8)
+        draw.polygon([(arrow_x, arrow_y - 16), (arrow_x - 15, arrow_y + 12), (arrow_x + 15, arrow_y + 12)], fill=(23, 43, 77))
+        buffer = BytesIO()
+        image.save(buffer, format='PNG')
+        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+        return persist_generated_image(f'data:image/png;base64,{encoded}', tenant_id) or ''
+    except Exception as error:
+        app.logger.warning('Could not render plan boundary reference: %s', error)
+        return ''
+
+
+def _visual_concept_plan_regulation_input(project_data, context):
+    return {
+        'project_facts': {
+            'land_area': context.get('land_area'),
+            'coverage_ratio': context.get('coverage_ratio'),
+            'open_area': context.get('open_area'),
+            'floor_count': context.get('floor_count'),
+            'setbacks': context.get('setbacks'),
+            'directions': context.get('directions'),
+            'components': context.get('components'),
+            'boundary_point_count': len(context.get('boundary_points') or []),
+        },
+        'regulatory_facts': context.get('regulations') or {},
+    }
+
+
+def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False):
+    if _visual_concept_plan_kind(slot_id) not in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values():
+        return None
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    verification = workflow.get('verification') if isinstance(workflow.get('verification'), dict) else {}
+    boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
+    if not verification.get('approved'):
+        return {'success': False, 'error': 'اعتماد نتيجة التحقق مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_VERIFICATION_REQUIRED'}
+    if require_boundary and not boundary.get('approved'):
+        return {'success': False, 'error': 'اعتماد حدود الأرض مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_BOUNDARY_REQUIRED'}
+    return None
+
+
+@app.route('/api/visual-concept/plans-verify', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_verify():
+    data = request.get_json(silent=True) or {}
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    context = _visual_concept_plan_context(project_data)
+    system_prompt = (
+        'أنت مدقق اتساق لرسومات تخطيطية مفاهيمية لمشروع عقاري. '
+        'قارن فقط بين بيانات المشروع المسجلة والبيانات التنظيمية الموثقة المجهولة أدناه. '
+        'لا تصدر شهادة قانونية ولا تعتبر أي نقص موافقة أو رفضًا نهائيًا. ميّز بين التعارض، والقيمة الناقصة، والقيمة التي تحتاج تأكيدًا. '
+        'لا تذكر أبدًا أسماء ملفات أو أرقام صفحات أو عبارة ملف اشتراط 1 أو ملف اشتراط 2 أو أي مصدر داخلي. '
+        'استخدم بدل ذلك «البيانات التنظيمية الموثقة». أخرج JSON فقط: '
+        '{"checks":[{"item":"","project":"","regulatory":"","result":"مطابق|متعارض|يحتاج تأكيد|غير متوفر","issues":[""],"action":""}],'
+        '"issues":[{"title":"","points":[""],"action":"","severity":"high|medium|low"}],"summary":"","canProceed":true}'
+    )
+    user_prompt = (
+        'هذه هي المدخلات المسموح بفحصها فقط:\n' +
+        json.dumps(_visual_concept_plan_regulation_input(project_data, context), ensure_ascii=False) +
+        '\nرتّب كل مشكلة كنقاط قصيرة قابلة للمتابعة، ولا تكتب فقرة طويلة. '
+        'لا تذكر أسماء أو أرقام مصادر داخل النتيجة.'
+    )
+    result = {}
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=8000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        result = parse_json_object(_get_chat_response_text(response))
+    except Exception:
+        result = {}
+    verification = _visual_concept_plan_normalize_verification(result) if result else _visual_concept_plan_fallback_verification(context)
+    existing_points = (context.get('regulations') or {}).get('existing_review_points') or []
+    for point in existing_points:
+        if not any(point in issue.get('points', []) for issue in verification.get('issues', [])):
+            verification.setdefault('issues', []).append({
+                'id': str(len(verification.get('issues', [])) + 1),
+                'title': 'مراجعة بيانات موثقة',
+                'points': [point],
+                'action': 'مراجعة القيمة قبل الاعتماد.',
+                'severity': 'medium'
+            })
+    return jsonify({'success': True, 'verification': verification, 'planContext': context, 'context': {
+        'boundaryPointCount': len(context.get('boundary_points') or []),
+        'componentCount': len(context.get('components') or []),
+    }})
+
+
+@app.route('/api/visual-concept/plans-boundary', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_boundary():
+    data = request.get_json(silent=True) or {}
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    points = _visual_concept_plan_boundary_points(data.get('points') or project_data.get('survey_coordinates'))
+    instruction = _visual_concept_text(data.get('instruction'), 2000)
+    if str(data.get('mode') or '').lower() == 'ai':
+        system_prompt = (
+            'أنت محرر حدود مساحية لمخطط مفاهيمي. أعد JSON فقط بالشكل '
+            '{"points":[{"point":"","eastings":0,"northings":0}],"reply":""}. '
+            'حافظ على ترتيب النقاط وشكل الحدود، ولا تغيّر أي إحداثي إلا إذا طلب المستخدم ذلك صراحة. '
+            'لا تخترع نقطة أو قيمة غير موجودة، ولا تذكر أسماء ملفات أو مصادر.'
+        )
+        user_prompt = (
+            'الإحداثيات الحالية:\n' + json.dumps(points, ensure_ascii=False) +
+            '\nطلب التعديل:\n' + instruction
+        )
+        try:
+            response = call_openrouter_chat(
+                system_prompt, user_prompt, temperature=None, max_tokens=4000,
+                model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+                response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+            parsed = parse_json_object(_get_chat_response_text(response))
+            ai_points = _visual_concept_plan_boundary_points(parsed.get('points') if isinstance(parsed, dict) else [])
+            if ai_points:
+                points = ai_points
+            reply = _visual_concept_plan_sanitize_text(parsed.get('reply') if isinstance(parsed, dict) else '')
+        except Exception as error:
+            return jsonify({'success': False, 'error': 'تعذر تعديل حدود الأرض بالذكاء الاصطناعي', 'detail': str(error)[:300]}), 503
+    else:
+        reply = ''
+    if len(points) < 3:
+        return jsonify({'success': False, 'error': 'لا توجد ثلاث نقاط إحداثية مكتملة على الأقل'}), 400
+    reference_url = _visual_concept_render_plan_boundary_reference(points, g.tenant_id)
+    return jsonify({'success': True, 'points': points, 'referenceUrl': reference_url, 'reply': reply})
+
+
+@app.route('/api/visual-concept/plans-prompts', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_prompts():
+    data = request.get_json(silent=True) or {}
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site', require_boundary=True)
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
+    points = _visual_concept_plan_boundary_points(boundary.get('points') or project_data.get('survey_coordinates'))
+    context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
+    context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
+    context['boundary_points'] = points or context.get('boundary_points') or []
+    spec = _visual_concept_plan_context_text(context)
+    system_prompt = (
+        'أنت SOL، كاتب برومبتات مخططات معمارية مفاهيمية. اكتب ثلاثة برومبتات إنجليزية مستقلة، '
+        'واحد لكل نوع: site وuses وmassing. استخدم المواصفة المعتمدة حرفيًا ولا تضف أو تغيّر أرقامًا. '
+        'لا تذكر أسماء ملفات أو مصادر أو صفحات. لا تستخدم نصوصًا عربية داخل الصور. أخرج JSON فقط: '
+        '{"prompts":{"site":"","uses":"","massing":""}}.'
+    )
+    user_prompt = spec + '\n\n' + '\n\n'.join(
+        f"{definition['kind'].upper()} INSTRUCTION: {_visual_concept_plan_drawing_instruction(definition['kind'])}"
+        for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS)
+    prompts = {}
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=12000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        parsed = parse_json_object(_get_chat_response_text(response))
+        raw_prompts = parsed.get('prompts') if isinstance(parsed, dict) else {}
+        if isinstance(raw_prompts, dict):
+            prompts = {kind: _visual_concept_sanitize_prompt(raw_prompts.get(kind)) for kind in ('site', 'uses', 'massing')}
+    except Exception:
+        prompts = {}
+    fallback = _visual_concept_plan_prompt_templates(context)
+    for kind in ('site', 'uses', 'massing'):
+        if not prompts.get(kind):
+            prompts[kind] = fallback[kind]
+    return jsonify({'success': True, 'prompts': prompts, 'context': context, 'referenceUrl': boundary.get('referenceUrl') or ''})
+
+
 @app.route('/api/visual-concept/preflight', methods=['POST'])
 @require_permission('generate_images')
 def api_visual_concept_preflight():
@@ -4395,6 +4926,9 @@ def api_visual_concept_prompt():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    if workflow_error:
+        return jsonify(workflow_error), 400
     _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
     if missing:
         return jsonify({
@@ -4441,6 +4975,9 @@ def api_visual_concept_generate():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    if workflow_error:
+        return jsonify(workflow_error), 400
     _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
     if missing:
         return jsonify({
@@ -4483,6 +5020,9 @@ def api_visual_concept_chat():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    if workflow_error:
+        return jsonify(workflow_error), 400
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:
         return jsonify({'success': False, 'error': 'اكتب طلب التعديل أولاً', 'error_code': 'MESSAGE_REQUIRED'}), 400

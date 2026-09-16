@@ -206,6 +206,176 @@
       cursor: not-allowed;
     }
 
+    .plans-workflow-card {
+      display: grid;
+      gap: 16px;
+    }
+
+    .plans-workflow-steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .plans-workflow-steps li {
+      min-height: 42px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7fafc;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .plans-workflow-steps li.is-active {
+      border-color: var(--p);
+      background: #eef6ff;
+      color: var(--p);
+    }
+
+    .plans-workflow-steps li.is-complete {
+      border-color: #b9e1d1;
+      background: #edf7f3;
+      color: #126247;
+    }
+
+    .plans-workflow-panel {
+      display: grid;
+      gap: 12px;
+      padding-top: 4px;
+    }
+
+    .plans-workflow-panel[hidden] {
+      display: none !important;
+    }
+
+    .plans-workflow-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .plans-workflow-panel-head h4 {
+      margin: 0;
+      color: var(--p);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .plans-workflow-table-wrap,
+    .plans-boundary-table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .plans-workflow-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .plans-workflow-table th,
+    .plans-workflow-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      vertical-align: top;
+    }
+
+    .plans-workflow-table th {
+      background: #f7fafc;
+      color: var(--p);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .plans-workflow-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .plans-workflow-table input,
+    .plans-workflow-panel textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .plans-workflow-empty {
+      padding: 18px !important;
+      color: var(--muted);
+      text-align: center !important;
+    }
+
+    .plans-workflow-notice {
+      padding: 10px 12px;
+      border: 1px solid #efb3b3;
+      border-radius: 10px;
+      background: #fff0f0;
+      color: #9c1d1d;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .plans-issue-list {
+      margin: 0;
+      padding-inline-start: 18px;
+      line-height: 1.7;
+    }
+
+    .plans-check-result {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      white-space: nowrap;
+    }
+
+    .plans-boundary-editor {
+      display: grid;
+      grid-template-columns: minmax(260px, .9fr) minmax(360px, 1.1fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .plans-boundary-preview {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .plans-boundary-svg {
+      display: block;
+      width: 100%;
+      max-height: 360px;
+    }
+
+    @media (max-width: 860px) {
+      .plans-boundary-editor,
+      .plans-workflow-steps {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .visual-concept-upload-box {
       border: 2px dashed var(--line);
       border-radius: 12px;

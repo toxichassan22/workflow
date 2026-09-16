@@ -365,21 +365,13 @@
             <button type="button" class="visual-concept-mode-btn" data-visual-plans-tab="upload">رفع المخططات</button>
           </div>
           <div id="visualConceptPlansGeneratePanel" data-visual-plans-panel="generate">
-            <div class="visual-concept-card">
-              <div class="visual-concept-head">
-                <h3>إضافة مخطط</h3>
-                <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
-              </div>
-              <div class="visual-concept-actions">
-                <button type="button" class="btn primary small" id="visualConceptAddPlanBtn">إضافة مخطط</button>
-              </div>
-            </div>
-            <div id="visualConceptPlansGenerateList" class="visual-concept-page"></div>
+            <div id="visualConceptPlansWorkflow" class="visual-concept-page"></div>
           </div>
           <div id="visualConceptPlansUploadPanel" data-visual-plans-panel="upload" hidden>
             <div class="visual-concept-card">
               <div class="visual-concept-head">
                 <h3>رفع مخططات العميل</h3>
+                <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
               </div>
               <input id="visualConceptPlansUploadInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
             </div>

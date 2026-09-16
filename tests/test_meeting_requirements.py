@@ -3957,14 +3957,15 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         # No icon libraries. SVG is allowed only for genuine data rendering:
         # the favicon, the map polygon overlay, and the super-admin dashboard
-        # charts (sparkline/line/donut builders emit SVG strings in JS).
+        # charts (sparkline/line/donut builders emit SVG strings in JS), and the
+        # visual-concept parcel boundary editor.
         index_source = read_frontend_text()
         shell_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
         self.assertEqual(shell_source.count('<svg'), 1, 'the shell may inline only the favicon SVG')
-        self.assertEqual(index_source.count('<svg'), 5,
-            'allowed SVG: favicon + map overlay + the three admin dashboard chart builders')
+        self.assertEqual(index_source.count('<svg'), 6,
+            'allowed SVG: favicon + map overlay + the three admin dashboard chart builders + parcel boundary editor')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 
         # Missing logos fall back to a text monogram rather than a building glyph.
@@ -8906,7 +8907,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function visualConceptPlanSeed(plan)', index_source)
         self.assertIn('async function uploadVisualConceptPlanImages(input)', index_source)
         self.assertIn('function deleteVisualConceptPlan(planId)', index_source)
-        self.assertIn('id="visualConceptAddPlanBtn"', index_source)
+        self.assertIn('id="visualConceptPlansWorkflow"', index_source)
+        self.assertIn('data-visual-plans-tab="generate"', index_source)
+        self.assertIn('data-visual-plans-tab="upload"', index_source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-verify'", index_source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-prompts'", index_source)
         self.assertIn('data-visual-action="delete-plan"', index_source)
         self.assertNotIn('data-visual-plan-title', index_source)
         self.assertNotIn('data-visual-plan-description', index_source)
@@ -9107,12 +9113,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(
             self.application_module._visual_concept_normalize_slot('plan_1700_abc'), 'plan_1700_abc')
         self.assertEqual(
-            self.application_module._visual_concept_slot_label('plan_site', {}), 'مخطط')
+            self.application_module._visual_concept_slot_label('plan_site', {}), 'الموقع العام المبسط')
 
         with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Plan prompt', 'تم')):
             plan_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
                 'projectData': facts,
             })
         self.assertEqual(plan_prompt.status_code, 200, plan_prompt.get_json())
@@ -9125,6 +9132,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'prompt': 'Conceptual site plan',
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
                 'projectData': facts,
             })
         self.assertEqual(plan.status_code, 200, plan.get_json())
@@ -9141,6 +9149,93 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn("function addConceptualPlansSection(form, before)", index_source)
         self.assertNotIn('data-key="conceptual_plans"', index_source)
         self.assertEqual(self.application_module._visual_concept_interior_component_id('interior_comp-1::3'), 'comp-1')
+
+    def test_plans_workflow_verifies_sources_anonymously_and_uses_boundary_context(self):
+        module = self.application_module
+        client = self.app.test_client()
+        points = [
+            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
+            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
+            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
+        ]
+        project_data = {
+            'project_name': 'The View',
+            'city': 'جدة',
+            'district': 'الشاطئ',
+            'croquis_land_area': 7012,
+            'approved_floor_count': 52,
+            'approved_coverage_ratio': 60,
+            'survey_coordinates': points,
+            'directions_table': [{'direction': 'west', 'regulation_text': 'كورنيش 16م'}],
+            'project_components_data': [
+                {'name': 'Luxury Apartments', 'useType': 'residential', 'units': 244, 'floorRange': '26-52'}
+            ],
+            'land_documents_analysis': {
+                'parcels': [{'croquis_land_area': 7012, 'coverage_ratio': 60, 'setbacks': '5m west; 3m east', 'table_floors': 52}],
+                'conflicts': [{'description': 'قيمة تحتاج تأكيدًا في اشتراطات1.pdf صفحة 4'}]
+            }
+        }
+        verification_payload = {
+            'checks': [{
+                'item': 'الارتدادات', 'project': '5m غربًا', 'regulatory': '5m غربًا',
+                'result': 'مطابق', 'issues': ['راجع اشتراطات1.pdf صفحة 4'], 'action': 'لا يوجد'
+            }],
+            'issues': [{'title': 'مراجعة', 'points': ['اشتراطات2.pdf صفحة 8 تحتاج تأكيدًا'], 'action': 'مراجعة', 'severity': 'medium'}],
+            'summary': 'توجد مراجعة في اشتراطات1.pdf.', 'canProceed': True
+        }
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(verification_payload, ensure_ascii=False)}}]
+        }):
+            verified = client.post('/api/visual-concept/plans-verify', headers=self._headers(self.token_a), json={
+                'projectData': project_data
+            })
+        self.assertEqual(verified.status_code, 200, verified.get_json())
+        verification = verified.get_json()['verification']
+        serialized = json.dumps(verification, ensure_ascii=False)
+        self.assertNotIn('اشتراطات1', serialized)
+        self.assertNotIn('اشتراطات2', serialized)
+        self.assertNotIn('صفحة', serialized)
+        self.assertTrue(verification['issues'][0]['points'])
+
+        with patch.object(module, '_visual_concept_render_plan_boundary_reference', return_value='/uploads/creative/parcel-ref.png'):
+            boundary = client.post('/api/visual-concept/plans-boundary', headers=self._headers(self.token_a), json={
+                'mode': 'manual', 'points': points, 'projectData': project_data,
+                'plansWorkflow': {'verification': {'approved': True}}
+            })
+        self.assertEqual(boundary.status_code, 200, boundary.get_json())
+        self.assertEqual(boundary.get_json()['referenceUrl'], '/uploads/creative/parcel-ref.png')
+        self.assertEqual(len(boundary.get_json()['points']), 3)
+
+        prompt_response = {'prompts': {'site': 'SITE PROMPT', 'uses': 'USES PROMPT', 'massing': 'MASSING PROMPT'}}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(prompt_response)}}]
+        }) as prompt_call:
+            prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+                'projectData': project_data,
+                'plansWorkflow': {
+                    'verification': {'approved': True},
+                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}
+                }
+            })
+        self.assertEqual(prompts.status_code, 200, prompts.get_json())
+        self.assertEqual(prompts.get_json()['prompts']['site'], 'SITE PROMPT')
+        self.assertTrue(prompt_call.called)
+        self.assertIn('APPROVED PLAN CONTEXT', prompt_call.call_args.args[1])
+        self.assertIn('Luxury Apartments', prompt_call.call_args.args[1])
+        self.assertNotIn('اشتراطات1', prompt_call.call_args.args[1])
+        self.assertNotIn('اشتراطات2', prompt_call.call_args.args[1])
+
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,CCCC') as image_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+            generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_site', 'planKind': 'site', 'prompt': 'SITE PROMPT',
+                'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}},
+                'projectData': project_data
+            })
+        self.assertEqual(generated.status_code, 200, generated.get_json())
+        self.assertTrue(any('parcel-ref.png' in str(item) for item in image_call.call_args.args[1]))
 
     def test_executive_content_section_generates_each_block_from_existing_facts(self):
         import executive_content

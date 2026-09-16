@@ -836,6 +836,11 @@
     const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
     const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;
     const VISUAL_CONCEPT_MAX_PLANS = 30;
+    const VISUAL_CONCEPT_PLAN_KINDS = [
+      { kind: 'site', id: 'plan_site', label: 'الموقع العام المبسط' },
+      { kind: 'uses', id: 'plan_uses', label: 'توزيع الاستخدامات على الأدوار' },
+      { kind: 'massing', id: 'plan_massing', label: 'المنظور الكتلي ثلاثي الأبعاد' }
+    ];
     const VISUAL_CONCEPT_SLOT_ALIASES = {
       cover: ['cover', 'main', 'hero'],
       right: ['right', 'east', 'east_facade'],
@@ -851,15 +856,127 @@
 
     function visualConceptDefaultSlotLabel(slotId) {
       return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
+        || visualConceptPlanDefinition(slotId)?.label
         || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : (isVisualConceptPlanSlot(slotId) ? 'مخطط' : 'الصورة'));
     }
 
     function visualConceptCanRenameSlot(slotId) {
-      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId) || isVisualConceptPlanSlot(slotId);
+      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId)
+        || (isVisualConceptPlanSlot(slotId) && !isVisualConceptWorkflowPlan(slotId));
     }
 
     function isVisualConceptPlanSlot(slotId) {
       return String(slotId || '').startsWith('plan_');
+    }
+
+    function visualConceptPlanDefinition(value) {
+      const raw = value && typeof value === 'object' ? value : { id: value };
+      const kind = String(raw.kind || '').trim().toLowerCase();
+      const id = String(raw.id || '').trim();
+      return VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === kind || item.id === id) || null;
+    }
+
+    function isVisualConceptWorkflowPlan(value) {
+      return Boolean(visualConceptPlanDefinition(value));
+    }
+
+    function visualConceptPlanKind(value) {
+      return visualConceptPlanDefinition(value)?.kind || '';
+    }
+
+    function visualConceptBoundaryPoints(value) {
+      let parsed = value;
+      if (typeof value === 'string') {
+        try { parsed = JSON.parse(value); } catch (error) { parsed = []; }
+      }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        parsed = parsed.points || parsed.survey_coordinates || parsed.coordinates || [];
+      }
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item, index) => {
+        const source = Array.isArray(item)
+          ? { eastings: item[0], northings: item[1], point: index + 1 }
+          : (item && typeof item === 'object' ? item : {});
+        const eastings = Number(String(source.eastings ?? source.easting ?? source.x ?? '').replace(/,/g, ''));
+        const northings = Number(String(source.northings ?? source.northing ?? source.y ?? '').replace(/,/g, ''));
+        return {
+          parcel_id: String(source.parcel_id || source.parcelId || '').trim(),
+          point: String(source.point || source.point_number || index + 1).trim(),
+          eastings,
+          northings
+        };
+      }).filter(item => Number.isFinite(item.eastings) && Number.isFinite(item.northings)).slice(0, 60);
+    }
+
+    function emptyVisualConceptPlansWorkflow() {
+      return {
+        status: 'idle',
+        verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
+        boundary: { points: [], referenceUrl: '', instruction: '', approved: false },
+        prompts: { site: '', uses: '', massing: '' },
+        planContext: null,
+        promptReady: false
+      };
+    }
+
+    function normalizeVisualConceptPlansWorkflow(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const source = value && typeof value === 'object' ? value : {};
+      const empty = emptyVisualConceptPlansWorkflow();
+      const verification = source.verification && typeof source.verification === 'object' ? source.verification : {};
+      const boundary = source.boundary && typeof source.boundary === 'object' ? source.boundary : {};
+      const prompts = source.prompts && typeof source.prompts === 'object' ? source.prompts : {};
+      return {
+        ...empty,
+        status: ['idle', 'verified', 'boundary', 'ready'].includes(source.status) ? source.status : 'idle',
+        verification: {
+          checks: Array.isArray(verification.checks) ? verification.checks.slice(0, 40) : [],
+          issues: Array.isArray(verification.issues) ? verification.issues.slice(0, 30) : [],
+          summary: String(verification.summary || '').slice(0, 1600),
+          canProceed: Boolean(verification.canProceed),
+          approved: Boolean(verification.approved)
+        },
+        boundary: {
+          points: visualConceptBoundaryPoints(boundary.points || boundary.survey_coordinates),
+          referenceUrl: durableImageUrl(boundary.referenceUrl || boundary.reference_url),
+          instruction: String(boundary.instruction || '').slice(0, 2000),
+          approved: Boolean(boundary.approved)
+        },
+        prompts: {
+          site: String(prompts.site || '').slice(0, 12000),
+          uses: String(prompts.uses || '').slice(0, 12000),
+          massing: String(prompts.massing || '').slice(0, 12000)
+        },
+        planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
+        promptReady: Boolean(source.promptReady || (prompts.site && prompts.uses && prompts.massing))
+      };
+    }
+
+    function visualConceptWorkflowPlanSeed(definition, workflow) {
+      const prompt = workflow?.prompts?.[definition.kind] || '';
+      return {
+        mode: 'ai',
+        label: definition.label,
+        caption: definition.label,
+        prompt,
+        imageUrl: '',
+        approvedImageUrl: '',
+        status: 'pending',
+        chat: [],
+        styleReferenceFileIds: [],
+        styleReferenceNames: [],
+        sourceFileId: '',
+        sourceFileName: ''
+      };
+    }
+
+    function visualConceptPlansWorkflowState() {
+      tenantVisualConceptState = tenantVisualConceptState || normalizeVisualConceptState({});
+      tenantVisualConceptState.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      return tenantVisualConceptState.plansWorkflow;
     }
 
     function visualConceptInteriorSlotId(componentId, viewIndex = 1) {
@@ -994,6 +1111,7 @@
         });
       }
       const plans = normalizeVisualConceptPlans(source.plans2d);
+      const plansWorkflow = normalizeVisualConceptPlansWorkflow(source.plansWorkflow || source.plans_workflow);
       const styleReferenceFileIds = savedReferenceIds.slice(0, 5);
       const styleReferenceNames = visualConceptReferenceList(source.styleReferenceNames || source.style_reference_names);
       const legacyReferenceName = String(source.styleReferenceName || '').trim();
@@ -1005,6 +1123,7 @@
       // an image the user had just unapproved, or never approved at all.
       const stated = {};
       const slotIds = new Set(VISUAL_CONCEPT_SLOTS.map(item => item.id));
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => slotIds.add(definition.id));
       Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
         if (isVisualConceptInteriorSlot(id) && !deletedInteriorSlots.has(id)) slotIds.add(id);
         if (isVisualConceptPlanSlot(id) && plans.some(plan => plan.id === id)) slotIds.add(id);
@@ -1026,8 +1145,11 @@
           const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + visualConceptInteriorComponentIdFromSlot(id);
           if ((!source.slots || !source.slots[id]) && source.slots && source.slots[legacyId]) sourceId = legacyId;
         }
+        const workflowDefinition = visualConceptPlanDefinition(id);
         const slot = visualConceptSlotSource(source.slots, sourceId) || visualConceptSlotSource(source.slots, id)
-          || visualConceptPlanSeed(plans.find(plan => plan.id === id)) || emptyVisualConceptSlot(id);
+          || visualConceptPlanSeed(plans.find(plan => plan.id === id))
+          || (workflowDefinition ? visualConceptWorkflowPlanSeed(workflowDefinition, plansWorkflow) : null)
+          || emptyVisualConceptSlot(id);
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000)
@@ -1083,6 +1205,7 @@
         version: 1,
         slots,
         plans2d: plans,
+        plansWorkflow,
         styleReferenceFileIds,
         styleReferenceFileId: styleReferenceFileIds[0] || '',
         styleReferenceNames,
@@ -1098,6 +1221,16 @@
       const previousPrompts = Array.isArray(previousImages.moodboard_prompts) ? previousImages.moodboard_prompts : [];
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
       tenantProjectData.visual_concept = tenantVisualConceptState;
+      tenantVisualConceptState.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+        const slot = tenantVisualConceptState.slots[definition.id];
+        if (!slot || (!slot.prompt && !slot.imageUrl && !slot.approvedImageUrl)) return;
+        let plan = (tenantVisualConceptState.plans2d || []).find(item => item.id === definition.id);
+        if (!plan) {
+          plan = { id: definition.id, mode: 'ai', title: definition.label, description: definition.label, fileId: '', fileName: '', imageUrl: '' };
+          tenantVisualConceptState.plans2d.push(plan);
+        }
+      });
       // The durable plan record mirrors its slot so slides and exports keep reading plans2d.
       (tenantVisualConceptState.plans2d || []).forEach(plan => {
         const slot = tenantVisualConceptState.slots[plan.id];
@@ -1175,6 +1308,16 @@
           : [],
         planDescription: isVisualConceptPlanSlot(slotId)
           ? (visualConceptPlans().find(item => item.id === slotId)?.description || '')
+          : '',
+        planKind: visualConceptPlanKind(slotId),
+        plansWorkflow: isVisualConceptWorkflowPlan(slotId)
+          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow)
+          : null,
+        planBoundaryPoints: isVisualConceptWorkflowPlan(slotId)
+          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.points
+          : [],
+        planBoundaryReferenceUrl: isVisualConceptWorkflowPlan(slotId)
+          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.referenceUrl
           : ''
       };
     }
@@ -1615,30 +1758,277 @@
       });
     }
 
+    function renderVisualConceptBoundarySvg(host, points) {
+      if (!host) return;
+      const rows = visualConceptBoundaryPoints(points);
+      if (rows.length < 3) {
+        host.innerHTML = '<p class="tenant-hint">لا توجد نقاط حدود مكتملة.</p>';
+        return;
+      }
+      const xs = rows.map(item => item.eastings);
+      const ys = rows.map(item => item.northings);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      const span = Math.max(maxX - minX, maxY - minY) || 1;
+      const pad = 100;
+      const toPoint = item => {
+        const x = pad + ((item.eastings - minX) / span) * (1000 - pad * 2) + ((1000 - pad * 2) - ((maxX - minX) / span) * (1000 - pad * 2)) / 2;
+        const y = 700 - (pad + ((item.northings - minY) / span) * (700 - pad * 2) + ((700 - pad * 2) - ((maxY - minY) / span) * (700 - pad * 2)) / 2);
+        return [Math.round(x), Math.round(y)];
+      };
+      const polygon = rows.map(toPoint).map(point => point.join(',')).join(' ');
+      const circles = rows.map((item, index) => {
+        const [x, y] = toPoint(item);
+        return '<circle cx="' + x + '" cy="' + y + '" r="9" fill="#172b4d"><title>' + escapeHtml(item.point || String(index + 1)) + '</title></circle>';
+      }).join('');
+      host.innerHTML = '<svg viewBox="0 0 1000 700" role="img" aria-label="حدود الأرض" class="plans-boundary-svg">' +
+        '<polygon points="' + polygon + '" fill="#e8f0e8" stroke="#172b4d" stroke-width="7"></polygon>' +
+        circles +
+        '<line x1="90" y1="155" x2="90" y2="70" stroke="#172b4d" stroke-width="7"></line>' +
+        '<polygon points="90,50 76,78 104,78" fill="#172b4d"></polygon>' +
+        '<text x="82" y="185" fill="#172b4d" font-size="24">N</text>' +
+        '</svg>';
+    }
+
+    function renderVisualConceptBoundaryRows(host, workflow) {
+      if (!host) return;
+      const points = workflow.boundary.points || [];
+      host.innerHTML = points.length ? points.map((item, index) =>
+        '<tr><td><input type="text" data-plan-boundary-field="point" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.point || index + 1) + '"></td>' +
+        '<td><input type="number" step="any" data-plan-boundary-field="eastings" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.eastings) + '"></td>' +
+        '<td><input type="number" step="any" data-plan-boundary-field="northings" data-plan-boundary-index="' + index + '" value="' + escapeHtml(item.northings) + '"></td>' +
+        '<td><button type="button" class="btn danger small" data-plan-boundary-action="remove" data-plan-boundary-index="' + index + '">حذف</button></td></tr>'
+      ).join('') : '<tr><td colspan="4" class="plans-workflow-empty">لا توجد نقاط حدود.</td></tr>';
+    }
+
+    function renderVisualConceptPlansWorkflow() {
+      const root = document.getElementById('visualConceptPlansWorkflow');
+      if (!root) return;
+      const workflow = visualConceptPlansWorkflowState();
+      const verification = workflow.verification || {};
+      const boundary = workflow.boundary || {};
+      const verified = Boolean(verification.approved);
+      const boundaryApproved = Boolean(boundary.approved);
+      const promptReady = Boolean(workflow.promptReady);
+      const checks = Array.isArray(verification.checks) ? verification.checks : [];
+      const checkRows = checks.length ? checks.map(item =>
+        '<tr><td>' + escapeHtml(item.item || '') + '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
+        (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
+        escapeHtml(item.action || '') + '</td></tr>'
+      ).join('') : '<tr><td colspan="5" class="plans-workflow-empty">لا توجد نتائج تحقق.</td></tr>';
+      const issueList = Array.isArray(verification.issues) && verification.issues.length
+        ? '<ul class="plans-issue-list plans-issue-summary">' + verification.issues.flatMap(item => (item.points || []).map(point => '<li>' + escapeHtml(point) + '</li>')).join('') + '</ul>'
+        : '';
+      const promptCards = promptReady
+        ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
+          renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, false)
+        ).join('') + '</div>'
+        : '<p class="tenant-hint">لم تُجهز برومبتات المخططات بعد.</p>';
+      root.innerHTML =
+        '<div class="plans-workflow-card">' +
+        '<ol class="plans-workflow-steps"><li class="' + (!verified ? 'is-active' : 'is-complete') + '">التحقق من التضارب</li><li class="' + (verified && !boundaryApproved ? 'is-active' : (boundaryApproved ? 'is-complete' : '')) + '">رسم حدود الأرض</li><li class="' + (boundaryApproved ? 'is-active' : '') + '">توليد المخططات</li></ol>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="verify">' +
+        '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
+        '<p class="tenant-hint" data-plans-verification-summary>' + escapeHtml(verification.summary || '') + '</p>' +
+        (issueList ? '<div class="plans-workflow-notice">' + issueList + '</div>' : '') +
+        '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!checks.length || !verification.canProceed ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
+        '</section>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary" ' + (!verified ? 'hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div>' +
+        '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-table-wrap"><table class="plans-workflow-table"><thead><tr><th>النقطة</th><th>الشرقيات</th><th>الشماليات</th><th></th></tr></thead>' +
+        '<tbody data-plans-boundary-rows></tbody></table><button type="button" class="btn ghost small" data-plans-boundary-action="add">إضافة نقطة</button></div></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="boundary-ai">تعديل الحدود بالذكاء الاصطناعي</button><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
+        '<label>ملاحظات تعديل الحدود</label><textarea rows="3" data-plans-boundary-instruction>' + escapeHtml(boundary.instruction || '') + '</textarea>' +
+        '</section>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="generate" ' + (!boundaryApproved ? 'hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">إعداد برومبتات المخططات</button></div>' +
+        '<p class="tenant-hint">' + (promptReady ? 'البرومبتات جاهزة للتعديل والتوليد.' : 'برومبتات المخططات الثلاثة غير جاهزة.') + '</p>' +
+        '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
+        '</section></div>';
+      const preview = root.querySelector('[data-plans-boundary-preview]');
+      renderVisualConceptBoundarySvg(preview, boundary.points);
+      renderVisualConceptBoundaryRows(root.querySelector('[data-plans-boundary-rows]'), workflow);
+      root.querySelectorAll('[data-plan-boundary-field]').forEach(input => {
+        input.addEventListener('input', () => {
+          const index = Number(input.getAttribute('data-plan-boundary-index'));
+          const field = input.getAttribute('data-plan-boundary-field');
+          const item = workflow.boundary.points[index];
+          if (!item) return;
+          item[field] = field === 'point' ? input.value : Number(input.value);
+          workflow.boundary.approved = false;
+          workflow.promptReady = false;
+          workflow.status = 'verified';
+          renderVisualConceptBoundarySvg(preview, workflow.boundary.points);
+          persistVisualConceptDraftState();
+          setDraftDirty(true);
+        });
+      });
+      root.querySelectorAll('[data-plan-boundary-action]').forEach(button => {
+        button.addEventListener('click', () => {
+          const action = button.getAttribute('data-plan-boundary-action');
+          if (action === 'add') workflow.boundary.points.push({ point: String(workflow.boundary.points.length + 1), eastings: '', northings: '' });
+          if (action === 'remove') workflow.boundary.points.splice(Number(button.getAttribute('data-plan-boundary-index')), 1);
+          workflow.boundary.approved = false;
+          workflow.promptReady = false;
+          workflow.status = 'verified';
+          persistVisualConceptDraftState();
+          renderVisualConceptPlans();
+        });
+      });
+      root.querySelectorAll('[data-plans-workflow-action]').forEach(button => {
+        button.addEventListener('click', () => {
+          const action = button.getAttribute('data-plans-workflow-action');
+          if (action === 'verify') verifyVisualConceptPlans();
+          else if (action === 'approve-verification') approveVisualConceptPlansVerification();
+          else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
+          else if (action === 'boundary-ai') reviseVisualConceptPlansBoundaryWithAi();
+          else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
+          else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
+        });
+      });
+    }
+
     function renderVisualConceptPlans() {
-      const generateHost = document.getElementById('visualConceptPlansGenerateList');
+      renderVisualConceptPlansWorkflow();
       const uploadHost = document.getElementById('visualConceptPlansUploadList');
       const count = document.getElementById('visualConceptPlansCount');
       const input = document.getElementById('visualConceptPlansUploadInput');
-      const plans = visualConceptPlans();
-      if (count) count.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
+      const plans = visualConceptPlans().filter(plan => !isVisualConceptWorkflowPlan(plan.id));
+      if (count) count.textContent = plans.length ? plans.length + ' مخطط مرفوع' : 'لا توجد مخططات مرفوعة.';
       if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
-      const addButton = document.getElementById('visualConceptAddPlanBtn');
-      if (addButton) addButton.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
+      if (!uploadHost) return;
       plans.forEach(plan => {
-        if (!tenantVisualConceptState.slots[plan.id]) {
-          tenantVisualConceptState.slots[plan.id] = visualConceptPlanSeed(plan) || emptyVisualConceptSlot(plan.id);
-        }
+        if (!tenantVisualConceptState.slots[plan.id]) tenantVisualConceptState.slots[plan.id] = visualConceptPlanSeed(plan) || emptyVisualConceptSlot(plan.id);
       });
-      const groups = { generate: [], upload: [] };
-      plans.forEach(plan => groups[visualConceptPlanMode(plan)].push(plan));
-      const renderGroup = group => group.length
-        ? '<div class="visual-concept-stack">' + group.map(plan =>
-          renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)
-        ).join('') + '</div>'
-        : '';
-      if (generateHost) generateHost.innerHTML = renderGroup(groups.generate) || '<p class="tenant-hint">لا توجد مخططات مولّدة.</p>';
-      if (uploadHost) uploadHost.innerHTML = renderGroup(groups.upload) || '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
+      uploadHost.innerHTML = plans.length
+        ? '<div class="visual-concept-stack">' + plans.map(plan => renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)).join('') + '</div>'
+        : '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
+    }
+
+    async function collectVisualConceptPlansWorkflowPayload() {
+      const payload = await collectVisualConceptPayload('plan_site');
+      payload.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      payload.projectData.visual_concept = tenantVisualConceptState;
+      return payload;
+    }
+
+    async function verifyVisualConceptPlans() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      showLoader(WFT('plans.verify_loading', 'جاري التحقق من التضارب'), WFT('plans.verify_loading_detail', 'يتم فحص بيانات المشروع والبيانات التنظيمية الموثقة...'), 18);
+      try {
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        const response = await api('POST', '/api/visual-concept/plans-verify', payload);
+        hideLoader();
+        if (!response?.success) { toast(response?.error || WFT('plans.verify_failed', 'تعذر التحقق من التضارب')); return; }
+        const workflow = visualConceptPlansWorkflowState();
+        workflow.verification = normalizeVisualConceptPlansWorkflow({ verification: response.verification }).verification;
+        workflow.planContext = response.planContext || workflow.planContext || null;
+        workflow.status = 'verified';
+        workflow.boundary.approved = false;
+        workflow.promptReady = false;
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.verify_failed', 'تعذر التحقق من التضارب'));
+      }
+    }
+
+    function approveVisualConceptPlansVerification() {
+      const workflow = visualConceptPlansWorkflowState();
+      if (!workflow.verification.checks.length || !workflow.verification.canProceed) return;
+      workflow.verification.approved = true;
+      workflow.status = 'verified';
+      if (!workflow.boundary.points.length) workflow.boundary.points = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      if (workflow.boundary.points.length >= 3) refreshVisualConceptPlansBoundary();
+    }
+
+    async function refreshVisualConceptPlansBoundary() {
+      const payload = await collectVisualConceptPlansWorkflowPayload();
+      const workflow = visualConceptPlansWorkflowState();
+      payload.points = workflow.boundary.points;
+      payload.mode = 'manual';
+      showLoader(WFT('plans.boundary_loading', 'جاري تجهيز رسم حدود الأرض'), WFT('plans.boundary_loading_detail', 'يتم بناء الرسم من الإحداثيات المحفوظة...'), 35);
+      try {
+        const response = await api('POST', '/api/visual-concept/plans-boundary', payload);
+        hideLoader();
+        if (!response?.success) { toast(response?.error || WFT('plans.boundary_failed', 'تعذر تجهيز رسم الحدود')); return; }
+        workflow.boundary.points = visualConceptBoundaryPoints(response.points);
+        workflow.boundary.referenceUrl = response.referenceUrl || '';
+        workflow.boundary.approved = false;
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.boundary_failed', 'تعذر تجهيز رسم الحدود'));
+      }
+    }
+
+    async function reviseVisualConceptPlansBoundaryWithAi() {
+      const instruction = String(document.querySelector('[data-plans-boundary-instruction]')?.value || '').trim();
+      if (!instruction) { toast(WFT('plans.boundary_instruction_required', 'طلب تعديل الحدود مطلوب')); return; }
+      const savedInstruction = instruction.slice(0, 2000);
+      const payload = await collectVisualConceptPlansWorkflowPayload();
+      const workflow = visualConceptPlansWorkflowState();
+      workflow.boundary.instruction = savedInstruction;
+      payload.points = workflow.boundary.points;
+      payload.instruction = savedInstruction;
+      payload.mode = 'ai';
+      showLoader(WFT('plans.boundary_ai_loading', 'جاري تعديل حدود الأرض'), WFT('plans.boundary_ai_loading_detail', 'يتم مراجعة التعديل على الإحداثيات...'), 35);
+      try {
+        const response = await api('POST', '/api/visual-concept/plans-boundary', payload);
+        hideLoader();
+        if (!response?.success) { toast(response?.error || WFT('plans.boundary_failed', 'تعذر تعديل رسم الحدود')); return; }
+        workflow.boundary.points = visualConceptBoundaryPoints(response.points);
+        workflow.boundary.referenceUrl = response.referenceUrl || workflow.boundary.referenceUrl;
+        workflow.boundary.approved = false;
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.boundary_failed', 'تعذر تعديل رسم الحدود'));
+      }
+    }
+
+    function approveVisualConceptPlansBoundary() {
+      const workflow = visualConceptPlansWorkflowState();
+      if (workflow.boundary.points.length < 3 || !workflow.boundary.referenceUrl) return;
+      workflow.boundary.approved = true;
+      workflow.status = 'boundary';
+      workflow.promptReady = false;
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      prepareVisualConceptPlansPrompts();
+    }
+
+    async function prepareVisualConceptPlansPrompts() {
+      const initialWorkflow = visualConceptPlansWorkflowState();
+      if (!initialWorkflow.verification.approved || !initialWorkflow.boundary.approved) return;
+      showLoader(WFT('plans.prompts_loading', 'جاري إعداد برومبتات المخططات'), WFT('plans.prompts_loading_detail', 'يتم بناء البرومبتات من البيانات المعتمدة وحدود الأرض...'), 50);
+      try {
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        const workflow = visualConceptPlansWorkflowState();
+        const response = await api('POST', '/api/visual-concept/plans-prompts', payload);
+        hideLoader();
+        if (!response?.success || !response.prompts) { toast(response?.error || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات')); return; }
+        workflow.prompts = { ...workflow.prompts, ...response.prompts };
+        workflow.promptReady = VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(workflow.prompts[item.kind]));
+        workflow.status = workflow.promptReady ? 'ready' : 'boundary';
+        VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+          const slot = tenantVisualConceptState.slots[definition.id] || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
+          slot.label = definition.label;
+          slot.prompt = workflow.prompts[definition.kind] || slot.prompt;
+          slot.caption = definition.label;
+          slot.status = slot.imageUrl ? 'review' : 'pending';
+        });
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+      }
     }
 
     function addVisualConceptPlan() {
@@ -1659,7 +2049,8 @@
       const files = Array.from(input?.files || []);
       if (!files.length) return;
       const plans = visualConceptPlans();
-      const remaining = Math.max(0, VISUAL_CONCEPT_MAX_PLANS - plans.length);
+      const uploadedPlans = plans.filter(plan => !isVisualConceptWorkflowPlan(plan.id));
+      const remaining = Math.max(0, VISUAL_CONCEPT_MAX_PLANS - uploadedPlans.length);
       if (!remaining) {
         toast('تم الوصول إلى الحد الأقصى للمخططات');
         input.value = '';
@@ -1703,6 +2094,7 @@
     }
 
     function deleteVisualConceptPlan(planId) {
+      if (isVisualConceptWorkflowPlan(planId)) return;
       const plans = visualConceptPlans();
       const index = plans.findIndex(item => item.id === planId);
       if (index < 0) return;

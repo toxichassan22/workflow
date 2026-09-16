@@ -356,6 +356,19 @@
     "notif.cat.support": "الدعم الفني",
     "notif.cat.task": "المهام",
     "notif.cat.job": "مهام التوليد",
+    "plans.permission": "لا تملك صلاحية توليد المخططات",
+    "plans.verify_loading": "جاري التحقق من التضارب",
+    "plans.verify_loading_detail": "يتم فحص بيانات المشروع والبيانات التنظيمية الموثقة...",
+    "plans.verify_failed": "تعذر التحقق من التضارب",
+    "plans.boundary_loading": "جاري تجهيز رسم حدود الأرض",
+    "plans.boundary_loading_detail": "يتم بناء الرسم من الإحداثيات المحفوظة...",
+    "plans.boundary_failed": "تعذر تجهيز رسم الحدود",
+    "plans.boundary_instruction_required": "طلب تعديل الحدود مطلوب",
+    "plans.boundary_ai_loading": "جاري تعديل حدود الأرض",
+    "plans.boundary_ai_loading_detail": "يتم مراجعة التعديل على الإحداثيات...",
+    "plans.prompts_loading": "جاري إعداد برومبتات المخططات",
+    "plans.prompts_loading_detail": "يتم بناء البرومبتات من البيانات المعتمدة وحدود الأرض...",
+    "plans.prompts_failed": "تعذر إعداد برومبتات المخططات",
     "notif.cat.platform": "المنصة"
   }/*I18N_AR_END*/;
 
@@ -681,6 +694,19 @@
     "notif.cat.support": "Support",
     "notif.cat.task": "Tasks",
     "notif.cat.job": "Generation jobs",
+    "plans.permission": "You do not have permission to generate plans",
+    "plans.verify_loading": "Checking conflicts",
+    "plans.verify_loading_detail": "Checking project data and documented regulatory data...",
+    "plans.verify_failed": "Could not check conflicts",
+    "plans.boundary_loading": "Preparing the land boundary drawing",
+    "plans.boundary_loading_detail": "Building the drawing from the saved coordinates...",
+    "plans.boundary_failed": "Could not prepare the boundary drawing",
+    "plans.boundary_instruction_required": "A boundary revision request is required",
+    "plans.boundary_ai_loading": "Revising the land boundary",
+    "plans.boundary_ai_loading_detail": "Reviewing the coordinate revision...",
+    "plans.prompts_loading": "Preparing plan prompts",
+    "plans.prompts_loading_detail": "Building prompts from the approved data and land boundary...",
+    "plans.prompts_failed": "Could not prepare the plan prompts",
     "notif.cat.platform": "Platform"
   }/*I18N_EN_END*/;
 
