@@ -1984,6 +1984,15 @@
         step.classList.toggle('is-complete', Boolean(completed[name]));
         step.classList.toggle('is-active', active);
       });
+      const visiblePanels = new Set(['verify']);
+      if (completed.verify && workflow.status !== 'blocked') {
+        visiblePanels.add('distribute');
+        if (hasDistribution) visiblePanels.add('approve');
+        if (completed.approve) visiblePanels.add('generate');
+      }
+      root.querySelectorAll('[data-plans-workflow-panel]').forEach(panel => {
+        panel.hidden = !visiblePanels.has(panel.getAttribute('data-plans-workflow-panel'));
+      });
       const verifySummary = document.getElementById('visualConceptPlansVerifySummary');
       if (verifySummary) verifySummary.textContent = workflow.verification.summary || '';
       const blocking = document.getElementById('visualConceptPlansBlocking');

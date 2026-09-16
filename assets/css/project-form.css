@@ -1994,6 +1994,10 @@
       padding-top: 4px;
     }
 
+    .plans-workflow-panel[hidden] {
+      display: none !important;
+    }
+
     .plans-workflow-panel-head,
     .plans-workflow-result-head {
       display: flex;
