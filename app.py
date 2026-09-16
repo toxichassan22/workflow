@@ -271,9 +271,10 @@ DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', 
 DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
-IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
-# Image-only models live on OpenRouter's dedicated /images endpoint, not /chat/completions.
-VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')
+# All image generation runs on OpenRouter's dedicated /images endpoint — the
+# adopted model is image-only and rejects /chat/completions.
+IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')
+VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', IMAGE_MODEL)
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
 EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '65536'))
@@ -2218,58 +2219,7 @@ def _image_response_url(data):
 
 
 def call_image_api(prompt, usage_ctx=None):
-    # AI4: Check if OpenRouter key is configured
-    ctx = usage_ctx or _usage_ctx('image')
-    gate = _tenant_key_gate(ctx)
-    if gate is not None:
-        print(f"[IMAGE ERROR] {gate['message']}")
-        return None
-    if not _has_any_openrouter_key(ctx):
-        print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
-        return None
-    attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
-    try:
-        headers = _openrouter_headers(ctx)
-        payload = {
-            "model": IMAGE_MODEL,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt + " --aspect 16:9"}]}],
-            "modalities": ["image", "text"]
-        }
-        response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
-        data = response.json()
-        generation_id, img_usage = _extract_openrouter_usage(data)
-        _settle_ai_attempt_record(
-            attempt_id,
-            'ok' if response.status_code < 400 and 'error' not in data else 'error',
-            img_usage, generation_id)
-        # AI4: Detect specific error codes and return descriptive messages
-        if response.status_code == 401:
-            print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
-            return None
-        if response.status_code == 402:
-            print("[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)")
-            return None
-        if response.status_code == 429:
-            print("[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)")
-            return None
-        if 'error' in data:
-            err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
-            print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
-            return None
-        image_url = _image_response_url(data)
-        if image_url:
-            return image_url
-        print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
-    except requests.exceptions.Timeout:
-        print("[IMAGE ERROR] OpenRouter API request timed out")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    except requests.exceptions.ConnectionError:
-        print("[IMAGE ERROR] Cannot connect to OpenRouter API")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    except Exception as e:
-        print("[IMAGE ERROR]", str(e))
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    return None
+    return call_images_api(prompt, usage_ctx=usage_ctx)
 
 def _prepare_image_reference_for_model(reference):
     """Normalize a generated local image URL into a model-readable reference."""
@@ -2314,66 +2264,7 @@ def _prepare_image_reference_for_model(reference):
 
 
 def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None):
-    # AI4: Check if OpenRouter key is configured
-    ctx = usage_ctx or _usage_ctx('image')
-    gate = _tenant_key_gate(ctx)
-    if gate is not None:
-        print(f"[IMAGE ERROR] {gate['message']}")
-        return None
-    if not _has_any_openrouter_key(ctx):
-        print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
-        return None
-    attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
-    try:
-        reference_for_model = _prepare_image_reference_for_model(reference_image_base64)
-        if not reference_for_model:
-            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-            return None
-        headers = _openrouter_headers(ctx)
-        user_content = [
-            {"type": "text", "text": prompt + " --aspect 16:9"},
-            {"type": "image_url", "image_url": {"url": reference_for_model}}
-        ]
-        payload = {
-            "model": IMAGE_MODEL,
-            "messages": [{"role": "user", "content": user_content}],
-            "modalities": ["image", "text"]
-        }
-        response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
-        data = response.json()
-        generation_id, img_usage = _extract_openrouter_usage(data)
-        _settle_ai_attempt_record(
-            attempt_id,
-            'ok' if response.status_code < 400 and 'error' not in data else 'error',
-            img_usage, generation_id)
-        # AI4: Detect specific error codes
-        if response.status_code == 401:
-            print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
-            return None
-        if response.status_code == 402:
-            print("[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)")
-            return None
-        if response.status_code == 429:
-            print("[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)")
-            return None
-        if 'error' in data:
-            err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
-            print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
-            return None
-        image_url = _image_response_url(data)
-        if image_url:
-            return image_url
-        print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
-    except requests.exceptions.Timeout:
-        print("[IMAGE ERROR] OpenRouter API request timed out")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    except requests.exceptions.ConnectionError:
-        print("[IMAGE ERROR] Cannot connect to OpenRouter API")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    except Exception as e:
-        print("[IMAGE ERROR]", str(e))
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    return None
+    return call_images_api(prompt, references=[reference_image_base64], usage_ctx=usage_ctx)
 
 
 def persist_generated_image(image, tenant_id):
@@ -2911,7 +2802,7 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
         print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
         return None
     prepared = _normalize_image_references(references)
-    images_model = model or VISUAL_CONCEPT_IMAGE_MODEL
+    images_model = model or IMAGE_MODEL
     attempt_id = _begin_ai_attempt_record(ctx, images_model)
     try:
         headers = _openrouter_headers(ctx)
@@ -2964,55 +2855,7 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
 
 
 def call_image_api_with_references(prompt, references=None, usage_ctx=None):
-    ctx = usage_ctx or _usage_ctx('image')
-    gate = _tenant_key_gate(ctx)
-    if gate is not None:
-        print(f"[IMAGE ERROR] {gate['message']}")
-        return None
-    if not _has_any_openrouter_key(ctx):
-        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
-        return None
-    prepared = _normalize_image_references(references)
-    if not prepared:
-        return call_image_api(prompt, usage_ctx=ctx)
-    if len(prepared) == 1:
-        return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
-    multi_attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
-    try:
-        headers = _openrouter_headers(ctx)
-        user_content = [{'type': 'text', 'text': prompt + ' --aspect 16:9'}]
-        for image_url in prepared[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]:
-            user_content.append({'type': 'image_url', 'image_url': {'url': image_url}})
-        payload = {
-            'model': IMAGE_MODEL,
-            'messages': [{'role': 'user', 'content': user_content}],
-            'modalities': ['image', 'text']
-        }
-        response = requests.post(f'{OPENROUTER_BASE}/chat/completions', headers=headers, json=payload, timeout=120)
-        data = response.json()
-        generation_id, img_usage = _extract_openrouter_usage(data)
-        _settle_ai_attempt_record(
-            multi_attempt_id,
-            'ok' if response.status_code not in (401, 402, 429) and 'error' not in data else 'error',
-            img_usage, generation_id)
-        if response.status_code in (401, 402, 429) or 'error' in data:
-            print(f"[IMAGE ERROR] Visual concept multi-reference failed: {data.get('error') if isinstance(data, dict) else response.status_code}")
-            return None
-        image_url = _image_response_url(data)
-        if image_url:
-            return image_url
-        print('[IMAGE ERROR] Multi-reference response contained no image; retrying with the first reference')
-        return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
-    except requests.exceptions.Timeout:
-        print('[IMAGE ERROR] OpenRouter API request timed out')
-        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
-    except requests.exceptions.ConnectionError:
-        print('[IMAGE ERROR] Cannot connect to OpenRouter API')
-        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
-    except Exception as error:
-        print('[IMAGE ERROR]', error)
-        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
-    return None
+    return call_images_api(prompt, references=references, usage_ctx=usage_ctx)
 
 
 def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None, usage_ctx=None):
@@ -4577,7 +4420,8 @@ def api_visual_concept_generate():
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
-    image = call_images_api(prompt, references, usage_ctx=_usage_ctx('image', data))
+    image = call_images_api(prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            usage_ctx=_usage_ctx('image', data))
     if not image:
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
@@ -10087,7 +9931,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         return None
     if not _has_any_openrouter_key(vision_ctx) or not image_path or not os.path.isfile(image_path):
         return None
-    site_attempt_id = _begin_ai_attempt_record(vision_ctx, IMAGE_MODEL)
+    site_attempt_id = _begin_ai_attempt_record(vision_ctx, GEMINI_TEXT_MODEL)
     try:
         from reference_analyzer import encode_image_to_base64
         from PIL import Image
@@ -10105,7 +9949,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
             f'{OPENROUTER_BASE}/chat/completions',
             headers=_openrouter_headers(vision_ctx, title='Real Estate Proposal Generator - Site Boundary'),
             json={
-                'model': IMAGE_MODEL,
+                'model': GEMINI_TEXT_MODEL,
                 'messages': [{'role': 'user', 'content': [
                     {'type': 'text', 'text': prompt},
                     {'type': 'image_url', 'image_url': {'url': image_uri}},
@@ -20337,7 +20181,7 @@ def api_analyze_reference():
     Analyze the uploaded reference image using Gemini Vision.
     Extracts colors, design style, and layout — then auto-applies to branding.
     """
-    from reference_analyzer import analyze_reference_image
+    from reference_analyzer import analyze_reference_image, VISION_MODEL as REFERENCE_VISION_MODEL
 
     branding = db.get_branding(g.tenant_id)
     ref_path = branding.get('reference_image_path') if branding else None
@@ -20360,7 +20204,7 @@ def api_analyze_reference():
             try:
                 metering = metering or {}
                 _record_ai_usage(
-                    _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
+                    _usage_ctx('image', tenant_id=g.tenant_id), REFERENCE_VISION_MODEL,
                     'ok', metering.get('usage') or {}, metering.get('generation_id'))
             except Exception as exc:
                 print(f"[AI-USAGE] reference metering failed: {exc}")
@@ -20403,7 +20247,7 @@ def api_analyze_reference():
         try:
             if not recorded.get('done'):
                 _record_ai_usage(
-                    _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
+                    _usage_ctx('image', tenant_id=g.tenant_id), REFERENCE_VISION_MODEL,
                     'error', {}, None)
                 recorded['done'] = True
         except Exception:

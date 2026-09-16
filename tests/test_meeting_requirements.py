@@ -2873,7 +2873,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(result, 'data:image/png;base64,result')
         request_payload = request_post.call_args.kwargs['json']
-        reference_url = request_payload['messages'][0]['content'][1]['image_url']['url']
+        reference_url = request_payload['input_references'][0]['image_url']['url']
         self.assertEqual(reference_url, 'data:image/png;base64,YWJj')
 
     def test_visual_concept_image_response_accepts_content_image_parts(self):
