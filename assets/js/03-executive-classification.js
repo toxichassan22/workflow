@@ -360,22 +360,31 @@
             </div>
             <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
           </div>
-          <div class="visual-concept-card">
-            <div class="visual-concept-head">
-              <h3>إضافة مخطط</h3>
-              <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
-            </div>
-            <div class="visual-concept-actions">
-              <button type="button" class="btn primary small" id="visualConceptAddPlanBtn">إضافة مخطط</button>
-            </div>
+          <div class="visual-concept-mode-selector visual-concept-plans-tabs">
+            <button type="button" class="visual-concept-mode-btn active" data-visual-plans-tab="generate">توليد المخططات</button>
+            <button type="button" class="visual-concept-mode-btn" data-visual-plans-tab="upload">رفع المخططات</button>
           </div>
-          <div class="visual-concept-card">
-            <div class="visual-concept-head">
-              <h3>رفع مخططات العميل</h3>
+          <div id="visualConceptPlansGeneratePanel" data-visual-plans-panel="generate">
+            <div class="visual-concept-card">
+              <div class="visual-concept-head">
+                <h3>إضافة مخطط</h3>
+                <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
+              </div>
+              <div class="visual-concept-actions">
+                <button type="button" class="btn primary small" id="visualConceptAddPlanBtn">إضافة مخطط</button>
+              </div>
             </div>
-            <input id="visualConceptPlansUploadInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
+            <div id="visualConceptPlansGenerateList" class="visual-concept-page"></div>
           </div>
-          <div id="visualConceptPlansWorkspace" class="visual-concept-page"></div>
+          <div id="visualConceptPlansUploadPanel" data-visual-plans-panel="upload" hidden>
+            <div class="visual-concept-card">
+              <div class="visual-concept-head">
+                <h3>رفع مخططات العميل</h3>
+              </div>
+              <input id="visualConceptPlansUploadInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
+            </div>
+            <div id="visualConceptPlansUploadList" class="visual-concept-page"></div>
+          </div>
           <div class="visual-concept-actions">
             <button type="button" class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
           </div>
@@ -397,6 +406,9 @@
       if (plansInput) plansInput.addEventListener('change', () => uploadVisualConceptPlanImages(plansInput));
       const addPlanButton = body.querySelector('#visualConceptAddPlanBtn');
       if (addPlanButton) addPlanButton.addEventListener('click', () => addVisualConceptPlan());
+      body.querySelectorAll('[data-visual-plans-tab]').forEach(button => {
+        button.addEventListener('click', () => setVisualConceptPlansTab(button.getAttribute('data-visual-plans-tab')));
+      });
       const intSelect = body.querySelector('#visualConceptInteriorComponentSelect');
       if (intSelect) {
         intSelect.addEventListener('change', () => {

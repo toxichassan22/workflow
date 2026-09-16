@@ -1334,7 +1334,8 @@
         ? '<input class="visual-concept-title-input" data-visual-title="' + slotDef.id + '" value="' + escapeHtml(title) + '" ' + (frozen ? 'disabled' : '') + '>'
         : '<h3>' + escapeHtml(title) + '</h3>';
 
-      const modeSelector = '<div class="visual-concept-mode-selector">' +
+      // Plans pick their mode by which tab they live in, not a per-card switch.
+      const modeSelector = isVisualConceptPlanSlot(slotDef.id) ? '' : '<div class="visual-concept-mode-selector">' +
         '<button type="button" class="visual-concept-mode-btn' + (mode === 'ai' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="ai" data-visual-slot="' + slotDef.id + '" ' + (disableAiSwitch ? 'disabled title="احذف الصورة الحالية أولاً لتغيير النمط"' : '') + '>توليد بالذكاء الاصطناعي</button>' +
         '<button type="button" class="visual-concept-mode-btn' + (mode === 'upload' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="upload" data-visual-slot="' + slotDef.id + '" ' + (disableUploadSwitch ? 'disabled title="احذف الصورة الحالية أولاً لتغيير النمط"' : '') + '>رفع يدوي</button>' +
         '</div>';
@@ -1598,8 +1599,25 @@
       return tenantVisualConceptState.plans2d;
     }
 
+    function visualConceptPlanMode(plan) {
+      const slot = tenantVisualConceptState?.slots?.[plan?.id];
+      const mode = slot ? slot.mode : plan?.mode;
+      return mode === 'upload' ? 'upload' : 'generate';
+    }
+
+    function setVisualConceptPlansTab(tab) {
+      const active = tab === 'upload' ? 'upload' : 'generate';
+      document.querySelectorAll('[data-visual-plans-tab]').forEach(button => {
+        button.classList.toggle('active', button.getAttribute('data-visual-plans-tab') === active);
+      });
+      document.querySelectorAll('[data-visual-plans-panel]').forEach(panel => {
+        panel.hidden = panel.getAttribute('data-visual-plans-panel') !== active;
+      });
+    }
+
     function renderVisualConceptPlans() {
-      const host = document.getElementById('visualConceptPlansWorkspace');
+      const generateHost = document.getElementById('visualConceptPlansGenerateList');
+      const uploadHost = document.getElementById('visualConceptPlansUploadList');
       const count = document.getElementById('visualConceptPlansCount');
       const input = document.getElementById('visualConceptPlansUploadInput');
       const plans = visualConceptPlans();
@@ -1607,17 +1625,20 @@
       if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
       const addButton = document.getElementById('visualConceptAddPlanBtn');
       if (addButton) addButton.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
-      if (!host) return;
       plans.forEach(plan => {
-        if (!tenantVisualConceptState.slots[plan.id]) tenantVisualConceptState.slots[plan.id] = emptyVisualConceptSlot(plan.id);
+        if (!tenantVisualConceptState.slots[plan.id]) {
+          tenantVisualConceptState.slots[plan.id] = visualConceptPlanSeed(plan) || emptyVisualConceptSlot(plan.id);
+        }
       });
-      if (!plans.length) {
-        host.innerHTML = '<p class="tenant-hint">لا توجد مخططات.</p>';
-        return;
-      }
-      host.innerHTML = '<div class="visual-concept-stack">' + plans.map(plan =>
-        renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)
-      ).join('') + '</div>';
+      const groups = { generate: [], upload: [] };
+      plans.forEach(plan => groups[visualConceptPlanMode(plan)].push(plan));
+      const renderGroup = group => group.length
+        ? '<div class="visual-concept-stack">' + group.map(plan =>
+          renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)
+        ).join('') + '</div>'
+        : '';
+      if (generateHost) generateHost.innerHTML = renderGroup(groups.generate) || '<p class="tenant-hint">لا توجد مخططات مولّدة.</p>';
+      if (uploadHost) uploadHost.innerHTML = renderGroup(groups.upload) || '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
     }
 
     function addVisualConceptPlan() {
@@ -1630,6 +1651,7 @@
       visualConceptPlans().push({ id, mode: 'ai', title: '', description: '', fileId: '', fileName: '', imageUrl: '' });
       tenantVisualConceptState.slots[id] = emptyVisualConceptSlot(id);
       markVisualConceptDirty();
+      setVisualConceptPlansTab('generate');
       renderVisualConceptPage();
     }
 
@@ -1666,8 +1688,7 @@
           });
         }
         markVisualConceptDirty();
-        renderVisualConceptPlans();
-        updateVisualConceptHomeCards();
+        renderVisualConceptPage();
         toast('تم رفع ' + incoming.length + ' مخطط.');
       } catch (error) {
         toast(error.message || 'تعذر رفع المخططات');
