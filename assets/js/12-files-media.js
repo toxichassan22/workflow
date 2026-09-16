@@ -1813,8 +1813,11 @@
       const conflicts = checks.filter(item => item.result === 'متعارض');
       const canApprove = !conflicts.length && (checks.length > 0 || verification.canProceed);
       const checkRows = conflicts.length ? conflicts.map(item =>
-        '<tr><td>' + escapeHtml(item.item || '') + '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
+        '<tr><td>' + escapeHtml(item.item || '') +
+        ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +
+        '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
         (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
+        (item.suggestion ? '<div class="plans-conflict-solution"><strong>' + escapeHtml(WFT('plans.proposed_solution', 'الحل المقترح:')) + '</strong> ' + escapeHtml(item.suggestion) + '</div>' : '') +
         escapeHtml(item.action || '') + '</td></tr>'
       ).join('') : '<tr><td colspan="5" class="plans-workflow-empty">' + escapeHtml(WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</td></tr>';
       const conflictPoints = conflicts.flatMap(item => Array.isArray(item.issues) ? item.issues : []).filter(Boolean);

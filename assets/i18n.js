@@ -371,6 +371,7 @@
     "plans.prompts_failed": "تعذر إعداد برومبتات المخططات",
     "plans.no_conflicts": "لا توجد تعارضات مباشرة.",
     "plans.conflicts_count": "عدد التعارضات المباشرة: ",
+    "plans.proposed_solution": "الحل المقترح:",
     "notif.cat.platform": "المنصة"
   }/*I18N_AR_END*/;
 
@@ -711,6 +712,7 @@
     "plans.prompts_failed": "Could not prepare the plan prompts",
     "plans.no_conflicts": "No direct conflicts.",
     "plans.conflicts_count": "Direct conflicts: ",
+    "plans.proposed_solution": "Proposed solution:",
     "notif.cat.platform": "Platform"
   }/*I18N_EN_END*/;
 

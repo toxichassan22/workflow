@@ -8917,6 +8917,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const canApprove = !conflicts.length', index_source)
         self.assertIn("if (conflicts.length || (!checks.length && !workflow.verification.canProceed)) return;", index_source)
         self.assertIn("WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')", index_source)
+        self.assertIn('plans-conflict-solution', index_source)
+        self.assertIn("WFT('plans.proposed_solution', 'الحل المقترح:')", index_source)
         self.assertIn('data-visual-action="delete-plan"', index_source)
         self.assertNotIn('data-visual-plan-title', index_source)
         self.assertNotIn('data-visual-plan-description', index_source)
@@ -9182,7 +9184,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         verification_payload = {
             'checks': [{
                 'item': 'الارتدادات', 'project': '5m غربًا', 'regulatory': '5m غربًا',
-                'result': 'مطابق', 'issues': ['راجع اشتراطات1.pdf صفحة 4'], 'action': 'لا يوجد'
+                'result': 'متعارض', 'issues': ['راجع اشتراطات1.pdf صفحة 4'], 'suggestion': 'غيّر القيمة في قسم المساحات من 60000 إلى 42072.72', 'action': 'تحديث الحقل'
             }],
             'issues': [{'title': 'مراجعة', 'points': ['اشتراطات2.pdf صفحة 8 تحتاج تأكيدًا'], 'action': 'مراجعة', 'severity': 'medium'}],
             'summary': 'توجد مراجعة في اشتراطات1.pdf.', 'canProceed': True
@@ -9200,6 +9202,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('اشتراطات2', serialized)
         self.assertNotIn('صفحة', serialized)
         self.assertTrue(verification['issues'][0]['points'])
+        self.assertEqual(verification['checks'][0]['suggestion'], 'غيّر القيمة في قسم المساحات من 60000 إلى 42072.72')
 
         with patch.object(module, '_visual_concept_render_plan_boundary_reference', return_value='/uploads/creative/parcel-ref.png'):
             boundary = client.post('/api/visual-concept/plans-boundary', headers=self._headers(self.token_a), json={

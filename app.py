@@ -4645,10 +4645,15 @@ def _visual_concept_plan_normalize_verification(raw):
         issues = _visual_concept_plan_bullets(item.get('issues') or item.get('note') or item.get('action'))
         checks.append({
             'item': name,
+            'field': _visual_concept_plan_sanitize_text(item.get('field') or item.get('key'))[:160],
+            'section': _visual_concept_plan_sanitize_text(item.get('section'))[:160],
             'project': _visual_concept_plan_sanitize_text(item.get('project') or item.get('project_value'))[:600],
             'regulatory': _visual_concept_plan_sanitize_text(item.get('regulatory') or item.get('reference') or item.get('constraint'))[:600],
             'result': result,
             'issues': issues,
+            'suggestion': _visual_concept_plan_sanitize_text(
+                item.get('suggestion') or item.get('resolution') or item.get('solution') or item.get('action')
+            )[:800],
             'action': _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))[:600],
         })
     issue_source = source.get('issues') or source.get('blocking_issues') or []
@@ -4658,14 +4663,17 @@ def _visual_concept_plan_normalize_verification(raw):
             title = _visual_concept_plan_sanitize_text(item.get('title') or item.get('item') or f'ملاحظة {index}')
             bullets = _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))
             action = _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))
+            suggestion = _visual_concept_plan_sanitize_text(
+                item.get('suggestion') or item.get('resolution') or item.get('solution') or action)
             severity = _visual_concept_plan_sanitize_text(item.get('severity') or 'medium')
         else:
             title = f'ملاحظة {index}'
             bullets = _visual_concept_plan_bullets(item)
             action = ''
+            suggestion = ''
             severity = 'medium'
         if bullets or title:
-            issues.append({'id': str(index), 'title': title, 'points': bullets, 'action': action, 'severity': severity})
+            issues.append({'id': str(index), 'title': title, 'points': bullets, 'action': action, 'suggestion': suggestion, 'severity': severity})
     summary = _visual_concept_plan_sanitize_text(source.get('summary'))
     return {
         'checks': checks,
@@ -4691,11 +4699,12 @@ def _visual_concept_plan_fallback_verification(context):
         project_text = _visual_concept_plan_sanitize_text(project_value) if not isinstance(project_value, int) else str(project_value)
         regulatory_text = _visual_concept_plan_sanitize_text(regulatory_value) if not isinstance(regulatory_value, int) else str(regulatory_value)
         result = 'مطابق' if project_text and regulatory_text and project_text == regulatory_text else ('يحتاج تأكيد' if project_text or regulatory_text else 'غير متوفر')
-        checks.append({'item': name, 'project': project_text, 'regulatory': regulatory_text, 'result': result, 'issues': [], 'action': ''})
+        suggestion = '' if result == 'مطابق' else f'راجع قيمة «{name}» في قسم بيانات المشروع مقابل القيمة الموثقة، وثبّت القيمة المعتمدة قبل الاعتماد.'
+        checks.append({'item': name, 'field': name, 'section': 'بيانات المشروع', 'project': project_text, 'regulatory': regulatory_text, 'result': result, 'issues': [], 'suggestion': suggestion, 'action': ''})
     issues = []
     for item in checks:
         if item['result'] in {'يحتاج تأكيد', 'غير متوفر'}:
-            issues.append({'id': str(len(issues) + 1), 'title': item['item'], 'points': ['القيمة تحتاج مراجعة يدوية قبل اعتمادها.'], 'action': 'مراجعة القيمة وتأكيدها.', 'severity': 'medium'})
+            issues.append({'id': str(len(issues) + 1), 'title': item['item'], 'points': ['القيمة تحتاج مراجعة يدوية قبل اعتمادها.'], 'action': 'مراجعة القيمة وتأكيدها.', 'suggestion': item.get('suggestion') or '', 'severity': 'medium'})
     return {'checks': checks, 'issues': issues, 'summary': 'تمت مقارنة المدخلات المتاحة مع البيانات التنظيمية المسجلة.', 'canProceed': True, 'approved': False}
 
 
@@ -4778,13 +4787,15 @@ def api_visual_concept_plans_verify():
         'لا تصدر شهادة قانونية ولا تعتبر أي نقص موافقة أو رفضًا نهائيًا. ميّز بين التعارض، والقيمة الناقصة، والقيمة التي تحتاج تأكيدًا. '
         'لا تذكر أبدًا أسماء ملفات أو أرقام صفحات أو عبارة ملف اشتراط 1 أو ملف اشتراط 2 أو أي مصدر داخلي. '
         'استخدم بدل ذلك «البيانات التنظيمية الموثقة». أخرج JSON فقط: '
-        '{"checks":[{"item":"","project":"","regulatory":"","result":"مطابق|متعارض|يحتاج تأكيد|غير متوفر","issues":[""],"action":""}],'
-        '"issues":[{"title":"","points":[""],"action":"","severity":"high|medium|low"}],"summary":"","canProceed":true}'
+        '{"checks":[{"item":"","field":"","section":"","project":"","regulatory":"","result":"مطابق|متعارض|يحتاج تأكيد|غير متوفر","issues":[""],"suggestion":"حل محدد مع اسم القسم والقيمة من وإلى عند توفرهما","action":""}],'
+        '"issues":[{"title":"","points":[""],"suggestion":"حل محدد قابل للتنفيذ","action":"","severity":"high|medium|low"}],"summary":"","canProceed":true}'
     )
     user_prompt = (
         'هذه هي المدخلات المسموح بفحصها فقط:\n' +
         json.dumps(_visual_concept_plan_regulation_input(project_data, context), ensure_ascii=False) +
         '\nرتّب كل مشكلة كنقاط قصيرة قابلة للمتابعة، ولا تكتب فقرة طويلة. '
+        'لكل تعارض اكتب suggestion واضحًا يذكر اسم القسم أو الحقل، القيمة الحالية، القيمة الموثقة، والتعديل المقترح من قيمة إلى قيمة. '
+        'إذا كانت المقارنة غير مباشرة مثل إجمالي المسطحات مقابل FAR، لا تقترح تغيير الرقم عشوائيًا؛ اقترح فصل تعريفات المساحة وتحديد القيمة التي تدخل في المقارنة. '
         'لا تذكر أسماء أو أرقام مصادر داخل النتيجة.'
     )
     result = {}
