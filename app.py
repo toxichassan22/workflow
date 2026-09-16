@@ -2767,11 +2767,15 @@ def _visual_concept_slot_instruction(slot_id, facts):
         description = str(facts.get('plan_description') or '').strip()
         kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
         approved_context = str(facts.get('approved_plan_context') or '').strip()
+        draft = str(facts.get('plan_prompt_draft') or '').strip()
         if approved_context and kind:
             return (
                 f'Create the approved {kind} diagram titled "{plan_title}". '
                 'The approved plan context below is the only source of geometry, numbers, uses, and labels. '
-                + _visual_concept_plan_drawing_instruction(kind) + ' '
+                + (f'The approved draft prompt below is fact-complete: keep every recorded fact, '
+                   f'number, rule, and "not recorded" statement verbatim, polish only the English, '
+                   f'and translate any non-English source text. Draft prompt:\n{draft}\n'
+                   if draft else '')
                 + (f"Client visual note: {description}. " if description else '')
                 + 'Do not mention sources, files, pages, or internal review. Do not invent missing values. '
                 + approved_context
@@ -3059,6 +3063,9 @@ def _visual_concept_request_bundle(data, slot_id):
         context['boundary_points'] = boundary_points or context.get('boundary_points') or []
         facts['plan_kind'] = _visual_concept_plan_kind(slot_id, data.get('planKind'))
         facts['approved_plan_context'] = _visual_concept_plan_context_text(context)
+        facts['plan_prompt_draft'] = (
+            _visual_concept_plan_drawing_prompt(facts['plan_kind'], context)
+            if facts['plan_kind'] else '')
         facts['plan_boundary_reference_url'] = _visual_concept_text(
             boundary.get('referenceUrl') or data.get('planBoundaryReferenceUrl'), 500)
     missing = _visual_concept_missing_fields(facts, slot_id)
@@ -4520,6 +4527,7 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
         'land_brief': _visual_concept_plan_sanitize_text(
             _visual_concept_text(_visual_concept_read(source, 'land_and_building_summary'), 6000)),
         'land_area': _visual_concept_text(_visual_concept_read(source, 'croquis_land_area', 'land_area', 'total_area_sqm'), 80),
+        'design_area': _visual_concept_text(_visual_concept_read(source, 'approved_financial_area', 'land_area', 'total_area_sqm'), 80),
         'coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio', 'coverage_ratio'), 120),
         'open_area': _visual_concept_text(_visual_concept_read(source, 'open_area', 'open_spaces', 'open_space_area'), 120),
         'floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count', 'max_floors_height', 'table_floors'), 120),
@@ -4563,6 +4571,7 @@ def _visual_concept_plan_context_text(context):
         f"Location: {location or 'not recorded'}\n"
         f"Recorded land brief: {context.get('land_brief') or 'not recorded'}\n"
         f"Land area: {context.get('land_area') or 'not recorded'}\n"
+        f"Secondary recorded area figure (not the design basis when it differs): {context.get('design_area') or 'not recorded'}\n"
         f"Coverage ratio: {context.get('coverage_ratio') or 'not recorded'}\n"
         f"Open area: {context.get('open_area') or 'not recorded'}\n"
         f"Approved floor count/height: {context.get('floor_count') or 'not recorded'}\n"
@@ -4578,34 +4587,326 @@ def _visual_concept_plan_context_text(context):
     )
 
 
-def _visual_concept_plan_drawing_instruction(kind):
-    if kind == 'site':
-        return (
-            "DRAWING REQUESTED — CONCEPTUAL SITE PLAN: top-down orthographic flat diagram on white. "
-            "Trace the attached surveyed parcel reference exactly and preserve every vertex and proportion. "
-            "Show the north arrow, documented street edges, documented setback envelope, approved building footprints, "
-            "open/landscape areas, documented entrances, and a compact legend. Do not use satellite imagery."
-        )
-    if kind == 'uses':
-        return (
-            "DRAWING REQUESTED — VERTICAL PROGRAM DISTRIBUTION: show the approved buildings as clear vertical floor stacks. "
-            "Use one stack per recorded building, group only recorded floor ranges, and show recorded units and areas when available. "
-            "Do not invent floors, buildings, uses, unit counts, or dimensions."
-        )
+def _visual_concept_plan_prompt_header(kind, context):
+    titles = {
+        'site': ('CONCEPTUAL SITE PLAN', 'top-down orthographic flat architectural diagram'),
+        'uses': ('VERTICAL PROGRAM DISTRIBUTION', 'clean architectural program diagram'),
+        'massing': ('CONCEPTUAL MASSING', 'clean high-corner isometric architectural diagram'),
+    }
+    title, description = titles.get(kind) or titles['massing']
+    name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
+    location = ', '.join(part for part in (
+        _visual_concept_text(context.get('district'), 100),
+        _visual_concept_text(context.get('city'), 80)) if part)
+    components = [item for item in context.get('components') or []
+                  if isinstance(item, dict) and item.get('name')]
+    fidelity = {
+        'site': 'Use only the recorded facts below; do not invent, infer, or recalculate any value.',
+        'uses': (f'Show {len(components)} separate vertical program stacks, one for each recorded '
+                 'approved project component. ' if components else
+                 'Show one vertical program stack for each recorded approved project component. ')
+                + 'Do not add, merge, split, or rename components. Do not invent floor assignments, '
+                  'floor ranges, buildings, unit counts, dimensions, or areas.',
+        'massing': 'Use only recorded geometry and controls; do not invent, infer, or recalculate '
+                   'building footprints, placements, floor ranges, heights, or dimensions.',
+    }
     return (
-        "DRAWING REQUESTED — CONCEPTUAL MASSING: clean high-corner isometric massing diagram on white. "
-        "Extrude only the approved building footprints and recorded floor ranges as simple matte volumes. "
-        "Keep the parcel outline and relative placement faithful to the attached surveyed boundary."
+        f'DRAWING REQUESTED — {title}. Create a {description} on a white background for "{name}"'
+        + (f' in {location}' if location else '')
+        + '. The result is conceptual and NOT TO SCALE. ' + fidelity[kind]
     )
 
 
+def _visual_concept_plan_coordinate_text(value):
+    number = _visual_concept_number(value)
+    if number is None:
+        return _visual_concept_text(value, 40)
+    return str(number)
+
+
+def _visual_concept_plan_parcel_sentence(context):
+    points = context.get('boundary_points') or []
+    if len(points) >= 3:
+        listing = '; '.join(
+            f"{item.get('point')}: E {_visual_concept_plan_coordinate_text(item.get('eastings'))} / "
+            f"N {_visual_concept_plan_coordinate_text(item.get('northings'))}"
+            for item in points)
+        return (
+            f'Draw the irregular {len(points)}-vertex parcel faithfully from these surveyed boundary '
+            f'points, preserving every vertex, break, and relative proportion: {listing}. '
+            'Number every vertex on the drawing.')
+    return ('No surveyed boundary points are recorded; draw a plain generic parcel outline and '
+            'label it "Parcel boundary not recorded."')
+
+
+def _visual_concept_plan_area_text(value):
+    text = _visual_concept_plan_sanitize_text(_visual_concept_text(value, 120))
+    if not text:
+        return ''
+    if re.search(r'[a-zA-Zء-ي]', text):
+        return text
+    if _visual_concept_number(text) is not None:
+        return f'{text} m²'
+    return text
+
+
+def _visual_concept_plan_area_sentence(context):
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    official = (_visual_concept_plan_area_text(regulations.get('croquis_land_area'))
+                or _visual_concept_plan_area_text(context.get('land_area')))
+    if not official:
+        return ''
+    sentence = f'Mark the official regulatory area as {official}.'
+    other = _visual_concept_plan_area_text(context.get('design_area'))
+    if (other and _visual_concept_number(other) is not None
+            and _visual_concept_number(other) != _visual_concept_number(official)):
+        sentence += f' Do not use {other} as the design basis.'
+    return sentence
+
+
+def _visual_concept_plan_surroundings_sentence(context):
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    parts = []
+    direction_labels = {'شمال': 'North', 'جنوب': 'South', 'شرق': 'East', 'غرب': 'West',
+                        'north': 'North', 'south': 'South', 'east': 'East', 'west': 'West'}
+    for item in context.get('directions') or []:
+        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
+        direction = _visual_concept_plan_sanitize_text(item.get('direction'))
+        direction = direction_labels.get(direction.lower(), direction)
+        if text:
+            parts.append(f'{direction}: {text}' if direction else text)
+    streets = _visual_concept_plan_sanitize_text(
+        context.get('surrounding_streets') or regulations.get('surrounding_streets'))
+    if streets:
+        parts.append(streets)
+    if not parts:
+        return 'No surroundings are recorded; keep the context around the parcel empty.'
+    return ('Show only the recorded surroundings — ' + '; '.join(parts) +
+            '. Do not add unrecorded streets, neighbors, water, or greenery.')
+
+
+def _visual_concept_plan_setbacks_sentence(context):
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    text = _visual_concept_plan_sanitize_text(
+        context.get('setbacks') or regulations.get('setbacks') or regulations.get('building_ratio_setbacks'))
+    if not text:
+        return 'No setbacks are recorded; draw no setback envelope.'
+    return (f'Show setback information diagrammatically without extrapolation: {text}. '
+            'Do not infer or extend setbacks beyond the recorded ranges.')
+
+
+def _visual_concept_plan_control_lines(context, regulations):
+    lines = []
+    coverage = _visual_concept_plan_sanitize_text(
+        context.get('coverage_ratio') or regulations.get('coverage_ratio')
+        or regulations.get('building_ratio_coverage') or regulations.get('building_ratio'))
+    if coverage:
+        lines.append(f'building coverage {coverage}')
+    for key, label in (
+            ('floor_area_ratio', 'floor area ratio (FAR)'),
+            ('allowed_uses', 'allowed uses'),
+            ('allowed_uses_restrictions', 'use restrictions'),
+            ('land_use', 'land use'),
+            ('zoning_code', 'zoning code'),
+            ('table_floors', 'approved floors'),
+            ('max_floors_height', 'maximum floors/height'),
+            ('regulatory_constraints', 'regulatory constraints')):
+        value = _visual_concept_plan_sanitize_text(regulations.get(key))
+        if value:
+            lines.append(f'{label}: {value}')
+    floor_count = _visual_concept_plan_sanitize_text(context.get('floor_count'))
+    if floor_count and not any(floor_count in line for line in lines):
+        lines.append(f'approved overall floor count: {floor_count}')
+    return lines
+
+
+def _visual_concept_plan_operational_lines(regulations):
+    lines = []
+    for key, label in (
+            ('parking_requirements', 'parking requirements'),
+            ('entrances_exits_requirements', 'entrance and exit requirements')):
+        value = _visual_concept_plan_sanitize_text(regulations.get(key))
+        if value:
+            lines.append(f'{label}: {value}')
+    return lines
+
+
+def _visual_concept_plan_component_line(item, index):
+    name = _visual_concept_plan_sanitize_text(item.get('name')) or f'component {index}'
+    fields = []
+    for label, key, suffix in (
+            ('Use', 'useType', ''), ('Units', 'units', ''), ('Unit area', 'unitArea', ' m²'),
+            ('Built area', 'builtArea', ' m²'), ('Floors', 'floorRange', ''),
+            ('Building', 'building', '')):
+        value = item.get(key)
+        if value in (None, ''):
+            continue
+        fields.append(f'{label}: {value}{suffix}')
+    notes = _visual_concept_plan_sanitize_text(item.get('notes'))
+    if notes:
+        fields.append(f'Notes: {notes}')
+    return f'{index}. {name}' + (' — ' + '; '.join(fields) if fields else '')
+
+
+def _visual_concept_plan_color_sentence(context, placement_recorded, for_stacks=False):
+    colors = '; '.join(
+        f"{item['use']} = {item['color']}" for item in context.get('colors') or [] if item.get('use'))
+    base = f'Use the fixed color code only: {colors}.' if colors else ''
+    if for_stacks:
+        return base + (' Color each stack by its recorded use; a component with no recorded use '
+                       'takes a neutral fill.')
+    if not placement_recorded:
+        return base + (' Because no building placement is recorded, reserve the use colors for the '
+                       'legend and do not turn them into speculative masses.')
+    return base
+
+
+def _visual_concept_plan_title_block(context, title):
+    name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
+    location = ', '.join(part for part in (
+        _visual_concept_text(context.get('district'), 100),
+        _visual_concept_text(context.get('city'), 80)) if part)
+    block = f'Title block top-left: "{name}"'
+    if location:
+        block += f' over "{location}"'
+    return block + f' over "{title} (NOT TO SCALE)".'
+
+
+def _visual_concept_plan_site_body(context, components, regulations):
+    has_placement = any(item.get('building') or item.get('floorRange') for item in components)
+    parts = [_visual_concept_plan_parcel_sentence(context)]
+    area = _visual_concept_plan_area_sentence(context)
+    if area:
+        parts.append(area)
+    boundary_lengths = _visual_concept_plan_sanitize_text(regulations.get('boundary_lengths'))
+    if boundary_lengths:
+        parts.append('Label each recorded boundary length on its edge verbatim: ' + boundary_lengths +
+                     '. Do not recalculate or round lengths.')
+    parts.append(_visual_concept_plan_surroundings_sentence(context))
+    north = _visual_concept_plan_sanitize_text(
+        context.get('north_direction') or regulations.get('north_direction'))
+    parts.append('Show a north arrow' + (f' for north direction {north}' if north else '') + '.')
+    if has_placement:
+        names = '; '.join(item.get('name') for item in components if item.get('name'))
+        parts.append('Draw only the recorded approved component footprints as flat fields: ' + names +
+                     '. Do not enlarge, merge, or reshape them.')
+    else:
+        parts.append(
+            'No approved building footprints or entrance positions are recorded, so draw no buildings '
+            'and no entry arrows. Inside the parcel write the English notes "Approved building '
+            'footprints not recorded" and "Entrance positions not recorded". Where the recorded '
+            'controls define distinct zones, show them as distinct flat color fields; otherwise keep '
+            'a single neutral field.')
+    parts.append(_visual_concept_plan_setbacks_sentence(context))
+    controls = _visual_concept_plan_control_lines(context, regulations)
+    if controls:
+        parts.append('Add a compact panel titled "Development controls (recorded)" listing verbatim: '
+                     + '; '.join(controls) + '.')
+    operational = _visual_concept_plan_operational_lines(regulations)
+    if operational:
+        parts.append('Add a panel titled "Operational requirements (recorded)" listing verbatim: '
+                     + '; '.join(operational) + '.')
+    parts.append(_visual_concept_plan_color_sentence(context, has_placement))
+    parts.append(
+        _visual_concept_plan_title_block(context, 'Conceptual site plan')
+        + ' Flat cartographic style: muted pastel fills, dark navy outlines and text, crisp English '
+          'callouts, minimal linework. No satellite imagery, no photorealism, no people, no cars.')
+    parts.append('All visible image labels must be English only.')
+    return '\n\n'.join(part for part in parts if part)
+
+
+def _visual_concept_plan_uses_body(context, components, regulations):
+    has_ranges = any(item.get('floorRange') for item in components)
+    parts = []
+    if components:
+        lines = [_visual_concept_plan_component_line(item, index)
+                 for index, item in enumerate(components, 1)]
+        parts.append('Recorded components, in this order:\n' + '\n'.join(lines) +
+                     '\nUnder each stack, list only the fields recorded for it, exactly as given.')
+    if has_ranges:
+        parts.append("Draw each stack's height from its recorded floor range only and label the range "
+                     'on the stack; a component without a recorded range gets a generic stack marked '
+                     '"floor range not recorded".')
+    else:
+        parts.append('No component floor ranges are recorded; draw generic stacks with no labeled floors.')
+    floor_count = _visual_concept_plan_sanitize_text(
+        context.get('floor_count') or regulations.get('table_floors') or regulations.get('max_floors_height'))
+    datum = []
+    if floor_count:
+        datum.append(f'Approved overall floor count: {floor_count}')
+    if not has_ranges:
+        datum.append('Component floor ranges not recorded.')
+    if datum:
+        parts.append('Add a "Project datum" panel reading: '
+                     + '; '.join(f'"{line}"' for line in datum) + '.')
+    controls = _visual_concept_plan_control_lines(context, regulations)
+    if controls:
+        parts.append('Add a "Regulatory context" panel with the recorded facts: '
+                     + '; '.join(controls) + '.')
+    parts.append(_visual_concept_plan_color_sentence(context, True, for_stacks=True))
+    parts.append(
+        _visual_concept_plan_title_block(context, 'Vertical program distribution')
+        + ' Clean infographic style: flat pastel stacks with thin floor lines, dark navy outlines '
+          'and text, dotted leader callouts. No photorealism, no people, no furniture.')
+    parts.append('All visible image labels must be English only.')
+    return '\n\n'.join(part for part in parts if part)
+
+
+def _visual_concept_plan_massing_body(context, components, regulations):
+    has_placement = any(item.get('building') or item.get('floorRange') for item in components)
+    parts = [_visual_concept_plan_parcel_sentence(context)]
+    area = _visual_concept_plan_area_sentence(context)
+    if area:
+        parts.append(area)
+    parts.append('Represent the site as a thin matte base plate. '
+                 + _visual_concept_plan_surroundings_sentence(context)
+                 + ' Keep recorded zoning sectors visibly distinct as flat zoning fields where the '
+                   'recorded controls define them.')
+    if has_placement:
+        lines = '; '.join(
+            item.get('name') + (f" (floors {item['floorRange']})" if item.get('floorRange') else '')
+            for item in components if item.get('name'))
+        parts.append('Extrude only the recorded approved components as simple matte volumes: ' + lines +
+                     '. Place each volume on its recorded zone inside the development field; do not '
+                     'invent footprint shapes or extra buildings.')
+    else:
+        parts.append('No approved building-footprint geometry, component placement, or '
+                     'component-specific floor ranges are recorded. Therefore, do not place or '
+                     'extrude speculative building masses. Show a restrained dashed development field '
+                     'inside the parcel and an English note reading "Approved building footprints and '
+                     'component floor ranges not recorded."')
+    floor_count = _visual_concept_plan_sanitize_text(
+        context.get('floor_count') or regulations.get('table_floors') or regulations.get('max_floors_height'))
+    if floor_count:
+        parts.append(f'The only recorded overall approved floor count is {floor_count}; show it as a '
+                     f'vertical datum labeled "Approved overall floor count: {floor_count}," not as '
+                     'an invented building volume.')
+    controls = _visual_concept_plan_control_lines(context, regulations)
+    if controls:
+        parts.append('Add a compact control panel with the recorded facts: ' + '; '.join(controls) + '.')
+    parts.append(_visual_concept_plan_setbacks_sentence(context))
+    parts.append(_visual_concept_plan_title_block(context, 'Conceptual massing')
+                 + ' Use simple matte geometry, subtle shadows, crisp edges, and minimal linework. '
+                 + _visual_concept_plan_color_sentence(context, has_placement))
+    parts.append('All visible image labels must be English only.')
+    return '\n\n'.join(part for part in parts if part)
+
+
+def _visual_concept_plan_drawing_prompt(kind, context):
+    context = context if isinstance(context, dict) else {}
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    components = [item for item in context.get('components') or [] if isinstance(item, dict)]
+    body = {
+        'site': _visual_concept_plan_site_body,
+        'uses': _visual_concept_plan_uses_body,
+        'massing': _visual_concept_plan_massing_body,
+    }.get(kind, _visual_concept_plan_massing_body)(context, components, regulations)
+    return _visual_concept_plan_prompt_header(kind, context) + '\n\n' + body
+
+
 def _visual_concept_plan_prompt_templates(context):
-    common = _visual_concept_plan_context_text(context)
     return {
-        definition['kind']: common + _visual_concept_plan_drawing_instruction(definition['kind']) +
-        " Use muted pastel fills, dark navy outlines, crisp English callouts, the fixed color code, "
-        "the caption 'ILLUSTRATIVE REFERENCE - NOT TO SCALE', no photorealism, no people, no cars, "
-        "no furniture, no room detail, no logos, no watermarks, and no unrecorded dimensions."
+        definition['kind']: _visual_concept_plan_drawing_prompt(definition['kind'], context)
         for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS
     }
 
@@ -4880,15 +5181,20 @@ def api_visual_concept_plans_prompts():
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
     spec = _visual_concept_plan_context_text(context)
+    drafts = _visual_concept_plan_prompt_templates(context)
     system_prompt = (
-        'أنت SOL، كاتب برومبتات مخططات معمارية مفاهيمية. اكتب ثلاثة برومبتات إنجليزية مستقلة، '
-        'واحد لكل نوع: site وuses وmassing. استخدم المواصفة المعتمدة حرفيًا ولا تضف أو تغيّر أرقامًا. '
-        'لا تذكر أسماء ملفات أو مصادر أو صفحات. لا تستخدم نصوصًا عربية داخل الصور. أخرج JSON فقط: '
+        'أنت SOL، محرّر برومبتات مخططات معمارية مفاهيمية. أمامك ثلاث مسودات مكتملة الحقائق '
+        '(site وuses وmassing) مبنية من بيانات المشروع المعتمدة أدناه. أعد صياغة كل مسودة إلى '
+        'برومبت إنجليزي نهائي سليم: يجوز لك فقط تحسين الصياغة وترتيب الجمل وترجمة أي نص مصدر غير '
+        'إنجليزي إلى إنجليزية موجزة دقيقة. كل رقم وكل حقيقة وكل شرط وكل جملة «not recorded» تبقى '
+        'كما هي — لا تضف ولا تحذف ولا تلطّف ولا تستنتج قيمة. لا تذكر أسماء ملفات أو مصادر أو صفحات، '
+        'ولا تستخدم نصوصًا عربية داخل البرومبت النهائي. أخرج JSON فقط: '
         '{"prompts":{"site":"","uses":"","massing":""}}.'
     )
-    user_prompt = spec + '\n\n' + '\n\n'.join(
-        f"{definition['kind'].upper()} INSTRUCTION: {_visual_concept_plan_drawing_instruction(definition['kind'])}"
-        for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS)
+    user_prompt = (
+        spec + '\n\nAPPROVED DRAFT PROMPTS — polish only; keep every fact verbatim:\n'
+        + json.dumps(drafts, ensure_ascii=False)
+    )
     prompts = {}
     try:
         response = call_openrouter_chat(
@@ -4901,10 +5207,9 @@ def api_visual_concept_plans_prompts():
             prompts = {kind: _visual_concept_sanitize_prompt(raw_prompts.get(kind)) for kind in ('site', 'uses', 'massing')}
     except Exception:
         prompts = {}
-    fallback = _visual_concept_plan_prompt_templates(context)
     for kind in ('site', 'uses', 'massing'):
         if not prompts.get(kind):
-            prompts[kind] = fallback[kind]
+            prompts[kind] = drafts[kind]
     return jsonify({'success': True, 'prompts': prompts, 'context': context, 'referenceUrl': boundary.get('referenceUrl') or ''})
 
 
