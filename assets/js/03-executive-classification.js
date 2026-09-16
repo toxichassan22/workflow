@@ -365,114 +365,16 @@
             <button type="button" class="visual-concept-mode-btn" data-visual-plans-tab="upload">رفع المخططات</button>
           </div>
           <div id="visualConceptPlansGeneratePanel" data-visual-plans-panel="generate">
-            <div class="visual-concept-card plans-workflow-card" id="visualConceptPlansWizard">
+            <div class="visual-concept-card">
               <div class="visual-concept-head">
-                <div>
-                  <h3 data-i18n="plans.workflow_title">سير عمل المخططات</h3>
-                  <p class="tenant-hint" data-i18n="plans.workflow_status_label">حالة سير العمل</p>
-                </div>
-                <span class="visual-concept-status pending" id="visualConceptPlansWorkflowStatus"></span>
-              </div>
-              <ol class="plans-workflow-steps" id="visualConceptPlansWorkflowSteps">
-                <li data-plans-step="verify"><span data-i18n="plans.step_verify">التحقق</span></li>
-                <li data-plans-step="distribute"><span data-i18n="plans.step_distribute">التوزيع</span></li>
-                <li data-plans-step="approve"><span data-i18n="plans.step_approve">الاعتماد</span></li>
-                <li data-plans-step="generate"><span data-i18n="plans.step_generate">التوليد</span></li>
-              </ol>
-
-              <section class="plans-workflow-panel" data-plans-workflow-panel="verify">
-                <div class="plans-workflow-panel-head">
-                  <h4 data-i18n="plans.verify_title">التحقق من بيانات المشروع</h4>
-                  <button type="button" class="btn primary small" id="visualConceptPlansVerifyBtn" data-i18n="plans.verify_button">تحقق</button>
-                </div>
-                <p class="tenant-hint" id="visualConceptPlansVerifySummary"></p>
-                <div class="plans-workflow-notice" id="visualConceptPlansBlocking" hidden></div>
-                <div class="plans-workflow-table-wrap">
-                  <table class="plans-workflow-table plans-check-table">
-                    <thead><tr>
-                      <th data-i18n="plans.check_item">البند</th>
-                      <th data-i18n="plans.check_project">بيانات المشروع</th>
-                      <th data-i18n="plans.check_reference">المرجع</th>
-                      <th data-i18n="plans.check_result">النتيجة</th>
-                      <th data-i18n="plans.check_note">الملاحظة</th>
-                    </tr></thead>
-                    <tbody id="visualConceptPlansVerifyRows"></tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section class="plans-workflow-panel" data-plans-workflow-panel="distribute">
-                <div class="plans-workflow-panel-head">
-                  <h4 data-i18n="plans.distribution_title">توزيع المكونات والأدوار</h4>
-                  <div class="visual-concept-actions">
-                    <button type="button" class="btn primary small" id="visualConceptPlansDistributeBtn" data-i18n="plans.distribute_button">اقتراح التوزيع</button>
-                    <button type="button" class="btn ghost small" id="visualConceptPlansRecheckBtn" data-i18n="plans.recheck_button">مراجعة التوزيع</button>
-                  </div>
-                </div>
-                <label data-i18n="plans.feedback_label">ملاحظات العميل</label>
-                <textarea id="visualConceptPlansFeedback" rows="3" data-i18n-ph="plans.feedback_placeholder" placeholder="ملاحظات التوزيع"></textarea>
-                <div class="plans-workflow-table-wrap">
-                  <table class="plans-workflow-table plans-distribution-table">
-                    <thead><tr>
-                      <th data-i18n="plans.building">المبنى</th>
-                      <th data-i18n="plans.floor_span">الدور أو النطاق</th>
-                      <th data-i18n="plans.component">المكون</th>
-                      <th data-i18n="plans.use">الاستخدام</th>
-                      <th data-i18n="plans.units_per_floor">وحدات بالدور</th>
-                      <th data-i18n="plans.total_units">إجمالي الوحدات</th>
-                      <th data-i18n="plans.floor_area">مساحة الدور</th>
-                      <th data-i18n="plans.group_area">مساحة المجموعة</th>
-                      <th data-i18n="plans.services_share">الحركة والخدمات</th>
-                      <th data-i18n="plans.notes">ملاحظات</th>
-                    </tr></thead>
-                    <tbody id="visualConceptPlansDistributionRows"></tbody>
-                  </table>
-                </div>
-                <div class="plans-workflow-subhead" data-i18n="plans.reconciliation_title">المطابقة مع الدراسة المالية</div>
-                <div class="plans-workflow-table-wrap">
-                  <table class="plans-workflow-table plans-reconciliation-table">
-                    <thead><tr>
-                      <th data-i18n="plans.component">المكون</th>
-                      <th data-i18n="plans.required_units">الوحدات المطلوبة</th>
-                      <th data-i18n="plans.proposed_units">الوحدات المقترحة</th>
-                      <th data-i18n="plans.required_area">المساحة المطلوبة</th>
-                      <th data-i18n="plans.proposed_area">المساحة المقترحة</th>
-                      <th data-i18n="plans.difference">الفرق</th>
-                    </tr></thead>
-                    <tbody id="visualConceptPlansReconciliationRows"></tbody>
-                  </table>
-                </div>
-                <p class="tenant-hint" id="visualConceptPlansDistributionNotes"></p>
-              </section>
-
-              <section class="plans-workflow-panel" data-plans-workflow-panel="approve">
-                <div class="plans-workflow-panel-head">
-                  <h4 data-i18n="plans.approval_title">اعتماد التوزيع</h4>
-                  <button type="button" class="btn primary small" id="visualConceptPlansApproveBtn" data-i18n="plans.approve_button">اعتماد التوزيع</button>
-                </div>
-                <p class="tenant-hint" id="visualConceptPlansApprovalStatus"></p>
-              </section>
-
-              <section class="plans-workflow-panel" data-plans-workflow-panel="generate">
-                <div class="plans-workflow-panel-head">
-                  <h4 data-i18n="plans.generate_title">توليد المخططات الثلاثة</h4>
-                  <button type="button" class="btn primary small" id="visualConceptPlansGenerateAllBtn" data-i18n="plans.generate_all_button">توليد الكل</button>
-                </div>
-                <p class="tenant-hint" id="visualConceptPlansSpecStatus"></p>
-                <div class="plans-disclaimer" id="visualConceptPlansDisclaimer" data-i18n="plans.disclaimer">تصور مبدئي لدراسة الفرصة الاستثمارية — غير مخصص للتنفيذ</div>
-                <div id="visualConceptPlansWorkflowImages" class="plans-workflow-results"></div>
-              </section>
-            </div>
-            <div class="visual-concept-card plans-legacy-extra" aria-hidden="true">
-              <div class="visual-concept-head">
-                <h3 data-i18n="plans.extra_title">مخططات إضافية</h3>
+                <h3>إضافة مخطط</h3>
                 <span class="visual-concept-status pending" id="visualConceptPlansCount"></span>
               </div>
               <div class="visual-concept-actions">
-                <button type="button" class="btn primary small" id="visualConceptAddPlanBtn" data-i18n="plans.add_button">إضافة مخطط</button>
+                <button type="button" class="btn primary small" id="visualConceptAddPlanBtn">إضافة مخطط</button>
               </div>
             </div>
-            <div id="visualConceptPlansGenerateList" class="visual-concept-page plans-legacy-extra" aria-hidden="true"></div>
+            <div id="visualConceptPlansGenerateList" class="visual-concept-page"></div>
           </div>
           <div id="visualConceptPlansUploadPanel" data-visual-plans-panel="upload" hidden>
             <div class="visual-concept-card">
@@ -504,19 +406,6 @@
       if (plansInput) plansInput.addEventListener('change', () => uploadVisualConceptPlanImages(plansInput));
       const addPlanButton = body.querySelector('#visualConceptAddPlanBtn');
       if (addPlanButton) addPlanButton.addEventListener('click', () => addVisualConceptPlan());
-      const planWorkflowActions = [
-        ['#visualConceptPlansVerifyBtn', 'verifyVisualConceptPlans'],
-        ['#visualConceptPlansDistributeBtn', 'distributeVisualConceptPlans'],
-        ['#visualConceptPlansRecheckBtn', 'recheckVisualConceptPlans'],
-        ['#visualConceptPlansApproveBtn', 'approveVisualConceptPlansDistribution'],
-        ['#visualConceptPlansGenerateAllBtn', 'generateAllVisualConceptPlans']
-      ];
-      planWorkflowActions.forEach(([selector, functionName]) => {
-        const button = body.querySelector(selector);
-        if (button) button.addEventListener('click', () => {
-          if (typeof window[functionName] === 'function') window[functionName]();
-        });
-      });
       body.querySelectorAll('[data-visual-plans-tab]').forEach(button => {
         button.addEventListener('click', () => setVisualConceptPlansTab(button.getAttribute('data-visual-plans-tab')));
       });

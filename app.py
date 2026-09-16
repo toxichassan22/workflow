@@ -2381,7 +2381,7 @@ def _visual_concept_components(project_data):
     financial = source.get('financial_study_model') if isinstance(source.get('financial_study_model'), dict) else {}
     dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
     rows = dynamic_rows.get('components')
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         rows = _visual_concept_parse_json(_visual_concept_read(source, 'project_components_data'), [])
     output = []
     for item in rows or []:
@@ -2613,14 +2613,6 @@ def _visual_concept_facts(project_data):
 
 def _visual_concept_missing_fields(facts, slot_id='cover'):
     missing = []
-    if facts.get('plan_kind_explicit'):
-        if not facts.get('project_name'):
-            missing.append({'key': 'project_name', 'label': 'اسم المشروع'})
-        if _visual_concept_number(facts.get('approved_financial_area')) in (None, 0):
-            missing.append({'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية'})
-        if not facts.get('components'):
-            missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
-        return missing
     if not facts.get('project_name'):
         missing.append({'key': 'project_name', 'label': 'اسم المشروع'})
     if not facts.get('project_idea'):
@@ -2656,14 +2648,6 @@ def _visual_concept_is_internal_slot(slot_id):
 
 def _visual_concept_is_plan_slot(slot_id):
     return str(slot_id or '').startswith(VISUAL_CONCEPT_PLAN_PREFIX + '_')
-
-
-def _visual_concept_plan_kind(slot_id, value=''):
-    kind = _visual_concept_text(value, 40).lower()
-    if kind in ('site', 'uses', 'massing'):
-        return kind
-    suffix = str(slot_id or '').strip().lower().split(VISUAL_CONCEPT_PLAN_PREFIX + '_', 1)[-1]
-    return suffix if suffix in ('site', 'uses', 'massing') else ''
 
 
 def _visual_concept_interior_component_id(slot_id):
@@ -2753,37 +2737,6 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if _visual_concept_is_plan_slot(slot_id):
         plan_title = _visual_concept_slot_label(slot_id, facts)
         description = str(facts.get('plan_description') or '').strip()
-        kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
-        approved_spec = facts.get('approved_spec') if isinstance(facts.get('approved_spec'), dict) else {}
-        spec_text = json.dumps(approved_spec, ensure_ascii=False, separators=(',', ':'))[:16000]
-        if kind:
-            kind_instructions = {
-                'site': (
-                    'Show the actual parcel boundary, north direction, setbacks, surrounding streets, '
-                    'entrances, parking zones, open areas, and building footprints from the approved spec. '
-                    'Do not show floor-by-floor uses in this diagram.'
-                ),
-                'uses': (
-                    'Show the approved buildings and floor spans as a clear floor-use distribution diagram. '
-                    'Every component, unit count, and area must come from the approved spec; do not add a '
-                    'building, floor, or use that is absent from it.'
-                ),
-                'massing': (
-                    'Show the approved building footprints as a simple 3D massing diagram. Derive the '
-                    'relative heights from the approved floor spans and floor height in the spec; do not '
-                    'invent a new arrangement or architectural detail.'
-                ),
-            }.get(kind, '')
-            return (
-                f'Create the {kind} diagram, titled "{plan_title}", for {name}. '
-                'The approved engineering spec below is the only source of geometry and numbers. '
-                'The diagram is conceptual and NOT TO SCALE. ' + kind_instructions + ' '
-                'Use a clean flat schematic architectural style on a white background, muted pastel color '
-                'coding, dark navy outlines, a compact legend, English labels only, and no logos, people, '
-                'or decorative text. Keep the same building names, use colors, floor spans, units, and '
-                'areas across all three diagram kinds. Approved spec: ' + spec_text +
-                (f' Client brief: {description}.' if description else '')
-            )
         scope = f"The client's brief for this diagram: {description}. " if description else ''
         return (
             f'Create a clean conceptual "{plan_title}" planning diagram for {name}. ' + scope +
@@ -2831,9 +2784,6 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"جدول الاتجاهات:\n{directions}\n"
         f"مكونات الدراسة المالية:\n{components}\n"
         f"المكون الداخلي المختار: {selected_component}\n"
-        f"نوع المخطط: {facts.get('plan_kind') or 'غير محدد'}\n"
-        f"المواصفة الهندسية المعتمدة: {json.dumps(facts.get('approved_spec') or {}, ensure_ascii=False)[:16000] if facts.get('approved_spec') else 'غير مرفقة'}\n"
-        f"التوزيع المعتمد: {json.dumps(facts.get('plan_distribution') or {}, ensure_ascii=False)[:12000] if facts.get('plan_distribution') else 'غير مرفق'}\n"
         f"صور مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_ids') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
         f"صور مرجعية للمكون الداخلي: {'مرفقة' if facts.get('interior_reference_file_ids') else 'غير مرفوعة'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
@@ -3020,16 +2970,6 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
         )
     if _visual_concept_is_plan_slot(slot_id):
         map_url = facts.get('overview_map_url')
-        kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
-        if kind == 'site':
-            return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
-        if kind == 'uses':
-            return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
-        if kind == 'massing':
-            return _visual_concept_reference_uris(
-                urls=[item for item in (map_url, cover_image) if item],
-                urls_first=True,
-            )
         return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
     return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True)
 
@@ -3046,20 +2986,6 @@ def _visual_concept_request_bundle(data, slot_id):
         }
     facts = _visual_concept_facts(project_data)
     facts['slot_label'] = _visual_concept_text(data.get('slotLabel') or data.get('slot_label'), 80)
-    explicit_plan_kind = _visual_concept_text(
-        data.get('planKind') or data.get('plan_kind'), 40).lower()
-    facts['plan_kind'] = _visual_concept_plan_kind(slot_id, explicit_plan_kind)
-    facts['plan_kind_explicit'] = explicit_plan_kind in ('site', 'uses', 'massing')
-    raw_spec = data.get('approvedSpec') or data.get('approved_spec')
-    if isinstance(raw_spec, str):
-        raw_spec = _visual_concept_parse_json(raw_spec, {})
-    facts['approved_spec'] = raw_spec if isinstance(raw_spec, dict) else {}
-    raw_distribution = data.get('distribution') or data.get('approvedDistribution')
-    if isinstance(raw_distribution, str):
-        raw_distribution = _visual_concept_parse_json(raw_distribution, {})
-    facts['plan_distribution'] = raw_distribution if isinstance(raw_distribution, dict) else {}
-    facts['plans_data_version'] = _visual_concept_text(
-        data.get('dataVersion') or data.get('plansDataVersion') or data.get('plans_data_version'), 120)
     requested_component_id = _visual_concept_text(data.get('componentId') or data.get('component_id'), 80)
     if _visual_concept_is_internal_slot(slot_id):
         if not requested_component_id:
@@ -4477,12 +4403,6 @@ def api_visual_concept_prompt():
             'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
             'missingFields': missing,
         }), 400
-    if (facts.get('plan_kind_explicit') and not facts.get('approved_spec')):
-        return jsonify({
-            'success': False,
-            'error': 'اعتمد مواصفة المخططات قبل إنشاء الوصف',
-            'error_code': 'PLANS_SPEC_REQUIRED',
-        }), 400
     cover_image = _visual_concept_cover_image(data)
     if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
@@ -4529,12 +4449,6 @@ def api_visual_concept_generate():
             'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
             'missingFields': missing,
         }), 400
-    if (facts.get('plan_kind_explicit') and not facts.get('approved_spec')):
-        return jsonify({
-            'success': False,
-            'error': 'اعتمد مواصفة المخططات قبل التوليد',
-            'error_code': 'PLANS_SPEC_REQUIRED',
-        }), 400
     prompt = _visual_concept_sanitize_prompt(data.get('prompt'))
     if not prompt:
         return jsonify({'success': False, 'error': 'وصف التصور البصري مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
@@ -4580,12 +4494,6 @@ def api_visual_concept_chat():
             'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
             'missingFields': missing,
         }), 400
-    if (facts.get('plan_kind_explicit') and not facts.get('approved_spec')):
-        return jsonify({
-            'success': False,
-            'error': 'اعتمد مواصفة المخططات قبل تعديل الوصف',
-            'error_code': 'PLANS_SPEC_REQUIRED',
-        }), 400
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     cover_image = _visual_concept_cover_image(data)
     if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
@@ -4613,479 +4521,6 @@ def api_visual_concept_chat():
         app.logger.exception('Visual concept chat failed')
         return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
                         'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-
-
-# --- Plans workflow: verify -> distribute+approve -> generate ---------------
-# The plans tab runs a staged pipeline instead of free-form generation: the
-# system checks the recorded project data against the documented land
-# regulations, proposes a distribution of components over buildings/floors,
-# the client edits and approves it, and only then are the three fixed diagrams
-# (site plan, floor-use distribution, 3D massing) generated from one shared
-# geometric spec so every number matches between the tables and the drawings.
-
-PLANS_CHECK_RESULTS = ('مطابق ضمن نطاق التحقق', 'متعارض', 'يحتاج توضيحًا', 'غير متحقق منه', 'لا ينطبق')
-PLANS_DIAGRAM_KINDS = ('site', 'uses', 'massing')
-PLANS_DISCLAIMER = 'تصور مبدئي لدراسة الفرصة الاستثمارية — غير مخصص للتنفيذ'
-
-_PLANS_PROJECT_KEYS = (
-    ('project_name', 'اسم المشروع'),
-    ('project_type', 'نوع المشروع'),
-    ('project_subtype', 'النوع الفرعي للمشروع'),
-    ('project_idea', 'فكرة المشروع'),
-    ('land_and_building_summary', 'وصف المشروع والأرض'),
-    ('target_audience', 'الفئات المستهدفة'),
-    ('city', 'المدينة'),
-    ('district', 'الحي'),
-)
-
-_PLANS_LAND_KEYS = (
-    ('plot_number_croquis', 'رقم القطعة'),
-    ('plan_number', 'رقم المخطط'),
-    ('boundary_lengths', 'أطوال حدود الأرض وانكساراتها'),
-    ('north_direction', 'اتجاه الشمال'),
-    ('surrounding_streets', 'الشوارع المحيطة وعروضها'),
-    ('survey_coordinates', 'إحداثيات الرفع المساحي'),
-    ('site_analysis', 'تحليل الموقع'),
-    ('zoning_code', 'رمز التنظيم'),
-    ('land_use', 'استخدام الأرض'),
-    ('land_use_status', 'حالة استخدام الأرض'),
-    ('infrastructure', 'البنية التحتية'),
-    ('building_system', 'نظام البناء'),
-)
-
-_PLANS_AREA_KEYS = (
-    ('croquis_land_area', 'المساحة التنظيمية للأرض'),
-    ('approved_financial_area', 'المساحة المعتمدة للدراسة المالية'),
-    ('approved_floor_count', 'عدد الأدوار المعتمدة وطريقة احتسابها'),
-    ('approved_coverage_ratio', 'نسبة التغطية المعتمدة'),
-    ('max_floors_height', 'حد الأدوار والارتفاع المسموح'),
-    ('building_ratio_coverage', 'نسب البناء والتغطية'),
-    ('covered_area', 'المساحة المغطاة'),
-    ('open_area', 'المساحة المفتوحة'),
-    ('parking_area', 'مساحة المواقف'),
-)
-
-_PLANS_REGULATION_KEYS = (
-    ('allowed_uses', 'الاستخدامات المسموحة'),
-    ('allowed_uses_restrictions', 'قيود الاستخدامات'),
-    ('building_ratio_setbacks', 'نسب البناء والارتدادات'),
-    ('setbacks', 'الارتدادات لكل حد'),
-    ('parking_requirements', 'اشتراطات المواقف'),
-    ('entrances_exits_requirements', 'اشتراطات المداخل والمخارج'),
-    ('regulatory_constraints', 'القيود التنظيمية'),
-)
-
-
-def _plans_key_lines(source, keys):
-    lines = []
-    for key, label in keys:
-        value = _visual_concept_read(source, key)
-        if isinstance(value, (list, dict)):
-            value = json.dumps(value, ensure_ascii=False)
-        text = _visual_concept_text(value, 1200)
-        if text:
-            lines.append(f'- {label}: {text}')
-    return lines
-
-
-def _plans_components(project_data):
-    source = project_data if isinstance(project_data, dict) else {}
-    financial = source.get('financial_study_model') if isinstance(source.get('financial_study_model'), dict) else {}
-    dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
-    rows = dynamic_rows.get('components')
-    if not isinstance(rows, list) or not rows:
-        rows = _visual_concept_parse_json(_visual_concept_read(source, 'project_components_data'), [])
-    output = []
-    for item in rows or []:
-        if not isinstance(item, dict):
-            continue
-        name = _visual_concept_text(item.get('name') or item.get('component') or item.get('title'), 160)
-        if not name:
-            continue
-        output.append({
-            'name': name,
-            'useType': _visual_concept_text(item.get('useType') or item.get('type'), 80),
-            'units': _visual_concept_number(item.get('units')),
-            'unitArea': _visual_concept_number(item.get('unitArea')),
-            'builtArea': _visual_concept_number(item.get('builtArea') or item.get('totalArea')),
-            'revenueArea': _visual_concept_number(
-                item.get('revenueArea') or item.get('revenue_area') or item.get('saleArea')),
-            'investmentModel': _visual_concept_text(
-                item.get('investmentModel') or item.get('benefitModel') or item.get('use_model'), 80),
-        })
-        if len(output) >= 40:
-            break
-    return output
-
-
-def _plans_context(project_data):
-    """Assemble the recorded study inputs the planner stages reason over."""
-    source = project_data if isinstance(project_data, dict) else {}
-    components = _plans_components(source)
-    blocks = []
-    project_lines = _plans_key_lines(source, _PLANS_PROJECT_KEYS)
-    blocks.append('بيانات المشروع:\n' + ('\n'.join(project_lines) if project_lines else 'غير متوفر'))
-    land_lines = _plans_key_lines(source, _PLANS_LAND_KEYS)
-    blocks.append('الكروكي وبيانات الأرض المستخرجة منه:\n' + ('\n'.join(land_lines) if land_lines else 'غير متوفر'))
-    area_lines = _plans_key_lines(source, _PLANS_AREA_KEYS)
-    blocks.append('بيانات المساحات والأدوار المدخلة سابقًا:\n' + ('\n'.join(area_lines) if area_lines else 'غير متوفر'))
-    component_lines = []
-    for item in components:
-        parts = [item['name']]
-        if item.get('useType'):
-            parts.append('الاستخدام: ' + item['useType'])
-        if item.get('units') not in (None, ''):
-            parts.append('عدد الوحدات: ' + str(item['units']))
-        if item.get('unitArea') not in (None, ''):
-            parts.append('مساحة الوحدة: ' + str(item['unitArea']))
-        if item.get('builtArea') not in (None, ''):
-            parts.append('المساحة المبنية: ' + str(item['builtArea']))
-        if item.get('revenueArea') not in (None, ''):
-            parts.append('المساحة البيعية/التأجيرية: ' + str(item['revenueArea']))
-        if item.get('investmentModel'):
-            parts.append('نموذج الاستفادة: ' + item['investmentModel'])
-        component_lines.append('- ' + '، '.join(parts))
-    blocks.append('جدول مكونات المشروع من الدراسة المالية:\n'
-                  + ('\n'.join(component_lines) if component_lines else 'غير متوفر'))
-    regulation_lines = _plans_key_lines(source, _PLANS_REGULATION_KEYS)
-    blocks.append('الاشتراطات التنظيمية الموثقة:\n' + ('\n'.join(regulation_lines) if regulation_lines else 'غير متوفرة'))
-    directions = _visual_concept_directions(source)
-    if directions:
-        blocks.append('جدول الاتجاهات:\n' + '\n'.join(
-            f"- {row['direction']}: {row['regulation_text']}" for row in directions))
-    missing = []
-    if not components:
-        missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
-    if not (_visual_concept_read(source, 'croquis_land_area') or _visual_concept_read(source, 'approved_financial_area')):
-        missing.append({'key': 'croquis_land_area', 'label': 'مساحة الأرض التنظيمية أو المعتمدة'})
-    return {'text': '\n\n'.join(blocks), 'components': components, 'missing': missing}
-
-
-def _plans_model_json(system_prompt, user_prompt, data):
-    for _attempt in range(2):
-        response = call_openrouter_chat(
-            system_prompt,
-            user_prompt,
-            temperature=None,
-            max_tokens=12000,
-            model=SLIDE_TEXT_MODEL,
-            reasoning_effort='medium',
-            response_format={'type': 'json_object'},
-            usage_ctx=_usage_ctx('image', data),
-        )
-        parsed = parse_json_object(_get_chat_response_text(response))
-        if parsed:
-            return parsed
-    return {}
-
-
-def _plans_normalize_checks(raw):
-    checks = []
-    for item in (raw if isinstance(raw, list) else [])[:40]:
-        if not isinstance(item, dict):
-            continue
-        name = _visual_concept_text(item.get('item') or item.get('check'), 200)
-        if not name:
-            continue
-        result = _visual_concept_text(item.get('result') or item.get('status'), 60)
-        if result not in PLANS_CHECK_RESULTS:
-            result = 'يحتاج توضيحًا'
-        checks.append({
-            'item': name,
-            'project': _visual_concept_text(item.get('project') or item.get('project_value'), 400),
-            'reference': _visual_concept_text(item.get('reference') or item.get('constraint'), 400),
-            'result': result,
-            'note': _visual_concept_text(item.get('note') or item.get('action'), 600),
-        })
-    return checks
-
-
-def _plans_normalize_rows(raw):
-    rows = []
-    for item in (raw if isinstance(raw, list) else [])[:120]:
-        if not isinstance(item, dict):
-            continue
-        rows.append({
-            'building': _visual_concept_text(item.get('building'), 80),
-            'floor_span': _visual_concept_text(item.get('floor_span') or item.get('floorRange'), 120),
-            'floor_count': _visual_concept_number(item.get('floor_count') or item.get('floorCount')),
-            'component': _visual_concept_text(item.get('component'), 160),
-            'use': _visual_concept_text(item.get('use'), 80),
-            'units_per_floor': _visual_concept_number(item.get('units_per_floor') or item.get('unitsPerFloor')),
-            'total_units': _visual_concept_number(item.get('total_units') or item.get('totalUnits')),
-            'floor_area': _visual_concept_number(item.get('floor_area') or item.get('floorArea')),
-            'group_area': _visual_concept_number(item.get('group_area') or item.get('groupArea')),
-            'services_share': _visual_concept_text(item.get('services_share') or item.get('servicesShare'), 200),
-            'notes': _visual_concept_text(item.get('notes'), 400),
-        })
-    return rows
-
-
-def _plans_normalize_reconciliation(raw):
-    rows = []
-    for item in (raw if isinstance(raw, list) else [])[:60]:
-        if not isinstance(item, dict):
-            continue
-        name = _visual_concept_text(item.get('component'), 160)
-        if not name:
-            continue
-        rows.append({
-            'component': name,
-            'required_units': _visual_concept_number(item.get('required_units') or item.get('requiredUnits')),
-            'proposed_units': _visual_concept_number(item.get('proposed_units') or item.get('proposedUnits')),
-            'required_area': _visual_concept_number(item.get('required_area') or item.get('requiredArea')),
-            'proposed_area': _visual_concept_number(item.get('proposed_area') or item.get('proposedArea')),
-            'difference': _visual_concept_text(item.get('difference') or item.get('explanation'), 400),
-        })
-    return rows
-
-
-def _plans_text_list(raw, limit=20, item_limit=400):
-    return [_visual_concept_text(item, item_limit)
-            for item in (raw if isinstance(raw, list) else [])
-            if _visual_concept_text(item, item_limit)][:limit]
-
-
-def _plans_normalize_spec(raw):
-    if not isinstance(raw, dict):
-        return {}
-    legend = []
-    for item in (raw.get('legend') if isinstance(raw.get('legend'), list) else [])[:20]:
-        if not isinstance(item, dict):
-            continue
-        use = _visual_concept_text(item.get('use'), 80)
-        label = _visual_concept_text(item.get('label_en') or item.get('label'), 120)
-        color = _visual_concept_text(item.get('color'), 20)
-        if use or label:
-            legend.append({'use': use or label, 'color': color, 'label_en': label or use})
-    buildings = []
-    for item in (raw.get('buildings') if isinstance(raw.get('buildings'), list) else [])[:20]:
-        if not isinstance(item, dict):
-            continue
-        floors = []
-        for floor in (item.get('floors') if isinstance(item.get('floors'), list) else [])[:60]:
-            if not isinstance(floor, dict):
-                continue
-            floors.append({
-                'span': _visual_concept_text(floor.get('span') or floor.get('floor_span'), 80),
-                'use': _visual_concept_text(floor.get('use'), 80),
-                'units': _visual_concept_number(floor.get('units')),
-                'area': _visual_concept_number(floor.get('area')),
-            })
-        buildings.append({
-            'name': _visual_concept_text(item.get('name'), 80),
-            'footprint': _visual_concept_text(item.get('footprint') or item.get('footprint_note'), 300),
-            'floors': floors,
-        })
-    if not buildings:
-        return {}
-    site = raw.get('site') if isinstance(raw.get('site'), dict) else {}
-    massing = raw.get('massing') if isinstance(raw.get('massing'), dict) else {}
-    return {
-        'legend': legend,
-        'buildings': buildings,
-        'site': {
-            'north': _visual_concept_text(site.get('north'), 120),
-            'setbacks': _visual_concept_text(site.get('setbacks'), 300),
-            'entrances': _plans_text_list(site.get('entrances'), 10, 160),
-            'parking_zones': _plans_text_list(site.get('parking_zones'), 10, 160),
-            'open_areas': _plans_text_list(site.get('open_areas'), 10, 160),
-        },
-        'massing': {
-            'floor_height_m': _visual_concept_number(massing.get('floor_height_m')),
-            'assumption_note': _visual_concept_text(massing.get('assumption_note'), 300),
-        },
-        'review_notes': _plans_text_list(raw.get('review_notes'), 20, 300),
-    }
-
-
-_PLANS_VERIFY_SYSTEM = (
-    'أنت مساعد التخطيط التصوري في منصة LandLoom AI، وتعمل على إعداد مخططات مبدئية لدراسات الفرص العقارية في السعودية.\n'
-    'مهمتك في هذه المرحلة: مراجعة بيانات المشروع المدخلة سابقًا مقابل الاشتراطات الموثقة الخاصة بالأرض والتحقق من اتساقها قبل أي توزيع.\n\n'
-    'القواعد الأساسية:\n'
-    '- استخدم البيانات المسجلة في الدراسة ولا تطلب إعادة إدخالها، ولا تخترع اشتراطات أو مصادر أو موافقات.\n'
-    '- لا تعتبر رغبات العميل (مثل عدد أدوار مستهدف) اشتراطًا مسموحًا دون مستند، ولا تفترض اشتراطات موحدة لجميع المدن أو الأنشطة.\n'
-    '- إذا تعذر التحقق من اشتراط، سجّله «غير متحقق منه» بوضوح.\n'
-    '- لا تغيّر أعداد الوحدات أو المساحات أو الاستخدامات المسجلة؛ عند التعارض اشرح المشكلة واقترح بدائل وأثرها دون تطبيقها.\n'
-    '- ميّز بين معلومة مدخلة واشتراط موثق ونتيجة محسوبة واقتراح تصميمي.\n'
-    '- إذا كان التعارض أو النقص يمنع توزيعًا موثوقًا، سجّله في blocking_issues واجعل can_distribute=false.\n'
-    '- لا تصف المشروع بأنه متوافق بالكامل لمجرد اجتيازه الفحوص المتاحة.\n\n'
-    'تحقق من:\n'
-    '1) اتساق البيانات: مجموع مساحات المكونات مقابل إجمالي المسطحات بعد توحيد تعريف المساحات، تفسير المساحات غير الموزعة دون تخصيصها تلقائيًا، علاقة عدد الوحدات بمساحة الوحدة والمساحة المخصصة، الفصل بين الصافية والإجمالية والبيعية، احتساب الحركة والخدمات والمرافق المشتركة مرة واحدة، موضع مساحة المواقف من إجمالي المسطحات، علاقة المساحة المغطاة والمفتوحة بالمساحة التنظيمية، والمقصود بعدد الأدوار (أرضي/قبو/ميزانين/ملحق).\n'
-    '2) الاشتراطات المتاحة: الاستخدامات المسموحة، نسبة التغطية، الارتدادات لكل حد، معامل البناء والمساحات المحتسبة ضمنه، حدود الأدوار والارتفاع، اشتراطات أجزاء الأرض المختلفة إن وجدت، احتياج المواقف بحسب الاستخدام، القيود على المداخل والخدمات والمناطق الممنوع البناء عليها.\n'
-    '3) كفاية بيانات الكروكي: لا تعِد تشكيل حدود الأرض من أطوال الأضلاع وحدها إن لم تكفِ لتحديد الشكل، ولا تعتبر صورة خريطة تقريبية حدودًا مؤكدة، وعند نقص بيانات هندسية مؤثرة حدد المطلوب بدقة. يمكن متابعة توزيع وظيفي غير مقياسي إذا كانت بياناته كافية مع توضيح حدوده.\n\n'
-    'أخرج JSON فقط بالشكل التالي:\n'
-    '{"checks":[{"item":"البند","project":"قيمة بيانات المشروع","reference":"القيد أو المرجع المستخدم","result":"مطابق ضمن نطاق التحقق","note":"الملاحظة أو الإجراء المطلوب"}],'
-    '"blocking_issues":["..."],"can_distribute":true,"summary":"ملخص قصير"}\n'
-    'قيم result المسموحة فقط: مطابق ضمن نطاق التحقق / متعارض / يحتاج توضيحًا / غير متحقق منه / لا ينطبق.'
-)
-
-_PLANS_DISTRIBUTE_SYSTEM = (
-    'أنت مساعد التخطيط التصوري في منصة LandLoom AI. مهمتك: اقتراح توزيع المكونات والوحدات على المباني والأدوار بناءً على بيانات المشروع ونتيجة التحقق، أو مراجعة توزيع عدّله العميل.\n\n'
-    'قواعد التوزيع:\n'
-    '- حدد نطاق البناء الممكن من شكل الأرض والارتدادات والقيود.\n'
-    '- اقترح تكوينًا بسيطًا يناسب نوع المشروع: مبنى واحد، عدة مبانٍ، قاعدة وبرج، أو توزيع أفقي.\n'
-    '- وزّع المكونات على المباني والأدوار بما يحافظ على أعداد الوحدات والمساحات المدخلة، واستخدم أعدادًا صحيحة للوحدات وتحقق من تطابق مجموعها مع المطلوب.\n'
-    '- لا تفترض تساوي مساحات جميع الأدوار، وخصص الحركة والخدمات ضمن المساحات المتاحة وفق طريقة الاحتساب المؤكدة.\n'
-    '- راعِ العلاقات بين الاستخدامات والخصوصية والوصول والخدمات والإطلالات.\n'
-    '- تعامل مع فصل المداخل ومواقع المكونات كتوصيات قابلة للمراجعة ما لم تكن قيودًا موثقة، ولا تضع قواعد ثابتة مثل تخصيص الأدوار العليا للسكن في جميع المشروعات.\n'
-    '- إذا لم يستوعب التوزيع البرنامج، اذكر العجز واقترح تعديلات دون تطبيقها تلقائيًا.\n'
-    '- التوزيع هنا عددي ومساحي مبدئي؛ لا تدّعِ إثبات الملاءمة المعمارية التفصيلية.\n'
-    '- للمشروعات الأفقية وزّع المكونات بين المباني والمناطق بدل فرض توزيع رأسي.\n'
-    '- إذا اجتمعت عدة مكونات في دور واحد، وضّح حصة كل مكون وإجمالي مساحة الدور ولا تكرر احتساب مساحة الدور أو الخدمات المشتركة.\n\n'
-    'في وضع «مراجعة تعديلات العميل»: حافظ على صفوف العميل المعدّلة ما دامت متسقة مع المساحات والقيود، أعد الحسابات والفحوص المتأثرة، اذكر في impacts أي أثر على الدراسة المالية، وفي warnings أي تعارض أو تصحيح لازم دون تبديل أرقام العميل بصمت.\n\n'
-    'أخرج JSON فقط بالشكل التالي:\n'
-    '{"rows":[{"building":"المبنى","floor_span":"الدور أو نطاق الأدوار","floor_count":0,"component":"المكون أو الاستخدام","use":"الاستخدام","units_per_floor":0,"total_units":0,"floor_area":0,"group_area":0,"services_share":"الحركة والخدمات المحتسبة ضمنها","notes":"ملاحظات"}],'
-    '"reconciliation":[{"component":"المكون","required_units":0,"proposed_units":0,"required_area":0,"proposed_area":0,"difference":"الفرق وتفسيره"}],'
-    '"explanation":"شرح مختصر لأسباب التوزيع والافتراضات المتبقية","assumptions":["..."],"impacts":["..."],"warnings":["..."]}'
-)
-
-_PLANS_SPEC_SYSTEM = (
-    'أنت مساعد التخطيط التصوري في منصة LandLoom AI. مهمتك: بناء نموذج هندسي موحد تُشتق منه ثلاث مخططات (الموقع العام المبسط، توزيع الاستخدامات على الأدوار، المنظور الكتلي ثلاثي الأبعاد) من التوزيع المعتمد فقط.\n\n'
-    'القواعد:\n'
-    '- لا تعِد ابتكار توزيع جديد؛ انسخ أعداد الوحدات والأدوار والمساحات من التوزيع المعتمد كما هي.\n'
-    '- ثبّت لونًا واحدًا لكل استخدام في legend وتستخدمه المخططات الثلاثة كلها، وكل التسميات بالإنجليزية.\n'
-    '- اشتق الارتفاعات من بيانات محددة؛ إذا غابت ارتفاعات الأدوار اذكر الافتراض المستخدم في assumption_note.\n'
-    '- حدد في site نطاق البناء والارتدادات والمداخل ومسارات الوصول ومناطق المواقف والخدمات على مستوى تصوري، والأبعاد والمساحات المتحقق منها فقط.\n'
-    '- في review_notes سجّل أي افتراضات باقية أو قيود غير متحقق منها أو عدم تطابق لاحظته أثناء البناء.\n\n'
-    'أخرج JSON فقط بالشكل التالي:\n'
-    '{"legend":[{"use":"الاستخدام","color":"#hex","label_en":"English label"}],'
-    '"buildings":[{"name":"English name","footprint":"وصف البصمة وموضعها داخل نطاق البناء","floors":[{"span":"G أو 1-3","use":"الاستخدام","units":0,"area":0}]}],'
-    '"site":{"north":"اتجاه الشمال","setbacks":"الارتدادات المعتمدة","entrances":["..."],"parking_zones":["..."],"open_areas":["..."]},'
-    '"massing":{"floor_height_m":0,"assumption_note":"الافتراض المستخدم إن غابت الارتفاعات"},'
-    '"review_notes":["..."]}'
-)
-
-
-@app.route('/api/visual-concept/plans-verify', methods=['POST'])
-@require_permission('generate_images')
-def api_visual_concept_plans_verify():
-    data = request.get_json(silent=True) or {}
-    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    context = _plans_context(project_data)
-    if context['missing']:
-        return jsonify({
-            'success': False,
-            'error': 'أكمل بيانات الأرض ومكونات المشروع قبل التحقق',
-            'error_code': 'PLANS_DATA_INCOMPLETE',
-            'missingFields': context['missing'],
-        }), 400
-    try:
-        payload = _plans_model_json(_PLANS_VERIFY_SYSTEM, context['text'], data)
-    except Exception as exc:
-        app.logger.exception('Plans verify failed')
-        return jsonify({'success': False, 'error': 'تعذر التحقق من بيانات المخططات',
-                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-    checks = _plans_normalize_checks(payload.get('checks'))
-    if not checks:
-        return jsonify({'success': False, 'error': 'تعذر التحقق من بيانات المخططات',
-                        'error_code': 'TEXT_PROVIDER_INVALID'}), 503
-    blocking = _plans_text_list(payload.get('blocking_issues'), 20, 400)
-    can_distribute = bool(payload.get('can_distribute')) and not blocking
-    return jsonify({
-        'success': True,
-        'checks': checks,
-        'canDistribute': can_distribute,
-        'blockingIssues': blocking,
-        'summary': _visual_concept_text(payload.get('summary'), 1200),
-        'dataVersion': _visual_concept_text(data.get('dataVersion') or data.get('plansDataVersion'), 120),
-    })
-
-
-@app.route('/api/visual-concept/plans-distribute', methods=['POST'])
-@require_permission('generate_images')
-def api_visual_concept_plans_distribute():
-    data = request.get_json(silent=True) or {}
-    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    context = _plans_context(project_data)
-    if context['missing']:
-        return jsonify({
-            'success': False,
-            'error': 'أكمل بيانات الأرض ومكونات المشروع قبل اقتراح التوزيع',
-            'error_code': 'PLANS_DATA_INCOMPLETE',
-            'missingFields': context['missing'],
-        }), 400
-    mode = str(data.get('workflowStatus') or 'initial').strip()
-    feedback = _visual_concept_text(data.get('feedback') or data.get('clientPreferences'), 4000)
-    verification = data.get('verification') if isinstance(data.get('verification'), dict) else {}
-    previous = data.get('previousDistribution') if isinstance(data.get('previousDistribution'), dict) else {}
-    user_prompt = context['text']
-    if verification:
-        user_prompt += '\n\nنتيجة التحقق السابقة:\n' + json.dumps(verification, ensure_ascii=False)[:12000]
-    if previous.get('rows'):
-        user_prompt += '\n\nالتوزيع الحالي كما عدّله العميل:\n' + json.dumps(previous, ensure_ascii=False)[:16000]
-    if feedback:
-        user_prompt += '\n\nتفضيلات وملاحظات العميل:\n' + feedback
-    user_prompt += '\n\nحالة سير العمل: ' + {
-        'adjust': 'تعديل التوزيع بملاحظات العميل',
-        'recheck': 'مراجعة تعديلات العميل على التوزيع',
-    }.get(mode, 'مراجعة أولية')
-    try:
-        payload = _plans_model_json(_PLANS_DISTRIBUTE_SYSTEM, user_prompt, data)
-    except Exception as exc:
-        app.logger.exception('Plans distribute failed')
-        return jsonify({'success': False, 'error': 'تعذر اقتراح توزيع المخططات',
-                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-    rows = _plans_normalize_rows(payload.get('rows'))
-    if not rows:
-        return jsonify({'success': False, 'error': 'تعذر اقتراح توزيع المخططات',
-                        'error_code': 'TEXT_PROVIDER_INVALID'}), 503
-    return jsonify({
-        'success': True,
-        'rows': rows,
-        'reconciliation': _plans_normalize_reconciliation(payload.get('reconciliation')),
-        'explanation': _visual_concept_text(payload.get('explanation'), 2000),
-        'assumptions': _plans_text_list(payload.get('assumptions'), 20, 300),
-        'impacts': _plans_text_list(payload.get('impacts'), 20, 300),
-        'warnings': _plans_text_list(payload.get('warnings'), 20, 300),
-        'dataVersion': _visual_concept_text(data.get('dataVersion') or data.get('plansDataVersion'), 120),
-    })
-
-
-@app.route('/api/visual-concept/plans-spec', methods=['POST'])
-@require_permission('generate_images')
-def api_visual_concept_plans_spec():
-    data = request.get_json(silent=True) or {}
-    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    approval = data.get('approval') if isinstance(data.get('approval'), dict) else {}
-    distribution = data.get('distribution') if isinstance(data.get('distribution'), dict) else {}
-    # The drawings must never start without an explicit approval of the current
-    # distribution; this is the server-side half of the generation gate.
-    if (not approval or approval.get('approved') is not True or
-            not (distribution.get('rows') or [])):
-        return jsonify({'success': False, 'error': 'اعتمد التوزيع الحالي قبل توليد المخططات',
-                        'error_code': 'PLANS_APPROVAL_REQUIRED'}), 400
-    context = _plans_context(project_data)
-    if context['missing']:
-        return jsonify({
-            'success': False,
-            'error': 'أكمل بيانات الأرض ومكونات المشروع قبل بناء نموذج المخططات',
-            'error_code': 'PLANS_DATA_INCOMPLETE',
-            'missingFields': context['missing'],
-        }), 400
-    rows = _plans_normalize_rows(distribution.get('rows'))
-    if not rows:
-        return jsonify({'success': False, 'error': 'التوزيع المعتمد غير صالح',
-                        'error_code': 'PLANS_DISTRIBUTION_INVALID'}), 400
-    user_prompt = context['text'] + '\n\nالتوزيع المعتمد وسجل الاعتماد:\n' + json.dumps(
-        {'rows': rows, 'reconciliation': distribution.get('reconciliation') or [],
-         'approval': approval}, ensure_ascii=False)[:18000]
-    try:
-        payload = _plans_model_json(_PLANS_SPEC_SYSTEM, user_prompt, data)
-    except Exception as exc:
-        app.logger.exception('Plans spec failed')
-        return jsonify({'success': False, 'error': 'تعذر بناء النموذج الهندسي للمخططات',
-                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-    spec = _plans_normalize_spec(payload)
-    if not spec:
-        return jsonify({'success': False, 'error': 'تعذر بناء النموذج الهندسي للمخططات',
-                        'error_code': 'TEXT_PROVIDER_INVALID'}), 503
-    return jsonify({
-        'success': True,
-        'spec': spec,
-        'disclaimer': PLANS_DISCLAIMER,
-        'dataVersion': _visual_concept_text(data.get('dataVersion') or data.get('plansDataVersion'), 120),
-    })
 
 
 @app.route('/api/designer-generate', methods=['POST'])
