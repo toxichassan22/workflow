@@ -915,6 +915,7 @@
         boundary: { points: [], referenceUrl: '', instruction: '', approved: false },
         prompts: { site: '', uses: '', massing: '' },
         planContext: null,
+        viewStage: 'verify',
         promptReady: false
       };
     }
@@ -951,6 +952,7 @@
           massing: String(prompts.massing || '').slice(0, 12000)
         },
         planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
+        viewStage: ['verify', 'boundary', 'generate'].includes(source.viewStage) ? source.viewStage : 'verify',
         promptReady: Boolean(source.promptReady || (prompts.site && prompts.uses && prompts.massing))
       };
     }
@@ -1798,7 +1800,11 @@
       const verified = Boolean(verification.approved);
       const boundaryApproved = Boolean(boundary.approved);
       const promptReady = Boolean(workflow.promptReady);
-      const activeStage = !verified ? 'verify' : (!boundaryApproved ? 'boundary' : 'generate');
+      const defaultStage = !verified ? 'verify' : (!boundaryApproved ? 'boundary' : 'generate');
+      const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
+      const activeStage = requestedStage === 'generate' && !boundaryApproved
+        ? (verified ? 'boundary' : 'verify')
+        : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
       const canApprove = !conflicts.length && (checks.length > 0 || verification.canProceed);
@@ -1820,6 +1826,11 @@
         ).join('') + '</div>'
         : '<p class="tenant-hint">لم تُجهز برومبتات المخططات بعد.</p>';
       root.innerHTML =
+        '<div class="visual-concept-mode-selector plans-workflow-stage-tabs">' +
+        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'verify' ? ' active' : '') + '" data-plans-workflow-tab="verify">التحقق</button>' +
+        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'boundary' ? ' active' : '') + '" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود</button>' +
+        '<button type="button" class="visual-concept-mode-btn' + (activeStage === 'generate' ? ' active' : '') + '" data-plans-workflow-tab="generate" ' + (!boundaryApproved ? 'disabled' : '') + '>توليد المخططات</button>' +
+        '</div>' +
         '<div class="plans-workflow-card">' +
         '<ol class="plans-workflow-steps"><li class="' + (!verified ? 'is-active' : 'is-complete') + '">التحقق من التضارب</li><li class="' + (verified && !boundaryApproved ? 'is-active' : (boundaryApproved ? 'is-complete' : '')) + '">رسم حدود الأرض</li><li class="' + (boundaryApproved ? 'is-active' : '') + '">توليد المخططات</li></ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
@@ -1830,18 +1841,28 @@
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="back-verify">مراجعة التحقق</button><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
+        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
         '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-meta"><p class="tenant-hint">حدود الرسم مأخوذة من جدول الإحداثيات المعتمد في الأرض والكروكي.</p></div></div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="boundary-ai">تعديل الحدود بالذكاء الاصطناعي</button><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
         '<label>ملاحظات تعديل الحدود</label><textarea rows="3" data-plans-boundary-instruction>' + escapeHtml(boundary.instruction || '') + '</textarea>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="back-boundary">مراجعة حدود الأرض</button><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">إعداد برومبتات المخططات</button></div></div>' +
+        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">إعداد برومبتات المخططات</button></div>' +
         '<p class="tenant-hint">' + (promptReady ? 'البرومبتات جاهزة للتعديل والتوليد.' : 'برومبتات المخططات الثلاثة غير جاهزة.') + '</p>' +
         '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
         '</section></div>';
       const preview = root.querySelector('[data-plans-boundary-preview]');
       renderVisualConceptBoundarySvg(preview, boundary.points);
+      root.querySelectorAll('[data-plans-workflow-tab]').forEach(button => {
+        button.addEventListener('click', () => {
+          const stage = button.getAttribute('data-plans-workflow-tab');
+          if (stage === 'boundary' && !verified) return;
+          if (stage === 'generate' && !boundaryApproved) return;
+          workflow.viewStage = stage;
+          persistVisualConceptDraftState();
+          renderVisualConceptPage();
+        });
+      });
       root.querySelectorAll('[data-plans-workflow-action]').forEach(button => {
         button.addEventListener('click', () => {
           const action = button.getAttribute('data-plans-workflow-action');
@@ -1849,12 +1870,14 @@
             workflow.verification.approved = false;
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.viewStage = 'verify';
             workflow.status = 'idle';
             markVisualConceptDirty();
             renderVisualConceptPage();
           } else if (action === 'back-boundary') {
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.viewStage = 'boundary';
             workflow.status = 'verified';
             markVisualConceptDirty();
             renderVisualConceptPage();
@@ -1862,6 +1885,7 @@
             workflow.verification.approved = false;
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.viewStage = 'verify';
             workflow.status = 'idle';
             markVisualConceptDirty();
             if (typeof showSection === 'function') showSection('land_croquis');
@@ -1911,6 +1935,7 @@
         workflow.verification = normalizeVisualConceptPlansWorkflow({ verification: response.verification }).verification;
         workflow.planContext = response.planContext || workflow.planContext || null;
         workflow.status = 'verified';
+        workflow.viewStage = 'verify';
         workflow.boundary.approved = false;
         workflow.promptReady = false;
         markVisualConceptDirty();
@@ -1928,6 +1953,7 @@
       if (conflicts.length || (!checks.length && !workflow.verification.canProceed)) return;
       workflow.verification.approved = true;
       workflow.status = 'verified';
+      workflow.viewStage = 'boundary';
       if (!workflow.boundary.points.length) workflow.boundary.points = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
       markVisualConceptDirty();
       renderVisualConceptPage();
@@ -1988,6 +2014,7 @@
       if (workflow.boundary.points.length < 3 || !workflow.boundary.referenceUrl) return;
       workflow.boundary.approved = true;
       workflow.status = 'boundary';
+      workflow.viewStage = 'generate';
       workflow.promptReady = false;
       markVisualConceptDirty();
       renderVisualConceptPage();
