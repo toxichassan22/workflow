@@ -16774,6 +16774,15 @@ def api_update_user(user_id):
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
 
+    # t21-03: the primary row IS the company's admin identity — every editable
+    # field on it (password, email, username, name, phone) mirrors onto the
+    # tenants login row. Only the tenant-direct session or the super admin may
+    # touch it; an employee holding manage_users must not rewrite the company's
+    # own credentials.
+    if db.is_primary_company_admin(g.tenant_id, user_id) and g.user_id is not None:
+        return jsonify({'error': 'لا يمكن تعديل مدير الشركة الأساسي',
+                        'error_code': 'primary_company_admin'}), 403
+
     data = request.json or {}
     updates = {}
     for k in ['name', 'email', 'role', 'is_active']:
@@ -16788,9 +16797,8 @@ def api_update_user(user_id):
         updates['password_hash'] = hash_password(data['password'])
         updates['require_password_change'] = 0
 
-    # t21-03: the primary user row IS the company's admin identity — disabling
-    # it through user management would lock the whole company out, so it can
-    # only change through the super-admin primary reassignment.
+    # Even the tenant-direct session must not disable the primary row through
+    # user management — it would lock the company's owner login out.
     if db.is_primary_company_admin(g.tenant_id, user_id) \
             and 'is_active' in updates and not updates['is_active']:
         return jsonify({'error': 'لا يمكن تعطيل مدير الشركة الأساسي',

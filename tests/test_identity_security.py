@@ -569,6 +569,22 @@ class IdentityApiTests(unittest.TestCase):
         still_denied = self.client.delete(f'/api/users/{self.admin_user_id}',
                                           headers=self.headers(second_token))
         self.assertEqual(still_denied.status_code, 400)
+        # The real hijack path: the row mirrors onto the tenants login, so a
+        # manage_users employee must not rewrite its password or identity
+        # fields either — every employee-side write on the primary is refused.
+        for payload in ({'password': 'NewP@ssword1'}, {'email': 'stolen@x.test'},
+                        {'name': 'منتحل'}, {'is_active': 0}):
+            hijack = self.client.put(f'/api/users/{self.admin_user_id}',
+                                     headers=self.headers(second_token), json=payload)
+            self.assertEqual(hijack.status_code, 403, payload)
+            self.assertEqual(hijack.get_json()['error_code'], 'primary_company_admin')
+        # The tenant-direct session (a normalized primary token) still edits
+        # its own record — but deactivation stays refused to keep the owner
+        # login open.
+        self_edit = self.client.put(f'/api/users/{self.admin_user_id}',
+                                    headers=self.headers(self.admin_user_token),
+                                    json={'name': 'مدير الشركة'})
+        self.assertEqual(self_edit.status_code, 200, self_edit.get_json())
         resassign = self.client.put(
             f'/api/users/{self.admin_user_id}',
             headers=self.headers(self.admin_user_token), json={'role': 'employee'})
