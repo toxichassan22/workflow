@@ -4632,6 +4632,40 @@ def _visual_concept_plan_edge_text(text):
     return text
 
 
+def _visual_concept_plan_edge_english(text):
+    """English edge phrase built from recorded features — keeps the recorded
+    widths and maps the common Arabic edge types (dead-end street, corniche,
+    beautification strip, sea) so raw source text never leaks into a bullet."""
+    if not re.search(r'[\u0600-\u06FF]', text):
+        return _visual_concept_plan_edge_text(text)
+
+    def width_near(pattern):
+        match = re.search(r'(?:' + pattern + r')[^0-9.]{0,40}?(\d+(?:\.\d+)?)\s*(?:م(?:تر)?|m\b)',
+                          text, flags=re.IGNORECASE)
+        return match.group(1) if match else ''
+
+    bits = []
+    if re.search(r'غير\s*نافذ|dead[\s-]?end', text, flags=re.IGNORECASE):
+        width = width_near(r'شارع|street')
+        bits.append(f'a {width} m-wide dead-end street' if width else 'a dead-end street')
+    elif not re.search(r'كورنيش|corniche', text, flags=re.IGNORECASE) and re.search(
+            r'شارع|طريق|street|road', text, flags=re.IGNORECASE):
+        width = width_near(r'شارع|طريق|street|road')
+        bits.append(f'a {width} m-wide street' if width else 'a street')
+    if re.search(r'تجميل|beautif', text, flags=re.IGNORECASE):
+        width = width_near(r'تجميلي[ةه]?|beautif\w*')
+        bits.append(f'a beautification strip averaging {width} m wide'
+                    if width else 'a beautification strip')
+    if re.search(r'كورنيش|corniche', text, flags=re.IGNORECASE):
+        width = width_near(r'كورنيش|corniche')
+        bits.append(f'Corniche Road averaging {width} m wide' if width else 'Corniche Road')
+    if re.search(r'بحر|sea\b|shore|coast', text, flags=re.IGNORECASE):
+        bits.append('the sea beyond')
+    if bits:
+        return ' and then '.join(bits)
+    return _visual_concept_plan_edge_text(text)
+
+
 # Fixed stack order for the derived concept distribution: tuple order is both the
 # keyword-match priority and the vertical band order (parking lowest, service on
 # the roof). Each category maps to a fixed palette use.
@@ -4674,37 +4708,134 @@ def _visual_concept_plan_use_category(item):
 
 
 def _visual_concept_plan_sector_hints(regulations):
-    text = ' '.join(str(regulations.get(key) or '') for key in (
+    """Sector floor caps, e.g. «الجزء الغربي بلا حد» / «بارتفاع حتى 4 طوابق للجزء الشرقي».
+
+    A cap may be written before its direction word, so every «N floors» occurrence is
+    attributed to the nearest sector-direction mention in the same field, whichever
+    side of the number the direction sits on. Mentions require a sector word nearby
+    (الجزء/القطاع/sector/...) so street names carrying a direction («الطريق الشمالي»)
+    do not count.
+    """
+    keys = (
         'floor_area_ratio', 'table_floors', 'max_floors_height', 'land_use',
-        'allowed_uses', 'allowed_uses_restrictions', 'zoning_code', 'regulatory_constraints'))
-    patterns = (
-        r'(western|eastern|northern|southern|west|east|north|south|الغربي?|الشرقي?|الشمالي?|الجنوبي?)'
-        r'[\w\u0600-\u06FF\- ]{0,30}?sector',
-        r'(?:القطاع|النطاق|قطاع|نطاق)\s+(الغربي|الشرقي|الشمالي|الجنوبي|غرب|شرق|شمال|جنوب)',
+        'allowed_uses', 'allowed_uses_restrictions', 'zoning_code',
+        'regulatory_constraints', 'building_ratio', 'building_ratio_coverage',
+        'building_ratio_setbacks',
     )
-    matches = []
-    for pattern in patterns:
-        matches.extend(re.finditer(pattern, text, flags=re.IGNORECASE))
-    matches.sort(key=lambda match: match.start())
-    hints = {}
-    for index, match in enumerate(matches):
-        direction = _visual_concept_plan_direction_key(match.group(1))
-        if not direction:
+    direction_word = (
+        r'(\b(?:western|eastern|northern|southern|west|east|north|south)\b'
+        r'|الغربي?|الشرقي?|الشمالي?|الجنوبي?|غرب|شرق|شمال|جنوب)')
+    sector_word = (
+        r'(?:القطاع|النطاق|الجزء|جزء|قطاع|نطاق|الشريحة|شريحة|المحور|محور'
+        r'|\b(?:sector|zone|part|axis)\b)')
+    mention_patterns = (
+        direction_word + r'[\w\u0600-\u06FF\- ]{0,30}?' + sector_word,
+        sector_word + r'[\w\u0600-\u06FF\- ]{0,30}?' + direction_word,
+    )
+    cap_pattern = re.compile(
+        r'(\d+(?:\.\d+)?)\s*(?:residential\s+|above[\w\- ]*\s+|سكنية?\s+|عمائر\s+)?'
+        r'(?:floors?|storeys?|أدوار|ادوار|طوابق|طابق|دور)',
+        flags=re.IGNORECASE)
+    uncapped_pattern = re.compile(
+        r'(?:بدون|دون|بلا|لا)\s*حد|غير\s*محدود[ةه]?|مفتوح[ةه]?|مرن[ةه]?\b|مرونة'
+        r'|no\s*maximum|without\s*(?:a\s*)?(?:maximum|limit|cap)|unlimited'
+        r'|flexible|open[- ]ended',
+        flags=re.IGNORECASE)
+    stats = {}
+    for key in keys:
+        text = str(regulations.get(key) or '')
+        if not text:
             continue
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        window = text[match.start():min(end, match.start() + 320)]
-        cap = re.search(
-            r'(?:up to|max(?:imum)?(?: number of)?|حتى|بحد\s*أقصى)\s*(?:about\s*)?(\d+)\s*'
-            r'(?:residential\s+|above[\w\- ]*\s+)?(?:floors?|أدوار|ادوار|طوابق|طابق|دور)',
-            window, flags=re.IGNORECASE)
-        if direction not in hints or (cap and not hints[direction].get('cap')):
-            hints[direction] = {'direction': direction,
-                                'cap': int(cap.group(1)) if cap else None}
-    return list(hints.values())
+        mentions = []
+        for pattern in mention_patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                direction = _visual_concept_plan_direction_key(match.group(1))
+                if direction:
+                    mentions.append((match.start(1), direction))
+        if not mentions:
+            continue
+        mentions.sort()
+        for _pos, direction in mentions:
+            stats.setdefault(direction, {'direction': direction, 'cap': None,
+                                         'cap_dist': 10 ** 9, 'uncapped': False})
+        for match in cap_pattern.finditer(text):
+            pos, direction = min(mentions, key=lambda item: abs(match.start() - item[0]))
+            dist = abs(match.start() - pos)
+            if dist <= 200 and dist < stats[direction]['cap_dist']:
+                stats[direction]['cap'] = int(float(match.group(1)))
+                stats[direction]['cap_dist'] = dist
+        for match in uncapped_pattern.finditer(text):
+            pos, direction = min(mentions, key=lambda item: abs(match.start() - item[0]))
+            if abs(match.start() - pos) <= 160:
+                stats[direction]['uncapped'] = True
+    return [{'direction': entry['direction'], 'cap': entry['cap'],
+             'uncapped': entry['uncapped']} for entry in stats.values()]
+
+
+_VISUAL_PLAN_SETBACK_EN = (
+    (r'في حال وجود مواقف سيارات متعامدة بالارتداد|في حال(?:ة)? وجود مواقف متعامدة',
+     'where perpendicular parking is provided within the setback'),
+    (r'مواقف سيارات متعامدة|مواقف متعامدة', 'perpendicular parking'),
+    (r'ارتداد الملحق العلوي|الملحق العلوي', 'upper-annex setback'),
+    (r'الشارع الجانبي|جهة الشارع الجانبي|الشوارع الجانبية', 'side street'),
+    (r'الشوارع المحيطة|الشوارع المجاورة', 'surrounding streets'),
+    (r'جهة الجوار|جهات الجوار|الجوار', 'neighbors'),
+    (r'الأمامي|الأمامية|أمامي|الواجهة الأمامية', 'front'),
+    (r'الجانبي|الجانبية|جانبي', 'side'),
+    (r'الخلفي|الخلفية|خلفي', 'rear'),
+    (r'من جهة', 'from'),
+    (r'حتى|بحد أقصى', 'up to'),
+    (r'إلى', 'to'),
+    (r'طوابق|طابقاً|طابق|أدوار|ادوار|دور', 'floors'),
+    (r'أو', 'or'),
+    (r'و(?=\s*\d)', ' and '),
+    (r'من', 'from'),
+    (r'في', 'in'),
+    (r'(?<=\d)\s*م(?=\s|$|[،,;.²])', ' m'),
+)
+
+
+def _visual_concept_plan_setback_en(text):
+    """Light deterministic Arabic→English for recorded setback phrasing —
+    keeps every number and condition, maps the standard setback vocabulary."""
+    text = str(text or '').strip()
+    if not re.search(r'[\u0600-\u06FF]', text):
+        return text
+    for pattern, replacement in _VISUAL_PLAN_SETBACK_EN:
+        text = re.sub(pattern, replacement, text)
+    return re.sub(r'\s+', ' ', text.replace('،', ', ').replace('؛', '; ')).strip()
+
+
+_VISUAL_PLAN_NAME_EN = (
+    (r'خمس[ةه]?\s*نجوم|5\s*نجوم', 'Five-Star Hotel'),
+    (r'شقق[^.]*فاخر|فاخر[^.]*شقق|سكنية?\s*فاخرة?|فاخرة?\s*سكنية?', 'Luxury Residential Apartments'),
+    (r'فندق|فنادق|ضيافة', 'Hotel'),
+    (r'شقق|سكني|سكن\b|وحدات\s*سكنية', 'Residential Apartments'),
+    (r'مطاعم|مطعم|كافيه|كافيتيريا', 'Restaurants'),
+    (r'قاعات|فعاليات|مناسبات|احتفالات', 'Halls and Events'),
+    (r'سبا|صحية|عافية|نادي\s*صحي', 'Spa and Wellness Facilities'),
+    (r'خدمات|مرافق\s*مشتركة|مشتركة', 'Shared Services and Facilities'),
+    (r'مكاتب|إداري|اداري|مكتبي', 'Offices'),
+    (r'مواقف|جراج|سرداب|باركينج', 'Parking'),
+    (r'تجاري|تجزئة|محلات|معارض|تجارية', 'Retail'),
+    (r'لاندسكيب|حدائق|مسطحات\s*خضراء|مناظر', 'Landscaping'),
+)
+
+
+def _visual_concept_plan_component_en(name):
+    """English display name for a component — maps the common Arabic program
+    vocabulary; anything unrecognized stays as recorded."""
+    name = str(name or '').strip()
+    if not name or not re.search(r'[\u0600-\u06FF]', name):
+        return name
+    for pattern, english in _VISUAL_PLAN_NAME_EN:
+        if re.search(pattern, name):
+            return english
+    return name
 
 
 def _visual_concept_plan_component_brief(item):
-    name = _visual_concept_plan_sanitize_text(item.get('name'))
+    name = _visual_concept_plan_component_en(_visual_concept_plan_sanitize_text(item.get('name')))
     bits = []
     if item.get('units') not in (None, ''):
         units = str(item['units']).strip()
@@ -4769,7 +4900,8 @@ def _visual_concept_plan_model(context, regulations):
         key = _visual_concept_plan_direction_key(item.get('direction'))
         if not key:
             continue
-        if re.search(r'sea|shore|coast|بحر|شاطئ', text, flags=re.IGNORECASE):
+        if re.search(r'sea|shore|coast|بحر|شاطئ|كورنيش|corniche|waterfront|واجهة\s+بحرية',
+                     text, flags=re.IGNORECASE):
             sea_dir = sea_dir or key
         if re.search(r'street|road|corniche|شارع|طريق|كورنيش', text, flags=re.IGNORECASE):
             street_dirs.append(key)
@@ -4815,7 +4947,8 @@ def _visual_concept_plan_model(context, regulations):
     for position, (category, items) in enumerate(groups):
         label = _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')
         if position > 0 and len(items) == 1:
-            label = _visual_concept_plan_sanitize_text(items[0].get('name')) or label
+            label = _visual_concept_plan_component_en(
+                _visual_concept_plan_sanitize_text(items[0].get('name'))) or label
         bands_out.append({
             'category': category,
             'label': label,
@@ -4826,10 +4959,14 @@ def _visual_concept_plan_model(context, regulations):
                 context, _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')),
         })
 
-    main_dir = street_dirs[0] if street_dirs else (
-        high_sector['direction'] if high_sector else '')
-    res_dir = street_dirs[1] if len(street_dirs) > 1 else ''
-    svc_dir = other_dirs[-1] if other_dirs else res_dir
+    # The main entry belongs on the sea/corniche frontage when one is recorded;
+    # the residential entry takes the next street, the service entry a rear edge.
+    main_dir = sea_dir or (street_dirs[0] if street_dirs else (
+        high_sector['direction'] if high_sector else ''))
+    res_dir = next((direction for direction in street_dirs if direction != main_dir), '')
+    svc_dir = ('south' if 'south' in other_dirs else
+               next((direction for direction in other_dirs
+                     if direction not in (main_dir, res_dir)), res_dir))
     return {
         'bands': bands_out,
         'below': below,
@@ -4876,10 +5013,12 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
         if re.search(r'neighbor|adjacent|propert|مجاور|جار', text, flags=re.IGNORECASE):
             neighbor_dirs.append(key)
             continue
-        bit = f'{key} edge faces {_visual_concept_plan_edge_text(text)}'
+        bit = f'{key} edge faces {_visual_concept_plan_edge_english(text)}'
         if key == sea_dir:
             bit += ' — this is the sea-frontage side'
         edge_bits.append(bit)
+    if sea_dir:
+        edge_bits.sort(key=lambda bit: 0 if bit.startswith(sea_dir + ' edge') else 1)
     if neighbor_dirs:
         edge_bits.append(' and '.join(neighbor_dirs) + ' edges touch neighboring plots')
     if edge_bits:
@@ -4892,9 +5031,9 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
             f"{model['low_sector']['direction'].upper()} part is low-rise, "
             f"max {model['low_sector']['cap']} floors.")
 
-    setbacks = _visual_concept_plan_sanitize_text(
+    setbacks = _visual_concept_plan_setback_en(_visual_concept_plan_sanitize_text(
         context.get('setbacks') or regulations.get('setbacks')
-        or regulations.get('building_ratio_setbacks'))
+        or regulations.get('building_ratio_setbacks')))
     if setbacks:
         lines.append(f'- Setback envelope: {setbacks} — shown as a dashed inner line.')
 
