@@ -4834,6 +4834,36 @@ def _visual_concept_plan_component_en(name):
     return name
 
 
+_VISUAL_PLAN_CITY_EN = {
+    'الرياض': 'Riyadh', 'جدة': 'Jeddah', 'مكة': 'Makkah', 'مكة المكرمة': 'Makkah',
+    'المدينة': 'Madinah', 'المدينة المنورة': 'Madinah', 'الدمام': 'Dammam',
+    'الخبر': 'Al Khobar', 'الظهران': 'Dhahran', 'الطائف': 'Taif', 'أبها': 'Abha',
+    'ابها': 'Abha', 'تبوك': 'Tabuk', 'بريدة': 'Buraidah', 'خميس مشيط': 'Khamis Mushait',
+    'حائل': 'Hail', 'جازان': 'Jazan', 'نجران': 'Najran', 'الباحة': 'Al Baha',
+    'سكاكا': 'Sakaka', 'عرعر': 'Arar', 'ينبع': 'Yanbu', 'الأحساء': 'Al Ahsa',
+    'الاحساء': 'Al Ahsa', 'الهفوف': 'Hofuf', 'القطيف': 'Qatif', 'الجبيل': 'Jubail',
+    'رابغ': 'Rabigh', 'العلا': 'AlUla', 'نيوم': 'NEOM', 'حفر الباطن': 'Hafar Al Batin',
+    'المبرز': 'Al Mubarraz', 'عنيزة': 'Unaizah', 'الرس': 'Ar Rass', 'الخرج': 'Al Kharj',
+    'الدوادمي': 'Dawadmi', 'المجمعة': 'Majmaah', 'القريات': 'Qurayyat', 'رفحاء': 'Rafha',
+    'طريف': 'Turaif', 'بيشة': 'Bisha', 'صبيا': 'Sabya',
+}
+
+
+def _visual_concept_plan_place_en(context):
+    """English-only place for the spec's project line: the city map covers the
+    Saudi names; an unmappable Arabic district is dropped — the Arabic header
+    line above it already carries the full place."""
+    parts = []
+    city = _visual_concept_plan_sanitize_text(context.get('city'))
+    district = _visual_concept_plan_sanitize_text(context.get('district'))
+    city_en = _VISUAL_PLAN_CITY_EN.get(city, city)
+    if city_en and not re.search(r'[\u0600-\u06FF]', city_en):
+        parts.append(city_en)
+    if district and not re.search(r'[\u0600-\u06FF]', district):
+        parts.append(district)
+    return ', '.join(parts)
+
+
 def _visual_concept_plan_component_brief(item):
     name = _visual_concept_plan_component_en(_visual_concept_plan_sanitize_text(item.get('name')))
     bits = []
@@ -4889,10 +4919,13 @@ def _visual_concept_plan_model(context, regulations):
     hints = _visual_concept_plan_sector_hints(regulations)
     capped = [hint for hint in hints if hint.get('cap')]
     low_sector = min(capped, key=lambda hint: hint['cap']) if capped else None
-    uncapped = [hint for hint in hints if not hint.get('cap')]
-    high_sector = uncapped[0] if uncapped else max(
-        (hint for hint in hints if hint is not low_sector),
-        key=lambda hint: hint['cap'] or 0, default=None)
+    # The high-rise axis is the sector recorded with no height cap; a sector that
+    # simply has no cap recorded still outranks the floor-capped low block.
+    explicit_open = [hint for hint in hints
+                     if hint.get('uncapped') and hint is not low_sector]
+    open_hints = [hint for hint in hints
+                  if not hint.get('cap') and hint is not low_sector]
+    high_sector = (explicit_open or open_hints or [None])[0]
 
     street_dirs, other_dirs, sea_dir = [], [], ''
     for item in context.get('directions') or []:
@@ -4947,8 +4980,14 @@ def _visual_concept_plan_model(context, regulations):
     for position, (category, items) in enumerate(groups):
         label = _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')
         if position > 0 and len(items) == 1:
-            label = _visual_concept_plan_component_en(
-                _visual_concept_plan_sanitize_text(items[0].get('name'))) or label
+            # A band label becomes callout text in the drawing, so it must stay
+            # English: a recorded Arabic name the lexicon cannot map falls back to
+            # the use category label — the name itself still reaches the prompt as
+            # data inside the component brief.
+            name = _visual_concept_plan_component_en(
+                _visual_concept_plan_sanitize_text(items[0].get('name')))
+            if name and not re.search(r'[\u0600-\u06FF]', name):
+                label = name
         bands_out.append({
             'category': category,
             'label': label,
@@ -4960,13 +4999,13 @@ def _visual_concept_plan_model(context, regulations):
         })
 
     # The main entry belongs on the sea/corniche frontage when one is recorded;
-    # the residential entry takes the next street, the service entry a rear edge.
+    # the residential entry takes the next street and the service entry a third
+    # street when one exists — never a neighbor edge (no entry crosses a plot line).
     main_dir = sea_dir or (street_dirs[0] if street_dirs else (
         high_sector['direction'] if high_sector else ''))
     res_dir = next((direction for direction in street_dirs if direction != main_dir), '')
-    svc_dir = ('south' if 'south' in other_dirs else
-               next((direction for direction in other_dirs
-                     if direction not in (main_dir, res_dir)), res_dir))
+    svc_dir = next((direction for direction in street_dirs
+                    if direction not in (main_dir, res_dir)), res_dir)
     return {
         'bands': bands_out,
         'below': below,
@@ -4988,9 +5027,7 @@ def _visual_concept_plan_model(context, regulations):
 def _visual_concept_plan_distribution_spec(context, model, regulations):
     """The shared APPROVED DISTRIBUTION MODEL block — same shape the bench used."""
     name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
-    place = ', '.join(part for part in (
-        _visual_concept_text(context.get('city'), 80),
-        _visual_concept_text(context.get('district'), 100)) if part)
+    place = _visual_concept_plan_place_en(context)
     lines = [f"- Project: '{name}'" + (f' — {place}.' if place else '.')]
 
     points = context.get('boundary_points') or []
@@ -5080,17 +5117,24 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
         masses.append('(3) multi-level basement parking across the parcel — drawn only in the '
                       'floor-distribution stack')
         lines.append('- Approved masses: ' + '; '.join(masses) + '.')
-        lines.append('- Open areas: landscaping on the remaining open ground inside the '
-                     'setback envelope.')
+        open_bits = []
+        if model['sea_dir']:
+            open_bits.append(f"along the {model['sea_dir']} edge")
+        if model['low_sector']:
+            open_bits.append(f"around the '{model['block_label']}'")
+        lines.append('- Open areas: landscaping '
+                     + (' and '.join(open_bits) if open_bits
+                        else 'on the remaining open ground inside the setback envelope') + '.')
         entries = []
         if model['main_dir']:
             entries.append(f"main lobby entry on the {model['main_dir']} side")
-        if model['res_dir']:
+        if model['res_dir'] and model['svc_dir'] and model['svc_dir'] != model['res_dir']:
             entries.append(f"residential entry on the {model['res_dir']} street")
-        if model['svc_dir'] and model['svc_dir'] not in (model['main_dir'], model['res_dir']):
-            entries.append(f"service entry on the {model['svc_dir']} side")
+            entries.append(f"service entry on the {model['svc_dir']} street")
         elif model['res_dir']:
-            entries.append(f"service entry on the {model['res_dir']} street")
+            entries.append(f"residential and service entries on the {model['res_dir']} street")
+        elif model['main_dir']:
+            entries.append('residential and service entries beside the main lobby entry')
         if entries:
             lines.append('- Entries: ' + '; '.join(entries) + '.')
     else:
@@ -5186,10 +5230,12 @@ def _visual_concept_plan_uses_body(context, model, regulations):
         if model['low_sector']:
             res_color = _visual_concept_plan_use_color(context, 'Residential') or 'soft-blue'
             cap = model['low_sector']['cap']
+            band_use = 'Residential' if model['has_residential'] else model['block_label']
             stacks.append(f"Right stack — the {cap}-storey '{model['block_label']}': {cap} "
-                          f"{res_color} 'Residential (G-{cap})' bands above the same ground line "
+                          f"{res_color} '{band_use} (G-{cap})' bands above the same ground line "
                           'with its own light-grey parking band below.')
-        parts.append(f'{len(stacks)} stacks side by side. ' + ' '.join(stacks) + ' ')
+        parts.append(('TWO stacks side by side. ' if len(stacks) > 1 else 'ONE stack. ')
+                     + ' '.join(stacks) + ' ')
     else:
         parts.append('No distribution is recorded; draw one generic stack per recorded component '
                      'with no labeled floors. ')
