@@ -1601,12 +1601,13 @@
       // financial, team, market study, visual concept, executive content, and contact. The timeline
       // comes before the financial study because it feeds it. Executive content writes
       // from earlier sections and never invents facts. Contact information is at the end.
-      addTimelineTable(form);
-      addFinancialCalculations(form);
-      addTeamSection(form);
-      addMarketStudySection(form);
-      addVisualConceptSection(form);
-      addExecutiveContentSection(form);
+      // Widget sections are governed like field sections: a revoked key must not render.
+      if (tenantAllowedFieldSections['section-timeline']) addTimelineTable(form);
+      if (tenantAllowedFieldSections['section-financial-calc']) addFinancialCalculations(form);
+      if (tenantAllowedFieldSections['section-team']) addTeamSection(form);
+      if (tenantAllowedFieldSections['section-market-study']) addMarketStudySection(form);
+      if (tenantAllowedFieldSections['section-visual-concept']) addVisualConceptSection(form);
+      if (tenantAllowedFieldSections['section-executive-content']) addExecutiveContentSection(form);
 
       const contactSectionDiv = renderFormSection('contact');
       if (contactSectionDiv) form.appendChild(contactSectionDiv);

@@ -30,7 +30,13 @@ from design_templates import (
     readable_text_color,
     sanitize_slide_html_for_export,
 )
-from generate_pdf_from_preview import _resolve_asset_urls, _resolve_project_file_urls, fit_image_bytes
+from generate_pdf_from_preview import (
+    _export_allowed_local_path,
+    _export_url_to_local_path,
+    _resolve_asset_urls,
+    _resolve_project_file_urls,
+    fit_image_bytes,
+)
 from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -551,7 +557,13 @@ def _image_bytes(src, tenant_id=None):
 
 
 def _resolve_image_bytes(src, tenant_id=None):
-    """Resolve an <img> src / background url to raw image bytes."""
+    """Resolve an <img> src / background url to raw image bytes.
+
+    ISS-019: the export never follows a remote URL and never reads a local
+    path outside the caller's allowed roots — a stored slide can carry
+    ``file://``, ``http(s)://`` or ``..`` traversal references that would
+    otherwise make the server read or fetch them.
+    """
     if not src:
         return None
     src = str(src).strip().strip('"\'')
@@ -563,54 +575,42 @@ def _resolve_image_bytes(src, tenant_id=None):
             if ';base64' in header and data:
                 return base64.b64decode(data)
             return None
-        if src.startswith('file://'):
-            path = Path(unquote(urlparse(src).path))
-            # Windows file URIs look like file:///D:/... -> urlparse gives /D:/...
-            if os.name == 'nt' and re.match(r'^/[A-Za-z]:', str(path)):
-                path = Path(str(path)[1:])
-            if path.is_file():
-                return path.read_bytes()
-            return None
         parsed = urlparse(src)
-        if parsed.scheme in ('http', 'https'):
-            import requests
-            try:
-                resp = requests.get(src, timeout=20, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            except Exception:
-                return None
-            if resp.ok and resp.content:
-                ctype = str(resp.headers.get('Content-Type', '')).lower()
-                if 'image' in ctype or src.lower().split('?')[0].endswith(
-                        ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
-                    return resp.content
-                # Accept it anyway when Pillow can open it
-                try:
-                    from PIL import Image
-                    Image.open(BytesIO(resp.content)).verify()
-                    return resp.content
-                except Exception:
-                    return None
+        if parsed.scheme in ('http', 'https') or src.startswith('//'):
+            # Remote image fetches are an SSRF surface; the export only embeds
+            # what the tenant already stored locally.
             return None
-        # Local repo paths: uploads/... assets/... /uploads/... /tenant-assets/...
-        rel = src.split('?')[0].split('#')[0].lstrip('/')
-        is_tenant_asset = rel.startswith('tenant-assets/')
-        if is_tenant_asset:
-            rel = 'uploads/' + rel[len('tenant-assets/'):]
-        candidate = (BASE_DIR / rel)
-        if candidate.is_file():
-            return candidate.read_bytes()
-        if is_tenant_asset and not candidate.suffix:
-            for ext in ('.png', '.jpg', '.jpeg', '.webp'):
-                extended = Path(str(candidate) + ext)
-                if extended.is_file():
-                    return extended.read_bytes()
-        # Tenant logo shorthand or bare filename under the tenant dir
-        if tenant_id and '/' not in rel:
-            for ext in ('', '.png', '.jpg', '.jpeg', '.webp'):
-                cand = BASE_DIR / 'uploads' / str(tenant_id) / (rel + ext if ext else rel)
-                if cand.is_file():
-                    return cand.read_bytes()
+        if parsed.scheme and parsed.scheme != 'file':
+            return None
+
+        candidates = []
+        if parsed.scheme == 'file':
+            candidates.append(_export_url_to_local_path(src))
+        else:
+            # Site paths: uploads/... assets/... /uploads/... /tenant-assets/...
+            rel = src.split('?')[0].split('#')[0].lstrip('/')
+            is_tenant_asset = rel.startswith('tenant-assets/')
+            if is_tenant_asset:
+                rel = 'uploads/' + rel[len('tenant-assets/'):]
+            candidates.append(BASE_DIR / rel)
+            if is_tenant_asset and not Path(rel).suffix:
+                candidates += [
+                    Path(str(BASE_DIR / rel) + ext)
+                    for ext in ('.png', '.jpg', '.jpeg', '.webp')
+                ]
+            # Tenant logo shorthand or bare filename under the tenant dir
+            if tenant_id and '/' not in rel:
+                candidates += [
+                    BASE_DIR / 'uploads' / str(tenant_id) / (rel + ext if ext else rel)
+                    for ext in ('', '.png', '.jpg', '.jpeg', '.webp')
+                ]
+        for candidate in candidates:
+            try:
+                if candidate.is_file() \
+                        and _export_allowed_local_path(candidate, tenant_id, base_dir=BASE_DIR):
+                    return candidate.read_bytes()
+            except OSError:
+                continue
         return None
     except Exception:
         return None

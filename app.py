@@ -148,7 +148,12 @@ def reassemble_chunked_request_body():
     import io
     import shutil as _shutil
     import time as _time
-    chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', upload_id)
+    chunk_dir = _body_chunk_dir(upload_id)
+    if chunk_dir is None:
+        # ISS-016: the reference only resolves inside the caller's own
+        # tenant/user namespace — a foreign or anonymous upload id finds
+        # nothing and cannot consume another caller's staged parts.
+        return jsonify({'error': 'Invalid chunked body reference'}), 400
     parts = []
     missing_index = None
     for _attempt in range(5):
@@ -187,6 +192,44 @@ def reassemble_chunked_request_body():
     _shutil.rmtree(chunk_dir, ignore_errors=True)
 
 
+def _body_chunk_namespace():
+    """ISS-016: ``(tenant_id, user_scope)`` naming the caller's chunk space.
+
+    Works both inside a ``@require_auth`` view (``g`` populated) and inside the
+    ``before_request`` reassembly hook (token decoded straight from the
+    header). Primary-admin user tokens normalize to the tenant session
+    (ISS-002), so their chunks share the tenant namespace — matching the
+    identity the rest of the request will run under.
+    """
+    payload = getattr(g, 'token_payload', None)
+    if payload is None:
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return None, None
+        payload = decode_token(auth_header[7:])
+    if not payload:
+        return None, None
+    tenant_id = payload.get('sub')
+    user_id = payload.get('user_id')
+    scope = 'tenant'
+    if user_id:
+        tenant = getattr(g, 'tenant', None) or db.get_tenant_by_id(tenant_id)
+        if not (tenant and db.is_primary_company_admin(tenant['id'], user_id)):
+            scope = 'u' + re.sub(r'[^A-Za-z0-9_-]', '', str(user_id))
+    return tenant_id, scope
+
+
+def _body_chunk_dir(upload_id):
+    """ISS-016: the caller's own ``.body_chunks/<tenant>/<scope>/<id>`` dir."""
+    tenant_id, scope = _body_chunk_namespace()
+    if not tenant_id or not scope:
+        return None
+    tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id))
+    if not tenant:
+        return None
+    return os.path.join(UPLOADS_DIR, '.body_chunks', tenant, scope, upload_id)
+
+
 @app.route('/api/body-chunk', methods=['POST'])
 @require_auth
 def api_body_chunk():
@@ -208,7 +251,10 @@ def api_body_chunk():
         return jsonify({'error': 'Invalid chunk data'}), 400
     import shutil as _shutil
     chunk_root = os.path.abspath(os.path.join(UPLOADS_DIR, '.body_chunks'))
-    chunk_dir = os.path.abspath(os.path.join(chunk_root, upload_id))
+    chunk_dir = _body_chunk_dir(upload_id)
+    if chunk_dir is None:
+        return jsonify({'error': 'Invalid upload id'}), 400
+    chunk_dir = os.path.abspath(chunk_dir)
     if os.path.commonpath([chunk_root, chunk_dir]) != chunk_root:
         return jsonify({'error': 'Invalid upload id'}), 400
     os.makedirs(chunk_dir, exist_ok=True)
@@ -219,13 +265,22 @@ def api_body_chunk():
             os.fsync(fh.fileno())
         except OSError:
             pass
-    # Best-effort sweep of stale chunk dirs (>15 min)
+    # Best-effort sweep of stale chunk dirs (>15 min), two levels down:
+    # .body_chunks/<tenant>/<scope>/<upload_id>
     try:
         now = time.time()
-        for name in os.listdir(chunk_root):
-            path = os.path.join(chunk_root, name)
-            if os.path.isdir(path) and now - os.path.getmtime(path) > 900:
-                _shutil.rmtree(path, ignore_errors=True)
+        for tenant_dir in os.listdir(chunk_root):
+            tenant_path = os.path.join(chunk_root, tenant_dir)
+            if not os.path.isdir(tenant_path):
+                continue
+            for scope_dir in os.listdir(tenant_path):
+                scope_path = os.path.join(tenant_path, scope_dir)
+                if not os.path.isdir(scope_path):
+                    continue
+                for name in os.listdir(scope_path):
+                    path = os.path.join(scope_path, name)
+                    if os.path.isdir(path) and now - os.path.getmtime(path) > 900:
+                        _shutil.rmtree(path, ignore_errors=True)
     except OSError:
         pass
     return jsonify({'success': True})
@@ -2221,21 +2276,77 @@ def _image_response_url(data):
 def call_image_api(prompt, usage_ctx=None):
     return call_images_api(prompt, usage_ctx=usage_ctx)
 
-def _prepare_image_reference_for_model(reference):
-    """Normalize a generated local image URL into a model-readable reference."""
+def _map_image_owned_by_tenant(image_path, tenant_id):
+    """ISS-020: map files share one folder — ownership is proven by a
+    ``map_images`` row of this tenant pointing at the same real path."""
+    try:
+        real = os.path.realpath(image_path)
+        for row in db.get_map_images(tenant_id) or []:
+            stored = row.get('file_path')
+            if stored and os.path.realpath(stored) == real:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _uploads_reference_owned_by_tenant(relative_path, image_path, tenant_id):
+    """ISS-020: an ``uploads/`` path is only a valid reference when it resolves
+    inside the caller's own tenant namespace.
+
+    Layout: ``uploads/creative/<tenant>/`` for generated images,
+    ``uploads/<tenant>/`` for documents/fonts, ``uploads/training/<tenant>/``
+    for attachments, and ``uploads/maps/`` which is shared on disk so ownership
+    comes from the ``map_images`` ledger instead.
+    """
+    tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id or ''))
+    if not tenant:
+        return False
+    parts = [part for part in relative_path.split('/') if part]
+    if len(parts) < 2:
+        return False
+    namespace = parts[1]
+    if namespace.startswith('.'):
+        return False
+    if namespace in ('creative', 'training'):
+        return len(parts) > 2 and parts[2] == tenant
+    if namespace == 'maps':
+        return _map_image_owned_by_tenant(image_path, tenant_id)
+    return namespace == tenant
+
+
+def _prepare_image_reference_for_model(reference, tenant_id=None):
+    """Normalize a caller-supplied image reference into a model-readable form.
+
+    ISS-020: the reference must be provably the caller's own — a ``data:`` URI
+    (already client-side bytes) or a local ``uploads/`` path inside the
+    tenant's namespace. Remote URLs are refused outright: the model only needs
+    images this app stored, and an unverifiable remote fetch is an SSRF hole.
+    ``tenant_id`` is an explicit parameter because generation runs in worker
+    threads where ``g`` does not exist.
+    """
     if not isinstance(reference, str) or not reference.strip():
         return None
     reference = reference.strip()
-    if reference.startswith('data:image/') or re.match(r'^https?://', reference, re.IGNORECASE):
+    if reference.startswith('data:image/'):
         return reference
+    if re.match(r'^https?://', reference, re.IGNORECASE):
+        print(f'[IMAGE ERROR] Remote reference images are not allowed: {reference[:120]}')
+        return None
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
 
     relative_path = reference.split('?', 1)[0].lstrip('/')
     if not relative_path.startswith('uploads/'):
         print(f'[IMAGE ERROR] Unsupported local reference path: {reference}')
         return None
 
-    uploads_root = os.path.abspath(os.path.join(os.path.dirname(__file__), 'uploads'))
-    image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path.replace('/', os.sep)))
+    uploads_root = os.path.abspath(UPLOADS_DIR)
+    image_path = os.path.abspath(
+        os.path.join(uploads_root, relative_path[len('uploads/'):].replace('/', os.sep)))
     try:
         if os.path.commonpath([uploads_root, image_path]) != uploads_root:
             return None
@@ -2243,6 +2354,9 @@ def _prepare_image_reference_for_model(reference):
         return None
     if not os.path.isfile(image_path) or os.path.getsize(image_path) > 15 * 1024 * 1024:
         print(f'[IMAGE ERROR] Local reference image is unavailable: {reference}')
+        return None
+    if not _uploads_reference_owned_by_tenant(relative_path, image_path, tenant_id):
+        print(f'[IMAGE ERROR] Reference image is not owned by this tenant: {reference[:120]}')
         return None
 
     mime_type = {
@@ -2575,16 +2689,18 @@ def _publish_project_file_as_creative_image(file_id, tenant_id=None):
     return url if isinstance(url, str) and url.startswith('/uploads/') else None
 
 
-def _visual_concept_reference_uris(urls=None, file_ids=None, max_images=None, urls_first=False):
+def _visual_concept_reference_uris(urls=None, file_ids=None, max_images=None, urls_first=False,
+                                   tenant_id=None):
+    tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     limit = VISUAL_CONCEPT_MAX_REFERENCE_IMAGES if max_images is None else max(1, int(max_images))
     prepared_files = []
     for file_id in file_ids or []:
-        prepared = _visual_concept_project_file_data_uri(file_id)
+        prepared = _visual_concept_project_file_data_uri(file_id, tenant_id)
         if prepared:
             prepared_files.append(prepared)
     prepared_urls = []
     for url in urls or []:
-        prepared = _prepare_image_reference_for_model(url)
+        prepared = _prepare_image_reference_for_model(url, tenant_id)
         if prepared:
             prepared_urls.append(prepared)
     references = (prepared_urls + prepared_files) if urls_first else (prepared_files + prepared_urls)
@@ -2840,14 +2956,14 @@ def _visual_concept_sanitize_prompt(prompt):
     return _visual_concept_text(prompt, 12000)
 
 
-def _normalize_image_references(references):
+def _normalize_image_references(references, tenant_id=None):
     prepared = []
     for reference in references or []:
-        item = _prepare_image_reference_for_model(reference) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
+        item = _prepare_image_reference_for_model(reference, tenant_id) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
         if isinstance(item, str) and item.startswith('data:image/'):
             prepared.append(item)
         elif isinstance(item, str) and item:
-            resolved = _prepare_image_reference_for_model(item)
+            resolved = _prepare_image_reference_for_model(item, tenant_id)
             if resolved:
                 prepared.append(resolved)
     return prepared
@@ -2867,7 +2983,9 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
     if not _has_any_openrouter_key(ctx):
         print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
         return None
-    prepared = _normalize_image_references(references)
+    # ISS-020: reference ownership is checked against the ctx tenant — the
+    # worker threads these calls run on have no request context.
+    prepared = _normalize_image_references(references, tenant_id=(ctx or {}).get('tenant_id'))
     images_model = model or IMAGE_MODEL
     attempt_id = _begin_ai_attempt_record(ctx, images_model)
     try:
@@ -2993,7 +3111,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
     return '', ''
 
 
-def _visual_concept_cover_image(data):
+def _visual_concept_cover_image(data, tenant_id=None):
     cover = str(data.get('coverImage') or data.get('cover_image') or '').strip()
     # A blob: URL is meaningless outside the browser tab that made it, so an old draft
     # carrying one must fall back to the stored file instead of losing the cover reference.
@@ -3001,17 +3119,18 @@ def _visual_concept_cover_image(data):
         return cover
     file_id = _visual_concept_text(data.get('coverFileId') or data.get('cover_file_id'), 80)
     if file_id:
-        return _visual_concept_project_file_data_uri(file_id) or ''
+        return _visual_concept_project_file_data_uri(file_id, tenant_id) or ''
     return ''
 
 
-def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''):
+def _visual_concept_collect_generation_references(facts, slot_id, cover_image='', tenant_id=None):
+    tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     if slot_id == 'cover':
         file_ids = list(facts.get('style_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
         map_urls = []
         if len(file_ids) < VISUAL_CONCEPT_MAX_REFERENCE_IMAGES and facts.get('overview_map_url'):
             map_urls.append(facts['overview_map_url'])
-        return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids)
+        return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids, tenant_id=tenant_id)
     urls = [cover_image] if cover_image else []
     if _visual_concept_is_internal_slot(slot_id):
         file_ids = list(facts.get('interior_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
@@ -3020,6 +3139,7 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             file_ids=file_ids,
             max_images=VISUAL_CONCEPT_MAX_REFERENCE_IMAGES + 1,
             urls_first=True,
+            tenant_id=tenant_id,
         )
     if _visual_concept_is_plan_slot(slot_id):
         kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
@@ -3027,10 +3147,10 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
         if kind == 'uses':
             return []
         if kind in ('site', 'massing') and boundary_url:
-            return _visual_concept_reference_uris(urls=[boundary_url])
+            return _visual_concept_reference_uris(urls=[boundary_url], tenant_id=tenant_id)
         map_url = facts.get('overview_map_url')
-        return _visual_concept_reference_uris(urls=[map_url] if map_url else [])
-    return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True)
+        return _visual_concept_reference_uris(urls=[map_url] if map_url else [], tenant_id=tenant_id)
+    return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True, tenant_id=tenant_id)
 
 
 def _visual_concept_request_bundle(data, slot_id):
@@ -12931,6 +13051,16 @@ def api_update_presentation(pres_id):
             else:
                 updates['draft_id'] = (updates['project_data'].get('draftId')
                                        or updates['project_data'].get('draft_id'))
+            # ISS-015: projectData is stored draft data — a section the caller
+            # cannot see must survive the save unchanged, exactly like the
+            # project-draft save path enforces.
+            forbidden_sections, _restored = _enforce_draft_field_sections(
+                updates['project_data'], current_project, None, None)
+            if forbidden_sections:
+                return jsonify({
+                    'error': 'لا تملك صلاحية تعديل الأقسام: ' + '، '.join(forbidden_sections),
+                    'error_code': 'SECTION_FORBIDDEN',
+                    'sections': forbidden_sections}), 403
 
         if 'slides_data' in updates:
             project_data = updates.get('project_data')
@@ -13475,6 +13605,10 @@ def api_save_project_draft():
     # changed instead of only counting a revision.
     previous_id = draft_data.get('draftId') or draft_data.get('draft_id')
     previous = db.get_project_draft_by_id(g.tenant_id, previous_id) if previous_id else None
+    # ISS-014: a project-scoped actor must not write a draft outside its scope
+    # by naming its id — the same not-found answer the GET path gives.
+    if previous and not db.user_may_access_draft(g.user_id, previous):
+        return jsonify({'error': 'Draft not found'}), 404
     previous_data = (previous or {}).get('draft_data') if isinstance(previous, dict) else {}
     previous_statuses = (previous or {}).get('section_statuses') if isinstance(previous, dict) else {}
     # A section the actor cannot open cannot be written through the save either.
@@ -14215,6 +14349,9 @@ def api_request_project_draft_approval():
     data = request.json or {}
     draft_id = _resolve_draft_id(data.get('draftId'))
     current = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    # ISS-014: an explicit draftId outside the caller's scope answers not-found.
+    if current and not db.user_may_access_draft(g.user_id, current):
+        return jsonify({'error': 'No project draft found'}), 404
     if current and current.get('user_id') == _project_draft_actor_id():
         # Rule 19.2: an approval names one version, so a later edit voids that
         # section's readiness until it is sent and approved again. Sections
@@ -14283,7 +14420,7 @@ def api_request_project_draft_approval():
         pass
     _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
                    ['أُرسل المشروع للمراجعة'])
-    return jsonify({'success': True, 'draft': draft})
+    return jsonify({'success': True, 'draft': _draft_response_filtered(draft)})
 
 
 @app.route('/api/project-draft/approval-status', methods=['GET'])
@@ -14291,7 +14428,7 @@ def api_request_project_draft_approval():
 def api_project_draft_approval_status():
     """Return the current actor's overall draft-review state."""
     draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
-    return jsonify({'success': True, 'approval': draft})
+    return jsonify({'success': True, 'approval': _draft_response_filtered(draft)})
 
 
 @app.route('/api/project-draft/pending-approvals', methods=['GET'])
@@ -14358,7 +14495,7 @@ def api_review_project_draft():
         pass
     action = 'اعتماد المشروع' if review_status == 'approved' else 'إعادة المشروع للتعديل'
     _record_change('draft', draft_id, action, [note] if note else [action])
-    return jsonify({'success': True, 'draft': reviewed})
+    return jsonify({'success': True, 'draft': _draft_response_filtered(reviewed)})
 
 
 @app.route('/api/project-draft/lifecycle-states', methods=['GET'])
@@ -15740,8 +15877,8 @@ def api_export():
         fallback_id = str(meta.get('id', ''))
         fallback_total = meta.get('total')
         fallback_gzip = bool(meta.get('gzip'))
-        chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', fallback_id)
-        if os.path.isdir(chunk_dir) and isinstance(fallback_total, int) and (1 <= fallback_total <= 1024):
+        chunk_dir = _body_chunk_dir(fallback_id)
+        if chunk_dir and os.path.isdir(chunk_dir) and isinstance(fallback_total, int) and (1 <= fallback_total <= 1024):
             try:
                 parts = []
                 for i in range(fallback_total):
@@ -15775,6 +15912,8 @@ def api_export():
             presentation_id = data.get('presentationId')
             project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
             pres = db.get_presentation(presentation_id, g.tenant_id) if presentation_id else None
+            if pres and not _presentation_in_scope(pres):
+                return jsonify({'error': 'Presentation not found'}), 404
             if pres and not project_data:
                 try:
                     project_data = json.loads(pres.get('project_data') or '{}')
@@ -15849,6 +15988,8 @@ def api_export():
             presentation_id = data.get('presentationId')
             project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
             pres = db.get_presentation(presentation_id, g.tenant_id) if presentation_id else None
+            if pres and not _presentation_in_scope(pres):
+                return jsonify({'error': 'Presentation not found'}), 404
             if pres and not project_data:
                 try:
                     project_data = json.loads(pres.get('project_data') or '{}')
@@ -21222,6 +21363,9 @@ def api_publish_project_file_image(file_id):
     ``blob:`` URL — which dies with the tab. This publishes the same bytes under
     ``/uploads/creative/<tenant>/`` exactly like a generated image.
     """
+    stored = db.get_project_file(g.tenant_id, str(file_id))
+    if not stored or not _project_file_in_scope(stored):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     url = _publish_project_file_as_creative_image(file_id)
     if not url:
         return jsonify({'success': False, 'error': 'الملف غير متاح أو ليس صورة'}), 404
@@ -26394,8 +26538,6 @@ def api_list_generation_jobs():
     return jsonify({'success': True, 'jobs': jobs})
 
 
-@app.route('/api/generation-jobs/<job_id>', methods=['GET'])
-@require_auth
 def _generation_job_in_scope(job):
     """ISS-014: a job stays inside the caller's project scope — its own draft
     link, or the draft its presentation carries."""

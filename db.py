@@ -1291,6 +1291,15 @@ FIELD_SECTIONS = [
     {'key': 'location', 'label': 'الموقع والخرائط'},
     {'key': 'land_croquis', 'label': 'الأرض والكروكي'},
     {'key': 'contact', 'label': 'بيانات التواصل'},
+    # The widget sections are governable like any field section: revoking one
+    # hides it in the form, blocks its writes and strips its blobs from draft
+    # responses (ISS-015).
+    {'key': 'section-timeline', 'label': 'الجدول الزمني'},
+    {'key': 'section-financial-calc', 'label': 'الدراسة المالية والمؤشرات'},
+    {'key': 'section-team', 'label': 'فريق العمل'},
+    {'key': 'section-market-study', 'label': 'دراسة السوق'},
+    {'key': 'section-visual-concept', 'label': 'التصور البصري'},
+    {'key': 'section-executive-content', 'label': 'المحتوى التنفيذي'},
 ]
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}

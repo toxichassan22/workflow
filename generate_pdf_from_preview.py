@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import traceback
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from design_templates import build_font_css, extract_slide_elements, sanitize_slide_html_for_export
 from slide_engine import (
     _cover_image_url_from_html,
@@ -453,6 +454,7 @@ def _generate_pdf_chunked(playwright, slides, layout_css, font_css, out_path, tm
             html_path.write_text(
                 _chunk_document_html(group, layout_css, font_css), encoding='utf-8')
             page = browser.new_page()
+            _install_export_request_guard(page)
             try:
                 page.set_viewport_size({"width": 1280, "height": 720})
                 page.goto(html_path.as_uri(), wait_until="load", timeout=30000)
@@ -727,6 +729,197 @@ def _resolve_project_file_urls(html, tenant_id):
     return _PROJECT_FILE_URL_RE.sub(replace, html)
 
 
+# ---------------------------------------------------------------------------
+# ISS-019: export resource policy
+#
+# Slide HTML is stored user input: it can carry ``file://``, ``http(s)://`` or
+# relative references that would make the renderer read outside the tenant —
+# or reach the host's internal network — when a slide is exported. Everything
+# the export may legitimately need resolves to a ``data:`` URI or a file under
+# one of the allowed roots below; anything else is stripped so the tag renders
+# broken instead of leaking bytes.
+# ---------------------------------------------------------------------------
+
+# Google font CSS/face fetches are the only remote reads an export may make —
+# ``build_font_css`` emits those @imports and font-status documents them.
+_EXPORT_REMOTE_HOSTS = frozenset({'fonts.googleapis.com', 'fonts.gstatic.com'})
+
+
+def _export_local_roots(tenant_id, extra_roots=(), base_dir=None):
+    """Directories a ``file:`` or relative resource may resolve under."""
+    base = Path(base_dir) if base_dir else BASE_DIR
+    roots = [base / 'assets', base / 'fonts']
+    tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id or ''))
+    if tenant:
+        roots += [
+            base / 'uploads' / tenant,
+            base / 'uploads' / 'creative' / tenant,
+            base / 'uploads' / 'training' / tenant,
+        ]
+    for extra in extra_roots or ():
+        roots.append(Path(extra))
+    return roots
+
+
+def _export_allowed_local_path(path, tenant_id, extra_roots=(), base_dir=None):
+    """True when ``path`` resolves under an export-allowed root (ISS-019).
+
+    ``uploads/<tenant>``, ``uploads/creative/<tenant>`` and
+    ``uploads/training/<tenant>`` are tenant namespaces; ``uploads/maps/`` is
+    shared on disk, so a map file is allowed only when the tenant's
+    ``map_images`` ledger points at it. Bundled ``assets/`` and ``fonts/``
+    belong to the application itself.
+    """
+    base = Path(base_dir) if base_dir else BASE_DIR
+    try:
+        real = os.path.realpath(str(path))
+    except Exception:
+        return False
+    for root in _export_local_roots(tenant_id, extra_roots, base_dir=base):
+        try:
+            root_real = os.path.realpath(str(root))
+            if os.path.commonpath([root_real, real]) == root_real:
+                return True
+        except (ValueError, OSError):
+            continue
+    tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id or ''))
+    if tenant:
+        try:
+            maps_real = os.path.realpath(str(base / 'uploads' / 'maps'))
+            if os.path.commonpath([maps_real, real]) == maps_real:
+                import db
+                for row in db.get_map_images(str(tenant_id)) or []:
+                    stored = row.get('file_path')
+                    if stored and os.path.realpath(stored) == real:
+                        return True
+        except Exception:
+            pass
+    return False
+
+
+def _export_url_to_local_path(url):
+    """Parse a ``file://`` URL or site path into a local path under BASE_DIR."""
+    clean = str(url).split('?')[0].split('#')[0].strip()
+    if clean.lower().startswith('file://'):
+        clean = unquote(urlparse(clean).path)
+        # Windows file URIs look like file:///D:/... -> urlparse gives /D:/...
+        if os.name == 'nt' and re.match(r'^/[A-Za-z]:', clean):
+            clean = clean[1:]
+        return Path(clean)
+    # Anything without a scheme is interpreted the way the app serves it —
+    # rooted at BASE_DIR — so '/uploads/x' and 'uploads/x' agree.
+    return BASE_DIR / clean.lstrip('/')
+
+
+def _export_url_allowed(url, tenant_id, extra_roots=()):
+    """ISS-019: whether one resource reference may survive into export HTML."""
+    value = str(url or '').strip()
+    if not value or value.startswith('#'):
+        return True
+    low = value.lower()
+    if low.startswith('data:'):
+        return low.startswith('data:image/') or low.startswith('data:font/')
+    if low.startswith('//'):
+        value = 'https:' + value
+        low = value.lower()
+    if low.startswith(('http://', 'https://')):
+        try:
+            host = urlparse(value).hostname or ''
+        except Exception:
+            return False
+        return host.lower() in _EXPORT_REMOTE_HOSTS
+    first = low.split('/', 1)[0]
+    if ':' in first:
+        return False  # javascript:, vbscript:, unknown schemes
+    return _export_allowed_local_path(
+        _export_url_to_local_path(value), tenant_id, extra_roots)
+
+
+_EXPORT_ATTR_URL_RE = re.compile(
+    r'''(?P<prefix>[\w:-]*(?:src|href|poster|srcset)\s*=\s*)(?P<quote>["'])(?P<url>.*?)(?P=quote)''',
+    re.IGNORECASE | re.DOTALL)
+_EXPORT_CSS_URL_RE = re.compile(
+    r'''url\(\s*(?P<q>["']?)(?P<url>[^)"']+)(?P=q)\s*\)''', re.IGNORECASE)
+_EXPORT_IMPORT_RE = re.compile(r'''@import\s+(["'])(?P<url>[^"']+)\1''', re.IGNORECASE)
+
+
+def _sanitize_export_resource_urls(html, tenant_id, tmp_root=None):
+    """ISS-019: drop every resource reference the export may not follow.
+
+    Runs after the project-file/asset resolvers have produced ``file:`` URIs,
+    so legitimate tenant images keep working while hostile ``file://`` reads,
+    remote fetches and ``..`` traversals are emptied.
+    """
+    if not html:
+        return html
+    extra = (tmp_root,) if tmp_root else ()
+
+    def _keep(url):
+        return _export_url_allowed(url, tenant_id, extra)
+
+    def _attr(match):
+        url = match.group('url')
+        if 'srcset' in match.group('prefix').lower():
+            kept = []
+            for candidate in url.split(','):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                source, _, descriptor = candidate.partition(' ')
+                if _keep(source.strip()):
+                    kept.append((source.strip() + ' ' + descriptor.strip()).strip())
+            url = ', '.join(kept)
+            return match.group('prefix') + match.group('quote') + url + match.group('quote')
+        if _keep(url.strip()):
+            return match.group(0)
+        print(f'[EXPORT] blocked resource url: {url.strip()[:120]}')
+        return match.group('prefix') + match.group('quote') + match.group('quote')
+
+    def _css(match):
+        url = match.group('url').strip()
+        if _keep(url):
+            return match.group(0)
+        print(f'[EXPORT] blocked css url: {url[:120]}')
+        return 'url("")'
+
+    def _import(match):
+        if _keep(match.group('url').strip()):
+            return match.group(0)
+        print(f'[EXPORT] blocked css import: {match.group("url").strip()[:120]}')
+        return ''
+
+    html = _EXPORT_ATTR_URL_RE.sub(_attr, html)
+    html = _EXPORT_CSS_URL_RE.sub(_css, html)
+    html = _EXPORT_IMPORT_RE.sub(_import, html)
+    return html
+
+
+def _install_export_request_guard(page):
+    """ISS-019: the export renders fully offline — abort any remote fetch a
+    hostile slide may still carry. Only the declared font hosts pass."""
+    def _guard(route):
+        try:
+            url = route.request.url or ''
+            host = urlparse(url).hostname or ''
+        except Exception:
+            url, host = '', ''
+        if url.lower().startswith(('http://', 'https://')) \
+                and host.lower() not in _EXPORT_REMOTE_HOSTS:
+            print(f'[EXPORT] blocked remote request: {url[:120]}')
+            try:
+                return route.abort()
+            except Exception:
+                return None
+        try:
+            return route.continue_()
+        except Exception:
+            return None
+    try:
+        page.route('**/*', _guard)
+    except Exception:
+        pass
+
+
 def _heal_section_divider_backgrounds(slides, cover_uri):
     if not cover_uri:
         return list(slides or [])
@@ -784,6 +977,11 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
     # Resolve relative asset URLs so Playwright can load local images/fonts
     html = _resolve_asset_urls(html)
+
+    # ISS-019: after resolution, every resource must still be a data: URI or a
+    # file under this tenant's allowed roots — the slide HTML is stored user
+    # input and can smuggle file://, remote or traversal references.
+    html = _sanitize_export_resource_urls(html, tenant_id)
 
     # Discover the actual cover image even when one or more logo tags precede it.
     cover_uri = _cover_image_url_from_html(html)
@@ -900,6 +1098,7 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
             browser, launch_how = _launch_chromium(p)
             print(f"[PDF] Chromium ready via {launch_how}")
             page = browser.new_page()
+            _install_export_request_guard(page)
             page.set_viewport_size({"width": 1280, "height": 720})
 
             file_url = resolved_html_path.as_uri()
@@ -1109,6 +1308,7 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
 
         html = _resolve_project_file_urls(html, tenant_id)
         html = _resolve_asset_urls(html)
+        html = _sanitize_export_resource_urls(html, tenant_id)
         html = sanitize_slide_html_for_export(html)
         slides = extract_slide_elements(html)
         if slides:
@@ -1157,6 +1357,7 @@ svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px 
         with sync_playwright() as p:
             browser, _launch_how = _launch_chromium(p)
             page = browser.new_page(viewport={"width": width, "height": height})
+            _install_export_request_guard(page)
             page.goto(resolved_html_path.as_uri(), wait_until="load", timeout=15000)
             try:
                 page.evaluate("() => document.fonts.ready")
