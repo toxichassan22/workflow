@@ -1529,8 +1529,7 @@
       recharge_sla: ['admin.alert_recharge_sla', 'طلبات شحن تجاوزت مهلة المراجعة ٢٤ ساعة'],
       generation_failures: ['admin.alert_generation_failures', 'مهام توليد فاشلة خلال ٢٤ ساعة'],
       dead_jobs: ['admin.alert_dead_jobs', 'مهام خلفية استنفدت محاولاتها'],
-      contract_expiry: ['admin.alert_contract_expiry', 'عقود تنتهي خلال ٣٠ يومًا'],
-      retention_due: ['admin.alert_retention_due', 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'],
+
     };
 
     function renderSagOpsAlerts(alerts) {
@@ -1733,7 +1732,7 @@
       renderSagTenants(filtered);
     }
 
-    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'contracts', 'activity', 'access'];
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity', 'access'];
 
     function sagTenantPaneId(tab) {
       return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -1753,7 +1752,7 @@
         if (pane) pane.style.display = active ? '' : 'none';
         if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
       });
-      if (['drafts', 'presentations', 'exports', 'contracts', 'activity', 'access'].includes(tab)) {
+      if (['drafts', 'presentations', 'exports', 'activity', 'access'].includes(tab)) {
         sagLoadTenantDataPane(sagCurrentTenantId, tab);
       }
     }
@@ -1763,7 +1762,6 @@
         drafts: 'sagTenantDraftsList',
         presentations: 'sagTenantPresentationsList',
         exports: 'sagTenantExportsList',
-        contracts: 'sagTenantContractsList',
         activity: 'sagTenantActivityList',
         access: 'sagTenantAccessList'
       };
@@ -1784,7 +1782,6 @@
       if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
       else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
-      else if (tab === 'contracts') host.innerHTML = renderSagTenantContracts(data.contracts || []);
       else if (tab === 'access') host.innerHTML = renderSagTenantAccess(data.requests || []);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
     }
@@ -1941,47 +1938,6 @@
       }).join('');
     }
 
-    async function sagAddTenantContract(event, tenantId) {
-      event.preventDefault();
-      const payload = {
-        title: document.getElementById('sagContractTitle').value.trim(),
-        kind: document.getElementById('sagContractKind').value,
-        startsAt: document.getElementById('sagContractStart').value || null,
-        expiresAt: document.getElementById('sagContractEnd').value || null,
-        signatureStatus: document.getElementById('sagContractSignature').value,
-        retentionUntil: document.getElementById('sagContractRetention').value || null
-      };
-      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/contracts', payload);
-      if (!data.success) { toast(data.error || WFT('contracts.save_failed', 'تعذر تسجيل الوثيقة')); return; }
-      toast(WFT('contracts.saved', 'تم تسجيل الوثيقة'));
-      const host = document.getElementById('sagTenantContractsList');
-      if (host) delete host.dataset.loaded;
-      await sagLoadTenantDataPane(tenantId, 'contracts');
-    }
-
-    function renderSagTenantContracts(contracts) {
-      if (!contracts || !contracts.length) return '<p class="tenant-hint">لا توجد عقود مسجلة لهذه الشركة</p>';
-      const sigLabels = { unsigned: 'غير موقّع', pending_signature: 'بانتظار التوقيع', signed: 'موقّع', expired: 'منتهي التوقيع' };
-      return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
-        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
-        '<th style="padding:10px 8px;">العنوان</th><th style="padding:10px 8px;">النوع</th>' +
-        '<th style="padding:10px 8px;">البداية</th><th style="padding:10px 8px;">الانتهاء</th>' +
-        '<th style="padding:10px 8px;">التوقيع</th><th style="padding:10px 8px;">الإصدار</th>' +
-        '<th style="padding:10px 8px;">الحالة</th></tr></thead><tbody>' +
-        contracts.map(c => {
-          const type = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد خدمة';
-          const status = c.is_expired
-            ? '<span style="color:#c33;font-weight:700">منتهي</span>'
-            : '<span style="color:var(--green)">سارٍ</span>';
-          return '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:10px 8px;">' + escapeHtml(c.title || '—') +
-            '</td><td style="padding:10px 8px;">' + type + '</td><td style="padding:10px 8px;">' + escapeHtml(c.starts_at || '—') +
-            '</td><td style="padding:10px 8px;">' + escapeHtml(c.expires_at || '—') +
-            '</td><td style="padding:10px 8px;">' + escapeHtml(sigLabels[c.signature_status] || c.signature_status || '—') +
-            '</td><td style="padding:10px 8px;">' + (c.version || 1) +
-            '</td><td style="padding:10px 8px;">' + status + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    }
-
     function renderSagTenantActivity(activity) {
       if (!activity.length) return '<p class="tenant-hint">لا يوجد سجل تعديلات</p>';
       return activity.map(a => {
@@ -2020,7 +1976,6 @@
         '<button type="button" id="sagTabBtnDrafts" class="btn small ghost" onclick="showSagTenantTab(\'drafts\')">المشاريع</button>' +
         '<button type="button" id="sagTabBtnPresentations" class="btn small ghost" onclick="showSagTenantTab(\'presentations\')">العروض</button>' +
         '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
-        '<button type="button" id="sagTabBtnContracts" class="btn small ghost" onclick="showSagTenantTab(\'contracts\')">العقود والاتفاقيات</button>' +
         '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
         '<button type="button" id="sagTabBtnAccess" class="btn small ghost" onclick="showSagTenantTab(\'access\')">' + escapeHtml(WFT('admin.access_tab', 'طلبات الوصول')) + '</button>' +
         '</div>' +
@@ -2077,20 +2032,6 @@
         '<h3 class="dash-section-title">العروض</h3><div id="sagTenantPresentationsList"></div></div>' +
         '<div id="sagTenantTabExports" style="display:none">' +
         '<h3 class="dash-section-title">التصديرات</h3><div id="sagTenantExportsList"></div></div>' +
-        '<div id="sagTenantTabContracts" style="display:none">' +
-        '<h3 class="dash-section-title">العقود والاتفاقيات</h3>' +
-        '<form onsubmit="sagAddTenantContract(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label for="sagContractTitle">العنوان</label><input id="sagContractTitle" maxlength="160" required></div>' +
-        '<div class="tenant-field"><label for="sagContractKind">النوع</label><select id="sagContractKind">' +
-        '<option value="contract">عقد خدمة</option><option value="nda">اتفاقية سرية</option></select></div>' +
-        '<div class="tenant-field"><label for="sagContractStart">البداية</label><input type="date" id="sagContractStart" dir="ltr"></div>' +
-        '<div class="tenant-field"><label for="sagContractEnd">الانتهاء</label><input type="date" id="sagContractEnd" dir="ltr"></div>' +
-        '<div class="tenant-field"><label for="sagContractSignature">حالة التوقيع</label><select id="sagContractSignature">' +
-        '<option value="unsigned">غير موقّع</option><option value="pending_signature">بانتظار التوقيع</option>' +
-        '<option value="signed">موقّع</option></select></div>' +
-        '<div class="tenant-field"><label for="sagContractRetention">الاحتفاظ حتى</label><input type="date" id="sagContractRetention" dir="ltr"></div>' +
-        '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الوثيقة</button></div></form>' +
-        '<div id="sagTenantContractsList"></div></div>' +
         '<div id="sagTenantTabActivity" style="display:none">' +
         '<h3 class="dash-section-title">سجل التعديلات</h3><div id="sagTenantActivityList"></div></div>' +
         '<div id="sagTenantTabAccess" style="display:none">' +

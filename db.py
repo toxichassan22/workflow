@@ -1113,12 +1113,12 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
                               password_hash, plan='free', credit_balance=0,
                               is_active=True, require_password_change=False,
                               profile=None, slug=None, package_id=None,
-                              trial_days=None, contracts=None):
+                              trial_days=None):
     """Create a company, its workspace, and its primary company administrator atomically.
 
     The whole opening file lands in one transaction (t50-05): tenant row with
     the legal profile, the URL slug, branding, default fields, the admin user,
-    the package subscription/trial window, and any uploaded contract documents.
+    and the package subscription/trial window.
     A failure anywhere rolls everything back so no half-opened company exists.
     """
     conn = get_db()
@@ -1185,34 +1185,6 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
                    VALUES (?, ?, ?, 'active', ?, ?)''',
                 (str(uuid.uuid4()), tenant_id, str(package_id) if package_id else None,
                  now, trial_ends_at),
-            )
-        for document in (contracts or []):
-            contract_id = str(uuid.uuid4())
-            doc_kind = document.get('kind') if document.get('kind') in {'contract', 'nda'} else 'contract'
-            signature = document.get('signature_status')
-            if signature not in CONTRACT_SIGNATURE_STATUSES:
-                signature = 'unsigned'
-            conn.execute(
-                '''INSERT INTO tenant_contracts
-                   (id, tenant_id, kind, title, file_id, starts_at, expires_at, notes,
-                    status, signature_status, version, retention_until, created_by,
-                    created_by_name, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?, ?)''',
-                (contract_id, tenant_id, doc_kind,
-                 str(document.get('title') or 'عقد').strip(), document.get('file_id'),
-                 document.get('starts_at'), document.get('expires_at'),
-                 document.get('notes'), signature, document.get('retention_until'),
-                 document.get('created_by'), document.get('created_by_name'), now),
-            )
-            conn.execute(
-                '''INSERT INTO tenant_contract_versions
-                   (id, contract_id, tenant_id, version, file_id, signature_status,
-                    starts_at, expires_at, retention_until, notes, created_by, created_by_name)
-                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (str(uuid.uuid4()), contract_id, tenant_id, document.get('file_id'),
-                 signature, document.get('starts_at'), document.get('expires_at'),
-                 document.get('retention_until'), document.get('notes'),
-                 document.get('created_by'), document.get('created_by_name')),
             )
         conn.commit()
     except Exception:
@@ -8127,7 +8099,7 @@ def get_ai_reconcile_by_scope(tenant_id, draft_ids=(), presentation_ids=()):
 # Omran platform tasks (t14-t63): generation approvals, final approvals,
 # downloads, proposal copies, notification tasks, invites, users report,
 # approval tasks, points reservations, recharge requests, support tickets,
-# contracts and the file-type registry. Money stays USD in tenant_ledger;
+# and the file-type registry. Money stays USD in tenant_ledger;
 # these tables track workflow state, not money.
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -8337,23 +8309,6 @@ def _create_omran_tables(conn):
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_ticket_messages(ticket_id, created_at)')
 
-    # t52: contracts and NDAs with expiry dates the admin screens watch.
-    conn.execute('''CREATE TABLE IF NOT EXISTS tenant_contracts (
-        id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL DEFAULT 'contract',
-        title TEXT NOT NULL,
-        file_id TEXT,
-        starts_at TEXT,
-        expires_at TEXT,
-        notes TEXT,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_by TEXT,
-        created_by_name TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_contracts_tenant ON tenant_contracts(tenant_id, expires_at)')
-
     # t62: versioned registry of allowed file types and their limits.
     conn.execute('''CREATE TABLE IF NOT EXISTS file_type_registry (
         key TEXT PRIMARY KEY,
@@ -8415,13 +8370,6 @@ TENANT_COMPANY_PROFILE_FIELDS = (
     'country', 'region', 'address', 'contact_title',
 )
 
-CONTRACT_SIGNATURE_STATUSES = ('unsigned', 'pending_signature', 'signed', 'expired')
-# t52: 'framework' is a first-class kind — the UI offered it and the backend
-# used to silently coerce it to 'contract', losing the distinction.
-CONTRACT_KINDS = ('contract', 'nda', 'framework')
-CONTRACT_RETENTION_DAYS = int(os.environ.get('CONTRACT_RETENTION_DAYS', '365'))
-
-
 def _create_platform_tables(conn):
     """Graph-model completion tables (t60) plus the mission-5 subsystem tables."""
     # t60-01: every notification fans out to per-channel delivery rows so the
@@ -8466,26 +8414,6 @@ def _create_platform_tables(conn):
         created_at TEXT DEFAULT (datetime('now'))
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_ticket_attachments ON support_ticket_attachments(ticket_id)')
-
-    # t60-03: contract versions carry the signed document and signature state;
-    # tenant_contracts stays the head row pointing at the latest version.
-    conn.execute('''CREATE TABLE IF NOT EXISTS tenant_contract_versions (
-        id TEXT PRIMARY KEY,
-        contract_id TEXT NOT NULL REFERENCES tenant_contracts(id) ON DELETE CASCADE,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        version INTEGER NOT NULL DEFAULT 1,
-        file_id TEXT REFERENCES project_files(id) ON DELETE SET NULL,
-        signature_status TEXT NOT NULL DEFAULT 'unsigned',
-        starts_at TEXT,
-        expires_at TEXT,
-        retention_until TEXT,
-        notes TEXT,
-        created_by TEXT,
-        created_by_name TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_contract_version ON tenant_contract_versions(contract_id, version)')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_contract_versions_tenant ON tenant_contract_versions(tenant_id)')
 
     # t60-04: subscriptions tie a tenant to an immutable package version with a
     # real validity window; topup receipts are the financial documents of a
@@ -8761,11 +8689,15 @@ def _ensure_platform_columns(conn):
     except Exception as exc:
         print(f'[DB] Migration notice: tenants.activated_at backfill: {exc}')
 
-    # t50/t52/t60-03: signature state and versioning on the contract head row.
-    _add('tenant_contracts', 'signature_status', "TEXT DEFAULT 'unsigned'")
-    _add('tenant_contracts', 'version', 'INTEGER DEFAULT 1')
-    _add('tenant_contracts', 'retention_until', 'TEXT')
-    _add('tenant_contracts', 'updated_at', 'TEXT')
+    # Contracts feature removed: drop the tables and its file-type rule on
+    # existing installs so no dead schema or upload type survives.
+    try:
+        conn.execute('DROP TABLE IF EXISTS tenant_contract_versions')
+        conn.execute('DROP TABLE IF EXISTS tenant_contracts')
+        conn.execute("DELETE FROM file_type_registry WHERE key = 'contract_file'")
+        conn.commit()
+    except Exception as exc:
+        print(f'[DB] Migration notice: contract tables drop: {exc}')
 
     # t60-02: tickets can hang off a project file/draft.
     _add('support_tickets', 'draft_id', 'TEXT')
@@ -8868,8 +8800,6 @@ FILE_TYPE_REGISTRY_DEFAULTS = [
      'max_size_mb': 5, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
     {'key': 'recharge_receipt', 'label_ar': 'إيصال تحويل شحن الرصيد', 'label_en': 'Recharge transfer receipt',
      'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
-    {'key': 'contract_file', 'label_ar': 'العقد أو اتفاقية السرية', 'label_en': 'Contract or NDA', 'kind': 'document',
-     'max_size_mb': 25, 'allowed_extensions': ['.pdf']},
 ]
 
 
@@ -11106,170 +11036,6 @@ def assign_support_ticket(tenant_id, ticket_id, assignee_id, actor_name=None):
     return result
 
 
-# ── t52: contracts and NDAs ─────────────────────────────────────────────────
-
-def create_tenant_contract(tenant_id, title, kind='contract', file_id=None, starts_at=None,
-                           expires_at=None, notes=None, created_by=None, created_by_name=None,
-                           signature_status='unsigned', retention_until=None):
-    if not str(title or '').strip():
-        return {'error': 'title_required'}
-    if kind not in CONTRACT_KINDS:
-        kind = 'contract'
-    if signature_status not in CONTRACT_SIGNATURE_STATUSES:
-        signature_status = 'unsigned'
-    conn = get_db()
-    row_id = str(uuid.uuid4())
-    now = _utcnow().isoformat()
-    conn.execute(
-        '''INSERT INTO tenant_contracts
-           (id, tenant_id, kind, title, file_id, starts_at, expires_at, notes, status,
-            signature_status, version, retention_until, created_by, created_by_name, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?, ?)''',
-        (row_id, tenant_id, kind, str(title).strip(), file_id, starts_at, expires_at, notes,
-         signature_status, retention_until, created_by, created_by_name, now),
-    )
-    conn.execute(
-        '''INSERT INTO tenant_contract_versions
-           (id, contract_id, tenant_id, version, file_id, signature_status,
-            starts_at, expires_at, retention_until, notes, created_by, created_by_name)
-           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (str(uuid.uuid4()), row_id, tenant_id, file_id, signature_status,
-         starts_at, expires_at, retention_until, notes, created_by, created_by_name),
-    )
-    conn.commit()
-    return dict(conn.execute('SELECT * FROM tenant_contracts WHERE id = ?', (row_id,)).fetchone())
-
-
-def add_contract_version(tenant_id, contract_id, file_id=None, signature_status=None,
-                         starts_at=None, expires_at=None, retention_until=None, notes=None,
-                         created_by=None, created_by_name=None):
-    """Append a new version to a contract and advance the head row (t60-03)."""
-    conn = get_db()
-    head = conn.execute(
-        'SELECT * FROM tenant_contracts WHERE id = ? AND tenant_id = ?',
-        (str(contract_id), str(tenant_id)),
-    ).fetchone()
-    if not head:
-        return {'error': 'contract_not_found'}
-    head = dict(head)
-    next_version = int(head.get('version') or 0) + 1
-    signature_status = signature_status if signature_status in CONTRACT_SIGNATURE_STATUSES \
-        else (head.get('signature_status') or 'unsigned')
-    now = _utcnow().isoformat()
-    conn.execute(
-        '''INSERT INTO tenant_contract_versions
-           (id, contract_id, tenant_id, version, file_id, signature_status,
-            starts_at, expires_at, retention_until, notes, created_by, created_by_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (str(uuid.uuid4()), str(contract_id), str(tenant_id), next_version,
-         file_id if file_id is not None else head.get('file_id'), signature_status,
-         starts_at if starts_at is not None else head.get('starts_at'),
-         expires_at if expires_at is not None else head.get('expires_at'),
-         retention_until if retention_until is not None else head.get('retention_until'),
-         notes if notes is not None else head.get('notes'), created_by, created_by_name),
-    )
-    conn.execute(
-        '''UPDATE tenant_contracts SET version = ?, file_id = ?, signature_status = ?,
-           starts_at = ?, expires_at = ?, retention_until = ?, notes = ?, updated_at = ?
-           WHERE id = ?''',
-        (next_version,
-         file_id if file_id is not None else head.get('file_id'), signature_status,
-         starts_at if starts_at is not None else head.get('starts_at'),
-         expires_at if expires_at is not None else head.get('expires_at'),
-         retention_until if retention_until is not None else head.get('retention_until'),
-         notes if notes is not None else head.get('notes'), now, str(contract_id)),
-    )
-    conn.commit()
-    return dict(conn.execute(
-        'SELECT * FROM tenant_contracts WHERE id = ?', (str(contract_id),)).fetchone())
-
-
-def list_contract_versions(contract_id, tenant_id=None):
-    conn = get_db()
-    if tenant_id:
-        rows = conn.execute(
-            'SELECT * FROM tenant_contract_versions WHERE contract_id = ? AND tenant_id = ? ORDER BY version DESC',
-            (str(contract_id), str(tenant_id)),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            'SELECT * FROM tenant_contract_versions WHERE contract_id = ? ORDER BY version DESC',
-            (str(contract_id),),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def list_tenant_contracts(tenant_id, include_expired=True):
-    conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM tenant_contracts WHERE tenant_id = ? ORDER BY expires_at IS NULL, expires_at',
-        (tenant_id,),
-    ).fetchall()
-    now = _utcnow()
-    result = []
-    for row in rows:
-        item = dict(row)
-        try:
-            item['is_expired'] = bool(item.get('expires_at')) and datetime.fromisoformat(item['expires_at']) < now
-        except (TypeError, ValueError):
-            item['is_expired'] = False
-        if include_expired or not item['is_expired']:
-            result.append(item)
-    return result
-
-
-def enforce_contract_retention(tenant_id=None):
-    """d06: apply the retention policy — not just display it.
-
-    Expired contracts get stamped ``retention_until`` (expiry +
-    CONTRACT_RETENTION_DAYS, default 365) and flip to 'expired'. A contract
-    whose retention window has fully lapsed flips to 'retention_expired' and
-    the owning tenant is marked for purge review — the rows are listed so an
-    admin acts on them, never silently deleted. Returns the sweep counts.
-    """
-    conn = get_db()
-    now = _utcnow()
-    scope = 'AND c.tenant_id = ?' if tenant_id else ''
-    params = [str(tenant_id)] if tenant_id else []
-    expired = conn.execute(
-        """SELECT c.id, c.tenant_id, c.expires_at FROM tenant_contracts c
-           WHERE c.status = 'active' AND c.expires_at IS NOT NULL AND c.expires_at < ? """ + scope,
-        [now.isoformat()] + params,
-    ).fetchall()
-    marked = 0
-    for row in expired:
-        try:
-            expiry = datetime.fromisoformat(row['expires_at'])
-        except (TypeError, ValueError):
-            continue
-        retention_until = (expiry + timedelta(days=CONTRACT_RETENTION_DAYS)).isoformat()
-        conn.execute(
-            """UPDATE tenant_contracts SET status = 'expired',
-               retention_until = COALESCE(retention_until, ?), updated_at = ?
-               WHERE id = ? AND status = 'active'""",
-            (retention_until, now.isoformat(), row['id']),
-        )
-        marked += 1
-    # Lapse after stamping: a contract that expired long ago (retention window
-    # already in the past) flips in the same sweep, while one expiring now got
-    # a future retention_until and keeps its full window.
-    lapsed = conn.execute(
-        """SELECT c.id, c.tenant_id FROM tenant_contracts c
-           WHERE c.status = 'expired' AND c.retention_until IS NOT NULL
-           AND c.retention_until < ? """ + scope,
-        [now.isoformat()] + params,
-    ).fetchall()
-    for row in lapsed:
-        conn.execute(
-            "UPDATE tenant_contracts SET status = 'retention_expired', updated_at = ? WHERE id = ?",
-            (now.isoformat(), row['id']),
-        )
-    if expired or lapsed:
-        conn.commit()
-    return {'contracts_expired': marked, 'retention_lapsed': len(lapsed),
-            'tenants_pending_review': sorted({row['tenant_id'] for row in lapsed})}
-
-
 # ── t54: operational monitoring that never exposes client content ───────────
 
 def _activity_bucket_pairs(months=12, from_month=None, to_month=None):
@@ -12778,39 +12544,26 @@ def resolve_company_slug(slug):
 # t50: activation gate — a company may only go live with a complete file
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Fields and documents that must exist before the account is activated.
+# Fields that must exist before the account is activated.
 COMPANY_ACTIVATION_REQUIRED_FIELDS = ('legal_name', 'tax_number', 'cr_number', 'country')
-COMPANY_ACTIVATION_REQUIRED_DOCS = {'contract'}
 
 
 def tenant_activation_checklist(tenant):
     """Return the missing pieces blocking activation for a tenant row.
 
-    ``missing`` lists stable keys the UI can label: a profile field name or
-    ``doc:contract`` / ``doc:nda`` for a required document kind.
+    ``missing`` lists stable keys the UI can label: a profile field name.
     """
     tenant = tenant or {}
     missing = [field for field in COMPANY_ACTIVATION_REQUIRED_FIELDS
                if not str(tenant.get(field) or '').strip()]
-    conn = get_db()
-    try:
-        kinds = {r['kind'] for r in conn.execute(
-            "SELECT DISTINCT kind FROM tenant_contracts WHERE tenant_id = ? AND status = 'active'",
-            (tenant.get('id'),),
-        ).fetchall()}
-    except Exception:
-        kinds = set()
-    for kind in sorted(COMPANY_ACTIVATION_REQUIRED_DOCS):
-        if kind not in kinds:
-            missing.append('doc:' + kind)
     return {'complete': not missing, 'missing': missing}
 
 
 def set_tenant_active(tenant_id, is_active, actor_id=None, actor_name=None, reason=None):
     """Flip the tenant's active flag with the activation gate and audit trail.
 
-    Activating requires a complete company file (legal profile + contract on
-    record); the first activation stamps ``activated_by``/``activated_at``.
+    Activating requires a complete company file (legal profile);
+    the first activation stamps ``activated_by``/``activated_at``.
     Deactivating stores the reason. Returns the updated tenant or an error
     dict carrying the missing checklist.
     """
@@ -14030,26 +13783,6 @@ def platform_alerts():
     if dead_jobs:
         alerts.append({'kind': 'dead_jobs', 'severity': 'critical', 'count': dead_jobs,
                        'message_ar': 'مهام خلفية استنفدت محاولاتها'})
-    try:
-        expiring = int(conn.execute(
-            """SELECT COUNT(*) AS n FROM tenant_contracts
-               WHERE status = 'active' AND expires_at IS NOT NULL
-               AND expires_at < ? AND expires_at >= ?""",
-            ((now + timedelta(days=30)).isoformat(), now.isoformat()),
-        ).fetchone()['n'] or 0)
-    except Exception:
-        expiring = 0
-    if expiring:
-        alerts.append({'kind': 'contract_expiry', 'severity': 'warning', 'count': expiring,
-                       'message_ar': 'عقود تنتهي خلال ٣٠ يومًا'})
-    try:
-        retention = enforce_contract_retention()
-        lapsed = int(retention.get('retention_lapsed') or 0)
-    except Exception:
-        lapsed = 0
-    if lapsed:
-        alerts.append({'kind': 'retention_due', 'severity': 'critical', 'count': lapsed,
-                       'message_ar': 'عقود تجاوزت مدة الاحتفاظ — بياناتها مستحقة المراجعة'})
     return alerts
 
 

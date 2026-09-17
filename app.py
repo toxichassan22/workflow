@@ -20435,7 +20435,7 @@ PROJECT_FILE_EXTENSIONS = {
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
                       'regulation_reference', 'team_logo', 'competitor_logo', 'visual_reference',
-                      'conceptual_plan', 'project_logo', 'recharge_receipt', 'contract_file'}
+                      'conceptual_plan', 'project_logo', 'recharge_receipt'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
 PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference', 'project_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
@@ -20454,7 +20454,6 @@ _UPLOAD_TYPE_REGISTRY_KEY = {
     'visual_reference': 'land_photos',
     'project_logo': 'project_logo',
     'recharge_receipt': 'recharge_receipt',
-    'contract_file': 'contract_file',
 }
 
 
@@ -21677,9 +21676,6 @@ def api_admin_tenants():
                 value = data.get(db_key)
             if value is not None:
                 profile[db_key] = str(value).strip()
-        contracts_payload = data.get('contracts') or []
-        if not isinstance(contracts_payload, list):
-            contracts_payload = []
         if password_mode == 'manual':
             password_error = _password_validation_error(password)
             if password_error:
@@ -21697,7 +21693,7 @@ def api_admin_tenants():
                 hash_password(password), plan=plan, credit_balance=credit_balance,
                 is_active=is_active, require_password_change=require_password_change,
                 profile=profile, slug=slug, package_id=package_id,
-                trial_days=trial_days, contracts=contracts_payload,
+                trial_days=trial_days,
             )
         except db_driver.IntegrityError:
             return jsonify({'error': 'Email or username already registered'}), 409
@@ -25805,7 +25801,7 @@ designer_chat_reliability.install(app, globals())
 # Omran platform APIs (t14-t63): generation and final-file approvals with
 # points reservation, downloads ledger, proposal copies, archive/restore,
 # notifications, approval tasks, event tasks, role templates, users report,
-# separation-of-duties matrix, recharge requests, support tickets, contracts
+# separation-of-duties matrix, recharge requests, support tickets
 # and the file-type registry. Money stays in tenant_ledger; these endpoints
 # track workflow state only.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -26934,14 +26930,6 @@ def api_admin_ledger_adjust():
     return jsonify({'success': True, 'result': result})
 
 
-@app.route('/api/admin/contracts/retention-sweep', methods=['POST'])
-@require_admin
-def api_admin_retention_sweep():
-    """d06: run the retention policy now — expire lapsed contracts and list
-    the tenants whose data is due for purge review."""
-    return jsonify({'success': True, 'result': db.enforce_contract_retention()})
-
-
 @app.route('/api/admin/recharge-requests/<request_id>/decision', methods=['POST'])
 @require_permission('sag_admin_panel')
 def api_admin_decide_recharge_request(request_id):
@@ -27171,16 +27159,7 @@ def api_admin_assign_support_ticket(ticket_id):
     return jsonify({'success': True, 'ticket': row})
 
 
-@app.route('/api/admin/tenants/<tenant_id>/contracts', methods=['GET'])
-@require_admin
-def api_admin_tenant_contracts(tenant_id):
-    _, error = _admin_tenant_or_404(tenant_id)
-    if error:
-        return error
-    return jsonify({'success': True, 'contracts': db.list_tenant_contracts(tenant_id)})
-
-
-# ── t51: operational overview; t53: contracts; t63: file-type registry ──────
+# ── t51: operational overview; t63: file-type registry ─────────────────────
 
 @app.route('/api/admin/operational-overview', methods=['GET'])
 @require_admin
@@ -27189,30 +27168,6 @@ def api_operational_overview():
         months=request.args.get('months'),
         from_month=request.args.get('from'),
         to_month=request.args.get('to'))})
-
-
-@app.route('/api/contracts', methods=['GET'])
-@require_permission('company_settings')
-def api_list_contracts():
-    include_expired = request.args.get('includeExpired') != '0'
-    return jsonify({'success': True, 'contracts': db.list_tenant_contracts(g.tenant_id, include_expired=include_expired)})
-
-
-@app.route('/api/contracts', methods=['POST'])
-@require_permission('company_settings')
-def api_create_contract():
-    data = request.json or {}
-    row = db.create_tenant_contract(
-        g.tenant_id, data.get('title'), kind=data.get('kind') or 'contract',
-        file_id=data.get('fileId'), starts_at=data.get('startsAt'), expires_at=data.get('expiresAt'),
-        notes=data.get('notes'), created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
-        signature_status=data.get('signatureStatus'), retention_until=data.get('retentionUntil'),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('contract.created', 'tenant_contract', row['id'], entity_name=row['title'])
-    return jsonify({'success': True, 'contract': row})
 
 
 @app.route('/api/file-types', methods=['GET'])
@@ -27317,56 +27272,6 @@ def api_admin_set_tenant_activation(tenant_id):
         tenant.get('company_name') or '',
         entity_type='tenant', entity_id=tenant_id)
     return jsonify({'success': True, 'tenant': _company_payload(result)})
-
-
-@app.route('/api/admin/tenants/<tenant_id>/contracts', methods=['POST'])
-@require_admin
-def api_admin_create_tenant_contract(tenant_id):
-    """t50/t52: register a contract or NDA on the company file."""
-    tenant, error = _admin_tenant_or_404(tenant_id)
-    if error:
-        return error
-    data = request.json or {}
-    row = db.create_tenant_contract(
-        tenant_id, data.get('title'), kind=data.get('kind') or 'contract',
-        file_id=data.get('fileId'), starts_at=data.get('startsAt'),
-        expires_at=data.get('expiresAt'), notes=data.get('notes'),
-        created_by=_omran_actor_id(), created_by_name=_omran_actor_name(),
-        signature_status=data.get('signatureStatus') or 'unsigned',
-        retention_until=data.get('retentionUntil'),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('contract.created', 'tenant_contract', row['id'],
-                        entity_name=row['title'])
-    return jsonify({'success': True, 'contract': row}), 201
-
-
-@app.route('/api/admin/tenants/<tenant_id>/contracts/<contract_id>/versions', methods=['GET', 'POST'])
-@require_admin
-def api_admin_contract_versions(tenant_id, contract_id):
-    """t52/t60: contract version list and new-version upload."""
-    _, error = _admin_tenant_or_404(tenant_id)
-    if error:
-        return error
-    if request.method == 'GET':
-        return jsonify({'success': True,
-                        'versions': db.list_contract_versions(contract_id, tenant_id=tenant_id)})
-    data = request.json or {}
-    row = db.add_contract_version(
-        tenant_id, contract_id, file_id=data.get('fileId'),
-        signature_status=data.get('signatureStatus'), starts_at=data.get('startsAt'),
-        expires_at=data.get('expiresAt'), retention_until=data.get('retentionUntil'),
-        notes=data.get('notes'), created_by=_omran_actor_id(),
-        created_by_name=_omran_actor_name(),
-    )
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('contract.version_added', 'tenant_contract', contract_id,
-                        new_value=row.get('version'))
-    return jsonify({'success': True, 'contract': row}), 201
 
 
 @app.route('/api/admin/tenants/<tenant_id>/subscription', methods=['GET', 'POST'])

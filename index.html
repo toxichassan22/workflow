@@ -141,9 +141,6 @@
               <button type="button" class="tenant-sidebar-link" data-permission="support_tickets"
                 data-nav-page="tenantOmranOpsPage" data-nav-tab="tickets"
                 onclick="openOmranOpsPage('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
-              <button type="button" class="tenant-sidebar-link" data-permission="company_settings"
-                data-nav-page="tenantOmranOpsPage" data-nav-tab="contracts"
-                onclick="openOmranOpsPage('contracts')" data-i18n="nav.contracts">العقود والاتفاقيات</button>
             </div>
           </div>
           <div class="tenant-nav-group tenant-nav-collapsible" data-nav-group="settings">
@@ -1527,7 +1524,6 @@
         <button type="button" class="btn small primary" id="omTabBtn_tasks" onclick="showOmranOpsTab('tasks')" data-i18n="nav.ops_tasks">المهام والتنبيهات</button>
         <button type="button" class="btn small ghost" id="omTabBtn_recharge" data-permission="billing" onclick="showOmranOpsTab('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
         <button type="button" class="btn small ghost" id="omTabBtn_tickets" data-permission="support_tickets" onclick="showOmranOpsTab('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
-        <button type="button" class="btn small ghost" id="omTabBtn_contracts" data-permission="company_settings" onclick="showOmranOpsTab('contracts')" data-i18n="nav.contracts">العقود والاتفاقيات</button>
       </div>
 
       <!-- Tab 1: Tasks & Notifications -->
@@ -1593,15 +1589,6 @@
         </div>
         <div id="omTicketsList" style="margin-bottom:24px"></div>
         <div id="omTicketDetail" style="display:none;margin-top:16px;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>
-      </div>
-
-      <!-- Tab 4: Contracts & NDAs -->
-      <div id="omTabPane_contracts" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0">العقود والاتفاقيات</h3>
-          <button type="button" class="btn primary small" id="omContractNewBtn" data-permission="company_settings" onclick="openOmModal('omContractModal')">تسجيل وثيقة</button>
-        </div>
-        <div id="omContractsList" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Modal 1: New Task -->
@@ -1692,39 +1679,6 @@
         </div>
       </div>
 
-      <!-- Modal 4: New Contract / NDA -->
-      <div id="omContractModal" class="om-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeOmModal('omContractModal')">
-        <div class="om-modal-card" role="dialog" aria-modal="true" aria-labelledby="omContractModalTitle">
-          <div class="sag-modal-head">
-            <h2 id="omContractModalTitle">تسجيل عقد أو اتفاقية سرية</h2>
-            <button type="button" class="btn ghost small" onclick="closeOmModal('omContractModal')">إغلاق</button>
-          </div>
-          <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label for="omContractTitle">مسمى الوثيقة</label><input type="text" id="omContractTitle" placeholder="اتفاقية سرية المعلومات"></div>
-            <div class="tenant-field"><label for="omContractKind">نوع الوثيقة</label>
-              <select id="omContractKind">
-                <option value="nda">اتفاقية سرية المعلومات (NDA)</option>
-                <option value="framework">عقد إطاري رئيسي</option>
-              </select>
-            </div>
-            <div class="tenant-field"><label for="omContractStarts">تاريخ البداية</label><input type="date" id="omContractStarts"></div>
-            <div class="tenant-field"><label for="omContractExpires">تاريخ الانتهاء</label><input type="date" id="omContractExpires"></div>
-            <div class="tenant-field"><label for="omContractSignature">حالة التوقيع</label>
-              <select id="omContractSignature">
-                <option value="unsigned">غير موقعة</option>
-                <option value="pending_signature">بانتظار التوقيع</option>
-                <option value="signed">موقعة</option>
-              </select>
-            </div>
-            <div class="tenant-field"><label for="omContractFile">ملف الوثيقة</label><input type="file" id="omContractFile" accept=".pdf"></div>
-          </div>
-          <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="omContractError"></div>
-          <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
-            <button type="button" class="btn ghost" onclick="closeOmModal('omContractModal')">إلغاء</button>
-            <button type="button" class="btn primary" onclick="omCreateContract()">حفظ الوثيقة</button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->

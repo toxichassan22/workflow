@@ -3,7 +3,7 @@
 Covers generation approvals with cost estimate and points reservation,
 final-file approvals with stamping, downloads ledger, proposal copies,
 archive/restore, notifications, approval tasks, event tasks, role templates,
-separation-of-duties matrix, recharge requests, support tickets, contracts,
+separation-of-duties matrix, recharge requests, support tickets,
 the file-type registry and their HTTP endpoints. Runs against a temporary
 SQLite database and never calls Google or an AI API.
 """
@@ -472,21 +472,15 @@ class OmranDbTests(unittest.TestCase):
         tickets = db.list_support_tickets('tenant-1', status='resolved')
         self.assertEqual(len(tickets), 1)
 
-    # ── t53/t63: contracts and the file-type registry ────────────────────
+    # ── t63: the file-type registry ──────────────────────────────────────
 
-    def test_contracts_and_file_type_registry(self):
-        contract = db.create_tenant_contract(
-            'tenant-1', 'عقد الرئيسي', kind='nda', expires_at='2027-01-01',
-            created_by='user-1', created_by_name='رئيس القسم')
-        self.assertEqual(contract['status'], 'active')
-        contracts = db.list_tenant_contracts('tenant-1')
-        self.assertEqual(len(contracts), 1)
+    def test_file_type_registry(self):
         row = db.upsert_file_type('deed_file', 'صك الملكية', max_size_mb=30)
         self.assertEqual(row['max_size_mb'], 30)
         self.assertEqual(row['version'], 2)
         missing = db.upsert_file_type('', 'بدون مفتاح')
         self.assertEqual(missing.get('error'), 'key_and_label_required')
-        self.assertEqual(len(db.get_file_type_registry()), 9)
+        self.assertEqual(len(db.get_file_type_registry()), 8)
 
     def test_operational_overview_counts(self):
         overview = db.operational_overview()
@@ -759,25 +753,6 @@ class OmranDbTests(unittest.TestCase):
         ids = db.list_admin_tenant_ids()
         self.assertIn('adm-live', ids)
         self.assertNotIn('adm-dead', ids)
-
-    # ── t52/d06: framework kind and retention enforcement ────────────────
-
-    def test_framework_contract_and_retention_sweep(self):
-        contract = db.create_tenant_contract(
-            'tenant-1', 'عقد إطاري', kind='framework',
-            expires_at='2020-01-01', signature_status='signed')
-        self.assertEqual(contract['kind'], 'framework')
-        self.assertEqual(contract['signature_status'], 'signed')
-        # A 2020 expiry means retention lapsed long ago: the first sweep marks
-        # it expired and past-window in the same pass.
-        result = db.enforce_contract_retention('tenant-1')
-        self.assertEqual(result['contracts_expired'], 1)
-        self.assertEqual(result['retention_lapsed'], 1)
-        self.assertIn('tenant-1', result['tenants_pending_review'])
-        updated = db.list_tenant_contracts('tenant-1')[0]
-        self.assertEqual(updated['status'], 'retention_expired')
-        self.assertTrue(updated['retention_until'])
-
 
 class OmranApiTests(unittest.TestCase):
     def setUp(self):

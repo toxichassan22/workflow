@@ -64,13 +64,26 @@ class Mission5DbTests(unittest.TestCase):
         tables = {r['name'] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         for table in ('notification_deliveries', 'support_ticket_attachments',
-                      'tenant_contract_versions',
                       'tenant_subscriptions', 'billing_package_versions',
                       'topup_receipts', 'generation_jobs', 'document_versions',
                       'tenant_slug_redirects', 'study_types', 'generator_registry',
                       'field_schema_versions', 'job_queue', 'email_outbox',
                       'backup_history'):
             self.assertIn(table, tables, table)
+
+    def test_contracts_feature_is_fully_removed(self):
+        conn = db.get_db()
+        tables = {r['name'] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+        self.assertNotIn('tenant_contracts', tables)
+        self.assertNotIn('tenant_contract_versions', tables)
+        keys = {r['key'] for r in conn.execute(
+            'SELECT key FROM file_type_registry').fetchall()}
+        self.assertNotIn('contract_file', keys)
+        for gone in ('create_tenant_contract', 'list_tenant_contracts',
+                     'add_contract_version', 'list_contract_versions',
+                     'enforce_contract_retention'):
+            self.assertFalse(hasattr(db, gone), gone)
 
     def test_notification_creates_in_app_delivery(self):
         note = db.create_notification('tenant-1', 'اختبار', body='نص',
@@ -102,18 +115,6 @@ class Mission5DbTests(unittest.TestCase):
         versions = db.list_package_versions('pkg-1')
         self.assertEqual([v['version'] for v in versions], [2, 1])
         self.assertEqual(versions[0]['credit_usd'], 300)
-
-    def test_contract_versions_chain(self):
-        contract = db.create_tenant_contract(
-            'tenant-1', 'عقد خدمة', signature_status='signed',
-            starts_at='2025-01-01', expires_at='2026-01-01')
-        self.assertEqual(contract['version'], 1)
-        updated = db.add_contract_version('tenant-1', contract['id'],
-                                          signature_status='pending_signature')
-        self.assertEqual(updated['version'], 2)
-        self.assertEqual(updated['signature_status'], 'pending_signature')
-        versions = db.list_contract_versions(contract['id'], tenant_id='tenant-1')
-        self.assertEqual(len(versions), 2)
 
     def test_document_versions_number_per_document(self):
         a = db.create_document_version('tenant-1', 'presentation', 'pres-1')
@@ -179,7 +180,6 @@ class Mission5DbTests(unittest.TestCase):
         result = db.set_tenant_active('tenant-2', True)
         self.assertEqual(result.get('error'), 'activation_incomplete')
         self.assertIn('legal_name', result['missing'])
-        self.assertIn('doc:contract', result['missing'])
 
     def test_activation_stamps_actor_after_complete_file(self):
         conn = db.get_db()
@@ -187,7 +187,6 @@ class Mission5DbTests(unittest.TestCase):
             "UPDATE tenants SET legal_name = 'شركة', tax_number = '123', "
             "cr_number = '456', country = 'السعودية' WHERE id = 'tenant-2'")
         conn.commit()
-        db.create_tenant_contract('tenant-2', 'عقد', signature_status='signed')
         result = db.set_tenant_active('tenant-2', True,
                                       actor_id='admin-1', actor_name='مدير المنصة')
         self.assertTrue(result['is_active'])
@@ -197,7 +196,7 @@ class Mission5DbTests(unittest.TestCase):
         self.assertFalse(suspended['is_active'])
         self.assertEqual(suspended['deactivated_reason'], 'عدم سداد')
 
-    def test_atomic_company_create_with_profile_slug_and_contract(self):
+    def test_atomic_company_create_with_profile_and_slug(self):
         tenant_id, user_id = db.create_company_with_admin(
             'شركة تجريبية', 'مدير', 'atomic@example.test', 'atomic_co',
             '+966500000009', 'hash', plan='pro',
@@ -205,8 +204,6 @@ class Mission5DbTests(unittest.TestCase):
             profile={'legal_name': 'شركة تجريبية ذ.م.م', 'tax_number': '300',
                      'cr_number': '1010', 'country': 'السعودية'},
             slug='Atomic Co', package_id='pkg-1', trial_days=30,
-            contracts=[{'kind': 'contract', 'title': 'عقد الافتتاح',
-                        'signature_status': 'signed'}],
         )
         tenant = db.get_tenant_by_id(tenant_id)
         self.assertEqual(tenant['slug'], 'atomic-co')
@@ -215,9 +212,6 @@ class Mission5DbTests(unittest.TestCase):
         self.assertTrue(tenant['trial_ends_at'])
         sub = db.current_subscription(tenant_id)
         self.assertEqual(sub['package_id'], 'pkg-1')
-        contracts = db.list_tenant_contracts(tenant_id)
-        self.assertEqual(len(contracts), 1)
-        self.assertEqual(contracts[0]['signature_status'], 'signed')
         checklist = db.tenant_activation_checklist(tenant)
         self.assertTrue(checklist['complete'], checklist['missing'])
 
@@ -443,12 +437,6 @@ class Mission5ApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 409)
         self.assertEqual(res.get_json()['error'], 'activation_incomplete')
 
-        res = self.client.post(
-            f'/api/admin/tenants/{gate_tenant_id}/contracts',
-            headers=self.admin_headers,
-            json={'title': 'عقد الافتتاح', 'kind': 'contract',
-                  'signatureStatus': 'signed'})
-        self.assertEqual(res.status_code, 201, res.get_json())
         self.client.put(
             f'/api/admin/tenants/{gate_tenant_id}',
             headers=self.admin_headers,
@@ -460,20 +448,16 @@ class Mission5ApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200, res.get_json())
         self.assertTrue(res.get_json()['tenant']['isActive'])
 
-    def test_contract_versions_endpoint(self):
-        created = self.client.post(
-            f'/api/admin/tenants/{self.company_id}/contracts',
-            headers=self.admin_headers, json={'title': 'اتفاقية'})
-        contract_id = created.get_json()['contract']['id']
-        res = self.client.post(
-            f'/api/admin/tenants/{self.company_id}/contracts/{contract_id}/versions',
-            headers=self.admin_headers, json={'signatureStatus': 'signed'})
-        self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.get_json()['contract']['version'], 2)
-        res = self.client.get(
-            f'/api/admin/tenants/{self.company_id}/contracts/{contract_id}/versions',
-            headers=self.admin_headers)
-        self.assertEqual(len(res.get_json()['versions']), 2)
+    def test_contract_routes_are_gone(self):
+        for method, url in (
+            ('get', '/api/contracts'),
+            ('post', '/api/contracts'),
+            ('get', f'/api/admin/tenants/{self.company_id}/contracts'),
+            ('post', f'/api/admin/tenants/{self.company_id}/contracts'),
+            ('post', '/api/admin/contracts/retention-sweep'),
+        ):
+            res = getattr(self.client, method)(url, headers=self.admin_headers)
+            self.assertEqual(res.status_code, 404, f'{method} {url}')
 
     def test_reports_pdf_export(self):
         import unittest.mock as mock

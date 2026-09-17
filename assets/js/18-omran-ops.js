@@ -36,7 +36,7 @@
       }
     }
 
-    const OMRAN_OPS_TABS = ['tasks', 'recharge', 'tickets', 'contracts'];
+    const OMRAN_OPS_TABS = ['tasks', 'recharge', 'tickets'];
     let omActiveTab = 'tasks';
 
     function omranOpsTabVisible(t) {
@@ -80,8 +80,7 @@
         omLoadNotifications(),
         omLoadTickets(),
         omLoadPointsOverview(),
-        omLoadRechargeRequests(),
-        omLoadContracts()
+        omLoadRechargeRequests()
       ]);
     }
 
@@ -536,79 +535,6 @@
       } else {
         toast(WFT('recharge.decision_failed', 'تعذر تسجيل القرار'));
       }
-    }
-
-    // ── Contracts & NDAs (t52, d06) ──────────────────────────────────────
-    async function omLoadContracts() {
-      const box = document.getElementById('omContractsList');
-      if (!box) return;
-      if (!hasPermission('company_settings')) { box.innerHTML = ''; return; }
-      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      const data = await api('GET', '/api/contracts').catch(() => null);
-      if (!data || !data.success) {
-        box.innerHTML = '<p class="tenant-hint">تعذر تحميل العقود.</p>';
-        return;
-      }
-      const contracts = data.contracts || [];
-      if (!contracts.length) {
-        box.innerHTML = '<p class="tenant-hint">لا توجد عقود مسجلة بعد.</p>';
-        return;
-      }
-      box.innerHTML = contracts.map(c => {
-        const expires = c.expires_at ? (' | <span>ينتهي:</span> ' + omEscape(c.expires_at)) : '';
-        const kindLabel = c.kind === 'nda' ? 'اتفاقية سرية' : 'عقد رئيسي';
-        const isExpired = c.status === 'expired' || (c.expires_at && new Date(c.expires_at) < new Date());
-        const statusLabel = isExpired ? '<span style="color:#c33;">منتهي (محفوظ 365 يوماً)</span>' : '<span style="color:var(--green);">سارٍ</span>';
-        return '<div class="tenant-presentation-card">' +
-          '<div><h3>' + omEscape(c.title) + ' — <span>' + kindLabel + '</span></h3>' +
-          '<div class="meta">' + statusLabel + expires + '</div></div></div>';
-      }).join('');
-    }
-
-    async function omCreateContract() {
-      const title = (document.getElementById('omContractTitle') || {}).value || '';
-      const kind = (document.getElementById('omContractKind') || {}).value || 'nda';
-      const startsAt = (document.getElementById('omContractStarts') || {}).value || '';
-      const expiresAt = (document.getElementById('omContractExpires') || {}).value || '';
-      const signatureStatus = (document.getElementById('omContractSignature') || {}).value || 'unsigned';
-      const errBox = document.getElementById('omContractError');
-      if (errBox) errBox.textContent = '';
-      if (!title.trim()) {
-        if (errBox) errBox.textContent = 'مسمى العقد مطلوب.';
-        return;
-      }
-      let fileId = null;
-      const fileInput = document.getElementById('omContractFile');
-      if (fileInput && fileInput.files && fileInput.files[0]) {
-        const form = new FormData();
-        form.append('file', fileInput.files[0]);
-        form.append('fileType', 'contract_file');
-        const uploaded = await api('POST', '/api/project-files', form, true).catch(e => e);
-        if (!uploaded || !uploaded.success) {
-          if (errBox) errBox.textContent = (uploaded && uploaded.error) || 'تعذر رفع ملف الوثيقة.';
-          return;
-        }
-        fileId = uploaded.file.id;
-      }
-      const data = await api('POST', '/api/contracts', {
-        title: title.trim(),
-        kind: kind,
-        fileId: fileId,
-        startsAt: startsAt || null,
-        expiresAt: expiresAt || null,
-        signatureStatus: signatureStatus
-      }).catch(e => e);
-      if (!data || !data.success) {
-        if (errBox) errBox.textContent = (data && data.error) || 'تعذر حفظ العقد.';
-        return;
-      }
-      if (document.getElementById('omContractTitle')) document.getElementById('omContractTitle').value = '';
-      if (document.getElementById('omContractExpires')) document.getElementById('omContractExpires').value = '';
-      if (document.getElementById('omContractStarts')) document.getElementById('omContractStarts').value = '';
-      if (fileInput) fileInput.value = '';
-      closeOmModal('omContractModal');
-      toast(WFT('contracts.saved', 'تم حفظ العقد بنجاح'));
-      await omLoadContracts();
     }
 
     // ── File types registry (t62, d10) — lives on the platform settings page ──
