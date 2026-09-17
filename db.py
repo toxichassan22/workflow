@@ -4734,9 +4734,13 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     """
     conn = get_db()
     if draft_id:
+        # ISS-029: a named draft identifies the tenant's row; the actor's scope
+        # is enforced by the route before this call. Filtering by user_id here
+        # made a shared draft look absent and the INSERT below die on a
+        # duplicate primary key instead of accepting the authorized edit.
         existing = conn.execute(
-            'SELECT * FROM project_drafts WHERE id = ? AND tenant_id = ? AND user_id = ?',
-            (draft_id, tenant_id, user_id)
+            'SELECT * FROM project_drafts WHERE id = ? AND tenant_id = ?',
+            (draft_id, tenant_id)
         ).fetchone()
     else:
         # The single-draft fallback targets the newest EDITABLE row: a locked
@@ -5139,8 +5143,9 @@ def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
     conn = get_db()
     for attempt in range(6):
         draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
-        if draft and draft.get('user_id') != user_id:
-            draft = None
+        # A named shared draft stays writable: the route already proved the
+        # actor's scope, and vetoing by owner here turned a legal status
+        # change into a phantom create that collided on the primary key.
         if not draft:
             # A status click can occur before the first explicit Save action.
             save_project_draft(tenant_id, user_id, {}, {}, 'draft', draft_id=draft_id)

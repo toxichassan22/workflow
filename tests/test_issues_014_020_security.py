@@ -325,5 +325,217 @@ class ImageReferenceTests(ScopeTestBase):
             self.assertIsNone(self.module._visual_concept_project_file_data_uri(file_id, self.tenant))
 
 
+class SectionStatusSaveTests(ScopeTestBase):
+    """ISS-023: a plain save cannot mint approvals outside the gated route."""
+
+    def test_save_cannot_approve_location_without_the_map_gate(self):
+        with self.app.app_context():
+            draft_id = db.save_project_draft(
+                self.tenant, f'tenant-admin:{self.tenant}', {'project_name': 'حالة'},
+                {'basic': 'draft'}, 'draft', draft_id='status-draft-1')
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'حالة'},
+            'sectionStatuses': {'location': 'approved', 'basic': 'approved'}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with self.app.app_context():
+            stored = db.get_project_draft_by_id(self.tenant, draft_id)['section_statuses']
+        # No approved maps exist, so the workflow gate keeps location at draft —
+        # while a section with no version snapshots may toggle exactly the way
+        # the dedicated route already allows.
+        self.assertNotEqual(stored.get('location'), 'approved')
+        self.assertEqual(stored.get('basic'), 'approved')
+
+    def test_dropped_and_demoted_statuses_behave(self):
+        with self.app.app_context():
+            draft_id = db.save_project_draft(
+                self.tenant, f'tenant-admin:{self.tenant}', {'project_name': 'حالة'},
+                {'basic': 'approved', 'contact': 'approved'}, 'draft', draft_id='status-draft-2')
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'حالة'},
+            'sectionStatuses': {'basic': 'draft'}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with self.app.app_context():
+            stored = db.get_project_draft_by_id(self.tenant, draft_id)['section_statuses']
+        self.assertEqual(stored.get('basic'), 'draft')       # demotion allowed
+        self.assertEqual(stored.get('contact'), 'approved')  # dropped key restored
+
+
+class SharedDraftSaveTests(ScopeTestBase):
+    """ISS-029: an in-scope shared draft saves instead of key-colliding."""
+
+    def test_in_scope_employee_save_lands_on_the_owner_row(self):
+        response = self.client.post('/api/project-draft', headers=self.emp_headers, json={
+            'draftData': {'draftId': self.draft_a, 'project_name': 'تعديل تعاوني'}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with self.app.app_context():
+            stored = db.get_project_draft_by_id(self.tenant, self.draft_a)
+        self.assertEqual(stored['draft_data']['project_name'], 'تعديل تعاوني')
+        self.assertEqual(stored['user_id'], 'owner')
+
+
+class SignedMediaUrlTests(ScopeTestBase):
+    """ISS-022: uploads media serves only an expiring signature or the owner."""
+
+    def _creative(self, tenant, name='pub.png', data=b'img-bytes'):
+        folder = Path(self.module.UPLOADS_DIR) / 'creative' / tenant
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(data)
+        return f'/uploads/creative/{tenant}/{name}'
+
+    def _map(self, tenant, name='map-x.png'):
+        maps = Path(self.module.UPLOADS_DIR) / 'maps'
+        maps.mkdir(parents=True, exist_ok=True)
+        (maps / name).write_bytes(b'map-bytes')
+        with self.app.app_context():
+            db.add_map_image(tenant, 'overview', f'uploads/maps/{name}', 'ph')
+        return f'/uploads/maps/{name}'
+
+    def _sig(self, path):
+        return self.module._media_url_serializer().dumps({'p': path})
+
+    def test_unsigned_media_requests_are_refused(self):
+        creative = self._creative(self.tenant)
+        maps = self._map(self.tenant)
+        for url in (creative, maps, '/uploads/maps/map-x.png'):
+            self.assertEqual(self.client.get(url).status_code, 404, url)
+
+    def test_valid_signature_serves_and_wrong_or_foreign_sig_fails(self):
+        creative = self._creative(self.tenant)
+        self.assertEqual(self.client.get(creative + '?s=' + self._sig(creative)).status_code, 200)
+        self.assertEqual(self.client.get(creative + '?s=forged').status_code, 404)
+        self.assertEqual(self.client.get(
+            creative + '?s=' + self._sig('/uploads/creative/' + self.tenant + '/other.png')
+        ).status_code, 404)
+
+    def test_bearer_session_serves_only_owning_tenant(self):
+        creative = self._creative(self.tenant)
+        self.assertEqual(self.client.get(creative, headers=self.admin_headers).status_code, 200)
+        self.assertEqual(self.client.get(creative, headers=self.other_headers).status_code, 404)
+
+    def test_json_responses_sign_owned_urls_only(self):
+        with self.app.app_context():
+            draft_id = db.save_project_draft(
+                self.tenant, 'owner',
+                {'project_name': 'توقيع', 'cover': self._creative(self.tenant, 'signed.png'),
+                 'foreign': self._creative(self.other, 'foreign.png'),
+                 'map': self._map(self.tenant, 'owned-map.png'),
+                 'unowned': self._map(self.other, 'foreign-map.png')},
+                {'basic': 'draft'}, 'draft')
+        response = self.client.get(f'/api/project-draft/{draft_id}', headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()['draft']['draft_data']
+        self.assertIn('?s=', data['cover'])
+        self.assertIn('?s=', data['map'])
+        self.assertNotIn('?s=', data['foreign'])
+        self.assertNotIn('?s=', data['unowned'])
+        # The signed URL actually serves the file.
+        self.assertEqual(self.client.get(data['cover']).status_code, 200)
+        self.assertEqual(self.client.get(data['map']).status_code, 200)
+
+
+class GenerationGateTests(ScopeTestBase):
+    """ISS-024: draft-scoped generation requires a live approved gate whose
+    snapshot matches both the stored draft and the inputs actually sent."""
+
+    SLIDE_PLAN = {'slides': [{'title': 'غلاف', 'type': 'cover'}]}
+
+    def _draft(self, draft_id, data=None, statuses=None):
+        payload = {'project_name': 'مشروع البوابة'}
+        payload.update(data or {})
+        with self.app.app_context():
+            return db.save_project_draft(
+                self.tenant, 'owner', payload,
+                statuses or {'basic': 'approved'}, 'draft', draft_id=draft_id)
+
+    def _approve(self, draft_id):
+        with self.app.app_context():
+            draft = db.get_project_draft_by_id(self.tenant, draft_id)
+            snapshot = {'draft_hash': db.draft_generation_input_hash(draft['draft_data'] or {})}
+            approval = db.create_generation_approval(
+                self.tenant, draft_id,
+                {'estimated_points': 0, 'estimated_cost_usd': 0, 'slides_count': 1},
+                'owner', 'Owner', input_snapshot=snapshot)
+            self.assertNotIn('error', approval, approval)
+            decided = db.decide_generation_approval(
+                self.tenant, approval['id'], 'approved', 'owner', 'Owner', allow_self=True)
+            self.assertNotIn('error', decided, decided)
+            return approval['id']
+
+    def _generate(self, project_data, headers=None):
+        with patch.object(self.module.slide_engine, 'generate_single_slide',
+                          return_value='<div class="slide">ok</div>'), \
+                patch.object(db, 'get_branding', return_value={'company_name': 'x'}):
+            return self.client.post('/api/generate-slide-single',
+                                    headers=headers or self.admin_headers,
+                                    json={'projectData': project_data,
+                                          'slidePlan': self.SLIDE_PLAN,
+                                          'slideIndex': 0})
+
+    def test_declared_draft_without_approval_is_refused(self):
+        draft_id = self._draft('gate-none')
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة'})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json().get('error_code'), 'generation_not_approved')
+
+    def test_draftless_generation_is_untouched(self):
+        response = self._generate({'project_name': 'بلا مسودة'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_approved_inputs_generate(self):
+        draft_id = self._draft('gate-ok')
+        self._approve(draft_id)
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_sent_inputs_must_match_the_approved_draft(self):
+        draft_id = self._draft('gate-tamper', {'land_area': '500'})
+        self._approve(draft_id)
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
+                                   'land_area': '999'})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json().get('error_code'), 'inputs_changed')
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
+                                   'land_area': '500', 'injected': 'x'})
+        self.assertEqual(response.status_code, 409)
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
+                                   'land_area': '500'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_draft_drift_after_approval_is_refused(self):
+        draft_id = self._draft('gate-drift', {'land_area': '500'})
+        self._approve(draft_id)
+        with self.app.app_context():
+            db.save_project_draft(
+                self.tenant, 'owner',
+                {'project_name': 'مشروع البوابة', 'land_area': '777'},
+                {'basic': 'approved'}, 'generating', draft_id=draft_id,
+                allow_generating=True)
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
+                                   'land_area': '777'})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json().get('error_code'), 'inputs_changed')
+
+    def test_slimmed_financial_and_photos_still_match(self):
+        model = {'inputs': {'projectCost': 1000}}
+        photos = [{'id': 'p1', 'imageUrl': '/uploads/creative/t/1.png',
+                   'originalName': 'a.png', 'description': 'd', 'extra': 'keep'}]
+        draft_id = self._draft('gate-slim', {'financial_study_model': model,
+                                             'land_photos_file_meta': photos})
+        self._approve(draft_id)
+        response = self._generate({
+            'draftId': draft_id, 'project_name': 'مشروع البوابة',
+            'financial_study_model': {'inputs': {'projectCost': 1000}, 'report': {'parts': []}},
+            'land_photos_file_meta': [{'id': 'p1', 'imageUrl': '/uploads/creative/t/1.png',
+                                       'originalName': 'a.png', 'description': 'd'}]})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_scoped_employee_cannot_generate_on_a_foreign_draft(self):
+        draft_id = self._draft('gate-scope', {'project_name': 'مشروع ممنوع'})
+        self._approve(draft_id)
+        response = self._generate({'draftId': draft_id, 'project_name': 'مشروع ممنوع'},
+                                  headers=self.emp_headers)
+        self.assertEqual(response.status_code, 404)
+
+
 if __name__ == '__main__':
     unittest.main()

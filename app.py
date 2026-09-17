@@ -43,11 +43,14 @@ import executive_content
 import population_service
 import slide_engine
 import change_tracking
+import presentation_assets
 import designer_chat_reliability
 import designer_chat_targets
 import designer_chat_colors
 import designer_chat_context
-from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
+from auth import (require_auth, require_admin, require_company_admin, require_permission,
+                  hash_password, verify_password, create_token, decode_token,
+                  _load_token_user, _session_state_error, _is_platform_admin_session)
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
 app = Flask(__name__, static_folder=None)
@@ -4916,7 +4919,7 @@ _VISUAL_PLAN_SETBACK_EN = (
 
 
 def _visual_concept_plan_setback_en(text):
-    """Light deterministic Arabic→English for recorded setback phrasing —
+    """Light deterministic Arabic-to-English for recorded setback phrasing —
     keeps every number and condition, maps the standard setback vocabulary."""
     text = str(text or '').strip()
     if not re.search(r'[\u0600-\u06FF]', text):
@@ -12015,35 +12018,100 @@ def _generation_map_marker_side(images, project_data, view='overview'):
     return 'left' if marker_lng < center_lng else 'right'
 
 
-def _generation_inputs_guard(project_data):
-    """t14-04/t15-01: a running generation must still match its approved inputs.
+def _generation_sent_value_matches(sent, stored):
+    """Deep-compare a sent generation input against its stored counterpart.
 
-    Returns an error response when the draft's live inputs drifted from the
-    approved snapshot — e.g. a concurrent edit raced the lock. None = clean.
+    Forward-only: every key the client sent must agree with storage, while
+    stored keys legitimately absent from the payload (the client slims the
+    request) are ignored. ``clean_project_data`` replaces embedded image data
+    with ``[IMAGE_DATA_OMITTED]`` before the guard runs — a leaf the run only
+    ever sees as the placeholder, so it matches whatever storage holds. The
+    same applies to ``blob:`` URLs, which the backend cannot consume.
+    """
+    if isinstance(sent, str) and (sent == '[IMAGE_DATA_OMITTED]' or sent.startswith('blob:')):
+        return True
+    if isinstance(sent, dict) and isinstance(stored, dict):
+        return all(_generation_sent_value_matches(value, stored.get(key))
+                   for key, value in sent.items())
+    if isinstance(sent, list) and isinstance(stored, list):
+        return len(sent) == len(stored) and all(
+            _generation_sent_value_matches(a, b) for a, b in zip(sent, stored))
+    return _draft_values_equal(sent, stored)
+
+
+def _generation_sent_input_matches(key, sent_value, stored_value):
+    """Whether one client-sent generation input agrees with the stored draft.
+
+    Two fields reach the wire in a slimmed shape (slimGenerationProjectData):
+    ``financial_study_model`` gains an injected ``report`` companion and
+    ``land_photos_file_meta`` collapses each photo to {id, imageUrl,
+    originalName, description} — they are compared in that normalized form.
+    """
+    if key == 'financial_study_model':
+        strip = lambda model: ({k: v for k, v in model.items() if k != 'report'}
+                               if isinstance(model, dict) else model)
+        return _generation_sent_value_matches(strip(sent_value), strip(stored_value))
+    if key == 'land_photos_file_meta':
+        def norm(items):
+            return [
+                {
+                    'id': photo.get('id') or '',
+                    'imageUrl': photo.get('imageUrl') or photo.get('url') or '',
+                    'originalName': photo.get('originalName') or photo.get('name') or '',
+                    'description': photo.get('description') or '',
+                }
+                for photo in (items if isinstance(items, list) else [])
+                if isinstance(photo, dict)
+            ]
+        return norm(sent_value) == norm(stored_value)
+    return _generation_sent_value_matches(sent_value, stored_value)
+
+
+def _generation_inputs_guard(project_data):
+    """t14-04/t15-01: draft-scoped generation stays inside its approval gate.
+
+    Returns None when the run is clean. Once projectData names a draft, a live
+    ``approved`` generation approval must exist (settlement moves the row to
+    ``consumed``, so the gate is per-run), the stored draft must still match the
+    approved snapshot, and every generation input the request actually carries
+    must agree with that stored draft — slimmed keys legitimately absent from
+    the payload are skipped, reshaped fields are compared normalized. A lookup
+    failure fails closed rather than letting generation slip the gate.
     """
     draft_id = project_data.get('draftId') or project_data.get('draft_id')
     if not draft_id:
         return None
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return None
+    if not db.user_may_access_draft(g.user_id, draft):
+        return jsonify({'error': 'المشروع غير موجود'}), 404
     try:
         approval = db.get_db().execute(
             "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
             "AND status = 'approved' ORDER BY decided_at DESC LIMIT 1",
             (g.tenant_id, draft_id)).fetchone()
-        if not approval:
-            return None
-        snapshot = db._json_object(
-            approval['input_snapshot'] if 'input_snapshot' in approval.keys() else None)
-        wanted = snapshot.get('draft_hash')
-        if not wanted:
-            return None
-        draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
-        if not draft:
-            return None
-        if db.draft_generation_input_hash(draft.get('draft_data') or {}) != wanted:
-            return jsonify({'error': 'مدخلات المشروع تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
-                            'error_code': 'inputs_changed'}), 409
     except Exception:
-        return None
+        app.logger.warning('generation gate lookup failed for draft %s', draft_id, exc_info=True)
+        return jsonify({'error': 'تعذر التحقق من اعتماد التوليد — أعد المحاولة',
+                        'error_code': 'generation_gate_unverified'}), 503
+    if not approval:
+        return jsonify({'error': 'توليد هذا المشروع يتطلب اعتماد توليد ساريًا',
+                        'error_code': 'generation_not_approved'}), 409
+    snapshot = db._json_object(approval['input_snapshot'] if 'input_snapshot' in approval.keys() else None)
+    stored_data = draft.get('draft_data') or {}
+    wanted = snapshot.get('draft_hash')
+    if wanted and db.draft_generation_input_hash(stored_data) != wanted:
+        return jsonify({'error': 'مدخلات المشروع تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
+                        'error_code': 'inputs_changed'}), 409
+    for key, value in project_data.items():
+        if key in db.GENERATION_INPUT_EXCLUDED_KEYS:
+            continue
+        if key.endswith('_file_meta') and key != 'land_photos_file_meta':
+            continue
+        if not _generation_sent_input_matches(key, value, stored_data.get(key)):
+            return jsonify({'error': 'مدخلات التوليد المرسلة لا تطابق المشروع المعتمد',
+                            'error_code': 'inputs_changed'}), 409
     return None
 
 
@@ -12728,6 +12796,14 @@ def _presentation_conflict(error):
     }), 409
 
 
+@app.errorhandler(presentation_assets.PresentationAssetError)
+def _presentation_asset_error(error):
+    return jsonify({
+        'success': False, 'error': 'وسائط العرض غير صالحة أو غير مصرح بها؛ لم تُحفظ التغييرات',
+        'error_code': 'PRESENTATION_ASSET_REJECTED',
+    }), 422
+
+
 def _presentation_provenance_serializer():
     from itsdangerous import URLSafeTimedSerializer
     from auth import JWT_SECRET
@@ -12797,7 +12873,7 @@ def _freeze_presentation_project_metadata(value, freeze):
 
 def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
     """All application content writes use the transactional version/history authority."""
-    from presentation_assets import PresentationAssetError, freeze_presentation_assets
+    from presentation_assets import freeze_presentation_assets
     root = os.path.dirname(__file__)
     authorized = {}
     for row in db.get_map_images(tenant_id):
@@ -12832,18 +12908,13 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
             return {key: freeze(item) for key, item in value.items()}
         if isinstance(value, list):
             return [freeze(item) for item in value]
-        try:
-            return freeze_presentation_assets(
-                value, tenant_id, authorized_paths=authorized,
-                allowed_origin=request.host_url.rstrip('/'),
-                uploads_root=UPLOADS_DIR)
-        except PresentationAssetError as error:
-            # Keep historical provider paths that were never local tenant assets.
-            # New recognized tenant assets still fail closed; the exception URL
-            # identifies the legacy reference that is safe to leave untouched.
-            if str(error.url).startswith(('/uploads/maps/', '/uploads/creative/')):
-                return value
-            raise
+        # Dangling historical uploads references (files absent from this
+        # server) are preserved inside the freezer per-URL; every asset that
+        # exists must pass its authorization and safety checks.
+        return freeze_presentation_assets(
+            value, tenant_id, authorized_paths=authorized,
+            allowed_origin=request.host_url.rstrip('/'),
+            uploads_root=UPLOADS_DIR, preserve_missing_uploads=True)
     def freeze_snapshot(state):
         frozen = dict(state)
         parsed = _presentation_state(state)
@@ -13548,6 +13619,48 @@ def _enforce_draft_field_sections(draft_data, stored_data, section_statuses, sto
     return forbidden, restored
 
 
+def _sanitize_save_section_statuses(tenant_id, draft, incoming, stored_statuses):
+    """ISS-023: a plain save may not mint approvals outside the gated route.
+
+    Mirroring the stored value and demoting to 'draft' are always safe — a stale
+    client must still be able to save its edit. A NEW 'approved' has to pass the
+    same gates the section-status route enforces (location workflow, no pending
+    version, version readiness); otherwise the stored value stands. Keys the
+    payload dropped are restored from storage so the map cannot be pruned.
+    """
+    if incoming is None:
+        return None
+    stored = stored_statuses if isinstance(stored_statuses, dict) else {}
+    sanitized = dict(stored)
+    blocked = []
+    section_map = None
+    draft_id = (draft or {}).get('id')
+    for key, value in incoming.items():
+        if not isinstance(key, str) or not key or value not in {'draft', 'approved'}:
+            continue
+        if value == 'draft' or stored.get(key) == 'approved':
+            sanitized[key] = value
+            continue
+        if key == 'location' and not _location_workflow_complete(draft):
+            blocked.append(key)
+            continue
+        if draft_id and db.pending_section_versions(tenant_id, draft_id, [key]):
+            blocked.append(key)
+            continue
+        if section_map is None:
+            section_map = _draft_field_section_map(tenant_id)
+        state, _meta = _section_version_readiness(draft, key, section_map)
+        if state in {'not_approved', 'stale', 'expired'}:
+            blocked.append(key)
+            continue
+        sanitized[key] = 'approved'
+    if blocked:
+        app.logger.warning(
+            '[DRAFT SAVE] Restored %d ungated approval(s): tenant=%s draft=%s sections=%s',
+            len(blocked), tenant_id, draft_id, blocked[:12])
+    return sanitized
+
+
 def _draft_locked_response(status):
     """423 answer naming the lifecycle state that froze the draft."""
     label = db.PROPOSAL_LIFECYCLE_STATES.get(status, {}).get('label', status)
@@ -13636,6 +13749,10 @@ def api_save_project_draft():
     # may write; every other locked state refuses the save outright.
     prev_norm = db.normalize_proposal_status((previous or {}).get('status')) if previous else 'draft'
     allow_generating = bool(data.get('slideCheckpoint')) and prev_norm == 'generating'
+    # ISS-023: statuses travel through the save only as mirrors, demotions, or
+    # approvals that would also pass the dedicated route's gates.
+    section_statuses = _sanitize_save_section_statuses(
+        g.tenant_id, previous, section_statuses, previous_statuses)
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -25815,9 +25932,137 @@ def static_assets(path):
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
+MEDIA_URL_MAX_AGE = 7 * 86400
+_MEDIA_URL_RE = re.compile(r"/uploads/[^\s<>'\"`\\),;\]\[]+")
+
+
+def _media_url_serializer():
+    from itsdangerous import URLSafeTimedSerializer
+    from auth import JWT_SECRET
+    return URLSafeTimedSerializer(JWT_SECRET, salt='media-url-v1')
+
+
+def _media_url_owned(path, tenant_id, map_basenames):
+    """Whether this uploads path belongs to the tenant's own media."""
+    pieces = path.lstrip('/').split('/')
+    if pieces[:2] == ['uploads', 'creative'] and len(pieces) >= 4:
+        return pieces[2] == tenant_id
+    if pieces[:2] == ['uploads', 'maps'] and len(pieces) == 3:
+        return pieces[2] in map_basenames
+    if len(pieces) == 2:
+        return pieces[1] in map_basenames
+    return False
+
+
+def _media_map_basenames(tenant_id):
+    names = {os.path.basename(str(row.get('file_path') or ''))
+             for row in db.get_map_images(tenant_id)}
+    names.discard('')
+    return names
+
+
+def _sign_media_url(url, tenant_id, state):
+    path = url.split('?', 1)[0].split('#', 1)[0]
+    pieces = path.lstrip('/').split('/')
+    if getattr(g, 'is_admin', False):
+        owned = True
+    elif pieces[:2] == ['uploads', 'creative']:
+        owned = len(pieces) >= 4 and pieces[2] == tenant_id
+    else:
+        if state['maps'] is None:
+            state['maps'] = _media_map_basenames(tenant_id)
+        owned = _media_url_owned(path, tenant_id, state['maps'])
+    if not owned:
+        return url
+    sig = _media_url_serializer().dumps({'p': path})
+    if '#' in url:
+        base, frag = url.split('#', 1)
+        frag = '#' + frag
+    else:
+        base, frag = url, ''
+    if '?' in base:
+        bare, query = base.split('?', 1)
+        kept = '&'.join(p for p in query.split('&')
+                        if p and not p.lstrip('amp;').startswith('s='))
+        return bare + '?' + (kept + '&' if kept else '') + 's=' + sig + frag
+    return base + '?s=' + sig + frag
+
+
+def _sign_media_refs(value, tenant_id, state):
+    if isinstance(value, dict):
+        return {key: _sign_media_refs(item, tenant_id, state) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sign_media_refs(item, tenant_id, state) for item in value]
+    if not isinstance(value, str) or '/uploads/' not in value:
+        return value
+    def replace(match):
+        signed = _sign_media_url(match.group(0), tenant_id, state)
+        if signed != match.group(0):
+            state['changed'] = True
+        return signed
+    return _MEDIA_URL_RE.sub(replace, value)
+
+
+@app.after_request
+def sign_media_urls(response):
+    """Attach an expiring signature to the tenant's own uploads URLs in JSON.
+
+    The media routes require either this signature or a matching session token,
+    so a link copied out of a response stops working instead of staying public
+    forever. Foreign or unowned references are left unsigned, which keeps them
+    unservable rather than laundering access through the signer.
+    """
+    tenant = getattr(g, 'tenant_id', None)
+    if (not tenant or not (200 <= response.status_code < 300)
+            or response.mimetype != 'application/json'):
+        return response
+    try:
+        body = response.get_data(as_text=True)
+    except Exception:
+        return response
+    if not body or '/uploads/' not in body:
+        return response
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return response
+    state = {'maps': None, 'changed': False}
+    signed = _sign_media_refs(payload, tenant, state)
+    if state['changed']:
+        response.set_data(json.dumps(signed, ensure_ascii=False))
+    return response
+
+
+def _media_request_authorized(path):
+    """A valid expiring signature, or a session token for the owning tenant."""
+    sig = request.args.get('s') or ''
+    if sig:
+        try:
+            payload = _media_url_serializer().loads(sig, max_age=MEDIA_URL_MAX_AGE)
+            if isinstance(payload, dict) and payload.get('p') == path:
+                return True
+        except Exception:
+            pass
+    header = request.headers.get('Authorization', '')
+    if header.startswith('Bearer '):
+        payload = decode_token(header[7:].strip())
+        if payload and payload.get('sub'):
+            tenant = db.get_tenant_by_id(payload['sub'])
+            if tenant and tenant.get('is_active'):
+                user_row, user_error = _load_token_user(payload, tenant)
+                if not user_error and not _session_state_error(payload, tenant, user_row):
+                    if _is_platform_admin_session(tenant, payload):
+                        return True
+                    return _media_url_owned(path, payload['sub'],
+                                            _media_map_basenames(payload['sub']))
+    return False
+
+
 @app.route('/uploads/maps/<path:path>')
 def static_map_uploads(path):
     """Serve persisted map assets; generation is available only via explicit APIs."""
+    if not _media_request_authorized(request.path):
+        return jsonify({'error': 'Not found'}), 404
     maps_dir = os.path.join(UPLOADS_DIR, 'maps')
     full_path = os.path.join(maps_dir, path)
     if os.path.isfile(full_path):
@@ -25829,6 +26074,8 @@ def static_map_uploads(path):
 def static_creative_upload(tenant_id, filename):
     """Serve generated creative images without exposing arbitrary upload paths."""
     safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', tenant_id)
+    if not _media_request_authorized(request.path):
+        return jsonify({'error': 'Not found'}), 404
     safe_filename = os.path.basename(filename)
     revision_asset = bool(re.fullmatch(r'revisions/[a-f0-9]{64}\.(?:png|jpg|jpeg|webp|gif|avif|bmp|ico|svg|ttf|otf|woff|woff2)', filename))
     if safe_tenant != tenant_id or (safe_filename != filename and not revision_asset):
@@ -25848,6 +26095,8 @@ def static_creative_upload(tenant_id, filename):
 @app.route('/uploads/<path:path>')
 def static_uploads(path):
     """Serve map images or static presentation assets."""
+    if not _media_request_authorized(request.path):
+        return jsonify({'error': 'Not found'}), 404
     maps_dir = os.path.join(UPLOADS_DIR, 'maps')
     filename = os.path.basename(path)
     possible_map = os.path.join(maps_dir, filename)

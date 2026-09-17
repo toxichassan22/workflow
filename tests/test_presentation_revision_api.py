@@ -222,10 +222,12 @@ class PresentationRevisionApiTests(unittest.TestCase):
                               projectData={'cover': url})
         snapshot_url = created['presentation']['projectData']['cover']
         self.assertIn('/revisions/', snapshot_url)
+        # Responses sign uploads URLs (?s=…, expiring); the path is the identity.
+        snapshot_path = snapshot_url.split('?', 1)[0]
         source.write_bytes(b'replacement image bytes')
-        self.assertEqual((Path(self.temp.name) / snapshot_url.lstrip('/')).read_bytes(), b'original image bytes')
+        self.assertEqual((Path(self.temp.name) / snapshot_path.lstrip('/')).read_bytes(), b'original image bytes')
         fetched = self.client.get(f"/api/presentations/{created['presentationId']}", headers=self.headers).get_json()
-        self.assertEqual(fetched['presentation']['projectData']['cover'], snapshot_url)
+        self.assertEqual(fetched['presentation']['projectData']['cover'].split('?', 1)[0], snapshot_path)
         asset = self.client.get(snapshot_url)
         self.assertEqual(asset.status_code, 200)
         self.assertEqual(asset.data, b'original image bytes')

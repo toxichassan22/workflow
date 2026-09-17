@@ -2868,7 +2868,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                 patch.object(self.application_module.os.path, 'getsize', return_value=3), \
                 patch('builtins.open', mock_open(read_data=b'abc')):
             result = self.application_module.call_image_api_with_reference(
-                '/uploads/creative/tenant-a/cover.png?t=1', 'moodboard prompt'
+                '/uploads/creative/tenant-a/cover.png?t=1', 'moodboard prompt',
+                usage_ctx={'tenant_id': 'tenant-a'}
             )
 
         self.assertEqual(result, 'data:image/png;base64,result')
@@ -9103,8 +9104,8 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,BBBB') as interior_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
-                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
-                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id: f'data:image/png;base64,{file_id}'):
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id, tenant_id=None: f'data:image/png;base64,{file_id}'):
             interior = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'interior_comp-1',
                 'prompt': 'Apartment interior',
@@ -9160,7 +9161,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,CCCC') as plan_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
-                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
             plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'prompt': 'Conceptual site plan',
@@ -9261,7 +9262,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,CCCC') as image_call, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'), \
-                patch.object(module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+                patch.object(module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
             generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site', 'planKind': 'site', 'prompt': 'SITE PROMPT',
                 'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',

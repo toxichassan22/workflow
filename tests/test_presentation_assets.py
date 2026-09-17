@@ -321,6 +321,41 @@ class PresentationAssetsTests(unittest.TestCase):
             self.assertEqual(freeze_presentation_assets(self.url, self.tenant),
                              self.revision(self.original.read_bytes()))
 
+    def test_preserve_missing_uploads_keeps_only_dangling_references(self):
+        dangling_map = '/uploads/maps/migrated-map.png?v=3'
+        dangling_creative = '/uploads/creative/tenant-a/revisions/' + 'a' * 64 + '.png'
+        with self.assertRaises(PresentationAssetError):
+            self.freeze(dangling_map)
+        self.assertEqual(self.freeze(dangling_map, preserve_missing_uploads=True),
+                         dangling_map)
+        self.assertEqual(
+            self.freeze({'ref': dangling_creative}, preserve_missing_uploads=True),
+            {'ref': dangling_creative})
+
+    def test_preserve_missing_uploads_still_rejects_existing_unauthorized_files(self):
+        foreign = '/uploads/creative/tenant-b/stolen.png'
+        self.write(foreign, b'foreign bytes')
+        with self.assertRaisesRegex(PresentationAssetError, 'another tenant'):
+            self.freeze(foreign, preserve_missing_uploads=True)
+        unowned_map = '/uploads/maps/foreign.png'
+        self.write(unowned_map, b'foreign map')
+        with self.assertRaises(PresentationAssetError):
+            self.freeze(unowned_map, preserve_missing_uploads=True)
+
+    def test_preserve_missing_uploads_decides_per_url_inside_one_string(self):
+        foreign = '/uploads/creative/tenant-b/stolen.png'
+        self.write(foreign, b'foreign bytes')
+        html = ('<img src="/uploads/maps/gone.png">'
+                '<img src="' + foreign + '">')
+        with self.assertRaisesRegex(PresentationAssetError, 'another tenant'):
+            self.freeze(html, preserve_missing_uploads=True)
+
+    def test_preserve_missing_uploads_rejects_tampered_existing_revision(self):
+        revision = self.revision(b'known')
+        self.write(revision, b'tampered')
+        with self.assertRaisesRegex(PresentationAssetError, 'hash'):
+            self.freeze(revision, preserve_missing_uploads=True)
+
 
 if __name__ == '__main__':
     unittest.main()

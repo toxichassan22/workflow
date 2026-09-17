@@ -123,7 +123,8 @@ def _decoded_path(path, original):
 
 
 class _Freezer:
-    def __init__(self, tenant_id, root, allowed_origin, authorized_paths, uploads_root=None):
+    def __init__(self, tenant_id, root, allowed_origin, authorized_paths, uploads_root=None,
+                 preserve_missing_uploads=False):
         tenant = str(tenant_id) if tenant_id is not None else ''
         if not _TENANT_RE.fullmatch(tenant):
             raise PresentationAssetError('has an invalid tenant identifier')
@@ -153,6 +154,7 @@ class _Freezer:
                     target = self.root / target
                 self.authorized[canonical] = target
         self.cache = {}
+        self.preserve_missing_uploads = preserve_missing_uploads
 
     def local_url(self, url):
         value = html.unescape(url)
@@ -325,23 +327,43 @@ class _Freezer:
         except OSError as exc:
             raise PresentationAssetError('could not be stored atomically', url) from exc
 
+    def _dangling_upload(self, canonical):
+        """A local uploads URL naming a file that does not exist anywhere on
+        this server. The canonical path is already traversal-safe; only flat
+        map files and tenant creative paths qualify as legacy references."""
+        pieces = canonical.lstrip('/').split('/')
+        if pieces[:2] not in (['uploads', 'maps'], ['uploads', 'creative']):
+            return False
+        candidates = [self.uploads_root.joinpath(*pieces[1:]),
+                      self.root.joinpath(*pieces)]
+        return not any(candidate.is_file() for candidate in candidates)
+
     def freeze_url(self, url):
         local = self.local_url(url)
         if local is None:
             return url
         canonical, fragment = local
         if canonical not in self.cache:
-            source = self.authorized_source(canonical)
-            data = self.read_source(source, canonical)
-            revision_prefix = f'/uploads/creative/{self.tenant}/revisions/'
-            if canonical.startswith(revision_prefix):
-                match = _REVISION_RE.fullmatch(canonical[len(revision_prefix):])
-                if not match or hashlib.sha256(data).hexdigest() != match[1]:
-                    raise PresentationAssetError('revision content does not match its hash', canonical)
-                frozen = canonical
-            else:
-                frozen = self.publish(data, source.suffix.lower(), canonical)
-            self.cache[canonical] = frozen
+            try:
+                source = self.authorized_source(canonical)
+                data = self.read_source(source, canonical)
+                revision_prefix = f'/uploads/creative/{self.tenant}/revisions/'
+                if canonical.startswith(revision_prefix):
+                    match = _REVISION_RE.fullmatch(canonical[len(revision_prefix):])
+                    if not match or hashlib.sha256(data).hexdigest() != match[1]:
+                        raise PresentationAssetError('revision content does not match its hash', canonical)
+                    frozen = canonical
+                else:
+                    frozen = self.publish(data, source.suffix.lower(), canonical)
+                self.cache[canonical] = frozen
+            except PresentationAssetError:
+                # Historical content may reference uploads that no longer exist
+                # on this server (migrated or pruned files). Nothing exists to
+                # freeze, mutate, or leak, so the stored reference is preserved.
+                # A file that IS present must pass every check — no exception.
+                if not (self.preserve_missing_uploads and self._dangling_upload(canonical)):
+                    raise
+                return url
         # A fragment can select an SVG view/font face; queries only bust old caches.
         return self.cache[canonical] + ('#' + fragment if fragment else '')
 
@@ -396,12 +418,18 @@ class _Freezer:
 
 
 def freeze_presentation_assets(value, tenant_id, *, root=None, allowed_origin=None,
-                               authorized_paths=None, uploads_root=None):
+                               authorized_paths=None, uploads_root=None,
+                               preserve_missing_uploads=False):
     """Return immutable tenant media references; fail closed for local errors.
 
     ``authorized_paths`` is trusted application input, not part of ``value``.
     Root must contain the application's uploads/ and assets/ directories. Input
     containers are never mutated. Failure may leave already-created immutable
     revisions, but never a partially rewritten return value or partial file.
+    ``preserve_missing_uploads`` keeps a dangling /uploads/maps|creative/ URL
+    that names a file absent from every local root; any error on a file that
+    exists still raises.
     """
-    return _Freezer(tenant_id, root, allowed_origin, authorized_paths, uploads_root=uploads_root).walk(value)
+    return _Freezer(tenant_id, root, allowed_origin, authorized_paths,
+                    uploads_root=uploads_root,
+                    preserve_missing_uploads=preserve_missing_uploads).walk(value)
