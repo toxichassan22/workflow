@@ -279,7 +279,7 @@ class AuditLogApiTests(unittest.TestCase):
         db.DB_PATH = self.original_db_path
         self.temp_dir.cleanup()
 
-    def headers(self, tenant_id='tenant-1', user_id='admin-1', role='company_admin'):
+    def headers(self, tenant_id='tenant-1', user_id=None, role='company_admin'):
         token = auth.create_token(
             tenant_id, 'audit@example.test', is_admin=True,
             user_id=user_id, user_name='مدير الاختبار', user_role=role

@@ -20,6 +20,9 @@ class AdminCompanyAccountTests(unittest.TestCase):
         db.DB_PATH = os.path.join(cls.temp_dir.name, 'admin-companies.db')
 
         import app as application_module
+        # init_db must run against this path explicitly — app may already be
+        # imported (its module-level init already spent on another path).
+        db.init_db()
 
         cls.application_module = application_module
         cls.app = application_module.app
@@ -89,7 +92,9 @@ class AdminCompanyAccountTests(unittest.TestCase):
         self.assertEqual(float(tenant['credit_balance']), 1250.5)
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0]['id'], tenant['primary_user_id'])
-        self.assertEqual(users[0]['role'], 'company_admin')
+        # The primary link — not a role value — is what makes this row the
+        # company's admin identity.
+        self.assertEqual(users[0]['role'], 'employee')
         self.assertTrue(fields)
         self.assertTrue(result['setupUrl'].endswith(result['setupUrl'].rsplit('/', 1)[-1]))
         self.assertFalse(result['welcomeEmailSent'])
@@ -198,7 +203,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
                 'email': 'new-manager@example.test',
                 'username': 'new_manager',
                 'phone': '+966500000020',
-                'role': 'company_admin',
+                'role': 'employee',
                 'useSetupLink': True,
             },
         )
@@ -219,7 +224,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
         self.assertEqual(tenant['primary_user_id'], new_user_id)
         self.assertEqual(tenant['account_manager_name'], 'مدير الحساب الجديد')
         self.assertEqual(old_primary['role'], 'employee')
-        self.assertEqual(new_primary['role'], 'company_admin')
+        self.assertEqual(new_primary['role'], 'employee')
 
     def test_company_admin_cannot_access_super_admin_company_creation(self):
         company = self._create_company('permission')

@@ -649,19 +649,11 @@
       if (!app) return;
       const isSagAdmin = Boolean(tenantUser && tenantUser.isAdmin);
       const role = (tenantUser && tenantUser._userRole) || 'company_admin';
-      const roleBadges = {
-        section_editor: ['employee', 'role.section_editor', 'محرر أقسام'],
-        section_approver: ['employee', 'role.section_approver', 'معتمد أقسام'],
-        generation_approver: ['employee', 'role.generation_approver', 'معتمد توليد'],
-        final_file_approver: ['employee', 'role.final_file_approver', 'معتمد ملف'],
-        profile: ['employee', 'role.profile', 'بروفايل'],
-        support: ['employee', 'role.support', 'دعم'],
-      };
       const roleData = isSagAdmin
         ? ['superadmin', 'role.super_admin', 'سوبر أدمن']
         : role === 'company_admin'
           ? ['company-admin', 'role.company_admin', 'أدمن الشركة']
-          : (roleBadges[role] || ['employee', 'role.employee', 'موظف']);
+          : ['employee', 'role.employee', 'موظف'];
       app.dataset.role = roleData[0];
 
       const roleEl = document.getElementById('tenantWorkspaceRole');

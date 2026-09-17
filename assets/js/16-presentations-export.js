@@ -2062,13 +2062,6 @@
         '<div class="tenant-field"><label for="sagNewUserEmail">البريد الإلكتروني</label><input type="email" id="sagNewUserEmail" required></div>' +
         '<div class="tenant-field"><label for="sagNewUserUsername">اسم المستخدم</label><input id="sagNewUserUsername" minlength="3" maxlength="40" required></div>' +
         '<div class="tenant-field"><label for="sagNewUserPhone">رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
-        '<div class="tenant-field full"><label for="sagNewUserRole">الدور</label><select id="sagNewUserRole">' +
-        '<option value="employee">موظف</option>' +
-        '<option value="section_editor">محرر أقسام</option>' +
-        '<option value="section_approver">معتمد أقسام</option>' +
-        '<option value="generation_approver">معتمد بدء التوليد</option>' +
-        '<option value="final_file_approver">معتمد الملف النهائي</option>' +
-        '<option value="company_admin">أدمن شركة</option></select></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
         '</div>' +
@@ -2107,7 +2100,7 @@
           (primary ? ' <span style="font-size:11px;color:var(--p)">مدير الحساب</span>' : '') + '</h3>' +
           '<div class="meta">' + escapeHtml(user.email) + ' | ' + escapeHtml(user.username || '') +
           ' | ' + escapeHtml(user.phone || '') + ' | <span>' +
-          (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + '</span> | <span>' +
+          (primary ? 'أدمن الشركة' : 'موظف') + '</span> | <span>' +
           (user.is_active ? 'نشط' : 'موقوف') + '</span></div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small ghost" onclick="openSagUserEdit(\'' +
@@ -2177,7 +2170,6 @@
           email: document.getElementById('sagNewUserEmail').value.trim().toLowerCase(),
           username: document.getElementById('sagNewUserUsername').value.trim().toLowerCase(),
           phone: document.getElementById('sagNewUserPhone').value.trim(),
-          role: document.getElementById('sagNewUserRole').value,
           useSetupLink: true
         });
         if (!data.success) {
@@ -2319,9 +2311,6 @@
         '<input type="text" id="sagEditUserPassword" minlength="10" autocomplete="new-password" placeholder="فارغة للإبقاء على الحالية" style="flex:1;min-width:0">' +
         '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagEditUserPassword\').value = generateStrongPassword()">توليد تلقائي</button>' +
         '</div></div>' +
-        '<div class="tenant-field full"><label>الدور</label><select id="sagEditUserRole">' +
-        '<option value="employee"' + (user.role !== 'company_admin' ? ' selected' : '') + '>موظف</option>' +
-        '<option value="company_admin"' + (user.role === 'company_admin' ? ' selected' : '') + '>أدمن شركة</option></select></div>' +
         '</div>' +
         '<div class="sag-modal-actions">' +
         '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserEditModal\').remove()">إلغاء</button>' +
@@ -2335,8 +2324,7 @@
         name: document.getElementById('sagEditUserName').value.trim(),
         email: document.getElementById('sagEditUserEmail').value.trim().toLowerCase(),
         username: document.getElementById('sagEditUserUsername').value.trim().toLowerCase(),
-        phone: document.getElementById('sagEditUserPhone').value.trim(),
-        role: document.getElementById('sagEditUserRole').value
+        phone: document.getElementById('sagEditUserPhone').value.trim()
       };
       const newPassword = document.getElementById('sagEditUserPassword').value;
       if (newPassword) {

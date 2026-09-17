@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -769,7 +770,11 @@ class OmranApiTests(unittest.TestCase):
         self.tenant_id = db.create_tenant('شركة العمق', 'omran@x.test', 'hash', 'omran')
         self.other_tenant_id = db.create_tenant('شركة أخرى', 'other@x.test', 'hash', 'other')
         self.user_id = db.create_user(
-            self.tenant_id, 'رئيس القسم', 'boss@x.test', 'hash', role='company_admin')
+            self.tenant_id, 'رئيس القسم', 'boss@x.test', 'hash', role='employee')
+        # The primary link makes this user-bound token the company admin: the
+        # session normalizes to the tenant-direct identity on every request.
+        db.update_tenant(self.tenant_id, primary_user_id=self.user_id)
+        db.grant_company_admin_permissions(self.user_id)
         self.token = auth.create_token(
             self.tenant_id, 'boss@x.test', user_id=self.user_id,
             user_name='رئيس القسم', user_role='company_admin')
@@ -779,6 +784,12 @@ class OmranApiTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        # The settle/finish endpoints fire a daemon `usage-bill-*` thread that
+        # opens its own SQLite handle — on Windows the temp file cannot be
+        # deleted while that handle lives, so wait for it before cleanup.
+        for thread in threading.enumerate():
+            if thread.name.startswith('usage-bill-'):
+                thread.join(timeout=10)
         db.close_db()
         self.context.pop()
         db.DB_PATH = self.original_db_path
@@ -788,10 +799,32 @@ class OmranApiTests(unittest.TestCase):
         return {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
 
     def _user_token(self, name, email, role='employee'):
-        user_id = db.create_user(self.tenant_id, name, email, 'hash', role=role)
+        """Create an employee holding the permission set the retired role
+        preset used to imply, so each test exercises the same capability."""
+        preset_perms = {
+            'support': ['support_tickets'],
+            'generation_approver': ['approve_generation'],
+            'final_file_approver': ['approve_final_file', 'export_files'],
+            'section_approver': ['approvals'],
+            'section_editor': ['generate_images', 'generate_maps'],
+        }
+        user_id = db.create_user(self.tenant_id, name, email, 'hash', role='employee')
+        for perm in preset_perms.get(role, []):
+            db.set_user_permission(user_id, perm, 1)
         token = auth.create_token(
-            self.tenant_id, email, user_id=user_id, user_name=name, user_role=role)
+            self.tenant_id, email, user_id=user_id, user_name=name, user_role='employee')
         return user_id, token
+
+    def _platform_admin_token(self):
+        """A super-admin session: an is_admin tenant with a direct login."""
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO tenants (id, company_name, email, password_hash, is_active, is_admin) "
+            "VALUES ('platform-adm', 'المنصة', 'root@x.test', 'hash', 1, 1) "
+            "ON CONFLICT(id) DO NOTHING")
+        conn.commit()
+        return auth.create_token(
+            'platform-adm', 'root@x.test', is_admin=True, user_name='مدير المنصة')
 
     def _approved_draft(self, draft_id):
         return db.save_project_draft(
@@ -904,10 +937,9 @@ class OmranApiTests(unittest.TestCase):
 
     def test_support_ticket_creation_and_status_are_gated(self):
         emp_id, creator_token = self._user_token('عميل', 'cust@x.test', 'employee')
-        _, other_token = self._user_token('آخر', 'other-emp@x.test', 'employee')
         _, support_token = self._user_token('دعم', 'sup@x.test', 'support')
         # Opening a ticket is a desk act: a plain employee is refused, a
-        # support_tickets holder (or company admin) is not.
+        # support_tickets holder (or the company admin) is not.
         denied_create = self.client.post(
             '/api/support/tickets', headers=self.headers(creator_token),
             json={'subject': 'مشكلة', 'body': 'تفاصيل'})
@@ -920,21 +952,22 @@ class OmranApiTests(unittest.TestCase):
             json={'subject': 'مشكلة', 'body': 'تفاصيل'})
         self.assertEqual(created.status_code, 200, created.get_json())
         ticket_id = created.get_json()['ticket']['id']
-        denied = self.client.post(
-            f'/api/support/tickets/{ticket_id}/status', headers=self.headers(other_token),
-            json={'status': 'in_progress'})
-        self.assertEqual(denied.status_code, 403)
-        # A ticket filed before the gate still lets its own creator close it.
+        # Status moves belong to the platform desk alone — the company side
+        # (permission holder, creator, even the company admin) has no route.
         legacy = db.create_support_ticket(
             self.tenant_id, 'مشكلة قديمة', created_by=emp_id, created_by_name='عميل')
-        creator_close = self.client.post(
-            f'/api/support/tickets/{legacy["id"]}/status', headers=self.headers(creator_token),
-            json={'status': 'closed'})
-        self.assertEqual(creator_close.status_code, 200, creator_close.get_json())
-        support_move = self.client.post(
-            f'/api/support/tickets/{ticket_id}/status', headers=self.headers(support_token),
+        for token in (creator_token, support_token, self.token):
+            for status in ('closed', 'in_progress', 'resolved'):
+                denied = self.client.post(
+                    f'/api/support/tickets/{legacy["id"]}/status',
+                    headers=self.headers(token), json={'status': status})
+                self.assertEqual(denied.status_code, 404)
+        # The platform desk still owns the workflow.
+        admin_move = self.client.post(
+            f'/api/admin/support/tickets/{ticket_id}/status',
+            headers=self.headers(self._platform_admin_token()),
             json={'status': 'in_progress'})
-        self.assertEqual(support_move.status_code, 200, support_move.get_json())
+        self.assertEqual(admin_move.status_code, 200, admin_move.get_json())
 
     def test_approval_task_close_and_remind_are_gated(self):
         _, emp_token = self._user_token('موظف', 'emp-task@x.test', 'employee')
@@ -987,7 +1020,7 @@ class OmranApiTests(unittest.TestCase):
         removed = self.client.get('/api/event-tasks', headers=self.headers(token))
         self.assertEqual(removed.status_code, 403)
 
-    def test_role_change_applies_to_existing_token(self):
+    def test_permission_grant_applies_to_existing_token(self):
         draft_id = self._approved_draft('draft-role-change')
         db.record_ledger_credit(self.tenant_id, 500, note='شحن تجريبي')
         created = self.client.post(
@@ -1000,7 +1033,7 @@ class OmranApiTests(unittest.TestCase):
             f'/api/generation-approvals/{approval_id}/decision', headers=self.headers(emp_token),
             json={'decision': 'approved'})
         self.assertEqual(denied.status_code, 403)
-        db.update_user(emp_id, role='generation_approver')
+        db.set_user_permission(emp_id, 'approve_generation', 1)
         allowed = self.client.post(
             f'/api/generation-approvals/{approval_id}/decision', headers=self.headers(emp_token),
             json={'decision': 'approved'})

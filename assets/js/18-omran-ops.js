@@ -311,36 +311,15 @@
         '<span style="font-size:11px;color:var(--muted)">' + omEscape((m.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
         '<p style="margin:4px 0 0;font-size:13px">' + omEscape(m.body) + '</p></div>'
       ).join('');
-      const myUserId = String((tenantUser && tenantUser._userId) || '');
-      const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
-      const canSupport = hasPermission('support_tickets');
-      const isCreator = String(t.created_by || '') === myActorId;
-      const statusActions = canSupport
-        ? '<div style="display:flex;gap:6px;margin:12px 0;flex-wrap:wrap">' +
-          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'in_progress\')">قيد المعالجة</button>' +
-          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'waiting_customer\')">بانتظار العميل</button>' +
-          '<button class="btn small ghost" onclick="omSetTicketStatus(\'' + id + '\', \'resolved\')">تم الحل</button>' +
-          '<button class="btn small danger" onclick="omSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق التذكرة</button></div>'
-        : (t.status !== 'closed' && isCreator
-          ? '<div style="margin:12px 0"><button class="btn small danger" onclick="omSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق التذكرة</button></div>'
-          : '');
       detail.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         '<h3 style="margin:0">#' + omEscape(t.number) + ' ' + omEscape(t.subject) + ' — <span>' + omStatus(t.status) + '</span></h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'omTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
-        statusActions +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         (t.status !== 'closed'
           ? '<div style="display:flex;gap:8px"><input type="text" id="omReplyBody" style="flex:1">' +
             '<button class="btn primary" onclick="omReplyTicket(\'' + id + '\')">إرسال</button></div>'
           : '');
-    }
-
-    async function omSetTicketStatus(id, status) {
-      const res = await api('POST', '/api/support/tickets/' + id + '/status', { status }).catch(e => e);
-      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الحالة'); return; }
-      await omOpenTicket(id);
-      await omLoadTickets();
     }
 
     async function omReplyTicket(id) {

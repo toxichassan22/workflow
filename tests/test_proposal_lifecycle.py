@@ -248,7 +248,7 @@ class ProposalLifecycleApiTests(unittest.TestCase):
 
         cls.admin_token = auth.create_token(
             'tenant-1', 'admin@example.test', is_admin=True,
-            user_id='user-admin', user_name='Admin User', user_role='company_admin',
+            user_name='Admin User', user_role='company_admin',
         )
         cls.employee_token = auth.create_token(
             'tenant-1', 'emp@example.test', is_admin=False,

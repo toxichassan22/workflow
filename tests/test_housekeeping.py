@@ -41,9 +41,11 @@ class HousekeepingDbTests(unittest.TestCase):
         )
         conn.commit()
         self.admin_id = db.create_user(
-            'tenant-1', 'مدير الشركة', 'admin@x.test', 'hash', role='company_admin')
+            'tenant-1', 'مدير الشركة', 'admin@x.test', 'hash', role='employee')
+        # The admin identity is the primary link on the tenants row, not a role.
+        db.update_tenant('tenant-1', primary_user_id=self.admin_id)
         self.assignee_id = db.create_user(
-            'tenant-1', 'المعتمد', 'approver@x.test', 'hash', role='generation_approver')
+            'tenant-1', 'المعتمد', 'approver@x.test', 'hash', role='employee')
 
     def tearDown(self):
         db.close_db()
@@ -111,7 +113,9 @@ class HousekeepingDbTests(unittest.TestCase):
         ).fetchone()
         self.assertTrue(updated['escalated_at'])
         self.assertTrue(self._notifications(self.assignee_id))
-        self.assertTrue(self._notifications(self.admin_id))
+        # Notices for the primary row land on the tenant-admin feed — the
+        # company admin's session reads under that address.
+        self.assertTrue(self._notifications('tenant-admin:tenant-1'))
         self.assertEqual(db.escalate_overdue_approval_tasks(), [])
 
     def test_open_task_inside_due_window_does_not_escalate(self):
@@ -171,7 +175,9 @@ class HousekeepingApiTests(unittest.TestCase):
         self.context.push()
         self.tenant_id = db.create_tenant('شركة العمق', 'omran@x.test', 'hash', 'omran')
         self.user_id = db.create_user(
-            self.tenant_id, 'مدير', 'boss@x.test', 'hash', role='company_admin')
+            self.tenant_id, 'مدير', 'boss@x.test', 'hash', role='employee')
+        # The primary link is what makes this the company admin session.
+        db.update_tenant(self.tenant_id, primary_user_id=self.user_id)
         self.token = auth.create_token(
             self.tenant_id, 'boss@x.test', user_id=self.user_id,
             user_name='مدير', user_role='company_admin')

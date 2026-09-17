@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -81,19 +82,76 @@ class IdentityDbTests(unittest.TestCase):
         self.assertEqual(
             db.set_user_project_scope('tenant-2', uid, []).get('error'), 'user_not_found')
 
-    # ── t21-03: last company admin protection ────────────────────────────
+    # ── t21-03: primary company admin protection ─────────────────────────
 
-    def test_last_active_company_admin_guard(self):
-        admin1 = db.create_user('tenant-1', 'A1', 'a1@x.test', 'hash', role='company_admin')
-        admin2 = db.create_user('tenant-1', 'A2', 'a2@x.test', 'hash', role='company_admin')
-        self.assertFalse(db.is_last_active_company_admin('tenant-1', admin1))
-        db.update_user(admin2, is_active=0)
-        self.assertTrue(db.is_last_active_company_admin('tenant-1', admin1))
+    def test_primary_company_admin_guard_follows_the_link(self):
+        admin = db.create_user('tenant-1', 'A1', 'a1@x.test', 'hash', role='employee')
         emp = db.create_user('tenant-1', 'E', 'e@x.test', 'hash', role='employee')
+        self.assertFalse(db.is_last_active_company_admin('tenant-1', admin))
+        # The admin is whoever the tenants row links as primary — not a role.
+        db.update_tenant('tenant-1', primary_user_id=admin)
+        self.assertTrue(db.is_last_active_company_admin('tenant-1', admin))
         self.assertFalse(db.is_last_active_company_admin('tenant-1', emp))
-        # A disabled last admin is still "last" — enabling a second admin lifts it.
-        db.update_user(admin1, is_active=0)
-        self.assertTrue(db.is_last_active_company_admin('tenant-1', admin1))
+        # Reassigning the link lifts the guard from the old row.
+        db.set_primary_company_admin('tenant-1', emp)
+        self.assertFalse(db.is_last_active_company_admin('tenant-1', admin))
+        self.assertTrue(db.is_last_active_company_admin('tenant-1', emp))
+
+    # ── Role collapse: one assignable role, access lives in permissions ────
+
+    def test_user_roles_is_employee_only(self):
+        self.assertEqual(db.USER_ROLES, ('employee',))
+
+    def test_legacy_roles_collapse_to_employee_with_materialized_permissions(self):
+        conn = db.get_db()
+        # Insert legacy-role rows straight through SQL — create_user now
+        # coerces everything to employee, which is exactly what routes want.
+        legacy = {}
+        for email, role in (('boss@x.test', 'company_admin'),
+                            ('editor@x.test', 'section_editor'),
+                            ('approver@x.test', 'generation_approver')):
+            uid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active) "
+                "VALUES (?, 'tenant-1', ?, ?, 'hash', ?, 1)",
+                (uid, role.title(), email, role))
+            legacy[role] = uid
+        # An explicit override on a preset role must survive the collapse:
+        # this editor had generate_maps turned off by an admin override.
+        conn.execute(
+            "INSERT INTO user_permissions (id, user_id, permission_key, granted) "
+            "VALUES (?, ?, 'generate_maps', 0)",
+            (str(uuid.uuid4()), legacy['section_editor']))
+        conn.commit()
+
+        db._collapse_legacy_user_roles(conn)
+        conn.commit()
+
+        for role, uid in legacy.items():
+            row = db.get_user_by_id(uid)
+            self.assertEqual(row['role'], 'employee', role)
+
+        admin_perms = db.get_user_permissions(legacy['company_admin'])
+        for key in db.PERMISSION_KEYS:
+            expected = key != 'sag_admin_panel'
+            self.assertEqual(admin_perms.get(key), expected, key)
+
+        editor_perms = db.get_user_permissions(legacy['section_editor'])
+        self.assertTrue(editor_perms['generate_images'])
+        self.assertFalse(editor_perms['generate_maps'])   # override wins
+        self.assertFalse(editor_perms['approve_generation'])
+
+        approver_perms = db.get_user_permissions(legacy['generation_approver'])
+        self.assertTrue(approver_perms['approve_generation'])
+        self.assertFalse(approver_perms['approve_final_file'])
+        self.assertFalse(approver_perms['sag_admin_panel'])
+
+    def test_create_user_and_update_user_coerce_retired_roles(self):
+        uid = db.create_user('tenant-1', 'Legacy', 'legacy@x.test', 'hash',
+                             role='company_admin')
+        self.assertEqual(db.get_user_by_id(uid)['role'], 'employee')
+        db.update_user(uid, role='section_editor')
+        self.assertEqual(db.get_user_by_id(uid)['role'], 'employee')
 
     # ── d01: section self-approval policy ────────────────────────────────
 
@@ -240,7 +298,8 @@ class IdentityDbTests(unittest.TestCase):
             'tenant-1', 'new@x.test', role='section_editor', name='موظف جديد',
             phone='0500', sections=['basic'], projects=[self.draft_id])
         stored = db.get_invite('tenant-1', invite['id'])
-        self.assertEqual(stored['role'], 'section_editor')
+        # Retired roles collapse to the single employee role; scope still holds.
+        self.assertEqual(stored['role'], 'employee')
         self.assertEqual(stored['name'], 'موظف جديد')
         db.mark_invite_email(invite['id'], 'failed', 'SMTP down')
         stored = db.get_invite('tenant-1', invite['id'])
@@ -312,7 +371,8 @@ class IdentityApiTests(unittest.TestCase):
             user_name='مدير النظام', user_role='company_admin')
         self.admin_user_id = db.create_user(
             self.tenant_id, 'مدير الشركة', 'boss@x.test',
-            application_module.hash_password('secret123'), role='company_admin')
+            application_module.hash_password('secret123'), role='employee')
+        db.update_tenant(self.tenant_id, primary_user_id=self.admin_user_id)
         self.admin_user_token = auth.create_token(
             self.tenant_id, 'boss@x.test', user_id=self.admin_user_id,
             user_name='مدير الشركة', user_role='company_admin')
@@ -366,6 +426,43 @@ class IdentityApiTests(unittest.TestCase):
         self.assertEqual(direct_panel.status_code, 200, direct_panel.get_json())
         direct_me = self.client.get('/api/auth/me', headers=direct_headers)
         self.assertTrue(direct_me.get_json()['tenant']['isAdmin'])
+
+    def test_user_bound_company_admin_claim_grants_nothing(self):
+        """A legacy token carrying user_role='company_admin' on a user-bound
+        session is just an employee — every permission gate still applies."""
+        uid = self._employee('claimed@x.test')
+        stale = auth.create_token(
+            self.tenant_id, 'claimed@x.test', user_id=uid,
+            user_name='موظف', user_role='company_admin')
+        headers = self.headers(stale)
+        # manage_users-gated route: no grants, so no users listing.
+        denied_users = self.client.get('/api/users', headers=headers)
+        self.assertEqual(denied_users.status_code, 403)
+        # And certainly not the platform surface.
+        denied_admin = self.client.get('/api/admin/tenants', headers=headers)
+        self.assertEqual(denied_admin.status_code, 403)
+
+    def test_fully_granted_employee_still_cannot_reach_platform_routes(self):
+        """The company admin may hand an employee every company permission —
+        the platform boundary is an identity, not a permission set."""
+        uid = self._employee('superemp@x.test')
+        for key in db.PERMISSION_KEYS:
+            if key != 'sag_admin_panel':
+                db.set_user_permission(uid, key, True)
+        token = auth.create_token(
+            self.tenant_id, 'superemp@x.test', user_id=uid,
+            user_name='موظف', user_role='employee')
+        headers = self.headers(token)
+        self.assertEqual(self.client.get('/api/users', headers=headers).status_code, 200)
+        self.assertEqual(self.client.get('/api/admin/tenants', headers=headers).status_code, 403)
+        self.assertEqual(self.client.get('/api/admin/sag-fonts', headers=headers).status_code, 403)
+
+    def test_permissions_put_rejects_the_platform_panel_key(self):
+        uid = self._employee('nogrant@x.test')
+        res = self.client.put(f'/api/users/{uid}/permissions',
+                              headers=self.headers(self.admin_user_token),
+                              json={'permissions': {'sag_admin_panel': True}})
+        self.assertEqual(res.status_code, 400)
 
     # ── Session revocation (logout + password change) ────────────────────
 
@@ -452,26 +549,30 @@ class IdentityApiTests(unittest.TestCase):
 
     # ── Last-admin protection over HTTP ──────────────────────────────────
 
-    def test_last_company_admin_cannot_be_deleted_or_demoted(self):
+    def test_primary_company_admin_cannot_be_deleted_or_disabled(self):
         res = self.client.delete(f'/api/users/{self.admin_user_id}',
                                  headers=self.headers(self.admin_user_token))
         self.assertEqual(res.status_code, 400)
-        self.assertEqual(res.get_json()['error_code'], 'last_company_admin')
-        demote = self.client.put(f'/api/users/{self.admin_user_id}',
-                                 headers=self.headers(self.admin_user_token),
-                                 json={'role': 'employee'})
-        self.assertEqual(demote.status_code, 400)
-        self.assertEqual(demote.get_json()['error_code'], 'last_company_admin')
+        self.assertEqual(res.get_json()['error_code'], 'primary_company_admin')
         disable = self.client.put(f'/api/users/{self.admin_user_id}',
                                   headers=self.headers(self.admin_user_token),
                                   json={'is_active': 0})
         self.assertEqual(disable.status_code, 400)
-        # A second admin restores normal management.
-        db.create_user(self.tenant_id, 'ثاني', 'second@x.test', 'hash', role='company_admin')
-        demote2 = self.client.put(f'/api/users/{self.admin_user_id}',
-                                  headers=self.headers(self.admin_user_token),
-                                  json={'role': 'employee'})
-        self.assertEqual(demote2.status_code, 200)
+        self.assertEqual(disable.get_json()['error_code'], 'primary_company_admin')
+        # No employee — even one holding every permission — may touch the
+        # primary row; only the super admin reassigns it.
+        second = db.create_user(self.tenant_id, 'ثاني', 'second@x.test', 'hash', role='employee')
+        db.grant_company_admin_permissions(second)
+        second_token = auth.create_token(
+            self.tenant_id, 'second@x.test', user_id=second,
+            user_name='ثاني', user_role='employee')
+        still_denied = self.client.delete(f'/api/users/{self.admin_user_id}',
+                                          headers=self.headers(second_token))
+        self.assertEqual(still_denied.status_code, 400)
+        resassign = self.client.put(
+            f'/api/users/{self.admin_user_id}',
+            headers=self.headers(self.admin_user_token), json={'role': 'employee'})
+        self.assertEqual(resassign.status_code, 200)
 
     # ── Project scope over HTTP ──────────────────────────────────────────
 
@@ -588,13 +689,17 @@ class IdentityApiTests(unittest.TestCase):
 
     # ── Invites over HTTP ────────────────────────────────────────────────
 
-    def test_invite_assigns_role_and_scope_on_acceptance(self):
+    def test_invite_assigns_employee_role_and_scope_on_acceptance(self):
         draft_id = db.save_project_draft(
             self.tenant_id, self.admin_user_id, {'project_name': 'ملف'},
             {'basic': 'draft'}, 'draft', draft_id='invite-draft')
+        # Retired role names are refused outright — invites only carry 'employee'.
+        bad = self.client.post('/api/invites', headers=self.headers(self.admin_user_token),
+                               json={'email': 'bad@x.test', 'role': 'section_editor'})
+        self.assertEqual(bad.status_code, 400)
         created = self.client.post('/api/invites', headers=self.headers(self.admin_user_token),
                                    json={'email': 'invited@x.test', 'name': 'مدعو',
-                                         'role': 'section_editor',
+                                         'role': 'employee',
                                          'sections': ['basic'], 'projects': [draft_id]})
         self.assertEqual(created.status_code, 200, created.get_json())
         token = created.get_json()['token']
@@ -604,9 +709,9 @@ class IdentityApiTests(unittest.TestCase):
                                       json={'password': 'Secret1234'})
         body = registered.get_json()
         self.assertEqual(registered.status_code, 201, body)
-        self.assertEqual(body['user']['role'], 'section_editor')
+        self.assertEqual(body['user']['role'], 'employee')
         new_user = db.get_user_by_email('invited@x.test')
-        self.assertEqual(new_user['role'], 'section_editor')
+        self.assertEqual(new_user['role'], 'employee')
         self.assertEqual(db.get_user_project_scope_ids(new_user['id']), {draft_id})
         self.assertTrue(db.get_user_field_sections(new_user['id'], self.tenant_id).get('basic'))
         # The link is spent.
@@ -806,7 +911,7 @@ class PrimaryAdminIdentityTests(unittest.TestCase):
         pw_hash = application_module.hash_password(self.password)
         self.tenant_id = db.create_tenant('شركة المالك', 'owner-co@x.test', pw_hash, 'ownerco')
         self.primary_id = db.create_user(
-            self.tenant_id, 'المالك', 'owner-user@x.test', pw_hash, role='company_admin')
+            self.tenant_id, 'المالك', 'owner-user@x.test', pw_hash, role='employee')
         db.update_tenant(self.tenant_id, primary_user_id=self.primary_id)
         self.client = self.app.test_client()
 
@@ -897,10 +1002,12 @@ class PrimaryAdminIdentityTests(unittest.TestCase):
         self.assertEqual(me.status_code, 200, me.get_json())
         self.assertNotIn('id', me.get_json()['user'])
 
-    def test_non_primary_company_admin_keeps_user_bound_session(self):
+    def test_non_primary_user_keeps_user_bound_session(self):
+        # A legacy role claim in the row grants nothing — the session stays a
+        # plain user-bound employee session.
         uid = db.create_user(
             self.tenant_id, 'مدير ثان', 'second@x.test',
-            self.application_module.hash_password('secret123'), role='company_admin')
+            self.application_module.hash_password('secret123'), role='employee')
         res = self.client.post('/api/auth/login',
                                json={'email': 'second@x.test', 'password': 'secret123'})
         body = res.get_json()
@@ -909,10 +1016,21 @@ class PrimaryAdminIdentityTests(unittest.TestCase):
         me = self.client.get('/api/auth/me', headers=self.headers(body['token']))
         self.assertEqual(me.get_json()['user']['id'], uid)
 
-    def test_demoted_primary_loses_owner_login_but_keeps_own(self):
-        db.update_user(self.primary_id, role='employee')
-        owner = self._login('owner-co@x.test')
-        self.assertEqual(owner.status_code, 401)
+    def test_reassigned_primary_moves_the_owner_login(self):
+        # Replacing the primary link moves the company login to the new row's
+        # credentials; the old primary keeps its own employee session.
+        second = db.create_user(
+            self.tenant_id, 'المالك الجديد', 'owner2@x.test',
+            self.application_module.hash_password('Second!234'), role='employee')
+        db.set_primary_company_admin(self.tenant_id, second)
+        # The tenant row now carries the new primary's credentials, so the old
+        # company email no longer resolves; the new owner's user email issues
+        # the tenant-direct session instead.
+        stale = self._login('owner-co@x.test')
+        self.assertEqual(stale.status_code, 401)
+        moved = self._login('owner2@x.test', 'Second!234')
+        self.assertEqual(moved.status_code, 200, moved.get_json())
+        self.assertIsNone(auth.decode_token(moved.get_json()['token']).get('user_id'))
         own = self._login('owner-user@x.test')
         body = own.get_json()
         self.assertEqual(own.status_code, 200, body)

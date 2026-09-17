@@ -10959,7 +10959,7 @@ def api_slide_plan():
     presentation_id = str(data.get('presentationId') or '').strip()
     if presentation_id and not project_data:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
-        if not presentation:
+        if not presentation or not _presentation_in_scope(presentation):
             return jsonify({'success': False, 'error': 'العرض غير موجود أو لا يتبع هذه الشركة'}), 404
         try:
             project_data = clean_project_data(json.loads(presentation.get('project_data') or '{}'))
@@ -12551,7 +12551,7 @@ def api_delete_presentation(pres_id):
     """Delete is cleanup for never-processed presentations only — admin-gated,
     and refused once the file carries workflow history (t18)."""
     presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not presentation:
+    if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'error': 'Presentation not found'}), 404
     if not _omran_actor_is_admin():
         return jsonify({'error': 'الحذف النهائي يتطلب صلاحية مدير الشركة — أو استخدم الأرشفة',
@@ -12795,6 +12795,12 @@ def api_save_presentation():
 
         scope = project_data.get('presentation_scope')
         draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        if draft_id:
+            # ISS-014: a project-scoped member cannot hang a new presentation on
+            # a draft outside their scope.
+            linked_draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+            if linked_draft and not db.user_may_access_draft(g.user_id, linked_draft):
+                return jsonify({'error': 'Draft not found'}), 404
         creation_key = None
         if draft_id and isinstance(scope, str) and (scope == 'full' or re.fullmatch(r'(?:section|copy):[A-Za-z0-9_-]+', scope)):
             creation_key = json.dumps([str(draft_id), scope], separators=(',', ':'))
@@ -12830,15 +12836,15 @@ def api_save_presentation():
 def api_get_presentation(pres_id):
     """Get a specific presentation."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
-    if pres.get('draft_id'):
-        accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
-        if accessible is not None and pres['draft_id'] not in accessible:
-            return jsonify({'error': 'Presentation not found'}), 404
 
     if int(pres.get('revision') or 0) > 0:
-        return jsonify({'success': True, 'presentation': _presentation_state(pres)})
+        state = _presentation_state(pres)
+        # ISS-015: the stored projectData is a draft snapshot — hidden sections
+        # stay server-side for this caller.
+        state['projectData'] = _draft_data_for_response(state.get('projectData'))
+        return jsonify({'success': True, 'presentation': state})
     pres['revision'] = int(pres.get('revision') or 0)
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
     pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
@@ -12865,6 +12871,7 @@ def api_get_presentation(pres_id):
             )
     pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
+    pres['projectData'] = _draft_data_for_response(pres.get('projectData'))
     return jsonify({'success': True, 'presentation': pres})
 
 
@@ -12873,7 +12880,7 @@ def api_get_presentation(pres_id):
 def api_update_presentation(pres_id):
     """Update a presentation. Saves a version snapshot and logs the edit."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
 
     data = request.json or {}
@@ -12998,6 +13005,75 @@ def _resolve_draft_id(explicit=None):
     draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
     return (draft or {}).get('id')
 
+
+def _presentation_in_scope(pres):
+    """ISS-014: True when this presentation stays inside the caller's project scope.
+
+    A presentation with no linked draft stays visible to scoped users, matching
+    the list route; one linked to a draft outside their scope answers not-found
+    so its existence is not disclosed.
+    """
+    if not pres:
+        return False
+    draft_id = pres.get('draft_id')
+    if not draft_id:
+        return True
+    accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+    return accessible is None or str(draft_id) in accessible
+
+
+def _hidden_field_sections():
+    """ISS-015: section keys the current caller may not see at all.
+
+    Tenant-direct (company admin) and super-admin sessions see everything; an
+    employee's ``user_field_sections`` rows decide. Fails open for a caller with
+    no user id only because that identity already bypasses section toggles.
+    """
+    try:
+        if not getattr(g, 'user_id', None) or getattr(g, 'is_admin', False):
+            return set()
+        allowed = db.get_user_field_sections(g.user_id, g.tenant_id) or {}
+    except Exception:
+        return set()
+    return {key for key, granted in allowed.items() if not granted} - {'general'}
+
+
+def _draft_data_for_response(data):
+    """ISS-015: copy of a draft/project payload without hidden-section keys.
+
+    Mirrors ``_enforce_draft_field_sections``: the UI never renders a denied
+    section, so its stored values must not reach the client through any
+    response — not the draft GET, a presentation's projectData, or a version
+    snapshot.
+    """
+    denied = _hidden_field_sections()
+    if not denied or not isinstance(data, dict):
+        return data
+    section_map = _draft_field_section_map(g.tenant_id)
+    return {key: value for key, value in data.items()
+            if _draft_section_of_key(section_map, key) not in denied}
+
+
+def _draft_response_filtered(draft):
+    """ISS-015: draft row minus hidden-section content and section statuses."""
+    denied = _hidden_field_sections()
+    if not denied or not isinstance(draft, dict):
+        return draft
+    draft = dict(draft)
+    if isinstance(draft.get('draft_data'), dict):
+        draft['draft_data'] = _draft_data_for_response(draft['draft_data'])
+    if isinstance(draft.get('section_statuses'), dict):
+        draft['section_statuses'] = {
+            key: value for key, value in draft['section_statuses'].items()
+            if key not in denied}
+    return draft
+
+
+def _section_key_forbidden(section_key):
+    """ISS-015: True when this section is hidden from the current caller."""
+    return bool(section_key) and section_key in _hidden_field_sections()
+
+
 @app.route('/api/project-draft', methods=['GET'])
 @require_auth
 def api_get_project_draft():
@@ -13008,18 +13084,25 @@ def api_get_project_draft():
     draft['draft_data'] = _merge_persisted_map_assets(
         draft.get('draft_data') or {}, g.tenant_id, draft_id=draft.get('id')
     )
-    return jsonify({'success': True, 'draft': draft})
+    return jsonify({'success': True, 'draft': _draft_response_filtered(draft)})
 
 
 # Draft keys that are not tenant_input_fields rows but still belong to a governed
-# field section. The widget sections (timeline, financial, team, market study,
-# visual concept, executive content) have no field-section keys, so their blobs
-# stay outside section enforcement until they get governable sections.
+# field section. ISS-015 also mapped the widget-section payloads: timeline,
+# financial study, team, market study, visual concept and executive content are
+# governable sections now, so a denied widget section refuses writes and never
+# reaches the client.
 DRAFT_FIELD_SECTION_BLOBS = {
     'land_documents_analysis': 'land_croquis',
     'survey_coordinates': 'land_croquis',
     'directions_table': 'land_croquis',
     'site_analysis': 'location',
+    'timeline_table_data': 'section-timeline',
+    'financial_study_model': 'section-financial-calc',
+    'team_selection': 'section-team',
+    'market_study_data': 'section-market-study',
+    'visual_concept': 'section-visual-concept',
+    'executive_content': 'section-executive-content',
 }
 
 # Widget-section blobs that belong to a section snapshot even though no input
@@ -13103,7 +13186,7 @@ def _has_approvals_permission():
             return True
     except Exception:
         pass
-    if getattr(g, 'user_role', None) == 'company_admin' or getattr(g, 'user_id', None) is None:
+    if getattr(g, 'user_id', None) is None:
         return True
     try:
         perms = getattr(g, 'user_permissions', None) or db.get_user_permissions(
@@ -13395,9 +13478,9 @@ def api_save_project_draft():
     previous_data = (previous or {}).get('draft_data') if isinstance(previous, dict) else {}
     previous_statuses = (previous or {}).get('section_statuses') if isinstance(previous, dict) else {}
     # A section the actor cannot open cannot be written through the save either.
-    # Company admins and tenant-direct logins bypass: require_permission already
-    # grants them every permission, and section toggles govern employees only.
-    if g.user_id and (g.user_role or 'employee') != 'company_admin' and not g.is_admin:
+    # The company admin (tenant-direct session) bypasses: require_permission
+    # already grants it every permission, and section toggles govern employees.
+    if g.user_id and not g.is_admin:
         forbidden_sections, restored_keys = _enforce_draft_field_sections(
             draft_data, previous_data, section_statuses, previous_statuses)
         if restored_keys:
@@ -13484,7 +13567,7 @@ def api_get_project_draft_by_id(draft_id):
     draft['draft_data'] = _merge_persisted_map_assets(
         draft.get('draft_data') or {}, g.tenant_id, draft_id=draft_id
     )
-    return jsonify({'success': True, 'draft': draft})
+    return jsonify({'success': True, 'draft': _draft_response_filtered(draft)})
 
 
 @app.route('/api/project-drafts/recovery', methods=['GET'])
@@ -13569,8 +13652,13 @@ def api_restore_project_draft(draft_id):
     if not isinstance(presentation_id, str) or not presentation_id:
         return jsonify({'error': 'presentationId is required'}), 400
     presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
-    if not presentation:
+    if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'error': 'Presentation not found'}), 404
+    # ISS-014: the restore target must be a draft the caller may touch —
+    # restore_draft_from_snapshot is tenant-scoped only.
+    target = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not target or not db.user_may_access_draft(g.user_id, target):
+        return jsonify({'error': 'Draft not found'}), 404
     try:
         snapshot = json.loads(presentation.get('project_data') or '{}')
     except (TypeError, ValueError):
@@ -13667,6 +13755,14 @@ def api_update_section_status():
             return jsonify({'error': 'A valid sectionStatuses map is required'}), 400
         draft_id = _resolve_draft_id(data.get('draftId'))
         before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+        # ISS-014/ISS-015: the draft must be in scope and a hidden section's
+        # status is never the caller's to change.
+        if before and not db.user_may_access_draft(g.user_id, before):
+            return jsonify({'error': 'Draft not found'}), 404
+        denied_sections = _hidden_field_sections()
+        if denied_sections and any(key in denied_sections for key in bulk):
+            return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
+                            'error_code': 'SECTION_FORBIDDEN'}), 403
         if bulk.get('location') == 'approved' and not _location_workflow_complete(before):
             return jsonify({'error': 'Location analysis and all four maps must be approved first',
                             'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
@@ -13705,6 +13801,11 @@ def api_update_section_status():
         return jsonify({'error': 'A valid sectionKey and sectionStatus are required'}), 400
     draft_id = _resolve_draft_id(data.get('draftId'))
     before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    if before and not db.user_may_access_draft(g.user_id, before):
+        return jsonify({'error': 'Draft not found'}), 404
+    if _section_key_forbidden(section_key):
+        return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
+                        'error_code': 'SECTION_FORBIDDEN'}), 403
     if section_key == 'location' and section_status == 'approved' and not _location_workflow_complete(before):
         return jsonify({'error': 'Location analysis and all four maps must be approved first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
@@ -13748,6 +13849,10 @@ def api_send_section_for_approval():
     draft, error = _versioned_draft_or_404(_resolve_draft_id(data.get('draftId')))
     if error:
         return jsonify(error), 404
+    # ISS-015: a section hidden from the caller cannot be sent for approval.
+    if _section_key_forbidden(section_key):
+        return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
+                        'error_code': 'SECTION_FORBIDDEN'}), 403
     if section_key == 'location' and not _location_workflow_complete(draft):
         return jsonify({'error': 'Location analysis and all four maps must be approved first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
@@ -13823,6 +13928,10 @@ def api_list_section_versions():
         return jsonify(error), 404
     section_key = request.args.get('sectionKey') or None
     versions = db.list_section_versions(g.tenant_id, draft['id'], section_key)
+    # ISS-015: versions of hidden sections are not the caller's to see.
+    denied = _hidden_field_sections()
+    if denied:
+        versions = [v for v in versions if v.get('section_key') not in denied]
     return jsonify({'success': True, 'versions': versions})
 
 
@@ -13835,6 +13944,9 @@ def api_get_section_version(version_id):
         return jsonify({'error': 'Section version not found'}), 404
     _draft, error = _versioned_draft_for_read(version.get('draft_id'))
     if error:
+        return jsonify({'error': 'Section version not found'}), 404
+    # ISS-015: a hidden section's snapshot never leaves the server.
+    if _section_key_forbidden(version.get('section_key')):
         return jsonify({'error': 'Section version not found'}), 404
     return jsonify({'success': True, 'version': version})
 
@@ -13964,6 +14076,8 @@ def api_cancel_section_version():
     draft, error = _versioned_draft_for_read(version.get('draft_id'))
     if error:
         return jsonify(error), 404
+    if _section_key_forbidden(version.get('section_key')):
+        return jsonify({'error': 'Section version not found'}), 404
     if draft.get('user_id') != _project_draft_actor_id() and not _has_approvals_permission():
         return jsonify({'error': 'Section version not found'}), 404
     cancelled = db.cancel_section_version(
@@ -14009,6 +14123,8 @@ def api_diff_section_version(version_id):
     _draft, error = _versioned_draft_for_read(version.get('draft_id'))
     if error:
         return jsonify({'error': 'Section version not found'}), 404
+    if _section_key_forbidden(version.get('section_key')):
+        return jsonify({'error': 'Section version not found'}), 404
     base_id = (request.args.get('baseVersionId') or '').strip() or None
     diff = db.diff_section_versions(g.tenant_id, version_id, base_version_id=base_id)
     if diff.get('error') == 'version_not_found':
@@ -14033,6 +14149,10 @@ def api_restore_section_version():
     draft, error = _versioned_draft_or_404(version.get('draft_id'))
     if error:
         return jsonify(error), 404
+    # ISS-015: restoring writes hidden-section content into the draft — the
+    # caller must be able to see that section.
+    if _section_key_forbidden(version.get('section_key')):
+        return jsonify({'error': 'Section version not found'}), 404
     live = dict(draft.get('draft_data') or {})
     section_map = _draft_field_section_map(g.tenant_id)
     for key in _section_snapshot_slice(live, version['section_key'], section_map):
@@ -14178,7 +14298,8 @@ def api_project_draft_approval_status():
 @require_permission('approvals')
 def api_pending_project_draft_approvals():
     """List tenant-only draft approval requests for authorized reviewers."""
-    drafts = db.get_pending_project_drafts(g.tenant_id)
+    drafts = db.get_pending_project_drafts(
+        g.tenant_id, accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     return jsonify({'success': True, 'drafts': drafts})
 
 
@@ -14192,6 +14313,10 @@ def api_review_project_draft():
     note = (data.get('note') or '').strip()[:3000]
     if not isinstance(draft_id, str) or not draft_id or review_status not in {'approved', 'rejected'}:
         return jsonify({'error': 'draftId and status (approved or rejected) are required'}), 400
+    # ISS-014: a scoped reviewer cannot decide a draft outside their scope.
+    target = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if target and not db.user_may_access_draft(g.user_id, target):
+        return jsonify({'error': 'Pending draft approval not found'}), 404
     reviewed = db.review_project_draft(
         g.tenant_id, draft_id, review_status, _project_draft_actor_id(), _project_draft_actor_name(), note
     )
@@ -16317,8 +16442,9 @@ def api_register():
             conn.execute('UPDATE tenants SET domain = ? WHERE id = ?', (domain, tenant_id))
             conn.commit()
         user_id = db.create_user(
-            tenant_id, company_name, email, password_hash, role='company_admin'
+            tenant_id, company_name, email, password_hash, role='employee'
         )
+        db.grant_company_admin_permissions(user_id)
         db.update_tenant(
             tenant_id,
             primary_user_id=user_id,
@@ -16367,7 +16493,7 @@ def api_login():
         candidate = db.get_user_by_id(tenant['primary_user_id'])
         if candidate and str(candidate.get('tenant_id')) == str(tenant['id']):
             primary = candidate
-    elif not tenant and user and user.get('role') == 'company_admin' and user.get('is_active'):
+    elif not tenant and user and user.get('is_active'):
         owning = db.get_tenant_by_id(user['tenant_id'])
         if owning and owning.get('primary_user_id') == user['id']:
             tenant, primary, user = owning, user, None
@@ -16375,8 +16501,7 @@ def api_login():
     owner_login_open = bool(
         tenant and (
             not tenant.get('primary_user_id')
-            or (primary is not None and primary.get('is_active')
-                and primary.get('role') == 'company_admin')
+            or (primary is not None and primary.get('is_active'))
         )
     )
     credential_ok = False
@@ -16582,8 +16707,11 @@ def api_logout():
 @app.route('/api/users', methods=['GET'])
 @require_permission('manage_users')
 def api_list_users():
-    """List all users in the tenant."""
+    """List all users in the tenant; the primary row is flagged as the admin."""
     users = db.get_users_by_tenant(g.tenant_id)
+    primary_id = str((g.tenant or {}).get('primary_user_id') or '')
+    for u in users:
+        u['is_primary'] = str(u.get('id')) == primary_id
     return jsonify({'success': True, 'users': users})
 
 
@@ -16660,12 +16788,13 @@ def api_update_user(user_id):
         updates['password_hash'] = hash_password(data['password'])
         updates['require_password_change'] = 0
 
-    # t21-03: the last active company admin can never be disabled or demoted.
-    demotes_admin = ('role' in updates and updates['role'] != 'company_admin' and user.get('role') == 'company_admin') \
-        or ('is_active' in updates and not updates['is_active'] and user.get('role') == 'company_admin')
-    if demotes_admin and db.is_last_active_company_admin(g.tenant_id, user_id):
-        return jsonify({'error': 'لا يمكن تعطيل أو تخفيض آخر مدير شركة نشط',
-                        'error_code': 'last_company_admin'}), 400
+    # t21-03: the primary user row IS the company's admin identity — disabling
+    # it through user management would lock the whole company out, so it can
+    # only change through the super-admin primary reassignment.
+    if db.is_primary_company_admin(g.tenant_id, user_id) \
+            and 'is_active' in updates and not updates['is_active']:
+        return jsonify({'error': 'لا يمكن تعطيل مدير الشركة الأساسي',
+                        'error_code': 'primary_company_admin'}), 400
 
     db.update_user(user_id, **updates)
     _apply_user_scope_payload(user_id, data)
@@ -16679,9 +16808,9 @@ def api_delete_user(user_id):
     user = db.get_user_by_id(user_id)
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
-    if db.is_last_active_company_admin(g.tenant_id, user_id):
-        return jsonify({'error': 'لا يمكن حذف آخر مدير شركة نشط',
-                        'error_code': 'last_company_admin'}), 400
+    if db.is_primary_company_admin(g.tenant_id, user_id):
+        return jsonify({'error': 'لا يمكن حذف مدير الشركة الأساسي',
+                        'error_code': 'primary_company_admin'}), 400
     db.delete_user(user_id)
     return jsonify({'success': True})
 
@@ -16726,7 +16855,8 @@ def api_get_user_permissions(user_id):
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
     perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
-    return jsonify({'success': True, 'permissions': perms, 'availableKeys': db.PERMISSION_KEYS})
+    keys = [k for k in db.PERMISSION_KEYS if k != 'sag_admin_panel']
+    return jsonify({'success': True, 'permissions': perms, 'availableKeys': keys})
 
 
 @app.route('/api/users/<user_id>/permissions', methods=['PUT'])
@@ -16740,7 +16870,7 @@ def api_set_user_permissions(user_id):
     data = request.json or {}
     permissions = data.get('permissions', {})
     for key, granted in permissions.items():
-        if key not in db.PERMISSION_KEYS:
+        if key not in db.PERMISSION_KEYS or key == 'sag_admin_panel':
             return jsonify({'error': f'Unknown permission key: {key}'}), 400
         db.set_user_permission(user_id, key, bool(granted))
 
@@ -16755,7 +16885,9 @@ def api_get_my_permissions():
     if g.user_id:
         perms = db.get_user_permissions(g.user_id, g.user_role or 'employee')
     else:
-        perms = {k: True for k in db.PERMISSION_KEYS}
+        # The tenant-direct session holds every company permission; the
+        # platform panel key stays super-admin only.
+        perms = {k: True for k in db.PERMISSION_KEYS if k != 'sag_admin_panel' or g.is_admin}
     return jsonify({'success': True, 'permissions': perms, 'role': g.user_role})
 
 
@@ -20197,6 +20329,9 @@ def _presentation_version_payload(version, include_snapshot=False):
     item['label'] = 'نسخة قديمة: الشرائح فقط' if legacy else f'مراجعة {item.get("revision", 0)}'
     if include_snapshot:
         state = _presentation_state(item)
+        # ISS-015: a version snapshot is draft data of its moment — hidden
+        # sections stay server-side for this caller.
+        state['projectData'] = _draft_data_for_response(state.get('projectData'))
         item['snapshot'] = {key: state.get(key) for key in
                             ('title', 'projectData', 'slidesData', 'slideCount', 'draftId', 'status')}
         if legacy:
@@ -20211,7 +20346,7 @@ def _presentation_version_payload(version, include_snapshot=False):
 def api_get_versions(pres_id):
     """Immutable revisions and explicitly labelled slides-only legacy backups."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     versions = db.get_presentation_revisions(pres_id, g.tenant_id)
     return jsonify({'success': True, 'currentRevision': int(pres.get('revision') or 0),
@@ -20221,6 +20356,9 @@ def api_get_versions(pres_id):
 @app.route('/api/presentations/<pres_id>/versions/<version_id>', methods=['GET'])
 @require_permission('view_presentations')
 def api_get_version(pres_id, version_id):
+    pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not pres or not _presentation_in_scope(pres):
+        return jsonify({'error': 'Presentation not found'}), 404
     version = db.get_presentation_revision(pres_id, version_id, g.tenant_id)
     if not version:
         return jsonify({'error': 'Version not found'}), 404
@@ -20231,7 +20369,7 @@ def api_get_version(pres_id, version_id):
 @require_permission('view_presentations')
 def api_compare_versions(pres_id):
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     before = db.get_presentation_revision(pres_id, request.args.get('from', ''), g.tenant_id)
     to_id = request.args.get('to') or 'current'
@@ -20239,6 +20377,9 @@ def api_compare_versions(pres_id):
     if not before or not after:
         return jsonify({'error': 'Version not found'}), 404
     old, new = _presentation_state(before), _presentation_state(after)
+    # ISS-015: hidden sections must not surface in the diff narrative either.
+    old['projectData'] = _draft_data_for_response(old.get('projectData'))
+    new['projectData'] = _draft_data_for_response(new.get('projectData'))
     changes = change_tracking.describe_slide_changes(old['slidesData'], new['slidesData'])
     if not before.get('legacy') and not after.get('legacy'):
         if old.get('title') != new.get('title'):
@@ -20255,7 +20396,7 @@ def api_compare_versions(pres_id):
 def api_restore_version(pres_id, version_id):
     """Restore creates a new revision of this card, not a rewrite of its source draft."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     version = db.get_presentation_revision(pres_id, version_id, g.tenant_id)
     if not version:
@@ -20279,7 +20420,7 @@ def api_restore_version(pres_id, version_id):
 def api_get_edit_log(pres_id):
     """Get edit history for a presentation: who changed what, by hand or by the AI."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'presentation', pres_id)})
 
@@ -20299,7 +20440,7 @@ def api_get_draft_edit_log(draft_id):
 def api_log_presentation_edit(pres_id):
     """Record a single edit log entry (used by inline text editing)."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     data = request.json or {}
     action = data.get('action', 'edit')
@@ -20902,6 +21043,24 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
         raise
 
 
+def _project_file_in_scope(stored):
+    """ISS-014: a project file follows the scope of the draft it belongs to.
+
+    Files with no live draft link stay reachable, matching the NULL-draft
+    presentations convention; a file whose draft exists but sits outside the
+    caller's scope is refused as not found.
+    """
+    if not stored:
+        return False
+    draft_id = stored.get('draft_id')
+    if not draft_id:
+        return True
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return True
+    return db.user_may_access_draft(g.user_id, draft)
+
+
 @app.route('/api/project-files', methods=['POST'])
 @require_permission('create_presentation')
 def api_upload_project_file():
@@ -20910,6 +21069,10 @@ def api_upload_project_file():
         return jsonify({'success': False, 'error': 'No project file provided'}), 400
     file_type = (request.form.get('fileType') or '').strip().lower()
     draft_id = (request.form.get('draftId') or '').strip() or None
+    if draft_id:
+        draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+        if draft and not db.user_may_access_draft(g.user_id, draft):
+            return jsonify({'success': False, 'error': 'Draft not found'}), 404
     project_id = (request.form.get('projectId') or '').strip() or None
     try:
         result = _store_project_upload(uploaded_file, file_type, draft_id=draft_id, project_id=project_id)
@@ -20945,6 +21108,8 @@ def api_get_project_file(file_id):
             if isinstance(grant, tuple):
                 return grant
     if not stored or not stored.get('storage_path'):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    if resolve_tenant == g.tenant_id and not _project_file_in_scope(stored):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     return _send_project_file_response(stored, resolve_tenant)
 
@@ -20986,6 +21151,8 @@ def api_project_file_signed_url(file_id):
     stored = db.get_project_file(g.tenant_id, str(file_id))
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    if not _project_file_in_scope(stored):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     token = auth.create_signed_download_token(str(file_id), g.tenant_id)
     return jsonify({'success': True, 'url': f'/api/files/signed/{token}'})
 
@@ -21007,6 +21174,8 @@ def api_signed_file_download(token):
 def api_delete_project_file(file_id):
     stored = db.get_project_file(g.tenant_id, str(file_id))
     if not stored:
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    if not _project_file_in_scope(stored):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     if stored.get('file_type') != 'competitor_logo':
         return jsonify({'success': False, 'error': 'لا يمكن حذف هذا النوع من الملفات من هنا'}), 400
@@ -22651,9 +22820,6 @@ def api_admin_update_tenant_user(tenant_id, user_id):
     if request.method == 'DELETE':
         if tenant.get('primary_user_id') == user_id:
             return jsonify({'error': 'Primary company admin cannot be deleted'}), 400
-        if db.is_last_active_company_admin(tenant_id, user_id):
-            return jsonify({'error': 'لا يمكن حذف آخر مدير شركة نشط',
-                            'error_code': 'last_company_admin'}), 400
         db.delete_user(user_id)
         return jsonify({'success': True})
     data = request.json or {}
@@ -22661,15 +22827,9 @@ def api_admin_update_tenant_user(tenant_id, user_id):
     for key in ['name', 'role', 'is_active']:
         if key in data:
             updates[key] = data[key]
-    # t21-03: never let an update strip the last active company admin.
-    demotes_admin = ('role' in updates and updates['role'] != 'company_admin'
-                     and user.get('role') == 'company_admin') \
-        or ('is_active' in updates and not updates['is_active']
-            and user.get('role') == 'company_admin')
-    if demotes_admin and db.is_last_active_company_admin(tenant_id, user_id) \
-            and not data.get('isPrimary'):
-        return jsonify({'error': 'لا يمكن تعطيل أو تخفيض آخر مدير شركة نشط',
-                        'error_code': 'last_company_admin'}), 400
+    # Disabling the primary row suspends the company's owner login — the
+    # tenant row flips with it through sync_primary_company_admin, so this
+    # stays a deliberate super-admin act.
     if 'email' in data:
         updates['email'] = str(data.get('email') or '').strip().lower()
         if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', updates['email']):
@@ -22763,17 +22923,13 @@ def _admin_tenant_or_404(tenant_id):
 def _notify_tenant_admins(tenant_id, title, body, entity_type=None, entity_id=None):
     """In-app + email notification to every active company admin of the tenant."""
     try:
-        for admin in db.get_users_by_tenant(tenant_id):
-            if admin.get('is_active') and admin.get('role') == 'company_admin':
-                db.create_notification(
-                    tenant_id, title, body, category='general',
-                    user_id=admin['id'], entity_type=entity_type, entity_id=entity_id,
-                    email_to=admin.get('email'))
-        # Tenant-direct logins see notifications with user_id NULL.
+        # The company admin reads its feed under the tenant-admin address —
+        # employees must not see platform-access escalations in theirs.
         tenant = db.get_tenant_by_id(tenant_id)
         db.create_notification(
             tenant_id, title, body, category='general',
-            user_id=None, entity_type=entity_type, entity_id=entity_id,
+            user_id='tenant-admin:' + str(tenant_id),
+            entity_type=entity_type, entity_id=entity_id,
             email_to=(tenant or {}).get('email'))
     except Exception as exc:
         print(f'[ACCESS REQUEST] client notification failed: {exc}')
@@ -22965,7 +23121,8 @@ def api_admin_get_tenant_user_permissions(tenant_id, user_id):
     if error:
         return error
     perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
-    return jsonify({'success': True, 'permissions': perms, 'availableKeys': db.PERMISSION_KEYS})
+    keys = [k for k in db.PERMISSION_KEYS if k != 'sag_admin_panel']
+    return jsonify({'success': True, 'permissions': perms, 'availableKeys': keys})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/users/<user_id>/permissions', methods=['PUT'])
@@ -22978,7 +23135,7 @@ def api_admin_set_tenant_user_permissions(tenant_id, user_id):
     data = request.json or {}
     permissions = data.get('permissions', {})
     for key, granted in permissions.items():
-        if key not in db.PERMISSION_KEYS:
+        if key not in db.PERMISSION_KEYS or key == 'sag_admin_panel':
             return jsonify({'error': f'Unknown permission key: {key}'}), 400
         db.set_user_permission(user_id, key, bool(granted))
     perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
@@ -24200,7 +24357,7 @@ def _agent_requester_permission_granted(permission_key):
         return True
     user_id = getattr(g, 'user_id', None)
     user_role = getattr(g, 'user_role', None)
-    if not user_id or user_role == 'company_admin':
+    if not user_id:
         return True
     permissions = getattr(g, 'user_permissions', None)
     if permissions is None:
@@ -24620,10 +24777,10 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 result['message'] = f'الموظف "{email}" غير موجود'
             else:
                 active_val = 1 if is_active in (True, 1, '1', 'true') else 0
-                # The agent is bound by the same last-admin guard as the user routes.
-                if not active_val and db.is_last_active_company_admin(tenant_id, target_user['id']):
+                # The agent is bound by the same primary-admin guard as the user routes.
+                if not active_val and db.is_primary_company_admin(tenant_id, target_user['id']):
                     result['status'] = 'error'
-                    result['message'] = 'لا يمكن تعطيل آخر مدير شركة نشط'
+                    result['message'] = 'لا يمكن تعطيل مدير الشركة الأساسي'
                 else:
                     db.update_user(target_user['id'], is_active=active_val)
                     db.log_ai_rule_change(tenant_id, 'agent_user', f'toggle_{email}', target_user.get('is_active'), active_val, risk_level='red')
@@ -25281,7 +25438,7 @@ def api_reset_ai_rules():
 def api_request_approval(pres_id):
     """Request approval for a presentation (employee submits for review)."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
     existing = db.get_approval_status(pres_id, tenant_id=g.tenant_id)
     if existing and existing['status'] == 'pending':
@@ -25295,7 +25452,8 @@ def api_request_approval(pres_id):
 @require_permission('approvals')
 def api_get_approvals():
     """Get all pending approvals for the current tenant."""
-    approvals = db.get_pending_approvals(g.tenant_id)
+    approvals = db.get_pending_approvals(
+        g.tenant_id, accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     return jsonify({'success': True, 'approvals': approvals})
 
 
@@ -25311,6 +25469,10 @@ def api_review_approval(approval_id):
     approval = db.get_approval(approval_id, g.tenant_id)
     if not approval:
         return jsonify({'error': 'Approval not found'}), 404
+    # ISS-014: a scoped reviewer can only decide approvals inside their scope.
+    pres = db.get_presentation(approval['presentation_id'], tenant_id=g.tenant_id)
+    if not _presentation_in_scope(pres):
+        return jsonify({'error': 'Approval not found'}), 404
     result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin', note)
     if not result:
         return jsonify({'error': 'Approval not found'}), 404
@@ -25325,12 +25487,8 @@ def api_review_approval(approval_id):
 def api_approval_status(pres_id):
     """Get approval status for a presentation."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not pres:
+    if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
-    if pres.get('draft_id'):
-        accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
-        if accessible is not None and pres['draft_id'] not in accessible:
-            return jsonify({'error': 'Presentation not found'}), 404
     approval = db.get_approval_status(pres_id, tenant_id=g.tenant_id)
     return jsonify({'success': True, 'approval': approval})
 
@@ -25981,9 +26139,12 @@ def _omran_actor_name():
 
 
 def _omran_actor_is_admin():
-    """Company-level administrators may combine requester and approver hats (d02)."""
-    return bool(getattr(g, 'is_admin', False)) or getattr(g, 'user_id', None) is None \
-        or getattr(g, 'user_role', None) == 'company_admin'
+    """Company-level administrators may combine requester and approver hats (d02).
+
+    The company admin is the tenant-direct identity: ``g.user_id`` is None for
+    it (a primary-admin token is normalized to it), so employees — including
+    ones holding every company permission — stay distinguishable from it."""
+    return bool(getattr(g, 'is_admin', False)) or getattr(g, 'user_id', None) is None
 
 
 def _omran_can(permission_key):
@@ -26217,7 +26378,8 @@ def api_create_generation_job(approval_id):
 def api_list_generation_jobs():
     jobs = db.list_generation_jobs(
         g.tenant_id, status=request.args.get('status'),
-        limit=request.args.get('limit') or 50)
+        limit=request.args.get('limit') or 50,
+        accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     draft_id = request.args.get('draftId')
     if draft_id:
         jobs = [job for job in jobs if job.get('draft_id') == draft_id]
@@ -26226,15 +26388,34 @@ def api_list_generation_jobs():
 
 @app.route('/api/generation-jobs/<job_id>', methods=['GET'])
 @require_auth
+def _generation_job_in_scope(job):
+    """ISS-014: a job stays inside the caller's project scope — its own draft
+    link, or the draft its presentation carries."""
+    if not job:
+        return False
+    accessible = db.user_accessible_draft_ids(g.user_id, g.tenant_id)
+    if accessible is None:
+        return True
+    draft_id = job.get('draft_id')
+    if not draft_id and job.get('presentation_id'):
+        pres = db.get_presentation(job['presentation_id'], tenant_id=g.tenant_id)
+        draft_id = (pres or {}).get('draft_id')
+    return not draft_id or str(draft_id) in accessible
+
+
+@app.route('/api/generation-jobs/<job_id>', methods=['GET'])
+@require_auth
 def api_get_generation_job(job_id):
     job = db.get_generation_job(job_id, tenant_id=g.tenant_id)
-    if not job:
+    if not job or not _generation_job_in_scope(job):
         return jsonify({'error': 'مهمة التوليد غير موجودة', 'error_code': 'job_not_found'}), 404
     return jsonify({'success': True, 'job': job})
 
 
 def _generation_job_actor_allowed(job):
     """The run belongs to its creator, a generation approver, or an admin."""
+    if not _generation_job_in_scope(job):
+        return False
     if str(job.get('created_by')) == str(_omran_actor_id()):
         return True
     return _omran_can('approve_generation')
@@ -26318,6 +26499,9 @@ def api_list_point_reservations():
 @app.route('/api/presentations/<presentation_id>/final-approval/request', methods=['POST'])
 @require_permission('create_presentation')
 def api_request_final_file_approval(presentation_id):
+    pres = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+    if not pres or not _presentation_in_scope(pres):
+        return jsonify({'error': 'العرض غير موجود', 'error_code': 'presentation_not_found'}), 404
     approval = db.request_final_file_approval(
         g.tenant_id, presentation_id, _omran_actor_id(), _omran_actor_name(),
         revision=int((request.json or {}).get('revision') or 0),
@@ -26352,6 +26536,7 @@ def api_list_final_file_approvals():
     approvals = db.list_final_file_approvals(
         g.tenant_id, presentation_id=request.args.get('presentationId'),
         status=request.args.get('status'),
+        accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id),
     )
     return jsonify({'success': True, 'approvals': approvals})
 
@@ -26364,6 +26549,14 @@ def api_decide_final_file_approval(approval_id):
     data = request.json or {}
     if data.get('decision') in {'approved', 'rejected'} and not _omran_can('approve_final_file'):
         return _omran_forbidden('اعتماد أو رفض الملف النهائي يتطلب صلاحية معتمد الملف')
+    # ISS-014: the decision must stay inside the caller's project scope too.
+    existing = db.get_final_file_approval(g.tenant_id, approval_id)
+    if not existing:
+        return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
+    pres = db.get_presentation(existing['presentation_id'], tenant_id=g.tenant_id) \
+        if existing.get('presentation_id') else None
+    if not _presentation_in_scope(pres):
+        return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
     result = db.decide_final_file_approval(
         g.tenant_id, approval_id, data.get('decision'), _omran_actor_id(), _omran_actor_name(),
         note=data.get('note'), allow_self=_omran_actor_is_admin(), app_root=app.root_path,
@@ -26396,6 +26589,17 @@ def api_decide_final_file_approval(approval_id):
 @require_auth
 def api_record_download():
     data = request.json or {}
+    # ISS-014: the ledger entry must not point at a draft or presentation the
+    # caller's project scope excludes.
+    draft_id = data.get('draftId')
+    if draft_id:
+        draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+        if draft and not db.user_may_access_draft(g.user_id, draft):
+            return jsonify({'error': 'Draft not found'}), 404
+    if data.get('presentationId'):
+        pres = db.get_presentation(data['presentationId'], tenant_id=g.tenant_id)
+        if pres and not _presentation_in_scope(pres):
+            return jsonify({'error': 'Presentation not found'}), 404
     row = db.record_download(
         g.tenant_id, data.get('fileName') or '', presentation_id=data.get('presentationId'),
         draft_id=data.get('draftId'), format=data.get('format') or 'pdf',
@@ -26414,13 +26618,22 @@ def api_record_download():
 @app.route('/api/downloads', methods=['GET'])
 @require_auth
 def api_list_downloads():
-    downloads = db.list_downloads(g.tenant_id, presentation_id=request.args.get('presentationId'))
+    downloads = db.list_downloads(
+        g.tenant_id, presentation_id=request.args.get('presentationId'),
+        accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     return jsonify({'success': True, 'downloads': downloads})
 
 
 @app.route('/api/downloads/<download_id>/delivered', methods=['POST'])
 @require_auth
 def api_mark_download_delivered(download_id):
+    existing = db.get_download(g.tenant_id, download_id)
+    if not existing:
+        return jsonify({'error': 'التنزيل غير موجود', 'error_code': 'not_found'}), 404
+    if existing.get('presentation_id'):
+        pres = db.get_presentation(existing['presentation_id'], tenant_id=g.tenant_id)
+        if not _presentation_in_scope(pres):
+            return jsonify({'error': 'التنزيل غير موجود', 'error_code': 'not_found'}), 404
     result = db.mark_download_downloaded(g.tenant_id, download_id, downloaded_by_name=_omran_actor_name())
     failure = _omran_error(result)
     if failure:
@@ -26435,8 +26648,12 @@ def api_mark_download_delivered(download_id):
 @require_permission('copy_presentation')
 def api_copy_project_draft():
     data = request.json or {}
+    source_draft_id = data.get('draftId') or _resolve_draft_id()
+    source = db.get_project_draft_by_id(g.tenant_id, source_draft_id) if source_draft_id else None
+    if source and not db.user_may_access_draft(g.user_id, source):
+        return jsonify({'error': 'Draft not found', 'error_code': 'draft_not_found'}), 404
     result = db.copy_project_draft(
-        g.tenant_id, data.get('draftId') or _resolve_draft_id(), data.get('newTitle'),
+        g.tenant_id, source_draft_id, data.get('newTitle'),
         _omran_actor_id(), _omran_actor_name(), actor_user_id=g.user_id,
     )
     failure = _omran_error(result)
@@ -26460,6 +26677,9 @@ def api_list_proposal_copies():
 @app.route('/api/presentations/<presentation_id>/archive', methods=['POST'])
 @require_auth
 def api_archive_presentation(presentation_id):
+    pres = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+    if not pres or not _presentation_in_scope(pres):
+        return jsonify({'error': 'العرض غير موجود', 'error_code': 'not_found'}), 404
     result = db.archive_presentation(g.tenant_id, presentation_id, _omran_actor_id(), _omran_actor_name())
     failure = _omran_error(result)
     if failure:
@@ -26472,6 +26692,9 @@ def api_archive_presentation(presentation_id):
 @app.route('/api/presentations/<presentation_id>/restore', methods=['POST'])
 @require_auth
 def api_restore_presentation(presentation_id):
+    pres = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+    if not pres or not _presentation_in_scope(pres):
+        return jsonify({'error': 'العرض غير موجود', 'error_code': 'not_found'}), 404
     result = db.restore_presentation(g.tenant_id, presentation_id)
     failure = _omran_error(result)
     if failure:
@@ -27011,9 +27234,9 @@ def api_admin_decide_recharge_request(request_id):
 # ── t50: support tickets ─────────────────────────────────────────────────────
 
 def _omran_ticket_actor_is_creator(ticket):
-    """The requester keeps view/reply/close rights on their own ticket even
-    without the desk permission — tickets filed before the gate existed, or a
-    grant the company admin later revoked."""
+    """The requester keeps view/reply rights on their own ticket even without
+    the desk permission — tickets filed before the gate existed, or a grant the
+    company admin later revoked. Status moves stay with the platform desk."""
     return str((ticket or {}).get('created_by') or '') == str(_omran_actor_id())
 
 
@@ -27085,7 +27308,7 @@ def api_add_support_message(ticket_id):
             return _omran_forbidden('الرد على التذكرة يتطلب صلاحية تذاكر الدعم')
     row = db.add_support_message(
         g.tenant_id, ticket_id, data.get('body'), author_id=_omran_actor_id(),
-        author_name=_omran_actor_name(), author_role=g.user_role or 'customer',
+        author_name=_omran_actor_name(), author_role='customer',
     )
     failure = _omran_error(row)
     if failure:
@@ -27096,38 +27319,6 @@ def api_add_support_message(ticket_id):
         db.update_support_ticket_status(g.tenant_id, ticket_id, 'reopened',
                                         actor_name=_omran_actor_name())
     return jsonify({'success': True, 'message': row})
-
-
-@app.route('/api/support/tickets/<ticket_id>/status', methods=['POST'])
-@require_auth
-def api_update_support_ticket_status(ticket_id):
-    """Status moves belong to the support desk. The one exception is the ticket's
-    own creator closing it — a customer confirming the answer helped."""
-    data = request.json or {}
-    new_status = data.get('status')
-    if not _omran_can('support_tickets'):
-        ticket = db.get_support_ticket(g.tenant_id, ticket_id)
-        if not ticket:
-            return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
-        is_creator = _omran_ticket_actor_is_creator(ticket)
-        if not (is_creator and new_status == 'closed'):
-            return _omran_forbidden('تغيير حالة التذكرة يتطلب صلاحية الدعم')
-    row = db.update_support_ticket_status(g.tenant_id, ticket_id, new_status,
-                                          actor_name=_omran_actor_name())
-    failure = _omran_error(row)
-    if failure:
-        return failure
-    _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
-                        new_value=row.get('status'))
-    # t40: the requester hears about every status move on their ticket.
-    ticket = db.get_support_ticket(g.tenant_id, ticket_id)
-    if ticket:
-        db.create_notification(
-            g.tenant_id, 'تحديث حالة التذكرة',
-            body=f'{ticket.get("subject") or ""} — {new_status}',
-            category='support', user_id=ticket.get('created_by'),
-            entity_type='support_ticket', entity_id=ticket_id)
-    return jsonify({'success': True, 'ticket': row})
 
 
 # ── Super-admin support inbox: tickets of every company land here ────────────

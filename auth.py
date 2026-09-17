@@ -204,8 +204,7 @@ def _load_token_user(payload, tenant):
     user = db.get_user_by_id(user_id)
     if not user or not user.get('is_active') or str(user.get('tenant_id')) != str(payload.get('sub')):
         return None, (jsonify({'error': 'User account inactive or not found'}), 403)
-    if user.get('role') == 'company_admin' and tenant \
-            and db.is_primary_company_admin(tenant['id'], user_id):
+    if tenant and db.is_primary_company_admin(tenant['id'], user_id):
         return None, None
     return user, None
 
@@ -283,7 +282,7 @@ def require_auth(f):
 
 
 def require_company_admin(f):
-    """Decorator: require a valid JWT token AND company_admin role (or super admin)."""
+    """Decorator: the company admin — the tenant-direct session — or super admin."""
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization', '')
@@ -310,7 +309,10 @@ def require_company_admin(f):
         user_role = (user_row or {}).get('role') or payload.get('user_role')
         user_id = (user_row or {}).get('id')
         is_super_admin = _is_platform_admin_session(tenant, payload)
-        if not is_super_admin and user_role != 'company_admin' and user_id is not None:
+        # The company admin is the tenant-direct identity (a normalized
+        # primary-admin session resolves to it). Every users row is an
+        # employee — none may pass this gate.
+        if not is_super_admin and user_id is not None:
             return jsonify({'error': 'Company admin access required'}), 403
 
         g.tenant_id = payload['sub']
@@ -395,7 +397,9 @@ def require_permission(permission_key):
             g.token_payload = payload
 
             is_super_admin = g.is_admin
-            is_company_admin = g.user_role == 'company_admin' or g.user_id is None
+            # The company admin is the tenant-direct session (no users row —
+            # a primary-admin token is normalized to it in _load_token_user).
+            is_company_admin = g.user_id is None
 
             if permission_key == 'sag_admin_panel' and not is_super_admin:
                 return jsonify({'error': 'Super admin access required'}), 403

@@ -654,19 +654,21 @@
         '<button type="button" class="btn small ghost" style="margin-right:auto;" onclick="showSodMatrixModal()">مصفوفة الفصل بين المهام</button>' +
         '</div>';
       const usersHtml = data.users.length ? data.users.map(u => {
-        const roleLabel = USER_ROLE_LABELS[u.role] || 'موظف';
+        const roleLabel = u.is_primary ? WFT('role.company_admin', 'أدمن الشركة') : (USER_ROLE_LABELS[u.role] || 'موظف');
         const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const reportUser = reportUsers[u.id] || {};
         const lastLogin = reportUser.last_login_at
           ? ' | <span>' + escapeHtml(WFT('users.last_login', 'آخر دخول')) + ':</span> ' + escapeHtml(String(reportUser.last_login_at).slice(0, 16).replace('T', ' '))
           : '';
-        return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
-          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + '</div></div>' +
-          '<div class="tenant-actions" style="gap:6px">' +
+        // The primary row is the company's admin identity — it is managed
+        // through the account itself, not employee permissions.
+        const actions = u.is_primary ? '' :
           '<button class="btn small primary" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">صلاحيات</button>' +
           '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + (u.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
-          '<button class="btn small danger" onclick="deleteTenantUser(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">حذف</button>' +
-          '</div></div>';
+          '<button class="btn small danger" onclick="deleteTenantUser(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">حذف</button>';
+        return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
+          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + '</div></div>' +
+          '<div class="tenant-actions" style="gap:6px">' + actions + '</div></div>';
       }).join('') : '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
       list.innerHTML = reportBanner + usersHtml;
       renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
@@ -694,7 +696,7 @@
             : '';
           return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
             '<div><h3 style="font-size:14px">' + escapeHtml(i.email) + '</h3>' +
-            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || i.role || 'موظف') + ' | ' + state + mail + '</div></div>' +
+            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || 'موظف') + ' | ' + state + mail + '</div></div>' +
             '<div class="tenant-actions" style="gap:6px">' + resend + '</div></div>';
         }).join('');
     }
@@ -731,7 +733,7 @@
 
     async function createTenantRole() {
       const name = ((document.getElementById('newRoleName') || {}).value || '').trim();
-      const baseRole = ((document.getElementById('newRoleBase') || {}).value || 'employee');
+      const baseRole = 'employee';
       if (!name) { toast(WFT('users.role_name_required', 'اسم القالب مطلوب')); return; }
       const data = await api('POST', '/api/roles', { name, baseRole });
       if (data && data.success) {
@@ -873,11 +875,10 @@
       const name = document.getElementById('newUserName').value.trim();
       const email = document.getElementById('newUserEmail').value.trim();
       const password = document.getElementById('newUserPassword').value;
-      const role = document.getElementById('newUserRole').value;
       if (!name || !email || !password) { toast('كل الحقول مطلوبة'); return; }
       const pwError = passwordPolicyError(password);
       if (pwError) { toast(pwError); return; }
-      const data = await api('POST', '/api/users', { name, email, password, role });
+      const data = await api('POST', '/api/users', { name, email, password });
       if (data.success) {
         toast('تم إضافة الموظف');
         document.getElementById('newUserName').value = '';
@@ -1044,13 +1045,6 @@
 
     const USER_ROLE_LABELS = {
       employee: 'موظف',
-      company_admin: 'أدمن شركة',
-      section_editor: 'محرر أقسام',
-      section_approver: 'معتمد أقسام',
-      generation_approver: 'معتمد بدء التوليد',
-      final_file_approver: 'معتمد الملف النهائي',
-      profile: 'بروفايل',
-      support: 'دعم',
     };
 
     async function openUserPermissionsModal(userId, userName) {
@@ -1202,7 +1196,6 @@
         email,
         name: ((document.getElementById('inviteName') || {}).value || '').trim() || null,
         phone: ((document.getElementById('invitePhone') || {}).value || '').trim() || null,
-        role: ((document.getElementById('inviteRole') || {}).value || 'employee'),
         sections,
         projects,
       });

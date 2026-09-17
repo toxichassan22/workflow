@@ -80,6 +80,9 @@ def init_db():
         _migrate_generation_approval_columns(conn)
         _migrate_point_reservation_columns(conn)
         _migrate_workflow_gate_columns(conn)
+        # Runs after _create_tables: the primary-user backfill there still keys
+        # off the legacy 'company_admin' role before it is collapsed here.
+        _collapse_legacy_user_roles(conn)
 
         try:
             conn.commit()
@@ -1186,10 +1189,13 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
             '''INSERT INTO users
                (id, tenant_id, name, username, phone, email, password_hash, role,
                 is_active, require_password_change)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'company_admin', ?, ?)''',
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'employee', ?, ?)''',
             (user_id, tenant_id, manager_name, username.lower(), phone, email.lower(),
              password_hash, 1 if is_active else 0, 1 if require_password_change else 0)
         )
+        # The primary row is the company's admin identity — it carries every
+        # company permission explicitly even though sessions run tenant-direct.
+        _grant_all_permissions(conn, user_id)
         if package_id or trial_ends_at:
             conn.execute(
                 '''INSERT INTO tenant_subscriptions
@@ -2714,16 +2720,18 @@ def get_stats():
 
 def create_user(tenant_id, name, email, password_hash, role='employee',
                 username=None, phone=None, require_password_change=False):
-    """Create a user (employee or company admin) within a tenant."""
+    """Create a user within a tenant. Every row is an employee — the single
+    company admin is the tenant-direct identity, never a role value."""
     conn = get_db()
     user_id = str(uuid.uuid4())
+    clean_role = role if role in USER_ROLES else 'employee'
     conn.execute(
         '''INSERT INTO users
            (id, tenant_id, name, username, phone, email, password_hash, role,
             is_active, require_password_change)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)''',
         (user_id, tenant_id, name, username.lower() if username else None, phone,
-         email.lower(), password_hash, role, 1 if require_password_change else 0)
+         email.lower(), password_hash, clean_role, 1 if require_password_change else 0)
     )
     conn.commit()
     return user_id
@@ -2786,6 +2794,8 @@ def update_user(user_id, **fields):
         updates['email'] = updates['email'].lower()
     if 'username' in updates and updates['username']:
         updates['username'] = updates['username'].lower()
+    if 'role' in updates and updates['role'] not in USER_ROLES:
+        updates['role'] = 'employee'
     set_parts = [f'{k} = ?' for k in updates]
     # A new password retires every session token issued under the old one.
     if 'password_hash' in updates:
@@ -2843,14 +2853,17 @@ def set_primary_company_admin(tenant_id, user_id):
     previous_user_id = tenant['primary_user_id'] if tenant else None
     try:
         if previous_user_id and previous_user_id != user_id:
+            # The outgoing admin becomes a plain employee row; its grants stay
+            # for the company to trim as it sees fit.
             conn.execute(
                 "UPDATE users SET role = 'employee' WHERE id = ? AND tenant_id = ?",
                 (previous_user_id, tenant_id)
             )
         conn.execute(
-            "UPDATE users SET role = 'company_admin', is_active = 1 WHERE id = ?",
+            "UPDATE users SET role = 'employee', is_active = 1 WHERE id = ?",
             (user_id,)
         )
+        _grant_all_permissions(conn, user_id)
         conn.execute(
             '''UPDATE tenants
                SET primary_user_id = ?, account_manager_name = ?, username = ?, phone = ?,
@@ -2971,43 +2984,16 @@ PERMISSION_KEYS = [
     'sag_admin_panel',
 ]
 
-# Roles the tenant may assign to its users (t20). company_admin holds every
-# permission through the role defaults below; the rest are least-privilege
-# presets that a company admin can still refine per user.
+# A company has exactly three authority levels: the platform super admin, the
+# single company admin (the tenant-direct identity / primary user link), and
+# employees — every row in ``users`` is an employee. Capability lives in the
+# per-user permission grants below, so an employee can hold every company
+# permission without ever leaving the employee role.
 USER_ROLES = (
     'employee',
-    'company_admin',
-    'section_editor',
-    'section_approver',
-    'generation_approver',
-    'final_file_approver',
-    'profile',
-    'support',
 )
 
 DEFAULT_PERMISSIONS = {
-    'company_admin': {
-        'dashboard': True,
-        'create_presentation': True,
-        'view_presentations': True,
-        'generate_images': True,
-        'generate_maps': True,
-        'company_settings': True,
-        'custom_fields': True,
-        'manage_users': True,
-        'ai_rules': True,
-        'training_data': True,
-        'approvals': True,
-        'approve_generation': True,
-        'approve_final_file': True,
-        'export_files': True,
-        'support_tickets': True,
-        'copy_presentation': True,
-        'post_approval_edit': True,
-        'billing': True,
-        'audit_log': True,
-        'sag_admin_panel': False,
-    },
     'employee': {
         'dashboard': True,
         'create_presentation': True,
@@ -3028,6 +3014,34 @@ DEFAULT_PERMISSIONS = {
         'post_approval_edit': False,
         'billing': False,
         'audit_log': False,
+        'sag_admin_panel': False,
+    },
+}
+
+# Presets of the retired roles — kept only so the role-collapse migration can
+# convert each existing user's effective access into explicit grants before
+# the role is rewritten to 'employee'.
+_RETIRED_ROLE_PRESETS = {
+    'company_admin': {
+        'dashboard': True,
+        'create_presentation': True,
+        'view_presentations': True,
+        'generate_images': True,
+        'generate_maps': True,
+        'company_settings': True,
+        'custom_fields': True,
+        'manage_users': True,
+        'ai_rules': True,
+        'training_data': True,
+        'approvals': True,
+        'approve_generation': True,
+        'approve_final_file': True,
+        'export_files': True,
+        'support_tickets': True,
+        'copy_presentation': True,
+        'post_approval_edit': True,
+        'billing': True,
+        'audit_log': True,
         'sag_admin_panel': False,
     },
     'section_editor': {
@@ -3200,6 +3214,77 @@ def has_permission(user_id, permission_key, default_role='employee'):
     """Check if a user has a specific permission."""
     perms = get_user_permissions(user_id, default_role)
     return perms.get(permission_key, False)
+
+
+def _grant_all_permissions(conn, user_id):
+    """Write every company permission as an explicit grant on this user row.
+
+    sag_admin_panel stays platform-only — it is not a company permission and
+    the auth layer hardwires it to super-admin sessions regardless of grants.
+    """
+    now = _utcnow().isoformat()
+    for key in PERMISSION_KEYS:
+        if key == 'sag_admin_panel':
+            continue
+        conn.execute(
+            '''INSERT INTO user_permissions (id, user_id, permission_key, granted, created_at, updated_at)
+               VALUES (?, ?, ?, 1, ?, ?)
+               ON CONFLICT(user_id, permission_key) DO UPDATE SET
+               granted = 1, updated_at = excluded.updated_at''',
+            (str(uuid.uuid4()), user_id, key, now, now)
+        )
+
+
+def grant_company_admin_permissions(user_id):
+    """Public wrapper for the primary admin row — full company access."""
+    conn = get_db()
+    _grant_all_permissions(conn, user_id)
+    conn.commit()
+
+
+def _collapse_legacy_user_roles(conn):
+    """Fold the retired assignable roles into the single 'employee' role.
+
+    The three-level model has no assignable company_admin: the company admin is
+    the tenant-direct identity, and employees may hold any subset of company
+    permissions. Before rewriting ``users.role`` each user's effective access —
+    the old role preset adjusted by its permission overrides — is frozen into
+    explicit user_permissions rows so nobody silently loses (or gains) access.
+    Retired company_admin rows receive every company permission: their old
+    bypass already behaved that way.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, role FROM users WHERE role IS NOT NULL AND role != 'employee'"
+        ).fetchall()
+    except Exception:
+        return
+    for row in rows:
+        overrides = conn.execute(
+            'SELECT permission_key, granted FROM user_permissions WHERE user_id = ?',
+            (row['id'],)
+        ).fetchall()
+        if row['role'] == 'company_admin':
+            _grant_all_permissions(conn, row['id'])
+        else:
+            effective = dict(_RETIRED_ROLE_PRESETS.get(row['role'], DEFAULT_PERMISSIONS['employee']))
+            for override in overrides:
+                effective[override['permission_key']] = bool(override['granted'])
+            now = _utcnow().isoformat()
+            for key, granted in effective.items():
+                if key not in PERMISSION_KEYS or key == 'sag_admin_panel':
+                    continue
+                conn.execute(
+                    '''INSERT INTO user_permissions
+                       (id, user_id, permission_key, granted, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(user_id, permission_key) DO UPDATE SET
+                       granted = excluded.granted, updated_at = excluded.updated_at''',
+                    (str(uuid.uuid4()), row['id'], key, 1 if granted else 0, now, now)
+                )
+        conn.execute("UPDATE users SET role = 'employee' WHERE id = ?", (row['id'],))
+    if rows:
+        print(f'[DB] Migration: collapsed {len(rows)} legacy user role(s) to employee')
 
 
 def get_user_field_sections(user_id, tenant_id=None):
@@ -4288,17 +4373,27 @@ def create_approval(presentation_id, tenant_id, requested_by, requested_by_name)
     return approval_id
 
 
-def get_pending_approvals(tenant_id):
-    """Get all pending approval requests for a tenant."""
+def get_pending_approvals(tenant_id, accessible_draft_ids=None):
+    """Get all pending approval requests for a tenant.
+
+    ``accessible_draft_ids`` (ISS-014) keeps a project-scoped member from
+    seeing approvals whose presentation links a draft outside their scope;
+    presentations with no draft stay visible, matching the list route."""
     conn = get_db()
-    rows = conn.execute(
-        '''SELECT pa.*, p.title as pres_title, p.slide_count 
-           FROM presentation_approvals pa 
-           JOIN presentations p ON pa.presentation_id = p.id 
-           WHERE pa.tenant_id = ? AND pa.status = 'pending' 
-           ORDER BY pa.created_at DESC''',
-        (tenant_id,)
-    ).fetchall()
+    query = '''SELECT pa.*, p.title as pres_title, p.slide_count
+           FROM presentation_approvals pa
+           JOIN presentations p ON pa.presentation_id = p.id
+           WHERE pa.tenant_id = ? AND pa.status = 'pending' '''
+    params = [tenant_id]
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            query += ' AND (p.draft_id IS NULL OR p.draft_id IN (' + ','.join('?' * len(ids)) + '))'
+            params.extend(ids)
+        else:
+            query += ' AND p.draft_id IS NULL'
+    query += ' ORDER BY pa.created_at DESC'
+    rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -4983,13 +5078,24 @@ def delete_project_draft_by_id(tenant_id, draft_id):
     return True
 
 
-def get_pending_project_drafts(tenant_id):
-    """Return only this tenant's drafts awaiting overall approval."""
+def get_pending_project_drafts(tenant_id, accessible_draft_ids=None):
+    """Return only this tenant's drafts awaiting overall approval.
+
+    ``accessible_draft_ids`` (ISS-014) keeps a project-scoped member's list
+    inside their assigned drafts plus drafts they own."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM project_drafts WHERE tenant_id = ? AND status IN ('pending_approval', 'section_approval_pending', 'generation_approval_pending', 'final_approval_pending') ORDER BY requested_at DESC",
-        (tenant_id,)
-    ).fetchall()
+    query = ("SELECT * FROM project_drafts WHERE tenant_id = ? AND status IN ('pending_approval', "
+             "'section_approval_pending', 'generation_approval_pending', 'final_approval_pending')")
+    params = [tenant_id]
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            query += ' AND id IN (' + ','.join('?' * len(ids)) + ')'
+            params.extend(ids)
+        else:
+            query += ' AND 0'
+    query += ' ORDER BY requested_at DESC'
+    rows = conn.execute(query, params).fetchall()
     return [_hydrate_project_draft(row) for row in rows]
 
 
@@ -9925,7 +10031,18 @@ def latest_final_file_approval(tenant_id, presentation_id, status=None):
     return dict(row) if row else None
 
 
-def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limit=50):
+def get_final_file_approval(tenant_id, approval_id):
+    """One final-file approval row inside the tenant, or None."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM final_file_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limit=50,
+                              accessible_draft_ids=None):
     conn = get_db()
     query = ('SELECT ffa.*, p.title AS presentation_title FROM final_file_approvals ffa '
              'LEFT JOIN presentations p ON p.id = ffa.presentation_id AND p.tenant_id = ffa.tenant_id '
@@ -9937,6 +10054,15 @@ def list_final_file_approvals(tenant_id, presentation_id=None, status=None, limi
     if status:
         query += ' AND ffa.status = ?'
         params.append(status)
+    if accessible_draft_ids is not None:
+        # ISS-014: a project-scoped member sees only approvals whose
+        # presentation links a draft inside their scope.
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            query += ' AND (p.draft_id IS NULL OR p.draft_id IN (' + ','.join('?' * len(ids)) + '))'
+            params.extend(ids)
+        else:
+            query += ' AND p.draft_id IS NULL'
     query += ' ORDER BY ffa.requested_at DESC LIMIT ?'
     params.append(int(limit))
     return [dict(row) for row in conn.execute(query, params).fetchall()]
@@ -10002,6 +10128,16 @@ def record_download(tenant_id, file_name, presentation_id=None, draft_id=None, f
     return dict(conn.execute('SELECT * FROM presentation_downloads WHERE id = ?', (row_id,)).fetchone())
 
 
+def get_download(tenant_id, download_id):
+    """One downloads-ledger row inside the tenant, or None."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM presentation_downloads WHERE id = ? AND tenant_id = ?',
+        (download_id, tenant_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def mark_download_downloaded(tenant_id, download_id, downloaded_by_name=None):
     conn = get_db()
     now = _utcnow().isoformat()
@@ -10016,18 +10152,27 @@ def mark_download_downloaded(tenant_id, download_id, downloaded_by_name=None):
     return None
 
 
-def list_downloads(tenant_id, presentation_id=None, limit=100):
+def list_downloads(tenant_id, presentation_id=None, limit=100, accessible_draft_ids=None):
     conn = get_db()
+    query = ('SELECT d.* FROM presentation_downloads d '
+             'LEFT JOIN presentations p ON p.id = d.presentation_id AND p.tenant_id = d.tenant_id '
+             'WHERE d.tenant_id = ?')
+    params = [tenant_id]
     if presentation_id:
-        rows = conn.execute(
-            'SELECT * FROM presentation_downloads WHERE tenant_id = ? AND presentation_id = ? ORDER BY generated_at DESC LIMIT ?',
-            (tenant_id, presentation_id, int(limit)),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            'SELECT * FROM presentation_downloads WHERE tenant_id = ? ORDER BY generated_at DESC LIMIT ?',
-            (tenant_id, int(limit)),
-        ).fetchall()
+        query += ' AND d.presentation_id = ?'
+        params.append(presentation_id)
+    if accessible_draft_ids is not None:
+        # ISS-014: a project-scoped member sees only downloads whose
+        # presentation links a draft inside their scope.
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            query += ' AND (p.draft_id IS NULL OR p.draft_id IN (' + ','.join('?' * len(ids)) + '))'
+            params.extend(ids)
+        else:
+            query += ' AND p.draft_id IS NULL'
+    query += ' ORDER BY d.generated_at DESC LIMIT ?'
+    params.append(int(limit))
+    rows = conn.execute(query, params).fetchall()
     items = [dict(row) for row in rows]
     for item in items:
         # The library serves the file through the gated export endpoint only,
@@ -10298,6 +10443,18 @@ NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_app
 def create_notification(tenant_id, title, body=None, category='general', user_id=None,
                         entity_type=None, entity_id=None, email_to=None):
     conn = get_db()
+    # A notice addressed to the primary user row belongs to the company admin —
+    # its session runs tenant-direct and reads under the tenant-admin address,
+    # so the row is rewritten to that address instead of sitting unread.
+    if user_id and not str(user_id).startswith('tenant-admin:'):
+        try:
+            primary = conn.execute(
+                'SELECT primary_user_id FROM tenants WHERE id = ?', (tenant_id,)
+            ).fetchone()
+            if primary and str(primary['primary_user_id']) == str(user_id):
+                user_id = 'tenant-admin:' + str(tenant_id)
+        except Exception:
+            pass
     row_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO notifications (id, tenant_id, user_id, category, title, body, entity_type, entity_id)
@@ -10610,12 +10767,13 @@ def _user_email(user_id):
 
 
 def tenant_admin_contacts(tenant_id):
-    """Active company admins — the human escalation target per company."""
+    """The company's admin — the primary user linked from the tenants row."""
     conn = get_db()
     try:
         rows = conn.execute(
-            "SELECT id, name, email FROM users WHERE tenant_id = ? "
-            "AND role = 'company_admin' AND COALESCE(is_active, 1) = 1",
+            '''SELECT u.id, u.name, u.email FROM users u
+               JOIN tenants t ON t.primary_user_id = u.id
+               WHERE u.tenant_id = ? AND COALESCE(u.is_active, 1) = 1''',
             (tenant_id,),
         ).fetchall()
     except Exception:
@@ -11830,11 +11988,16 @@ def separation_of_duties_matrix(tenant_id):
                  AND ga.decided_by IS NOT NULL AND ga.decided_by = fa.decided_by''',
             (tenant_id,)
         ).fetchall()
-        admin_ids = {
-            r[0] for r in conn.execute(
-                "SELECT id FROM users WHERE tenant_id = ? AND role = 'company_admin'", (tenant_id,)
-            ).fetchall()
-        }
+        # The company admin acts through the tenant-direct identity — its
+        # writes carry the 'tenant-admin:<id>' actor id, and the linked primary
+        # user id is the same person. Employees with both approvals are still
+        # flagged: holding both permissions is exactly what this check watches.
+        admin_row = conn.execute(
+            'SELECT primary_user_id FROM tenants WHERE id = ?', (tenant_id,)
+        ).fetchone()
+        admin_ids = {f'tenant-admin:{tenant_id}'}
+        if admin_row and admin_row['primary_user_id']:
+            admin_ids.add(admin_row['primary_user_id'])
         for row in rows:
             item = dict(row)
             if item['gen_by'] in admin_ids:
@@ -11896,8 +12059,16 @@ def separation_of_duties_matrix(tenant_id):
         ).fetchall()
         for row in rows:
             item = dict(row)
-            holder = conn.execute('SELECT role FROM users WHERE id = ?', (item['user_id'],)).fetchone()
-            if holder and holder['role'] == 'company_admin':
+            # The tenant-direct company admin (sentinel actor or its linked
+            # primary user) is exempt — the check exists to catch employees
+            # editing without post_approval_edit.
+            if str(item['user_id'] or '').startswith('tenant-admin:'):
+                continue
+            holder = conn.execute(
+                'SELECT 1 FROM tenants WHERE id = ? AND primary_user_id = ?',
+                (tenant_id, item['user_id'])
+            ).fetchone()
+            if holder:
                 continue
             if get_user_permissions(item['user_id']).get('post_approval_edit'):
                 continue
@@ -12006,19 +12177,14 @@ def set_tenant_policies(tenant_id, updates):
 
 
 def is_last_active_company_admin(tenant_id, user_id):
-    """True when removing/disabling this user would leave no active company admin."""
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'company_admin' "
-        'AND is_active = 1 AND id != ?',
-        (tenant_id, user_id),
-    ).fetchone()
-    target = conn.execute(
-        "SELECT role, is_active FROM users WHERE id = ? AND tenant_id = ?", (user_id, tenant_id)
-    ).fetchone()
-    if not target or target['role'] != 'company_admin':
-        return False
-    return int(row['n'] or 0) == 0
+    """Guard kept for callers: the only company admin is the primary user.
+
+    Under the three-level model there is exactly one admin — the primary row
+    linked from ``tenants.primary_user_id`` — and it is never deletable or
+    deactivatable through user management, so this now just answers whether
+    the target is that row.
+    """
+    return is_primary_company_admin(tenant_id, user_id)
 
 
 # ── t20: per-user project scope ──────────────────────────────────────────────
@@ -13186,22 +13352,36 @@ def get_generation_job(job_id, tenant_id=None):
     return dict(row) if row else None
 
 
-def list_generation_jobs(tenant_id=None, status=None, limit=100):
+def list_generation_jobs(tenant_id=None, status=None, limit=100, accessible_draft_ids=None):
+    """Tenant jobs; ``accessible_draft_ids`` keeps a project-scoped member from
+    listing jobs whose draft or presentation falls outside their scope
+    (ISS-014). Rows with no draft link stay visible, matching presentations."""
     if tenant_id:
         sweep_stale_generation_jobs(tenant_id)
     conn = get_db()
     clauses = []
     params = []
     if tenant_id:
-        clauses.append('tenant_id = ?')
+        clauses.append('j.tenant_id = ?')
         params.append(str(tenant_id))
     if status:
-        clauses.append('status = ?')
+        clauses.append('j.status = ?')
         params.append(status)
-    query = 'SELECT * FROM generation_jobs'
+    query = ('SELECT j.* FROM generation_jobs j '
+             'LEFT JOIN presentations p ON p.id = j.presentation_id AND p.tenant_id = j.tenant_id')
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            placeholders = ','.join('?' * len(ids))
+            clauses.append('(j.draft_id IS NULL OR j.draft_id IN (' + placeholders + '))')
+            params.extend(ids)
+            clauses.append('(j.presentation_id IS NULL OR p.draft_id IS NULL OR p.draft_id IN (' + placeholders + '))')
+            params.extend(ids)
+        else:
+            clauses.append('j.draft_id IS NULL AND (j.presentation_id IS NULL OR p.draft_id IS NULL)')
     if clauses:
         query += ' WHERE ' + ' AND '.join(clauses)
-    query += ' ORDER BY created_at DESC LIMIT ?'
+    query += ' ORDER BY j.created_at DESC LIMIT ?'
     params.append(int(limit))
     return [dict(r) for r in conn.execute(query, params).fetchall()]
 

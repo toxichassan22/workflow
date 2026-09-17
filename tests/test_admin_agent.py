@@ -166,27 +166,33 @@ class AdminAgentTests(unittest.TestCase):
             with self.app.app_context():
                 db.delete_user(uid)
 
-    # ── The last-admin guard binds the agent like the user routes ──────────
+    # ── The primary-admin guard binds the agent like the user routes ────────
 
-    def test_agent_cannot_disable_the_last_company_admin(self):
+    def test_agent_cannot_disable_the_primary_company_admin(self):
         with self.app.app_context():
-            admin_id = db.create_user(self.tenant, 'مدير وحيد', 'solo-admin@agent.test',
-                                      'hash', role='company_admin')
+            admin_id = db.create_user(self.tenant, 'مدير الشركة', 'primary-admin@agent.test',
+                                      'hash', role='employee')
+            db.update_tenant(self.tenant, primary_user_id=admin_id)
 
-        refused = self._run('toggle_user', user_email='solo-admin@agent.test', is_active=False)
+        refused = self._run('toggle_user', user_email='primary-admin@agent.test', is_active=False)
         self.assertEqual(refused['status'], 'error')
-        self.assertIn('آخر مدير شركة', refused['message'])
+        self.assertIn('مدير الشركة الأساسي', refused['message'])
         with self.app.app_context():
             self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 1)
 
-        # With a second active admin the same tool disables normally.
+        # Once the link points elsewhere the row is a plain employee and the
+        # same tool disables it normally. (update_tenant — not
+        # set_primary_company_admin — so the shared class token's session
+        # version is not bumped mid-class.)
         with self.app.app_context():
-            db.create_user(self.tenant, 'مدير ثان', 'second-admin@agent.test',
-                           'hash', role='company_admin')
-        allowed = self._run('toggle_user', user_email='solo-admin@agent.test', is_active=False)
+            other_id = db.create_user(self.tenant, 'مدير ثان', 'second-admin@agent.test',
+                                      'hash', role='employee')
+            db.update_tenant(self.tenant, primary_user_id=other_id)
+        allowed = self._run('toggle_user', user_email='primary-admin@agent.test', is_active=False)
         self.assertEqual(allowed['status'], 'success', allowed.get('message'))
         with self.app.app_context():
             self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 0)
+            db.update_tenant(self.tenant, primary_user_id=admin_id)
 
     # ── The agent may not exceed the requester's own permissions ───────────
 
