@@ -489,6 +489,18 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_airules_tenant ON ai_rules_log(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_airules_created ON ai_rules_log(created_at);
 
+    CREATE TABLE IF NOT EXISTS agent_chat_log (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id TEXT,
+        user_name TEXT,
+        message TEXT,
+        reply TEXT,
+        actions_json TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agentchat_tenant ON agent_chat_log(tenant_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS map_images (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -4122,13 +4134,36 @@ def delete_training_entry(tenant_id, entry_id):
     return cursor.rowcount > 0
 
 
-def get_training_context(tenant_id, max_entries=20, max_chars=12000):
+# Training categories each AI surface accepts. 'general' and 'chat' entries
+# reach every surface. A surface absent from the map — or None — hears every
+# active entry (slides mix text and visuals, so they take everything).
+_TRAINING_SURFACE_CATEGORIES = {
+    'design':  {'general', 'chat', 'design', 'style', 'image_reference'},
+    'content': {'general', 'chat', 'content'},
+}
+
+
+def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=None):
     """Build bounded, tenant-only context for AI calls.
+
+    ``surface`` optionally scopes which training entries apply: a 'content'
+    surface hears general/chat and content entries, a 'design' surface hears
+    the visual categories plus anything carrying a reference image. Entries
+    with no category count as 'general'.
 
     Image files themselves remain in tenant storage.  Only the tenant's saved
     description and analysis are supplied to the model as contextual text.
     """
-    entries = get_training_data(tenant_id, active_only=True)[:max_entries]
+    entries = get_training_data(tenant_id, active_only=True)
+    allowed = _TRAINING_SURFACE_CATEGORIES.get(surface)
+    if allowed is not None:
+        if surface == 'design':
+            entries = [e for e in entries
+                       if (e.get('category') or 'general') in allowed
+                       or e.get('image_path') or e.get('image_analysis')]
+        else:
+            entries = [e for e in entries if (e.get('category') or 'general') in allowed]
+    entries = entries[:max_entries]
     branding = get_branding(tenant_id) or {}
     sections = get_all_sections(tenant_id)
     active_fields = get_fields(tenant_id, active_only=True)
@@ -6000,6 +6035,33 @@ def get_ai_rules_log(tenant_id, limit=50):
     rows = conn.execute(
         'SELECT * FROM ai_rules_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?',
         (tenant_id, limit)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def log_agent_chat(tenant_id, user_id, user_name, message, reply, actions):
+    """Persist one training-chat turn so the super admin can review what a
+    company asked the agent and what the agent answered/did."""
+    conn = get_db()
+    log_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO agent_chat_log
+           (id, tenant_id, user_id, user_name, message, reply, actions_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (log_id, tenant_id, user_id, user_name,
+         str(message or '')[:4000], str(reply or '')[:4000],
+         json.dumps(actions or [], ensure_ascii=False)[:8000])
+    )
+    conn.commit()
+    return log_id
+
+
+def get_agent_chat_log(tenant_id, limit=100):
+    """Recent stored training-chat turns for a tenant, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM agent_chat_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?',
+        (tenant_id, max(1, min(int(limit or 100), 500)))
     ).fetchall()
     return [dict(r) for r in rows]
 

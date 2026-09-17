@@ -564,6 +564,181 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('data-company-logo-placement', source)
         self.assertIn('تحريك العناصر', source)
 
+    # ── Server-side review: every agent turn is stored for the super admin ──
+
+    def _admin_headers(self):
+        """A platform-admin token for the tenant review routes."""
+        if not hasattr(self, '_admin_token'):
+            with self.app.app_context():
+                admin_id = db.create_tenant(
+                    'Platform Admin', 'sag@agent.test',
+                    auth.hash_password('AdminPass12345'))
+                db.get_db().execute(
+                    'UPDATE tenants SET is_admin = 1 WHERE id = ?', (admin_id,))
+                db.get_db().commit()
+            self._admin_token = auth.create_token(
+                admin_id, 'sag@agent.test', is_admin=True,
+                user_name='Platform Admin', user_role='company_admin')
+        return {'Authorization': f'Bearer {self._admin_token}'}
+
+    def test_training_chat_turn_is_persisted_for_super_admin_review(self):
+        """The conversation used to live only in the browser: when a company
+        reported a problem there was nothing server-side to review. Each turn
+        — message, reply and executed tools — is now stored per tenant."""
+        client = self.app.test_client()
+        reply = _reply_with([
+            {'tool': 'add_training', 'params': {'title': 'قاعدة', 'content': 'محتوى القاعدة'}},
+        ], text='أضفت القاعدة')
+        with patch.object(self.application_module, 'call_zai_chat', return_value=reply):
+            response = client.post('/api/training-chat', headers=self._headers(),
+                                   json={'message': 'أضف قاعدة تدريب جديدة'})
+        self.assertTrue(response.get_json()['success'], response.get_json())
+        with self.app.app_context():
+            rows = db.get_agent_chat_log(self.tenant)
+        turn = next(r for r in rows if r['message'] == 'أضف قاعدة تدريب جديدة')
+        self.assertIn('أضفت القاعدة', turn['reply'])
+        actions = json.loads(turn['actions_json'])
+        self.assertEqual(actions[0]['tool'], 'add_training')
+        self.assertEqual(actions[0]['status'], 'success')
+        self.assertEqual(turn['user_name'], 'Agent Admin')
+
+        # Ask turns are stored too — the super admin sees when the agent asked
+        # instead of guessing, not only when it executed.
+        ask_reply = _reply_with([
+            {'tool': 'ask', 'params': {'question': 'أي قسم تقصد؟'}},
+        ], text='محتاج توضيح')
+        with patch.object(self.application_module, 'call_zai_chat', return_value=ask_reply):
+            response = client.post('/api/training-chat', headers=self._headers(),
+                                   json={'message': 'عدّل القسم'})
+        self.assertTrue(response.get_json()['awaitingAnswer'])
+        with self.app.app_context():
+            rows = db.get_agent_chat_log(self.tenant)
+        turn = next(r for r in rows if r['message'] == 'عدّل القسم')
+        self.assertIn('أي قسم تقصد؟', turn['reply'])
+        self.assertEqual(json.loads(turn['actions_json'])[0]['tool'], 'ask')
+
+        # A log-write failure must never break the agent's own reply.
+        with patch.object(self.application_module, 'call_zai_chat', return_value=_reply_with([])), \
+                patch.object(self.application_module.db, 'log_agent_chat',
+                             side_effect=RuntimeError('db down')):
+            response = client.post('/api/training-chat', headers=self._headers(),
+                                   json={'message': 'رسالة أخرى'})
+        self.assertTrue(response.get_json()['success'], response.get_json())
+
+        # Rows stay scoped to their own tenant.
+        with self.app.app_context():
+            other = db.create_tenant('Other Co', 'other@agent.test', 'hash', 'other-co')
+            self.assertEqual(db.get_agent_chat_log(other), [])
+
+    def test_agent_review_endpoint_is_admin_only_and_tenant_scoped(self):
+        """The super admin always reviews a company's training, rule changes
+        and agent conversations — no client access grant is required — while
+        company tokens and other tenants see nothing."""
+        client = self.app.test_client()
+        with self.app.app_context():
+            db.create_training_entry(self.tenant, 'قاعدة هوية',
+                                     'التزم بألوان الشركة', category='design')
+            db.log_agent_chat(self.tenant, None, 'Agent Admin', 'رسالة مراجعة', 'رد', [])
+            db.log_ai_rule_change(self.tenant, 'branding', 'primary_color',
+                                  '#111111', '#222222', user_name='Agent Admin')
+
+        response = client.get(f'/api/admin/tenants/{self.tenant}/agent',
+                              headers=self._admin_headers())
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200, payload)
+        self.assertTrue(payload['success'])
+        self.assertIn('قاعدة هوية', [e['title'] for e in payload['training']])
+        self.assertIn('رسالة مراجعة', [c['message'] for c in payload['chatLog']])
+        self.assertIn('primary_color', [r['rule_key'] for r in payload['rulesLog']])
+
+        denied = client.get(f'/api/admin/tenants/{self.tenant}/agent',
+                            headers=self._headers())
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(client.get(f'/api/admin/tenants/{self.tenant}/agent').status_code, 401)
+        self.assertEqual(client.get('/api/admin/tenants/no-such-tenant/agent',
+                                    headers=self._admin_headers()).status_code, 404)
+
+    def test_agent_review_tab_is_wired_into_the_tenant_modal(self):
+        source = read_frontend_text()
+        self.assertIn('sagTenantTabAgent', source)
+        self.assertIn("showSagTenantTab(\\'agent\\')", source)
+        self.assertIn("'activity', 'access', 'agent'", source)
+        self.assertIn('renderSagTenantAgent', source)
+        self.assertIn('chatLog', source)
+        # No client access grant gate on the tab: it loads directly.
+        self.assertIn("'/api/admin/tenants/' + tenantId + '/' + tab", source)
+
+    # ── Training reaches the live AI surfaces, scoped by category ─────────
+
+    def test_training_context_is_scoped_by_surface(self):
+        """A 'design' entry must not steer executive text, and a 'content'
+        entry must not steer the designer — while general and chat entries
+        reach every surface."""
+        with self.app.app_context():
+            db.create_training_entry(self.tenant, 'عام', 'قاعدة عامة للجميع', category='general')
+            db.create_training_entry(self.tenant, 'محتوى', 'قاعدة المحتوى فقط', category='content')
+            db.create_training_entry(self.tenant, 'تصميم', 'قاعدة التصميم فقط', category='design')
+            db.create_training_entry(self.tenant, 'شات', 'قاعدة محفوظة من الشات', category='chat')
+            db.create_training_entry(self.tenant, 'مرجع صورة', 'وصف مرجعي', category='image_reference')
+
+            content_ctx = db.get_training_context(self.tenant, surface='content')
+            self.assertIn('قاعدة عامة للجميع', content_ctx)
+            self.assertIn('قاعدة المحتوى فقط', content_ctx)
+            self.assertIn('قاعدة محفوظة من الشات', content_ctx)
+            self.assertNotIn('قاعدة التصميم فقط', content_ctx)
+            self.assertNotIn('وصف مرجعي', content_ctx)
+
+            design_ctx = db.get_training_context(self.tenant, surface='design')
+            self.assertIn('قاعدة التصميم فقط', design_ctx)
+            self.assertIn('وصف مرجعي', design_ctx)
+            self.assertIn('قاعدة عامة للجميع', design_ctx)
+            self.assertNotIn('قاعدة المحتوى فقط', design_ctx)
+
+            # No surface (slides, agent, designer chat) hears everything.
+            all_ctx = db.get_training_context(self.tenant)
+            for text in ('قاعدة عامة للجميع', 'قاعدة المحتوى فقط', 'قاعدة التصميم فقط'):
+                self.assertIn(text, all_ctx)
+
+    def test_market_executors_keep_tenant_identity_and_training(self):
+        """ISS-033: the background worker had the tenant id but dropped it, so
+        usage metering lost the company and training never reached the market
+        prompts. Both executors now take the id explicitly."""
+        with self.app.app_context():
+            db.create_training_entry(self.tenant, 'سوق', 'ركز على منطقة الرياض', category='content')
+        captured = {}
+
+        def fake_market(system_prompt, user_prompt, **kwargs):
+            captured['system'] = system_prompt
+            captured['usage_ctx'] = kwargs.get('usage_ctx')
+            return {'choices': [{'message': {'content': '{"competitors": [], "notes": ""}'}}]}, None
+
+        # App context only — no request, so g.tenant_id is absent, exactly like
+        # the background worker thread.
+        with self.app.app_context():
+            with patch.object(self.application_module, '_call_market_study_model',
+                              side_effect=fake_market):
+                result = self.application_module._execute_market_competitors(
+                    {'projectData': {'project_name': 'مشروع'}}, tenant_id=self.tenant)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(captured['usage_ctx']['tenant_id'], self.tenant)
+        self.assertIn('ركز على منطقة الرياض', captured['system'])
+
+        captured.clear()
+
+        def fake_summary(system_prompt, user_prompt, **kwargs):
+            captured['system'] = system_prompt
+            captured['usage_ctx'] = kwargs.get('usage_ctx')
+            return {'choices': [{'message': {'content': '{"summary": "ملخص", "sources": []}'}}]}, None
+
+        with self.app.app_context():
+            with patch.object(self.application_module, '_call_market_study_model',
+                              side_effect=fake_summary):
+                result = self.application_module._execute_market_summary(
+                    {'projectData': {'project_name': 'مشروع'}}, tenant_id=self.tenant)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(captured['usage_ctx']['tenant_id'], self.tenant)
+        self.assertIn('ركز على منطقة الرياض', captured['system'])
+
 
 if __name__ == '__main__':
     unittest.main()

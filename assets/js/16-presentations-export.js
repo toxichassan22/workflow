@@ -1732,7 +1732,7 @@
       renderSagTenants(filtered);
     }
 
-    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity', 'access'];
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity', 'access', 'agent'];
 
     function sagTenantPaneId(tab) {
       return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -1752,7 +1752,7 @@
         if (pane) pane.style.display = active ? '' : 'none';
         if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
       });
-      if (['drafts', 'presentations', 'exports', 'activity', 'access'].includes(tab)) {
+      if (['drafts', 'presentations', 'exports', 'activity', 'access', 'agent'].includes(tab)) {
         sagLoadTenantDataPane(sagCurrentTenantId, tab);
       }
     }
@@ -1763,7 +1763,8 @@
         presentations: 'sagTenantPresentationsList',
         exports: 'sagTenantExportsList',
         activity: 'sagTenantActivityList',
-        access: 'sagTenantAccessList'
+        access: 'sagTenantAccessList',
+        agent: 'sagTenantAgentList'
       };
       const host = document.getElementById(bodies[tab]);
       if (!host || !tenantId || host.dataset.loaded === '1') return;
@@ -1783,7 +1784,51 @@
       else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
       else if (tab === 'access') host.innerHTML = renderSagTenantAccess(data.requests || []);
+      else if (tab === 'agent') host.innerHTML = renderSagTenantAgent(data);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
+    }
+
+    function renderSagTenantAgent(data) {
+      const training = data.training || [];
+      const rulesLog = data.rulesLog || [];
+      const chatLog = data.chatLog || [];
+      const card = (title, meta, extra) =>
+        '<div class="tenant-presentation-card"><div><h3 style="font-size:14px">' + title + '</h3>' +
+        '<div class="meta">' + meta + '</div>' + (extra || '') + '</div></div>';
+      let html = '<h3 class="dash-section-title">مدخلات التدريب</h3>';
+      html += training.length ? training.map(e => {
+        const date = (e.created_at || '').slice(0, 16).replace('T', ' ');
+        return card(
+          escapeHtml(e.title || 'بدون عنوان') + (e.is_active ? '' : ' <span style="font-size:11px">معطل</span>'),
+          escapeHtml(e.category || 'general') + ' | ' + escapeHtml(date),
+          '<div class="meta" style="white-space:pre-wrap;margin-top:6px">' + escapeHtml(String(e.content || '').slice(0, 400)) + '</div>');
+      }).join('') : '<p class="tenant-hint">لا توجد مدخلات تدريب</p>';
+      html += '<h3 class="dash-section-title" style="margin-top:18px">سجل تغييرات الوكيل</h3>';
+      html += rulesLog.length ? rulesLog.map(r => {
+        const date = (r.created_at || '').slice(0, 16).replace('T', ' ');
+        return card(
+          escapeHtml(r.rule_category || '') + ' — ' + escapeHtml(r.rule_key || ''),
+          escapeHtml(r.user_name || '') + ' | ' + escapeHtml(r.risk_level || '') + ' | ' + escapeHtml(date),
+          '<div class="meta" style="white-space:pre-wrap;margin-top:6px">' +
+            escapeHtml(String(r.old_value == null ? '—' : r.old_value).slice(0, 200)) + ' إلى ' +
+            escapeHtml(String(r.new_value == null ? '—' : r.new_value).slice(0, 200)) + '</div>');
+      }).join('') : '<p class="tenant-hint">لا يوجد سجل تغييرات</p>';
+      html += '<h3 class="dash-section-title" style="margin-top:18px">محادثات الوكيل</h3>';
+      html += chatLog.length ? chatLog.map(c => {
+        const date = (c.created_at || '').slice(0, 16).replace('T', ' ');
+        let actionsText = '';
+        try {
+          const acts = typeof c.actions_json === 'string' ? JSON.parse(c.actions_json) : (c.actions_json || []);
+          if (acts.length) actionsText = '<div class="meta" style="margin-top:4px">' +
+            acts.map(a => escapeHtml((a.tool || '') + ': ' + (a.status || ''))).join(' | ') + '</div>';
+        } catch (e) { /* keep the turn readable even if actions json is malformed */ }
+        return card(
+          escapeHtml(c.user_name || 'مستخدم') + ' | ' + escapeHtml(date),
+          escapeHtml(String(c.message || '').slice(0, 300)),
+          (c.reply ? '<div class="meta" style="white-space:pre-wrap;margin-top:4px">الرد: ' +
+            escapeHtml(String(c.reply).slice(0, 300)) + '</div>' : '') + actionsText);
+      }).join('') : '<p class="tenant-hint">لا توجد محادثات مسجلة</p>';
+      return html;
     }
 
     function renderSagTenantAccess(requests) {
@@ -1978,6 +2023,7 @@
         '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
         '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
         '<button type="button" id="sagTabBtnAccess" class="btn small ghost" onclick="showSagTenantTab(\'access\')">' + escapeHtml(WFT('admin.access_tab', 'طلبات الوصول')) + '</button>' +
+        '<button type="button" id="sagTabBtnAgent" class="btn small ghost" onclick="showSagTenantTab(\'agent\')">تدريب AI والوكيل</button>' +
         '</div>' +
         '<div id="sagTenantTabCompany">' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
@@ -2046,6 +2092,8 @@
         '<div class="tenant-field full"><label for="sagAccessReason">' + escapeHtml(WFT('admin.access_reason', 'السبب')) + '</label><input id="sagAccessReason" maxlength="300" required></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">' + escapeHtml(WFT('admin.access_request_btn', 'إرسال طلب وصول')) + '</button></div></form>' +
         '<div id="sagTenantAccessList"></div></div>' +
+        '<div id="sagTenantTabAgent" style="display:none">' +
+        '<h3 class="dash-section-title">تدريب AI والوكيل</h3><div id="sagTenantAgentList"></div></div>' +
         '</div>';
       showSagTenantTab(sagTenantActiveTab);
       if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);

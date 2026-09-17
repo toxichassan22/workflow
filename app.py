@@ -11654,6 +11654,9 @@ def api_site_analysis():
 بيانات المشروع والموقع:
 {json.dumps(project_data, ensure_ascii=False, indent=2)}"""
     system_prompt = 'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا سلسًا يغطي كل فئة متاحة من البيانات دون تخطي أي منها، ودون اختلاق معلومات غير موجودة.'
+    training_context = db.get_training_context(g.tenant_id, surface='content') or ''
+    if training_context:
+        system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     try:
         try:
             response = call_zai_chat(
@@ -19054,14 +19057,22 @@ def _prepare_market_payload(data):
     return payload
 
 
-def _execute_market_competitors(data):
+def _execute_market_competitors(data, tenant_id=None):
     payload = _prepare_market_payload(data)
     existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt()
+    training_context = db.get_training_context(tenant_id, surface='content') if tenant_id else ''
+    if training_context:
+        system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
     res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=6000,
-                                                       usage_ctx=_usage_ctx('market', data))
+                                                       usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -19095,7 +19106,7 @@ def _execute_market_competitors(data):
     }
 
 
-def _execute_market_summary(data):
+def _execute_market_summary(data, tenant_id=None):
     payload = _prepare_market_payload(data)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     raw_current = data.get('currentSummary')
@@ -19103,7 +19114,15 @@ def _execute_market_summary(data):
     current_sources = data.get('currentSources') if isinstance(data.get('currentSources'), list) else None
     current_swot = data.get('currentSwot') if isinstance(data.get('currentSwot'), dict) else None
     offer_lang = slide_engine.resolve_offer_lang(data)
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang=offer_lang)
+    training_context = db.get_training_context(tenant_id, surface='content') if tenant_id else ''
+    if training_context:
+        system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_summary_user_prompt(
         payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot,
         offer_lang=offer_lang,
@@ -19112,7 +19131,7 @@ def _execute_market_summary(data):
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
-                                                       usage_ctx=_usage_ctx('market', data))
+                                                       usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -19147,9 +19166,9 @@ def _market_job_worker(app, tenant_id, kind, data, job_id):
         })
         try:
             if kind == 'competitors':
-                payload = _execute_market_competitors(data)
+                payload = _execute_market_competitors(data, tenant_id)
             else:
-                payload = _execute_market_summary(data)
+                payload = _execute_market_summary(data, tenant_id)
             status = 'completed' if payload.get('success') else 'failed'
             _write_market_job(tenant_id, job_id, {
                 **payload,
@@ -19232,14 +19251,17 @@ def api_generate_executive_content():
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     cap = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
+    system_prompt = executive_content.SYSTEM_PROMPT
+    training_context = db.get_training_context(g.tenant_id, surface='content') or ''
+    if training_context:
+        system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
+    if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+        system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     raw = None
     last_error = None
     try:
         for attempt in range(3):
             try:
-                system_prompt = executive_content.SYSTEM_PROMPT
-                if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
-                    system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
                 response = call_zai_chat(
                     system_prompt, prompt, temperature=0.2,
                     max_tokens=cap,
@@ -19265,7 +19287,7 @@ def api_generate_executive_content():
                     raise
                 print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
                 fallback = call_openrouter_chat(
-                    executive_content.SYSTEM_PROMPT,
+                    system_prompt,
                     prompt,
                     temperature=0.2,
                     max_tokens=cap,
@@ -23052,6 +23074,24 @@ def api_admin_tenant_activity(tenant_id):
     return jsonify({'success': True, 'activity': db.get_tenant_recent_activity(tenant_id)})
 
 
+@app.route('/api/admin/tenants/<tenant_id>/agent', methods=['GET'])
+@require_admin
+def api_admin_tenant_agent(tenant_id):
+    """Read-only review of a tenant's AI training, agent change log and stored
+    agent conversations. Always available to the super admin — when a company
+    reports a problem, support sees what it taught the AI and what the agent
+    answered and executed, without needing a client access grant."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    return jsonify({
+        'success': True,
+        'training': db.get_training_data(tenant_id),
+        'rulesLog': db.get_ai_rules_log(tenant_id, limit=100),
+        'chatLog': db.get_agent_chat_log(tenant_id, limit=100),
+    })
+
+
 @app.route('/api/admin/tenants/<tenant_id>/presentations/<pres_id>', methods=['GET'])
 @require_admin
 def api_admin_tenant_presentation(tenant_id, pres_id):
@@ -23776,6 +23816,19 @@ def api_training_chat():
                 if len(denied) == len(actions_executed)
                 else 'بعض الإجراءات لم تُنفَّذ لأنها تتجاوز صلاحيات حسابك.')
         clean_reply = (clean_reply + '\n\n' + note).strip() if clean_reply else note
+
+    # Persist the turn so platform support can later review exactly what the
+    # company asked and what the agent answered and ran (super-admin surface).
+    try:
+        db.log_agent_chat(
+            g.tenant_id, g.user_id, g.user_name, message, clean_reply,
+            [{'tool': item.get('tool'), 'status': item.get('status'),
+              'error_code': item.get('error_code'),
+              'message': item.get('message')}
+             for item in actions_executed if isinstance(item, dict)],
+        )
+    except Exception as log_exc:
+        print(f'[SUPER-AGENT] chat log write failed: {log_exc}')
 
     return jsonify({
         'success': True,
