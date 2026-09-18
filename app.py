@@ -13050,11 +13050,21 @@ def api_get_presentation(pres_id):
     if not pres or not _presentation_in_scope(pres):
         return jsonify({'error': 'Presentation not found'}), 404
 
+    # ISS-030: the workspace keeps saving into the linked draft, so the client
+    # needs its current revision — otherwise the next expectedRevision save
+    # conflicts against a stale counter it never saw.
+    draft_revision = None
+    if pres.get('draft_id'):
+        linked_draft = db.get_project_draft_by_id(g.tenant_id, pres['draft_id'])
+        if linked_draft:
+            draft_revision = int(linked_draft.get('revision') or 0)
+
     if int(pres.get('revision') or 0) > 0:
         state = _presentation_state(pres)
         # ISS-015: the stored projectData is a draft snapshot — hidden sections
         # stay server-side for this caller.
         state['projectData'] = _draft_data_for_response(state.get('projectData'))
+        state['draftRevision'] = draft_revision
         return jsonify({'success': True, 'presentation': state})
     pres['revision'] = int(pres.get('revision') or 0)
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
@@ -13083,6 +13093,7 @@ def api_get_presentation(pres_id):
     pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
     pres['projectData'] = _draft_data_for_response(pres.get('projectData'))
+    pres['draftRevision'] = draft_revision
     return jsonify({'success': True, 'presentation': pres})
 
 
@@ -13787,12 +13798,31 @@ def api_save_project_draft():
         g.tenant_id, previous, section_statuses, previous_statuses)
     draft_data = _sanitize_save_workflow_claims(
         g.tenant_id, save_draft_id, draft_data, previous_data)
+    # ISS-030: a save that names the revision it was made against cannot
+    # silently overwrite a draft that moved meanwhile — the conflict surfaces
+    # instead of the later save rewinding the earlier one's edits.
+    expected_revision = data.get('expectedRevision')
+    if expected_revision is not None:
+        try:
+            expected_revision = int(expected_revision)
+            if expected_revision < 0:
+                raise ValueError('negative')
+        except (TypeError, ValueError):
+            return jsonify({'error': 'expectedRevision must be a non-negative integer'}), 400
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
             draft_id=draft_data.get('draftId') or draft_data.get('draft_id'),
             allow_generating=allow_generating,
+            expected_revision=expected_revision,
         )
+    except db.DraftRevisionConflict as conflict:
+        return jsonify({
+            'error': 'المسودة تغيّرت في نسخة أخرى منذ آخر قراءة — أعد تحميلها قبل الحفظ',
+            'error_code': 'DRAFT_REVISION_CONFLICT',
+            'expectedRevision': conflict.expected_revision,
+            'currentRevision': conflict.current_revision,
+        }), 409
     except db.DraftLocked as locked:
         return _draft_locked_response(locked.status)
     except db.DraftOverwriteRefused as refused:
@@ -13819,7 +13849,11 @@ def api_save_project_draft():
             _void_stale_section_approvals(g.tenant_id, draft_id, draft_data)
         except Exception:
             pass
-    return jsonify({'success': True, 'draftId': draft_id})
+    saved_revision = None
+    saved_draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if saved_draft:
+        saved_revision = int(saved_draft.get('revision') or 0)
+    return jsonify({'success': True, 'draftId': draft_id, 'revision': saved_revision})
 
 
 @app.route('/api/project-drafts', methods=['GET'])
@@ -14592,7 +14626,11 @@ def api_restore_section_version():
         new_value=snapshot,
         metadata={'draft_id': draft['id'], 'section_key': version['section_key']},
     )
-    return jsonify({'success': True, 'version': restored})
+    # The restore already moved the draft revision — hand it back so an open
+    # workspace does not conflict against a counter it never saw.
+    restored_draft = db.get_project_draft_by_id(g.tenant_id, draft['id'])
+    return jsonify({'success': True, 'version': restored,
+                    'revision': int((restored_draft or {}).get('revision') or 0)})
 
 
 @app.route('/api/project-draft/request-approval', methods=['POST'])

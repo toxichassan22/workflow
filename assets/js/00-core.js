@@ -286,6 +286,7 @@
     let tenantSlideGenerationCheckpoint = null;
     let tenantPresentationId = null;
     let tenantPresentationRevision = 0;
+    let tenantDraftRevision = 0;
     let tenantPresentationProvenance = null;
     let tenantPresentationSavePromise = null;
     let tenantPresentationHistory = null;

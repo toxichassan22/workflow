@@ -497,7 +497,9 @@
       tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
         && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
       resetDesignerChatForNewPresentation();
-      await saveProjectAsDraftNow(true, false);
+      // A paid run must not start on data the server never received — when the
+      // pre-save fails the save function already said why, and the run stops.
+      if (!(await saveProjectAsDraftNow(true, false))) return;
 
       if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
@@ -753,9 +755,10 @@
 
       // Persist the project snapshot before the gate: the approval request needs a
       // real draft row, and this snapshot is the one the presentation is built on.
+      // A paid run must not start on data the server never received — the shared
+      // save path carries expectedRevision and reports failure, and the run stops.
       resetDesignerChatForNewPresentation();
-      const draftSave = await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
-      if (draftSave && draftSave.draftId) tenantProjectData.draftId = draftSave.draftId;
+      if (!(await saveProjectAsDraftNow(true, false))) return;
 
       // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
       const gateApproved = await showGenerationApprovalModal({

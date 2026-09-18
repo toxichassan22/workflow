@@ -152,6 +152,7 @@
       setDraftDirty(false);
       tenantPresentationId = null;
       tenantPresentationRevision = 0;
+      tenantDraftRevision = 0;
       tenantPresentationProvenance = null;
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';
@@ -663,6 +664,7 @@
         const result = await api('POST', '/api/project-draft/section-version/restore', { versionId: versionId });
         hideLoader();
         if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.restore_failed', 'تعذر الاستعادة')); return; }
+        if (result.revision !== undefined) tenantDraftRevision = Number(result.revision) || tenantDraftRevision;
         sectionVersionsOpen[sectionKey] = true;
         toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
         await loadAllSectionVersions();

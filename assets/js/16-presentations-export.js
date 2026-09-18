@@ -7,6 +7,7 @@
       setDraftDirty(false);
       tenantPresentationId = p.id;
       tenantPresentationRevision = Number(p.revision) || 0;
+      tenantDraftRevision = Number(p.draftRevision) || 0;
       tenantPresentationProvenance = null;
       tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
@@ -239,6 +240,7 @@
 
         const draft = resp.draft;
         setDraftDirty(false);
+        tenantDraftRevision = Number(draft.revision) || 0;
         const draftData = draft.draft_data || draft.draftData || {};
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};
@@ -393,7 +395,10 @@
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return false; }
       // The draft carries the same snapshot including the slides, so back it up
       // first: a presentation-save failure must never lose the open workspace.
-      try { await saveProjectAsDraftNow(true, false); } catch (backupError) {
+      try {
+        const backupSaved = await saveProjectAsDraftNow(true, false);
+        if (!backupSaved) console.error('[DRAFT BACKUP] save reported failure');
+      } catch (backupError) {
         console.error('[DRAFT BACKUP]', backupError);
       }
       renumberTenantSlides();

@@ -846,5 +846,219 @@ class LegacyApprovalGateTests(ScopeTestBase):
         self.assertEqual(decided.get_json()['error_code'], 'use_final_approval_gate')
 
 
+class ApprovalRaceTests(ScopeTestBase):
+    """ISS-028: the decide UPDATE is the atomic claim — a competing decision
+    committed inside the read-write window turns the loser's write into a
+    refusal instead of a silent overwrite."""
+
+    def _draft(self, draft_id, statuses=None):
+        with self.app.app_context():
+            return db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'مشروع السباق'},
+                statuses or {'basic': 'approved'}, 'draft', draft_id=draft_id)
+
+    def _generation_approval(self, draft_id):
+        with self.app.app_context():
+            draft = db.get_project_draft_by_id(self.tenant, draft_id)
+            snapshot = {'draft_hash': db.draft_generation_input_hash(draft['draft_data'] or {})}
+            approval = db.create_generation_approval(
+                self.tenant, draft_id,
+                {'estimated_points': 5, 'estimated_cost_usd': 1, 'slides_count': 1},
+                'owner', 'Owner', input_snapshot=snapshot)
+            self.assertNotIn('error', approval, approval)
+            return approval['id']
+
+    def _final_approval(self, draft_id):
+        with self.app.app_context():
+            pres_id = db.create_presentation(
+                self.tenant, 'عرض السباق', project_data={'project_name': 'مشروع السباق'},
+                slides_data=[{'html': '<div class="slide">x</div>'}], draft_id=draft_id)
+            result = db.request_final_file_approval(
+                self.tenant, pres_id, revision=1, requested_by='owner', requested_by_name='Owner')
+            self.assertNotIn('error', result, result)
+            return result['id']
+
+    def test_generation_decision_loses_the_race_atomically(self):
+        draft_id = self._draft('race-gen')
+        approval_id = self._generation_approval(draft_id)
+        real_release = db.release_stale_reservations
+
+        def competitor_wins(tenant_id):
+            # A competing reviewer decided inside this decision's read-write
+            # window: the row is no longer pending by the time ours writes.
+            conn = db.get_db()
+            conn.execute(
+                "UPDATE generation_approvals SET status = 'rejected', "
+                "decided_by = 'rival', decided_at = datetime('now') WHERE id = ?",
+                (approval_id,))
+            conn.commit()
+            return real_release(tenant_id)
+
+        with self.app.app_context(), \
+                patch.object(db, 'release_stale_reservations', side_effect=competitor_wins):
+            result = db.decide_generation_approval(
+                self.tenant, approval_id, 'approved', 'owner', 'Owner', allow_self=True)
+        self.assertEqual(result.get('error'), 'approval_not_pending')
+        with self.app.app_context():
+            row = db.get_db().execute(
+                'SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone()
+            # The winning decision stands — no overwrite, no reservation.
+            self.assertEqual(row['status'], 'rejected')
+            self.assertEqual(row['decided_by'], 'rival')
+            holds = db.get_db().execute(
+                "SELECT COUNT(*) AS n FROM point_reservations WHERE generation_approval_id = ?",
+                (approval_id,)).fetchone()
+            self.assertEqual(holds['n'], 0)
+
+    def test_final_file_decision_loses_the_race_atomically(self):
+        draft_id = self._draft('race-final', statuses={'basic': 'approved'})
+        with self.app.app_context():
+            db.get_db().execute(
+                "UPDATE project_drafts SET status = 'generated_draft' WHERE id = ?",
+                (draft_id,))
+            db.get_db().commit()
+            approval_id = self._final_approval(draft_id)
+        real_get = db.get_project_draft_by_id
+
+        def competitor_wins(tenant_id, did):
+            conn = db.get_db()
+            conn.execute(
+                "UPDATE final_file_approvals SET status = 'approved', "
+                "decided_by = 'rival', decided_at = datetime('now') WHERE id = ?",
+                (approval_id,))
+            conn.commit()
+            return real_get(tenant_id, did)
+
+        with self.app.app_context(), \
+                patch.object(db, 'get_project_draft_by_id', side_effect=competitor_wins):
+            result = db.decide_final_file_approval(
+                self.tenant, approval_id, 'rejected', 'owner', 'Owner',
+                note='سبب', allow_self=True)
+        self.assertEqual(result.get('error'), 'approval_not_pending')
+        with self.app.app_context():
+            row = db.get_db().execute(
+                'SELECT * FROM final_file_approvals WHERE id = ?', (approval_id,)).fetchone()
+            self.assertEqual(row['status'], 'approved')
+            self.assertEqual(row['decided_by'], 'rival')
+
+    def test_section_version_decision_loses_the_race_atomically(self):
+        draft_id = self._draft('race-section', statuses={'basic': 'draft'})
+        with self.app.app_context():
+            version = db.create_section_version(
+                self.tenant, draft_id, 'basic', {'project_name': 'x'},
+                created_by='owner', created_by_name='Owner')
+            self.assertNotIn('error', version, version)
+            version_id = version['id']
+        real_days = db.get_section_approval_validity_days
+
+        def competitor_wins(tenant_id):
+            conn = db.get_db()
+            conn.execute(
+                "UPDATE section_versions SET status = 'returned', "
+                "decided_by = 'rival', decided_at = datetime('now') WHERE id = ?",
+                (version_id,))
+            conn.commit()
+            return real_days(tenant_id)
+
+        with self.app.app_context(), \
+                patch.object(db, 'get_section_approval_validity_days', side_effect=competitor_wins):
+            result = db.decide_section_version(
+                self.tenant, version_id, 'approved', 'reviewer', 'Reviewer')
+        self.assertEqual(result.get('error'), 'version_not_pending')
+        with self.app.app_context():
+            row = db.get_db().execute(
+                'SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
+            self.assertEqual(row['status'], 'returned')
+            self.assertEqual(row['decided_by'], 'rival')
+
+
+class DraftRevisionConflictTests(ScopeTestBase):
+    """ISS-030: a save that names its base revision cannot silently overwrite
+    a draft that moved meanwhile — the conflict surfaces instead."""
+
+    def _save(self, draft_id, data, expected='omit', statuses=None):
+        payload = {'draftData': {'draftId': draft_id, **data}}
+        if statuses is not None:
+            payload['sectionStatuses'] = statuses
+        if expected != 'omit':
+            payload['expectedRevision'] = expected
+        return self.client.post('/api/project-draft', headers=self.admin_headers, json=payload)
+
+    def _stored(self, draft_id):
+        with self.app.app_context():
+            return db.get_project_draft_by_id(self.tenant, draft_id)
+
+    def test_save_chain_tracks_the_returned_revision(self):
+        response = self._save('rev-draft', {'project_name': 'أول'}, expected=0)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['revision'], 1)
+        response = self._save('rev-draft', {'project_name': 'ثان'}, expected=1)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['revision'], 2)
+        self.assertEqual(self._stored('rev-draft')['draft_data']['project_name'], 'ثان')
+
+    def test_stale_revision_is_refused_not_overwritten(self):
+        self._save('rev-stale', {'project_name': 'أول', 'field_a': 'A'})
+        # A second tab moved the row meanwhile.
+        self._save('rev-stale', {'project_name': 'أول', 'field_a': 'A2'}, expected=1)
+        stale = self._save('rev-stale', {'project_name': 'أول', 'field_b': 'B'}, expected=1)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.get_json()['error_code'], 'DRAFT_REVISION_CONFLICT')
+        self.assertEqual(stale.get_json()['currentRevision'], 2)
+        stored = self._stored('rev-stale')['draft_data']
+        self.assertEqual(stored.get('field_a'), 'A2')
+        self.assertNotIn('field_b', stored)
+
+    def test_unknown_future_revision_is_refused(self):
+        self._save('rev-future', {'project_name': 'أول'})
+        response = self._save('rev-future', {'project_name': 'أول'}, expected=9)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'DRAFT_REVISION_CONFLICT')
+
+    def test_legacy_save_without_revision_still_works(self):
+        response = self._save('rev-legacy', {'project_name': 'أول'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        response = self._save('rev-legacy', {'project_name': 'ثان', 'more': 'x'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_invalid_expected_revision_is_a_client_error(self):
+        response = self._save('rev-bad', {'project_name': 'أول'}, expected='abc')
+        self.assertEqual(response.status_code, 400)
+
+    def test_presentation_get_reports_the_linked_draft_revision(self):
+        """Opening a presentation must hand the workspace its draft revision —
+        otherwise the next expectedRevision save conflicts against a counter
+        the client never saw."""
+        self._save('rev-linked', {'project_name': 'أول'}, expected=0)
+        with self.app.app_context():
+            pres_id = db.create_presentation(
+                self.tenant, 'عرض مرتبط', project_data={'project_name': 'أول'},
+                slides_data=[{'html': '<div class="slide">x</div>'}], draft_id='rev-linked')
+        response = self.client.get(f'/api/presentations/{pres_id}', headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['presentation'].get('draftRevision'), 1)
+        # A second save moves the draft — the next open sees the new counter.
+        self._save('rev-linked', {'project_name': 'ثان'}, expected=1)
+        response = self.client.get(f'/api/presentations/{pres_id}', headers=self.admin_headers)
+        self.assertEqual(response.get_json()['presentation'].get('draftRevision'), 2)
+
+    def test_section_version_restore_returns_the_new_draft_revision(self):
+        self._save('rev-restore', {'project_name': 'أول'}, expected=0,
+                   statuses={'basic': 'draft'})
+        with self.app.app_context():
+            version = db.create_section_version(
+                self.tenant, 'rev-restore', 'basic', {'project_name': 'أول'},
+                created_by='owner', created_by_name='Owner')
+            self.assertNotIn('error', version, version)
+        response = self.client.post(
+            '/api/project-draft/section-version/restore',
+            headers=self.admin_headers, json={'versionId': version['id']})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn('revision', response.get_json())
+        self.assertEqual(
+            response.get_json()['revision'],
+            self._stored('rev-restore')['revision'])
+
+
 if __name__ == '__main__':
     unittest.main()

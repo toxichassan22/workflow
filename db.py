@@ -4704,6 +4704,18 @@ class DraftLocked(Exception):
         self.draft_id = draft_id
         self.status = status
 
+
+class DraftRevisionConflict(Exception):
+    """Raised when a save names a base revision the stored row already moved past."""
+
+    def __init__(self, draft_id, expected_revision, current_revision):
+        super().__init__(
+            f'Project draft {draft_id} revision conflict: '
+            f'expected {expected_revision}, current {current_revision}')
+        self.draft_id = draft_id
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+
 # Keys every save carries as bookkeeping: they say nothing about whether the payload still
 # holds the project itself, so they are ignored when judging a destructive overwrite.
 DRAFT_BOOKKEEPING_KEYS = {
@@ -4786,7 +4798,7 @@ def _clear_draft_approval_fields(conn, draft_id):
 
 
 def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft',
-                       draft_id=None, allow_generating=False):
+                       draft_id=None, allow_generating=False, expected_revision=None):
     """Save one unified draft per tenant actor without losing section approvals.
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
@@ -4830,6 +4842,16 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
 
     # Determine the stable draft id before serializing
     draft_id = existing['id'] if existing else (draft_id or str(uuid.uuid4()))
+
+    # ISS-030: a save that declares the revision it was made against cannot
+    # land on a row that moved meanwhile — the conditional UPDATE below is the
+    # atomic half of the same guarantee for the read-write window.
+    if expected_revision is not None:
+        if existing and int(existing['revision'] or 0) != int(expected_revision):
+            raise DraftRevisionConflict(
+                existing['id'], int(expected_revision), int(existing['revision'] or 0))
+        if not existing and int(expected_revision) > 0:
+            raise DraftRevisionConflict(draft_id, int(expected_revision), 0)
 
     now = _utcnow().isoformat()
 
@@ -4906,14 +4928,24 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             next_status = old_overall_status
             clear_approval = False
 
-        conn.execute(
-            '''UPDATE project_drafts
+        update_sql = '''UPDATE project_drafts
                SET title = ?, draft_data = ?, section_statuses = ?, status = ?,
                    revision = COALESCE(revision, 0) + 1, data_bytes = ?,
                    has_slides = ?, has_maps = ?, updated_at = ?
-               WHERE id = ?''',
-            (title, draft_json, statuses_json, next_status, data_bytes, has_slides, has_maps, now, existing['id'])
-        )
+               WHERE id = ?'''
+        update_params = [title, draft_json, statuses_json, next_status, data_bytes,
+                         has_slides, has_maps, now, existing['id']]
+        if expected_revision is not None:
+            update_sql += ' AND revision = ?'
+            update_params.append(int(expected_revision))
+        updated_row = conn.execute(update_sql, update_params)
+        if expected_revision is not None and updated_row.rowcount != 1:
+            current = conn.execute(
+                'SELECT revision FROM project_drafts WHERE id = ?', (existing['id'],)
+            ).fetchone()
+            raise DraftRevisionConflict(
+                existing['id'], int(expected_revision),
+                int((current or {}).get('revision') or 0) if current else 0)
         if clear_approval:
             _clear_draft_approval_fields(conn, existing['id'])
         conn.commit()
@@ -5627,12 +5659,18 @@ def decide_section_version(tenant_id, version_id, decision, decided_by, decided_
         # has to be sent and decided again before the file can move forward.
         expires_at = (_utcnow() + timedelta(
             days=get_section_approval_validity_days(tenant_id))).isoformat()
-    conn.execute(
+    # ISS-028: the decide itself is the atomic claim — a competing decision
+    # committed between the read above and this write turns it into a no-op
+    # instead of silently overwriting the first decision.
+    updated_row = conn.execute(
         '''UPDATE section_versions SET status = ?, decided_by = ?, decided_by_name = ?,
-           decision_note = ?, decided_at = ?, expires_at = ? WHERE id = ?''',
+           decision_note = ?, decided_at = ?, expires_at = ?
+           WHERE id = ? AND status = 'pending' ''',
         (decision, decided_by, decided_by_name, clean_note or None,
          _utcnow().isoformat(), expires_at, version_id),
     )
+    if updated_row.rowcount != 1:
+        return {'error': 'version_not_pending'}
     conn.commit()
     updated = conn.execute('SELECT * FROM section_versions WHERE id = ?', (version_id,)).fetchone()
     res = _section_version_public(updated)
@@ -9374,11 +9412,16 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
         # real available wallet, not one inflated by dead runs.
         release_stale_reservations(tenant_id)
     reservation_id = None
-    conn.execute(
+    # ISS-028: the decide itself is the atomic claim — a competing decision
+    # that committed meanwhile turns this UPDATE into a no-op, and the loser
+    # exits before any reservation is held or lifecycle moved.
+    updated_row = conn.execute(
         '''UPDATE generation_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
-           decided_at = ?, decision_note = ? WHERE id = ?''',
+           decided_at = ?, decision_note = ? WHERE id = ? AND status = 'pending' ''',
         (decision, decided_by, decided_by_name, _utcnow().isoformat(), str(note or '').strip() or None, approval_id),
     )
+    if updated_row.rowcount != 1:
+        return {'error': 'approval_not_pending'}
     if decision == 'approved' and int(row['estimated_points'] or 0) > 0:
         # One commit covers the decision and the escrow: an approval that
         # cannot hold its points rolls the decision back with it.
@@ -10055,12 +10098,17 @@ def decide_final_file_approval(tenant_id, approval_id, decision, decided_by, dec
             return {'error': 'invalid_transition',
                     'current_status': normalize_proposal_status(draft.get('status')),
                     'target_status': target_status}
-    conn.execute(
+    # ISS-028: the decide itself is the atomic claim — a second reviewer who
+    # passed the pending check above loses the conditional UPDATE rather than
+    # overwriting the first decision.
+    updated_row = conn.execute(
         '''UPDATE final_file_approvals SET status = ?, decided_by = ?, decided_by_name = ?,
-           decided_at = ?, decision_note = ? WHERE id = ?''',
+           decided_at = ?, decision_note = ? WHERE id = ? AND status = 'pending' ''',
         (decision, decided_by, decided_by_name, _utcnow().isoformat(),
          clean_note or None, approval_id),
     )
+    if updated_row.rowcount != 1:
+        return {'error': 'approval_not_pending'}
     if decision == 'approved':
         conn.execute(
             "UPDATE presentations SET status = 'approved' WHERE id = ? AND tenant_id = ?",

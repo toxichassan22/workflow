@@ -912,9 +912,13 @@
     // Drafts are saved only when the user explicitly asks for it. Changes stay in the current
     // workspace until the save button is used, so a refresh restores the last saved version.
     let tenantDraftDirty = false;
+    // Every edit bumps this counter, so a save response arriving after a newer
+    // edit can be told apart from one that still describes the current state.
+    let draftEditCounter = 0;
 
     function setDraftDirty(dirty) {
       tenantDraftDirty = !!dirty;
+      if (dirty) draftEditCounter += 1;
       const badge = document.getElementById('draftSyncBadge');
       if (badge) {
         if (tenantDraftDirty) {
@@ -1045,11 +1049,25 @@
         const snapshot = JSON.parse(JSON.stringify(data));
         const savedPresentationId = tenantPresentationId;
         const savedPresentationTitle = tenantPresentationTitle;
+        const savedWorkspaceRef = tenantProjectData;
+        const savedEditCounter = draftEditCounter;
         const resp = await api('POST', '/api/project-draft',
           { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
-            slideCheckpoint },
+            slideCheckpoint, expectedRevision: tenantDraftRevision },
           false, { onProgress });
-        if (resp.draftId) tenantProjectData.draftId = resp.draftId;
+        // The response describes the workspace captured above. A draft-id ack
+        // belongs to the draft row, so it lands whenever the same draft is
+        // still open — an edit meanwhile does not invalidate it — while the
+        // saved-badge and the dirty flag require the state to be untouched.
+        const sameDraftOpen = resp.draftId
+          ? tenantProjectData.draftId === resp.draftId
+          : tenantProjectData === savedWorkspaceRef;
+        const stillCurrent = tenantProjectData === savedWorkspaceRef
+          && draftEditCounter === savedEditCounter;
+        if (sameDraftOpen) {
+          if (resp.draftId) tenantProjectData.draftId = resp.draftId;
+          if (resp.revision) tenantDraftRevision = Number(resp.revision) || tenantDraftRevision;
+        }
         if (resp.success) {
           if (syncPresentation && savedPresentationId && snapshot.tenantSlidesData.length) {
             try {
@@ -1070,15 +1088,18 @@
               return false;
             }
           }
-          tenantDraftDirty = false;
-          if (badge) {
-            const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
-            badge.style.background = '#dcfce7';
-            badge.style.color = '#166534';
-            badge.innerHTML = 'محفوظ (' + timeStr + ')';
+          if (stillCurrent) {
+            tenantDraftDirty = false;
+            if (badge) {
+              const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+              badge.style.background = '#dcfce7';
+              badge.style.color = '#166534';
+              badge.innerHTML = 'محفوظ (' + timeStr + ')';
+            }
           }
           tenantArchiveCache = null;
           if (!silent) toast('تم حفظ المسودة على الخادم');
+          return true;
         } else {
           if (badge) {
             badge.style.background = '#fee2e2';
@@ -1086,6 +1107,7 @@
             badge.innerHTML = 'فشل الحفظ — التغييرات ما زالت غير محفوظة';
           }
           if (!silent) toast(resp.error || 'فشل حفظ المسودة');
+          return false;
         }
       } catch (e) {
         // This used to paint a badge and stop. collectTenantFormData can throw on a failed file
@@ -1098,6 +1120,7 @@
           badge.innerHTML = 'لم يتم الحفظ — التغييرات غير محفوظة';
         }
         if (!silent) toast('تعذر حفظ المسودة: ' + (e?.message || e));
+        return false;
       }
     }
 

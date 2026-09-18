@@ -447,9 +447,12 @@
       try {
         // The draft sits in the locked 'generating' state while this runs; the
         // flag marks this as the job's own checkpoint write, not a user edit.
-        await saveProjectAsDraftNow(true, false, true);
+        // The boolean comes back so a caller can tell a persisted checkpoint
+        // from one that silently failed.
+        return await saveProjectAsDraftNow(true, false, true);
       } catch (error) {
         console.error('[SLIDE CHECKPOINT]', error);
+        return false;
       }
     }
 
@@ -796,12 +799,16 @@
           generationStopped = true;
           generationFinished = true;
           generationFailure = { index: i, error: lastError || '' };
-          await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
+          const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
           const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
           setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
-            'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.', slidePct);
+            checkpointSaved
+              ? 'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.'
+              : 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.', slidePct);
           renderTenantSlidesSidebar();
-          toast('تم حفظ نقطة التوقف عند الشريحة ' + (i + 1));
+          toast(checkpointSaved
+            ? 'تم حفظ نقطة التوقف عند الشريحة ' + (i + 1)
+            : 'تعذر حفظ نقطة التوقف على الخادم');
           if (typeof finishResolve === 'function') finishResolve();
         }
 

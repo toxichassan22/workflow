@@ -6508,7 +6508,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('selectMapPreviewView(mapType)', index_source)
         self.assertIn("return regenerateMapPreview(tenantSelectedMapType || 'overview');", index_source)
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
-        self.assertIn('await saveProjectAsDraftNow(true);', index_source)
+        self.assertIn('await saveProjectAsDraftNow(true)', index_source)
 
     def test_map_section_has_no_regeneration_controls(self):
         index_source = read_frontend_text()

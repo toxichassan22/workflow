@@ -630,7 +630,9 @@
       } else if (tenantProjectData.draftId && typeof saveProjectAsDraftNow === 'function') {
         // Regenerating a map is an explicit user action. Persist the new image URL
         // immediately for drafts; otherwise reload restores the previous placeholder.
-        await saveProjectAsDraftNow(true);
+        // A failed save keeps the workspace but must be said, or the map looks
+        // persisted while a reload quietly drops it.
+        if (!(await saveProjectAsDraftNow(true))) toast('تعذر حفظ حالة الخريطة على الخادم');
       } else {
         triggerAutoSaveDraft();
       }
