@@ -11832,36 +11832,56 @@ def api_generate_single_map_image():
         return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400
     project_data = clean_project_data(data.get('projectData', {})) or {}
     overlay_only = data.get('overlayOnly') is True and map_type in {'overview', 'access', 'catchment', 'landmarks'}
-    if not overlay_only and project_data.get('location_analysis_approved') is not True:
-        return jsonify({
-            'success': False,
-            'error': 'يجب اعتماد تحليل الموقع قبل إنشاء الخريطة',
-            'error_code': 'LOCATION_ANALYSIS_NOT_APPROVED',
-        }), 400
-    if not overlay_only and map_type in {'landmarks', 'access', 'catchment'} and data.get('overviewApproved') is not True:
-        return jsonify({
-            'success': False,
-            'error': 'يجب اعتماد خريطة الموقع العامة قبل إنشاء هذه الخريطة',
-            'error_code': 'OVERVIEW_MAP_NOT_APPROVED',
-        }), 400
-    if data.get('mapApproved') is True:
-        return jsonify({
-            'success': False,
-            'error': 'يجب إلغاء اعتماد الخريطة قبل إعادة توليدها',
-            'error_code': 'MAP_ALREADY_APPROVED',
-        }), 400
     presentation_id = data.get('presentationId')
     draft_id = project_data.get('draftId') or project_data.get('draft_id')
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
     if not effective_id:
         return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
-    highlight_site = data.get('highlightSite', True) is not False
+    # ISS-025: workflow approvals are read from the stored project, never the
+    # request payload — a flag the caller types in is not the ceremony.
+    stored_project = {}
     presentation = None
-    expected_revision = None
     if presentation_id:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
-        if not presentation:
+        if not presentation or not _presentation_in_scope(presentation):
             return jsonify({'error': 'Presentation not found'}), 404
+        try:
+            stored_project = json.loads(presentation.get('project_data') or '{}')
+        except (TypeError, ValueError):
+            stored_project = {}
+    elif draft_id:
+        stored_draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+        if stored_draft and not db.user_may_access_draft(g.user_id, stored_draft):
+            return jsonify({'success': False, 'error': 'المشروع غير موجود'}), 404
+        stored_project = (stored_draft or {}).get('draft_data') or {}
+    if not isinstance(stored_project, dict):
+        stored_project = {}
+    stored_creative = stored_project.get('tenantCreativeImages') \
+        if isinstance(stored_project.get('tenantCreativeImages'), dict) else {}
+    stored_map_approvals = stored_creative.get('map_approvals') \
+        if isinstance(stored_creative.get('map_approvals'), dict) else {}
+    if not overlay_only and stored_project.get('location_analysis_approved') not in (True, 'true', 1):
+        return jsonify({
+            'success': False,
+            'error': 'يجب اعتماد تحليل الموقع قبل إنشاء الخريطة',
+            'error_code': 'LOCATION_ANALYSIS_NOT_APPROVED',
+        }), 400
+    if not overlay_only and map_type in {'landmarks', 'access', 'catchment'} \
+            and stored_map_approvals.get('overview') is not True:
+        return jsonify({
+            'success': False,
+            'error': 'يجب اعتماد خريطة الموقع العامة قبل إنشاء هذه الخريطة',
+            'error_code': 'OVERVIEW_MAP_NOT_APPROVED',
+        }), 400
+    if stored_map_approvals.get(map_type) is True:
+        return jsonify({
+            'success': False,
+            'error': 'يجب إلغاء اعتماد الخريطة قبل إعادة توليدها',
+            'error_code': 'MAP_ALREADY_APPROVED',
+        }), 400
+    highlight_site = data.get('highlightSite', True) is not False
+    expected_revision = None
+    if presentation:
         try:
             expected_revision = _expected_presentation_revision(data, presentation)
             # Freeze a legacy baseline before a map provider can overwrite its files.
@@ -13077,7 +13097,7 @@ def api_update_presentation(pres_id):
     data = request.json or {}
     if not isinstance(data, dict) or ('projectData' in data and not isinstance(data['projectData'], dict)) or ('slidesData' in data and not isinstance(data['slidesData'], list)):
         return jsonify({'error': 'projectData must be an object and slidesData an array'}), 400
-    locked_status = _presentation_draft_lock(pres.get('draft_id'), data)
+    locked_status = _presentation_draft_lock(pres.get('draft_id'), data, presentation_id=pres_id)
     if locked_status:
         return _draft_locked_response(locked_status)
     # t16: editing a finally-approved file is a privileged, reasoned action —
@@ -13671,12 +13691,14 @@ def _draft_locked_response(status):
     }), 423
 
 
-def _presentation_draft_lock(draft_id, data):
+def _presentation_draft_lock(draft_id, data, presentation_id=None):
     """The lifecycle status freezing this presentation's draft, or None.
 
     A presentation write is draft editing: while the draft sits in a locked
     lifecycle state only the running generation job may write, and only through
-    its own ``operation='generation'`` save.
+    its own ``operation='generation'`` save — a flag the client cannot forge
+    because it must be backed by a live approved generation approval, and an
+    approval bound to a presentation unlocks only that file.
     """
     if not draft_id:
         return None
@@ -13687,7 +13709,12 @@ def _presentation_draft_lock(draft_id, data):
     if not db.proposal_status_is_locked(status):
         return None
     if status == 'generating' and (data or {}).get('operation') == 'generation':
-        return None
+        approval = _active_generation_approval(draft_id)
+        bound = (approval or {}).get('presentation_id')
+        if approval and not bound:
+            return None
+        if approval and bound and presentation_id and bound == presentation_id:
+            return None
     return status
 
 
@@ -13748,11 +13775,18 @@ def api_save_project_draft():
     # While the draft runs its generation job only the job's own checkpoint saves
     # may write; every other locked state refuses the save outright.
     prev_norm = db.normalize_proposal_status((previous or {}).get('status')) if previous else 'draft'
-    allow_generating = bool(data.get('slideCheckpoint')) and prev_norm == 'generating'
+    save_draft_id = draft_data.get('draftId') or draft_data.get('draft_id') \
+        or (previous or {}).get('id')
+    # ISS-025: the client flag only claims the run exists — a live approved
+    # approval is what proves it, so the flag alone cannot unlock the state.
+    allow_generating = bool(data.get('slideCheckpoint')) and prev_norm == 'generating' \
+        and _active_generation_approval(save_draft_id) is not None
     # ISS-023: statuses travel through the save only as mirrors, demotions, or
     # approvals that would also pass the dedicated route's gates.
     section_statuses = _sanitize_save_section_statuses(
         g.tenant_id, previous, section_statuses, previous_statuses)
+    draft_data = _sanitize_save_workflow_claims(
+        g.tenant_id, save_draft_id, draft_data, previous_data)
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -13991,6 +14025,108 @@ def _location_workflow_complete(draft):
     creative = project.get('tenantCreativeImages') if isinstance(project.get('tenantCreativeImages'), dict) else {}
     approvals = creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}
     return all(approvals.get(key) is True for key in ('overview', 'access', 'catchment', 'landmarks'))
+
+
+# Mirrors LOCATION_ANALYSIS_KEYS on the client: the analysis approval exists to
+# confirm a complete location input set, so the server requires the same set.
+_LOCATION_ANALYSIS_REQUIRED_KEYS = (
+    'location_address', 'location_lat', 'location_lng', 'city', 'district',
+    'main_roads', 'nearby_landmarks', 'city_landmarks', 'location_detail')
+_MAP_APPROVAL_TYPES = ('overview', 'access', 'catchment', 'landmarks')
+
+
+def _location_analysis_approvable(project_data):
+    """Whether the location analysis approval may stand: full inputs present."""
+    if not isinstance(project_data, dict):
+        return False
+    for key in _LOCATION_ANALYSIS_REQUIRED_KEYS:
+        value = project_data.get(key)
+        if value is None or value == [] or value == {} \
+                or (isinstance(value, str) and not value.strip()):
+            return False
+    return True
+
+
+def _map_image_artifact(tenant_id, map_type, draft_id=None, presentation_id=None):
+    """The generated-map artifact a map approval must be backed by.
+
+    The ledger keys generated maps to ``draft_<id>`` or a presentation id; an
+    approval claim that names neither can never be honored.
+    """
+    scope = {presentation_id} if presentation_id else set()
+    if draft_id:
+        scope.add(f'draft_{draft_id}')
+        try:
+            scope.update(pres['id'] for pres in db.get_presentations(tenant_id, draft_id=draft_id))
+        except Exception:
+            pass
+    scope.discard(None)
+    if not scope:
+        return False
+    prefixes = (map_type, f'{map_type}_')
+    try:
+        return any(
+            row.get('presentation_id') in scope
+            and str(row.get('image_type') or '').startswith(prefixes)
+            for row in db.get_map_images(tenant_id))
+    except Exception:
+        return False
+
+
+def _sanitize_save_workflow_claims(tenant_id, draft_id, draft_data, stored_data):
+    """ISS-025: workflow-lock claims must be backed by server artifacts.
+
+    Approval flags can always be cleared, and may only be set when the artifact
+    they claim exists: analysis approval needs the complete location input set;
+    a map approval needs a generated map recorded under this project. A bare
+    claim written into draftData does not survive — the stored value stands.
+    """
+    if not isinstance(draft_data, dict):
+        return draft_data
+    stored = stored_data if isinstance(stored_data, dict) else {}
+    truthy = lambda v: v in (True, 'true', 1)
+    if truthy(draft_data.get('location_analysis_approved')) \
+            and not truthy(stored.get('location_analysis_approved')) \
+            and not _location_analysis_approvable(draft_data):
+        draft_data['location_analysis_approved'] = \
+            stored.get('location_analysis_approved') or False
+        app.logger.warning(
+            '[DRAFT SAVE] Refused unbacked location analysis approval: tenant=%s draft=%s',
+            tenant_id, draft_id)
+    creative = draft_data.get('tenantCreativeImages')
+    stored_creative = stored.get('tenantCreativeImages')
+    if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
+        incoming = creative['map_approvals']
+        stored_approvals = (stored_creative.get('map_approvals')
+                            if isinstance(stored_creative, dict) else {}) or {}
+        for key, value in list(incoming.items()):
+            if truthy(value) and not truthy(stored_approvals.get(key)) \
+                    and key in _MAP_APPROVAL_TYPES \
+                    and not _map_image_artifact(tenant_id, key, draft_id=draft_id):
+                incoming[key] = False
+                app.logger.warning(
+                    '[DRAFT SAVE] Refused map approval without a generated map: '
+                    'tenant=%s draft=%s map=%s', tenant_id, draft_id, key)
+    return draft_data
+
+
+def _active_generation_approval(draft_id):
+    """The live approved generation approval for this draft, if one is running.
+
+    Settlement moves the row to consumed/rejected, so its presence proves a
+    real run — a client-sent ``slideCheckpoint`` or ``operation='generation'``
+    flag is only a claim until this record backs it.
+    """
+    if not draft_id:
+        return None
+    try:
+        row = db.get_db().execute(
+            "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+            "AND status = 'approved' ORDER BY decided_at DESC LIMIT 1",
+            (g.tenant_id, draft_id)).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
 
 
 @app.route('/api/project-draft/section-status', methods=['POST'])
@@ -20667,12 +20803,29 @@ def api_restore_version(pres_id, version_id):
     version = db.get_presentation_revision(pres_id, version_id, g.tenant_id)
     if not version:
         return jsonify({'error': 'Version not found'}), 404
+    data = request.json or {}
+    # ISS-026: restoring rewrites the same state a PUT writes, so the same
+    # gates stand — a locked draft refuses it, and an approved file needs the
+    # post-approval permission plus a written reason.
+    locked_status = _presentation_draft_lock(pres.get('draft_id'), data, presentation_id=pres_id)
+    if locked_status:
+        return _draft_locked_response(locked_status)
+    restore_reason = ''
+    if pres.get('status') == 'approved':
+        if not _omran_can('post_approval_edit'):
+            return jsonify({'error': 'استرجاع ملف معتمد يتطلب صلاحية التعديل بعد الاعتماد',
+                            'error_code': 'post_approval_edit_required'}), 403
+        restore_reason = str(data.get('editReason') or '').strip()
+        if not restore_reason:
+            return jsonify({'error': 'سبب الاسترجاع بعد الاعتماد إلزامي',
+                            'error_code': 'reason_required'}), 400
     try:
-        expected_revision = _expected_presentation_revision(request.json or {}, pres)
+        expected_revision = _expected_presentation_revision(data, pres)
         result = _commit_presentation_state(
             g.tenant_id, pres_id, expected_revision=expected_revision,
             restore_version_id=version_id, action='استرجاع نسخة', source='manual',
-            details=[_presentation_version_payload(version)['label']],
+            details=[_presentation_version_payload(version)['label']]
+                    + ([f'استرجاع بعد الاعتماد — السبب: {restore_reason}'] if restore_reason else []),
         )
     except (LookupError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
@@ -25712,9 +25865,14 @@ def api_request_approval(pres_id):
     existing = db.get_approval_status(pres_id, tenant_id=g.tenant_id)
     if existing and existing['status'] == 'pending':
         return jsonify({'error': 'Approval already requested'}), 400
-    approval_id = db.create_approval(pres_id, g.tenant_id, g.user_id, g.user_name or 'Unknown')
+    requested = db.create_approval(pres_id, g.tenant_id, g.user_id, g.user_name or 'Unknown')
+    if requested.get('error') == 'use_final_approval_gate':
+        return jsonify({'error': 'هذا الملف يتبع بوابة اعتماد الملف النهائي',
+                        'error_code': 'use_final_approval_gate'}), 409
+    if requested.get('error'):
+        return jsonify({'error': 'العرض غير موجود'}), 404
     _record_change('presentation', pres_id, 'طلب تعميد العرض', ['أُرسل العرض للمراجعة'])
-    return jsonify({'success': True, 'approvalId': approval_id})
+    return jsonify({'success': True, 'approvalId': requested['approval_id']})
 
 
 @app.route('/api/approvals', methods=['GET'])
@@ -25742,9 +25900,26 @@ def api_review_approval(approval_id):
     pres = db.get_presentation(approval['presentation_id'], tenant_id=g.tenant_id)
     if not _presentation_in_scope(pres):
         return jsonify({'error': 'Approval not found'}), 404
-    result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin', note)
-    if not result:
-        return jsonify({'error': 'Approval not found'}), 404
+    result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin',
+                                note, allow_self=_omran_actor_is_admin())
+    if not result or result.get('error'):
+        code = (result or {}).get('error')
+        if code == 'approval_not_found':
+            return jsonify({'error': 'Approval not found'}), 404
+        if code == 'use_final_approval_gate':
+            return jsonify({'error': 'هذا الملف يتبع بوابة اعتماد الملف النهائي',
+                            'error_code': 'use_final_approval_gate'}), 409
+        if code == 'self_approval_not_allowed':
+            return jsonify({'error': 'لا يمكنك اتخاذ قرار على طلب قدّمته بنفسك',
+                            'error_code': 'self_approval_not_allowed'}), 403
+        if code == 'content_changed':
+            return jsonify({'error': 'محتوى العرض تغيّر بعد إرساله — أعد طلب الاعتماد',
+                            'error_code': 'content_changed'}), 409
+        if code == 'note_required':
+            return jsonify({'error': 'سبب الرفض إلزامي',
+                            'error_code': 'note_required'}), 400
+        return jsonify({'error': 'الاعتماد لم يعد بانتظار القرار',
+                        'error_code': 'approval_not_pending'}), 409
     action = 'اعتماد العرض' if status == 'approved' else 'إعادة العرض للتعديل'
     _record_change('presentation', approval['presentation_id'], action,
                    [str(note).strip()] if str(note or '').strip() else [action])

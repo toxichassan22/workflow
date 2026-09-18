@@ -116,7 +116,8 @@ class PresentationRevisionApiTests(unittest.TestCase):
             db.save_project_draft(self.tenant, 'owner', {'project_name': 'New draft facts'}, draft_id=draft_id)
             db.update_presentation(created['presentationId'], status='approved')
         response = self.client.post(f"/api/presentations/{created['presentationId']}/versions/{original_version}/restore",
-                                    headers=self.headers, json={'expectedRevision': edited['revision']})
+                                    headers=self.headers, json={'expectedRevision': edited['revision'],
+                                                                'editReason': 'استعادة بعد الاعتماد'})
         self.assertEqual(response.status_code, 200, response.get_json())
         restored = response.get_json()
         self.assertEqual(restored['presentationId'], created['presentationId'])

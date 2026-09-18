@@ -537,5 +537,314 @@ class GenerationGateTests(ScopeTestBase):
         self.assertEqual(response.status_code, 404)
 
 
+class WorkflowClaimTests(ScopeTestBase):
+    """ISS-025: client-sent unlock booleans cannot mint workflow state — every
+    approval the routes honor must exist as a stored server artifact."""
+
+    def _draft(self, draft_id, data=None, status='draft', statuses=None):
+        with self.app.app_context():
+            saved = db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'مشروع الأعلام', **(data or {})},
+                statuses or {'basic': 'draft'}, 'draft', draft_id=draft_id)
+            if status != 'draft':
+                db.get_db().execute(
+                    'UPDATE project_drafts SET status = ? WHERE id = ?', (status, saved))
+                db.get_db().commit()
+            return saved
+
+    def _stored_draft_data(self, draft_id):
+        with self.app.app_context():
+            return (db.get_project_draft_by_id(self.tenant, draft_id) or {}).get('draft_data') or {}
+
+    def _approve_generation(self, draft_id):
+        with self.app.app_context():
+            draft = db.get_project_draft_by_id(self.tenant, draft_id)
+            snapshot = {'draft_hash': db.draft_generation_input_hash(draft['draft_data'] or {})}
+            approval = db.create_generation_approval(
+                self.tenant, draft_id,
+                {'estimated_points': 0, 'estimated_cost_usd': 0, 'slides_count': 1},
+                'owner', 'Owner', input_snapshot=snapshot)
+            self.assertNotIn('error', approval, approval)
+            decided = db.decide_generation_approval(
+                self.tenant, approval['id'], 'approved', 'owner', 'Owner', allow_self=True)
+            self.assertNotIn('error', decided, decided)
+            return approval['id']
+
+    def _generate_map(self, draft_id, map_type='overview', project_extra=None):
+        project = {'draftId': draft_id, 'project_name': 'مشروع الأعلام'}
+        project.update(project_extra or {})
+        with patch.object(self.module.maps_service, 'generate_all_map_images',
+                          return_value={'placeholders': {}, 'landmarks': []}), \
+                patch.object(db, 'get_branding', return_value={'company_name': 'x'}):
+            return self.client.post('/api/generate-map-image', headers=self.admin_headers,
+                                    json={'projectData': project, 'mapType': map_type})
+
+    def test_map_gate_reads_approval_from_storage_not_payload(self):
+        # The payload claims every approval under the sun; the stored draft has
+        # none, so generation is refused at the first gate.
+        draft_id = self._draft('wfc-map-claims')
+        response = self._generate_map(draft_id, 'overview', {
+            'location_analysis_approved': True,
+            'locationAnalysisApproved': True,
+            'tenantCreativeImages': {'map_approvals': {'overview': True}},
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'LOCATION_ANALYSIS_NOT_APPROVED')
+
+    def test_dependent_maps_need_the_stored_overview_approval(self):
+        draft_id = self._draft('wfc-map-overview', {'location_analysis_approved': True})
+        for map_type in ('landmarks', 'access', 'catchment'):
+            response = self._generate_map(draft_id, map_type)
+            self.assertEqual(response.status_code, 400, map_type)
+            self.assertEqual(response.get_json()['error_code'], 'OVERVIEW_MAP_NOT_APPROVED',
+                             map_type)
+
+    def test_approved_map_cannot_be_regenerated_by_flagging_it(self):
+        draft_id = self._draft('wfc-map-done', {
+            'location_analysis_approved': True,
+            'tenantCreativeImages': {'map_approvals': {'overview': True}},
+        })
+        response = self._generate_map(draft_id, 'overview')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'MAP_ALREADY_APPROVED')
+
+    def test_stored_approval_lets_generation_through(self):
+        draft_id = self._draft('wfc-map-ok', {'location_analysis_approved': True})
+        response = self._generate_map(draft_id, 'overview')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
+
+    def test_checkpoint_flag_without_a_live_run_stays_locked(self):
+        draft_id = self._draft('wfc-gen-locked', status='generating')
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام'},
+            'slideCheckpoint': True})
+        self.assertEqual(response.status_code, 423)
+        self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')
+
+    def test_checkpoint_flag_passes_with_a_live_approval(self):
+        draft_id = self._draft('wfc-gen-live', statuses={'basic': 'approved'})
+        self._approve_generation(draft_id)
+        with self.app.app_context():
+            stored = db.get_project_draft_by_id(self.tenant, draft_id)
+            self.assertEqual(db.normalize_proposal_status(stored['status']), 'generating')
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام'},
+            'slideCheckpoint': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def test_generation_operation_flag_cannot_unlock_a_presentation_save(self):
+        draft_id = self._draft('wfc-op-flag', status='generating')
+        with self.app.app_context():
+            pres_id = db.create_presentation(
+                self.tenant, 'عرض مقفل', project_data={'project_name': 'مشروع الأعلام'},
+                slides_data=[{'html': '<div class="slide">x</div>'}], draft_id=draft_id)
+        response = self.client.put(f'/api/presentations/{pres_id}',
+                                   headers=self.admin_headers,
+                                   json={'operation': 'generation',
+                                         'projectData': {'project_name': 'مشروع الأعلام'},
+                                         'expectedRevision': 0})
+        self.assertEqual(response.status_code, 423)
+        self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')
+
+    def test_unbacked_approval_claims_are_stripped_on_save(self):
+        draft_id = self._draft('wfc-strip')
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام',
+                          'location_analysis_approved': True,
+                          'tenantCreativeImages': {'map_approvals': {'overview': True}}}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        stored = self._stored_draft_data(draft_id)
+        self.assertNotIn(stored.get('location_analysis_approved'), (True, 'true', 1))
+        approvals = (stored.get('tenantCreativeImages') or {}).get('map_approvals') or {}
+        self.assertNotEqual(approvals.get('overview'), True)
+
+
+class VersionRestoreGateTests(ScopeTestBase):
+    """ISS-026: restoring a version rewrites the file, so every edit gate that
+    guards a PUT guards the restore as well."""
+
+    def _draft(self, draft_id, status='draft'):
+        with self.app.app_context():
+            saved = db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'مشروع الاستعادة'},
+                {'basic': 'draft'}, 'draft', draft_id=draft_id)
+            if status != 'draft':
+                db.get_db().execute(
+                    'UPDATE project_drafts SET status = ? WHERE id = ?', (status, saved))
+                db.get_db().commit()
+            return saved
+
+    def _presentation(self, draft_id=None, status='draft'):
+        with self.app.app_context():
+            pres_id = db.create_presentation(
+                self.tenant, 'عرض الاستعادة', project_data={'project_name': 'مشروع الاستعادة'},
+                slides_data=[{'html': '<div class="slide">v1</div>'}], draft_id=draft_id)
+            with self.app.test_request_context():
+                from flask import g as flask_g
+                flask_g.tenant_id = self.tenant
+                version_id = self.module._commit_presentation_state(
+                    self.tenant, pres_id, action='حالة ابتدائية', source='system')['version_id']
+            if status != 'draft':
+                db.get_db().execute('UPDATE presentations SET status = ? WHERE id = ?',
+                                    (status, pres_id))
+                db.get_db().commit()
+            return pres_id, version_id
+
+    def _restore(self, pres_id, version_id, payload=None, headers=None):
+        return self.client.post(
+            f'/api/presentations/{pres_id}/versions/{version_id}/restore',
+            headers=headers or self.admin_headers, json=payload or {})
+
+    def test_restore_inside_a_locked_draft_is_refused(self):
+        draft_id = self._draft('rst-locked', status='generating')
+        pres_id, version_id = self._presentation(draft_id=draft_id)
+        response = self._restore(pres_id, version_id)
+        self.assertEqual(response.status_code, 423)
+        self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')
+
+    def test_restore_on_an_approved_file_needs_the_permission(self):
+        pres_id, version_id = self._presentation(status='approved')
+        with self.app.app_context():
+            limited_id = db.create_user(self.tenant, 'محرر محدود', 'limited@scope.test',
+                                        'hash', role='employee')
+            for key in db.PERMISSION_KEYS:
+                db.set_user_permission(limited_id, key, True)
+            db.set_user_permission(limited_id, 'post_approval_edit', False)
+            limited_headers = {'Authorization': 'Bearer ' + auth.create_token(
+                self.tenant, 'limited@scope.test', user_id=limited_id,
+                user_name='محرر محدود', user_role='employee')}
+        response = self._restore(pres_id, version_id,
+                                 payload={'editReason': 'سبب'}, headers=limited_headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()['error_code'], 'post_approval_edit_required')
+
+    def test_restore_on_an_approved_file_needs_a_reason(self):
+        pres_id, version_id = self._presentation(status='approved')
+        response = self._restore(pres_id, version_id, payload={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'reason_required')
+
+    def test_restore_on_an_approved_file_with_reason_passes(self):
+        pres_id, version_id = self._presentation(status='approved')
+        response = self._restore(pres_id, version_id,
+                                 payload={'editReason': 'تصحيح قيمة'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
+
+    def test_restore_on_an_open_file_still_works(self):
+        pres_id, version_id = self._presentation()
+        response = self._restore(pres_id, version_id)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
+
+
+class LegacyApprovalGateTests(ScopeTestBase):
+    """ISS-027: the legacy approval table cannot mint a final approval for a
+    file inside the formal lifecycle, and where it still governs it enforces
+    the gate's invariants — pending state, separation of duties, rejection
+    reason and content binding."""
+
+    def _draft(self, draft_id, status='draft'):
+        with self.app.app_context():
+            saved = db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'مشروع الاعتماد'},
+                {'basic': 'draft'}, 'draft', draft_id=draft_id)
+            if status != 'draft':
+                db.get_db().execute(
+                    'UPDATE project_drafts SET status = ? WHERE id = ?', (status, saved))
+                db.get_db().commit()
+            return saved
+
+    def _presentation(self, draft_id=None):
+        with self.app.app_context():
+            return db.create_presentation(
+                self.tenant, 'عرض الاعتماد', project_data={'project_name': 'مشروع الاعتماد'},
+                slides_data=[{'html': '<div class="slide">x</div>'}], draft_id=draft_id)
+
+    def _request(self, pres_id, headers=None):
+        return self.client.post(f'/api/presentations/{pres_id}/request-approval',
+                                headers=headers or self.admin_headers, json={})
+
+    def _review(self, approval_id, status='approved', note=None, headers=None):
+        payload = {'status': status}
+        if note is not None:
+            payload['note'] = note
+        return self.client.post(f'/api/approvals/{approval_id}/review',
+                                headers=headers or self.admin_headers, json=payload)
+
+    def test_request_on_a_formal_gate_file_is_refused(self):
+        draft_id = self._draft('lga-gated', status='generated_draft')
+        pres_id = self._presentation(draft_id=draft_id)
+        response = self._request(pres_id)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'use_final_approval_gate')
+
+    def test_request_and_clean_decision_on_a_legacy_file(self):
+        pres_id = self._presentation()
+        requested = self._request(pres_id)
+        self.assertEqual(requested.status_code, 200, requested.get_json())
+        approval_id = requested.get_json()['approvalId']
+        with self.app.app_context():
+            row = db.get_approval(approval_id, self.tenant)
+            self.assertEqual(row['status'], 'pending')
+            self.assertTrue(row['request_hash'])
+        decided = self._review(approval_id, 'approved')
+        self.assertEqual(decided.status_code, 200, decided.get_json())
+        with self.app.app_context():
+            self.assertEqual(db.get_approval(approval_id, self.tenant)['status'], 'approved')
+            pres = db.get_presentation(pres_id, tenant_id=self.tenant)
+            self.assertEqual(pres['status'], 'approved')
+        # A second decision on the settled row is refused, not re-applied.
+        again = self._review(approval_id, 'approved')
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(again.get_json()['error_code'], 'approval_not_pending')
+
+    def test_employee_cannot_self_decide(self):
+        pres_id = self._presentation()
+        requested = self._request(pres_id, headers=self.emp_headers)
+        self.assertEqual(requested.status_code, 200, requested.get_json())
+        approval_id = requested.get_json()['approvalId']
+        decided = self._review(approval_id, 'approved', headers=self.emp_headers)
+        self.assertEqual(decided.status_code, 403)
+        self.assertEqual(decided.get_json()['error_code'], 'self_approval_not_allowed')
+
+    def test_rejection_requires_a_written_reason(self):
+        pres_id = self._presentation()
+        approval_id = self._request(pres_id).get_json()['approvalId']
+        decided = self._review(approval_id, 'rejected')
+        self.assertEqual(decided.status_code, 400)
+        self.assertEqual(decided.get_json()['error_code'], 'note_required')
+        decided = self._review(approval_id, 'rejected', note='أعد العنوان')
+        self.assertEqual(decided.status_code, 200, decided.get_json())
+        with self.app.app_context():
+            pres = db.get_presentation(pres_id, tenant_id=self.tenant)
+            self.assertEqual(pres['status'], 'draft')
+
+    def test_approval_fails_when_the_content_moved(self):
+        pres_id = self._presentation()
+        approval_id = self._request(pres_id).get_json()['approvalId']
+        with self.app.app_context():
+            db.get_db().execute(
+                'UPDATE presentations SET project_data = ? WHERE id = ?',
+                ('{"project_name": "محتوى مغيّر"}', pres_id))
+            db.get_db().commit()
+        decided = self._review(approval_id, 'approved')
+        self.assertEqual(decided.status_code, 409)
+        self.assertEqual(decided.get_json()['error_code'], 'content_changed')
+        with self.app.app_context():
+            self.assertEqual(db.get_approval(approval_id, self.tenant)['status'], 'pending')
+
+    def test_a_file_that_enters_the_gate_mid_request_leaves_the_legacy_path(self):
+        draft_id = self._draft('lga-mid', status='draft')
+        pres_id = self._presentation(draft_id=draft_id)
+        approval_id = self._request(pres_id).get_json()['approvalId']
+        # The draft moved into the formal lifecycle after the request opened.
+        self._draft(draft_id, status='generated_draft')
+        decided = self._review(approval_id, 'approved')
+        self.assertEqual(decided.status_code, 409)
+        self.assertEqual(decided.get_json()['error_code'], 'use_final_approval_gate')
+
+
 if __name__ == '__main__':
     unittest.main()

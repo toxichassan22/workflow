@@ -5899,6 +5899,13 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_single_map_regeneration_bypasses_cached_assets(self):
         client = self.app.test_client()
+        # The map gates read approval from the stored draft, never the payload.
+        with self.app.app_context():
+            db.save_project_draft(self.tenant_a, 'owner',
+                                  {'project_name': 'One map', 'location_lat': 24.0,
+                                   'location_lng': 46.0, 'location_analysis_approved': True,
+                                   'tenantCreativeImages': {'map_approvals': {'overview': True}}},
+                                  {'basic': 'draft'}, 'draft', draft_id='one-map')
         with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
             'placeholders': {'##MAP_ACCESS##': '/uploads/maps/access.png'},
             'landmarks': [],
@@ -5923,14 +5930,31 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_location_analysis_approval_gates_individual_map_generation(self):
         client = self.app.test_client()
         base = {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'approval-map'}
+        # The gates read approval from the stored draft; the payload cannot mint it.
+        with self.app.app_context():
+            db.save_project_draft(self.tenant_a, 'owner',
+                                  {'project_name': 'Approval map', 'location_lat': 24.0,
+                                   'location_lng': 46.0},
+                                  {'basic': 'draft'}, 'draft', draft_id='approval-map')
         response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
             'projectData': base, 'mapType': 'overview'})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['error_code'], 'LOCATION_ANALYSIS_NOT_APPROVED')
+        with self.app.app_context():
+            db.save_project_draft(self.tenant_a, 'owner',
+                                  {'project_name': 'Approval map', 'location_lat': 24.0,
+                                   'location_lng': 46.0, 'location_analysis_approved': True},
+                                  {'basic': 'draft'}, 'draft', draft_id='approval-map')
         response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
             'projectData': {**base, 'location_analysis_approved': True}, 'mapType': 'access'})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['error_code'], 'OVERVIEW_MAP_NOT_APPROVED')
+        with self.app.app_context():
+            db.save_project_draft(self.tenant_a, 'owner',
+                                  {'project_name': 'Approval map', 'location_lat': 24.0,
+                                   'location_lng': 46.0, 'location_analysis_approved': True,
+                                   'tenantCreativeImages': {'map_approvals': {'overview': True}}},
+                                  {'basic': 'draft'}, 'draft', draft_id='approval-map')
         with patch.object(self.application_module.db, 'delete_map_images') as delete_images:
             response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
                 'projectData': {**base, 'location_analysis_approved': True},
@@ -6313,6 +6337,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(service.select_map_landmark_rows([{'name': f'معلم {index}'} for index in range(1, 10)])), 7)
 
         client = self.app.test_client()
+        # The map gates read approval from the stored draft, never the payload.
+        with self.app.app_context():
+            db.save_project_draft(
+                self.tenant_a, 'owner', {
+                    'project_name': 'Quick landmarks',
+                    'location_lat': 24.0, 'location_lng': 46.0,
+                    'location_analysis_approved': True,
+                    'tenantCreativeImages': {'map_approvals': {'overview': True}},
+                }, {'basic': 'approved'}, 'draft', draft_id='quick-landmarks')
         result = {'placeholders': {}, 'zooms': {'landmarks': 14}, 'centers': {'landmarks': {'lat': 24.0, 'lng': 46.0}}, 'landmark_map_items': []}
         with patch.object(service, 'recompose_landmarks_map', return_value=result) as recompose, \
                 patch.object(service, 'generate_all_map_images') as generate_maps, \
@@ -6605,13 +6638,21 @@ class MeetingRequirementsTests(unittest.TestCase):
             'section-executive-content',
         ]
         client.post('/api/project-draft', headers=headers, json={
-            'draftData': {
-                'project_name': 'ملف اعتماد', 'location_analysis_approved': True,
-                'tenantCreativeImages': {'map_approvals': {
-                    'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
-            },
+            'draftData': {'draftId': 'parallel-approval', 'project_name': 'ملف اعتماد'},
             'sectionStatuses': {}, 'status': 'draft'
         })
+        # The location workflow's approved state is a stored artifact — writes
+        # through the real gates land it here; a save payload cannot mint it.
+        with self.app.app_context():
+            draft_row = db.get_project_draft_by_id(self.tenant_a, 'parallel-approval')
+            draft_state = dict(draft_row['draft_data'] or {})
+            draft_state['location_analysis_approved'] = True
+            draft_state['tenantCreativeImages'] = {'map_approvals': {
+                'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
+            db.get_db().execute(
+                'UPDATE project_drafts SET draft_data = ? WHERE id = ? AND tenant_id = ?',
+                (json.dumps(draft_state, ensure_ascii=False), 'parallel-approval', self.tenant_a))
+            db.get_db().commit()
 
         # One merged call must store every section.
         response = client.post('/api/project-draft/section-status', headers=headers, json={

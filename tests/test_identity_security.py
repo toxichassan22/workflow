@@ -806,7 +806,7 @@ class IdentityApiTests(unittest.TestCase):
             (self.tenant_id, draft_id))
         conn.commit()
         approval_id = db.create_approval(
-            'pres-appr', self.tenant_id, self.admin_user_id, 'مدير الشركة')
+            'pres-appr', self.tenant_id, self.admin_user_id, 'مدير الشركة')['approval_id']
 
         own = self.client.get('/api/presentations/pres-appr/approval-status',
                               headers=self.headers(self.admin_user_token))

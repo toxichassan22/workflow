@@ -391,6 +391,7 @@ def _create_tables(conn):
         reviewed_by TEXT,
         reviewed_by_name TEXT,
         review_note TEXT,
+        request_hash TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         reviewed_at TEXT
     );
@@ -1899,6 +1900,7 @@ def _migrate_workflow_gate_columns(conn):
         ('generation_approvals', (('input_snapshot', 'TEXT'),)),
         ('generation_jobs', (('heartbeat_at', 'TEXT'),)),
         ('final_file_approvals', (('request_hash', 'TEXT'), ('stamped_export_id', 'TEXT'))),
+        ('presentation_approvals', (('request_hash', 'TEXT'),)),
         ('presentation_downloads', (('export_id', 'TEXT'),)),
         ('exports', (('content_hash', 'TEXT'), ('regen_policy', 'TEXT'), ('cost_usd', 'REAL DEFAULT 0'))),
         ('project_drafts', (('archived_at', 'TEXT'),)),
@@ -4369,17 +4371,53 @@ def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=Non
 # Presentation Approvals
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _final_gate_reachable(tenant_id, presentation):
+    """Whether the presentation's linked draft belongs to the formal gate.
+
+    A draft already inside the lifecycle (a gate state or one that can enter
+    ``final_approval_pending``) must be approved through ``final_file_approvals``
+    — the legacy table cannot drive it, so a legacy request on such a file is
+    refused rather than stamped in parallel.
+    """
+    draft_id = (presentation or {}).get('draft_id')
+    if not draft_id:
+        return False
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return False
+    norm = normalize_proposal_status(draft.get('status'))
+    if norm in {'generation_approval_pending', 'generating', 'generated_draft',
+                'final_approval_pending', 'approved'}:
+        return True
+    return can_transition_proposal_status(norm, 'final_approval_pending')
+
+
 def create_approval(presentation_id, tenant_id, requested_by, requested_by_name):
-    """Create an approval request for a presentation."""
+    """Create an approval request for a presentation.
+
+    ISS-027: the request pins the content it sends (``request_hash``), and a
+    presentation whose draft belongs to the formal lifecycle must go through
+    the final-file gate instead — the legacy table only governs files outside
+    that flow.
+    """
     conn = get_db()
+    pres = conn.execute(
+        'SELECT draft_id, status, project_data, slides_data FROM presentations WHERE id = ? AND tenant_id = ?',
+        (presentation_id, tenant_id),
+    ).fetchone()
+    if not pres:
+        return {'error': 'presentation_not_found'}
+    if _final_gate_reachable(tenant_id, dict(pres)):
+        return {'error': 'use_final_approval_gate'}
     approval_id = str(uuid.uuid4())
     conn.execute(
-        'INSERT INTO presentation_approvals (id, presentation_id, tenant_id, requested_by, requested_by_name, status) VALUES (?, ?, ?, ?, ?, ?)',
-        (approval_id, presentation_id, tenant_id, requested_by, requested_by_name, 'pending')
+        'INSERT INTO presentation_approvals (id, presentation_id, tenant_id, requested_by, requested_by_name, status, request_hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (approval_id, presentation_id, tenant_id, requested_by, requested_by_name, 'pending',
+         _presentation_review_hash(dict(pres)))
     )
     conn.execute("UPDATE presentations SET status = 'pending_approval' WHERE id = ?", (presentation_id,))
     conn.commit()
-    return approval_id
+    return {'approval_id': approval_id}
 
 
 def get_pending_approvals(tenant_id, accessible_draft_ids=None):
@@ -4415,20 +4453,52 @@ def get_approval(approval_id, tenant_id):
     return dict(row) if row else None
 
 
-def review_approval(approval_id, tenant_id, status, reviewed_by, reviewed_by_name, note=None):
-    """Approve or reject a presentation."""
+def review_approval(approval_id, tenant_id, status, reviewed_by, reviewed_by_name,
+                    note=None, allow_self=False):
+    """Approve or reject a presentation — the final gate's invariants (ISS-027).
+
+    Only a pending row may be decided, the conditional UPDATE makes the decide
+    itself race-safe, the requester cannot self-decide unless a company admin
+    (``allow_self``), rejection needs a written reason, approval verifies the
+    file still matches the reviewed content, and a file whose draft entered the
+    formal lifecycle must be decided through the final-file gate instead.
+    """
+    if status not in {'approved', 'rejected'}:
+        return {'error': 'invalid_decision'}
+    clean_note = str(note or '').strip()
+    if status == 'rejected' and not clean_note:
+        return {'error': 'note_required'}
     conn = get_db()
     approval = conn.execute('SELECT * FROM presentation_approvals WHERE id = ? AND tenant_id = ?', (approval_id, tenant_id)).fetchone()
     if not approval:
-        return False
-    conn.execute(
-        'UPDATE presentation_approvals SET status = ?, reviewed_by = ?, reviewed_by_name = ?, review_note = ?, reviewed_at = datetime(\'now\') WHERE id = ?',
-        (status, reviewed_by, reviewed_by_name, note, approval_id)
+        return {'error': 'approval_not_found'}
+    if approval['status'] != 'pending':
+        return {'error': 'approval_not_pending'}
+    if not allow_self and approval['requested_by'] \
+            and str(approval['requested_by']) == str(reviewed_by):
+        return {'error': 'self_approval_not_allowed'}
+    pres = conn.execute(
+        'SELECT draft_id, status, project_data, slides_data FROM presentations WHERE id = ? AND tenant_id = ?',
+        (approval['presentation_id'], tenant_id)).fetchone()
+    if pres is not None and _final_gate_reachable(tenant_id, dict(pres)):
+        return {'error': 'use_final_approval_gate'}
+    if status == 'approved' and pres is not None:
+        request_hash = approval['request_hash'] if 'request_hash' in approval.keys() else None
+        if request_hash and _presentation_review_hash(dict(pres)) != request_hash:
+            return {'error': 'content_changed'}
+    updated = conn.execute(
+        '''UPDATE presentation_approvals SET status = ?, reviewed_by = ?, reviewed_by_name = ?,
+           review_note = ?, reviewed_at = datetime('now')
+           WHERE id = ? AND status = 'pending' ''',
+        (status, reviewed_by, reviewed_by_name, clean_note or None, approval_id)
     )
+    if updated.rowcount != 1:
+        return {'error': 'approval_not_pending'}
     pres_status = 'approved' if status == 'approved' else 'draft'
-    conn.execute('UPDATE presentations SET status = ? WHERE id = ?', (pres_status, approval['presentation_id']))
+    conn.execute('UPDATE presentations SET status = ? WHERE id = ? AND tenant_id = ?',
+                 (pres_status, approval['presentation_id'], tenant_id))
     conn.commit()
-    return True
+    return {'status': status}
 
 
 def get_approval_status(presentation_id, tenant_id=None):
