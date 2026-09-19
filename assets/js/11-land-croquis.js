@@ -272,7 +272,7 @@
         tr.dataset.direction = row.direction;
         tr.innerHTML = '<td>' + escapeHtml(row.label) + '</td>' +
           '<td><textarea data-direction-field="regulation_text" rows="2" placeholder="بطول ... يحده ...">' + escapeHtml(row.regulation_text || '') + '</textarea></td>' +
-          '<td><input type="text" data-direction-field="setback" value="' + escapeHtml(row.setback ?? '') + '" placeholder="5" style="width:100%;min-width:80px"></td>';
+          '<td><input type="text" data-direction-field="setback" value="' + escapeHtml(row.setback ?? '') + '" placeholder="5"></td>';
         tr.querySelectorAll('textarea, input').forEach(control => control.addEventListener('input', syncSurveyDirections));
         tbody.appendChild(tr);
       });

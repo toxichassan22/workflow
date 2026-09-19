@@ -1499,7 +1499,11 @@
 
     .survey-directions-table th:last-child,
     .survey-directions-table td:last-child {
-      width: 82%;
+      width: 22%;
+    }
+
+    .survey-directions-table input {
+      text-align: center;
     }
 
     .survey-directions-table textarea {
