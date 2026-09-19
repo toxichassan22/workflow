@@ -48,6 +48,7 @@ import designer_chat_reliability
 import designer_chat_targets
 import designer_chat_colors
 import designer_chat_context
+import regulation_digest
 from auth import (require_auth, require_admin, require_company_admin, require_permission,
                   hash_password, verify_password, create_token, decode_token,
                   _load_token_user, _session_state_error, _is_platform_admin_session)
@@ -18015,6 +18016,10 @@ LAND_FACTS_MAX_TOKENS = int(os.environ.get('LAND_FACTS_MAX_TOKENS', '2500'))
 LAND_FACTS_MIN_TOKENS = int(os.environ.get('LAND_FACTS_MIN_TOKENS', '1200'))
 REGULATION_EVIDENCE_MAX_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MAX_TOKENS', '4000'))
 REGULATION_EVIDENCE_MIN_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MIN_TOKENS', '1500'))
+# When enabled, the verified rules digest (rules/*.json) supplies regulation
+# values deterministically and the per-request PDF evidence extraction is
+# skipped. Set REGULATION_DIGEST=0 to restore the legacy extraction path.
+REGULATION_DIGEST_ENABLED = os.environ.get('REGULATION_DIGEST', '1') != '0'
 
 _REGULATION_PAGE_INDEX = None
 _REGULATION_PAGE_INDEX_SIGNATURE = None
@@ -19216,6 +19221,38 @@ def _directions_have_content(directions):
     )
 
 
+def _apply_regulation_digest_fields(resp_json, reg_digest):
+    """Force-fill verified numeric regulation fields from the digest.
+
+    When the digest matched a zone, its values are the source of truth for the
+    numeric requirements — the model narrates them but may not override them.
+    Fields absent from the digest (e.g. conflicting values) are left untouched
+    so an unverified number is never force-written.
+    """
+    fields = reg_digest.get('fields') or {}
+    if not fields:
+        return
+    if reg_digest.get('conflicts'):
+        existing = resp_json.get('conflicts')
+        merged = list(existing) if isinstance(existing, list) else []
+        for conflict in reg_digest['conflicts']:
+            if conflict not in merged:
+                merged.append(conflict)
+        resp_json['conflicts'] = merged
+    targets = []
+    parcels = resp_json.get('parcels')
+    if isinstance(parcels, list):
+        targets.extend(p for p in parcels if isinstance(p, dict))
+    if not targets:
+        targets.append(resp_json)
+    for target in targets:
+        for key, value in fields.items():
+            if key == 'allowed_uses':
+                continue
+            if value not in (None, '', []):
+                target[key] = value
+
+
 def _normalize_land_document_result(resp_json, text_content='', project_type=''):
     """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
     if not isinstance(resp_json, dict):
@@ -20406,69 +20443,99 @@ def _execute_extract_croquis():
                 vision_warnings.append('تعذر استخراج حقائق الكروكي الأولية؛ تم استخدام بيانات المشروع المدخلة فقط.')
                 print(f'[LAND ANALYSIS STAGE ERROR] site_facts cap={facts_cap} {facts_error}')
             site_facts = _extract_land_site_facts(facts_result, request_facts)
-            regulation_query = ' '.join(str(value) for value in site_facts.values() if value not in (None, ''))
-            try:
-                evidence_package, evidence_warnings = search_official_regulations_evidence(
-                    regulation_query, site_facts)
-            except Exception as evidence_error:
-                evidence_package = {'context': '', 'documents': [], 'table_pages': []}
-                evidence_warnings = [f'تعذر تجهيز أدلة الاشتراطات: {evidence_error}']
-            vision_warnings.extend(evidence_warnings)
+            if REGULATION_DIGEST_ENABLED:
+                try:
+                    reg_digest = regulation_digest.build_regulation_digest(site_facts)
+                except Exception as digest_error:
+                    reg_digest = {'matched': False}
+                    vision_warnings.append(f'تعذر قراءة قاعدة بيانات الاشتراطات الموثقة: {digest_error}')
+                    print(f'[REGULATION DIGEST ERROR] {digest_error}')
             evidence_results = []
-            for source in evidence_package.get('documents', []):
-                source_name = source.get('name') or 'ملف اشتراطات'
-                source_tables = [
-                    entry for entry in evidence_package.get('table_pages', [])
-                    if entry.get('name') == source_name
-                ]
-                source_for_evidence = {**source, 'table_pages': source_tables}
-                extracted_evidence = _extract_full_regulation_evidence(
-                    source_for_evidence, site_facts, usage_ctx=_usage_ctx('land', data))
-                vision_warnings.extend(extracted_evidence.get('warnings', []))
-                if not extracted_evidence.get('evidence') and not extracted_evidence.get('uncertainties'):
-                    if not source.get('context') and not source_tables:
-                        vision_warnings.append(f'لم يتوفر محتوى قابل للقراءة في {source_name}؛ لن يتم تخمين اشتراطاته.')
+            if reg_digest.get('matched'):
+                regulation_evidence_metadata = [{
+                    'name': 'قاعدة بيانات الأنظمة الموثقة (rules/)',
+                    'zone': reg_digest.get('zone_key'),
+                    'special_plan_required': reg_digest.get('special_plan_required'),
+                    'sources': reg_digest.get('sources', []),
+                }]
+                print(f"[REGULATION DIGEST] zone={reg_digest.get('zone_key')} "
+                      f"fields={sorted(reg_digest.get('fields') or {})} "
+                      f"special={reg_digest.get('special_plan_required')}")
+            else:
+                regulation_query = ' '.join(str(value) for value in site_facts.values() if value not in (None, ''))
+                try:
+                    evidence_package, evidence_warnings = search_official_regulations_evidence(
+                        regulation_query, site_facts)
+                except Exception as evidence_error:
+                    evidence_package = {'context': '', 'documents': [], 'table_pages': []}
+                    evidence_warnings = [f'تعذر تجهيز أدلة الاشتراطات: {evidence_error}']
+                vision_warnings.extend(evidence_warnings)
+                for source in evidence_package.get('documents', []):
+                    source_name = source.get('name') or 'ملف اشتراطات'
+                    source_tables = [
+                        entry for entry in evidence_package.get('table_pages', [])
+                        if entry.get('name') == source_name
+                    ]
+                    source_for_evidence = {**source, 'table_pages': source_tables}
+                    extracted_evidence = _extract_full_regulation_evidence(
+                        source_for_evidence, site_facts, usage_ctx=_usage_ctx('land', data))
+                    vision_warnings.extend(extracted_evidence.get('warnings', []))
+                    if not extracted_evidence.get('evidence') and not extracted_evidence.get('uncertainties'):
+                        if not source.get('context') and not source_tables:
+                            vision_warnings.append(f'لم يتوفر محتوى قابل للقراءة في {source_name}؛ لن يتم تخمين اشتراطاته.')
+                        evidence_results.append({
+                            'source_file': source_name,
+                            'evidence': {},
+                            'error': 'لا يوجد محتوى قابل للقراءة أو تعذر استخراج أدلة',
+                        })
+                        continue
                     evidence_results.append({
                         'source_file': source_name,
-                        'evidence': {},
-                        'error': 'لا يوجد محتوى قابل للقراءة أو تعذر استخراج أدلة',
+                        'evidence': extracted_evidence.get('evidence', []),
+                        'uncertainties': extracted_evidence.get('uncertainties', []),
                     })
-                    continue
-                evidence_results.append({
-                    'source_file': source_name,
-                    'evidence': extracted_evidence.get('evidence', []),
-                    'uncertainties': extracted_evidence.get('uncertainties', []),
-                })
-            regulation_evidence_metadata = [
-                {
-                    'name': source.get('name'),
-                    'text_pages': source.get('text_pages', []),
-                    'table_pages': source.get('table_pages', []),
-                }
-                for source in evidence_package.get('documents', [])
-            ]
-            print(
-                f"[REGULATION EVIDENCE] documents={len(regulation_evidence_metadata)} "
-                f"text_chars={sum(len(source.get('context') or '') for source in evidence_package.get('documents', []))} "
-                f"table_pages={len(evidence_package.get('table_pages', []))}"
-            )
+                regulation_evidence_metadata = [
+                    {
+                        'name': source.get('name'),
+                        'text_pages': source.get('text_pages', []),
+                        'table_pages': source.get('table_pages', []),
+                    }
+                    for source in evidence_package.get('documents', [])
+                ]
+                print(
+                    f"[REGULATION EVIDENCE] documents={len(regulation_evidence_metadata)} "
+                    f"text_chars={sum(len(source.get('context') or '') for source in evidence_package.get('documents', []))} "
+                    f"table_pages={len(evidence_package.get('table_pages', []))}"
+                )
 
-            instructions = (
-                "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
-                "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
-                "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
-                "٢) نتائج استخلاص مبنية على المحتوى الكامل لملفي اشتراطات1 واشتراطات2، بما في ذلك جداول كل ملف. "
-                "استخدم القواعد التي تنطبق على حقائق الموقع فقط، ولا تخترع قاعدة غير موجودة في المحتوى الكامل.\n"
-                "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
-                "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude. لا تذكر أرقام الصفحات أو أسماء الملفات في أي قيمة للمستخدم.\n"
-            )
-            regulation_block = (
-                "نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين:\n"
-                + json.dumps(evidence_results, ensure_ascii=False)
-                + "\n\n"
-                if evidence_results else
-                "تنبيه: لم تتوفر نتائج قابلة للاستخدام من الملفين كاملين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
-            )
+            if reg_digest.get('matched'):
+                instructions = (
+                    "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
+                    "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
+                    "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
+                    "٢) بلوك اشتراطات موثق مختار حتميًا من قاعدة بيانات الأنظمة المبنية على ملفي الاشتراطات. "
+                    "قيمه الرقمية ملزمة: استخدمها حرفيًا ولا تخترع قاعدة غير موجودة فيه.\n"
+                    "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
+                    "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude. لا تذكر أرقام الصفحات أو أسماء الملفات في أي قيمة للمستخدم.\n"
+                )
+                regulation_block = regulation_digest.digest_prompt_block(reg_digest) + "\n\n"
+            else:
+                instructions = (
+                    "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
+                    "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
+                    "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
+                    "٢) نتائج استخلاص مبنية على المحتوى الكامل لملفي اشتراطات1 واشتراطات2، بما في ذلك جداول كل ملف. "
+                    "استخدم القواعد التي تنطبق على حقائق الموقع فقط، ولا تخترع قاعدة غير موجودة في المحتوى الكامل.\n"
+                    "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
+                    "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude. لا تذكر أرقام الصفحات أو أسماء الملفات في أي قيمة للمستخدم.\n"
+                )
+                regulation_block = (
+                    "نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين:\n"
+                    + json.dumps(evidence_results, ensure_ascii=False)
+                    + "\n\n"
+                    if evidence_results else
+                    "تنبيه: لم تتوفر نتائج قابلة للاستخدام من الملفين كاملين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
+                )
             user_content = [{
                 "type": "text",
                 "text": instructions
@@ -20548,6 +20615,8 @@ def _execute_extract_croquis():
                 'documentProcessing': document_processing
             }), 503
         parsed_response = parse_json_object(raw_resp)
+        if parsed_response and reg_digest.get('matched'):
+            _apply_regulation_digest_fields(parsed_response, reg_digest)
         if not parsed_response:
             print(f"[EXTRACT LAND DOCUMENTS UNPARSEABLE] first 400 chars: {raw_resp[:400]}")
             return jsonify({

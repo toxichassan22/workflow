@@ -343,7 +343,56 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['failureReason'], 'location_required')
 
-    def test_land_analysis_pipeline_reads_both_regulation_sources_before_final_merge(self):
+    def test_land_analysis_pipeline_uses_verified_digest_when_zone_matches(self):
+        """A recognized zoning code resolves from rules/ deterministically: the
+        per-request PDF evidence stages are skipped and the digest's numbers are
+        force-filled on the parcel."""
+        final_payload = {
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'plot_number': '9',
+                'area_sqm': 3000,
+                'setbacks': 'قيمة غير موثقة من النموذج',
+                'survey_coordinates': [{
+                    'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'
+                }],
+                'directions': {},
+            }],
+            'conflicts': [],
+        }
+        stage_responses = [
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
+                'site_facts': {'area_sqm': 3000, 'land_use': 'سكني', 'zoning_code': 'ت ر1'}
+            }, ensure_ascii=False)}}]},
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(final_payload, ensure_ascii=False)}}]},
+        ]
+        stage_responses = [(response, 9000, '') for response in stage_responses]
+        with patch.object(self.application_module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(self.application_module, '_prepare_document_vision_parts', return_value=(
+                    [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
+                    [], 1, 'image_direct'
+                )), \
+                patch.object(self.application_module, 'search_official_regulations_evidence') as evidence_search, \
+                patch.object(self.application_module, '_call_land_analysis_model', side_effect=stage_responses) as calls:
+            response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'fileData': 'data:image/png;base64,test',
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        # site_facts + final analysis only — the digest replaces evidence extraction.
+        self.assertEqual(calls.call_count, 2)
+        evidence_search.assert_not_called()
+        final_user_content = json.dumps(calls.call_args_list[-1].args[1], ensure_ascii=False)
+        self.assertIn('الشوارع التجارية الرئيسة', final_user_content)
+        parcel = response.get_json()['extractedData']['parcels'][0]
+        self.assertIn('ارتداد أمامي', parcel['setbacks'])
+        self.assertNotIn('قيمة غير موثقة', parcel['setbacks'])
+
+    def test_land_analysis_pipeline_falls_back_to_pdf_evidence_for_unknown_zone(self):
+        """An unrecognized zoning code keeps the legacy two-file evidence path."""
         final_payload = {
             'parcels': [{
                 'parcel_id': 'P-1',
@@ -358,7 +407,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         }
         stage_responses = [
             {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
-                'site_facts': {'area_sqm': 3000, 'land_use': 'سكني', 'zoning_code': 'ت ر1'}
+                'site_facts': {'area_sqm': 3000, 'land_use': 'سكني', 'zoning_code': 'كود غير موثق'}
             }, ensure_ascii=False)}}]},
             {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
                 'evidence': [{'field': 'allowed_uses_restrictions', 'value': 'سكني', 'page': 12}]
