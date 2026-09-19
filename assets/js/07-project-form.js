@@ -369,14 +369,83 @@
           return;
         }
       }
+      if (status === 'approved') {
+        // t10: an approval must name the snapshot it approved. The direct status
+        // write left sections "approved" with an empty version history and no
+        // frozen copy to audit, so approving now freezes this moment's inputs as
+        // a version and decides it in the same step.
+        await approveSectionWithVersion(sectionKey);
+        return;
+      }
       const result = await api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: status });
       if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
       applySectionStatuses({ [sectionKey]: status });
     }
 
+    // Approve through the version flow: the section's current inputs are frozen
+    // as the next version and decided in one step. A version still pending is
+    // decided as sent — unless the form carried unsaved edits, in which case a
+    // fresh snapshot supersedes it so approval never lands on stale data.
+    async function approveSectionWithVersion(sectionKey, options = {}) {
+      const hadUnsaved = options.pendingStale === undefined
+        ? (tenantDraftDirty || !tenantProjectData.draftId)
+        : options.pendingStale;
+      if (!options.skipSave && (tenantDraftDirty || !tenantProjectData.draftId)) {
+        // The server snapshots the stored draft, and autosave only marks the
+        // form dirty — without this flush a send freezes stale data, or fails
+        // the required-field gate on fields filled on screen but never saved.
+        const saved = await saveProjectAsDraft(true);
+        if (!saved) {
+          toast(WFT('sectionver.send_save_failed', 'تعذر حفظ المسودة قبل الإرسال'));
+          return false;
+        }
+      }
+      showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
+      try {
+        await loadAllSectionVersions();
+        const pending = (sectionVersionCache[sectionKey] || []).find(version => version.status === 'pending');
+        let versionId = (pending && !hadUnsaved) ? pending.id : null;
+        if (!versionId) {
+          const sent = await api('POST', '/api/project-draft/section-version', {
+            draftId: tenantProjectData.draftId, sectionKey: sectionKey, supersede: true });
+          if (!sent || !sent.success) {
+            if (sent && sent.error_code === 'SECTION_VERSION_INCOMPLETE') {
+              const missing = Array.isArray(sent.missing) ? sent.missing.join('، ') : '';
+              toast(WFT('sectionver.incomplete', 'حقول إلزامية ناقصة') + (missing ? ': ' + missing : ''));
+              return false;
+            }
+            // A caller versions cannot reach (e.g. a scoped user approving on
+            // someone else's draft) keeps the previous direct toggle.
+            const legacy = await api('POST', '/api/project-draft/section-status', {
+              draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: 'approved' });
+            if (!legacy || !legacy.success) {
+              toast((legacy && legacy.error) || (sent && sent.error) || WFT('sectionver.send_failed', 'تعذر إرسال القسم للاعتماد'));
+              return false;
+            }
+            applySectionStatuses({ [sectionKey]: 'approved' });
+            return true;
+          }
+          versionId = sent.version.id;
+        }
+        const decided = await api('POST', '/api/project-draft/section-version/decision', {
+          versionId: versionId, decision: 'approved' });
+        if (!decided || !decided.success) {
+          toast((decided && decided.error) || WFT('sectionver.decide_failed', 'تعذر تسجيل القرار'));
+          await loadAllSectionVersions();
+          return false;
+        }
+        applySectionStatuses({ [sectionKey]: 'approved' });
+        toast(WFT('sectionver.decide_done', 'تم تسجيل القرار'));
+        await loadAllSectionVersions();
+        return true;
+      } finally {
+        try { hideLoader(); } catch (e) {}
+      }
+    }
+
     async function approveAllSections() {
       const sections = document.querySelectorAll('.tenant-form-section[data-section]');
-      const statuses = {};
+      const keys = [];
       let landCroquisBlocked = false;
       let locationBlocked = false;
       sections.forEach(sec => {
@@ -402,18 +471,26 @@
             return;
           }
         }
-        statuses[key] = 'approved';
+        keys.push(key);
       });
-      if ((landCroquisBlocked || locationBlocked) && Object.keys(statuses).length === 0) return;
-      // One merged request: parallel per-section calls raced on the same JSON column and the
-      // screen ended up showing sections as approved that the server had never stored.
-      const result = await api('POST', '/api/project-draft/section-status', {
-        draftId: tenantProjectData.draftId,
-        sectionStatuses: statuses
-      });
-      if (!result.success) { toast(result.error || 'تعذر اعتماد قسم أو أكثر'); return; }
-      applySectionStatuses(statuses);
-      if (landCroquisBlocked || locationBlocked) {
+      if (!keys.length) return;
+      // One flush before the batch: every approval freezes the stored draft, so
+      // unsaved edits must land first — and a version still pending predates
+      // them, so it is superseded rather than decided.
+      const hadUnsaved = tenantDraftDirty || !tenantProjectData.draftId;
+      if (hadUnsaved && !(await saveProjectAsDraft(true))) {
+        toast(WFT('sectionver.send_save_failed', 'تعذر حفظ المسودة قبل الإرسال'));
+        return;
+      }
+      let failed = 0;
+      for (const key of keys) {
+        try {
+          if (!(await approveSectionWithVersion(key, { skipSave: true, pendingStale: hadUnsaved }))) failed += 1;
+        } catch (e) {
+          failed += 1;
+        }
+      }
+      if (failed || landCroquisBlocked || locationBlocked) {
         toast('تم اعتماد الأقسام المكتملة، وبقي قسم يحتاج استكمال متطلبات الاعتماد');
       } else {
         toast('تم اعتماد جميع الأقسام');
@@ -421,6 +498,12 @@
     }
 
     async function requestProjectDraftApproval() {
+      // Same stored-draft caveat as the section sends: the request must review
+      // the edits on screen, not the last saved copy.
+      if (tenantDraftDirty || !tenantProjectData.draftId) {
+        const saved = await saveProjectAsDraft(true);
+        if (!saved) { toast(WFT('sectionver.send_save_failed', 'تعذر حفظ المسودة قبل الإرسال')); return; }
+      }
       const result = await api('POST', '/api/project-draft/request-approval', { draftId: tenantProjectData.draftId });
       if (!result.success) {
         toast(result.error_code === 'SECTIONS_NOT_APPROVED'
@@ -473,6 +556,7 @@
       if (!block) {
         block = document.createElement('div');
         block.className = 'section-version-block';
+        block.hidden = true;
         const line = document.createElement('p');
         line.className = 'tenant-hint';
         line.id = 'section-version-line-' + sectionKey;
@@ -490,11 +574,18 @@
     }
 
     function renderSectionVersionBlock(sectionKey) {
-      attachSectionVersionBlock(sectionKey);
+      const block = attachSectionVersionBlock(sectionKey);
       const line = document.getElementById('section-version-line-' + sectionKey);
       const history = document.getElementById('section-version-history-' + sectionKey);
       const versions = sectionVersionCache[sectionKey] || [];
-      if (line) line.textContent = sectionVersionLineText(versions[0] || null);
+      // The empty state holds no permanent space: the status line renders only
+      // once a version exists, and the empty message stays inside the history
+      // panel the user opens through the versions button.
+      if (line) {
+        line.hidden = !versions.length;
+        line.textContent = versions.length ? sectionVersionLineText(versions[0]) : '';
+      }
+      if (block) block.hidden = !versions.length && !sectionVersionsOpen[sectionKey];
       if (!history) return;
       if (!sectionVersionsOpen[sectionKey]) { history.hidden = true; history.innerHTML = ''; return; }
       history.hidden = false;
@@ -607,6 +698,17 @@
       if (btn) btn.disabled = true;
       showLoader(WFT('sectionver.send_title', 'إرسال القسم للاعتماد'), '', 10);
       try {
+        // The snapshot freezes the stored draft, and autosave only marks the
+        // form dirty — flush pending edits first or the send validates stale
+        // data and fails on required fields that are filled on screen.
+        if (tenantDraftDirty || !tenantProjectData.draftId) {
+          const saved = await saveProjectAsDraft(true);
+          if (!saved) {
+            hideLoader();
+            toast(WFT('sectionver.send_save_failed', 'تعذر حفظ المسودة قبل الإرسال'));
+            return;
+          }
+        }
         const result = await api('POST', '/api/project-draft/section-version', { draftId: tenantProjectData.draftId, sectionKey: sectionKey });
         hideLoader();
         if (!result || !result.success) {
