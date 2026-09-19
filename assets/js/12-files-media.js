@@ -1317,9 +1317,9 @@
           ? (visualConceptPlans().find(item => item.id === slotId)?.description || '')
           : '',
         planKind: visualConceptPlanKind(slotId),
-        plansWorkflow: isVisualConceptWorkflowPlan(slotId)
-          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow)
-          : null,
+        // Exterior slots also ship the workflow: the server grounds their prompts
+        // on the same deterministic plan measurements when the workflow carries data.
+        plansWorkflow: normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow),
         planBoundaryPoints: isVisualConceptWorkflowPlan(slotId)
           ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.points
           : [],

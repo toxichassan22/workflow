@@ -3181,9 +3181,8 @@ def _visual_concept_request_bundle(data, slot_id):
         facts['interior_reference_file_ids'] = _visual_concept_list(
             data.get('referenceFileIds') or data.get('interiorReferenceFileIds')
         )[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
-    if _visual_concept_is_plan_slot(slot_id):
-        facts['plan_description'] = _visual_concept_text(
-            data.get('planDescription') or data.get('plan_description'), 2000)
+    is_plan = _visual_concept_is_plan_slot(slot_id)
+    if is_plan or slot_id in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
         boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
         boundary_points = _visual_concept_plan_boundary_points(
@@ -3191,13 +3190,21 @@ def _visual_concept_request_bundle(data, slot_id):
         context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
         context = context or _visual_concept_plan_context(project_data, boundary_points, workflow.get('verification'))
         context['boundary_points'] = boundary_points or context.get('boundary_points') or []
-        facts['plan_kind'] = _visual_concept_plan_kind(slot_id, data.get('planKind'))
-        facts['approved_plan_context'] = _visual_concept_plan_context_text(context)
-        facts['plan_prompt_draft'] = (
-            _visual_concept_plan_drawing_prompt(facts['plan_kind'], context)
-            if facts['plan_kind'] else '')
-        facts['plan_boundary_reference_url'] = _visual_concept_text(
-            boundary.get('referenceUrl') or data.get('planBoundaryReferenceUrl'), 500)
+        if is_plan:
+            facts['plan_description'] = _visual_concept_text(
+                data.get('planDescription') or data.get('plan_description'), 2000)
+            facts['plan_kind'] = _visual_concept_plan_kind(slot_id, data.get('planKind'))
+            facts['approved_plan_context'] = _visual_concept_plan_context_text(context)
+            facts['plan_prompt_draft'] = (
+                _visual_concept_plan_drawing_prompt(facts['plan_kind'], context)
+                if facts['plan_kind'] else '')
+            facts['plan_boundary_reference_url'] = _visual_concept_text(
+                boundary.get('referenceUrl') or data.get('planBoundaryReferenceUrl'), 500)
+        elif _visual_concept_plan_context_has_measurements(context):
+            # Exterior renders ground on the same deterministic measurements the
+            # plan diagrams draw from — the spec text only, never the diagram's
+            # color legend or labelling rules.
+            facts['approved_plan_context'] = _visual_concept_plan_context_text(context, diagram_rules=False)
     missing = _visual_concept_missing_fields(facts, slot_id)
     if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
         missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
@@ -4674,7 +4681,7 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
     return context
 
 
-def _visual_concept_plan_context_text(context):
+def _visual_concept_plan_context_text(context, diagram_rules=True):
     context = context if isinstance(context, dict) else {}
     location = '، '.join(item for item in (context.get('city'), context.get('district')) if item)
     boundary = context.get('boundary_points') or []
@@ -4695,7 +4702,7 @@ def _visual_concept_plan_context_text(context):
         components.append('- ' + '; '.join(parts))
     regulations = json.dumps(context.get('regulations') or {}, ensure_ascii=False)
     colors = ', '.join(f"{item['use']}={item['color']}" for item in context.get('colors') or [])
-    return (
+    text = (
         'APPROVED PLAN CONTEXT — use only these recorded facts; do not invent or recalculate values.\n'
         f"Project: {context.get('project_name') or 'unnamed'}\n"
         f"Location: {location or 'not recorded'}\n"
@@ -4712,9 +4719,22 @@ def _visual_concept_plan_context_text(context):
         f"Directions and edges:\n{directions}\n"
         f"Approved project components:\n{chr(10).join(components) or 'not recorded'}\n"
         f"Regulatory facts:\n{regulations}\n"
-        f"Fixed color code: {colors}\n"
-        'All image labels must be English. The result is conceptual and NOT TO SCALE.\n'
     )
+    if diagram_rules:
+        text += (
+            f"Fixed color code: {colors}\n"
+            'All image labels must be English. The result is conceptual and NOT TO SCALE.\n'
+        )
+    return text
+
+
+def _visual_concept_plan_context_has_measurements(context):
+    context = context if isinstance(context, dict) else {}
+    if context.get('boundary_points') or context.get('components') or context.get('directions'):
+        return True
+    return any(context.get(key) for key in (
+        'land_area', 'design_area', 'coverage_ratio', 'open_area', 'floor_count',
+        'setbacks', 'surrounding_streets', 'north_direction'))
 
 
 def _visual_concept_plan_prompt_header(kind, context):

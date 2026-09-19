@@ -9085,6 +9085,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         # surfaces the last failure instead of a bare hint.
         self.assertIn('prepareVisualConceptPlansPrompts();', render_body)
         self.assertIn('promptsError', render_body)
+        # Exterior prompts ship the workflow too, so the server can ground them on
+        # the same deterministic measurements the plan diagrams draw from.
+        payload_start = index_source.index('async function collectVisualConceptPayload(slotId)')
+        payload_body = index_source[payload_start:index_source.index('function visualConceptSlotLocked', payload_start)]
+        self.assertIn(
+            'plansWorkflow: normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow),',
+            payload_body)
+        self.assertNotIn(': null', payload_body)
 
     def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
         client = self.app.test_client()
@@ -9168,6 +9176,30 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
         self.assertEqual(east_prompt.get_json()['slotId'], 'right')
         self.assertEqual(east_prompt.get_json()['prompt'], 'Revised right prompt')
+
+        # Exterior prompts ground on the same deterministic measurements the plan
+        # diagrams draw from — even before the plans workflow runs — while the
+        # diagram's color legend and labelling rules stay out of render prompts.
+        captured_facts = {}
+
+        def _capture_prompt_facts(facts_arg, _slot_id, **_kwargs):
+            captured_facts.update(facts_arg)
+            return ('Grounded right prompt', 'تم')
+
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', side_effect=_capture_prompt_facts):
+            grounded = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
+                'slotId': 'right',
+                'coverImage': '/uploads/creative/cover.png',
+                'projectData': facts,
+            })
+        self.assertEqual(grounded.status_code, 200, grounded.get_json())
+        plan_context = captured_facts.get('approved_plan_context') or ''
+        self.assertIn('APPROVED PLAN CONTEXT', plan_context)
+        self.assertIn('Approved floor count/height: 12', plan_context)
+        self.assertIn('مكاتب', plan_context)
+        self.assertIn('شارع تجاري 30م', plan_context)
+        self.assertNotIn('Fixed color code', plan_context)
+        self.assertNotIn('NOT TO SCALE', plan_context)
 
         interior_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
             'slotId': 'interior_comp-1',
