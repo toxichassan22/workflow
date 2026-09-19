@@ -919,7 +919,8 @@
         prompts: { site: '', uses: '', massing: '' },
         planContext: null,
         viewStage: 'verify',
-        promptReady: false
+        promptReady: false,
+        promptsError: ''
       };
     }
 
@@ -956,7 +957,8 @@
         },
         planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
         viewStage: ['verify', 'boundary', 'generate'].includes(source.viewStage) ? source.viewStage : 'verify',
-        promptReady: Boolean(source.promptReady || (prompts.site && prompts.uses && prompts.massing))
+        promptReady: Boolean(source.promptReady || (prompts.site && prompts.uses && prompts.massing)),
+        promptsError: String(source.promptsError || '').slice(0, 400)
       };
     }
 
@@ -1850,7 +1852,7 @@
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">إعداد برومبتات المخططات</button></div>' +
-        '<p class="tenant-hint">' + (promptReady ? 'البرومبتات جاهزة للتعديل والتوليد.' : 'برومبتات المخططات الثلاثة غير جاهزة.') + '</p>' +
+        '<p class="tenant-hint">' + escapeHtml(promptReady ? 'البرومبتات جاهزة للتعديل والتوليد.' : (workflow.promptsError ? 'تعذر إعداد برومبتات المخططات: ' + workflow.promptsError : 'برومبتات المخططات الثلاثة غير جاهزة.')) + '</p>' +
         '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
         '</section></div>';
       const preview = root.querySelector('[data-plans-boundary-preview]');
@@ -1872,6 +1874,7 @@
             workflow.verification.approved = false;
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.promptsError = '';
             workflow.viewStage = 'verify';
             workflow.status = 'idle';
             markVisualConceptDirty();
@@ -1879,6 +1882,7 @@
           } else if (action === 'back-boundary') {
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.promptsError = '';
             workflow.viewStage = 'boundary';
             workflow.status = 'verified';
             markVisualConceptDirty();
@@ -1887,6 +1891,7 @@
             workflow.verification.approved = false;
             workflow.boundary.approved = false;
             workflow.promptReady = false;
+            workflow.promptsError = '';
             workflow.viewStage = 'verify';
             workflow.status = 'idle';
             markVisualConceptDirty();
@@ -1899,6 +1904,13 @@
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
         });
       });
+      // Prompts used to sit un-prepared forever after a failed request or a draft saved
+      // mid-flow, leaving the generate stage as a bare "not ready" message. Approved
+      // inputs are all the endpoint needs, so a rendered not-ready stage retries once —
+      // promptsError blocks a retry loop until a new attempt clears it.
+      if (activeStage === 'generate' && verified && boundaryApproved && !promptReady && !workflow.promptsError) {
+        prepareVisualConceptPlansPrompts();
+      }
     }
 
     function renderVisualConceptPlans() {
@@ -1921,7 +1933,12 @@
     async function collectVisualConceptPlansWorkflowPayload() {
       const payload = await collectVisualConceptPayload('plan_site');
       payload.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
-      payload.projectData.visual_concept = tenantVisualConceptState;
+      // The plans endpoints read plansWorkflow and the project facts only, so the
+      // visual_concept state mirror is dead weight here — and oversized bodies are
+      // what the hosting edge corrupts, so the request drops it (clone: projectData
+      // is tenantProjectData, which must keep its own copy).
+      payload.projectData = { ...payload.projectData };
+      delete payload.projectData.visual_concept;
       return payload;
     }
 
@@ -1940,6 +1957,7 @@
         workflow.viewStage = 'verify';
         workflow.boundary.approved = false;
         workflow.promptReady = false;
+        workflow.promptsError = '';
         markVisualConceptDirty();
         renderVisualConceptPage();
       } catch (error) {
@@ -1964,16 +1982,17 @@
 
     async function refreshVisualConceptPlansBoundary() {
       const payload = await collectVisualConceptPlansWorkflowPayload();
-      const workflow = visualConceptPlansWorkflowState();
+      const seedWorkflow = visualConceptPlansWorkflowState();
       const sourcePoints = visualConceptBoundaryPoints(payload.projectData?.survey_coordinates);
-      if (sourcePoints.length >= 3) workflow.boundary.points = sourcePoints;
-      payload.points = workflow.boundary.points;
+      if (sourcePoints.length >= 3) seedWorkflow.boundary.points = sourcePoints;
+      payload.points = seedWorkflow.boundary.points;
       payload.mode = 'manual';
       showLoader(WFT('plans.boundary_loading', 'جاري تجهيز رسم حدود الأرض'), WFT('plans.boundary_loading_detail', 'يتم بناء الرسم من الإحداثيات المحفوظة...'), 35);
       try {
         const response = await api('POST', '/api/visual-concept/plans-boundary', payload);
         hideLoader();
         if (!response?.success) { toast(response?.error || WFT('plans.boundary_failed', 'تعذر تجهيز رسم الحدود')); return; }
+        const workflow = visualConceptPlansWorkflowState();
         workflow.boundary.points = visualConceptBoundaryPoints(response.points);
         workflow.boundary.referenceUrl = response.referenceUrl || '';
         workflow.boundary.approved = false;
@@ -1990,9 +2009,9 @@
       if (!instruction) { toast(WFT('plans.boundary_instruction_required', 'طلب تعديل الحدود مطلوب')); return; }
       const savedInstruction = instruction.slice(0, 2000);
       const payload = await collectVisualConceptPlansWorkflowPayload();
-      const workflow = visualConceptPlansWorkflowState();
-      workflow.boundary.instruction = savedInstruction;
-      payload.points = workflow.boundary.points;
+      const seedWorkflow = visualConceptPlansWorkflowState();
+      seedWorkflow.boundary.instruction = savedInstruction;
+      payload.points = seedWorkflow.boundary.points;
       payload.instruction = savedInstruction;
       payload.mode = 'ai';
       showLoader(WFT('plans.boundary_ai_loading', 'جاري تعديل حدود الأرض'), WFT('plans.boundary_ai_loading_detail', 'يتم مراجعة التعديل على الإحداثيات...'), 35);
@@ -2000,8 +2019,10 @@
         const response = await api('POST', '/api/visual-concept/plans-boundary', payload);
         hideLoader();
         if (!response?.success) { toast(response?.error || WFT('plans.boundary_failed', 'تعذر تعديل رسم الحدود')); return; }
+        const workflow = visualConceptPlansWorkflowState();
         workflow.boundary.points = visualConceptBoundaryPoints(response.points);
         workflow.boundary.referenceUrl = response.referenceUrl || workflow.boundary.referenceUrl;
+        workflow.boundary.instruction = savedInstruction;
         workflow.boundary.approved = false;
         markVisualConceptDirty();
         renderVisualConceptPage();
@@ -2023,18 +2044,30 @@
       prepareVisualConceptPlansPrompts();
     }
 
+    let visualConceptPlansPromptsPending = false;
+
     async function prepareVisualConceptPlansPrompts() {
       const initialWorkflow = visualConceptPlansWorkflowState();
       if (!initialWorkflow.verification.approved || !initialWorkflow.boundary.approved) return;
+      if (visualConceptPlansPromptsPending) return;
+      visualConceptPlansPromptsPending = true;
+      initialWorkflow.promptsError = '';
       showLoader(WFT('plans.prompts_loading', 'جاري إعداد برومبتات المخططات'), WFT('plans.prompts_loading_detail', 'يتم بناء البرومبتات من البيانات المعتمدة وحدود الأرض...'), 50);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        const workflow = visualConceptPlansWorkflowState();
         const response = await api('POST', '/api/visual-concept/plans-prompts', payload);
         hideLoader();
-        if (!response?.success || !response.prompts) { toast(response?.error || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات')); return; }
+        const workflow = visualConceptPlansWorkflowState();
+        if (!response?.success || !response.prompts) {
+          workflow.promptsError = String(response?.error || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+          markVisualConceptDirty();
+          renderVisualConceptPage();
+          toast(workflow.promptsError);
+          return;
+        }
         workflow.prompts = { ...workflow.prompts, ...response.prompts };
         workflow.promptReady = VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(workflow.prompts[item.kind]));
+        workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'برومبتات المخططات الثلاثة غير مكتملة');
         workflow.status = workflow.promptReady ? 'ready' : 'boundary';
         VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
           const slot = tenantVisualConceptState.slots[definition.id] || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
@@ -2047,7 +2080,13 @@
         renderVisualConceptPage();
       } catch (error) {
         hideLoader();
-        toast(error.message || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+        const workflow = visualConceptPlansWorkflowState();
+        workflow.promptsError = String(error.message || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast(workflow.promptsError);
+      } finally {
+        visualConceptPlansPromptsPending = false;
       }
     }
 

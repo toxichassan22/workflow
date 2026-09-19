@@ -9048,6 +9048,36 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('liveSlot().prompt = response.prompt;', chat_body)
         self.assertNotIn('slot.chat.push({ role: \'assistant\'', chat_body)
 
+    def test_plans_workflow_writes_responses_to_the_live_workflow(self):
+        index_source = read_frontend_text()
+        # renderVisualConceptPage reassigns tenantVisualConceptState, so a workflow
+        # captured before the API await is detached and the response lands on a dead
+        # object — the generate stage then stayed a bare "prompts not ready" message.
+        start = index_source.index('async function prepareVisualConceptPlansPrompts()')
+        body = index_source[start:index_source.index('function addVisualConceptPlan()', start)]
+        self.assertLess(
+            body.index("api('POST', '/api/visual-concept/plans-prompts'"),
+            body.index('const workflow = visualConceptPlansWorkflowState()'))
+        self.assertIn('workflow.promptsError', body)
+        self.assertIn('visualConceptPlansPromptsPending', index_source)
+        boundary_start = index_source.index('async function refreshVisualConceptPlansBoundary()')
+        boundary_body = index_source[boundary_start:index_source.index('async function reviseVisualConceptPlansBoundaryWithAi()', boundary_start)]
+        self.assertLess(
+            boundary_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
+            boundary_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        ai_start = index_source.index('async function reviseVisualConceptPlansBoundaryWithAi()')
+        ai_body = index_source[ai_start:index_source.index('function approveVisualConceptPlansBoundary()', ai_start)]
+        self.assertLess(
+            ai_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
+            ai_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
+        render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
+        # A draft saved between boundary approval and prompt preparation used to reopen
+        # on a permanently empty generate stage; the render now re-arms preparation and
+        # surfaces the last failure instead of a bare hint.
+        self.assertIn('prepareVisualConceptPlansPrompts();', render_body)
+        self.assertIn('promptsError', render_body)
+
     def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
         client = self.app.test_client()
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
