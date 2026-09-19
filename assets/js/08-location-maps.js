@@ -1356,12 +1356,8 @@
           } else if (f.fieldKey === 'approved_financial_area' && !input.placeholder) {
             input.placeholder = 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.';
           }
-          if (f.fieldKey === 'city' || f.fieldKey === 'district') {
-            input.readOnly = true;
-            input.setAttribute('aria-readonly', 'true');
-            input.classList.add('location-derived-input');
-            input.title = 'تُملأ تلقائيًا من الموقع والخرائط';
-          }
+          // City and district stay editable: the map fill is a starting value, and
+          // this section is the single edit point the market mirrors follow.
           if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'project_subtype' || f.fieldKey === 'target_audience' || f.fieldKey === 'activity_class') {
             input.type = 'hidden';
             input.dataset.type = 'text';

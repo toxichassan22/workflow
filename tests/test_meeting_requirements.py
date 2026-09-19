@@ -3416,9 +3416,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('locationAddressMirror', index_source)
         self.assertNotIn('syncLocationAddressMirror', index_source)
         self.assertIn('geocodeTenantLocationLink', index_source)
-        self.assertIn("if (f.fieldKey === 'city' || f.fieldKey === 'district')", index_source)
-        self.assertIn("input.title = 'تُملأ تلقائيًا من الموقع والخرائط';", index_source)
+        # City and district are editable in the location section — the map fill is a
+        # starting value, not a lock — while the market study keeps read-only mirrors
+        # fed from those same inputs, so site & maps stays the single edit point.
+        self.assertNotIn("if (f.fieldKey === 'city' || f.fieldKey === 'district')", index_source)
+        self.assertNotIn("input.title = 'تُملأ تلقائيًا من الموقع والخرائط'", index_source)
+        self.assertNotIn('location-derived-input', index_source)
         self.assertIn('applyCityDistrictToForm(data.city, data.district, true)', index_source)
+        self.assertIn('cityMirror.readOnly = true', index_source)
+        self.assertIn('districtMirror.readOnly = true', index_source)
+        self.assertIn("['city', 'district'].forEach", index_source)
+        self.assertIn('syncMarketLocationMirrors', index_source)
         self.assertIn('includeMapContext: true', index_source)
         self.assertIn('function renderAllowedUsesStatusNote(status)', index_source)
         self.assertIn("id = 'allowedUsesStatusNote'", index_source)
