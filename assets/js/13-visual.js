@@ -488,21 +488,24 @@
       window.currentGenerationJobId = null;
       window.currentGenerationApprovalId = null;
       if (jobId) {
-        try {
-          await api('POST', '/api/generation-jobs/' + encodeURIComponent(jobId) + '/finish', {
-            status: consumed ? 'completed' : 'failed',
-            progress: consumed ? 100 : undefined,
-            slidesDone: (tenantSlidesData || []).length,
-            note: note || ''
-          });
-          return;
-        } catch (e) { /* fall through to the direct settle */ }
+        // api() resolves with the error body instead of throwing, so a 502
+        // settlement_failed answer must fall through to the direct settle —
+        // the job is closed but its escrow and the draft lock are still live.
+        const res = await api('POST', '/api/generation-jobs/' + encodeURIComponent(jobId) + '/finish', {
+          status: consumed ? 'completed' : 'failed',
+          progress: consumed ? 100 : undefined,
+          slidesDone: (tenantSlidesData || []).length,
+          note: note || ''
+        });
+        if (res && res.success) return;
+        console.warn('Generation job finish refused, settling directly:', res);
       }
       if (approvalId) {
-        api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/settle', {
+        const res = await api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/settle', {
           consumed: consumed,
           note: note || ''
-        }).catch(err => console.warn('Settlement error:', err));
+        });
+        if (!res || !res.success) console.warn('Settlement error:', res);
       }
     }
 
@@ -654,7 +657,8 @@
             const jobRes = await api('POST', '/api/generation-approvals/' +
               encodeURIComponent(window.currentGenerationApprovalId) + '/jobs', {
               slidesTotal: totalSlides,
-              idempotencyKey: 'gen-' + (tenantProjectData.draftId || tenantPresentationId || Date.now())
+              idempotencyKey: 'gen-' + (window.currentGenerationApprovalId || 'run') +
+                '-' + (tenantProjectData.draftId || tenantPresentationId || Date.now())
             });
             if (jobRes && jobRes.success && jobRes.job) window.currentGenerationJobId = jobRes.job.id;
           } catch (jobErr) { console.warn('Generation job register:', jobErr); }
@@ -942,6 +946,17 @@
           setLiveGenBanner(false);
         }, 3500);
       } finally {
+        // Every exit above — a thrown validation, an early return, a dead
+        // request — ends this client-driven run. Leaving with the gate still
+        // open would hold the escrowed points and lock the draft in
+        // 'generating', so an unsettled approval is always released here.
+        if (window.currentGenerationApprovalId || window.currentGenerationJobId) {
+          try {
+            await settleGenerationRun(false, 'انتهت مهمة التوليد قبل اكتمالها');
+          } catch (settleError) {
+            console.warn('[GENERATION SETTLE]', settleError);
+          }
+        }
         isGeneratingTenantSlides = false;
         checkpointPresentationUndo();
         updatePresentationUndoButtons();

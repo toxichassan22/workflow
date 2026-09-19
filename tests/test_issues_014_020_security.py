@@ -615,7 +615,9 @@ class WorkflowClaimTests(ScopeTestBase):
         self.assertTrue(response.get_json()['success'])
 
     def test_checkpoint_flag_without_a_live_run_stays_locked(self):
-        draft_id = self._draft('wfc-gen-locked', status='generating')
+        # The flag claims a running generation; parked at the approval gate the
+        # draft has none, so the write is refused instead of unlocking.
+        draft_id = self._draft('wfc-gen-locked', status='generation_approval_pending')
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام'},
             'slideCheckpoint': True})
@@ -634,11 +636,21 @@ class WorkflowClaimTests(ScopeTestBase):
         self.assertEqual(response.status_code, 200, response.get_json())
 
     def test_generation_operation_flag_cannot_unlock_a_presentation_save(self):
+        # A live run bound to one file must not be used to write a different
+        # one: the flag names the run's presentation or it stays locked.
         draft_id = self._draft('wfc-op-flag', status='generating')
         with self.app.app_context():
             pres_id = db.create_presentation(
                 self.tenant, 'عرض مقفل', project_data={'project_name': 'مشروع الأعلام'},
                 slides_data=[{'html': '<div class="slide">x</div>'}], draft_id=draft_id)
+            db.get_db().execute(
+                """INSERT INTO generation_approvals
+                   (id, tenant_id, draft_id, presentation_id, status, requested_by,
+                    decided_at, prior_status)
+                   VALUES (?, ?, ?, ?, 'approved', 'owner', ?, 'sections_approved')""",
+                ('appr-wfc-op-flag', self.tenant, draft_id, 'pres-other-file',
+                 db._utcnow().isoformat()))
+            db.get_db().commit()
         response = self.client.put(f'/api/presentations/{pres_id}',
                                    headers=self.admin_headers,
                                    json={'operation': 'generation',
@@ -699,6 +711,15 @@ class VersionRestoreGateTests(ScopeTestBase):
     def test_restore_inside_a_locked_draft_is_refused(self):
         draft_id = self._draft('rst-locked', status='generating')
         pres_id, version_id = self._presentation(draft_id=draft_id)
+        with self.app.app_context():
+            # A fresh approved approval makes the 'generating' state a live run
+            # rather than a corpse the lock path would recover.
+            db.get_db().execute(
+                """INSERT INTO generation_approvals
+                   (id, tenant_id, draft_id, status, requested_by, decided_at, prior_status)
+                   VALUES (?, ?, ?, 'approved', 'owner', ?, 'sections_approved')""",
+                ('appr-rst-locked', self.tenant, draft_id, db._utcnow().isoformat()))
+            db.get_db().commit()
         response = self._restore(pres_id, version_id)
         self.assertEqual(response.status_code, 423)
         self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')

@@ -4868,6 +4868,15 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
 
     if existing:
         norm_existing = normalize_proposal_status(existing['status'])
+        if norm_existing == 'generating' and not allow_generating:
+            # The 'generating' lock is only honest while a live run backs it —
+            # a dead client leaves the state behind with nobody left to settle
+            # it, so the save that notices the corpse is what frees the file.
+            recover_dead_generating_drafts(tenant_id, draft_id=existing['id'])
+            existing = conn.execute(
+                'SELECT * FROM project_drafts WHERE id = ? AND tenant_id = ?',
+                (existing['id'], tenant_id)).fetchone()
+            norm_existing = normalize_proposal_status(existing['status'])
         if proposal_status_is_locked(norm_existing) \
                 and not (allow_generating and norm_existing == 'generating'):
             raise DraftLocked(existing['id'], norm_existing)
@@ -9317,6 +9326,14 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
     if pending:
         return {'error': 'approval_already_pending', 'approval_id': pending['id']}
     norm = normalize_proposal_status(draft.get('status'))
+    if norm == 'generating':
+        # A corpse run must not refuse a new request: recover the draft first,
+        # then let the normal gate decide on the state that is really there.
+        recover_dead_generating_drafts(tenant_id, draft_id=draft_id)
+        draft = get_project_draft_by_id(tenant_id, draft_id)
+        if not draft:
+            return {'error': 'draft_not_found'}
+        norm = normalize_proposal_status(draft.get('status'))
     if proposal_status_is_locked(norm):
         return {'error': 'draft_locked', 'status': norm}
     expired = expired_approved_sections(tenant_id, draft_id)
@@ -13470,6 +13487,119 @@ def sweep_stale_generation_jobs(tenant_id=None, timeout_minutes=None):
             except Exception:
                 pass
     return len(rows)
+
+
+def recover_dead_generating_drafts(tenant_id=None, timeout_minutes=None, draft_id=None):
+    """Return drafts from 'generating' when the run that owned them is dead.
+
+    A run proves it is alive through a generation_jobs row still queued or
+    running with a heartbeat inside the timeout, or through an approval decided
+    so recently the client may legitimately not have registered the job yet —
+    the run is client-driven and the job row appears only after the slide plan
+    returns. Anything else holding 'generating' is a corpse: a browser that
+    died before its job was registered, a settle whose lifecycle transition
+    failed, or an approval that never escrowed points. Each is closed like a
+    failed run — stale jobs fail, the escrow releases, the draft returns to the
+    state the request came from — so the file can be saved and generated again
+    instead of staying locked until a reservation happens to expire.
+    """
+    conn = get_db()
+    limit = int(timeout_minutes or GENERATION_JOB_TIMEOUT_MINUTES)
+    cutoff = (_utcnow() - timedelta(minutes=limit)).isoformat()
+    clauses = ["COALESCE(status, 'draft') = 'generating'"]
+    params = []
+    if tenant_id:
+        clauses.append('tenant_id = ?')
+        params.append(str(tenant_id))
+    if draft_id:
+        clauses.append('id = ?')
+        params.append(str(draft_id))
+    try:
+        drafts = conn.execute(
+            'SELECT id, tenant_id FROM project_drafts WHERE ' + ' AND '.join(clauses),
+            tuple(params)).fetchall()
+    except Exception:
+        return 0
+    recovered = 0
+    for draft in drafts:
+        d_id, t_id = draft['id'], draft['tenant_id']
+        try:
+            live_job = conn.execute(
+                """SELECT j.id FROM generation_jobs j
+                   WHERE j.tenant_id = ? AND j.status IN ('queued', 'running')
+                     AND COALESCE(j.heartbeat_at, j.started_at, j.created_at) >= ?
+                     AND (j.draft_id = ? OR j.approval_id IN (
+                         SELECT id FROM generation_approvals
+                         WHERE tenant_id = ? AND draft_id = ?))
+                   LIMIT 1""",
+                (t_id, cutoff, d_id, t_id, d_id)).fetchone()
+            if live_job:
+                continue
+            approval = conn.execute(
+                """SELECT * FROM generation_approvals
+                   WHERE tenant_id = ? AND draft_id = ? AND status = 'approved'
+                   ORDER BY decided_at DESC LIMIT 1""",
+                (t_id, d_id)).fetchone()
+            if approval and str(approval['decided_at'] or '') >= cutoff:
+                # Still inside the grace the client needs to register its job.
+                continue
+            # Stale job rows under this draft belong to the dead run: fail them
+            # here so they never read as still executing.
+            stale_jobs = conn.execute(
+                """SELECT j.id FROM generation_jobs j
+                   WHERE j.tenant_id = ? AND j.status IN ('queued', 'running')
+                     AND (j.draft_id = ? OR j.approval_id IN (
+                         SELECT id FROM generation_approvals
+                         WHERE tenant_id = ? AND draft_id = ?))""",
+                (t_id, d_id, t_id, d_id)).fetchall()
+            for stale in stale_jobs:
+                conn.execute(
+                    "UPDATE generation_jobs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
+                    ('job_timeout', _utcnow().isoformat(), stale['id']))
+            if stale_jobs:
+                conn.commit()
+            moved = False
+            if approval:
+                settle_generation_approval(
+                    t_id, approval['id'], 'dead-run-sweep', consumed=False,
+                    settled_by='system',
+                    note='مهمة التوليد توقفت دون إنهاء — تحرير الحجز وإعادة الملف')
+                # settle reports success even when its lifecycle hop refused —
+                # only the draft actually leaving 'generating' counts.
+                current = conn.execute(
+                    'SELECT status FROM project_drafts WHERE id = ?', (d_id,)).fetchone()
+                moved = bool(current) and normalize_proposal_status(current['status']) != 'generating'
+            if not moved:
+                # No approved approval — or a settle whose transition refused:
+                # nothing is funding a run anymore. Release any stray hold and
+                # send the draft back to the state the request came from (or
+                # the last editable gate before 'generating').
+                stray = conn.execute(
+                    """SELECT * FROM point_reservations
+                       WHERE tenant_id = ? AND draft_id = ? AND status = 'reserved'""",
+                    (t_id, d_id)).fetchall()
+                for row in stray:
+                    _settle_reservation_tx(conn, t_id, row, 'released', settled_by='system',
+                                           note='تحرير حجز بلا مهمة توليد نشطة')
+                if stray:
+                    conn.commit()
+                    _fire_balance_change(t_id)
+                last = conn.execute(
+                    """SELECT prior_status FROM generation_approvals
+                       WHERE tenant_id = ? AND draft_id = ?
+                       ORDER BY COALESCE(decided_at, requested_at) DESC LIMIT 1""",
+                    (t_id, d_id)).fetchone()
+                prior = str((last['prior_status'] if last else '') or '').strip()
+                if prior not in PROPOSAL_ALLOWED_TRANSITIONS.get('generating', set()):
+                    prior = 'sections_approved'
+                moved = bool(_draft_gate_transition(
+                    t_id, d_id, prior, 'system', 'النظام',
+                    'استرداد ملف علق في حالة التوليد دون مهمة نشطة'))
+            if moved:
+                recovered += 1
+        except Exception as exc:
+            print(f'[LIFECYCLE] dead-run recovery for draft {d_id} failed: {exc}')
+    return recovered
 
 
 def get_generation_job(job_id, tenant_id=None):

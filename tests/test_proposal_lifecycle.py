@@ -521,8 +521,13 @@ class ProposalLifecycleGateTests(unittest.TestCase):
         self.assertEqual(self._draft_status('gate-2'), 'sections_in_progress')
 
     def test_generation_request_on_locked_draft_refused(self):
-        """A draft already inside a gate refuses a second generation request."""
-        self._seed_draft('gate-3', status='generating')
+        """A draft with a live run refuses a second generation request."""
+        self._seed_draft('gate-3', status='sections_approved')
+        approval = self._approval('gate-3')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد')
+        self.assertEqual(decided.get('status'), 'approved', decided)
+        self.assertEqual(self._draft_status('gate-3'), 'generating')
         estimate = db.estimate_generation_cost('tenant-1', draft_id='gate-3', slides_count=5)
         res = db.create_generation_approval('tenant-1', 'gate-3', estimate, 'user-1', 'مقدم')
         self.assertEqual(res.get('error'), 'draft_locked')
@@ -664,8 +669,14 @@ class ProposalLifecycleGateTests(unittest.TestCase):
         self.assertEqual(res.get('error'), 'draft_locked')
 
     def test_generating_draft_accepts_only_checkpoint_saves(self):
-        """While 'generating', ordinary saves refuse; the job's checkpoint save passes."""
-        self._seed_draft('gate-16', status='generating')
+        """While a live run holds 'generating', ordinary saves refuse; the
+        job's checkpoint save passes."""
+        self._seed_draft('gate-16', status='sections_approved')
+        approval = self._approval('gate-16')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'معتمد')
+        self.assertEqual(decided.get('status'), 'approved', decided)
+        self.assertEqual(self._draft_status('gate-16'), 'generating')
         with self.assertRaises(db.DraftLocked):
             db.save_project_draft(
                 'tenant-1', 'user-1', {'project_name': 'تعديل'}, None,

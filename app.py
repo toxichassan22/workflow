@@ -13741,6 +13741,14 @@ def _presentation_draft_lock(draft_id, data, presentation_id=None):
     if not draft:
         return None
     status = db.normalize_proposal_status(draft.get('status'))
+    if status == 'generating':
+        # 'generating' only counts while a live run backs it; a dead client
+        # leaves the state behind, and the write that notices frees the file.
+        db.recover_dead_generating_drafts(g.tenant_id, draft_id=draft_id)
+        draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+        if not draft:
+            return None
+        status = db.normalize_proposal_status(draft.get('status'))
     if not db.proposal_status_is_locked(status):
         return None
     if status == 'generating' and (data or {}).get('operation') == 'generation':
@@ -16693,6 +16701,7 @@ def _run_housekeeping_tick():
         ('event_task_reminders', db.send_due_event_task_reminders),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
+        ('dead_generating_drafts', db.recover_dead_generating_drafts),
         ('rate_limits', db.rate_limit_cleanup),
         ('usage_billing', _bill_all_unbilled_usage),
     )

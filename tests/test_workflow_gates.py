@@ -172,6 +172,105 @@ class WorkflowGateDbTests(unittest.TestCase):
         draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
         self.assertNotEqual(draft['status'], 'generating')
 
+    def test_dead_generating_draft_recovers_and_unlocks(self):
+        """A run that dies before its job row exists must not lock the draft
+        forever: the dead-run sweep releases the hold and returns the draft to
+        the state the request came from, and a normal save works again."""
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        self.assertEqual(decided.get('status'), 'approved', decided)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'generating')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+
+        # Inside the grace window the client may still be planning — a fresh
+        # approval with no job yet is a live run, never a corpse.
+        self.assertEqual(db.recover_dead_generating_drafts('tenant-1'), 0)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'generating')
+
+        # The decision ages past the job timeout with no job row ever
+        # registered — the browser died between approval and job creation.
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE generation_approvals SET decided_at = '2000-01-01T00:00:00' WHERE id = ?",
+            (approval['id'],))
+        conn.commit()
+        self.assertEqual(db.recover_dead_generating_drafts('tenant-1'), 1)
+        draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
+        self.assertEqual(draft['status'], 'sections_approved')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 100.0)
+        reservations = db.list_point_reservations('tenant-1', status='released')
+        self.assertEqual(len(reservations), 1)
+        # The lock is gone for real: a plain save lands instead of DraftLocked.
+        saved = db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'برج المشرق'},
+            {'basic': 'approved'}, 'draft', draft_id='draft-1')
+        self.assertEqual(saved, 'draft-1')
+
+    def test_save_and_request_self_heal_a_dead_generating_draft(self):
+        """The lazy path: a save or a new generation request that finds a dead
+        'generating' state recovers it instead of reporting DRAFT_LOCKED."""
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE generation_approvals SET decided_at = '2000-01-01T00:00:00' WHERE id = ?",
+            (approval['id'],))
+        conn.commit()
+        saved = db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'برج المشرق'},
+            {'basic': 'approved'}, 'draft', draft_id='draft-1')
+        self.assertEqual(saved, 'draft-1')
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'sections_approved')
+
+        # Same for the generation request: the dead state must not refuse it.
+        conn.execute(
+            "UPDATE project_drafts SET status = 'generating' WHERE id = 'draft-1'")
+        conn.commit()
+        request = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One')
+        self.assertEqual(request.get('status'), 'pending', request)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'],
+            'generation_approval_pending')
+
+    def test_orphaned_generating_draft_without_approval_recovers(self):
+        """A 'generating' draft with no approved approval at all — a settle
+        whose lifecycle hop failed, or a state written by an older bug — is an
+        orphan; the sweep returns it to the last editable gate."""
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE project_drafts SET status = 'generating' WHERE id = 'draft-1'")
+        conn.commit()
+        self.assertEqual(db.recover_dead_generating_drafts('tenant-1'), 1)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'sections_approved')
+
+    def test_live_generating_draft_is_not_recovered(self):
+        """A fresh-heartbeat job proves the run is alive — recovery leaves the
+        draft locked exactly as the lock intends."""
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        job = db.create_generation_job(
+            'tenant-1', approval_id=approval['id'], draft_id='draft-1',
+            slides_total=8, created_by='user-1')
+        db.update_generation_job(job['id'], status='running', progress=10)
+        self.assertEqual(db.recover_dead_generating_drafts('tenant-1'), 0)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'generating')
+        with self.assertRaises(db.DraftLocked):
+            db.save_project_draft(
+                'tenant-1', 'user-1', {'project_name': 'برج آخر'},
+                {'basic': 'approved'}, 'draft', draft_id='draft-1')
+
     def test_job_idempotency_key_stays_inside_its_tenant_and_approval(self):
         """ISS-013: a key names one retried request — (tenant, approval, key).
         The old global index let one company's key return another's job."""

@@ -775,47 +775,60 @@
       clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
       setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
 
-      // The plan is always rebuilt from the current project data. Reusing the saved plan meant a
-      // regenerated file kept the previous structure and slide count no matter how much the
-      // project had changed, which read as a fixed slide count that nobody had asked for.
-      setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
-      const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
-          (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
-      });
-      if (planResponse.success && planResponse.plan) {
-        tenantSlidePlan = planResponse.plan;
-        tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-        const planCount = (tenantSlidePlan.slides || []).length;
-        // A fallback plan is a failed planner, not a proposal: it always has the same generic
-        // titles and the same count, so it is stated instead of passing as the model's work.
-        if (tenantSlidePlan.source === 'fallback') {
-          setLiveGenBanner(true, 'تعذر تحليل بيانات المشروع — هيكل عام',
-            planCount + ' شريحة بعناوين عامة لا تعبّر عن هذا المشروع', 12);
-          toast('لم ينتج المحلل خطة لهذا المشروع، والهيكل المستخدم عام.');
+      try {
+        // The plan is always rebuilt from the current project data. Reusing the saved plan meant a
+        // regenerated file kept the previous structure and slide count no matter how much the
+        // project had changed, which read as a fixed slide count that nobody had asked for.
+        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
+        const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
+          setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
+            (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
+        });
+        if (planResponse.success && planResponse.plan) {
+          tenantSlidePlan = planResponse.plan;
+          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+          const planCount = (tenantSlidePlan.slides || []).length;
+          // A fallback plan is a failed planner, not a proposal: it always has the same generic
+          // titles and the same count, so it is stated instead of passing as the model's work.
+          if (tenantSlidePlan.source === 'fallback') {
+            setLiveGenBanner(true, 'تعذر تحليل بيانات المشروع — هيكل عام',
+              planCount + ' شريحة بعناوين عامة لا تعبّر عن هذا المشروع', 12);
+            toast('لم ينتج المحلل خطة لهذا المشروع، والهيكل المستخدم عام.');
+          } else {
+            setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
+          }
+          triggerAutoSaveDraft();
         } else {
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
+          // The gate already escrowed the hold: a dead plan releases it and
+          // returns the draft from 'generating' instead of stranding both.
+          if (window.currentGenerationApprovalId) {
+            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
+              consumed: false,
+              note: 'تعذر إعداد خطة الشرائح'
+            }).catch(err => console.warn('Settlement release error:', err));
+            window.currentGenerationApprovalId = null;
+          }
+          const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
+          setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
+          console.error('[SLIDE PLAN]', planResponse);
+          toast(errorMessage);
+          renderTenantSlides();
+          return;
         }
-        triggerAutoSaveDraft();
-      } else {
-        // The gate already escrowed the hold: a dead plan releases it and
-        // returns the draft from 'generating' instead of stranding both.
-        if (window.currentGenerationApprovalId) {
-          api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
-            consumed: false,
-            note: 'تعذر إعداد خطة الشرائح'
-          }).catch(err => console.warn('Settlement release error:', err));
-          window.currentGenerationApprovalId = null;
-        }
-        const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
-        setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
-        console.error('[SLIDE PLAN]', planResponse);
-        toast(errorMessage);
-        renderTenantSlides();
-        return;
-      }
 
-      await generateTenantSlides({ approvalGranted: true });
+        await generateTenantSlides({ approvalGranted: true });
+      } catch (generationError) {
+        // A throw anywhere after approval must still close the gate: the hold
+        // stays escrowed and the draft stays 'generating' until it settles.
+        console.error('[GENERATE FILE]', generationError);
+        try {
+          await settleGenerationRun(false, (generationError && generationError.message) || 'تعذر إكمال التوليد');
+        } catch (settleError) {
+          console.warn('[GENERATION SETTLE]', settleError);
+        }
+        setLiveGenBanner(true, 'تعذر إكمال التوليد', (generationError && generationError.message) || '', 5);
+        toast((generationError && generationError.message) || 'تعذر إكمال التوليد');
+      }
     }
 
     async function submitTenantProject() {
