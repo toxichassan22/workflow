@@ -6361,15 +6361,78 @@ def _derive_attempt_status(cost_usd, generation_id, explicit=None):
     return 'unresolved'
 
 
-def _tenant_active_package_id(conn, tenant_id):
-    """Package a new spend row burns under. None when the tenant has none."""
+def _tenant_package_cycle(conn, tenant_id):
+    """(package_id, credit_usd, assigned_at) for the tenant's current cycle.
+
+    The entitlement comes from the latest tenant_package_history snapshot, so
+    editing the catalog's credit_usd never rewrites an already-granted
+    assignment. ``assigned_at`` is where the new cycle's consumption starts —
+    re-assigning a spent package begins a fresh window instead of inheriting
+    the old cycle's burn. Falls back to the catalog credit for assignments
+    that predate history tracking. None when the tenant has no valid package.
+    """
     try:
         if not tenant_id:
             return None
         row = conn.execute(
             'SELECT package_id FROM tenants WHERE id = ?', (str(tenant_id),)).fetchone()
         package_id = dict(row).get('package_id') if row else None
-        return str(package_id) if package_id else None
+        if not package_id:
+            return None
+        package_id = str(package_id)
+        package = conn.execute(
+            'SELECT credit_usd, is_active FROM billing_packages WHERE id = ?',
+            (package_id,)).fetchone()
+        if not package or not dict(package).get('is_active'):
+            return None
+        hist = conn.execute(
+            'SELECT credit_usd, assigned_at FROM tenant_package_history '
+            'WHERE tenant_id = ? AND package_id = ? '
+            'ORDER BY assigned_at DESC, rowid DESC LIMIT 1',
+            (str(tenant_id), package_id)).fetchone()
+        if hist:
+            return (package_id, float(dict(hist).get('credit_usd') or 0.0),
+                    dict(hist).get('assigned_at'))
+        return (package_id, float(dict(package).get('credit_usd') or 0.0), None)
+    except Exception:
+        return None
+
+
+def _package_cycle_consumed(conn, tenant_id, package_id, assigned_at):
+    """Tagged spend inside the current cycle — rows before ``assigned_at``
+    belong to the previous assignment of the same package."""
+    consumed = 0.0
+    bound = str(assigned_at).replace('T', ' ')[:19] if assigned_at else None
+    for table in ('ai_usage_events', 'map_usage_events'):
+        try:
+            where = ('WHERE tenant_id = ? AND package_id = ?'
+                     + (" AND REPLACE(created_at, 'T', ' ') >= ?" if bound else ''))
+            params = [str(tenant_id), str(package_id)] + ([bound] if bound else [])
+            spent = conn.execute(
+                f'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM {table} {where}',
+                tuple(params)).fetchone()
+            consumed += float(dict(spent).get('total') or 0.0)
+        except Exception:
+            pass
+    return consumed
+
+
+def _tenant_active_package_id(conn, tenant_id):
+    """Package a new spend row burns under — only while it still has credit.
+
+    An exhausted or deactivated package must not keep owning new usage: rows
+    tagged with its id are excluded from wallet billing, so over-quota spend
+    would never reach the wallet at all. Falling back to NULL lets the next
+    row bill against the wallet again.
+    """
+    try:
+        cycle = _tenant_package_cycle(conn, tenant_id)
+        if not cycle:
+            return None
+        package_id, credit, assigned_at = cycle
+        if credit - _package_cycle_consumed(conn, tenant_id, package_id, assigned_at) <= 0:
+            return None
+        return package_id
     except Exception:
         return None
 
@@ -7032,6 +7095,11 @@ def get_billing_flow_estimates():
         'market_competitors': 1.0,
         'market_summary': 1.0,
         'croquis': 0.5,
+        'image_generation': 0.5,
+        'visual_concept': 0.25,
+        'executive_content': 0.25,
+        'designer_chat': 0.5,
+        'ai_text': 0.25,
     }
     try:
         overrides = json.loads(os.environ.get('BILLING_PREFLIGHT_ESTIMATES') or '{}')
@@ -7124,6 +7192,25 @@ _AI_BILLABLE_STATUS_CLAUSE = (
 )
 
 
+def _live_hold_exclusion_sql(tenant_ref):
+    """ISS-034: usage rows under a draft or presentation covered by a live
+    point hold are prepaid by the reservation — the settlement claims them
+    under its own ledger entry, so billing them here would charge the run
+    twice. ``tenant_ref`` is either a bound '?' or a correlated column; the
+    unqualified draft_id/presentation_id resolve to the statement's own
+    usage-events table in both UPDATE and SELECT contexts."""
+    return (
+        '(draft_id IS NULL OR draft_id NOT IN ('
+        'SELECT draft_id FROM point_reservations '
+        f"WHERE status = 'reserved' AND draft_id IS NOT NULL AND tenant_id = {tenant_ref})) "
+        'AND (presentation_id IS NULL OR presentation_id NOT IN ('
+        'SELECT ga.presentation_id FROM point_reservations pr '
+        'JOIN generation_approvals ga ON ga.id = pr.generation_approval_id '
+        f"WHERE pr.status = 'reserved' AND ga.presentation_id IS NOT NULL "
+        f'AND pr.tenant_id = {tenant_ref}))'
+    )
+
+
 def _unbilled_scope_clause(tenant_id, draft_id=None, presentation_id=None,
                            ai_settled_only=False):
     # package_id IS NULL: a usage row burned under an assigned package is
@@ -7131,6 +7218,8 @@ def _unbilled_scope_clause(tenant_id, draft_id=None, presentation_id=None,
     # and must not be double-charged by checkout or counted as unbilled.
     clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL', 'package_id IS NULL']
     params = [tenant_id]
+    clauses.append(_live_hold_exclusion_sql('?'))
+    params.extend([tenant_id, tenant_id])
     if ai_settled_only:
         clauses.append(_AI_BILLABLE_STATUS_CLAUSE)
     if draft_id:
@@ -7190,6 +7279,9 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
         if existing:
             return {'billed': False, 'reason': 'idempotency_key_replayed',
                     'entry': dict(existing)}
+    # An expired hold must not keep its usage unbillable — sweep stale rows
+    # before the exclusion below decides what is still prepaid.
+    release_stale_reservations(tenant_id)
     ledger_id = str(uuid.uuid4())
     try:
         try:
@@ -7223,6 +7315,12 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
         ).fetchone()).get('total') or 0.0)
         raw_cost = ai_cost + maps_cost
         billed_amount = round(raw_cost * active_multiplier + 1e-9, 2)
+        if raw_cost > 0 and billed_amount <= 0:
+            # A sub-cent claim must not close: rolling the claim back keeps the
+            # rows unbilled so the cents carry into the next invoice instead of
+            # being marked paid at $0 forever.
+            conn.rollback()
+            return {'billed': False, 'reason': 'below_minimum_charge'}
         debit = conn.execute(
             'UPDATE tenants SET credit_balance = credit_balance - ? '
             'WHERE id = ? AND credit_balance >= ?',
@@ -7952,28 +8050,29 @@ def get_client_overview(tenant_id):
         'SELECT package_id FROM tenants WHERE id = ?', (tenant_id,)).fetchone()
     package_id = dict(tenant).get('package_id') if tenant else None
     package = get_billing_package(package_id) if package_id else None
-    assigned_at = None
-    if package is not None:
-        try:
-            row = conn.execute(
-                'SELECT assigned_at FROM tenant_package_history '
-                'WHERE tenant_id = ? ORDER BY assigned_at DESC LIMIT 1',
-                (tenant_id,)).fetchone()
-            assigned_at = dict(row).get('assigned_at') if row else None
-        except Exception:
-            assigned_at = None
+    cycle = _tenant_package_cycle(conn, tenant_id)
+    assigned_at = cycle[2] if cycle else None
     block = None
     if package is not None:
         try:
             credit = float(package.get('credit_usd') or 0.0)
         except (TypeError, ValueError):
             credit = 0.0
-        ai_tagged = _tagged_sum('ai_usage_events', package.get('id'))
-        maps_tagged = _tagged_sum('map_usage_events', package.get('id'))
-        if ai_tagged is None or maps_tagged is None:
-            consumed = lifetime
+        if cycle:
+            # Entitlement comes from the assignment snapshot and consumption
+            # counts only this cycle — a re-assignment starts clean and a
+            # catalog edit never rewrites what was already granted.
+            credit = cycle[1]
+            consumed = _package_cycle_consumed(conn, tenant_id, cycle[0], cycle[2])
         else:
-            consumed = ai_tagged + maps_tagged
+            ai_tagged = _tagged_sum('ai_usage_events', package.get('id'))
+            maps_tagged = _tagged_sum('map_usage_events', package.get('id'))
+            if ai_tagged is None or maps_tagged is None:
+                consumed = lifetime
+            else:
+                consumed = ai_tagged + maps_tagged
+            if not package.get('is_active'):
+                consumed = max(consumed, credit)
         remaining = max(0.0, credit - consumed)
         block = {
             'id': package.get('id'),
@@ -9599,19 +9698,23 @@ def _hold_points_tx(conn, tenant_id, points, cost_usd, reserved_by=None, reserve
     return dict(row)
 
 
-def _claim_run_usage_tx(conn, tenant_id, ledger_id, draft_id=None, presentation_id=None):
+def _claim_run_usage_tx(conn, tenant_id, ledger_id, draft_id=None, presentation_id=None,
+                        reserved_at=None):
     """Attach the run's unbilled usage events to the settling ledger row.
 
     The reservation price is what the client pays; claiming the usage events
     under the same entry records the provider cost on it and keeps checkout
     from billing the run a second time. Events are attributed to the draft or
-    the presentation — either link counts as this run.
+    the presentation — either link counts as this run. ISS-035: package-burned
+    rows never join a wallet ledger, still-unpriced AI rows stay unclaimed
+    until reconciliation settles them, and usage older than the hold belongs
+    to a different accounting context than this run.
     """
     empty = {'ai_events_count': 0, 'maps_events_count': 0, 'raw_cost_usd': 0.0,
              'ai_cost_usd': 0.0, 'maps_cost_usd': 0.0}
     if not ledger_id:
         return empty
-    clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL']
+    clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL', 'package_id IS NULL']
     params = [tenant_id]
     links = []
     if draft_id:
@@ -9622,9 +9725,19 @@ def _claim_run_usage_tx(conn, tenant_id, ledger_id, draft_id=None, presentation_
         params.append(presentation_id)
     if not links:
         return empty
-    where = 'WHERE ' + clauses[0] + ' AND ' + clauses[1] + ' AND (' + ' OR '.join(links) + ')'
+    where = 'WHERE ' + ' AND '.join(clauses) + ' AND (' + ' OR '.join(links) + ')'
+    if reserved_at:
+        # Bound the claim to this run's window: usage older than the hold
+        # belongs to a different accounting context. Both sides are compared
+        # as 'YYYY-MM-DD HH:MM:SS' text — created_at's column default and the
+        # ISO form rows differ only by the 'T' separator, so REPLACE keeps the
+        # comparison portable and same-second rows land inside the window.
+        bound = str(reserved_at).replace('T', ' ')[:19]
+        where += " AND REPLACE(created_at, 'T', ' ') >= ?"
+        params.append(bound)
     ai_claim = conn.execute(
-        'UPDATE ai_usage_events SET billed_ledger_id = ? ' + where,
+        'UPDATE ai_usage_events SET billed_ledger_id = ? ' + where
+        + ' AND ' + _AI_BILLABLE_STATUS_CLAUSE,
         tuple([ledger_id] + params),
     )
     maps_claim = conn.execute(
@@ -9671,7 +9784,8 @@ def _settle_reservation_tx(conn, tenant_id, row, new_status, settled_by=None, no
         usage = _claim_run_usage_tx(
             conn, tenant_id, hold['id'] if hold else None,
             draft_id=row['draft_id'],
-            presentation_id=(hold['presentation_id'] if hold and 'presentation_id' in hold.keys() else None))
+            presentation_id=(hold['presentation_id'] if hold and 'presentation_id' in hold.keys() else None),
+            reserved_at=row['reserved_at'])
         if hold:
             conn.execute(
                 '''UPDATE tenant_ledger SET kind = 'debit', raw_cost_usd = ?, multiplier = ?,
@@ -9889,27 +10003,11 @@ def get_package_remaining_usd(tenant_id):
     """
     try:
         conn = get_db()
-        tenant = conn.execute(
-            'SELECT package_id FROM tenants WHERE id = ?', (str(tenant_id),),
-        ).fetchone()
-        package_id = dict(tenant).get('package_id') if tenant else None
-        if not package_id:
+        cycle = _tenant_package_cycle(conn, tenant_id)
+        if not cycle:
             return 0.0
-        package = get_billing_package(package_id)
-        if not package:
-            return 0.0
-        credit = float(package.get('credit_usd') or 0.0)
-        consumed = 0.0
-        for table in ('ai_usage_events', 'map_usage_events'):
-            try:
-                row = conn.execute(
-                    f'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM {table} '
-                    'WHERE tenant_id = ? AND package_id = ?',
-                    (str(tenant_id), str(package_id)),
-                ).fetchone()
-                consumed += float(dict(row).get('total') or 0.0)
-            except Exception:
-                pass
+        package_id, credit, assigned_at = cycle
+        consumed = _package_cycle_consumed(conn, tenant_id, package_id, assigned_at)
         return max(0.0, credit - consumed)
     except Exception:
         return 0.0
@@ -9923,15 +10021,20 @@ def list_tenants_with_billable_usage(limit=200):
     qualify. Super admins are never billed.
     """
     conn = get_db()
+    # ISS-034: rows covered by a live hold are not sweep candidates — the
+    # settlement claims them under the reservation's own entry.
+    ai_exclusion = _live_hold_exclusion_sql('ai_usage_events.tenant_id')
+    maps_exclusion = _live_hold_exclusion_sql('map_usage_events.tenant_id')
     rows = conn.execute(
         'SELECT tenant_id FROM ('
         '  SELECT DISTINCT tenant_id FROM ai_usage_events '
         '   WHERE billed_ledger_id IS NULL AND tenant_id IS NOT NULL '
         '     AND package_id IS NULL AND ' + _AI_BILLABLE_STATUS_CLAUSE +
+        '     AND ' + ai_exclusion +
         '  UNION '
         '  SELECT DISTINCT tenant_id FROM map_usage_events '
         '   WHERE billed_ledger_id IS NULL AND tenant_id IS NOT NULL '
-        '     AND package_id IS NULL'
+        '     AND package_id IS NULL AND ' + maps_exclusion +
         ') WHERE tenant_id NOT IN (SELECT id FROM tenants WHERE COALESCE(is_admin, 0) = 1) '
         'LIMIT ?', (int(limit),),
     ).fetchall()

@@ -437,7 +437,10 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
             raw = db.get_tenant_openrouter_key_raw(tid)
         except Exception as exc:
             print(f"[OPENROUTER KEY] gate lookup failed: {exc}")
-            return None
+            # Strict mode exists to stop unkeyed companies spending on the
+            # platform key — a lookup error that opens the gate defeats it.
+            return {'message': 'تعذر التحقق من مفتاح AI للشركة الآن',
+                    'error_code': 'TENANT_KEY_CHECK_FAILED'}
         if raw:
             return None
         return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
@@ -893,6 +896,25 @@ def _tenant_provider_cap_usd(tenant_id):
     return max(0.0, wallet_raw + float(package_remaining or 0.0))
 
 
+def _openrouter_key_usage_usd(tenant_id):
+    """Accumulated provider-side spend on the company's key, or None when the
+    live read fails. ``limit`` on a managed key is a cumulative cap on
+    ``usage``, so a PATCH that wants N more dollars must send usage + N."""
+    try:
+        raw = db.get_tenant_openrouter_key_raw(tenant_id)
+    except Exception:
+        raw = None
+    if not raw:
+        return None
+    status = _openrouter_key_status(raw)
+    if not isinstance(status, dict) or status.get('error'):
+        return None
+    try:
+        return max(0.0, float(status.get('usage') or 0.0))
+    except (TypeError, ValueError):
+        return None
+
+
 def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd=None):
     """Sync a tenant's spend cap to its OpenRouter key (best-effort). Never raises.
 
@@ -926,9 +948,15 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd=None):
             if not key_hash and existing.get('provenance') == 'auto':
                 key_hash = _find_managed_key_hash_for_tenant(tenant_id, tenant=tenant, existing_meta=existing)
             if key_hash:
+                # ISS-036: the provider's limit is a cumulative cap on usage,
+                # not a remaining-budget field. Adding the burn already
+                # recorded keeps limit_remaining equal to the wallet
+                # entitlement; without it every sync shrunk the real
+                # allowance by whatever the key had already spent.
+                provider_usage = _openrouter_key_usage_usd(tenant_id)
                 res = _openrouter_update_managed_key(
                     key_hash,
-                    limit_usd=new_limit,
+                    limit_usd=(provider_usage + new_limit) if provider_usage is not None else new_limit,
                     limit_reset=reset_policy,
                     # A drained wallet blocks the key; a funded one reopens
                     # it. An admin-disabled key (is_active=0) stays disabled.
@@ -1883,7 +1911,13 @@ def _require_billing_balance(flow_key):
     try:
         balance = db.get_tenant_balance(g.tenant_id)
     except Exception:
-        return None
+        # ISS-037: an unreadable wallet is not a funded wallet — enforcement
+        # that fails open turns every storage hiccup into a free paid run.
+        return jsonify({
+            'success': False,
+            'error': 'تعذر التحقق من رصيد الشركة الآن. أعد المحاولة بعد قليل',
+            'error_code': 'BILLING_CHECK_UNAVAILABLE',
+        }), 503
     if balance < estimate:
         return jsonify({
             'success': False,
@@ -4187,6 +4221,9 @@ def _extract_json_from_text(text):
 @require_permission('create_presentation')
 def api_generate():
     data = request.json
+    _billing_guard = _require_billing_balance('slide_plan')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     images = data.get('images', {})
 
@@ -4219,6 +4256,9 @@ def api_generate():
 @require_permission('generate_images')
 def api_generate_images():
     data = request.json
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     include_cover = data.get('includeCover', True) is not False
     reference_image = data.get('referenceImage') or project_data.get('cover') or project_data.get('mainImageData') or None
@@ -4328,6 +4368,9 @@ def api_export_pdf():
 @require_auth
 def api_official_outline():
     """Compatibility: Generate outline/titles following tenant slide bounds."""
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(request.json.get('projectData', {}))
     print(f"\n[OUTLINE] Generating outline for: {project_data.get('projectName', 'Unknown')}")
 
@@ -4400,6 +4443,9 @@ def api_generate_titles():
 def api_generate_main_image():
     """Compatibility: Generate main cover image"""
     data = request.json or {}
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     project_name = project_data.get('project_name') or project_data.get('projectName') or 'real-estate project'
     project_type = project_data.get('project_type') or project_data.get('projectType') or 'residential project'
@@ -4437,6 +4483,9 @@ def api_generate_main_image():
 @require_permission('generate_images')
 def api_generate_slide_image():
     """Compatibility: Generate image for a specific slide"""
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
     prompt = request.json.get('prompt', '')
     reference = request.json.get('referenceImage')
     print(f"\n[SLIDE IMAGE] Generating...")
@@ -4461,6 +4510,9 @@ def api_generate_slide_image():
 @require_permission('generate_images')
 def api_generate_image_single():
     """Compatibility: Generate single image (singular)"""
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
     prompt = request.json.get('prompt', '')
     reference = request.json.get('referenceImage')
     print(f"\n[IMAGE] Generating single image...")
@@ -4487,6 +4539,9 @@ def api_generate_image_single():
 def api_get_image_prompts():
     """Use GLM 5.1 to generate hyper-realistic, project-tailored architectural prompts for cover and moodboard images."""
     data = request.json or {}
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     project_name = project_data.get('project_name') or project_data.get('projectName') or 'مشروع عقاري'
     project_type = project_data.get('project_type') or project_data.get('projectType') or 'سكني'
@@ -5642,6 +5697,9 @@ def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False):
 @require_permission('generate_images')
 def api_visual_concept_plans_verify():
     data = request.get_json(silent=True) or {}
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     context = _visual_concept_plan_context(project_data)
     system_prompt = (
@@ -5698,6 +5756,9 @@ def api_visual_concept_plans_boundary():
     points = _visual_concept_plan_boundary_points(data.get('points') or project_data.get('survey_coordinates'))
     instruction = _visual_concept_text(data.get('instruction'), 2000)
     if str(data.get('mode') or '').lower() == 'ai':
+        _billing_guard = _require_billing_balance('visual_concept')
+        if _billing_guard is not None:
+            return _billing_guard
         system_prompt = (
             'أنت محرر حدود مساحية لمخطط مفاهيمي. أعد JSON فقط بالشكل '
             '{"points":[{"point":"","eastings":0,"northings":0}],"reply":""}. '
@@ -5811,6 +5872,9 @@ def api_visual_concept_prompt():
             })
         if plan_draft and not current_prompt:
             current_prompt = plan_draft
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
@@ -5836,6 +5900,9 @@ def api_visual_concept_prompt():
 @require_permission('generate_images')
 def api_visual_concept_generate():
     data = request.get_json(silent=True) or {}
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
@@ -5881,6 +5948,9 @@ def api_visual_concept_generate():
 @require_permission('generate_images')
 def api_visual_concept_chat():
     data = request.get_json(silent=True) or {}
+    _billing_guard = _require_billing_balance('designer_chat')
+    if _billing_guard is not None:
+        return _billing_guard
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
@@ -5931,6 +6001,9 @@ def api_visual_concept_chat():
 @require_auth
 def api_designer_generate():
     """Generate slides HTML: variable slide count in parallel (4 concurrent workers)."""
+    _billing_guard = _require_billing_balance('slide_plan')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(request.json.get('projectData', {}))
     outline = request.json.get('outline', [])
     images = request.json.get('images', {})
@@ -6043,6 +6116,9 @@ def api_generate_outline():
 @require_auth
 def api_generate_content():
     """Compatibility: Generate content for a slide"""
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     slide_data = request.json.get('slide', {})
     project_data = clean_project_data(request.json.get('projectData', {}))
 
@@ -6061,6 +6137,9 @@ def api_generate_content():
 def api_ai_edit_slide():
     """Compatibility: AI edit a slide with Playwright Vision guidance"""
     data = request.json
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     instruction = data.get('instruction', '') or data.get('editRequest', '') or data.get('message', '')
     slide_html = data.get('slideHtml', '') or data.get('slideContent', '') or data.get('currentSlideHtml', '')
     project_data = clean_project_data(data.get('projectData', {}))
@@ -6133,6 +6212,9 @@ def api_ai_edit_slide():
 def api_ai_chat():
     """Compatibility: AI chat — returns data.data format expected by frontend"""
     data = request.json
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     message = data.get('message', '')
     project_data = clean_project_data(data.get('projectData', {}))
     current_slide_idx = data.get('currentSlideIdx', 0)
@@ -6186,6 +6268,9 @@ def api_edit_deck_data():
 @require_auth
 def api_generate_bullets():
     """Compatibility: Generate bullets for a slide"""
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     title = request.json.get('title', '')
     project_data = clean_project_data(request.json.get('projectData', {}))
 
@@ -8824,6 +8909,9 @@ def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text,
 def api_designer_chat():
     """Agentic designer chat operating on one slide or the complete presentation."""
     data = request.json or {}
+    _billing_guard = _require_billing_balance('designer_chat')
+    if _billing_guard is not None:
+        return _billing_guard
     job_id = request.headers.get('X-Designer-Job-Id') or data.get('_job_id')
     tenant_id = g.tenant_id
 
@@ -10046,6 +10134,9 @@ def api_project_data():
 def api_generate_cover_prompt():
     """Compatibility: Generate detailed cover image prompt using GLM"""
     data = request.json
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
 
     project_name = project_data.get('projectName', '')
@@ -10551,6 +10642,9 @@ def api_ai_input_builder():
     Output: { suggestions: [{ fieldKey, fieldLabel, fieldType, sectionKey, fieldOptions, isRequired, placeholder, defaultValue, aiHint, reason }] }
     """
     data = request.json or {}
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     description = (data.get('description') or '').strip()
     if not description:
         return jsonify({'error': 'description is required'}), 400
@@ -10650,6 +10744,9 @@ def api_ai_build_fields():
     Output: { created: [...], errors: [] }
     """
     data = request.json or {}
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
     description = (data.get('description') or '').strip()
     if not description:
         return jsonify({'error': 'description is required'}), 400
@@ -11144,6 +11241,11 @@ def api_slide_plan():
         'success': True,
         'message': 'تم استلام طلب إعداد هيكل العرض',
         'fallbackPlan': fallback_plan,
+        'payload': {
+            'projectData': project_data,
+            'images': images,
+            'targetSectionKeys': target_section_keys,
+        },
     })
     threading.Thread(
         target=_slide_plan_job_worker,
@@ -11172,7 +11274,7 @@ def api_slide_plan_job(job_id):
             'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(job)
+    return jsonify(_public_job(job))
 
 
 @app.route('/api/geocode', methods=['POST'])
@@ -12386,6 +12488,12 @@ def api_generate_slide_single_job():
         'status': 'queued',
         'success': True,
         'message': 'تم استلام طلب توليد الشريحة',
+        'payload': {'data': data},
+        'actor': {
+            'user_id': getattr(g, 'user_id', None),
+            'user_name': getattr(g, 'user_name', None),
+            'user_role': getattr(g, 'user_role', None),
+        },
     })
     threading.Thread(
         target=_run_slide_generation_job,
@@ -12413,7 +12521,7 @@ def api_generate_slide_single_job_status(job_id):
             'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(job)
+    return jsonify(_public_job(job))
 
 
 @app.route('/api/generate-slides', methods=['POST'])
@@ -13315,16 +13423,32 @@ def _draft_data_for_response(data):
 
 def _draft_response_filtered(draft):
     """ISS-015: draft row minus hidden-section content and section statuses."""
-    denied = _hidden_field_sections()
-    if not denied or not isinstance(draft, dict):
+    if not isinstance(draft, dict):
         return draft
     draft = dict(draft)
-    if isinstance(draft.get('draft_data'), dict):
-        draft['draft_data'] = _draft_data_for_response(draft['draft_data'])
-    if isinstance(draft.get('section_statuses'), dict):
-        draft['section_statuses'] = {
-            key: value for key, value in draft['section_statuses'].items()
-            if key not in denied}
+    data = draft.get('draft_data')
+    if isinstance(data, dict):
+        # Older saves embedded a second copy of the whole deck under
+        # pageDrafts.slides.data; nothing reads it, so returning it doubled the
+        # payload of every draft open. The stored row keeps it; the response
+        # drops it.
+        page_drafts = data.get('pageDrafts')
+        if isinstance(page_drafts, dict) and isinstance(page_drafts.get('slides'), dict) \
+                and 'data' in page_drafts['slides']:
+            data = dict(data)
+            page_drafts = dict(page_drafts)
+            page_drafts['slides'] = {
+                key: value for key, value in page_drafts['slides'].items() if key != 'data'}
+            data['pageDrafts'] = page_drafts
+            draft['draft_data'] = data
+    denied = _hidden_field_sections()
+    if denied:
+        if isinstance(draft.get('draft_data'), dict):
+            draft['draft_data'] = _draft_data_for_response(draft['draft_data'])
+        if isinstance(draft.get('section_statuses'), dict):
+            draft['section_statuses'] = {
+                key: value for key, value in draft['section_statuses'].items()
+                if key not in denied}
     return draft
 
 
@@ -16718,6 +16842,13 @@ def _run_housekeeping_tick():
 
 def _housekeeping_loop():
     interval = max(60, int(os.environ.get('HOUSEKEEPING_INTERVAL_SECONDS') or 300))
+    try:
+        with app.app_context():
+            resumed = _resume_interrupted_jobs()
+            if resumed:
+                print(f'[HOUSEKEEPING] resumed {resumed} interrupted job(s)')
+    except Exception as exc:
+        print(f'[HOUSEKEEPING] job resume sweep failed: {exc}')
     while True:
         try:
             with app.app_context():
@@ -19516,6 +19647,19 @@ def _write_job(namespace, tenant_id, job_id, payload):
     path = _job_path(namespace, tenant_id, job_id)
     payload = dict(payload)
     payload['updatedAt'] = time.time()
+    payload['pid'] = os.getpid()
+    # The restart-resume sweep re-dispatches from the persisted request, so `payload`/`actor`
+    # must survive every status write — status updates replace the document wholesale and would
+    # otherwise drop them the moment the worker reports progress.
+    if 'payload' not in payload or 'actor' not in payload:
+        try:
+            existing = _read_job_file(path)
+        except Exception:
+            existing = None
+        if isinstance(existing, dict):
+            for sticky in ('payload', 'actor'):
+                if sticky not in payload and sticky in existing:
+                    payload[sticky] = existing[sticky]
     body = json.dumps(payload, ensure_ascii=False)
     # Polling can be served by another Gunicorn worker, so a process-local lock alone cannot
     # stop that worker from opening the file between truncate() and the final write. Publish a
@@ -19549,17 +19693,161 @@ def _write_job(namespace, tenant_id, job_id, payload):
                 pass
 
 
+def _read_job_file(path):
+    try:
+        with open(path, encoding='utf-8') as fh:
+            payload = json.load(fh)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _read_job(namespace, tenant_id, job_id):
     path = _job_path(namespace, tenant_id, job_id)
     if not os.path.isfile(path):
         return None
     with _MARKET_JOB_LOCK:
-        try:
-            with open(path, encoding='utf-8') as fh:
-                payload = json.load(fh)
-        except Exception:
-            return None
+        payload = _read_job_file(path)
     return payload if isinstance(payload, dict) else None
+
+
+def _resume_interrupted_jobs():
+    """Re-dispatch persisted jobs whose owning process died.
+
+    Every `_write_job` stamps the writing pid. A job still 'queued' or
+    'running' under a foreign pid at startup belongs to a dead worker —
+    Gunicorn respawns one — so this worker claims it and re-runs the stored
+    request. A live sibling's job keeps that worker's pid and is left alone.
+    Orphans that predate resumable payloads are closed as failed once stale
+    so clients stop polling a job that will never finish.
+    """
+    my_pid = os.getpid()
+    orphan_fail_seconds = int(os.environ.get('JOB_ORPHAN_FAIL_SECONDS') or 900)
+    resumed = 0
+    for namespace in ('.market_jobs', '.plan_jobs', '.land_jobs', '.slide_jobs',
+                      '.designer_chat_jobs'):
+        base = os.path.join(UPLOADS_DIR, namespace)
+        if not os.path.isdir(base):
+            continue
+        for tenant_dir in os.listdir(base):
+            tenant_path = os.path.join(base, tenant_dir)
+            if not os.path.isdir(tenant_path):
+                continue
+            for name in os.listdir(tenant_path):
+                if not name.endswith('.json') or '.tmp-' in name:
+                    continue
+                job_id = name[:-5]
+                try:
+                    job = _read_job(namespace, tenant_dir, job_id)
+                except Exception:
+                    continue
+                if not isinstance(job, dict):
+                    continue
+                if str(job.get('status') or '') not in ('queued', 'running'):
+                    continue
+                if job.get('pid') == my_pid:
+                    continue
+                if not isinstance(job.get('payload'), dict):
+                    try:
+                        age = time.time() - float(job.get('updatedAt') or 0)
+                    except (TypeError, ValueError):
+                        age = orphan_fail_seconds + 1
+                    if age > orphan_fail_seconds:
+                        try:
+                            _write_job(namespace, tenant_dir, job_id, {
+                                'status': 'failed',
+                                'success': False,
+                                'error': 'توقفت المهمة عند إعادة تشغيل الخادم',
+                                'failureReason': 'job_interrupted',
+                            })
+                        except Exception:
+                            pass
+                    continue
+                _write_job(namespace, tenant_dir, job_id, {
+                    **job,
+                    'status': 'running',
+                    'success': True,
+                    'resumed': True,
+                    'message': 'استُؤنفت المهمة بعد إعادة تشغيل الخادم',
+                })
+                if _redispatch_job(namespace, tenant_dir, job_id, job):
+                    resumed += 1
+    return resumed
+
+
+def _redispatch_job(namespace, tenant_id, job_id, job):
+    """Spawn the worker matching a persisted job's namespace."""
+    payload = job.get('payload') or {}
+    actor = job.get('actor') if isinstance(job.get('actor'), dict) else None
+    try:
+        if namespace == '.market_jobs':
+            kind = str(job.get('kind') or payload.get('kind') or '')
+            if kind not in ('competitors', 'summary'):
+                return False
+            threading.Thread(
+                target=_market_job_worker,
+                args=(current_app._get_current_object(), tenant_id, kind,
+                      payload.get('data') or {}, job_id),
+                kwargs={'actor': actor},
+                daemon=True,
+            ).start()
+            return True
+        if namespace == '.plan_jobs':
+            branding = db.get_branding(tenant_id)
+            if not branding:
+                return False
+            threading.Thread(
+                target=_slide_plan_job_worker,
+                args=(current_app._get_current_object(), tenant_id,
+                      payload.get('projectData') or {}, dict(branding),
+                      payload.get('images') or {}, job_id,
+                      payload.get('targetSectionKeys')),
+                daemon=True,
+            ).start()
+            return True
+        if namespace == '.land_jobs':
+            threading.Thread(
+                target=_land_job_worker,
+                args=(current_app._get_current_object(), tenant_id,
+                      payload.get('data') or {}, job_id),
+                daemon=True,
+            ).start()
+            return True
+        if namespace in ('.slide_jobs', '.designer_chat_jobs'):
+            if not isinstance(actor, dict) or not actor:
+                return False
+            # These workers authenticate by replaying the caller's Authorization
+            # header; a persisted bearer token would be a stored secret, so the
+            # resume path mints a fresh one for the recorded actor instead.
+            token = auth.create_token(
+                tenant_id, '',
+                user_id=actor.get('user_id'),
+                user_name=actor.get('user_name'),
+                user_role=actor.get('user_role'))
+            target = (_run_slide_generation_job if namespace == '.slide_jobs'
+                      else globals().get('_designer_chat_run_job'))
+            if target is None:
+                return False
+            threading.Thread(
+                target=target,
+                args=(current_app._get_current_object(), tenant_id,
+                      payload.get('data') or {}, job_id, f'Bearer {token}'),
+                daemon=True,
+            ).start()
+            return True
+    except Exception as exc:
+        print(f'[JOB RESUME] failed to re-dispatch {namespace}/{job_id}: {exc}')
+    return False
+
+
+_JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid')
+
+
+def _public_job(job):
+    """Job file minus server-only internals before it is returned to a client."""
+    if not isinstance(job, dict):
+        return job
+    return {k: v for k, v in job.items() if k not in _JOB_INTERNAL_KEYS}
 
 
 def _market_job_dir(tenant_id):
@@ -19800,8 +20088,16 @@ def _execute_market_summary(data, tenant_id=None):
     }
 
 
-def _market_job_worker(app, tenant_id, kind, data, job_id):
+def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
     with app.app_context():
+        # ISS-033: helpers that read the caller identity from g (upload dir,
+        # logo publish, audit) must see this job's tenant — an app context
+        # starts empty, so the worker stamps it the way require_auth would.
+        g.tenant_id = tenant_id
+        if isinstance(actor, dict):
+            g.user_id = actor.get('user_id')
+            g.user_name = actor.get('user_name')
+            g.user_role = actor.get('user_role')
         _write_market_job(tenant_id, job_id, {
             'status': 'running',
             'success': True,
@@ -19848,10 +20144,21 @@ def _start_market_job(kind, executor):
         'success': True,
         'kind': kind,
         'message': 'تم استلام طلب دراسة السوق',
+        'payload': {'kind': kind, 'data': data},
+        'actor': {
+            'user_id': getattr(g, 'user_id', None),
+            'user_name': getattr(g, 'user_name', None),
+            'user_role': getattr(g, 'user_role', None),
+        },
     })
     threading.Thread(
         target=_market_job_worker,
         args=(current_app._get_current_object(), tenant_id, kind, data, job_id),
+        kwargs={'actor': {
+            'user_id': getattr(g, 'user_id', None),
+            'user_name': getattr(g, 'user_name', None),
+            'user_role': getattr(g, 'user_role', None),
+        }},
         daemon=True,
     ).start()
     return jsonify({
@@ -19868,6 +20175,9 @@ def _start_market_job(kind, executor):
 def api_generate_executive_content():
     """Rewrite one executive-content block from already collected project facts."""
     data = request.json or {}
+    _billing_guard = _require_billing_balance('executive_content')
+    if _billing_guard is not None:
+        return _billing_guard
     key = str(data.get('block') or '').strip()
     spec = executive_content.block_spec(key)
     if not spec:
@@ -20004,6 +20314,9 @@ def api_market_study_competitor_logo():
     verified_official = bool(official_url and market_study.official_source_reliability(
         competitor.get('name'), competitor.get('source'), official_url))
     if not verified_official:
+        _billing_guard = _require_billing_balance('ai_text')
+        if _billing_guard is not None:
+            return _billing_guard
         discovery_prompt = (
             f'ابحث عن الموقع الرسمي وشعار «{competitor["name"]}». '
             'أعد JSON فقط بالمفاتيح official_url وlogo_url وlogo_source_url. '
@@ -20072,52 +20385,23 @@ def api_market_study_job(job_id):
             'error': 'مهمة دراسة السوق غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(job)
-
-
-_LAND_JOB_LOCK = threading.Lock()
+    return jsonify(_public_job(job))
 
 
 def _land_job_dir(tenant_id):
-    path = os.path.join(UPLOADS_DIR, '.land_jobs', str(tenant_id))
-    os.makedirs(path, exist_ok=True)
-    return path
+    return _job_dir('.land_jobs', tenant_id)
 
 
 def _land_job_path(tenant_id, job_id):
-    return os.path.join(_land_job_dir(tenant_id), f'{job_id}.json')
+    return _job_path('.land_jobs', tenant_id, job_id)
 
 
 def _write_land_job(tenant_id, job_id, payload):
-    path = _land_job_path(tenant_id, job_id)
-    payload = dict(payload)
-    payload['updatedAt'] = time.time()
-    body = json.dumps(payload, ensure_ascii=False)
-    with _LAND_JOB_LOCK:
-        last_error = None
-        for _ in range(8):
-            try:
-                with open(path, 'w', encoding='utf-8') as fh:
-                    fh.write(body)
-                return
-            except OSError as error:
-                last_error = error
-                time.sleep(0.03)
-        if last_error:
-            raise last_error
+    _write_job('.land_jobs', tenant_id, job_id, payload)
 
 
 def _read_land_job(tenant_id, job_id):
-    path = _land_job_path(tenant_id, job_id)
-    if not os.path.isfile(path):
-        return None
-    with _LAND_JOB_LOCK:
-        try:
-            with open(path, encoding='utf-8') as fh:
-                payload = json.load(fh)
-        except Exception:
-            return None
-    return payload if isinstance(payload, dict) else None
+    return _read_job('.land_jobs', tenant_id, job_id)
 
 
 def _land_job_worker(app, tenant_id, data, job_id):
@@ -20132,6 +20416,10 @@ def _land_job_worker(app, tenant_id, data, job_id):
             with app.test_request_context('/api/extract-croquis', method='POST', json=data):
                 g.tenant_id = tenant_id
                 response = _execute_extract_croquis()
+            http_status = getattr(response, 'status_code', 500)
+            if isinstance(response, tuple):
+                http_status = response[1] if len(response) > 1 else 200
+                response = response[0]
             payload = response.get_json(silent=True) if response is not None else {}
             if not isinstance(payload, dict):
                 payload = {}
@@ -20140,7 +20428,7 @@ def _land_job_worker(app, tenant_id, data, job_id):
             _write_land_job(tenant_id, job_id, {
                 **payload,
                 'status': status,
-                'httpStatus': getattr(response, 'status_code', 500),
+                'httpStatus': http_status,
                 'message': payload.get('error') or 'اكتمل التحليل',
             })
         except Exception as exc:
@@ -20175,6 +20463,7 @@ def api_extract_croquis():
         'status': 'queued',
         'success': True,
         'message': 'تم استلام طلب التحليل',
+        'payload': {'data': data},
     })
     threading.Thread(
         target=_land_job_worker,
@@ -20201,7 +20490,7 @@ def api_extract_croquis_job(job_id):
             'error': 'مهمة التحليل غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(job)
+    return jsonify(_public_job(job))
 
 
 def _execute_extract_croquis():
@@ -20396,6 +20685,7 @@ def _execute_extract_croquis():
         vision_warnings = list(site_context_warnings)
         document_processing = []
         regulation_evidence_metadata = []
+        reg_digest = {'matched': False}
         if _has_any_openrouter_key(_usage_ctx('land', data)):
             vision_parts = []
             document_descriptions = []
@@ -22240,6 +22530,10 @@ def api_analyze_reference():
     if not ref_path:
         return jsonify({'error': 'No reference image uploaded. Upload one first via /api/upload/reference-image'}), 400
 
+    _billing_guard = _require_billing_balance('ai_text')
+    if _billing_guard is not None:
+        return _billing_guard
+
     # Convert relative path to absolute
     abs_path = os.path.join(os.path.dirname(__file__), ref_path.lstrip('/'))
     if not os.path.exists(abs_path):
@@ -22956,7 +23250,14 @@ def api_admin_tenant_key_update(tenant_id):
         key_hash = _find_managed_key_hash_for_tenant(tenant_id)
     if key_hash:
         if limit_usd is not None:
-            _openrouter_update_managed_key(key_hash, limit_usd=limit_usd, limit_reset=limit_reset)
+            # ISS-036: the dashboard field means the same thing here as in the
+            # wallet sync — how much more the key may burn — so the PATCH adds
+            # the usage the provider already recorded against the key.
+            provider_usage = _openrouter_key_usage_usd(tenant_id)
+            _openrouter_update_managed_key(
+                key_hash,
+                limit_usd=(provider_usage + limit_usd) if provider_usage is not None else limit_usd,
+                limit_reset=limit_reset)
         if is_active is False:
             _openrouter_update_managed_key(key_hash, disabled=True)
         elif is_active is True:
@@ -24108,6 +24409,9 @@ def api_training_chat():
     Understands and can modify: branding, fields, slides, moodboard, users,
     permissions, sections, presentations, and training data."""
     data = request.json or {}
+    _billing_guard = _require_billing_balance('designer_chat')
+    if _billing_guard is not None:
+        return _billing_guard
     message = (data.get('message') or '').strip()
     if not message:
         return jsonify({'error': 'message is required'}), 400
@@ -27034,9 +27338,32 @@ def api_settle_generation_approval(approval_id):
             and not _omran_can('approve_generation'):
         return _omran_forbidden('تسوية الحجز تخص مقدم الطلب أو معتمد التوليد')
     data = request.json or {}
+    job_id = str(data.get('jobId') or '').strip()
+    consumed = bool(data.get('consumed', True))
+    # The caller's claim about the run is checked against server state: a
+    # named job must belong to this approval and agree with the outcome, and
+    # a live run can never have its escrow released under it.
+    jobs = _approval_generation_jobs(g.tenant_id, approval_id)
+    job = None
+    if job_id:
+        job = next((j for j in jobs if str(j.get('id')) == job_id), None)
+        if job is None:
+            return jsonify({'error': 'مهمة التوليد لا تتبع هذا الاعتماد',
+                            'error_code': 'job_mismatch'}), 409
+        if consumed and job.get('status') != 'completed':
+            return jsonify({'error': 'لا يمكن استهلاك الحجز قبل اكتمال مهمة التوليد',
+                            'error_code': 'job_not_completed'}), 409
+        if not consumed and job.get('status') in ('queued', 'running'):
+            return jsonify({'error': 'لا يمكن تحرير الحجز ومهمة التوليد ما زالت تعمل',
+                            'error_code': 'job_still_running'}), 409
+    elif jobs:
+        # A registered run exists for this approval — settling under a bare
+        # 'unknown-job' label would orphan its bookkeeping.
+        return jsonify({'error': 'تسوية هذا الاعتماد تتطلب معرف مهمة التوليد',
+                        'error_code': 'job_required'}), 409
     result = db.settle_generation_approval(
-        g.tenant_id, approval_id, data.get('jobId') or 'unknown-job',
-        consumed=bool(data.get('consumed', True)), settled_by=_omran_actor_id(),
+        g.tenant_id, approval_id, job_id or 'unknown-job',
+        consumed=consumed, settled_by=_omran_actor_id(),
         note=data.get('note'),
     )
     failure = _omran_error(result)
@@ -27104,6 +27431,19 @@ def api_list_generation_jobs():
     if draft_id:
         jobs = [job for job in jobs if job.get('draft_id') == draft_id]
     return jsonify({'success': True, 'jobs': jobs})
+
+
+def _approval_generation_jobs(tenant_id, approval_id):
+    """Registered runs of one approval — what settle/finish claims are checked
+    against instead of trusting the client's job label."""
+    try:
+        rows = db.get_db().execute(
+            'SELECT * FROM generation_jobs WHERE tenant_id = ? AND approval_id = ? '
+            'ORDER BY created_at ASC, rowid ASC',
+            (str(tenant_id), str(approval_id))).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
 
 
 def _generation_job_in_scope(job):
@@ -27181,14 +27521,30 @@ def api_finish_generation_job(job_id):
         job_id, status=status, progress=data.get('progress'),
         slides_done=data.get('slidesDone'), actual_cost_usd=data.get('actualCostUsd'),
         error=data.get('error'))
+    settlement_error = None
     if job.get('approval_id'):
         try:
-            db.settle_generation_approval(
+            settlement = db.settle_generation_approval(
                 g.tenant_id, job['approval_id'], job_id,
                 consumed=(status == 'completed'), settled_by=_omran_actor_id(),
                 note=str(data.get('note') or data.get('error') or '').strip() or None)
-        except Exception:
-            pass
+            if isinstance(settlement, dict) and settlement.get('error'):
+                settlement_error = settlement.get('error')
+        except Exception as exc:
+            settlement_error = str(exc) or 'settlement_failed'
+    if settlement_error:
+        # The job is closed but its escrow is still live — reporting the
+        # failure lets the caller retry settle instead of believing the run
+        # was paid for (or refunded) when it was not. 503, not 502: the edge
+        # fabricates 502s of its own for large bodies, so an app-emitted one
+        # would be indistinguishable from a proxy failure.
+        return jsonify({
+            'success': False,
+            'error': 'تعذر تسوية حجز التوليد بعد إنهاء المهمة',
+            'error_code': 'settlement_failed',
+            'detail': str(settlement_error)[:300],
+            'job': updated,
+        }), 503
     try:
         titles = {'completed': 'اكتمل توليد العرض', 'failed': 'فشل توليد العرض',
                   'cancelled': 'أُلغيت مهمة التوليد'}

@@ -252,6 +252,157 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertEqual(result['entry']['kind'], 'credit')
         self.assertAlmostEqual(result['balance_usd'], 6.0)
 
+    # ── Sub-cent carry (ISS-038) ───────────────────────────────────────
+
+    def test_subcent_claim_carries_instead_of_closing_at_zero(self):
+        """ISS-038: a claim whose billed total rounds to $0.00 must leave the
+        rows unbilled so the cents accumulate into the next invoice."""
+        tenant_id = self._fresh_tenant('subcent', balance=10.0)
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=3,
+                cost_usd=0.001, draft_id='draft-subcent')
+            result = db.bill_unbilled_usage(tenant_id, draft_id='draft-subcent')
+        self.assertFalse(result['billed'])
+        self.assertEqual(result['reason'], 'below_minimum_charge')
+        with self.app.app_context():
+            conn = db.get_db()
+            row = conn.execute(
+                'SELECT billed_ledger_id FROM ai_usage_events WHERE draft_id = ?',
+                ('draft-subcent',)).fetchone()
+            self.assertIsNone(row['billed_ledger_id'])
+            count = conn.execute(
+                'SELECT COUNT(*) AS c FROM tenant_ledger WHERE tenant_id = ? AND kind = ?',
+                (tenant_id, 'debit')).fetchone()['c']
+            self.assertEqual(count, 0)
+            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 10.0)
+
+    def test_carried_subcent_claim_bills_once_threshold_is_crossed(self):
+        """ISS-038: after the carried cents push the aggregate past a cent,
+        the next checkout claims the earlier rows under the new debit."""
+        tenant_id = self._fresh_tenant('subcent-carry', balance=10.0)
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=3,
+                cost_usd=0.001, draft_id='draft-carry')
+            first = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
+            self.assertFalse(first['billed'])
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=900,
+                cost_usd=0.02, draft_id='draft-carry')
+            second = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
+        self.assertTrue(second['billed'])
+        entry = second['entry']
+        # 0.021 raw * 1.6 = 0.0336 -> $0.03 collected once, not $0.00 twice.
+        self.assertAlmostEqual(entry['amount_usd'], 0.03, places=2)
+        self.assertEqual(entry['ai_events_count'], 2)
+        with self.app.app_context():
+            conn = db.get_db()
+            unbilled = conn.execute(
+                'SELECT COUNT(*) AS c FROM ai_usage_events '
+                'WHERE draft_id = ? AND billed_ledger_id IS NULL',
+                ('draft-carry',)).fetchone()['c']
+            self.assertEqual(unbilled, 0)
+
+    def test_zero_cost_rows_still_close_instead_of_looping(self):
+        """ISS-038: genuinely free rows have no cents to carry — marking them
+        billed at $0 keeps them out of every later claim scope."""
+        tenant_id = self._fresh_tenant('free-rows', balance=10.0)
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=0,
+                cost_usd=0.0, draft_id='draft-free')
+            result = db.bill_unbilled_usage(tenant_id, draft_id='draft-free')
+        self.assertTrue(result['billed'])
+        self.assertAlmostEqual(result['entry']['amount_usd'], 0.0)
+
+    # ── Package fallback (ISS-039) ─────────────────────────────────────
+
+    def test_exhausted_package_stops_owning_new_usage(self):
+        """ISS-039: once the assigned package's credit is burned, new usage
+        must fall back to the wallet instead of staying package-tagged and
+        unbillable forever."""
+        tenant_id = self._fresh_tenant('pkg-exhaust', balance=10.0)
+        with self.app.app_context():
+            package = db.create_billing_package('pkg-mini', credit_usd=0.01)
+            db.assign_tenant_package(tenant_id, package['id'])
+            # First event burns the package credit exactly under it.
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=0.01, draft_id='draft-pkg')
+            # Second event lands after the credit is gone — it must be a
+            # wallet row, not another package row the billing sweep ignores.
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=0.02, draft_id='draft-pkg')
+            conn = db.get_db()
+            rows = conn.execute(
+                'SELECT cost_usd, package_id FROM ai_usage_events '
+                'WHERE tenant_id = ? ORDER BY created_at ASC, rowid ASC',
+                (tenant_id,)).fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]['package_id'], package['id'])
+            self.assertIsNone(rows[1]['package_id'])
+            # And the wallet actually bills the overflow row.
+            result = db.bill_unbilled_usage(tenant_id, draft_id='draft-pkg')
+            self.assertTrue(result['billed'])
+            self.assertAlmostEqual(result['entry']['amount_usd'], 0.03, places=2)
+
+    def test_deactivated_package_stops_owning_new_usage(self):
+        """ISS-039: an is_active=0 package is not a valid spend owner either."""
+        tenant_id = self._fresh_tenant('pkg-off', balance=10.0)
+        with self.app.app_context():
+            package = db.create_billing_package('pkg-off', credit_usd=5.0)
+            db.assign_tenant_package(tenant_id, package['id'])
+            conn = db.get_db()
+            conn.execute('UPDATE billing_packages SET is_active = 0 WHERE id = ?',
+                         (package['id'],))
+            conn.commit()
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=0.02, draft_id='draft-off')
+            row = conn.execute(
+                'SELECT package_id FROM ai_usage_events WHERE tenant_id = ?',
+                (tenant_id,)).fetchone()
+            self.assertIsNone(row['package_id'])
+
+    def test_reassignment_starts_a_fresh_package_cycle(self):
+        """ISS-040: re-assigning a consumed package must open a new credit
+        window — the old cycle's burn must not eat the new grant."""
+        tenant_id = self._fresh_tenant('pkg-cycle', balance=10.0)
+        with self.app.app_context():
+            package = db.create_billing_package('pkg-renew', credit_usd=0.01)
+            db.assign_tenant_package(tenant_id, package['id'])
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=0.01, draft_id='draft-cycle')
+            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.0)
+            import time
+            time.sleep(1.1)  # cycle bound is second-precision
+            db.assign_tenant_package(tenant_id, package['id'])
+            # New cycle: full snapshot credit again, old usage out of scope.
+            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.01)
+            db.record_ai_usage_event(
+                tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=0.005, draft_id='draft-cycle')
+            row = db.get_db().execute(
+                'SELECT package_id FROM ai_usage_events WHERE tenant_id = ? '
+                'ORDER BY created_at DESC, rowid DESC LIMIT 1',
+                (tenant_id,)).fetchone()
+            self.assertEqual(row['package_id'], package['id'])
+            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.005)
+
+    def test_catalog_edit_does_not_rewrite_existing_entitlement(self):
+        """ISS-040: changing the catalog credit_usd must not change what an
+        already-assigned company was granted."""
+        tenant_id = self._fresh_tenant('pkg-snapshot', balance=10.0)
+        with self.app.app_context():
+            package = db.create_billing_package('pkg-snap', credit_usd=0.05)
+            db.assign_tenant_package(tenant_id, package['id'])
+            db.update_billing_package(package['id'], credit_usd=0.01)
+            # The assignment snapshot keeps the original 0.05 grant.
+            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.05)
+
     # ── Pre-flight guard ───────────────────────────────────────────────
 
     def test_preflight_passes_when_enforcement_off(self):
@@ -273,6 +424,113 @@ class BillingLedgerTests(unittest.TestCase):
         body = response.get_json()
         self.assertFalse(body['success'])
         self.assertEqual(body['error_code'], 'INSUFFICIENT_BALANCE')
+
+    def test_preflight_fails_closed_when_balance_lookup_errors(self):
+        """ISS-037: an unreadable wallet is not a funded wallet — a DB error
+        must refuse the paid call instead of silently letting it through."""
+        os.environ['BILLING_ENFORCE'] = '1'
+        original = db.get_tenant_balance
+        db.get_tenant_balance = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('db down'))
+        try:
+            with self.app.app_context():
+                from flask import g
+                g.tenant_id = self.tenant_id
+                resp, status = self.application_module._require_billing_balance('analyze_site')
+        finally:
+            db.get_tenant_balance = original
+        self.assertEqual(status, 503)
+        self.assertEqual(resp.get_json()['error_code'], 'BILLING_CHECK_UNAVAILABLE')
+
+    def test_preflight_guard_covers_paid_ai_routes(self):
+        """ISS-037: image, visual-concept, executive-content and legacy paid
+        routes all run the wallet preflight before any provider call."""
+        os.environ['BILLING_ENFORCE'] = '1'
+        tenant_id = self._fresh_tenant('preflight-coverage', balance=0.0)
+        token = auth.create_token(
+            tenant_id, 'preflight-coverage@example.test', user_id=None,
+            user_name='Coverage Admin', user_role='company_admin')
+        headers = {'Authorization': f'Bearer {token}'}
+        client = self.app.test_client()
+        paid_posts = [
+            ('/api/visual-concept/generate', {'slotId': 'cover'}),
+            ('/api/visual-concept/chat', {'slotId': 'cover'}),
+            ('/api/visual-concept/plans-verify', {}),
+            ('/api/visual-concept/plans-boundary', {
+                'mode': 'ai',
+                'plansWorkflow': {'verification': {'approved': True}},
+            }),
+            ('/api/visual-concept/prompt', {
+                'slotId': 'plan_site',
+                'instruction': 'x',
+                'projectData': {'project_name': 'x'},
+                'plansWorkflow': {
+                    'verification': {'approved': True},
+                    'boundary': {'approved': True},
+                },
+            }),
+            ('/api/generate-images', {'projectData': {}}),
+            ('/api/generate-main-image', {'projectData': {}}),
+            ('/api/generate-slide-image', {'prompt': 'x'}),
+            ('/api/generate-image', {'prompt': 'x'}),
+            ('/api/generate', {'projectData': {}}),
+            ('/api/generate-content', {'projectData': {}}),
+            ('/api/ai-edit-slide', {'instruction': 'x'}),
+            ('/api/ai-chat', {'message': 'x'}),
+            ('/api/generate-bullets', {'title': 'x'}),
+            ('/api/designer-generate', {'projectData': {}}),
+            ('/api/designer-chat', {'message': 'x'}),
+            ('/api/generate-cover-prompt', {'projectData': {}}),
+            ('/api/get-image-prompts', {'projectData': {}}),
+            ('/api/executive-content/generate', {'block': 'x'}),
+            ('/api/ai-input-builder', {'description': 'x'}),
+            ('/api/ai-build-fields', {'description': 'x'}),
+            ('/api/training-chat', {'message': 'x'}),
+            ('/api/market-study/competitors/logo', {'competitor': {'name': 'x'}}),
+        ]
+        for path, payload in paid_posts:
+            response = client.post(path, json=payload, headers=headers)
+            body = response.get_json() or {}
+            self.assertEqual(
+                response.status_code, 402,
+                f'{path} should refuse an empty wallet first, got '
+                f'{response.status_code}: {body}')
+            self.assertEqual(body.get('error_code'), 'INSUFFICIENT_BALANCE', path)
+
+    def test_preflight_refusal_precedes_payload_validation(self):
+        """ISS-037: the wallet check fires before request validation, so a
+        paid route can never be probed for free with malformed payloads."""
+        os.environ['BILLING_ENFORCE'] = '1'
+        tenant_id = self._fresh_tenant('preflight-order', balance=0.0)
+        token = auth.create_token(
+            tenant_id, 'preflight-order@example.test', user_id=None,
+            user_name='Order Admin', user_role='company_admin')
+        client = self.app.test_client()
+        response = client.post(
+            '/api/executive-content/generate', json={},
+            headers={'Authorization': f'Bearer {token}'})
+        self.assertEqual(response.status_code, 402)
+        self.assertEqual(
+            response.get_json()['error_code'], 'INSUFFICIENT_BALANCE')
+
+    def test_tenant_key_gate_fails_closed_on_lookup_error(self):
+        """ISS-037: strict tenant-key mode must refuse when the key lookup
+        itself fails — a storage error cannot become a free pass."""
+        module = self.application_module
+        original_flag = module.REQUIRE_TENANT_OPENROUTER_KEY
+        original_raw = db.get_tenant_openrouter_key_raw
+        original_tenant = db.get_tenant_by_id
+        module.REQUIRE_TENANT_OPENROUTER_KEY = True
+        db.get_tenant_by_id = lambda tid: {'id': tid, 'is_admin': 0}
+        db.get_tenant_openrouter_key_raw = (
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError('db down')))
+        try:
+            verdict = module._tenant_key_gate(tenant_id=self.tenant_id)
+        finally:
+            module.REQUIRE_TENANT_OPENROUTER_KEY = original_flag
+            db.get_tenant_openrouter_key_raw = original_raw
+            db.get_tenant_by_id = original_tenant
+        self.assertIsNotNone(verdict)
+        self.assertEqual(verdict['error_code'], 'TENANT_KEY_CHECK_FAILED')
 
     # ── HTTP surface ───────────────────────────────────────────────────
 

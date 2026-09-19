@@ -537,6 +537,87 @@ class GenerationGateTests(ScopeTestBase):
         self.assertEqual(response.status_code, 404)
 
 
+class GenerationSettlementTests(ScopeTestBase):
+    """ISS-042: settle/finish verify the run against server state — an
+    unverified job label cannot consume or release the escrow, and a failed
+    settlement can never be reported as success."""
+
+    def _approved_run(self, draft_id, job_status='queued'):
+        with self.app.app_context():
+            db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'مشروع التسوية'},
+                {'basic': 'approved'}, 'draft', draft_id=draft_id)
+            approval = db.create_generation_approval(
+                self.tenant, draft_id,
+                {'estimated_points': 0, 'estimated_cost_usd': 0, 'slides_count': 1},
+                'owner', 'Owner')
+            self.assertNotIn('error', approval, approval)
+            decided = db.decide_generation_approval(
+                self.tenant, approval['id'], 'approved', 'owner', 'Owner', allow_self=True)
+            self.assertNotIn('error', decided, decided)
+            job = db.create_generation_job(
+                self.tenant, approval_id=approval['id'], draft_id=draft_id)
+            if job_status != 'queued':
+                job = db.update_generation_job(job['id'], status=job_status)
+            return approval['id'], job['id']
+
+    def _settle(self, approval_id, payload):
+        return self.client.post(
+            f'/api/generation-approvals/{approval_id}/settle',
+            headers=self.admin_headers, json=payload)
+
+    def test_consume_claim_needs_a_completed_job(self):
+        approval_id, job_id = self._approved_run('settle-live', job_status='running')
+        response = self._settle(approval_id, {'jobId': job_id, 'consumed': True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'job_not_completed')
+
+    def test_release_claim_needs_a_finished_job(self):
+        approval_id, job_id = self._approved_run('settle-rel', job_status='running')
+        response = self._settle(approval_id, {'jobId': job_id, 'consumed': False})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'job_still_running')
+
+    def test_settle_rejects_a_job_from_another_approval(self):
+        approval_id, _job = self._approved_run('settle-a')
+        other_approval, other_job = self._approved_run('settle-b')
+        response = self._settle(approval_id, {'jobId': other_job, 'consumed': True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'job_mismatch')
+        response = self._settle(approval_id, {'jobId': 'ghost-job', 'consumed': True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'job_mismatch')
+
+    def test_settle_without_job_id_is_refused_when_a_run_exists(self):
+        approval_id, _job = self._approved_run('settle-noname')
+        response = self._settle(approval_id, {'consumed': True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error_code'], 'job_required')
+
+    def test_settle_consumes_once_the_job_is_completed(self):
+        approval_id, job_id = self._approved_run('settle-ok', job_status='completed')
+        response = self._settle(approval_id, {'jobId': job_id, 'consumed': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['result']['status'], 'consumed')
+
+    def test_finish_reports_settlement_failure_instead_of_success(self):
+        approval_id, job_id = self._approved_run('finish-fail')
+        with self.app.app_context():
+            # Consume the approval first so the finish-time settle must fail.
+            db.update_generation_job(job_id, status='running')
+            settled = db.settle_generation_approval(
+                self.tenant, approval_id, job_id, consumed=True)
+            self.assertEqual(settled.get('status'), 'consumed')
+        # The job is still 'running' server-side; finishing it now hits a
+        # settle that can no longer pass — the route must surface that.
+        response = self.client.post(
+            f'/api/generation-jobs/{job_id}/finish',
+            headers=self.admin_headers, json={'status': 'completed'})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['error_code'], 'settlement_failed')
+        self.assertFalse(response.get_json()['success'])
+
+
 class WorkflowClaimTests(ScopeTestBase):
     """ISS-025: client-sent unlock booleans cannot mint workflow state — every
     approval the routes honor must exist as a stored server artifact."""
@@ -1079,6 +1160,210 @@ class DraftRevisionConflictTests(ScopeTestBase):
         self.assertEqual(
             response.get_json()['revision'],
             self._stored('rev-restore')['revision'])
+
+
+class MarketJobIdentityTests(ScopeTestBase):
+    """ISS-033: the background market worker must run under the job's tenant
+    identity — upload dirs, logo publishing, audit rows and key selection all
+    read it from g, and an app context starts empty."""
+
+    def test_worker_stamps_tenant_and_actor_inside_its_context(self):
+        from flask import g as flask_g
+        captured = {}
+
+        def fake_execute(data, tenant_id=None):
+            captured['g_tenant'] = getattr(flask_g, 'tenant_id', None)
+            captured['g_user'] = getattr(flask_g, 'user_id', None)
+            captured['arg_tenant'] = tenant_id
+            return {'success': True, 'summary': {}}
+
+        with patch.object(self.module, '_execute_market_summary', side_effect=fake_execute):
+            self.module._market_job_worker(
+                self.app, self.tenant, 'summary', {'projectData': {}}, 'job0001',
+                actor={'user_id': 'u-1', 'user_name': 'Employee', 'user_role': 'employee'})
+
+        self.assertEqual(captured['g_tenant'], self.tenant)
+        self.assertEqual(captured['g_user'], 'u-1')
+        self.assertEqual(captured['arg_tenant'], self.tenant)
+
+
+class BillingHoldExclusionTests(ScopeTestBase):
+    """ISS-034: usage under a live generation hold is prepaid by the escrow —
+    the periodic sweep must not bill it separately and charge the run twice."""
+
+    def _wallet_tenant(self, slug, credit=100.0):
+        tenant = db.create_tenant('Wallet ' + slug, slug + '@example.test', 'hash', slug)
+        db.record_ledger_credit(tenant, credit, note='topup')
+        return tenant
+
+    def test_unbilled_usage_under_a_live_hold_is_not_billed(self):
+        with self.app.app_context():
+            tenant = self._wallet_tenant('hold-tenant')
+            draft_id = db.save_project_draft(
+                tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
+                'draft', draft_id='hold-draft')
+            hold = db.reserve_points(
+                tenant, 10, cost_usd=10.0,
+                generation_approval_id='appr-1', draft_id=draft_id)
+            self.assertNotIn('error', hold, hold)
+            self.assertAlmostEqual(db.get_tenant_balance(tenant), 90.0)
+            db.record_ai_usage_event(
+                tenant, 'model-x', flow='slide', cost_usd=1.0, draft_id=draft_id)
+            # The sweep must skip usage the live hold already prepays.
+            result = db.bill_unbilled_usage(tenant)
+            self.assertFalse(result.get('billed'), result)
+            self.assertAlmostEqual(db.get_tenant_balance(tenant), 90.0)
+            # Settlement claims the run's usage under its own entry — one
+            # debit total, and the usage lands on that entry, not a second.
+            settle = db.consume_points(tenant, hold['id'])
+            self.assertNotIn('error', settle, settle)
+            billed = db.get_db().execute(
+                'SELECT billed_ledger_id FROM ai_usage_events WHERE tenant_id = ?',
+                (tenant,)).fetchone()
+            self.assertIsNotNone(billed['billed_ledger_id'])
+            self.assertAlmostEqual(db.get_tenant_balance(tenant), 90.0)
+
+    def test_usage_outside_the_hold_scope_still_bills(self):
+        with self.app.app_context():
+            tenant = self._wallet_tenant('hold-scope')
+            db.save_project_draft(
+                tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
+                'draft', draft_id='held-draft')
+            db.save_project_draft(
+                tenant, 'owner', {'project_name': 'حر'}, {'basic': 'draft'},
+                'draft', draft_id='free-draft')
+            hold = db.reserve_points(
+                tenant, 10, cost_usd=10.0,
+                generation_approval_id='appr-2', draft_id='held-draft')
+            self.assertNotIn('error', hold, hold)
+            db.record_ai_usage_event(
+                tenant, 'model-x', flow='slide', cost_usd=1.0, draft_id='held-draft')
+            db.record_ai_usage_event(
+                tenant, 'model-x', flow='market', cost_usd=2.0, draft_id='free-draft')
+            # Only the unrelated usage bills; the held draft's spend stays
+            # prepaid until settlement.
+            result = db.bill_unbilled_usage(tenant)
+            self.assertTrue(result.get('billed'), result)
+            entry = result.get('entry') or {}
+            self.assertAlmostEqual(float(entry.get('ai_cost_usd') or 0), 2.0)
+            held = db.get_db().execute(
+                'SELECT billed_ledger_id FROM ai_usage_events WHERE draft_id = ?',
+                ('held-draft',)).fetchone()
+            self.assertIsNone(held['billed_ledger_id'])
+
+    def test_released_hold_returns_its_usage_to_billable(self):
+        with self.app.app_context():
+            tenant = self._wallet_tenant('hold-release')
+            db.save_project_draft(
+                tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
+                'draft', draft_id='rel-draft')
+            hold = db.reserve_points(
+                tenant, 10, cost_usd=10.0,
+                generation_approval_id='appr-3', draft_id='rel-draft')
+            self.assertNotIn('error', hold, hold)
+            db.record_ai_usage_event(
+                tenant, 'model-x', flow='slide', cost_usd=1.0, draft_id='rel-draft')
+            released = db.release_points(tenant, hold['id'])
+            self.assertNotIn('error', released, released)
+            # After release the escrow is refunded and the usage bills normally.
+            self.assertAlmostEqual(db.get_tenant_balance(tenant), 100.0)
+            result = db.bill_unbilled_usage(tenant)
+            self.assertTrue(result.get('billed'), result)
+
+
+class RunClaimScopeTests(ScopeTestBase):
+    """ISS-035: settlement claims only this run's wallet-billable usage —
+    package rows, still-unpriced attempts and usage older than the hold stay
+    out of the settling entry."""
+
+    def _settle_with_events(self, slug, events):
+        with self.app.app_context():
+            tenant = db.create_tenant('Claim ' + slug, slug + '@example.test', 'hash', slug)
+            db.record_ledger_credit(tenant, 100.0, note='topup')
+            draft_id = db.save_project_draft(
+                tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
+                'draft', draft_id='claim-draft-' + slug)
+            ids = {}
+            conn = db.get_db()
+            for name, kwargs in events.items():
+                kwargs = dict(kwargs)
+                older = kwargs.pop('older_than_hold', False)
+                kwargs.setdefault('tenant_id', tenant)
+                kwargs.setdefault('draft_id', draft_id)
+                ids[name] = db.record_ai_usage_event(model='model-x', **kwargs)
+                if older:
+                    conn.execute(
+                        "UPDATE ai_usage_events SET created_at = '2020-01-01 00:00:00' WHERE id = ?",
+                        (ids[name],))
+                    conn.commit()
+            hold = db.reserve_points(
+                tenant, 10, cost_usd=10.0,
+                generation_approval_id='appr-' + slug, draft_id=draft_id)
+            self.assertNotIn('error', hold, hold)
+            settle = db.consume_points(tenant, hold['id'])
+            self.assertNotIn('error', settle, settle)
+            rows = {
+                row['id']: row['billed_ledger_id']
+                for row in conn.execute(
+                    'SELECT id, billed_ledger_id FROM ai_usage_events WHERE tenant_id = ?',
+                    (tenant,)).fetchall()
+            }
+            return ids, rows
+
+    def test_settled_usage_in_the_run_window_is_claimed(self):
+        ids, rows = self._settle_with_events('inwin', {
+            'settled': {'flow': 'slide', 'cost_usd': 1.0},
+        })
+        self.assertIsNotNone(rows[ids['settled']])
+
+    def test_pending_and_package_rows_stay_unclaimed(self):
+        ids, rows = self._settle_with_events('pend', {
+            'pending': {'flow': 'slide', 'attempt_status': 'in_flight'},
+            'packaged': {'flow': 'slide', 'cost_usd': 1.0, 'package_id': 'pkg-1'},
+        })
+        self.assertIsNone(rows[ids['pending']])
+        self.assertIsNone(rows[ids['packaged']])
+
+    def test_usage_older_than_the_hold_is_not_claimed(self):
+        ids, rows = self._settle_with_events('older', {
+            'prior': {'flow': 'slide', 'cost_usd': 1.0, 'older_than_hold': True},
+            'current': {'flow': 'slide', 'cost_usd': 1.0},
+        })
+        self.assertIsNone(rows[ids['prior']])
+        self.assertIsNotNone(rows[ids['current']])
+
+
+class ProviderCapSyncTests(ScopeTestBase):
+    """ISS-036: the provider's limit is a cumulative cap on usage — the PATCH
+    must send usage + remaining entitlement or every re-sync silently shrinks
+    the real allowance by what the key already burned."""
+
+    def _sync(self, tenant, status, intended=80.0):
+        captured = {}
+        meta = {'has_key': True, 'openrouter_key_hash': 'hash-1',
+                'is_active': 1, 'provenance': 'manual'}
+        with self.app.app_context(), \
+                patch.object(db, 'get_tenant_openrouter_key_meta', return_value=meta), \
+                patch.object(db, 'update_tenant_openrouter_key_meta', return_value=meta), \
+                patch.object(db, 'get_tenant_openrouter_key_raw', return_value='sk-or-fake'), \
+                patch.object(self.module, '_openrouter_key_status', return_value=status), \
+                patch.object(self.module, '_openrouter_update_managed_key',
+                           side_effect=lambda h, **kw: captured.update(kw) or {'ok': True}):
+            self.module._sync_tenant_credit_to_openrouter(tenant, new_limit_usd=intended)
+        return captured
+
+    def test_cap_patch_adds_recorded_usage_to_the_remaining_budget(self):
+        with self.app.app_context():
+            tenant = db.create_tenant('Cap T', 'cap@example.test', 'hash', 'cap-tenant')
+        captured = self._sync(tenant, {'usage': 20.0, 'limit': 100.0}, intended=80.0)
+        self.assertAlmostEqual(captured['limit_usd'], 100.0)
+
+    def test_unreadable_usage_falls_back_to_the_conservative_cap(self):
+        with self.app.app_context():
+            tenant = db.create_tenant('Cap F', 'capf@example.test', 'hash', 'capf-tenant')
+        captured = self._sync(tenant, {'error': 'network'}, intended=80.0)
+        # Under-capping is the safe failure — the next successful sync corrects it.
+        self.assertAlmostEqual(captured['limit_usd'], 80.0)
 
 
 if __name__ == '__main__':

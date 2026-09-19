@@ -1721,6 +1721,12 @@ def install(app, namespace: Dict[str, Any]) -> None:
                 **queued_context,
                 "status": "queued", "success": True, "progress": 1,
                 "message": "تم استلام طلب تعديل العرض",
+                "payload": {"data": payload},
+                "actor": {
+                    "user_id": getattr(g, "user_id", None),
+                    "user_name": getattr(g, "user_name", None),
+                    "user_role": getattr(g, "user_role", None),
+                },
             })
         except RuntimeError as error:
             app.logger.error("Designer chat job registration failed: %s", error)
@@ -1754,6 +1760,9 @@ def install(app, namespace: Dict[str, Any]) -> None:
             "message": "بدأ تعديل العرض في الخلفية",
         }), 202
 
+    # The restart-resume sweep in app.py re-dispatches orphaned jobs through this worker.
+    namespace["_designer_chat_run_job"] = run_job
+
     def job_status(job_id):
         from flask import g, jsonify, request
 
@@ -1770,7 +1779,8 @@ def install(app, namespace: Dict[str, Any]) -> None:
             heartbeat_at = os.path.getmtime(job_path(".designer_chat_jobs", g.tenant_id, job_id))
         except OSError:
             heartbeat_at = float(job.get("updatedAt") or 0)
-        response_job = dict(job)
+        response_job = {k: v for k, v in job.items()
+                        if k not in ("payload", "actor", "pid")}
         response_job["jobId"] = str(job_id)
         response_job["heartbeatAt"] = heartbeat_at
         if response_job.get("status") in {"queued", "running"} and heartbeat_at:

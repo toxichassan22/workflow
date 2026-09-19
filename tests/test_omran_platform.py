@@ -219,12 +219,15 @@ class OmranDbTests(unittest.TestCase):
     def test_consume_writes_debit_and_claims_run_usage(self):
         conn = db.get_db()
         conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        reservation = db.reserve_points('tenant-1', 25000, 25.0, draft_id=self.draft_id)
+        # ISS-035: the settlement claims only this run's usage — rows written
+        # inside the hold window and already priced ('settled'). An unpriced
+        # 'pending' row or one predating the hold stays unclaimed.
         conn.execute(
-            "INSERT INTO ai_usage_events (id, tenant_id, draft_id, flow, model, cost_usd) "
-            "VALUES ('ev-1', 'tenant-1', ?, 'slide_single', 'm', 1.25)",
+            "INSERT INTO ai_usage_events (id, tenant_id, draft_id, flow, model, cost_usd, attempt_status) "
+            "VALUES ('ev-1', 'tenant-1', ?, 'slide_single', 'm', 1.25, 'settled')",
             (self.draft_id,))
         conn.commit()
-        reservation = db.reserve_points('tenant-1', 25000, 25.0, draft_id=self.draft_id)
         consumed = db.consume_points('tenant-1', reservation['id'], settled_by='user-2', note='job-1')
         self.assertEqual(consumed['status'], 'consumed')
         # The hold became the debit on the real ledger — amount is the agreed
@@ -889,9 +892,19 @@ class OmranApiTests(unittest.TestCase):
             f'/api/generation-approvals/{approval_id}/settle', headers=self.headers(third_token),
             json={'jobId': 'job-x', 'consumed': True})
         self.assertEqual(denied.status_code, 403)
-        settled = self.client.post(
+        # ISS-042: a settle claim is checked against the server-side run — the
+        # named job must exist under this approval and be completed.
+        with self.app.app_context():
+            job = db.create_generation_job(
+                self.tenant_id, approval_id=approval_id, draft_id=draft_id)
+            db.update_generation_job(job['id'], status='completed')
+        mismatched = self.client.post(
             f'/api/generation-approvals/{approval_id}/settle', headers=self.headers(emp_token),
             json={'jobId': 'job-x', 'consumed': True})
+        self.assertEqual(mismatched.status_code, 409, mismatched.get_json())
+        settled = self.client.post(
+            f'/api/generation-approvals/{approval_id}/settle', headers=self.headers(emp_token),
+            json={'jobId': job['id'], 'consumed': True})
         self.assertEqual(settled.status_code, 200, settled.get_json())
 
     def test_final_file_decision_requires_permission_and_separation(self):

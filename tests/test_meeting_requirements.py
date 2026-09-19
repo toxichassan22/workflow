@@ -8686,6 +8686,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('if (completed?.plan || !res.fallbackPlan) return completed;', index_source)
         self.assertIn("plan: { ...res.fallbackPlan, source: 'fallback'", index_source)
 
+    def test_generation_job_idempotency_key_names_the_run_not_just_the_draft(self):
+        """ISS-041: re-generating the same draft must register a new job —
+        the key carries the approval id, not only the draft id."""
+        index_source = read_frontend_text()
+        self.assertIn(
+            "idempotencyKey: 'gen-' + (window.currentGenerationApprovalId || 'run')",
+            index_source)
+
     def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
         client = self.app.test_client()
         enriched = {
