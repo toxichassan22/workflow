@@ -231,6 +231,12 @@
     async function openProjectDraftById(draftId) {
       showLoader('جاري تحميل المسودة', '');
       try {
+        // The form schema does not depend on the draft, so its two GETs ride in
+        // parallel with the (much heavier) draft fetch instead of queuing behind it.
+        const formSchemaRequest = Promise.all([
+          api('GET', '/api/fields'),
+          api('GET', '/api/field-sections')
+        ]);
         const resp = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId));
         hideLoader();
         if (!resp.success || !resp.draft) {
@@ -316,7 +322,7 @@
         tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept);
 
         showTenantPage('tenantProjectPage');
-        await loadTenantProjectForm();
+        await loadTenantProjectForm(formSchemaRequest);
         hydrateTenantProjectForm(tenantProjectData);
         applySectionStatuses(sectionStatuses);
         renderTenantSlides();

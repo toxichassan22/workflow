@@ -89,7 +89,10 @@ def compress_response(response):
         if len(body) < COMPRESS_MIN_BYTES:
             return response
         import gzip as _gzip
-        response.set_data(_gzip.compress(body, 6))
+        # Draft responses run to several MB of JSON; on the shared host the CPU
+        # time of level 6 is the bottleneck, while level 1 keeps ~90% of the
+        # compression ratio at a fraction of the cost.
+        response.set_data(_gzip.compress(body, 1 if len(body) > 256 * 1024 else 6))
         response.headers['Content-Encoding'] = 'gzip'
         response.headers['Content-Length'] = str(len(response.get_data()))
         response.headers.add('Vary', 'Accept-Encoding')

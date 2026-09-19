@@ -798,11 +798,13 @@
     }
 
     // Dynamic Project Form
-    async function loadTenantProjectForm() {
-      const [fieldsData, sectionsData] = await Promise.all([
+    // `prefetched` lets callers that already await a bigger request (draft open)
+    // fire these two cheap GETs alongside it instead of adding a second serial wait.
+    async function loadTenantProjectForm(prefetched) {
+      const [fieldsData, sectionsData] = await (prefetched || Promise.all([
         api('GET', '/api/fields'),
         api('GET', '/api/field-sections')
-      ]);
+      ]));
       if (!fieldsData.success) {
         toast(fieldsData.error || 'تعذر تحميل الحقول');
         return false;

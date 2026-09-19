@@ -1023,8 +1023,9 @@
               ? tenantCreativeImages.moodboard.map(image => !!image)
               : []
           },
+          // tenantSlidesData already rides at the top level of this payload; the copy that
+          // used to live here doubled every draft's stored and transferred size.
           slides: {
-            data: tenantSlidesData,
             generated: tenantSlidesData.length > 0,
             status: tenantSlidesData.length ? 'draft' : 'empty'
           }

@@ -285,15 +285,25 @@
       };
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       host.innerHTML = '<p class="tenant-hint">جاري تحميل العروض...</p>';
-      const [response, draftResponse] = await Promise.all([
+      // The page only needs the draft's title. When the draft is already open its
+      // row is in memory, and otherwise the lightweight summaries list answers it —
+      // a full draft GET here re-downloaded megabytes of slides for one string.
+      const draftOpenInMemory = tenantProjectData && String(tenantProjectData.draftId || '') === String(draftId);
+      const [response, draftsResponse] = await Promise.all([
         apiWithTimeout('GET', '/api/presentations?' + query.toString(), null, 25000).catch(() => ({ success: false })),
-        api('GET', '/api/project-draft/' + encodeURIComponent(draftId)).catch(() => ({ success: false }))
+        draftOpenInMemory
+          ? Promise.resolve(null)
+          : api('GET', '/api/project-drafts?limit=200').catch(() => ({ success: false }))
       ]);
       if (!response || !response.success) {
         renderListLoadError(host, 'loadProjectPresentationsPage()');
         return;
       }
-      const title = draftResponse?.success && draftResponse.draft?.title ? draftResponse.draft.title : '';
+      const title = draftOpenInMemory
+        ? String((tenantProjectDraftApproval && tenantProjectDraftApproval.title)
+          || tenantProjectData.project_name || tenantProjectData.projectName || '')
+        : String(((draftsResponse && draftsResponse.drafts) || [])
+          .find(item => String(item.id) === String(draftId))?.title || '');
       const titleNode = document.getElementById('projectPresentationsPageTitle');
       if (titleNode) titleNode.innerHTML = title ? '<span>العروض السابقة</span> — ' + escapeHtml(title) : 'العروض السابقة';
       const presentations = response?.success && Array.isArray(response.presentations)
