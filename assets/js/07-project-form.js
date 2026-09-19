@@ -552,21 +552,29 @@
     function attachSectionVersionBlock(sectionKey) {
       const section = getProjectSectionElement(sectionKey);
       if (!section || section.dataset.underConstruction === '1') return null;
+      const header = section.querySelector(':scope > h3.tenant-section-title');
+      // The status line is title chrome: it sits beside the status badge in the
+      // header row instead of taking a row of its own above the fields.
+      let line = document.getElementById('section-version-line-' + sectionKey);
+      if (!line && header) {
+        line = document.createElement('span');
+        line.className = 'tenant-hint section-version-line';
+        line.id = 'section-version-line-' + sectionKey;
+        line.hidden = true;
+        const badge = header.querySelector('.section-status-badge');
+        if (badge && badge.nextSibling) header.insertBefore(line, badge.nextSibling);
+        else header.appendChild(line);
+      }
       let block = section.querySelector(':scope > .section-version-block');
       if (!block) {
         block = document.createElement('div');
         block.className = 'section-version-block';
         block.hidden = true;
-        const line = document.createElement('p');
-        line.className = 'tenant-hint';
-        line.id = 'section-version-line-' + sectionKey;
-        block.appendChild(line);
         const history = document.createElement('div');
         history.className = 'section-version-history';
         history.id = 'section-version-history-' + sectionKey;
         history.hidden = true;
         block.appendChild(history);
-        const header = section.querySelector(':scope > h3.tenant-section-title');
         if (header && header.nextSibling) section.insertBefore(block, header.nextSibling);
         else section.appendChild(block);
       }
@@ -585,7 +593,8 @@
         line.hidden = !versions.length;
         line.textContent = versions.length ? sectionVersionLineText(versions[0]) : '';
       }
-      if (block) block.hidden = !versions.length && !sectionVersionsOpen[sectionKey];
+      // The block now only carries the opened history panel.
+      if (block) block.hidden = !sectionVersionsOpen[sectionKey];
       if (!history) return;
       if (!sectionVersionsOpen[sectionKey]) { history.hidden = true; history.innerHTML = ''; return; }
       history.hidden = false;
