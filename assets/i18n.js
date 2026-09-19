@@ -1178,6 +1178,7 @@
   "الإيرادات وصافي الدخل": "Revenues & Net Operating Income",
   "الإيضاحات": "Notes",
   "الاتجاه": "Direction",
+  "الارتداد": "Setback",
   "الارتدادات": "Setbacks",
   "الارتفاع أو عدد الأدوار المسموح": "Allowed height or floor count",
   "الاستخدامات المسموحة": "Permitted uses",

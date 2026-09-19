@@ -3122,7 +3122,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             ensure_ascii=False)
         directions = json.dumps(
             [{'direction': 'north', 'regulation_text': 'بطول 80.32م يحده شارع',
-              'source': 'regulation_table'}],
+              'setback': '5م', 'source': 'regulation_table'}],
             ensure_ascii=False)
         saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
             'draftData': {'survey_coordinates': coordinates, 'directions_table': directions}
@@ -3132,6 +3132,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         draft_data = loaded.get_json()['draft']['draft_data']
         self.assertEqual(json.loads(draft_data['survey_coordinates'])[0]['eastings'], '510180.849')
         self.assertEqual(json.loads(draft_data['directions_table'])[0]['direction'], 'north')
+        self.assertEqual(json.loads(draft_data['directions_table'])[0]['setback'], '5م')
 
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because
@@ -3157,6 +3158,40 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('"coordinate_tables"', app_source)
         self.assertIn('"regulation_coordinates"', app_source)
         self.assertNotIn('"severity": "high|medium|low"', app_source)
+
+    def test_direction_setbacks_are_extracted_per_direction_and_stay_optional(self):
+        """Each direction row carries its own setback: the model fills it only when the
+        documents name one, the table column stays editable, and empty is a valid state."""
+        index_source = read_frontend_text()
+        self.assertIn('data-direction-field="setback"', index_source)
+        self.assertIn('<th>الارتداد</th>', index_source)
+        self.assertIn('setback: row.setback ?? row.setback_m', index_source)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('"setback": ""', app_source)
+
+        module = self.application_module
+        directions = module._normalize_direction_map({
+            'north': {'regulation_text': 'بطول 20م يحده شارع', 'setback': '5م'},
+            'south': {},
+        })
+        self.assertEqual(directions['north']['setback'], '5م')
+        self.assertFalse(directions['south'].get('setback'))
+        # A direction whose only content is a setback still counts as extracted content.
+        self.assertTrue(module._directions_have_content({'north': {'setback': '3م'}}))
+        self.assertFalse(module._directions_have_content({'north': {}, 'south': {}}))
+
+        rows = module._visual_concept_directions({
+            'directions_table': json.dumps([
+                {'direction': 'north', 'regulation_text': 'شارع 20م', 'setback': '5م'},
+                {'direction': 'south', 'setback': '3م'},
+                {'direction': 'east', 'regulation_text': '', 'setback': ''},
+            ], ensure_ascii=False)
+        })
+        by_label = {row['direction']: row['regulation_text'] for row in rows}
+        self.assertIn('الارتداد: 5م', by_label['شمال'])
+        self.assertEqual(by_label['جنوب'], 'الارتداد: 3م')
+        self.assertNotIn('شرق', by_label)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
@@ -5238,7 +5273,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('building_ratio_setbacks: parcel.building_ratio_setbacks || buildingRulesText', index_source)
         for label in ('نسبة البناء', 'نسبة التغطية', 'معامل مسطح البناء (FAR)'):
             self.assertIn("['" + label + "'", index_source)
-        self.assertIn("const setbacksText = String(parcel.setbacks || '').trim();", index_source)
+        self.assertIn("const setbacksText = String(parcel.setbacks || '').trim() || directionSetbacksText;", index_source)
+        self.assertIn('directionSetbacksText', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('"coverage_ratio": ""', app_source)

@@ -1306,7 +1306,11 @@
       ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
         .map(([label, value]) => label + ': ' + String(value).trim())
         .join('\n');
-      const setbacksText = String(parcel.setbacks || '').trim();
+      const directionSetbacksText = directionRows
+        .map(row => row.setback ? row.label + ': ' + row.setback : '')
+        .filter(Boolean)
+        .join(' | ');
+      const setbacksText = String(parcel.setbacks || '').trim() || directionSetbacksText;
       const buildingRulesText = [buildingRatioCoverageText, setbacksText]
         .filter(Boolean)
         .join('\n');

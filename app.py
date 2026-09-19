@@ -2562,6 +2562,9 @@ def _visual_concept_directions(project_data):
             item.get('regulation_text') or item.get('regulation') or item.get('text') or item.get('notes'),
             400,
         )
+        setback = _visual_concept_text(item.get('setback') or item.get('setback_m'), 120)
+        if setback:
+            text = (text + ' — الارتداد: ' + setback) if text else ('الارتداد: ' + setback)
         if not text:
             continue
         rows.append({'direction': label or direction, 'regulation_text': text})
@@ -19215,7 +19218,7 @@ def _directions_have_content(directions):
         return False
     return any(
         any(str(value.get(key) or '').strip() for key in (
-            'regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes'
+            'regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes', 'setback'
         )) if isinstance(value, dict) else bool(str(value or '').strip())
         for value in directions.values()
     )
@@ -20292,10 +20295,10 @@ def _execute_extract_croquis():
             '    "deed_number": "", "deed_date": "", "area_sqm": null,\n'
             '    "facades_count": null, "facades_directions": "",\n'
             '    "directions": {\n'
-            '      "north": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
-            '      "south": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
-            '      "east": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
-            '      "west": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"}\n'
+            '      "north": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"},\n'
+            '      "south": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"},\n'
+            '      "east": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"},\n'
+            '      "west": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"}\n'
             '    },\n'
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
             '    "building_ratio_coverage": "", "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
@@ -20336,6 +20339,8 @@ def _execute_extract_croquis():
             "لا تكتب الاتجاهات الأربعة كلها إلا إذا كانت القطعة فعلًا مطلة على أربعة شوارع.\n"
             "- في directions املأ street_name و street_width_m للحدود المطلة على شوارع، "
             "واذكر في uses أن الحد يجاور قطعة/جار للحدود غير المطلة على شارع.\n"
+            "- setback داخل كل اتجاه: الارتداد المخصص لذلك الاتجاه بالمتر كما ورد صراحة في جدول التنظيم أو الرخصة "
+            "(مثل «5م»). املأه فقط للجهات التي لها ارتداد مذكور بعينه، واتركه فارغًا للجهات الأخرى ولا تخترع رقمًا.\n"
             "قواعد منع التكرار:\n"
             "- لا تكرر نفس المعلومة في أكثر من حقل. building_ratio_coverage لنسب البناء والتغطية وFAR والأدوار، وsetbacks للارتدادات فقط.\n"
             "- allowed_uses للاستخدامات، وregulatory_constraints للقيود فقط.\n"

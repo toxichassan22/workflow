@@ -235,7 +235,8 @@
         return {
           direction,
           label,
-          regulation_text: regulationText || fallbackText
+          regulation_text: regulationText || fallbackText,
+          setback: row.setback ?? row.setback_m ?? ''
         };
       });
     }
@@ -244,6 +245,7 @@
       return Array.from(document.querySelectorAll('#surveyDirectionsPanel tbody tr')).map(row => ({
         direction: row.dataset.direction || '',
         regulation_text: row.querySelector('[data-direction-field="regulation_text"]')?.value?.trim() || '',
+        setback: row.querySelector('[data-direction-field="setback"]')?.value?.trim() || '',
         source: 'regulation_table'
       }));
     }
@@ -263,14 +265,15 @@
       if (hadValue && parseStoredLandTable(value) === null) return;
       const rows = normalizeSurveyDirections(value);
       panel.innerHTML = '<strong class="survey-directions-title">جدول الاتجاهات</strong>' +
-        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th></tr></thead><tbody></tbody></table></div>';
+        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th><th>الارتداد</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
       rows.forEach(row => {
         const tr = document.createElement('tr');
         tr.dataset.direction = row.direction;
         tr.innerHTML = '<td>' + escapeHtml(row.label) + '</td>' +
-          '<td><textarea data-direction-field="regulation_text" rows="2" placeholder="بطول ... يحده ...">' + escapeHtml(row.regulation_text || '') + '</textarea></td>';
-        tr.querySelector('textarea').addEventListener('input', syncSurveyDirections);
+          '<td><textarea data-direction-field="regulation_text" rows="2" placeholder="بطول ... يحده ...">' + escapeHtml(row.regulation_text || '') + '</textarea></td>' +
+          '<td><input type="text" data-direction-field="setback" value="' + escapeHtml(row.setback ?? '') + '" placeholder="5" style="width:100%;min-width:80px"></td>';
+        tr.querySelectorAll('textarea, input').forEach(control => control.addEventListener('input', syncSurveyDirections));
         tbody.appendChild(tr);
       });
       const hidden = document.getElementById('directionsTableData');
