@@ -4560,9 +4560,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = read_frontend_text()
         self.assertIn("formData.append('fileType', 'competitor_logo')", index_source)
         self.assertIn('data-field="logo_cell"', index_source)
-        self.assertIn('استيراد رسمي', index_source)
-        self.assertIn("tr.dataset.logoImporting = 'true'", index_source)
-        self.assertIn('جاري البحث والاستيراد', index_source)
+        self.assertIn('logoImportWarning', index_source)
+        # Logos import automatically inside the competitors job — no per-row button.
+        self.assertNotIn('استيراد رسمي', index_source)
+        self.assertNotIn('data-import-competitor-logo', index_source)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('_auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id)', app_source)
+        self.assertIn('def _auto_import_competitor_logos', app_source)
 
     def test_competitor_slide_renders_full_rows_logos_scope_and_horizontal_chart(self):
         engine = self.application_module.slide_engine

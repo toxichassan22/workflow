@@ -115,14 +115,13 @@
       }
       if (label) label.textContent = success ? successLabel : failureLabel;
       window.setTimeout(() => {
-        tr.dataset.logoImporting = '';
         tr.dataset.logoUploading = '';
         renderCompetitorLogoCell(tr);
       }, success ? 450 : 900);
     }
 
     async function removeCompetitorLogo(tr) {
-      if (!tr || tr.dataset.logoImporting === 'true' || tr.dataset.logoUploading === 'true') return;
+      if (!tr || tr.dataset.logoUploading === 'true') return;
       if (!confirm('حذف شعار المنافس؟')) return;
       const fileId = tr.dataset.logoFileId || '';
       if (fileId) {
@@ -172,59 +171,26 @@
       }
     }
 
-    async function importCompetitorLogo(tr) {
-      if (tr.dataset.logoImporting === 'true' || tr.dataset.logoUploading === 'true') return;
-      const row = collectOneCompetitorRow(tr);
-      tr.dataset.logoImporting = 'true';
-      renderCompetitorLogoCell(tr);
-      startCompetitorLogoProgress(tr);
-      let success = false;
-      try {
-        const response = await api('POST', '/api/market-study/competitors/logo', {
-          draftId: tenantProjectData?.draftId || '', competitor: row
-        });
-        if (!response?.success || !response.competitor) {
-          throw new Error(response?.error || 'لم يُعثر على شعار رسمي');
-        }
-        const imported = response.competitor;
-        tr.dataset.logoFileId = imported.logo_file_id || tr.dataset.logoFileId || '';
-        tr.dataset.logoPath = imported.logo_path || tr.dataset.logoPath || '';
-        tr.dataset.logoUrl = imported.logo_url || tr.dataset.logoUrl || '';
-        tr.dataset.logoSourceUrl = imported.logo_source_url || tr.dataset.logoSourceUrl || '';
-        tr.dataset.fieldSources = JSON.stringify(imported.field_sources || imported.fieldSources || {});
-        renderCompetitorSourceUrlEditor(tr, imported);
-        renderCompetitorSourceLinks(tr);
-        persistMarketStudyFromDom();
-        success = true;
-      } catch (error) {
-        toast(error.message || 'لم يُعثر على شعار رسمي');
-      } finally {
-        finishCompetitorLogoProgress(tr, success);
-      }
-    }
-
     function renderCompetitorLogoCell(tr) {
       const cell = tr.querySelector('[data-field="logo_cell"]');
       if (!cell) return;
       const path = tr.dataset.logoPath || tr.dataset.logoUrl || '';
       const hasLogo = Boolean(path || tr.dataset.logoFileId);
-      const manual = Boolean(tr.dataset.logoFileId);
-      const importing = tr.dataset.logoImporting === 'true';
       const uploading = tr.dataset.logoUploading === 'true';
-      const busy = importing || uploading;
-      const busyLabel = uploading ? 'جاري حفظ الشعار' : 'جاري البحث والاستيراد';
+      const busy = uploading;
+      const busyLabel = 'جاري حفظ الشعار';
       const progress = busy
         ? '<div data-logo-progress class="market-logo-progress"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
         : '';
+      const warning = (!hasLogo && !busy) ? String(tr.dataset.logoImportWarning || '').trim() : '';
       const actions = hasLogo
         ? '<div class="market-logo-actions"><button type="button" class="btn ghost small" data-preview-competitor-logo>تكبير</button><button type="button" class="btn ghost small" data-remove-competitor-logo>حذف</button></div>'
         : '';
       cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">' + (busy ? busyLabel : 'لا يوجد') + '</div>') +
         progress + actions +
         '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px"' + (busy ? ' disabled' : '') + '>' +
-        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual || busy ? ' disabled' : '') + '>' + (busy ? busyLabel : 'استيراد رسمي') + '</button>';
+        (warning ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">' + escapeHtml(warning) + '</div>' : '');
       cell.querySelector('[data-competitor-logo]')?.addEventListener('change', event => uploadCompetitorLogo(event.target, tr));
-      cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
       cell.querySelector('[data-preview-competitor-logo]')?.addEventListener('click', () => openCompetitorLogoPreview(tr));
       cell.querySelector('[data-remove-competitor-logo]')?.addEventListener('click', () => removeCompetitorLogo(tr));
       refreshDynamicI18n(cell);

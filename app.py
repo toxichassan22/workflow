@@ -20317,14 +20317,7 @@ def _execute_market_competitors(data, tenant_id=None):
             if (row.get('row_source') or 'ai') == 'ai':
                 market_study.strip_unverified_competitor_sources(row)
     out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
-    draft_id = payload.get('draftId') or payload.get('draft_id')
-    for row in merged:
-        if row.get('logo_file_id') or row.get('logo_path'):
-            continue
-        try:
-            _store_imported_competitor_logo(row, draft_id=draft_id)
-        except Exception as exc:
-            row['logo_import_warning'] = str(exc)
+    _auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id)
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     return {
@@ -22120,6 +22113,96 @@ def _safe_download_competitor_logo(logo_url, official_url):
     finally:
         response.release_conn()
         pool.close()
+
+
+def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
+    """Import official logos during competitor generation — no per-row button needed.
+
+    Pass 1 is free: rows whose source_url already verifies as the official site go
+    straight to HTML extraction. Pass 2 runs ONE extra search call to discover the
+    official site + logo for the rest, then extracts/downloads per row. A discovered
+    official URL is only trusted when it matches a real search citation host.
+    """
+    draft_id = payload.get('draftId') or payload.get('draft_id')
+    missing = []
+    for row in rows:
+        if row.get('logo_file_id') or row.get('logo_path'):
+            continue
+        official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
+        verified = bool(official_url and (
+            row.get('logo_official_verified')
+            or market_study.official_source_reliability(
+                row.get('name'), row.get('source'), official_url)))
+        if verified:
+            try:
+                _store_imported_competitor_logo(row, draft_id=draft_id)
+            except Exception as exc:
+                row['logo_import_warning'] = str(exc)
+        if not row.get('logo_file_id') and not row.get('logo_path'):
+            missing.append(row)
+    if not missing:
+        return
+    batch = missing[:8]
+    listing = json.dumps(
+        [{'id': str(row.get('id') or ''), 'name': str(row.get('name') or '')} for row in batch],
+        ensure_ascii=False)
+    city = str(payload.get('city') or '').strip() or 'غير محددة'
+    prompt = (
+        f'ابحث عن الموقع الرسمي والشعار لكل مشروع منافس في القائمة التالية (المدينة: {city}):\n'
+        f'{listing}\n'
+        'نفّذ بحثًا منفصلًا لكل مشروع. أرجع JSON فقط بالشكل {"results": [...]} ولكل نتيجة: '
+        '"id" كما وصلك، "official_url" صفحة HTTPS من الموقع الرسمي للمشروع أو مطوّره، '
+        '"logo_url" رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي أو نطاق الصور التابع له، '
+        '"logo_source_url" الصفحة الرسمية التي ظهر فيها الشعار. '
+        'إن لم تجد دليلًا رسميًا لمشروع أعد حقوله فارغة، ولا تخمّن أي رابط.'
+    )
+    try:
+        response, _provider_error = _call_market_study_model(
+            market_study.build_consultant_system_prompt(), prompt, max_tokens=2500,
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+    except Exception:
+        return
+    if not _market_search_ran(response):
+        for row in batch:
+            row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')
+        return
+    parsed, parse_error = _parse_market_model_json(response)
+    if parse_error or not isinstance(parsed, dict):
+        return
+    citations = _market_citation_urls(response)
+    results = parsed.get('results')
+    if not isinstance(results, list):
+        results = [parsed]
+    by_id = {str(row.get('id') or ''): row for row in batch}
+    by_name = {str(row.get('name') or '').strip().casefold(): row for row in batch}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        row = by_id.get(str(item.get('id') or ''))
+        if row is None:
+            row = by_name.get(str(item.get('name') or '').strip().casefold())
+        if row is None:
+            continue
+        official = str(item.get('official_url') or item.get('logo_source_url') or '').strip()
+        if not official or not any(_related_official_hosts(official, c) for c in citations):
+            continue
+        row['logo_url'] = str(item.get('logo_url') or '').strip()
+        row['logo_source_url'] = official
+        row['logo_official_verified'] = True
+        field_sources = market_study.competitor_field_sources(row)
+        urls = field_sources.setdefault('logo_url', [])
+        if official not in urls:
+            urls.append(official)
+        row['field_sources'] = field_sources
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + [official]))
+        try:
+            _store_imported_competitor_logo(row, draft_id=draft_id)
+        except Exception as exc:
+            row['logo_import_warning'] = str(exc)
+    for row in batch:
+        if not row.get('logo_file_id') and not row.get('logo_path'):
+            row.setdefault('logo_import_warning', 'لم يُعثر على موقع رسمي موثق للشعار')
 
 
 def _store_imported_competitor_logo(row, draft_id=None):
