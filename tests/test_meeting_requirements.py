@@ -9873,6 +9873,73 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(fallback.status_code, 200, fallback.get_json())
         self.assertTrue(fallback.get_json()['distribution']['rows'])
 
+    def test_plans_distribution_totals_match_floor_scoped_study_rows(self):
+        """The study stores components per floor («طابق أرضي - سكني» …) while the
+        distribution groups per use — both sides aggregate on the base component
+        before comparing. A mezzanine/مسروق is a slab inside the ground level,
+        not a conflicting claim on floor 0, and basements never count in the FAR
+        total."""
+        module = self.application_module
+        context = {'land_area': 9991, 'components': [
+            {'name': 'طابق أرضي - سكني', 'units': 18, 'builtArea': 2027.95},
+            {'name': 'طابق مسروق - سكني', 'units': 20, 'builtArea': 2200.0},
+            {'name': 'طابق أول - سكني', 'units': 38, 'builtArea': 8532.85},
+            {'name': 'طابق أرضي - تجاري', 'units': 16, 'builtArea': 1388.26},
+            {'name': 'طابق مسروق - تجاري', 'builtArea': 640.74},
+            {'name': 'طابق أرضي - خدمات', 'builtArea': 336.36},
+            {'name': 'طابق أول - خدمات', 'builtArea': 2780.7},
+            {'name': 'طابق أرضي - مساحات أخرى', 'builtArea': 1223.47},
+            {'name': 'طابق مسروق - مساحات أخرى', 'builtArea': 688.5},
+            {'name': 'طابق أول - مساحات أخرى', 'builtArea': 868.73},
+        ]}
+        rows = [
+            {'building': 'A', 'floor_range': 'أرضي', 'component': 'سكني',
+             'units_per_floor': 18, 'floor_area_sqm': 2027.95},
+            {'building': 'A', 'floor_range': 'ميزانين', 'component': 'سكني',
+             'units_per_floor': 20, 'floor_area_sqm': 2200.0},
+            {'building': 'A', 'floor_range': '1-2', 'component': 'سكني',
+             'units_per_floor': 19, 'floor_area_sqm': 4266.425},
+            {'building': 'A', 'floor_range': 'أرضي', 'component': 'تجاري',
+             'units_per_floor': 16, 'floor_area_sqm': 1388.26},
+            {'building': 'A', 'floor_range': 'ميزانين', 'component': 'تجاري',
+             'floor_area_sqm': 640.7399999999},
+            {'building': 'A', 'floor_range': 'أرضي', 'component': 'خدمات',
+             'floor_area_sqm': 336.36},
+            {'building': 'A', 'floor_range': '1', 'component': 'خدمات',
+             'floor_area_sqm': 2780.7},
+            {'building': 'A', 'floor_range': 'B1', 'component': 'مواقف سيارات',
+             'floor_area_sqm': 5000},
+        ]
+
+        self.assertEqual(module._visual_concept_plan_floor_range('ميزانين'),
+                         {'kind': 'mezzanine', 'lo': 0.5, 'hi': 0.5, 'count': 1})
+        self.assertEqual(module._visual_concept_plan_floor_range('أرضي وميزانين')['kind'], 'ground')
+
+        totals = {row['component']: row
+                  for row in module._visual_concept_plan_distribution_totals(rows, context)}
+        self.assertEqual(totals['سكني']['units'], 76)
+        self.assertEqual(totals['سكني']['required_units'], 76)
+        self.assertEqual(totals['سكني']['area'], 12760.8)
+        self.assertEqual(totals['سكني']['required_area'], 12760.8)
+        self.assertEqual(totals['سكني']['delta_area'], 0)
+        # Long float tails are rounded before they reach the client.
+        self.assertEqual(totals['تجاري']['area'], 2029.0)
+        self.assertEqual(totals['تجاري']['required_area'], 2029.0)
+        self.assertEqual(totals['خدمات']['required_area'], 3117.06)
+        # Study rows with no distribution counterpart merge into one entry.
+        self.assertEqual(totals['مساحات أخرى']['units'], 0)
+        self.assertEqual(totals['مساحات أخرى']['required_area'], 2780.7)
+        self.assertEqual(totals['مساحات أخرى']['delta_area'], -2780.7)
+
+        checks = module._visual_concept_plan_distribution_checks(
+            rows, list(totals.values()), context, {'floor_area_ratio': 1.2})
+        # Ground + mezzanine for the same component is normal, not a conflict.
+        self.assertFalse(any(item['result'] == 'متعارض' for item in checks))
+        # FAR still fires — and the basement row is not part of its total.
+        far_check = next(item for item in checks if 'معامل' in item['item'])
+        self.assertIn('17906', far_check['detail'])
+        self.assertNotIn('22906', far_check['detail'])
+
     def test_plans_generate_sequentially_on_approved_plan_images(self):
         """The diagrams are drawn in order: uses needs the approved site plan,
         massing needs both — each previous image ships as a generation reference."""

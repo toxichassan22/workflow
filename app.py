@@ -5913,7 +5913,9 @@ def _visual_concept_plan_normalize_issues(issue_source, limit=30):
 
 def _visual_concept_plan_floor_range(text):
     """Parse an approved-table floor cell: 'G', 'B1-B3', '5-12', 'Roof' into
-    {kind, lo, hi, count}. Basement lo/hi are negative; ground lo=hi=0."""
+    {kind, lo, hi, count}. Basement lo/hi are negative; ground lo=hi=0; a lone
+    mezzanine/مسروق sits at 0.5 — a slab inside the ground level, so it never
+    collides with plain «أرضي» yet still overlaps a range that spans it."""
     value = str(text or '').strip()
     if not value:
         return None
@@ -5925,7 +5927,10 @@ def _visual_concept_plan_floor_range(text):
         count = max(digits) if digits else 1
         return {'kind': 'basement', 'lo': -count, 'hi': -1, 'count': count}
     numbers = [int(d) for d in re.findall(r'\d+', lowered)]
-    ground = bool(re.search(r'\bg\b|ground|أرضي|الارضي|الأرضي|ميزانين|mezzanine', lowered))
+    mezzanine = bool(re.search(r'ميزانين|mezzanine|مسروق', lowered))
+    ground = bool(re.search(r'\bg\b|ground|أرضي|الارضي|الأرضي', lowered))
+    if mezzanine and not ground:
+        return {'kind': 'mezzanine', 'lo': 0.5, 'hi': 0.5, 'count': 1}
     if not numbers:
         return {'kind': 'ground', 'lo': 0, 'hi': 0, 'count': 1} if ground else None
     lo, hi = (0, numbers[-1]) if ground else (numbers[0], numbers[-1])
@@ -5968,16 +5973,29 @@ def _visual_concept_plan_component_key(name):
     return re.sub(r'[^\w\u0600-\u06FF]+', '', text)
 
 
+def _visual_concept_plan_component_base(name):
+    """Component name without a leading floor tag: «طابق أرضي - سكني» resolves to
+    «سكني» so the study's per-floor rows and the distribution's per-use rows
+    compare like for like. Names without a dash tag pass through unchanged."""
+    text = _visual_concept_plan_sanitize_text(name)
+    stripped = re.sub(r'^(?:ال)?(?:طابق|دور|floor|level)\s+[^-–—:]*[-–—:]\s*', '', text).strip()
+    return stripped or text
+
+
 def _visual_concept_plan_distribution_totals(rows, context):
     """Per-component totals from the distribution table, each matched against the
-    required figure recorded in the project components / financial study rows."""
+    required figure recorded in the project components / financial study rows.
+    Both sides group on the base component name, so the study's per-floor rows
+    («طابق أرضي - سكني» …) aggregate to the whole-component figure before the
+    comparison instead of matching only the first floor's row."""
     groups = {}
     order = []
     for row in rows:
         name = _visual_concept_plan_sanitize_text(row.get('component')) or 'غير محدد'
-        key = _visual_concept_plan_component_key(name) or name
+        base = _visual_concept_plan_component_base(name)
+        key = _visual_concept_plan_component_key(base) or _visual_concept_plan_component_key(name) or name
         if key not in groups:
-            groups[key] = {'component': name, 'units': 0.0, 'area': 0.0,
+            groups[key] = {'component': base, 'units': 0.0, 'area': 0.0,
                            'has_units': False, 'has_area': False}
             order.append(key)
         parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
@@ -5992,25 +6010,54 @@ def _visual_concept_plan_distribution_totals(rows, context):
             groups[key]['has_area'] = True
     required = []
     for comp in context.get('components') or []:
+        comp_name = _visual_concept_plan_sanitize_text(comp.get('name'))
         required.append({
-            'key': _visual_concept_plan_component_key(comp.get('name')),
-            'component': _visual_concept_plan_sanitize_text(comp.get('name')),
+            'key': _visual_concept_plan_component_key(comp_name),
+            'base_key': _visual_concept_plan_component_key(
+                _visual_concept_plan_component_base(comp_name)),
+            'component': _visual_concept_plan_component_base(comp_name) or comp_name,
             'required_units': comp.get('units'),
             'required_area': comp.get('builtArea') or comp.get('unitArea'),
         })
+
+    def match_rank(item, key):
+        if item['key'] == key or item['base_key'] == key:
+            return 0
+        if item['key'] and (item['key'] in key or key in item['key']):
+            return 1
+        if item['base_key'] and (item['base_key'] in key or key in item['base_key']):
+            return 2
+        return None
+
+    matched = {key: [] for key in order}
+    leftovers = []
+    for item in required:
+        if not (item['key'] or item['base_key']):
+            continue
+        best_key = best_rank = None
+        for key in order:
+            rank = match_rank(item, key)
+            if rank is not None and (best_rank is None or rank < best_rank
+                                     or (rank == best_rank and len(key) > len(best_key or ''))):
+                best_key, best_rank = key, rank
+        if best_key is None:
+            leftovers.append(item)
+        else:
+            matched[best_key].append(item)
+
+    def summed(field, items):
+        numbers = [item[field] for item in items if isinstance(item[field], (int, float))]
+        return round(sum(numbers), 2) if numbers else None
+
     totals = []
     for key in order:
         entry = groups[key]
-        match = next((item for item in required
-                      if item['key'] and (item['key'] == key
-                                          or (len(item['key']) >= 3 and item['key'] in key)
-                                          or (len(key) >= 3 and key in item['key']))), None)
         total = {
             'component': entry['component'],
-            'units': entry['units'] if entry['has_units'] else None,
-            'area': entry['area'] if entry['has_area'] else None,
-            'required_units': match['required_units'] if match else None,
-            'required_area': match['required_area'] if match else None,
+            'units': round(entry['units'], 2) if entry['has_units'] else None,
+            'area': round(entry['area'], 2) if entry['has_area'] else None,
+            'required_units': summed('required_units', matched[key]),
+            'required_area': summed('required_area', matched[key]),
         }
         for pair in (('units', 'required_units', 'delta_units'),
                      ('area', 'required_area', 'delta_area')):
@@ -6019,17 +6066,22 @@ def _visual_concept_plan_distribution_totals(rows, context):
                               if isinstance(value, (int, float)) and isinstance(wanted, (int, float))
                               else None)
         totals.append(total)
-    covered = {key for key in order}
-    for item in required:
-        if not item['key'] or any(item['key'] == key or item['key'] in key or key in item['key']
-                                  for key in covered):
-            continue
-        totals.append({'component': item['component'], 'units': 0, 'area': 0,
-                       'required_units': item['required_units'], 'required_area': item['required_area'],
-                       'delta_units': (-item['required_units']
-                                       if isinstance(item['required_units'], (int, float)) else None),
-                       'delta_area': (-item['required_area']
-                                      if isinstance(item['required_area'], (int, float)) else None)})
+    merged = {}
+    merged_order = []
+    for item in leftovers:
+        group_key = item['base_key'] or item['key'] or item['component']
+        if group_key not in merged:
+            merged[group_key] = {'component': item['component'], 'items': []}
+            merged_order.append(group_key)
+        merged[group_key]['items'].append(item)
+    for group_key in merged_order:
+        entry = merged[group_key]
+        req_units = summed('required_units', entry['items'])
+        req_area = summed('required_area', entry['items'])
+        totals.append({'component': entry['component'], 'units': 0, 'area': 0,
+                       'required_units': req_units, 'required_area': req_area,
+                       'delta_units': -req_units if isinstance(req_units, (int, float)) else None,
+                       'delta_area': -req_area if isinstance(req_area, (int, float)) else None})
     return totals
 
 
@@ -6053,7 +6105,8 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
         # soft "confirm the share" note instead of a blocker.
         by_component = {}
         for parsed, row in entries:
-            key = _visual_concept_plan_component_key(row.get('component'))
+            key = _visual_concept_plan_component_key(
+                _visual_concept_plan_component_base(row.get('component')))
             if key:
                 by_component.setdefault(key, []).append((parsed, row))
         for comp_entries in by_component.values():
@@ -6097,7 +6150,8 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
         total_built = sum(
             row.get('floor_area_sqm') * (parsed['count'] if parsed else 1)
             for row, parsed in parsed_rows
-            if isinstance(row.get('floor_area_sqm'), (int, float)))
+            if isinstance(row.get('floor_area_sqm'), (int, float))
+            and (not parsed or parsed['kind'] != 'basement'))
         cap_area = land * far
         if total_built > cap_area * 1.02:
             checks.append({
