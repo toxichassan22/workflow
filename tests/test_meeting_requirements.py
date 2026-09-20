@@ -7557,14 +7557,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('أُضيفت الشريحة 4', joined)
         self.assertNotIn('تعديل المحتوى', joined)
 
-        draft_lines = '\n'.join(tracking.describe_draft_changes(
+        draft_lines = '\n'.join(tracking.detail_text(item) for item in tracking.describe_draft_changes(
             {'project_name': 'the view', 'city': 'جدة', 'financial_study_model': {'inputs': {'a': 1}}},
             {'project_name': 'THE VIEW', 'district': 'الشاطئ', 'financial_study_model': {'inputs': {'a': 2}}},
         ))
         self.assertIn('من «the view» إلى «THE VIEW»', draft_lines)
         self.assertIn('أُفرغ (كان «جدة»)', draft_lines)
         self.assertIn('أُضيف «الشاطئ»', draft_lines)
-        self.assertIn('الدراسة المالية: تم تحديث البيانات', draft_lines)
+        # A blob is diffed to the leaf: the section and the inner path are named,
+        # and the changed value shows before/after — never «تم تحديث البيانات».
+        self.assertIn('الدراسة المالية', draft_lines)
+        self.assertIn('مدخلات الدراسة', draft_lines)
+        self.assertIn('من «1» إلى «2»', draft_lines)
+        self.assertNotIn('تم تحديث البيانات', draft_lines)
         # A blob is named, never dumped as a value.
         self.assertNotIn('inputs', draft_lines)
 
@@ -7880,7 +7885,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         actions = [entry['action'] for entry in draft_log['log']]
         self.assertIn('حفظ بيانات المشروع', actions)
         self.assertIn('اعتماد قسم', actions)
-        details = '\n'.join(line for entry in draft_log['log'] for line in entry['details'])
+        import change_tracking as tracking
+        details = '\n'.join(
+            tracking.detail_text(line)
+            for entry in draft_log['log'] for line in entry['details'])
         self.assertIn('من «THE VIEW» إلى «THE VIEW 2»', details)
         self.assertIn('أُضيف «الشاطئ»', details)
         self.assertIn('معتمد', details)

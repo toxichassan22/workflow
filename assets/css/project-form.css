@@ -1197,6 +1197,177 @@
       background: #f7fcf8;
     }
 
+    /* ── Change log page: grouped audit entries with before/after values ── */
+    .change-log-card {
+      max-width: 860px;
+      width: 100%;
+      max-height: 92vh;
+    }
+
+    .change-log-search {
+      width: 100%;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+
+    .change-log-day {
+      margin: 18px 0 8px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--pd);
+    }
+
+    .change-log-day:first-child {
+      margin-top: 4px;
+    }
+
+    .change-log-entry {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    .change-log-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .change-log-action {
+      color: var(--pd);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .change-log-badge {
+      font-size: 11px;
+      padding: 2px 10px;
+      border-radius: 10px;
+    }
+
+    .change-log-badge.badge-ai {
+      background: #eef5fb;
+      color: #123B6D;
+    }
+
+    .change-log-badge.badge-manual,
+    .change-log-badge.badge-system {
+      background: #f1f5f9;
+      color: #475569;
+    }
+
+    .change-log-stamp {
+      margin-inline-start: auto;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .change-log-summary {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #334155;
+    }
+
+    .change-log-group {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .change-log-group-title {
+      background: #f4f6f8;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #334155;
+    }
+
+    .change-log-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px 8px;
+      align-items: baseline;
+      padding: 6px 10px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .change-log-row.kind-added .change-log-text {
+      color: #1c7a2e;
+      font-weight: 600;
+    }
+
+    .change-log-row.kind-removed .change-log-text {
+      color: #a13030;
+      font-weight: 600;
+    }
+
+    .change-log-path {
+      color: #7a8494;
+      font-size: 12px;
+    }
+
+    .change-log-path::after {
+      content: '—';
+      margin-inline-start: 4px;
+      color: #cbd5e1;
+    }
+
+    .change-log-field {
+      font-weight: 600;
+      color: #1e293b;
+    }
+
+    .change-log-field::after {
+      content: ':';
+      margin-inline-start: 2px;
+    }
+
+    .change-log-old {
+      background: #fdecec;
+      color: #a13030;
+      border-radius: 4px;
+      padding: 0 6px;
+      text-decoration: line-through;
+      text-decoration-color: #d98a8a;
+      word-break: break-word;
+    }
+
+    .change-log-new {
+      background: #e9f7ee;
+      color: #1c7a2e;
+      border-radius: 4px;
+      padding: 0 6px;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .change-log-to {
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    .change-log-text {
+      color: #334155;
+    }
+
+    .change-log-plain {
+      padding: 5px 2px;
+      font-size: 13px;
+      line-height: 1.8;
+      color: #334155;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    .change-log-plain:last-child {
+      border-bottom: none;
+    }
+
     .tenant-form-section.section-locked input:not([type="hidden"]):not([data-section-lock-ignore]),
     .tenant-form-section.section-locked select:not([data-section-lock-ignore]),
     .tenant-form-section.section-locked textarea:not([data-section-lock-ignore]),

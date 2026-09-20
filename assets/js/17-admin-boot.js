@@ -1265,7 +1265,7 @@
               '<div class="meta" style="margin-top:4px">' + escapeHtml(String(v.created_at || '').replace('T', ' ').slice(0,19)) +
               ' | ' + (v.slide_count || 0) + ' شريحة</div>' +
               '<div style="margin-top:10px;line-height:1.8">' + escapeHtml(v.summary || linked?.summary || revisionActionLabel(v.action)) + '</div>' +
-              ((v.details || linked?.details || []).slice(0, 5).map(line => '<div style="font-size:13px;line-height:1.8">' + escapeHtml(line) + '</div>').join('')) +
+              ((v.details || linked?.details || []).slice(0, 5).map(line => '<div style="font-size:13px;line-height:1.8">' + escapeHtml(changeDetailText(line)) + '</div>').join('')) +
               '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
               '<button class="btn small ghost" data-version-preview="' + index + '">معاينة ومقارنة</button>' +
               (hasPermission('create_presentation') ? '<button class="btn small ghost" data-version-restore="' + index + '">استعادة</button>' : '') + '</div></article>';
@@ -1374,45 +1374,213 @@
       finally { if (button) { button.disabled = false; button.textContent = 'استعادة'; } }
     }
 
+    // ── Change log: who changed what, rendered as a real audit page ──────────
+    // Entries carry structured detail items {group, path, field, old, new, kind}
+    // alongside legacy plain strings; the page groups them by section and shows
+    // the old value next to the new one instead of «تم تحديث البيانات».
+    function parseChangeLogDate(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+      let parsed = new Date(raw);
+      if (!/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw)) parsed = new Date(raw.replace(' ', 'T') + 'Z');
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatChangeLogStamp(value) {
+      const parsed = parseChangeLogDate(value);
+      if (!parsed) return String(value || '').slice(0, 19).replace('T', ' ');
+      const pad = number => String(number).padStart(2, '0');
+      let hours = parsed.getHours();
+      const suffix = hours < 12 ? 'ص' : 'م';
+      hours = hours % 12 || 12;
+      return parsed.getFullYear() + '-' + pad(parsed.getMonth() + 1) + '-' + pad(parsed.getDate()) +
+        ' — ' + hours + ':' + pad(parsed.getMinutes()) + ' ' + suffix;
+    }
+
+    function formatChangeLogDay(value) {
+      const parsed = parseChangeLogDate(value);
+      if (!parsed) return '';
+      const pad = number => String(number).padStart(2, '0');
+      return parsed.getFullYear() + '-' + pad(parsed.getMonth() + 1) + '-' + pad(parsed.getDate());
+    }
+
+    function changeDetailText(item) {
+      if (!item || typeof item !== 'object') return String(item || '');
+      const head = [item.group, item.path].filter(Boolean).join(' › ');
+      if (item.field) {
+        const oldValue = String(item.old || '');
+        const newValue = String(item.new || '');
+        const phrase = oldValue && newValue
+          ? 'من «' + oldValue + '» إلى «' + newValue + '»'
+          : newValue ? 'أُضيف «' + newValue + '»' : 'أُفرغ (كان «' + oldValue + '»)';
+        return (head ? head + ': ' : '') + item.field + ': ' + phrase;
+      }
+      const text = String(item.text || '');
+      return head ? head + ': ' + text : text;
+    }
+
+    function renderChangeLogDetails(details) {
+      const items = Array.isArray(details) ? details : [];
+      // Structured items cluster under their section name even when the source
+      // order interleaves groups; plain strings keep their own order at the end.
+      const groups = [];
+      const loose = [];
+      items.forEach(item => {
+        if (item && typeof item === 'object') {
+          const name = item.group || 'تغييرات';
+          let bucket = groups.find(g => g.name === name);
+          if (!bucket) { bucket = { name: name, items: [] }; groups.push(bucket); }
+          bucket.items.push(item);
+        } else if (String(item || '').trim()) {
+          loose.push(item);
+        }
+      });
+      const rowHtml = item => {
+        const path = item.path
+          ? '<span class="change-log-path">' + escapeHtml(item.path) + '</span>' : '';
+        if (item.field) {
+          const oldValue = escapeHtml(String(item.old || ''));
+          const newValue = escapeHtml(String(item.new || ''));
+          let valueHtml;
+          if (oldValue && newValue) {
+            valueHtml = '<span class="change-log-old">' + oldValue + '</span>' +
+              '<span class="change-log-to">إلى</span>' +
+              '<span class="change-log-new">' + newValue + '</span>';
+          } else if (newValue) {
+            valueHtml = '<span class="change-log-text">أُضيف</span>' +
+              '<span class="change-log-new">' + newValue + '</span>';
+          } else {
+            valueHtml = '<span class="change-log-text">أُزيلت (كانت</span>' +
+              '<span class="change-log-old">' + oldValue + '</span>' +
+              '<span class="change-log-text">)</span>';
+          }
+          return '<div class="change-log-row">' + path +
+            '<span class="change-log-field">' + escapeHtml(item.field) + '</span>' +
+            valueHtml + '</div>';
+        }
+        const kindClass = item.kind === 'added' ? ' kind-added'
+          : item.kind === 'removed' ? ' kind-removed' : '';
+        return '<div class="change-log-row' + kindClass + '">' + path +
+          '<span class="change-log-text">' + escapeHtml(item.text || '') + '</span></div>';
+      };
+      let html = groups.map(group =>
+        '<div class="change-log-group"><div class="change-log-group-title">' +
+        escapeHtml(group.name) + '</div>' +
+        group.items.map(rowHtml).join('') + '</div>').join('');
+      html += loose.map(item =>
+        '<div class="change-log-plain">' + escapeHtml(String(item)) + '</div>').join('');
+      return html;
+    }
+
     // Every entry names its author, whether it was done by hand or by the AI, and the individual
     // differences it produced. It used to read «تعديل نصي» with nothing behind it.
     function renderChangeLogEntry(entry) {
-      const source = entry.source === 'ai' ? 'الذكاء الاصطناعي' : entry.source === 'system' ? 'النظام' : 'يدوي';
-      const lines = Array.isArray(entry.details) ? entry.details : [];
-      const stamp = String(entry.created_at || '').slice(0, 19).replace('T', ' ');
-      return '<div style="padding:12px 0;border-bottom:1px solid var(--line)">' +
-        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        '<strong>' + escapeHtml(entry.user_name || 'نظام') + '</strong>' +
-        '<span class="tenant-hint">' + escapeHtml(entry.action || '') + '</span>' +
-        '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' +
-        (entry.source === 'ai' ? '#eef5fb;color:#123B6D' : '#f1f5f9;color:#475569') + '">' +
-        source + '</span></div>' +
-        (entry.summary ? '<div style="margin-top:4px">' + escapeHtml(entry.summary) + '</div>' : '') +
-        (lines.length
-          ? '<ul style="margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.9">' +
-          lines.map(line => '<li>' + escapeHtml(line) + '</li>').join('') + '</ul>'
-          : '') +
-        '<div class="meta" style="margin-top:4px">' + escapeHtml(stamp) + '</div></div>';
+      const source = entry.source === 'ai' ? 'الذكاء الاصطناعي'
+        : entry.source === 'system' ? 'النظام' : 'يدوي';
+      const badgeClass = entry.source === 'ai' ? 'badge-ai'
+        : entry.source === 'system' ? 'badge-system' : 'badge-manual';
+      const stamp = formatChangeLogStamp(entry.created_at);
+      return '<div class="change-log-entry">' +
+        '<div class="change-log-head">' +
+        '<strong class="change-log-user">' + escapeHtml(entry.user_name || 'نظام') + '</strong>' +
+        '<span class="change-log-action">' + escapeHtml(entry.action || '') + '</span>' +
+        '<span class="change-log-badge ' + badgeClass + '">' + source + '</span>' +
+        '<span class="change-log-stamp">' + escapeHtml(stamp) + '</span></div>' +
+        (entry.summary
+          ? '<div class="change-log-summary">' + escapeHtml(entry.summary) + '</div>' : '') +
+        renderChangeLogDetails(entry.details) + '</div>';
+    }
+
+    function renderChangeLogList(entries) {
+      let html = '';
+      let lastDay = null;
+      const today = formatChangeLogDay(new Date().toISOString());
+      const yesterday = formatChangeLogDay(new Date(Date.now() - 86400000).toISOString());
+      entries.forEach(entry => {
+        const day = formatChangeLogDay(entry.created_at);
+        if (day !== lastDay) {
+          lastDay = day;
+          const label = day === today ? 'اليوم' : day === yesterday ? 'أمس' : (day || 'بدون تاريخ');
+          html += '<div class="change-log-day">' + escapeHtml(label) + '</div>';
+        }
+        html += renderChangeLogEntry(entry);
+      });
+      return html;
     }
 
     async function showEditLog(presId) {
       return showPresentationVersions(presId);
     }
 
+    let changeLogEntries = [];
+
+    function ensureChangeLogPage() {
+      let overlay = document.getElementById('changeLogPage');
+      if (overlay) return overlay;
+      overlay = document.createElement('div');
+      overlay.id = 'changeLogPage';
+      overlay.className = 'om-modal-overlay change-log-overlay';
+      overlay.setAttribute('data-a11y-modal', '');
+      overlay.addEventListener('click', event => {
+        if (event.target === overlay) closeChangeLogPage();
+      });
+      overlay.innerHTML = '<div class="om-modal-card change-log-card" role="dialog" aria-modal="true">' +
+        '<div class="sag-modal-head"><h2 id="changeLogPageTitle">سجل التعديلات</h2>' +
+        '<button type="button" class="btn ghost small" id="changeLogPageClose">إغلاق</button></div>' +
+        '<input type="search" id="changeLogSearch" class="change-log-search" placeholder="بحث في السجل">' +
+        '<div id="changeLogPageBody"></div></div>';
+      document.body.appendChild(overlay);
+      overlay.querySelector('#changeLogPageClose').addEventListener('click', closeChangeLogPage);
+      overlay.querySelector('#changeLogSearch').addEventListener('input', renderChangeLogPageBody);
+      return overlay;
+    }
+
+    function closeChangeLogPage() {
+      const overlay = document.getElementById('changeLogPage');
+      if (overlay) overlay.style.display = 'none';
+      if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
+    }
+
+    function changeLogEntryMatches(entry, query) {
+      const lines = Array.isArray(entry.details) ? entry.details.map(changeDetailText) : [];
+      return [entry.user_name, entry.action, entry.summary].concat(lines)
+        .join(' ').includes(query);
+    }
+
+    function renderChangeLogPageBody() {
+      const overlay = document.getElementById('changeLogPage');
+      if (!overlay) return;
+      const query = (overlay.querySelector('#changeLogSearch').value || '').trim();
+      const entries = query
+        ? changeLogEntries.filter(entry => changeLogEntryMatches(entry, query))
+        : changeLogEntries;
+      overlay.querySelector('#changeLogPageBody').innerHTML = entries.length
+        ? renderChangeLogList(entries)
+        : '<p class="tenant-hint">لا توجد تعديلات مسجلة</p>';
+    }
+
     async function showDraftEditLog(draftId) {
-      const data = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId) + '/edit-log');
-      if (!data.success) { toast(data.error || 'فشل تحميل السجل'); return; }
-      if (!data.log.length) { toast('لا يوجد سجل تعديلات لهذه المسودة'); return; }
-      const existing = document.getElementById('editLogModal');
-      if (existing) existing.remove();
-      const modal = document.createElement('div');
-      modal.id = 'editLogModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3>سجل تعديلات المشروع</h3><button class="btn ghost" onclick="this.closest(\'#editLogModal\').remove()">إغلاق</button></div>' +
-        data.log.map(renderChangeLogEntry).join('') + '</div>';
-      document.body.appendChild(modal);
+      const overlay = ensureChangeLogPage();
+      const body = overlay.querySelector('#changeLogPageBody');
+      overlay.querySelector('#changeLogPageTitle').textContent = 'سجل تعديلات المشروع';
+      overlay.querySelector('#changeLogSearch').value = '';
+      body.innerHTML = '<p class="tenant-hint">جاري تحميل السجل...</p>';
+      overlay.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(overlay);
+      try {
+        const data = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId) + '/edit-log');
+        if (!data || !data.success) {
+          body.innerHTML = '<p class="tenant-hint">' + escapeHtml((data && data.error) || 'فشل تحميل السجل') + '</p>';
+          return;
+        }
+        if (data.title) {
+          overlay.querySelector('#changeLogPageTitle').textContent = 'سجل تعديلات المشروع — ' + data.title;
+        }
+        changeLogEntries = data.log || [];
+        renderChangeLogPageBody();
+      } catch (error) {
+        body.innerHTML = '<p class="tenant-hint">تعذر تحميل السجل</p>';
+      }
     }
 
     function initTenant() {

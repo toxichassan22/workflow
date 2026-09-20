@@ -2439,7 +2439,7 @@ def commit_presentation_revision(tenant_id, presentation_id=None, *,
         version_id = previous_id
         if changed:
             revision += 1
-            lines = [str(line).strip() for line in (details or []) if str(line or '').strip()]
+            lines = _change_detail_items(details)
             if not lines:
                 from change_tracking import describe_slide_changes, describe_draft_changes
                 lines = describe_slide_changes(
@@ -3594,18 +3594,37 @@ CHANGE_TARGETS = ('presentation', 'draft')
 CHANGE_SOURCES = ('manual', 'ai', 'system')
 
 
+def _change_detail_items(details):
+    """Detail items as stored: readable strings, or structured dicts kept as-is.
+
+    change_tracking emits dicts {group, path, field, old, new, kind} so the log
+    page can render a grouped before/after; plain strings stay untouched.
+    """
+    items = []
+    for item in (details or []):
+        if isinstance(item, dict):
+            cleaned = {str(k): v for k, v in item.items()
+                       if v is not None and str(v).strip() != ''}
+            if cleaned:
+                items.append(cleaned)
+        elif str(item or '').strip():
+            items.append(str(item).strip())
+    return items
+
+
 def log_change(tenant_id, target_type, target_id, user_id, user_name, action,
                summary='', details=None, source='manual', revision_id=None, previous_revision_id=None):
     """Record one change with the individual differences it produced.
 
-    ``details`` is a list of human-readable Arabic lines; it is stored as JSON so the reader can
-    show them one per line instead of a single sentence. Presentation events such as
-    approval/export link to the current revision without creating a content revision.
+    ``details`` is a list of human-readable Arabic lines — or structured dicts —
+    stored as JSON so the reader can show them one per line instead of a single
+    sentence. Presentation events such as approval/export link to the current
+    revision without creating a content revision.
     Explicit links must refer to this tenant's same presentation.
     """
     if target_type not in CHANGE_TARGETS or not target_id:
         return None
-    lines = [str(line).strip() for line in (details or []) if str(line or '').strip()]
+    lines = _change_detail_items(details)
     summary = str(summary or '').strip()
     if not summary and not lines:
         return None

@@ -233,6 +233,20 @@ DRAFT_BLOB_LABELS = {
     'pageDrafts': 'حالة الصفحات',
     'map_styles': 'أنماط الخرائط',
     'landmarks_matrix': 'مسافات المعالم',
+    'site_analysis': 'تحليل الموقع',
+    'location_detail': 'تفاصيل الموقع',
+    'location_polygon': 'مضلع الموقع',
+    'parcels': 'قطع الأرض',
+    'warnings': 'التنبيهات',
+    'regulation_evidence': 'الأدلة التنظيمية',
+    'access_roads_data': 'بيانات طرق الوصول',
+    'main_roads_data': 'بيانات الطرق الرئيسية',
+    'city_landmarks_data': 'بيانات معالم المدينة',
+    'catchment_map_landmarks': 'معالم خريطة التغطية',
+    'landmark_map_items': 'عناصر خريطة المعالم',
+    'manual_road_paths': 'مسارات الطرق اليدوية',
+    'source_priority': 'أولوية المصادر',
+    'land_use': 'استخدام الأرض',
 }
 
 # Scalar draft keys with no PREBUILT_FIELDS row of their own — still worth a readable name.
@@ -245,7 +259,462 @@ DRAFT_SCALAR_LABELS = {
 DRAFT_IGNORED_KEYS = {
     'draftId', 'draft_id', 'sectionStatuses', 'regen_seed', 'refresh_maps',
     'updated_at', 'created_at', 'revision',
+    # Machinery that is rewritten on every save or chat turn — its churn used to
+    # fill the log with «تم تحديث البيانات» lines that said nothing.
+    'designerChat', 'slide_generation_checkpoint', 'calculate_landmark_driving',
 }
+
+# Draft keys ending like this are bookkeeping, not reader content.
+DRAFT_IGNORED_SUFFIXES = ('_file_meta', '_file_ids', '_file_id', '_label_positions',
+                          '_label_sizes', '_signature')
+
+# Blobs that mirror data already diffed elsewhere — one honest line at most,
+# never a second copy of the same table changes.
+DRAFT_BLOB_QUIET = {
+    'financial_calc_data': 'أُعيد احتساب نتائج الدراسة',
+}
+
+# Sub-keys inside a blob that are computed output, not entered data.
+DRAFT_BLOB_INNER_SKIP = {
+    'financial_study_model': {'financialCalcData', 'projection', 'tables'},
+    'land_documents_analysis': {'extraction_diagnostics', 'document_processing', 'confidence'},
+    'tenantCreativeImages': {'images_signature', 'last_error', 'last_warning'},
+    'tenantSlidePlan': {'source_error'},
+}
+
+# Labels for keys inside structured blobs: table names, row fields and the
+# financial study inputs (mirroring the form labels in 09-financial.js).
+BLOB_KEY_LABELS = {
+    # financial study structure
+    'dynamicRows': '',  # flat wrapper: its children carry the real table names
+    'components': 'جدول المكونات', 'revenue': 'جدول الإيرادات', 'revenues': 'جدول الإيرادات',
+    'costs': 'جدول التكاليف', 'opex': 'جدول المصروفات التشغيلية',
+    'schedule': 'جدول مراحل التطوير', 'external': 'البنود الخارجية',
+    'financeDraw': 'جدول سحب التمويل', 'financeRepayment': 'جدول سداد التمويل',
+    'fundAdditionalFees': 'رسوم الصندوق الإضافية', 'graceSchedule': 'جدول فترة السماح',
+    'occupancyRamp': 'جدول الوصول للإشغال', 'sensitivity': 'تحليل الحساسية',
+    'sensitivityAssumptionsTable': 'جدول افتراضات الحساسية',
+    'inputs': 'مدخلات الدراسة',
+    # financial inputs
+    'unitRevenueMode': 'نمط وحدات المشروع (بيعية/تأجيرية)',
+    'developmentYears': 'مدة تطوير المشروع (سنة)', 'salesStartYear': 'سنة بدء بيع الوحدات',
+    'salesYears': 'عدد سنوات بيع الوحدات', 'operationYears': 'عدد سنوات التشغيل',
+    'operationStartYear': 'سنة بدء التشغيل', 'landArea': 'مساحة الأرض م²',
+    'coverageRate': 'نسبة التغطية %', 'floorCount': 'عدد الطوابق',
+    'builtUpAreaAbove': 'مسطحات البناء فوق الأرض م²', 'basementArea': 'مساحة البدرومات م²',
+    'totalBuiltUpArea': 'إجمالي مسطحات البناء م²', 'coveredArea': 'المساحة المغطاة م²',
+    'openArea': 'المساحات المفتوحة م²', 'landValueMethod': 'طريقة احتساب قيمة الأرض',
+    'manualLandValue': 'قيمة الأرض اليدوية', 'landStatus': 'حالة الأرض',
+    'landContributionType': 'معالجة الأرض في التدفقات', 'landContributionYear': 'سنة تسجيل الأرض',
+    'landRentMethod': 'طريقة احتساب إيجار الأرض', 'landRentRate': 'نسبة إيجار الأرض السنوي %',
+    'manualAnnualLandRent': 'إيجار الأرض السنوي', 'monthlyLandRent': 'إيجار الأرض الشهري',
+    'landValue': 'قيمة الأرض المحسوبة', 'annualLandRent': 'إيجار الأرض السنوي المحسوب',
+    'graceEnabled': 'تطبيق فترة سماح', 'graceMethod': 'طريقة احتساب السماح',
+    'graceScope': 'نطاق فترة السماح', 'graceRevenueId': 'الإيراد المشمول',
+    'graceStartYear': 'سنة بداية السماح', 'graceDurationMonths': 'مدة السماح (شهر)',
+    'graceDiscountRate': 'نسبة الخصم خلال السماح %', 'graceTotalDiscount': 'إجمالي خصم فترة السماح',
+    'developerRate': 'نسبة المطور %', 'developerBase': 'أساس احتساب نسبة المطور',
+    'developerBaseAmount': 'قيمة أساس المطور', 'developerCostValue': 'إجمالي أتعاب المطور',
+    'developerPaymentsEnabled': 'مراحل تطوير ودفعات المطور',
+    'developerBonusEnabled': 'علاوة حسن أداء المطور', 'developerUpliftShare': 'نسبة المطور من الزيادة في سعر البيع %',
+    'executionCostTotal': 'إجمالي تكلفة التنفيذ', 'designCostTotal': 'التصميم والدراسات',
+    'servicesCostTotal': 'رسوم الخدمات', 'advertisingCostTotal': 'الدعاية والإعلان',
+    'landCostIncluded': 'قيمة الأرض داخل التكلفة', 'landRentSummary': 'إيجار الأرض السنوي',
+    'financeEnabled': 'استخدام تمويل', 'financeBase': 'أساس احتساب التمويل',
+    'financingRate': 'نسبة التمويل من تكلفة المشروع %', 'financeArrangementFeeRate': 'رسوم ترتيب التمويل %',
+    'financeInterestMethod': 'طريقة احتساب الفائدة', 'annualFinanceRate': 'معدل الفائدة السنوي %',
+    'financeDrawYears': 'عدد سنوات سحب التمويل', 'financeRepaymentStartYear': 'سنة بدء سداد التمويل',
+    'financeRepaymentYears': 'عدد سنوات التمويل والسداد', 'financeBaseAmount': 'قيمة أساس التمويل',
+    'facilityAmount': 'قيمة التسهيل التمويلي', 'arrangementFeeTotal': 'رسوم ترتيب التمويل',
+    'financeInterestTotal': 'إجمالي فوائد التمويل', 'landEquityContribution': 'مساهمة الأرض العينية',
+    'cashEquityRequired': 'الضخ النقدي المطلوب', 'equityRequired': 'إجمالي حقوق الملكية',
+    'fundEnabled': 'وجود صندوق للمشروع', 'fundFeesEnabled': 'تطبيق أتعاب إدارة الصندوق',
+    'fundFeeBase': 'أساس احتساب الأتعاب', 'fundCapitalInput': 'رأس مال الصندوق',
+    'fundNavInput': 'صافي قيمة الأصول NAV', 'fundManagementRate': 'نسبة أتعاب الإدارة السنوية %',
+    'fundFixedAnnualFee': 'مبلغ الأتعاب السنوي الثابت', 'fundFeeStartYear': 'سنة بداية الاحتساب',
+    'fundFeeEndYear': 'سنة نهاية الاحتساب', 'fundFeeFrequency': 'دورية السداد',
+    'fundFeeTiming': 'توقيت السداد', 'fundFeeGrowthRate': 'نسبة الزيادة السنوية في الأتعاب %',
+    'fundManagementFeesTotal': 'إجمالي أتعاب الإدارة المحسوبة', 'fundExitFeeEnabled': 'تطبيق أتعاب التخارج',
+    'fundExitFeeBase': 'أساس احتساب أتعاب التخارج', 'fundExitFeeRate': 'نسبة أتعاب التخارج %',
+    'fundExitFixedFee': 'مبلغ أتعاب التخارج الثابت', 'fundFeesTotal': 'إجمالي تكاليف الصندوق',
+    'performanceFeeEnabled': 'تطبيق حافز أداء', 'hurdleRate': 'الحد الأدنى للعائد %',
+    'hurdleMethod': 'طريقة احتساب الحد الأدنى', 'performanceFeeRate': 'نسبة حافز الأداء %',
+    'performanceFeeBase': 'أساس الاحتساب', 'catchupEnabled': 'تطبيق الاستدراك',
+    'catchupRate': 'نسبة الاستدراك %', 'performanceCrystallizationYear': 'سنة احتساب حافز الأداء',
+    'performanceFeeTotal': 'إجمالي حافز الأداء المحسوب', 'externalEnabled': 'بنود خارجية مرنة',
+    'exitEnabled': 'تطبيق التخارج', 'saleExitMethod': 'طريقة التخارج البيعي',
+    'saleExitYear': 'سنة التخارج البيعي', 'saleExitRemainingArea': 'المساحة البيعية المتبقية م²',
+    'saleExitAreaReference': 'المساحة البيعية في بنود الإيرادات م²',
+    'saleExitFixedValue': 'قيمة التخارج البيعي الثابتة', 'saleExitCostRate': 'تكاليف التخارج البيعي %',
+    'exitMethod': 'طريقة التخارج التشغيلي', 'operatingExitYear': 'سنة التخارج التشغيلي',
+    'exitInput': 'معدل الرسملة / المضاعف / القيمة', 'operatingExitCostRate': 'تكاليف التخارج التشغيلي %',
+    'settleDebtAtExit': 'سداد رصيد التمويل عند التخارج', 'roiPeriod': 'فترة احتساب ROI',
+    'roiEndYear': 'آخر سنة في ROI', 'irrPeriod': 'فترة احتساب IRR',
+    'irrEndYear': 'آخر سنة في IRR', 'sensitivityVariableSelect': 'المتغير المراد اختباره',
+    'financialClarifications': 'الإيضاحات',
+    # row fields shared by the dynamic tables
+    'name': 'الاسم', 'useType': 'نوع الاستخدام', 'units': 'عدد الوحدات',
+    'unitArea': 'مساحة الوحدة', 'builtArea': 'المساحة المبنية',
+    'revenueArea': 'المساحة البيعية / التأجيرية', 'totalArea': 'المساحة الإجمالية',
+    'investmentModel': 'نموذج الاستفادة', 'leasable': 'قابل للتأجير',
+    'qty': 'الكمية', 'qtySource': 'مصدر الكمية', 'price': 'السعر',
+    'period': 'الفترة', 'method': 'طريقة الاحتساب', 'formula': 'المعادلة',
+    'customFormula': 'المعادلة المخصصة', 'component': 'المكون المرتبط',
+    'componentId': 'المكون المرتبط', 'occupancy': 'نسبة الإشغال',
+    'year': 'السنة', 'startYear': 'سنة البداية', 'endYear': 'سنة النهاية',
+    'drawPct': 'نسبة السحب', 'repaymentPct': 'نسبة السداد', 'costPct': 'نسبة التكلفة',
+    'devPct': 'نسبة التطوير', 'operationYear': 'سنة التشغيل', 'studyYear': 'سنة الدراسة',
+    'reachPct': 'نسبة الوصول', 'class': 'الفئة', 'duration': 'المدة',
+    'recurrence': 'التكرار', 'value': 'القيمة', 'key': 'المتغير',
+    'low': 'متحفظ', 'high': 'متفائل', 'quarter': 'الربع', 'endQuarter': 'ربع النهاية',
+    'amount': 'المبلغ', 'base': 'الأساس', 'growth': 'نسبة النمو السنوي %',
+    'notes': 'ملاحظات',
+    # land / croquis tables
+    'rows': 'الصفوف', 'point': 'النقطة', 'eastings': 'الإحداثي الشرقي',
+    'northings': 'الإحداثي الشمالي', 'parcel_id': 'القطعة', 'source': 'المصدر',
+    'direction': 'الاتجاه', 'label': 'الحد', 'regulation_text': 'النص التنظيمي',
+    'boundary_length_m': 'طول الحد', 'street_name': 'اسم الشارع',
+    'street_width_m': 'عرض الشارع', 'parcels': 'القطع', 'conflicts': 'التعارضات',
+    'document_summary': 'ملخص المستندات',
+    # market study
+    'competitors': 'المنافسون', 'summary': 'الملخص', 'swot': 'تحليل SWOT',
+    'sources': 'المصادر', 'decision': 'القرار', 'one_block_summary': 'الملخص المختصر',
+    'disclaimer': 'إخلاء المسؤولية', 'competitor_radius': 'نطاق البحث عن المنافسين',
+    'competitor_radius_custom_km': 'نطاق البحث المخصص (كم)', 'data_period': 'فترة البيانات',
+    'data_period_from': 'بداية الفترة', 'data_period_to': 'نهاية الفترة',
+    'project_type': 'نوع المشروع', 'status': 'الحالة', 'strengths': 'نقاط القوة',
+    'weaknesses': 'نقاط الضعف', 'opportunities': 'الفرص', 'threats': 'التهديدات',
+    'distance_km': 'المسافة (كم)', 'distance_text': 'المسافة',
+    'duration_min': 'المدة (دقيقة)', 'duration_minutes': 'المدة (دقيقة)',
+    'category': 'الفئة', 'show_on_map': 'يظهر على الخريطة', 'in_traffic': 'داخل الزحام',
+    'area_sqm': 'المساحة (م²)', 'area_mode': 'نمط المساحة', 'area_from': 'المساحة من',
+    'area_to': 'المساحة إلى',
+    # executive content / team / misc
+    'brief': 'النبذة', 'opportunity': 'الفرصة الاستثمارية', 'features': 'المميزات',
+    'risks': 'المخاطر', 'roles': 'الأدوار', 'excluded': 'المستبعدون',
+    'local': 'المحلي', 'role': 'الدور', 'company': 'الشركة',
+    'title': 'العنوان', 'description': 'الوصف', 'task': 'المهمة',
+    'milestone': 'المرحلة', 'owner': 'المسؤول', 'progress': 'التقدم',
+    'start': 'البداية', 'end': 'النهاية', 'approved': 'معتمد',
+    'image': 'الصورة', 'prompt': 'الوصف', 'access': 'خريطة الوصول',
+    'catchment': 'خريطة التغطية', 'landmarks': 'خريطة المعالم', 'overview': 'الخريطة العامة',
+    'enabled': 'مفعّل', 'visible': 'ظاهر', 'slides': 'الشرائح',
+    'proposed_count': 'عدد الشرائح المقترح', 'type': 'النوع', 'audience': 'الفئة المستهدفة',
+    # generated-asset state (pageDrafts / visual_concept / creative images)
+    'mainImage': 'الصورة الرئيسية', 'moodboard': 'لوحة المزاج', 'project': 'المشروع',
+    'cover': 'الغلاف', 'competitor_logos': 'شعارات المنافسين', 'interior': 'اللقطات الداخلية',
+    'interior_components': 'المكونات الداخلية', 'land_photos': 'صور الأرض',
+    'map_access_roads': 'خريطة طرق الوصول', 'map_approvals': 'اعتمادات الخرائط',
+    'map_catchment_landmarks': 'خريطة معالم التغطية', 'plans2d': 'المخططات ثنائية الأبعاد',
+    'plansWorkflow': 'سير المخططات', 'slots': 'الخانات', 'deletedInteriorSlots': 'الخانات المحذوفة',
+    'selectedInteriorComponentId': 'المكون الداخلي المحدد', 'styleReferenceName': 'النمط المرجعي',
+    'styleReferenceNames': 'الأنماط المرجعية', 'images': 'الصور', 'urls': 'الروابط',
+    'map_overview': 'الخريطة العامة', 'croquis': 'الكروكي',
+}
+
+# Stored enum codes read back as the same Arabic words the form shows.
+BLOB_VALUE_LABELS = {
+    'sale': 'بيع وحدات', 'dailyRent': 'إيجار يومي', 'monthlyRent': 'إيجار شهري',
+    'annualRent': 'إيجار سنوي', 'operating': 'تأجير آخر', 'nonRevenue': 'بدون إيراد',
+    'residential': 'سكني', 'commercial': 'تجاري', 'offices': 'مكاتب',
+    'retail': 'تجزئة', 'hotel': 'فندقي', 'hospitality': 'فندقي',
+    'mixed': 'مختلط', 'services': 'خدمات', 'industrial': 'صناعي',
+    'manual': 'إدخال يدوي', 'componentRevenueArea': 'المساحة البيعية / التأجيرية',
+    'componentArea': 'المساحة البيعية / التأجيرية', 'componentBuiltArea': 'المساحة المبنية',
+    'componentUnits': 'عدد الوحدات', 'yes': 'نعم', 'no': 'لا',
+    'auto': 'تلقائي', 'fixed': 'ثابت', 'north': 'شمال', 'south': 'جنوب',
+    'east': 'شرق', 'west': 'غرب', 'approved': 'معتمد', 'pending': 'قيد المراجعة',
+    'draft': 'مسودة', 'ai': 'الذكاء الاصطناعي', 'user': 'يدوي',
+}
+
+# Keys that never say anything a reader cares about inside a blob.
+BLOB_SKIP_KEYS = {
+    'id', 'idx', 'version', 'signature', 'created_at', 'updated_at',
+    'extraction_diagnostics', 'document_processing', 'confidence',
+    'slide_generation_checkpoint', 'area_cache', 'row_source',
+}
+
+# Image/file slots: the stored URL is noise — a change reads as a replacement.
+BLOB_IMAGE_KEYS = {
+    'image', 'imageUrl', 'image_url', 'src', 'logo', 'fileId', 'file_id',
+    'fileName', 'file_name', 'cover', 'plan_image', 'photo', 'thumbnail',
+}
+
+_INTERNAL_KEY_RE = re.compile(
+    r'^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}|[a-z]+_\d{6,}|plan_[a-z0-9_]+)$')
+_URL_BUSTER_RE = re.compile(r'([?&](?:t|v|cb)=)[^&\s]+')
+_MISSING = object()
+
+
+def _parse_jsonish(value):
+    """A stored JSON string behaves like the object it encodes."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if len(text) < 2 or text[0] not in '{[':
+        return value
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return value
+    return parsed if isinstance(parsed, (dict, list)) else value
+
+
+def _norm_scalar(value):
+    """Numbers compare by value; text compares normalized (cache-busters and spacing out)."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = _WS_RE.sub(' ', _URL_BUSTER_RE.sub(r'\1', value)).strip()
+        try:
+            return float(text.replace(',', ''))
+        except ValueError:
+            return text
+    return _MISSING
+
+
+def _values_equal(old, new):
+    if old == new:
+        return True
+    old_n, new_n = _norm_scalar(old), _norm_scalar(new)
+    if old_n is not _MISSING and new_n is not _MISSING:
+        return old_n == new_n
+    old_p, new_p = _parse_jsonish(old), _parse_jsonish(new)
+    if (old_p, new_p) != (old, new):
+        return _values_equal(old_p, new_p)
+    return False
+
+
+def _is_empty_value(value):
+    return value is None or value == '' or value == {} or value == []
+
+
+def _blob_label(key):
+    if key in BLOB_KEY_LABELS:
+        return BLOB_KEY_LABELS[key]
+    if _INTERNAL_KEY_RE.match(str(key)):
+        return 'أحد العناصر'
+    return str(key)
+
+
+def _blob_text(value):
+    """Readable text for one leaf value; '' for empty or unprintable values."""
+    if _is_empty_value(value):
+        return ''
+    if isinstance(value, bool):
+        return 'نعم' if value else 'لا'
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return str(int(number)) if number.is_integer() else str(value)
+    if isinstance(value, (dict, list)):
+        return ''
+    text = str(value).strip()
+    if not text or text.startswith('data:') or text.startswith('/uploads/'):
+        return ''
+    if _parse_jsonish(text) is not text:
+        return ''
+    return BLOB_VALUE_LABELS.get(text, _shorten(text))
+
+
+def _row_key(item):
+    """Stable identity for a table row: its stored id, else its display name."""
+    if isinstance(item, dict):
+        explicit = str(item.get('id') or item.get('key') or '').strip()
+        if explicit:
+            return 'id:' + explicit
+        for key in ('name', 'title', 'label', 'direction', 'point', 'street_name',
+                    'milestone', 'task', 'company', 'role', 'year'):
+            value = str(item.get(key) or '').strip()
+            if value:
+                return 'name:' + value
+    return None
+
+
+def _row_label(item, index):
+    if isinstance(item, dict):
+        for key in ('name', 'title', 'label', 'direction', 'point', 'street_name',
+                    'milestone', 'task', 'company', 'role', 'year'):
+            text = _blob_text(item.get(key))
+            if text:
+                return f'«{text}»'
+    return f'صف {index + 1}'
+
+
+def _has_row_id(item):
+    """A stored id/key is strong identity: an unmatched one means another row."""
+    return isinstance(item, dict) and bool(
+        str(item.get('id') or item.get('key') or '').strip())
+
+
+def _match_rows(old_items, new_items):
+    """Pair rows by id, then by name, then by order; report the leftovers."""
+    pairs, remaining_new = [], set(range(len(new_items)))
+    buckets = {}
+    for index, item in enumerate(new_items):
+        key = _row_key(item)
+        if key:
+            buckets.setdefault(key, []).append(index)
+    unmatched_old = []
+    for index, item in enumerate(old_items):
+        key = _row_key(item)
+        candidates = buckets.get(key) if key else None
+        while candidates and candidates[0] not in remaining_new:
+            candidates.pop(0)
+        if candidates:
+            match = candidates.pop(0)
+            remaining_new.discard(match)
+            pairs.append((index, match))
+        else:
+            unmatched_old.append(index)
+    # Leftovers pair only at the same position (an in-place row edit); a row
+    # removed mid-table or appended elsewhere reports as removed/added instead
+    # of a fake rename between unrelated rows. Two leftover rows that both
+    # carry ids are never the same row — a delete plus an insert at the same
+    # position stays a removal and an addition, not a rename.
+    if len(old_items) == len(new_items):
+        for index in unmatched_old:
+            if (index in remaining_new
+                    and not (_has_row_id(old_items[index]) and _has_row_id(new_items[index]))):
+                remaining_new.discard(index)
+                pairs.append((index, index))
+    matched_old = {index for index, _ in pairs}
+    removed = [index for index in range(len(old_items)) if index not in matched_old]
+    return sorted(pairs, key=lambda pair: pair[1]), removed, sorted(remaining_new)
+
+
+def _path_head(path):
+    return path[0] if path else ''
+
+
+def _path_tail(path):
+    return ' › '.join(part for part in path[1:] if part)
+
+
+def _emit(out, path, text=None, field=None, old=None, new=None, kind='info'):
+    if len(out) >= MAX_LINES:
+        return
+    item = {'group': _path_head(path), 'path': _path_tail(path), 'kind': kind}
+    if field:
+        item['field'] = field
+        item['old'] = old or ''
+        item['new'] = new or ''
+        item['kind'] = 'change'
+    if text:
+        item['text'] = text
+    out.append(item)
+
+
+def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
+    """Walk two structured values and emit one detail item per real change."""
+    if len(out) >= MAX_LINES or depth > 7:
+        return
+    old, new = _parse_jsonish(old), _parse_jsonish(new)
+    if _values_equal(old, new):
+        return
+    if isinstance(old, dict) and isinstance(new, dict):
+        skip = set(BLOB_SKIP_KEYS) | set(extra_skip)
+        for key in sorted(set(old) | set(new)):
+            if (key in skip or str(key).startswith('_')
+                    or str(key).endswith(('_file_meta', '_file_ids', '_file_id', '_signature'))):
+                continue
+            old_v, new_v = old.get(key), new.get(key)
+            if _values_equal(old_v, new_v):
+                continue
+            # A difference at a describable key: even if no line survives below,
+            # the caller's fallback knows this was a real change, not churn.
+            if state is not None:
+                state['saw'] = True
+            label = _blob_label(key)
+            child_path = path + ([label] if label else [])
+            if isinstance(_parse_jsonish(old_v), (dict, list)) or isinstance(_parse_jsonish(new_v), (dict, list)):
+                _diff_blob(old_v, new_v, child_path, out, depth + 1, state=state)
+            elif key in BLOB_IMAGE_KEYS:
+                _emit(out, child_path, text='استُبدلت', kind='info')
+            else:
+                old_t, new_t = _blob_text(old_v), _blob_text(new_v)
+                if not old_t and not new_t:
+                    _emit(out, child_path, text='تغيّرت قيمة', kind='info')
+                    continue
+                if max(len(str(old_v or '')), len(str(new_v or ''))) > 160:
+                    for text_line in _text_difference_lines(str(old_v or ''), str(new_v or '')):
+                        _emit(out, child_path, text=text_line, kind='info')
+                else:
+                    _emit(out, path, field=label or 'القيمة', old=old_t, new=new_t,
+                          kind='change')
+        return
+    if isinstance(old, list) and isinstance(new, list):
+        if state is not None:
+            state['saw'] = True
+        _diff_list(old, new, path, out, depth, state=state)
+        return
+    had, has = not _is_empty_value(old), not _is_empty_value(new)
+    if has and not had:
+        text = 'أُضيفت البيانات'
+    elif had and not has:
+        text = 'أُزيلت البيانات'
+    else:
+        text = 'تغيّرت البيانات'
+    if state is not None:
+        state['saw'] = True
+    _emit(out, path, text=text, kind='info')
+
+
+def _diff_list(old_items, new_items, path, out, depth, state=None):
+    if len(out) >= MAX_LINES:
+        return
+    if (old_items or new_items) and all(isinstance(item, dict)
+                                        for item in list(old_items) + list(new_items)):
+        pairs, removed, added = _match_rows(old_items, new_items)
+        for old_index, new_index in pairs:
+            _diff_blob(old_items[old_index], new_items[new_index],
+                       path + [_row_label(new_items[new_index], new_index)],
+                       out, depth + 1, state=state)
+        for index in removed:
+            _emit(out, path, text='حُذف ' + _row_label(old_items[index], index),
+                  kind='removed')
+        for index in added:
+            _emit(out, path, text='أُضيف ' + _row_label(new_items[index], index),
+                  kind='added')
+        if pairs and not removed and not added:
+            order = [old_index for old_index, _ in pairs]
+            if order != sorted(order):
+                _emit(out, path, text='أُعيد ترتيب الصفوف', kind='info')
+        return
+    from collections import Counter
+    old_counter = Counter(text for text in (_blob_text(item) for item in old_items) if text)
+    new_counter = Counter(text for text in (_blob_text(item) for item in new_items) if text)
+    removed = list((old_counter - new_counter).elements())
+    added = list((new_counter - old_counter).elements())
+    if removed:
+        _emit(out, path, text='حُذف: ' + '، '.join(removed[:6])
+              + (f' و{len(removed) - 6} أخرى' if len(removed) > 6 else ''),
+              kind='removed')
+    if added:
+        _emit(out, path, text='أُضيف: ' + '، '.join(added[:6])
+              + (f' و{len(added) - 6} أخرى' if len(added) > 6 else ''),
+              kind='added')
+    if not removed and not added and old_items != new_items:
+        _emit(out, path, text='تغيّرت القائمة', kind='info')
+
+
+def detail_text(item):
+    """One readable line out of a stored detail item, dict or plain string."""
+    if not isinstance(item, dict):
+        return str(item)
+    head = ' › '.join(part for part in (item.get('group'), item.get('path')) if part)
+    if item.get('field'):
+        old, new = str(item.get('old') or ''), str(item.get('new') or '')
+        if old and new:
+            phrase = f'من «{old}» إلى «{new}»'
+        elif new:
+            phrase = f'أُضيف «{new}»'
+        else:
+            phrase = f'أُفرغ (كان «{old}»)'
+        return f'{head}: {item["field"]}: {phrase}' if head else f'{item["field"]}: {phrase}'
+    text = str(item.get('text') or '')
+    return f'{head}: {text}' if head else text
 
 
 def _draft_field_labels():
@@ -255,6 +724,18 @@ def _draft_field_labels():
         if key:
             labels[key] = field.get('label') or key
     return labels
+
+
+def _draft_field_groups():
+    """Section label per known draft field, so scalar edits group under their form section."""
+    section_labels = {section['key']: section['label']
+                      for section in (getattr(db, 'FIELD_SECTIONS', []) or [])}
+    groups = {}
+    for field in getattr(db, 'PREBUILT_FIELDS', []) or []:
+        key = field.get('key')
+        if key:
+            groups[key] = section_labels.get(field.get('section_key'), '')
+    return groups
 
 
 def _readable_value(value):
@@ -280,40 +761,49 @@ def _is_blob(value):
 
 
 def describe_draft_changes(old_data, new_data, field_labels=None):
-    """Readable lines for what changed between two saves of a project file."""
+    """Readable detail items for what changed between two saves of a project file.
+
+    Each item is either a plain string (legacy wording, slide lines) or a dict
+    {group, path, field, old, new, kind} — the log page groups dicts under their
+    section and renders a before/after, while detail_text() flattens any item
+    back into one sentence for plain-text consumers.
+    """
     old_data = old_data if isinstance(old_data, dict) else {}
     new_data = new_data if isinstance(new_data, dict) else {}
     labels = dict(field_labels or _draft_field_labels())
     labels.update(DRAFT_SCALAR_LABELS)
     labels.update(DRAFT_BLOB_LABELS)
+    groups = _draft_field_groups()
     lines = []
 
     for key in sorted(set(old_data) | set(new_data)):
-        if key in DRAFT_IGNORED_KEYS or key.startswith('_') or key.endswith(('_file_meta', '_file_ids')):
+        if (key in DRAFT_IGNORED_KEYS or str(key).startswith('_')
+                or str(key).endswith(DRAFT_IGNORED_SUFFIXES)):
             continue
         old_value, new_value = old_data.get(key), new_data.get(key)
-        if old_value == new_value:
+        if _values_equal(old_value, new_value):
             continue
         label = labels.get(key, key)
-        if key in DRAFT_BLOB_LABELS or _is_blob(old_value) or _is_blob(new_value):
-            had = bool(old_value) and old_value not in ({}, [], '')
-            has = bool(new_value) and new_value not in ({}, [], '')
-            if has and not had:
-                lines.append(f'{label}: أُضيفت البيانات')
-            elif had and not has:
-                lines.append(f'{label}: أُزيلت البيانات')
-            else:
-                lines.append(f'{label}: تم تحديث البيانات')
+        old_blob, new_blob = _parse_jsonish(old_value), _parse_jsonish(new_value)
+        if key in DRAFT_BLOB_QUIET:
+            _emit(lines, [label], text=DRAFT_BLOB_QUIET[key], kind='info')
+            continue
+        if key in DRAFT_BLOB_LABELS or isinstance(old_blob, (dict, list)) or isinstance(new_blob, (dict, list)):
+            if key == 'tenantSlidesData':
+                slide_lines = describe_slide_changes(
+                    old_blob if isinstance(old_blob, list) else [],
+                    new_blob if isinstance(new_blob, list) else [])
+                for slide_line in slide_lines:
+                    _emit(lines, [label], text=slide_line, kind='info')
+                continue
+            _diff_blob(old_blob, new_blob, [label], lines,
+                       extra_skip=DRAFT_BLOB_INNER_SKIP.get(key, ()))
             continue
         old_text, new_text = _readable_value(old_value), _readable_value(new_value)
         if not old_text and not new_text:
             continue
-        if not old_text:
-            lines.append(f'{label}: أُضيف «{new_text}»')
-        elif not new_text:
-            lines.append(f'{label}: أُفرغ (كان «{old_text}»)')
-        else:
-            lines.append(f'{label}: من «{old_text}» إلى «{new_text}»')
+        _emit(lines, [groups.get(key) or 'بيانات المشروع'],
+              field=label, old=old_text, new=new_text, kind='change')
 
     if len(lines) > MAX_LINES:
         remaining = len(lines) - MAX_LINES

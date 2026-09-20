@@ -207,8 +207,19 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
 
 - `describe_slide_changes(old, new)` names the difference: a title from one value to another, which
   phrases left and which arrived, a replaced image or map, an added or removed slide, and a styling
-  change that left the text untouched. `describe_draft_changes` does the same per field, and names a
-  data area (`financial_study_model` → «الدراسة المالية») instead of dumping its JSON.
+  change that left the text untouched. `describe_draft_changes` walks structured blobs to the leaf —
+  «الدراسة المالية › جدول المكونات › «المطاعم»: عدد الوحدات: من «6» إلى «8»» — and returns a mix of
+  plain strings and dict items `{group, path, field, old, new, kind}`; `detail_text(item)` flattens
+  either form back to one line for plain-text consumers (the versions-compare API). Table rows pair
+  by `id`, then display name, then same-position; skipped machinery keys (`id`, `idx`,
+  `extraction_diagnostics`, `*_signature`, cache-buster `?t=` on URLs) never reach the log, so a save
+  that changed nothing real writes nothing. Blob key/value Arabic labels live in `BLOB_KEY_LABELS` /
+  `BLOB_VALUE_LABELS` in `change_tracking.py`.
+- The draft log opens as a dedicated overlay page (`#changeLogPage`, `showDraftEditLog`): entries
+  grouped by day (اليوم/أمس/date), each entry shows the editor's name, the action, a
+  manual/AI/system badge and a 12-hour ص/م local timestamp (`formatChangeLogStamp`), with details
+  grouped under their section name and old-vs-new values side by side. The same
+  `renderChangeLogEntry` renders the «كل الأحداث» list inside the presentation versions modal.
 - Every flow that changes either target writes one entry with `source` = `manual` or `ai`: the
   manual slide edit, inline text editing (quoting both sides), the AI designer chat (with the
   request and the tools it ran), draft save, section approval, version restore, creation, export and
