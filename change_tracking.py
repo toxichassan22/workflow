@@ -410,6 +410,10 @@ BLOB_KEY_LABELS = {
     'selectedInteriorComponentId': 'المكون الداخلي المحدد', 'styleReferenceName': 'النمط المرجعي',
     'styleReferenceNames': 'الأنماط المرجعية', 'images': 'الصور', 'urls': 'الروابط',
     'map_overview': 'الخريطة العامة', 'croquis': 'الكروكي',
+    # file/image slots that can appear under row names
+    'logo': 'الشعار', 'logo_path': 'الشعار', 'logo_url': 'الشعار',
+    'image_path': 'الصورة', 'photo_path': 'الصورة', 'cover_path': 'الغلاف',
+    'map_path': 'الخريطة', 'file_path': 'الملف',
 }
 
 # Stored enum codes read back as the same Arabic words the form shows.
@@ -438,10 +442,33 @@ BLOB_SKIP_KEYS = {
 BLOB_IMAGE_KEYS = {
     'image', 'imageUrl', 'image_url', 'src', 'logo', 'fileId', 'file_id',
     'fileName', 'file_name', 'cover', 'plan_image', 'photo', 'thumbnail',
+    'logo_path', 'image_path', 'photo_path', 'map_path', 'cover_path',
 }
+
+_BLOB_FILE_KEY_RE = re.compile(r'(?:_path|_url|_uri|_image|_logo|_photo|_file|_src)$', re.I)
+
+
+def _is_imageish_change(key, old_v, new_v):
+    """File/image slot even when the key is not in BLOB_IMAGE_KEYS: a *_path /
+    *_url / *_logo style key whose stored value is a file path or URL."""
+    if key in BLOB_IMAGE_KEYS:
+        return True
+    if not _BLOB_FILE_KEY_RE.search(str(key)):
+        return False
+
+    def looks_like_file(value):
+        text = str(value or '').strip()
+        return text.startswith(('/uploads/', 'http://', 'https://', 'data:image', 'data:'))
+
+    return looks_like_file(old_v) or looks_like_file(new_v)
 
 _INTERNAL_KEY_RE = re.compile(
     r'^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}|[a-z]+_\d{6,}|plan_[a-z0-9_]+)$')
+# A stored row reference such as «p_1789906384606_497620a2685448» or a uuid —
+# never readable on screen; resolve it to the referenced row's name instead.
+_INTERNAL_ID_VALUE_RE = re.compile(
+    r'^(?:[a-z]+_\d{6,}(?:_[0-9a-z]{4,})?|'
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$', re.I)
 _URL_BUSTER_RE = re.compile(r'([?&](?:t|v|cb)=)[^&\s]+')
 _MISSING = object()
 
@@ -516,6 +543,43 @@ def _blob_text(value):
     if _parse_jsonish(text) is not text:
         return ''
     return BLOB_VALUE_LABELS.get(text, _shorten(text))
+
+
+def _collect_id_names(*roots):
+    """id/key → display name for every row dict in the structures, so a stored
+    reference («الإيراد المشمول: من «p_…» إلى «p_…»») reads as the row it points
+    at. Both snapshots are scanned so a deleted row still resolves."""
+    id_map = {}
+    stack = [root for root in roots if isinstance(root, (dict, list))]
+    while stack and len(id_map) < 1000:
+        node = stack.pop()
+        if isinstance(node, dict):
+            row_id = str(node.get('id') or node.get('key') or '').strip()
+            if row_id and row_id not in id_map:
+                for name_key in ('name', 'title', 'label', 'direction', 'point',
+                                 'street_name', 'milestone', 'task', 'company',
+                                 'role', 'year'):
+                    text = _blob_text(node.get(name_key))
+                    if text:
+                        id_map[row_id] = text
+                        break
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+    return id_map
+
+
+def _ref_text(value, id_map, deleted=False, fallback=None):
+    """Readable text for a leaf value, resolving stored row references to the
+    referenced row's name. An unresolvable internal id reads as a removed/added
+    item rather than dumping «p_1789906…» on screen."""
+    raw = str(value or '').strip()
+    if raw:
+        if raw in id_map:
+            return id_map[raw]
+        if _INTERNAL_ID_VALUE_RE.match(raw):
+            return 'عنصر محذوف' if deleted else 'عنصر مضاف'
+    return (fallback or _blob_text)(value)
 
 
 def _row_key(item):
@@ -630,10 +694,12 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
             child_path = path + ([label] if label else [])
             if isinstance(_parse_jsonish(old_v), (dict, list)) or isinstance(_parse_jsonish(new_v), (dict, list)):
                 _diff_blob(old_v, new_v, child_path, out, depth + 1, state=state)
-            elif key in BLOB_IMAGE_KEYS:
+            elif _is_imageish_change(key, old_v, new_v):
                 _emit(out, child_path, text='استُبدلت', kind='info')
             else:
-                old_t, new_t = _blob_text(old_v), _blob_text(new_v)
+                id_map = state.get('id_map') if state else {}
+                old_t = _ref_text(old_v, id_map, deleted=True)
+                new_t = _ref_text(new_v, id_map)
                 if not old_t and not new_t:
                     _emit(out, child_path, text='تغيّرت قيمة', kind='info')
                     continue
@@ -774,6 +840,7 @@ def describe_draft_changes(old_data, new_data, field_labels=None):
     labels.update(DRAFT_SCALAR_LABELS)
     labels.update(DRAFT_BLOB_LABELS)
     groups = _draft_field_groups()
+    state = {'id_map': _collect_id_names(old_data, new_data)}
     lines = []
 
     for key in sorted(set(old_data) | set(new_data)):
@@ -797,9 +864,10 @@ def describe_draft_changes(old_data, new_data, field_labels=None):
                     _emit(lines, [label], text=slide_line, kind='info')
                 continue
             _diff_blob(old_blob, new_blob, [label], lines,
-                       extra_skip=DRAFT_BLOB_INNER_SKIP.get(key, ()))
+                       extra_skip=DRAFT_BLOB_INNER_SKIP.get(key, ()), state=state)
             continue
-        old_text, new_text = _readable_value(old_value), _readable_value(new_value)
+        old_text = _ref_text(old_value, state['id_map'], deleted=True, fallback=_readable_value)
+        new_text = _ref_text(new_value, state['id_map'], fallback=_readable_value)
         if not old_text and not new_text:
             continue
         _emit(lines, [groups.get(key) or 'بيانات المشروع'],
