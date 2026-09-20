@@ -5272,6 +5272,37 @@ def _visual_concept_plan_place_en(context):
     return ', '.join(parts)
 
 
+_VISUAL_PLAN_FLOOR_LABEL_EN = {
+    'ارضي': 'ground', 'ميزانين': 'mezzanine', 'مسروق': 'mezzanine',
+    'ملحقعلوي': 'roof annex', 'ملحق': 'roof annex', 'سطح': 'roof', 'بدروم': 'basement',
+}
+
+
+def _visual_concept_plan_floor_label_en(text):
+    """English floor tag for the spec's masses line: «أرضي» -> «ground»,
+    «بدروم 1-3» -> «basement 1-3», a numeric range passes through."""
+    value = str(text or '').strip()
+    if not value:
+        return value
+    basement = re.match(r'بدروم\s*(\d+(?:\s*-\s*\d+)?)\s*$', value)
+    if basement:
+        return 'basement ' + re.sub(r'\s+', '', basement.group(1))
+    key = _visual_concept_plan_component_key(value)
+    if key in _VISUAL_PLAN_FLOOR_LABEL_EN:
+        return _VISUAL_PLAN_FLOOR_LABEL_EN[key]
+    return value
+
+
+_VISUAL_PLAN_BUILDING_EN = {'المبنى الرئيسي': 'Main Building'}
+
+
+def _visual_concept_plan_building_en(name):
+    """Building label for English spec text: our own default names translate;
+    anything the client recorded stays a proper name."""
+    text = str(name or '').strip()
+    return _VISUAL_PLAN_BUILDING_EN.get(text, text) or 'Main Building'
+
+
 def _visual_concept_plan_component_brief(item):
     name = _visual_concept_plan_component_en(_visual_concept_plan_sanitize_text(item.get('name')))
     bits = []
@@ -5282,9 +5313,9 @@ def _visual_concept_plan_component_brief(item):
     if area not in (None, ''):
         bits.append(f'{area} m²')
     if item.get('floorRange') not in (None, ''):
-        bits.append(f"floors {item['floorRange']}")
+        bits.append(f"floors {_visual_concept_plan_floor_label_en(item['floorRange'])}")
     if item.get('building') not in (None, ''):
-        bits.append(f"building {item['building']}")
+        bits.append(f"building {_visual_concept_plan_building_en(item['building'])}")
     return name + (f" ({'; '.join(bits)})" if bits else '')
 
 
@@ -5509,8 +5540,11 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
 
     if model:
         tower_dir = model['high_sector']['direction'] if model['high_sector'] else ''
-        tower = (f"a {model['floor_count']}-storey mixed-use tower"
-                 if model['floor_count'] else 'a mixed-use tower')
+        if model.get('from_distribution'):
+            tower = 'a mixed-use building'
+        else:
+            tower = (f"a {model['floor_count']}-storey mixed-use tower"
+                     if model['floor_count'] else 'a mixed-use tower')
         if tower_dir:
             tower += f' on the {tower_dir} part'
         band_phrases = []
@@ -5532,7 +5566,11 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
             article = 'an' if band['label'][:1].lower() in 'aeiou' else 'a'
             if position == 0:
                 storey = f"{band['floors']}-storey " if band['floors'] else ''
-                noun = 'podium base' if len(model['bands']) > 1 and (band['floors'] or 0) <= 8 else 'base'
+                if model.get('from_distribution'):
+                    noun = 'ground band'
+                else:
+                    noun = ('podium base' if len(model['bands']) > 1
+                            and (band['floors'] or 0) <= 8 else 'base')
                 phrase = f"{article} {storey}{band['label']} {noun}"
             elif position == last:
                 phrase = f"{article} {band['label']} top band"
@@ -5599,8 +5637,18 @@ def _visual_concept_plan_site_body(context, model, regulations):
         crown_color = (model['bands'][-1]['color'] if model['bands'] else '') or 'soft-blue'
         # Same podium heuristic the spec uses: a short first band under a taller
         # stack is a podium base; otherwise the tower sits on the ground directly.
-        has_podium = len(model['bands']) > 1 and (model['bands'][0]['floors'] or 0) <= 8
-        if has_podium:
+        # An approved-distribution model names no podium — its bands are floors.
+        has_podium = (not model.get('from_distribution')
+                      and len(model['bands']) > 1 and (model['bands'][0]['floors'] or 0) <= 8)
+        building_name = next((str(item.get('building') or '')
+                              for band in model['bands'] for item in band.get('items') or []
+                              if item.get('building')), '')
+        mass_label = _visual_concept_plan_building_en(building_name)
+        if model.get('from_distribution'):
+            footprints = [f"the building zone" + (f' on the {high_dir} part' if high_dir else '')
+                          + f" ({(podium_color + ' ') if podium_color else ''}footprint "
+                            f"labeled '{mass_label}')"]
+        elif has_podium:
             footprints = [f"the podium+tower zone" + (f' on the {high_dir} part' if high_dir else '')
                           + f' ({podium_color} podium footprint with a smaller {crown_color} tower '
                             "footprint inside it labeled 'Tower')"]
@@ -5665,15 +5713,18 @@ def _visual_concept_plan_uses_body(context, model, regulations):
         for band in model['bands']:
             color = band['color'] or 'muted'
             count = band['floors']
-            rng = band['range']
+            rng = _visual_concept_plan_floor_label_en(band['range'])
             if count and rng:
                 tower_bits.append(f"{count} {color} '{band['label']} ({rng})' bands")
             else:
                 tower_bits.append(f"{color} '{band['label']}' bands")
         if model['roof']:
             tower_bits.append("a thin grey 'Roof & Services' cap")
-        tower_name = (f"{model['floor_count']}-storey tower" if model['floor_count']
-                      else 'mixed-use tower')
+        if model.get('from_distribution'):
+            tower_name = 'building'
+        else:
+            tower_name = (f"{model['floor_count']}-storey tower" if model['floor_count']
+                          else 'mixed-use tower')
         stacks.append('Left stack — the ' + tower_name + ', bands bottom to top exactly: '
                       + ', '.join(tower_bits) + '.')
         for position, block in enumerate(model.get('blocks') or []):
@@ -5682,7 +5733,8 @@ def _visual_concept_plan_uses_body(context, model, regulations):
                 block_bits = []
                 for band in block['bands']:
                     band_text = (f"{band['floors']} {band['color'] or 'muted'} '{band['label']}"
-                                 + (f" ({band['range']})'" if band.get('range') else "'")
+                                 + (f" ({_visual_concept_plan_floor_label_en(band['range'])})'"
+                                    if band.get('range') else "'")
                                  + ' bands')
                     block_bits.append(band_text)
                 stacks.append(f"{side} stack — the '{block['label']}': "
@@ -5728,13 +5780,20 @@ def _visual_concept_plan_massing_body(context, model, regulations):
             noun = _VISUAL_PLAN_USE_LABEL.get(band['category'], 'Amenities').lower()
             if position == 0:
                 storey = f"{band['floors']}-storey " if band['floors'] else ''
-                base_noun = 'podium base' if len(model['bands']) > 1 and (band['floors'] or 0) <= 8 else 'base'
+                if model.get('from_distribution'):
+                    base_noun = 'ground band'
+                else:
+                    base_noun = ('podium base' if len(model['bands']) > 1
+                                 and (band['floors'] or 0) <= 8 else 'base')
                 tiers.append(f'{color} {storey}{base_noun}')
             elif position == last:
                 tiers.append(f'{color} {noun} crown')
             else:
                 tiers.append(f'{color} {noun} band')
-        tower_name = (f"{model['floor_count']}-storey tower" if model['floor_count'] else 'tower')
+        if model.get('from_distribution'):
+            tower_name = 'building'
+        else:
+            tower_name = (f"{model['floor_count']}-storey tower" if model['floor_count'] else 'tower')
         parts.append(
             'On it, extrude only the approved masses as simple matte boxes with thin white '
             'horizontal floor lines and dark navy outlines: the ' + tower_name
@@ -5748,7 +5807,8 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         parts.append('. Pale-green landscaping with round trees fills the open areas')
         if model['sea_dir']:
             parts.append(f"; a pale-cyan 'Sea' band runs beyond the {model['sea_dir']} edge")
-        callouts = [band['label'] + (' Podium' if i == 0 and len(model['bands']) > 1
+        callouts = [band['label'] + (' Podium' if i == 0 and not model.get('from_distribution')
+                                     and len(model['bands']) > 1
                                      and (band['floors'] or 0) <= 8 else '')
                     for i, band in enumerate(model['bands'])]
         callouts += [block['label'] for block in model.get('blocks') or [] if block.get('label')]
@@ -5927,6 +5987,12 @@ def _visual_concept_plan_floor_range(text):
         count = max(digits) if digits else 1
         return {'kind': 'basement', 'lo': -count, 'hi': -1, 'count': count}
     numbers = [int(d) for d in re.findall(r'\d+', lowered)]
+    if not numbers:
+        ordinals = {'اول': 1, 'ثاني': 2, 'ثالث': 3, 'رابع': 4, 'خامس': 5,
+                    'سادس': 6, 'سابع': 7, 'ثامن': 8, 'تاسع': 9, 'عاشر': 10}
+        found = [ordinals.get(_visual_concept_plan_component_key(token) or '')
+                 for token in re.split(r'[-–—]', value)]
+        numbers = [n for n in found if n]
     mezzanine = bool(re.search(r'ميزانين|mezzanine|مسروق', lowered))
     ground = bool(re.search(r'\bg\b|ground|أرضي|الارضي|الأرضي', lowered))
     if mezzanine and not ground:
@@ -6281,7 +6347,7 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
             parsed = parsed_of(row)
             if parsed and parsed['kind'] not in ('basement', 'roof'):
                 top = max(top, parsed['hi'])
-        return top
+        return int(-(-top // 1)) if top else 0
 
     def band_for(row):
         parsed = parsed_of(row) or {'kind': 'range', 'lo': 0, 'hi': 0, 'count': 1}
@@ -6393,6 +6459,7 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
         'sea_dir': sea_dir,
         'has_residential': any(band['category'] == 'residential' for band in all_bands),
         'block_label': blocks[0]['label'] if blocks else 'Low Block',
+        'from_distribution': True,
     }
 
 
@@ -6417,6 +6484,9 @@ def _visual_concept_plan_adapt_bodies(distribution, bodies, data):
         'For each kind, rewrite ONLY the DRAWING REQUESTED paragraph so it matches the approved '
         'distribution: drop any element the distribution does not contain (podium, low block, '
         'basement parking, sea band, extra entries), and add approved elements the template lacks. '
+        'But the APPROVED DISTRIBUTION MODEL block above the body is fact: every mass, entry, '
+        'street, and setback it lists stays in the drawing — never remove, forbid, or contradict '
+        'an element the spec lists; only drop template elements the spec itself does not contain. '
         'Keep the flat pastel style, English labels, legend, titles, and "NOT TO SCALE" caption. '
         'Never change an approved number, direction, color, or label; never mention sources or files. '
         'Return JSON only: {"site":"...","uses":"...","massing":"..."} with the full adapted '
