@@ -1120,6 +1120,35 @@
       font-weight: 700;
     }
 
+    .section-version-diff-tline {
+      padding: 1px 4px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .section-version-diff-tline.diff-del {
+      background: #fdecec;
+    }
+
+    .section-version-diff-tline.diff-ins {
+      background: #e9f7ee;
+    }
+
+    .section-version-diff-tline .diff-word {
+      border-radius: 3px;
+      padding: 0 2px;
+      font-weight: 700;
+    }
+
+    .diff-del .diff-word {
+      background: #f6c9c9;
+    }
+
+    .diff-ins .diff-word {
+      background: #b9e7c9;
+    }
+
     .section-version-diff-row.diff-modified .section-version-diff-old,
     .section-version-diff-row.diff-removed .section-version-diff-old {
       border-color: #e5bcbc;

@@ -1017,6 +1017,136 @@
       return box;
     }
 
+    // A modified text field gets an inline diff: only the lines that actually
+    // changed are tinted, and inside a changed pair of lines the differing
+    // words are marked, so the approver sees exactly what moved.
+    function diffPlainTextValue(value) {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'object') return null;
+      if (diffParseJsonString(value)) return null;
+      return String(value);
+    }
+
+    function diffLines(oldText, newText) {
+      const a = String(oldText).split('\n');
+      const b = String(newText).split('\n');
+      if (a.length > 400 || b.length > 400) return null;
+      const m = a.length;
+      const n = b.length;
+      const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+      for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+          dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const ops = [];
+      let i = 0;
+      let j = 0;
+      while (i < m && j < n) {
+        if (a[i] === b[j]) { ops.push({ type: 'same', oldLine: a[i], newLine: b[j] }); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ type: 'del', oldLine: a[i] }); i++; }
+        else { ops.push({ type: 'add', newLine: b[j] }); j++; }
+      }
+      while (i < m) ops.push({ type: 'del', oldLine: a[i++] });
+      while (j < n) ops.push({ type: 'add', newLine: b[j++] });
+      return ops;
+    }
+
+    function diffWordMarks(line, paired) {
+      // Token-level LCS that keeps whitespace: only the differing tokens mark.
+      const mine = String(line).split(/(\s+)/);
+      const other = String(paired).split(/(\s+)/);
+      const m = mine.length;
+      const n = other.length;
+      if (m > 300 || n > 300) return null;
+      const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+      for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+          dp[i][j] = mine[i] === other[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const marks = new Array(m).fill(false);
+      let i = 0;
+      let j = 0;
+      while (i < m && j < n) {
+        if (mine[i] === other[j]) { i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { marks[i] = true; i++; }
+        else { j++; }
+      }
+      while (i < m) marks[i++] = true;
+      const frags = [];
+      for (let k = 0; k < m; k++) {
+        const changed = marks[k] && mine[k].trim() !== '';
+        const last = frags[frags.length - 1];
+        if (last && last.changed === changed) last.text += mine[k];
+        else frags.push({ text: mine[k], changed: changed });
+      }
+      return frags;
+    }
+
+    function renderDiffLines(ops, side) {
+      const box = document.createElement('div');
+      box.className = 'section-version-diff-text';
+      let i = 0;
+      while (i < ops.length) {
+        if (ops[i].type === 'same') {
+          const line = document.createElement('div');
+          line.className = 'section-version-diff-tline';
+          line.textContent = (side === 'old' ? ops[i].oldLine : ops[i].newLine) || ' ';
+          box.appendChild(line);
+          i++;
+          continue;
+        }
+        const block = [];
+        while (i < ops.length && ops[i].type !== 'same') { block.push(ops[i]); i++; }
+        const dels = block.filter(op => op.type === 'del');
+        const adds = block.filter(op => op.type === 'add');
+        const source = side === 'old' ? dels : adds;
+        const other = side === 'old' ? adds : dels;
+        const pairs = Math.min(dels.length, adds.length);
+        source.forEach((entry, idx) => {
+          const lineText = side === 'old' ? entry.oldLine : entry.newLine;
+          const pairedEntry = idx < pairs ? other[idx] : null;
+          const pairedText = pairedEntry ? (side === 'old' ? pairedEntry.newLine : pairedEntry.oldLine) : null;
+          const div = document.createElement('div');
+          div.className = 'section-version-diff-tline ' + (side === 'old' ? 'diff-del' : 'diff-ins');
+          const marks = pairedText === null ? null : diffWordMarks(lineText, pairedText);
+          if (!marks) {
+            div.textContent = lineText || ' ';
+          } else {
+            let wrote = false;
+            marks.forEach(frag => {
+              if (!frag.text) return;
+              wrote = true;
+              if (!frag.changed) { div.appendChild(document.createTextNode(frag.text)); return; }
+              const mark = document.createElement('span');
+              mark.className = 'diff-word';
+              mark.textContent = frag.text;
+              div.appendChild(mark);
+            });
+            if (!wrote) div.textContent = ' ';
+          }
+          box.appendChild(div);
+        });
+      }
+      return box;
+    }
+
+    function fillScalarDiffCells(oldCell, newCell, oldValue, newValue) {
+      const oldText = diffPlainTextValue(oldValue);
+      const newText = diffPlainTextValue(newValue);
+      if (oldText === null || newText === null || oldText === newText) return;
+      const ops = diffLines(oldText, newText);
+      if (!ops) return;
+      const oldBox = oldCell.querySelector('.section-version-diff-value');
+      const newBox = newCell.querySelector('.section-version-diff-value');
+      if (!oldBox || !newBox) return;
+      oldBox.innerHTML = '';
+      newBox.innerHTML = '';
+      oldBox.appendChild(renderDiffLines(ops, 'old'));
+      newBox.appendChild(renderDiffLines(ops, 'new'));
+    }
+
     // One side of the comparison: a captioned box so the previous value always
     // sits next to the new value, even when one of them is empty (added fields
     // have no previous value, removed fields have no new one).
@@ -1178,8 +1308,13 @@
           cols.classList.add('single');
           cols.appendChild(sectionVersionDiffCell('same', item.new_value, item._diffAttachment));
         } else {
-          cols.appendChild(sectionVersionDiffCell('old', item.old_value, item._diffAttachment));
-          cols.appendChild(sectionVersionDiffCell('new', item.new_value, item._diffAttachment));
+          const oldCell = sectionVersionDiffCell('old', item.old_value, item._diffAttachment);
+          const newCell = sectionVersionDiffCell('new', item.new_value, item._diffAttachment);
+          if (!item._diffAttachment && item.status === 'modified') {
+            fillScalarDiffCells(oldCell, newCell, item.old_value, item.new_value);
+          }
+          cols.appendChild(oldCell);
+          cols.appendChild(newCell);
         }
         row.appendChild(cols);
         grid.appendChild(row);
