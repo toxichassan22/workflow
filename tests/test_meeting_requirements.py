@@ -10826,6 +10826,57 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(
             merged['source_url'], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
 
+    def test_competitor_verification_captures_retrieved_price(self):
+        module = self.application_module
+        price_page = 'https://sa.aqar.fm/listing/9'
+        official_page = 'https://developer.sa/olu-alrehab'
+        response = {
+            'choices': [{'message': {
+                'content': json.dumps({'exists': True, 'price': {
+                    'type': 'إيجار الوحدة السنوي', 'value': '45000', 'url': price_page}}),
+                'annotations': [
+                    {'type': 'url_citation', 'url_citation': {
+                        'url': price_page, 'title': 'مشروع علو الرحاب شقق للإيجار'}},
+                    {'type': 'url_citation', 'url_citation': {
+                        'url': official_page,
+                        'title': 'مشروع علو الرحاب — الموقع الرسمي'}},
+                ],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        row = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
+        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+            module._verify_competitor_row(row, {'city': 'جدة'}, {})
+        self.assertEqual(row.get('price_value'), '45000')
+        self.assertEqual(row.get('price_type'), 'إيجار الوحدة السنوي')
+        self.assertIn(price_page, row.get('field_sources', {}).get('price_value', []))
+        self.assertIn(price_page, row.get('source_urls') or [])
+        # A price citing a page the search never retrieved is rejected — the
+        # figure could be memory dressed up as evidence.
+        ghost = {
+            'choices': [{'message': {
+                'content': json.dumps({'exists': True, 'price': {
+                    'type': 'إيجار الوحدة السنوي', 'value': '45000',
+                    'url': 'https://never-retrieved.example/page'}}),
+                'annotations': [
+                    {'type': 'url_citation', 'url_citation': {
+                        'url': official_page,
+                        'title': 'مشروع علو الرحاب — الموقع الرسمي'}},
+                ],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        rejected = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
+        with patch.object(module, '_call_market_study_model', return_value=(ghost, '')):
+            module._verify_competitor_row(rejected, {'city': 'جدة'}, {})
+        self.assertFalse(rejected.get('price_value'))
+        # An evidence-backed price from the main pass is never overwritten.
+        filled = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار',
+                  'price_value': '30000', 'row_source': 'ai'}
+        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+            module._verify_competitor_row(filled, {'city': 'جدة'}, {})
+        self.assertEqual(filled.get('price_value'), '30000')
+
     def test_market_study_prices_require_a_dedicated_search(self):
         import market_study
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')

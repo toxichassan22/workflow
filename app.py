@@ -21624,11 +21624,19 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     if not name:
         return
     city = str(payload.get('city') or '').strip() or 'السعودية'
+    operation = str(row.get('operation_type') or '').strip() or 'أخرى'
+    price_options = '، '.join(
+        market_study.PRICE_TYPE_BY_OPERATION.get(operation)
+        or market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
     prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
-        'للمشروع أو مطوّره إن وُجدت", "price_note": "أي سعر أو إيجار ورد في الصفحات", '
-        '"summary": "سطر واحد عن المشروع"}.\n'
+        'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
+        '"price": {"type": "أحد: ' + price_options + '", "value": "الرقم فقط", '
+        '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
+        '"url": "رابط الصفحة التي ورد فيها السعر حرفيًا"}}.\n'
+        'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
+        'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )
     try:
@@ -21670,6 +21678,60 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     if official and not str(row.get('logo_source_url') or '').strip():
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
+    parsed, _parse_error = _parse_market_model_json(response)
+    _apply_verified_competitor_price(
+        row, parsed, set(_market_citation_urls(response)))
+
+
+def _apply_verified_competitor_price(row, parsed, citation_urls):
+    """Fill empty price fields from the per-competitor verification search.
+
+    That call already retrieves real pages for this competitor — accept its
+    price only when the cited page was actually retrieved, so the figure stays
+    grounded in a fetched page and a memory number never slips through. A price
+    the main pass already filled is never overwritten.
+    """
+    price = parsed.get('price') if isinstance(parsed, dict) else None
+    if not isinstance(price, dict):
+        price = parsed if isinstance(parsed, dict) else {}
+    url = str(price.get('url') or price.get('source_url') or price.get('sourceUrl') or '').strip()
+    if not url or url not in (citation_urls or set()):
+        return
+    value = market_study._clean_numeric(price.get('value') or price.get('price_value'))
+    from_v = market_study._clean_numeric(price.get('from') or price.get('price_from'))
+    to_v = market_study._clean_numeric(price.get('to') or price.get('price_to'))
+    if not (value or from_v or to_v):
+        return
+    if str(row.get('price_value') or '').strip() or str(row.get('price_from') or '').strip():
+        return
+    url = market_study.canonical_index_source_url(url, row.get('operation_type'))
+    price_type = str(price.get('type') or price.get('price_type') or '').strip()
+    options = market_study.PRICE_TYPE_BY_OPERATION.get(
+        str(row.get('operation_type') or '').strip() or 'أخرى',
+        market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
+    if price_type not in options:
+        price_type = ''
+    is_range = price_type in market_study.RANGE_PRICE_TYPES or (from_v and to_v)
+    if is_range:
+        row['price_from'] = from_v or value
+        row['price_to'] = to_v or ''
+        row['price_cache'] = {'price_from': row['price_from'], 'price_to': row['price_to']}
+        field_key = 'price_from'
+        if not price_type:
+            price_type = 'نطاق سعري' if 'نطاق سعري' in options else 'أخرى'
+    else:
+        row['price_value'] = value or from_v
+        row['price_cache'] = {'price_value': row['price_value']}
+        field_key = 'price_value'
+    if price_type:
+        row['price_type'] = price_type
+    field_sources = market_study.competitor_field_sources(row)
+    urls = field_sources.setdefault(field_key, [])
+    if url not in urls:
+        urls.append(url)
+    row['field_sources'] = field_sources
+    row['source_urls'] = list(dict.fromkeys(
+        market_study.competitor_source_urls(row) + [url]))
 
 
 def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
