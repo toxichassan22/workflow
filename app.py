@@ -21662,16 +21662,23 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     matched = []
     official = ''
     for prompt in prompts:
-        try:
-            response, _err = _call_market_study_model(
-                market_study.build_consultant_system_prompt(), prompt,
-                max_tokens=1200, usage_ctx=usage_ctx, server_tools=False)
-        except Exception:
-            response = None
+        # Plugin-only first (Gemini can fumble tool calls), then the
+        # openrouter:web_search tool — on deployments where the Exa plugin
+        # returns no citations the tool is the only path that grounds.
+        for tools_on in (False, True):
+            try:
+                response, _err = _call_market_study_model(
+                    market_study.build_consultant_system_prompt(), prompt,
+                    max_tokens=1200, usage_ctx=usage_ctx, server_tools=tools_on)
+            except Exception:
+                response = None
+                continue
+            if not _market_search_ran(response):
+                continue
+            search_ran_any = True
+            break
+        if not search_ran_any:
             continue
-        if not _market_search_ran(response):
-            continue
-        search_ran_any = True
         for page in _market_citation_pages(response):
             url = str(page.get('url') or '').strip()
             if url and _foreign_market_host(url):
@@ -24120,15 +24127,21 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         '"logo_source_url" الصفحة الرسمية التي ظهر فيها الشعار. '
         'إن لم تجد دليلًا رسميًا لمشروع أعد حقوله فارغة، ولا تخمّن أي رابط.'
     )
-    try:
-        # No server tool here: the prompt asks for a lookup per project, which
-        # Gemini answers with MALFORMED_FUNCTION_CALL and an empty message. The
-        # Exa plugin still grounds every attempt with real retrieved pages.
-        response, _provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), prompt, max_tokens=4000,
-            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=False)
-    except Exception:
-        response = None
+    response = None
+    for tools_on in (False, True):
+        # Plugin-only first: the multi-lookup prompt makes Gemini answer the
+        # tool call with MALFORMED_FUNCTION_CALL, so the Exa plugin is the
+        # reliable ground — until a deployment where it returns nothing, in
+        # which case the server tool is the only remaining path to citations.
+        try:
+            response, _provider_error = _call_market_study_model(
+                market_study.build_consultant_system_prompt(), prompt, max_tokens=4000,
+                usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=tools_on)
+        except Exception:
+            response = None
+            continue
+        if _market_search_ran(response):
+            break
     if not _market_search_ran(response):
         for row in batch:
             row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')
