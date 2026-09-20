@@ -1010,5 +1010,6 @@
       tenantCompaniesPage: '/app/admin/companies',
       tenantAdminRechargePage: '/app/admin/recharges',
       tenantAdminTicketsPage: '/app/admin/tickets',
-      tenantAdminPlatformPage: '/app/admin/platform'
+      tenantAdminPlatformPage: '/app/admin/platform',
+      tenantFinlabPage: '/app/admin/finlab'
     };

@@ -100,6 +100,8 @@
             <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
               data-nav-page="tenantAdminPlatformPage" onclick="openAdminPlatformPage()"
               data-i18n="nav.platform_settings">إعدادات المنصة</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantFinlabPage" onclick="openFinlabPage()">معمل الدراسة المالية</button>
           </div>
         </nav>
         <nav class="tenant-sidebar-nav" data-nav-role="tenant" aria-label="مساحة العمل" data-i18n-aria="chrome.workspace">
@@ -1413,6 +1415,20 @@
         </div>
         <div id="adminFileTypesList"></div>
       </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- FINANCIAL STUDY LAB (super admin)                              -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section id="tenantFinlabPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2>معمل الدراسة المالية</h2>
+        </div>
+      </div>
+      <iframe id="finlabFrame" data-src="/finlab-frame" title="معمل الدراسة المالية"
+        style="width:100%;height:calc(100vh - 170px);border:0;border-radius:12px;background:#f3f4f6"></iframe>
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->

@@ -19133,6 +19133,15 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
 
     parcel['north_direction'] = normalize_north_direction(parcel.get('north_direction'))
 
+    # Per-direction setbacks: the documents usually name them per compass side,
+    # so an empty direction cell can be recovered from the setbacks narrative —
+    # and a bare direction table can in turn feed the narrative field.
+    _fill_direction_setbacks_from_text(parcel)
+    if not str(parcel.get('setbacks') or '').strip():
+        composed_setbacks = _compose_setbacks_from_directions(parcel.get('directions'))
+        if composed_setbacks:
+            parcel['setbacks'] = composed_setbacks
+
     if not parcel.get('deed_number'):
         deed_match = re.search(
             r'(?:صك|الصك|مرجع|المرجع|وثيقة)\s*(?:رقم)?\s*[:\s]*([0-9]{8,14})', fallback_text)
@@ -19327,6 +19336,13 @@ _DIRECTION_ALIASES = {
     'w': 'west', 'west': 'west', 'غرب': 'west', 'الغرب': 'west',
 }
 
+# The model uses several key names for a direction's setback; accept the common
+# ones so the value reaches the editable table column instead of being dropped.
+_DIRECTION_SETBACK_KEYS = (
+    'setback', 'setback_m', 'setback_text', 'setback_value', 'setbacks',
+    'setback_requirement', 'setback_meters', 'الارتداد', 'ارتداد', 'ارتدادات',
+)
+
 
 def _normalize_direction_map(value):
     if isinstance(value, dict):
@@ -19350,10 +19366,63 @@ def _normalize_direction_map(value):
             clean = dict(entry)
             clean.pop('direction', None)
             clean.pop('key', None)
+            if not str(clean.get('setback') or '').strip():
+                for alias in _DIRECTION_SETBACK_KEYS:
+                    alias_value = clean.get(alias)
+                    if str(alias_value or '').strip():
+                        clean['setback'] = str(alias_value).strip()
+                        break
             directions[direction] = clean
     for direction in ('north', 'south', 'east', 'west'):
         directions.setdefault(direction, {})
     return directions
+
+
+_DIRECTION_SETBACK_TEXT_WORDS = (
+    ('north', r'(?:الجهة\s+)?(?:ال)?شمالي?(?:ة)?'),
+    ('south', r'(?:الجهة\s+)?(?:ال)?جنوبي?(?:ة)?'),
+    ('east', r'(?:الجهة\s+)?(?:ال)?شرقي?(?:ة)?'),
+    ('west', r'(?:الجهة\s+)?(?:ال)?غربي?(?:ة)?'),
+)
+
+
+def _fill_direction_setbacks_from_text(parcel):
+    """Copy compass-named setbacks out of the free-text ``setbacks`` value into
+    the matching direction rows — only where the model left the cell empty.
+    The number must follow the direction word directly, so a boundary length
+    («الشمال بطول 20م») is never mistaken for a setback.
+    """
+    if not isinstance(parcel, dict):
+        return
+    directions = parcel.get('directions')
+    if not isinstance(directions, dict):
+        return
+    text = str(parcel.get('setbacks') or parcel.get('setback_requirements') or '').strip()
+    if not text:
+        return
+    for direction, word in _DIRECTION_SETBACK_TEXT_WORDS:
+        entry = directions.get(direction)
+        if not isinstance(entry, dict) or str(entry.get('setback') or '').strip():
+            continue
+        match = re.search(
+            word + r'\s*[:=\-–—]?\s*([0-9٠-٩]+(?:[.,][0-9]+)?\s*(?:متر|م\.?))',
+            text)
+        if match:
+            entry['setback'] = match.group(1).strip()
+
+
+def _compose_setbacks_from_directions(directions):
+    """Flatten per-direction setbacks into the summary text used by the legacy
+    «الارتدادات» field, so the two never disagree."""
+    if not isinstance(directions, dict):
+        return ''
+    parts = []
+    for direction, label in (('north', 'شمال'), ('south', 'جنوب'), ('east', 'شرق'), ('west', 'غرب')):
+        entry = directions.get(direction)
+        value = str((entry or {}).get('setback') or '').strip()
+        if value:
+            parts.append(f'{label}: {value}')
+    return ' | '.join(parts)
 
 
 def _directions_have_content(directions):
@@ -20440,6 +20509,24 @@ def _land_job_worker(app, tenant_id, data, job_id):
             })
 
 
+def _land_document_key(filename, provided=''):
+    """Give each uploaded land document a stable kind for the prompt.
+
+    The client tags every file 'land_document', so the filename carries the
+    only real signal about whether the model is looking at the croquis, the
+    building licence, or the deed — the identity matters because the source
+    priority order references it.
+    """
+    lowered = str(filename or '').casefold()
+    if any(token in lowered for token in ('رخصة', 'رخصه', 'licen', 'permit')):
+        return 'building_license'
+    if any(token in lowered for token in ('كروكي', 'croquis', 'krooki')):
+        return 'croquis'
+    if any(token in lowered for token in ('صك', 'deed')):
+        return 'deed'
+    return provided or 'land_document'
+
+
 @app.route('/api/extract-croquis', methods=['POST'])
 @require_permission('create_presentation')
 def api_extract_croquis():
@@ -20558,9 +20645,10 @@ def _execute_extract_croquis():
                         file_data = f"data:{stored.get('mime_type') or 'application/octet-stream'};base64,{encoded}"
                 if not file_data:
                     continue
+                filename = os.path.basename(str(item.get('filename') or item.get('originalName') or f'document_{index + 1}'))
                 documents.append({
-                    'key': str(item.get('key') or item.get('fileType') or f'document_{index + 1}'),
-                    'filename': os.path.basename(str(item.get('filename') or item.get('originalName') or f'document_{index + 1}')),
+                    'key': _land_document_key(filename, str(item.get('key') or item.get('fileType') or '')),
+                    'filename': filename,
                     'fileData': file_data,
                     'mimeType': item.get('mimeType') or ('application/pdf' if 'application/pdf' in file_data else 'image/*'),
                 })
@@ -26466,7 +26554,7 @@ FRONTEND_JS_ORDER = (
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
     '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
-    '19-notifications.js',
+    '19-notifications.js', '20-finlab.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}
@@ -26554,6 +26642,52 @@ def static_assets(path):
     # shell after a deploy. ETag revalidation keeps repeat loads cheap.
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
+
+
+@app.route('/finlab-frame')
+def finlab_frame():
+    """Isolated financial-study lab embedded by the super-admin «معمل الدراسة
+    المالية» page. Loads every frontend part file except the app boot module
+    (17-admin-boot.js runs initTenant), mounts the study on an empty host, and
+    lets assets/js/20-finlab.js drive it. The page itself carries no tenant
+    data — draft loading still goes through the authenticated API."""
+    scripts = '\n    '.join(
+        f'<script src="/assets/js/{name}"></script>'
+        for name in FRONTEND_JS_ORDER
+        if name != '17-admin-boot.js'
+    )
+    html = (
+        '<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<title>معمل الدراسة المالية</title>'
+        '<link rel="stylesheet" href="/assets/app.bundle.css">'
+        '</head><body data-finlab-frame class="finlab-frame-body">'
+        '<div id="finlabStudyHost"></div>\n    ' + scripts + '\n</body></html>'
+    )
+    resp = Response(html, mimetype='text/html')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+@app.route('/api/dev/finlab-apply', methods=['POST'])
+@require_auth
+def api_dev_finlab_apply():
+    """Writes the lab-patched financial model back to assets/js/09-financial.js.
+
+    Loopback-only: the formula lab is a local meeting tool, so a deployed
+    instance must never rewrite its own source over the network."""
+    if request.remote_addr not in ('127.0.0.1', '::1'):
+        return jsonify({'error': 'finlab apply is localhost only'}), 403
+    if not getattr(g, 'is_admin', False):
+        return jsonify({'error': 'finlab apply is super-admin only'}), 403
+    payload = request.get_json(silent=True) or {}
+    source = payload.get('source')
+    if not isinstance(source, str) or 'function calculateAll' not in source:
+        return jsonify({'error': 'Invalid financial source'}), 400
+    target = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'js', '09-financial.js')
+    with open(target, 'w', encoding='utf-8') as fh:
+        fh.write(source)
+    return jsonify({'ok': True, 'bytes': len(source.encode('utf-8'))})
 
 MEDIA_URL_MAX_AGE = 7 * 86400
 _MEDIA_URL_RE = re.compile(r"/uploads/[^\s<>'\"`\\),;\]\[]+")
