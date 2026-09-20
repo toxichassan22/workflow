@@ -21976,6 +21976,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     _attach_retrieved_citations(merged, _market_citation_pages(res))
     report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id, progress=report)
+    for row in merged:
+        market_study.canonicalize_competitor_source_urls(row)
     report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
     search_ran = _market_search_ran(res)
     if search_ran:

@@ -274,7 +274,10 @@ SUMMARY_SECTION_HINTS = {
 SOURCE_PRIORITY = {
     1: [
         'الهيئة العامة للعقار rega.gov.sa',
-        'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع الفعلية ومتوسط سعر المتر حسب الحي ونوع العقار',
+        'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع المنفذة rei.rega.gov.sa/ar/advanced-search/deals ومتوسط سعر المتر حسب الحي ونوع العقار',
+        'المؤشرات اللحظية rei.rega.gov.sa/ar/advanced-search/live — أسعار السوق الحالية',
+        'مؤشر سوق الإيجار التفصيلي rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator — ومقارنة الأحياء rei.rega.gov.sa/ar/advanced-search/rental-market/comparison',
+        'معروض الإعلانات rei.rega.gov.sa/ar/advanced-search/ads-supply-market — أسعار الطلب المعروضة',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول إيجار الوحدات السكنية والتجارية حسب المدينة والحي',
         'السجل العقاري rer.sa وبيانات وزارة العدل moj.gov.sa المتاحة',
         'شبكة إيجار ejar.sa',
@@ -408,7 +411,7 @@ TYPE_ANALYSIS_POINTS = {
 
 TYPE_SOURCE_PRIORITY = {
     'سكني': [
-        'منصة المؤشرات العقارية rei.rega.gov.sa وبيانات الصفقات الفعلية',
+        'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data',
         'الهيئة العامة للإحصاء stats.gov.sa',
         'البنك المركزي السعودي sama.gov.sa',
@@ -421,7 +424,7 @@ TYPE_SOURCE_PRIORITY = {
         'Google Maps للموقع والخدمات فقط',
     ],
     'تجاري': [
-        'منصة المؤشرات العقارية rei.rega.gov.sa وشبكة إيجار ejar.sa',
+        'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market — وشبكة إيجار ejar.sa',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول الوحدات التجارية',
         'الهيئة العامة للإحصاء stats.gov.sa',
         'وزارة التجارة mc.gov.sa',
@@ -995,11 +998,13 @@ def _source_host(url):
     return (urlsplit(str(url or '')).netloc or '').lower().removeprefix('www.')
 
 
-def resolve_source_url_from_citations(url, citations):
+def resolve_source_url_from_citations(url, citations, operation=''):
     """Replace a homepage with the retrieved page the search actually returned.
 
     The model tends to quote a site's front page from memory even when the figure
-    came from a deep page, and the client needs the exact page.
+    came from a deep page, and the client needs the exact page. When no deeper
+    same-host page was retrieved, known indicator portals still resolve to the
+    fixed dataset view matching the row's operation.
     """
     value = _norm(url)
     pages = [_norm(item) for item in (citations or []) if _norm(item).startswith(('http://', 'https://'))]
@@ -1011,7 +1016,7 @@ def resolve_source_url_from_citations(url, citations):
         same_host = next((item for item in pages if _source_host(item) == host), '')
         if same_host:
             return same_host
-    return value
+    return canonical_index_source_url(value, operation)
 
 
 def prefer_specific_source_url(*candidates):
@@ -1020,6 +1025,32 @@ def prefer_specific_source_url(*candidates):
         if value.startswith(('http://', 'https://')) and not is_generic_source_homepage(value):
             return value
     return next((value for value in values if value.startswith(('http://', 'https://'))), values[0] if values else '')
+
+
+# Indicator portals whose homepage is a navigation shell: the figures live on a
+# fixed dataset page, so a bare-domain citation is normalized to the page that
+# actually exposes the row's numbers instead of a shell that shows nothing.
+_PORTAL_DATASET_PAGES = {
+    'rei.rega.gov.sa': {
+        'بيع': 'https://rei.rega.gov.sa/ar/advanced-search/deals',
+        'إيجار': 'https://rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator',
+        'default': 'https://rei.rega.gov.sa/ar/advanced-search/live',
+    },
+    'sakani.sa': {
+        'default': 'https://sakani.sa/reports-and-data',
+    },
+}
+
+
+def canonical_index_source_url(url, operation=''):
+    """Map a portal homepage to the dataset page that actually carries its data."""
+    value = _norm(url)
+    if not value or not is_generic_source_homepage(value):
+        return value
+    pages = _PORTAL_DATASET_PAGES.get(_source_host(value))
+    if not pages:
+        return value
+    return pages.get(_canonical_operation(operation), '') or pages['default']
 
 
 def official_source_reliability(entity_name='', source_name='', url=''):
@@ -1457,18 +1488,24 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'واذكر أقصى مسافة وصلت إليها في expansionNote.\n'
         '8. فترة البيانات الملزمة مكتوبة في بيانات المشروع: ارفض أي سعر أو مساحة مصدرها أقدم من '
         'بداية الفترة، واكتب تاريخ البيانات التي وجدتها لكل صف داخل notes.\n'
-        '9. مصدران إلزاميان عند الارتباط: إن كان المشروع أو أي من منافسيه للإيجار فابحث في المؤشر '
-        'التفصيلي لسوق الإيجار من سكني (site:sakani.sa/reports-and-data) واسحب جداول '
-        'الوحدات السكنية أو التجارية أو كلتيهما حسب مكونات المشروع. وإن كان البيع هو نوع التشغيل فابحث '
-        'في منصة المؤشرات العقارية (site:rei.rega.gov.sa) عن صفقات المدينة ومتوسط سعر المتر حسب الحي '
-        'ونوع العقار، واستخدم نتائجها كمرجعية رسمية للأسعار.\n'
+        '9. مصادر المؤشرات الرسمية إلزامية عند الارتباط: إن كان المشروع أو أي من منافسيه '
+        'للإيجار فابحث في المؤشر التفصيلي لسوق الإيجار من سكني '
+        '(site:sakani.sa/reports-and-data) وفي مؤشر سوق الإيجار التفصيلي ومقارنة الأحياء '
+        '(rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator '
+        'و/rental-market/comparison) واسحب جداول الوحدات السكنية أو التجارية أو كلتيهما '
+        'حسب مكونات المشروع. وإن كان البيع هو نوع التشغيل فابحث في صفقات منصة المؤشرات '
+        'العقارية (rei.rega.gov.sa/ar/advanced-search/deals) والمؤشرات اللحظية '
+        '(rei.rega.gov.sa/ar/advanced-search/live) عن صفقات المدينة ومتوسط سعر المتر '
+        'حسب الحي ونوع العقار، واستخدم نتائجها كمرجعية رسمية للأسعار.\n'
         '10. طبيعة الإيرادات في بيانات المشروع ملزمة ولا تخمَّن: المشروع البيعي يقارَن بمنافسين '
         'بيعيين (سعر وحدة/متر)، والتأجيري بتأجيريين (إيجار/ليلة/ADR حسب نموذج الاستفادة)، '
         'والمختلط يقارَن بالنوعين مع مطابقة كل منافس لنموذج استفادة مكوّنه.\n'
         '11. المنافس مشروع حقيقي مسمّى (برج، مجمع سكني، مشروع مطوّر معلن). صفحات المؤشرات '
         'الرسمية (سكني، شبكة إيجار، منصة المؤشرات العقارية) ومواقع البيانات الإجمالية ليست '
         'منافسين: استخدمها مصدرَ سعر داخل source_urls للصفوف الحقيقية وفي مصادر الملخص، '
-        'ولا تُنشئ صف منافس باسم مؤشر أو صفحة بيانات إحصائية.\n'
+        'ولا تُنشئ صف منافس باسم مؤشر أو صفحة بيانات إحصائية. ويجب أن يحمل source_urls '
+        'كل منافس صفحةً تخص المشروع نفسه — موقع المطور أو المشغل أو إعلانًا تفصيليًا '
+        'يذكره بالاسم — فروابط المؤشرات العامة وحدها لا توثّق هوية المنافس ولا سعره.\n'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )
@@ -1599,10 +1636,13 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + 'أو شهري أو يومي، تشغيل فندقي، مختلط) وحدد صراحةً أين تكمن فرصة الربح '
         + 'الفعلية وأي نموذج أعلى جدوى ولو كان مختلفًا عما أدخله المستخدم، مع السبب '
         + 'والأرقام. إن كان النموذج المدخل أضعف من بديل فاذكر ذلك صراحةً.\n'
-        + 'مصدران إلزاميان عند الارتباط: لمؤشرات البيع وصفقات المدينة استخدم منصة المؤشرات العقارية '
-        + '(site:rei.rega.gov.sa — متوسط سعر المتر حسب الحي ونوع العقار)، ولمؤشرات الإيجار استخدم '
-        + 'المؤشر التفصيلي لسوق الإيجار من سكني (site:sakani.sa/reports-and-data — '
-        + 'جداول الوحدات السكنية أو التجارية أو كلتيهما حسب مكونات المشروع).\n'
+        + 'مصادر المؤشرات الرسمية إلزامية عند الارتباط: لمؤشرات البيع وصفقات المدينة استخدم '
+        + 'صفقات منصة المؤشرات العقارية (rei.rega.gov.sa/ar/advanced-search/deals) والمؤشرات '
+        + 'اللحظية (rei.rega.gov.sa/ar/advanced-search/live — متوسط سعر المتر حسب الحي ونوع '
+        + 'العقار)، ولمؤشرات الإيجار استخدم المؤشر التفصيلي لسوق الإيجار من سكني '
+        + '(site:sakani.sa/reports-and-data) ومؤشر سوق الإيجار التفصيلي '
+        + '(rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator) — جداول '
+        + 'الوحدات السكنية أو التجارية أو كلتيهما حسب مكونات المشروع.\n'
         + 'فترة البيانات الملزمة مكتوبة في بيانات المشروع: كل رقم أو مؤشر يجب أن يأتي من مصدر '
         + 'نُشر داخل تلك الفترة، ويُكتب تاريخ بياناته في data_date بصيغة YYYY-MM-DD أو YYYY-MM أو سنة. '
         + 'أي مصدر خارج الفترة غير مقبول — لا تستخدمه ولا تدرجه في sources.\n'
@@ -1759,33 +1799,64 @@ def normalize_competitor_row(row, fallback_source='ai'):
     return result
 
 
-def _resolve_source_urls(urls, citations):
+def _resolve_source_urls(urls, citations, operation=''):
     resolved = []
     for url in urls:
-        value = resolve_source_url_from_citations(url, citations)
+        value = resolve_source_url_from_citations(url, citations, operation)
         if value:
             resolved.append(value)
     return _unique_values(resolved)
 
 
+def canonicalize_competitor_source_urls(row):
+    """Normalize portal-homepage links on a competitor row to the dataset page.
+
+    Citation resolution upgrades a homepage only when the search retrieved a
+    deeper page on the same host; this pass catches the rows the retrieval left
+    behind, including links merged in by the per-competitor verification.
+    """
+    if not isinstance(row, dict):
+        return row
+    operation = _norm(
+        row.get('operation_type') or row.get('operationType') or row.get('operation'))
+    urls = competitor_source_urls(row)
+    resolved = _unique_values(canonical_index_source_url(item, operation) for item in urls)
+    if resolved:
+        row['source_urls'] = resolved
+    field_sources = competitor_field_sources(row)
+    if field_sources:
+        row['field_sources'] = {
+            field: _unique_values(canonical_index_source_url(item, operation) for item in urls)
+            for field, urls in field_sources.items()
+        }
+    source_url = _norm(row.get('source_url'))
+    if source_url:
+        row['source_url'] = canonical_index_source_url(source_url, operation)
+    return row
+
+
 def apply_search_citations(rows, citations, url_key='source_url'):
-    """Upgrade AI-written homepage links to the exact pages returned by the search."""
-    if not citations:
-        return rows
+    """Upgrade AI-written homepage links to the exact pages returned by the search.
+
+    Runs even with an empty citation set: known indicator portals still resolve
+    their bare homepage to the fixed dataset page for the row's operation.
+    """
     for row in rows or []:
         if not isinstance(row, dict):
             continue
         if (row.get('row_source') or 'ai') != 'ai' and url_key == 'source_url':
             continue
         if url_key == 'source_url':
+            operation = _norm(
+                row.get('operation_type') or row.get('operationType') or row.get('operation'))
             field_sources = competitor_field_sources(row)
             resolved_field_sources = {
                 field: resolved
                 for field, urls in field_sources.items()
-                if (resolved := _resolve_source_urls(urls, citations))
+                if (resolved := _resolve_source_urls(urls, citations, operation))
             }
             urls = competitor_source_urls(row)
-            resolved_urls = _resolve_source_urls(urls, citations)
+            resolved_urls = _resolve_source_urls(urls, citations, operation)
             if resolved_urls:
                 row['source_urls'] = resolved_urls
                 price_urls = (

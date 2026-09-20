@@ -10764,6 +10764,68 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("market_study.apply_search_citations(merged, _market_citation_urls(res))", app_source)
 
+    def test_portal_homepage_links_resolve_to_the_dataset_page(self):
+        import market_study
+        # rei.rega.gov.sa/ar is a navigation shell — sale figures live behind the
+        # deals view and rental figures behind the detailed indicator. A row that
+        # cites only the portal homepage must end up pointing at the dataset page.
+        sale = {
+            'name': 'برج بيعي',
+            'operation_type': 'بيع',
+            'source_url': 'https://rei.rega.gov.sa/ar',
+            'source_urls': ['https://rei.rega.gov.sa/ar'],
+            'field_sources': {'price_value': ['https://rei.rega.gov.sa/ar']},
+            'row_source': 'ai',
+        }
+        rental = {
+            'name': 'مجمع إيجاري',
+            'operation_type': 'إيجار',
+            'source_url': 'https://rei.rega.gov.sa/ar',
+            'source_urls': ['https://rei.rega.gov.sa/ar', 'https://sakani.sa'],
+            'field_sources': {'price_value': ['https://sakani.sa']},
+            'row_source': 'ai',
+        }
+        market_study.apply_search_citations([sale, rental], [])
+        self.assertEqual(sale['source_url'], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
+        self.assertEqual(sale['source_urls'], ['https://rei.rega.gov.sa/ar/advanced-search/deals'])
+        self.assertEqual(
+            sale['field_sources']['price_value'],
+            ['https://rei.rega.gov.sa/ar/advanced-search/deals'])
+        self.assertEqual(
+            rental['field_sources']['price_value'], ['https://sakani.sa/reports-and-data'])
+        self.assertIn(
+            'https://rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator',
+            rental['source_urls'])
+        self.assertIn('https://sakani.sa/reports-and-data', rental['source_urls'])
+        self.assertTrue(all(
+            not market_study.is_generic_source_homepage(url) for url in rental['source_urls']))
+        # A retrieved page on the same host still wins over the canonical map.
+        retrieved = ['https://rei.rega.gov.sa/ar/advanced-search/deals?deal=1']
+        cited = {
+            'name': 'برج', 'operation_type': 'بيع',
+            'source_url': 'https://rei.rega.gov.sa/ar', 'row_source': 'ai',
+        }
+        market_study.apply_search_citations([cited], retrieved)
+        self.assertEqual(cited['source_url'], retrieved[0])
+        # Non-portal homepages stay untouched.
+        other = {
+            'name': 'برج', 'operation_type': 'بيع',
+            'source_url': 'https://developer.sa/', 'row_source': 'ai',
+        }
+        market_study.apply_search_citations([other], [])
+        self.assertEqual(other['source_url'], 'https://developer.sa/')
+        # Links merged in by the per-competitor verification get normalized too.
+        merged = {
+            'name': 'برج', 'operation_type': 'بيع',
+            'source_url': 'https://rei.rega.gov.sa',
+            'source_urls': ['https://rei.rega.gov.sa', 'https://dev.sa/proj/1'],
+        }
+        market_study.canonicalize_competitor_source_urls(merged)
+        self.assertEqual(
+            merged['source_urls'][0], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
+        self.assertEqual(
+            merged['source_url'], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
+
     def test_market_study_prices_require_a_dedicated_search(self):
         import market_study
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
@@ -11048,7 +11110,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         expected = {
             1: [
                 'الهيئة العامة للعقار rega.gov.sa',
-                'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع الفعلية ومتوسط سعر المتر حسب الحي ونوع العقار',
+                'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع المنفذة rei.rega.gov.sa/ar/advanced-search/deals ومتوسط سعر المتر حسب الحي ونوع العقار',
+                'المؤشرات اللحظية rei.rega.gov.sa/ar/advanced-search/live — أسعار السوق الحالية',
+                'مؤشر سوق الإيجار التفصيلي rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator — ومقارنة الأحياء rei.rega.gov.sa/ar/advanced-search/rental-market/comparison',
+                'معروض الإعلانات rei.rega.gov.sa/ar/advanced-search/ads-supply-market — أسعار الطلب المعروضة',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول إيجار الوحدات السكنية والتجارية حسب المدينة والحي',
                 'السجل العقاري rer.sa وبيانات وزارة العدل moj.gov.sa المتاحة',
                 'شبكة إيجار ejar.sa',
@@ -11083,7 +11148,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(market_study.SOURCE_PRIORITY, expected)
         expected_type_sources = {
             'سكني': [
-                'منصة المؤشرات العقارية rei.rega.gov.sa وبيانات الصفقات الفعلية',
+                'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data',
                 'الهيئة العامة للإحصاء stats.gov.sa',
                 'البنك المركزي السعودي sama.gov.sa', 'وافي red.rega.gov.sa',
@@ -11094,7 +11159,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'Google Maps للموقع والخدمات فقط',
             ],
             'تجاري': [
-                'منصة المؤشرات العقارية rei.rega.gov.sa وشبكة إيجار ejar.sa',
+                'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market — وشبكة إيجار ejar.sa',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول الوحدات التجارية',
                 'الهيئة العامة للإحصاء stats.gov.sa', 'وزارة التجارة mc.gov.sa',
                 'الأمانة وبلدي balady.gov.sa', 'البنك المركزي السعودي sama.gov.sa',
