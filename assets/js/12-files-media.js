@@ -1642,7 +1642,7 @@
           '</div>';
       }
 
-      const lockHint = waitCover && isVisualConceptPlanSlot(slotDef.id)
+      const lockHint = waitCover
         ? '<p class="tenant-hint">' + escapeHtml(visualConceptLockMessage(slotDef.id)) + '</p>'
         : '';
       return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +

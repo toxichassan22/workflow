@@ -1,5 +1,45 @@
 /* 13-visual.js - index.html lines 21642-23155, shared global scope, classic scripts in order */
 
+    // Card actions and the zoom lightbox are delegated once on the document:
+    // every render replaces innerHTML, so listeners bound per-element died
+    // silently whenever a subtree re-rendered after the binding pass.
+    document.addEventListener('click', event => {
+      const button = event.target.closest('[data-visual-action]');
+      if (button && !button.disabled) {
+        const action = button.getAttribute('data-visual-action');
+        const slotId = button.getAttribute('data-visual-slot');
+        if (action === 'prompt') generateVisualConceptPrompt(slotId);
+        else if (action === 'generate') generateVisualConceptImage(slotId);
+        else if (action === 'approve') approveVisualConceptImage(slotId);
+        else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
+        else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
+        else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
+        else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
+        else if (action === 'chat') sendVisualConceptChat(slotId);
+        else if (action === 'add-interior') addVisualConceptInteriorView();
+        else if (action === 'set-mode') {
+          const targetMode = button.getAttribute('data-visual-mode');
+          const slot = tenantVisualConceptState?.slots?.[slotId];
+          if (slotId && slot && (targetMode === 'ai' || targetMode === 'upload')) {
+            const hasImg = Boolean(slot.approvedImageUrl || slot.imageUrl || slot.sourceFileId);
+            if (hasImg && targetMode !== slot.mode) {
+              toast('يجب حذف الصورة الحالية أولاً لتغيير النمط.');
+              return;
+            }
+            slot.mode = targetMode;
+            markVisualConceptDirty();
+            renderVisualConceptPage();
+          }
+        }
+        return;
+      }
+      const zoom = event.target.closest('[data-visual-zoom]');
+      if (zoom && event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
+        const url = zoom.getAttribute('data-visual-zoom');
+        if (url) openVisualConceptLightbox(url, zoom.getAttribute('data-visual-title'));
+      }
+    });
+
     function renderVisualConceptPage() {
       const host = document.getElementById('visualConceptWorkspace');
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
@@ -46,45 +86,8 @@
           markVisualConceptDirty();
         });
       });
-      bindRoot.querySelectorAll('[data-visual-action]').forEach(button => {
-        button.addEventListener('click', () => {
-          const action = button.getAttribute('data-visual-action');
-          const slotId = button.getAttribute('data-visual-slot');
-          if (action === 'prompt') generateVisualConceptPrompt(slotId);
-          else if (action === 'generate') generateVisualConceptImage(slotId);
-          else if (action === 'approve') approveVisualConceptImage(slotId);
-          else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
-          else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
-          else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
-          else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
-          else if (action === 'chat') sendVisualConceptChat(slotId);
-          else if (action === 'add-interior') addVisualConceptInteriorView();
-          else if (action === 'set-mode') {
-            const targetMode = button.getAttribute('data-visual-mode');
-            const slot = tenantVisualConceptState?.slots?.[slotId];
-            if (slotId && slot && (targetMode === 'ai' || targetMode === 'upload')) {
-              const hasImg = Boolean(slot.approvedImageUrl || slot.imageUrl || slot.sourceFileId);
-              if (hasImg && targetMode !== slot.mode) {
-                toast('يجب حذف الصورة الحالية أولاً لتغيير النمط.');
-                return;
-              }
-              slot.mode = targetMode;
-              markVisualConceptDirty();
-              renderVisualConceptPage();
-            }
-          }
-        });
-      });
       bindRoot.querySelectorAll('[data-visual-upload]').forEach(input => {
         input.addEventListener('change', () => uploadVisualConceptSlotImage(input.getAttribute('data-visual-upload'), input));
-      });
-      bindRoot.querySelectorAll('[data-visual-zoom]').forEach(el => {
-        el.addEventListener('click', (e) => {
-          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-          const url = el.getAttribute('data-visual-zoom');
-          const title = el.getAttribute('data-visual-title');
-          if (url) openVisualConceptLightbox(url, title);
-        });
       });
       repairVisualConceptStoredImages();
     }
