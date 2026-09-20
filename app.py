@@ -5917,9 +5917,14 @@ def _visual_concept_plan_floor_range(text):
 
 
 def _visual_concept_plan_component_key(name):
-    text = re.sub(r'[^\w\u0600-\u06FF]+', '', str(name or '')
-                  .translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).casefold())
-    return text
+    """Match key for component names — unifies hamza/taa/ya variants and drops
+    word-initial «ال» so «طابق أرضي - سكني» matches «الطابق الأرضي سكني»."""
+    text = str(name or '').translate(
+        str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).casefold()
+    text = re.sub(r'[أإآٱ]', 'ا', text).replace('ى', 'ي').replace('ة', 'ه')
+    text = text.replace('ـ', '')
+    text = re.sub(r'(?<!\w)ال', '', text)
+    return re.sub(r'[^\w\u0600-\u06FF]+', '', text)
 
 
 def _visual_concept_plan_distribution_totals(rows, context):
@@ -6595,8 +6600,13 @@ def api_visual_concept_plans_distribution_check():
             return _billing_guard
         system_prompt = (
             'أنت مدقق اشتراطات لمخطط مفاهيمي. راجع جدول التوزيع مقابل البيانات التنظيمية الموثقة '
-            'فقط، وركّز على الارتدادات والمواقف والمداخل والمخارج والاستخدامات المسموحة وسقوف '
-            'الارتفاع ومعامل البناء. أعد JSON فقط: '
+            'فقط. الجدول يعبّر عن: المبنى، الدور أو نطاق الأدوار، الاستخدام، عدد الوحدات لكل دور، '
+            'مساحة الدور، والحركة والخدمات — فدقّق فيما يمكن للجدول إثباته فعلًا: الاستخدامات '
+            'المسموحة، سقف الارتفاع وعدد الأدوار، حد التغطية، وعدم تجاوز مساحات أو وحدات الدراسة. '
+            'لا تكتب بنود «لم يوثّق» عمّا لا يمكن لجدول توزيع إثباته بطبيعته (أبعاد المواقف، '
+            'عروض الممرات والمنحدرات، مسافات الإخلاء، تفاصيل الحريق) — فهي مرحلة تصميم لاحقة. '
+            'كل بند يجب أن يكون إجراءً واضحًا قابلاً للتنفيذ على الجدول: «عدّل قيمة X في صف Y إلى Z» '
+            'أو «أضف مكوّنًا لـ…»، وبحد أقصى 8 بنود مرتبة بالأهمية. أعد JSON فقط: '
             '{"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],"canProceed":true}. '
             'لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
         )

@@ -1911,6 +1911,26 @@
         '</svg>';
     }
 
+    function visualConceptDistributionTotalsRowsHtml(distribution) {
+      const totals = Array.isArray(distribution.totals) ? distribution.totals : [];
+      if (!totals.length) return '';
+      const fmt = value => (value === null || value === undefined || value === '') ? '—' : String(value);
+      const rowsHtml = totals.map(item => {
+        const deltas = [];
+        if (typeof item.delta_units === 'number' && item.delta_units) deltas.push('وحدات ' + (item.delta_units > 0 ? '+' : '') + item.delta_units);
+        if (typeof item.delta_area === 'number' && item.delta_area) deltas.push('م² ' + (item.delta_area > 0 ? '+' : '') + item.delta_area);
+        const hasRequired = typeof item.required_units === 'number' || typeof item.required_area === 'number';
+        const deltaText = deltas.length ? deltas.join('، ') : (hasRequired ? 'مطابق للدراسة' : '—');
+        const impact = deltas.length ? '<div class="plans-conflict-location">يؤثر في الدراسة المالية</div>' : '';
+        return '<tr class="plans-distribution-total"><td colspan="3">' + escapeHtml(item.component || '') + '</td>' +
+          '<td>' + escapeHtml(fmt(item.units)) + ' / ' + escapeHtml(fmt(item.required_units)) + '</td>' +
+          '<td>' + escapeHtml(fmt(item.area)) + ' / ' + escapeHtml(fmt(item.required_area)) + '</td>' +
+          '<td colspan="2">' + escapeHtml(deltaText) + impact + '</td></tr>';
+      }).join('');
+      return '<tr class="plans-distribution-total-head"><td colspan="3">إجمالي المكونات</td>' +
+        '<td>الوحدات توزيع/دراسة</td><td>المساحة توزيع/دراسة</td><td colspan="2">الفرق</td></tr>' + rowsHtml;
+    }
+
     function visualConceptDistributionEditorHtml(distribution) {
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const head = '<thead><tr><th>المبنى</th><th>الدور أو نطاق الأدوار</th><th>الاستخدام / المكون</th>' +
@@ -1927,45 +1947,30 @@
         '</tr>').join('')
         : '<tr><td colspan="7" class="plans-workflow-empty">لم يُقترح توزيع بعد.</td></tr>';
       return '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-distribution-table">' +
-        head + '<tbody>' + body + '</tbody></table></div>' +
+        head + '<tbody>' + body + '</tbody>' +
+        '<tfoot data-plans-distribution-totals>' + visualConceptDistributionTotalsRowsHtml(distribution) + '</tfoot>' +
+        '</table></div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="add-distribution-row">إضافة صف</button></div>';
     }
 
     function visualConceptDistributionResultsHtml(distribution) {
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
-      const totals = Array.isArray(distribution.totals) ? distribution.totals : [];
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
       const notes = Array.isArray(distribution.notes) ? distribution.notes : [];
-      const fmt = value => (value === null || value === undefined || value === '') ? '—' : String(value);
-      const totalsRows = totals.map(item => {
-        const deltas = [];
-        if (typeof item.delta_units === 'number') deltas.push('وحدات ' + (item.delta_units > 0 ? '+' : '') + item.delta_units);
-        if (typeof item.delta_area === 'number') deltas.push('م² ' + (item.delta_area > 0 ? '+' : '') + item.delta_area);
-        const deltaText = deltas.join('، ');
-        const impact = deltaText ? '<div class="plans-conflict-location">يؤثر في الدراسة المالية</div>' : '';
-        return '<tr><td>' + escapeHtml(item.component || '') + '</td><td>' + escapeHtml(fmt(item.required_units)) + '</td><td>' +
-          escapeHtml(fmt(item.units)) + '</td><td>' + escapeHtml(fmt(item.required_area)) + '</td><td>' +
-          escapeHtml(fmt(item.area)) + '</td><td>' + escapeHtml(deltaText) + impact + '</td></tr>';
-      }).join('');
-      const totalsTable = totals.length
-        ? '<h5>إجمالي الوحدات والمساحات مقابل الدراسة</h5><div class="plans-workflow-table-wrap"><table class="plans-workflow-table">' +
-          '<thead><tr><th>المكون</th><th>الوحدات — الدراسة</th><th>الوحدات — التوزيع</th><th>المساحة — الدراسة</th><th>المساحة — التوزيع</th><th>الفرق</th></tr></thead><tbody>' +
-          totalsRows + '</tbody></table></div>' : '';
-      const checksRows = checks.map(item =>
-        '<tr><td>' + escapeHtml(item.item || '') + '</td><td>' + escapeHtml(item.detail || '') + '</td>' +
-        '<td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td></tr>').join('');
-      const checksTable = checks.length
-        ? '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table">' +
-          '<thead><tr><th>الفحص</th><th>التفصيل</th><th>النتيجة</th></tr></thead><tbody>' + checksRows + '</tbody></table></div>' : '';
-      const issuesHtml = issues.length
+      const findings = checks.map(item =>
+          (item.result && item.result !== 'مطابق' ? item.result + ': ' : '') + (item.detail || item.item || ''))
+        .concat(issues.flatMap(item =>
+          (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
+        .filter(Boolean);
+      const findingsHtml = findings.length
         ? '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
-          issues.flatMap(item => (Array.isArray(item.points) && item.points.length ? item.points : [item.title || '']))
-            .filter(Boolean).map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>' : '';
+          findings.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
+        : (rows.length ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>' : '');
       const notesHtml = notes.length
         ? '<ul class="plans-issue-list">' + notes.map(note => '<li>' + escapeHtml(note) + '</li>').join('') + '</ul>' : '';
       const canApprove = rows.length > 0 && !visualConceptDistributionBlocking(distribution).length;
-      return totalsTable + checksTable + issuesHtml + notesHtml +
+      return findingsHtml + notesHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
@@ -2321,6 +2326,8 @@
         workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
         if (Array.isArray(response.issues)) workflow.distribution.issues = response.issues;
         markVisualConceptDirty();
+        const totalsHost = document.querySelector('[data-plans-distribution-totals]');
+        if (totalsHost) totalsHost.innerHTML = visualConceptDistributionTotalsRowsHtml(workflow.distribution);
         const host = document.querySelector('[data-plans-distribution-results]');
         if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
         else renderVisualConceptPage();

@@ -407,6 +407,19 @@
       vertical-align: middle;
     }
 
+    .plans-distribution-table tfoot td {
+      background: #f8fafc;
+      border-top: 2px solid var(--line);
+      font-weight: 700;
+    }
+
+    .plans-distribution-table tfoot .plans-distribution-total-head td {
+      background: #eef2f7;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
     .plans-boundary-editor {
       display: grid;
       grid-template-columns: 1fr;
