@@ -214,7 +214,9 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
   by `id`, then display name, then same-position; skipped machinery keys (`id`, `idx`,
   `extraction_diagnostics`, `*_signature`, cache-buster `?t=` on URLs) never reach the log, so a save
   that changed nothing real writes nothing. Blob key/value Arabic labels live in `BLOB_KEY_LABELS` /
-  `BLOB_VALUE_LABELS` in `change_tracking.py`.
+  `BLOB_VALUE_LABELS` in `change_tracking.py`. Rows the draft only references by id — the team
+  library entities inside `team_selection.roles`/`excluded` — resolve through the `id_names`
+  argument, which app.py fills from `db.get_team_entities` via `_draft_change_id_names()`.
 - The draft log opens as a dedicated overlay page (`#changeLogPage`, `showDraftEditLog`): entries
   grouped by day (اليوم/أمس/date), each entry shows the editor's name, the action, a
   manual/AI/system badge and a 12-hour ص/م local timestamp (`formatChangeLogStamp`), with details

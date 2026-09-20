@@ -3407,6 +3407,24 @@ def _history_actor_name():
     return name
 
 
+def _draft_change_id_names():
+    """id-to-display-name map for rows the draft references but does not own.
+
+    «team_selection» stores library entity ids in «roles»/«excluded»; the names
+    live in tenant_team_entities, so the diff needs them handed in — otherwise
+    the log prints raw uuids. Never fails a request.
+    """
+    try:
+        tenant_id = getattr(g, 'tenant_id', None)
+        if not tenant_id:
+            return {}
+        return {entity['id']: entity['name']
+                for entity in db.get_team_entities(tenant_id)
+                if entity.get('id') and entity.get('name')}
+    except Exception:
+        return {}
+
+
 def _record_audit_event(action, entity_type, entity_id, entity_name=None,
                         old_value=None, new_value=None, metadata=None):
     """Write an immutable audit log entry. Never fails a request."""
@@ -14549,7 +14567,9 @@ def api_update_presentation(pres_id):
                 old_project_data = json.loads(pres.get('project_data') or '{}')
             except (TypeError, ValueError):
                 old_project_data = {}
-            details.extend(change_tracking.describe_draft_changes(old_project_data, updates['project_data']))
+            details.extend(change_tracking.describe_draft_changes(
+                old_project_data, updates['project_data'],
+                id_names=_draft_change_id_names()))
         if 'slides_data' in updates:
             current_slides = change_tracking.parse_slides(pres.get('slides_data'))
             details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
@@ -15220,7 +15240,8 @@ def api_save_project_draft():
             'error_code': 'DRAFT_EMPTY_OVERWRITE'
         }), 409
 
-    details = change_tracking.describe_draft_changes(previous_data, draft_data)
+    details = change_tracking.describe_draft_changes(
+        previous_data, draft_data, id_names=_draft_change_id_names())
     if isinstance(section_statuses, dict) and section_statuses:
         details.extend(change_tracking.describe_section_status_changes(previous_statuses, section_statuses))
     _record_change('draft', draft_id, 'حفظ بيانات المشروع' if previous else 'إنشاء ملف مشروع',
@@ -23237,7 +23258,8 @@ def api_compare_versions(pres_id):
             changes.insert(0, f'عنوان العرض: من «{old.get("title") or ""}» إلى «{new.get("title") or ""}»')
         changes.extend(change_tracking.detail_text(item)
                        for item in change_tracking.describe_draft_changes(
-                           old['projectData'], new['projectData']))
+                           old['projectData'], new['projectData'],
+                           id_names=_draft_change_id_names()))
         if old.get('status') != new.get('status'):
             changes.append(f'حالة العرض: من «{old.get("status") or ""}» إلى «{new.get("status") or ""}»')
     return jsonify({'success': True, 'from': _presentation_version_payload(before, True),

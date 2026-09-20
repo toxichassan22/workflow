@@ -274,6 +274,13 @@ DRAFT_BLOB_QUIET = {
     'financial_calc_data': 'أُعيد احتساب نتائج الدراسة',
 }
 
+# Per-blob wording for list-of-strings diffs: key maps to (removed verb, added verb).
+# «excluded» gains an id when an entity leaves the file and loses one when it
+# comes back — plain حُذف/أُضيف would read backwards there.
+DRAFT_BLOB_LIST_VERBS = {
+    'team_selection': {'excluded': ('أُعيدت للملف', 'استُبعدت من الملف')},
+}
+
 # Sub-keys inside a blob that are computed output, not entered data.
 DRAFT_BLOB_INNER_SKIP = {
     'financial_study_model': {'financialCalcData', 'projection', 'tables'},
@@ -396,8 +403,10 @@ BLOB_KEY_LABELS = {
     'area_to': 'المساحة إلى',
     # executive content / team / misc
     'brief': 'النبذة', 'opportunity': 'الفرصة الاستثمارية', 'features': 'المميزات',
-    'risks': 'المخاطر', 'roles': 'الأدوار', 'excluded': 'المستبعدون',
-    'local': 'المحلي', 'role': 'الدور', 'company': 'الشركة',
+    'risks': 'المخاطر', 'roles': 'دور الجهة في الملف', 'excluded': 'الجهات',
+    'local': 'جهات خاصة بالمشروع', 'role': 'الدور', 'company': 'الشركة',
+    'experienceYears': 'سنوات الخبرة', 'notableProjects': 'أبرز المشاريع',
+    'logoFileId': 'الشعار',
     'title': 'العنوان', 'description': 'الوصف', 'task': 'المهمة',
     'milestone': 'المرحلة', 'owner': 'المسؤول', 'progress': 'التقدم',
     'start': 'البداية', 'end': 'النهاية', 'approved': 'معتمد',
@@ -442,7 +451,7 @@ BLOB_VALUE_LABELS = {
 
 # Keys that never say anything a reader cares about inside a blob.
 BLOB_SKIP_KEYS = {
-    'id', 'idx', 'version', 'signature', 'created_at', 'updated_at',
+    'id', 'idx', 'version', 'signature', 'created_at', 'updated_at', 'localId',
     'extraction_diagnostics', 'document_processing', 'confidence',
     'slide_generation_checkpoint', 'area_cache', 'row_source',
     'sourceFileId', 'styleReferenceFileIds',
@@ -453,7 +462,7 @@ BLOB_IMAGE_KEYS = {
     'image', 'imageUrl', 'image_url', 'src', 'logo', 'fileId', 'file_id',
     'fileName', 'file_name', 'cover', 'plan_image', 'photo', 'thumbnail',
     'logo_path', 'image_path', 'photo_path', 'map_path', 'cover_path',
-    'approvedImageUrl',
+    'approvedImageUrl', 'logoFileId', 'logo_file_id',
 }
 
 _BLOB_FILE_KEY_RE = re.compile(r'(?:_path|_url|_uri|_image|_logo|_photo|_file|_src)$', re.I)
@@ -562,7 +571,7 @@ def _blob_label(key, child=None):
                 or (child_id and child_id == key_text)):
             name = _child_row_name(parsed)
             return f'«{name}»' if name else 'أحد العناصر'
-    if _INTERNAL_KEY_RE.match(key_text):
+    if _INTERNAL_KEY_RE.match(key_text) or _MACHINE_KEY_RE.search(key_text):
         return 'أحد العناصر'
     return key_text
 
@@ -595,7 +604,8 @@ def _collect_id_names(*roots):
     while stack and len(id_map) < 1000:
         node = stack.pop()
         if isinstance(node, dict):
-            row_id = str(node.get('id') or node.get('key') or '').strip()
+            row_id = str(node.get('id') or node.get('key')
+                         or node.get('localId') or '').strip()
             if row_id and row_id not in id_map:
                 for name_key in ('name', 'title', 'label', 'direction', 'point',
                                  'street_name', 'milestone', 'task', 'company',
@@ -604,7 +614,9 @@ def _collect_id_names(*roots):
                     if text:
                         id_map[row_id] = text
                         break
-            for child_key, child in node.items():
+            parsed_items = [(child_key, _parse_jsonish(child))
+                            for child_key, child in node.items()]
+            for child_key, child in parsed_items:
                 # Slot-style dicts are keyed by the row id itself
                 # («slots: {interior_p_…: {label: …}}») — map the key too, so a
                 # bare id in a list («الخانات المحذوفة») still resolves.
@@ -612,7 +624,7 @@ def _collect_id_names(*roots):
                     name = _child_row_name(child)
                     if name:
                         id_map[child_key] = name
-            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+            stack.extend(v for _, v in parsed_items if isinstance(v, (dict, list)))
         elif isinstance(node, list):
             stack.extend(v for v in node if isinstance(v, (dict, list)))
     return id_map
@@ -634,7 +646,8 @@ def _ref_text(value, id_map, deleted=False, fallback=None):
 def _row_key(item):
     """Stable identity for a table row: its stored id, else its display name."""
     if isinstance(item, dict):
-        explicit = str(item.get('id') or item.get('key') or '').strip()
+        explicit = str(item.get('id') or item.get('key')
+                       or item.get('localId') or '').strip()
         if explicit:
             return 'id:' + explicit
         for key in ('name', 'title', 'label', 'direction', 'point', 'street_name',
@@ -658,7 +671,8 @@ def _row_label(item, index):
 def _has_row_id(item):
     """A stored id/key is strong identity: an unmatched one means another row."""
     return isinstance(item, dict) and bool(
-        str(item.get('id') or item.get('key') or '').strip())
+        str(item.get('id') or item.get('key')
+            or item.get('localId') or '').strip())
 
 
 def _match_rows(old_items, new_items):
@@ -719,13 +733,15 @@ def _emit(out, path, text=None, field=None, old=None, new=None, kind='info'):
     out.append(item)
 
 
-def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
+def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None,
+               list_verbs=None, verbs=None):
     """Walk two structured values and emit one detail item per real change."""
     if len(out) >= MAX_LINES or depth > 7:
         return
     old, new = _parse_jsonish(old), _parse_jsonish(new)
     if _values_equal(old, new):
         return
+    id_map = state.get('id_map') if state else {}
     if isinstance(old, dict) and isinstance(new, dict):
         skip = set(BLOB_SKIP_KEYS) | set(extra_skip)
         for key in sorted(set(old) | set(new)):
@@ -739,15 +755,20 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
             # the caller's fallback knows this was a real change, not churn.
             if state is not None:
                 state['saw'] = True
-            label = _blob_label(key, new_v if not _is_empty_value(_parse_jsonish(new_v)) else old_v)
+            # A key that is itself a stored row id («roles: {entity-uuid: role}»)
+            # names the row it points at instead of printing the raw id.
+            ref_name = id_map.get(str(key))
+            label = (f'«{ref_name}»' if ref_name else
+                     _blob_label(key, new_v if not _is_empty_value(_parse_jsonish(new_v)) else old_v))
             child_path = path + ([label] if label else [])
             if isinstance(_parse_jsonish(old_v), (dict, list)) or isinstance(_parse_jsonish(new_v), (dict, list)):
                 _diff_blob(old_v, new_v, child_path, out, depth + 1,
-                           extra_skip=extra_skip, state=state)
+                           extra_skip=extra_skip, state=state,
+                           list_verbs=list_verbs,
+                           verbs=(list_verbs or {}).get(key))
             elif _is_imageish_change(key, old_v, new_v):
                 _emit(out, child_path, text='استُبدلت', kind='info')
             else:
-                id_map = state.get('id_map') if state else {}
                 old_t = _ref_text(old_v, id_map, deleted=True)
                 new_t = _ref_text(new_v, id_map)
                 if not old_t and not new_t:
@@ -763,7 +784,7 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
     if isinstance(old, list) and isinstance(new, list):
         if state is not None:
             state['saw'] = True
-        _diff_list(old, new, path, out, depth, state=state)
+        _diff_list(old, new, path, out, depth, state=state, verbs=verbs)
         return
     had, has = not _is_empty_value(old), not _is_empty_value(new)
     if has and not had:
@@ -777,7 +798,7 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
     _emit(out, path, text=text, kind='info')
 
 
-def _diff_list(old_items, new_items, path, out, depth, state=None):
+def _diff_list(old_items, new_items, path, out, depth, state=None, verbs=None):
     if len(out) >= MAX_LINES:
         return
     if (old_items or new_items) and all(isinstance(item, dict)
@@ -806,12 +827,13 @@ def _diff_list(old_items, new_items, path, out, depth, state=None):
                           (_ref_text(item, id_map) for item in new_items) if text)
     removed = list((old_counter - new_counter).elements())
     added = list((new_counter - old_counter).elements())
+    removed_verb, added_verb = verbs or ('حُذف', 'أُضيف')
     if removed:
-        _emit(out, path, text='حُذف: ' + '، '.join(removed[:6])
+        _emit(out, path, text=removed_verb + ': ' + '، '.join(removed[:6])
               + (f' و{len(removed) - 6} أخرى' if len(removed) > 6 else ''),
               kind='removed')
     if added:
-        _emit(out, path, text='أُضيف: ' + '، '.join(added[:6])
+        _emit(out, path, text=added_verb + ': ' + '، '.join(added[:6])
               + (f' و{len(added) - 6} أخرى' if len(added) > 6 else ''),
               kind='added')
     if not removed and not added and old_items != new_items:
@@ -879,7 +901,7 @@ def _is_blob(value):
     return text.startswith('{') or text.startswith('[')
 
 
-def describe_draft_changes(old_data, new_data, field_labels=None):
+def describe_draft_changes(old_data, new_data, field_labels=None, id_names=None):
     """Readable detail items for what changed between two saves of a project file.
 
     Each item is either a plain string (legacy wording, slide lines) or a dict
@@ -894,6 +916,10 @@ def describe_draft_changes(old_data, new_data, field_labels=None):
     labels.update(DRAFT_BLOB_LABELS)
     groups = _draft_field_groups()
     state = {'id_map': _collect_id_names(old_data, new_data)}
+    # Rows that live outside draft_data (the company team library): the caller
+    # hands their id-to-name map so references inside the draft still resolve.
+    if id_names:
+        state['id_map'].update({str(k): str(v) for k, v in id_names.items() if v})
     lines = []
 
     for key in sorted(set(old_data) | set(new_data)):
@@ -917,7 +943,8 @@ def describe_draft_changes(old_data, new_data, field_labels=None):
                     _emit(lines, [label], text=slide_line, kind='info')
                 continue
             _diff_blob(old_blob, new_blob, [label], lines,
-                       extra_skip=DRAFT_BLOB_INNER_SKIP.get(key, ()), state=state)
+                       extra_skip=DRAFT_BLOB_INNER_SKIP.get(key, ()), state=state,
+                       list_verbs=DRAFT_BLOB_LIST_VERBS.get(key))
             continue
         old_text = _ref_text(old_value, state['id_map'], deleted=True, fallback=_readable_value)
         new_text = _ref_text(new_value, state['id_map'], fallback=_readable_value)

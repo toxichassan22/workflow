@@ -7573,6 +7573,50 @@ class MeetingRequirementsTests(unittest.TestCase):
         # A blob is named, never dumped as a value.
         self.assertNotIn('inputs', draft_lines)
 
+    def test_team_selection_changes_name_the_entity_not_its_id(self):
+        # «team_selection» stores library entity ids in roles/excluded — the log
+        # must resolve them to the entity's name, not print a raw uuid.
+        import change_tracking as tracking
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        with self.app.app_context():
+            developer_id = db.create_team_entity(
+                self.tenant_a, 'شركة التطوير الأولى', role='مطور')
+            engineer_id = db.create_team_entity(
+                self.tenant_a, 'مكتب الهندسة المتحدة', role='استشاري')
+        draft_id = 'draft-team-history'
+        base = {'draftId': draft_id, 'project_name': 'Team Project'}
+        client.post('/api/project-draft', headers=headers, json={
+            'draftId': draft_id,
+            'draftData': {**base, 'team_selection': {
+                'excluded': [], 'roles': {developer_id: 'مقاول عام'}, 'local': []}},
+            'sectionStatuses': {},
+        })
+        response = client.post('/api/project-draft', headers=headers, json={
+            'draftId': draft_id,
+            'draftData': {**base, 'team_selection': {
+                'excluded': [engineer_id],
+                'roles': {developer_id: 'مهندس استشاري'},
+                'local': [{'localId': 'loc-1', 'name': 'شركة البناء الحديث',
+                           'role': 'مقاول'}]}},
+            'sectionStatuses': {},
+        })
+        self.assertEqual(response.status_code, 200)
+
+        log = client.get(f'/api/project-draft/{draft_id}/edit-log',
+                         headers=headers).get_json()
+        self.assertTrue(log.get('log'))
+        last = log['log'][0]
+        self.assertEqual(last.get('action'), 'حفظ بيانات المشروع')
+        joined = '\n'.join(tracking.detail_text(item)
+                           for item in (last.get('details') or []))
+        self.assertIn('فريق العمل', joined)
+        self.assertIn('استُبعدت من الملف: مكتب الهندسة المتحدة', joined)
+        self.assertIn('«شركة التطوير الأولى»: من «مقاول عام» إلى «مهندس استشاري»', joined)
+        self.assertIn('أُضيف «شركة البناء الحديث»', joined)
+        self.assertNotIn(engineer_id, joined)
+        self.assertNotIn(developer_id, joined)
+
     def test_project_archive_and_previous_presentations_are_filtered_and_scoped(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
