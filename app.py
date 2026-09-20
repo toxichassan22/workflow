@@ -6598,6 +6598,9 @@ def api_visual_concept_generate():
     prompt = _visual_concept_sanitize_prompt(data.get('prompt'))
     if not prompt:
         return jsonify({'success': False, 'error': 'وصف التصور البصري مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
+    external_gate = _visual_concept_external_gate(data, slot_id)
+    if external_gate:
+        return jsonify(external_gate), 400
     cover_image = _visual_concept_cover_image(data)
     if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
@@ -21123,11 +21126,14 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         _radius_limit = float(payload.get('resolvedRadiusKm') or 0)
     except (TypeError, ValueError):
         _radius_limit = 0
-    cutoff = max(_radius_limit * 3, 60) if _radius_limit > 0 else 0
-    if _radius_limit > 0:
-        # Flagging keeps borderline rows for review, but a competitor hundreds of
-        # kilometres away is noise, not a choice — drop it before counting, so a
-        # list padded with far cities still triggers the expansion pass.
+    # Flagging keeps borderline rows for review, but a competitor hundreds of
+    # kilometres away is noise, not a choice — drop it before counting, so a
+    # list padded with far cities still triggers the expansion pass. Whole-city
+    # scope has no km bound, yet a row claiming another region is still noise:
+    # cap it at 100 km.
+    cutoff = (max(_radius_limit * 3, 60) if _radius_limit > 0
+              else (100 if payload.get('resolvedRadiusKm') is None else 0))
+    if cutoff:
         generated = [row for row in generated if isinstance(row, dict)]
         _kept = []
         for row in generated:
@@ -21187,7 +21193,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 if not key or key in seen_names:
                     continue
                 distance = market_study._number_in_text(row.get('distance_km'))
-                if _radius_limit > 0 and distance is not None and distance > cutoff:
+                if cutoff and distance is not None and distance > cutoff:
                     dropped_far.append(str(row.get('name') or '').strip())
                     continue
                 seen_names.add(key)
