@@ -794,9 +794,30 @@
       if (value === null || value === undefined || value === '') return '—';
       if (typeof value === 'boolean') return value ? 'نعم' : 'لا';
       if (typeof value === 'object') {
-        try { return JSON.stringify(value); } catch (e) { return String(value); }
+        try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
       }
       return String(value);
+    }
+
+    // One side of the comparison: a captioned box so the previous value always
+    // sits next to the new value, even when one of them is empty (added fields
+    // have no previous value, removed fields have no new one).
+    function sectionVersionDiffCell(side, value) {
+      const cell = document.createElement('div');
+      cell.className = 'section-version-diff-cell section-version-diff-' + side;
+      const cap = document.createElement('span');
+      cap.className = 'section-version-diff-cap';
+      cap.textContent = side === 'old'
+        ? WFT('sectionver.diff_col_old', 'القيمة السابقة')
+        : WFT('sectionver.diff_col_new', 'القيمة الجديدة');
+      cell.appendChild(cap);
+      const val = document.createElement('span');
+      val.className = 'section-version-diff-value';
+      const text = diffValueText(value);
+      val.textContent = text;
+      if (text === '—') val.classList.add('is-empty');
+      cell.appendChild(val);
+      return cell;
     }
 
     function sectionVersionDiffStatusText(status) {
@@ -858,22 +879,22 @@
         const row = document.createElement('div');
         row.className = 'section-version-diff-row diff-' + item.status;
         const isAttachment = attachments.some(att => att && att.key === item.key);
+        const head = document.createElement('div');
+        head.className = 'section-version-diff-row-head';
         const label = document.createElement('span');
         label.className = 'section-version-diff-label';
         label.textContent = (isAttachment ? WFT('sectionver.diff_attachment', 'مرفق') + ': ' : '') + (item.label || item.key);
-        row.appendChild(label);
+        head.appendChild(label);
         const status = document.createElement('span');
         status.className = 'section-version-diff-status';
         status.textContent = sectionVersionDiffStatusText(item.status);
-        row.appendChild(status);
-        const oldValue = document.createElement('span');
-        oldValue.className = 'section-version-diff-old';
-        oldValue.textContent = WFT('sectionver.diff_old', 'القيمة السابقة: {v}', { v: diffValueText(item.old_value) });
-        row.appendChild(oldValue);
-        const newValue = document.createElement('span');
-        newValue.className = 'section-version-diff-new';
-        newValue.textContent = WFT('sectionver.diff_new', 'القيمة الجديدة: {v}', { v: diffValueText(item.new_value) });
-        row.appendChild(newValue);
+        head.appendChild(status);
+        row.appendChild(head);
+        const cols = document.createElement('div');
+        cols.className = 'section-version-diff-cols';
+        cols.appendChild(sectionVersionDiffCell('old', item.old_value));
+        cols.appendChild(sectionVersionDiffCell('new', item.new_value));
+        row.appendChild(cols);
         panel.appendChild(row);
       });
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {

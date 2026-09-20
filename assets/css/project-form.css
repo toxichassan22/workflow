@@ -974,10 +974,7 @@
     }
 
     .section-version-diff-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 10px;
-      padding: 6px 0;
+      padding: 8px 0;
       border-bottom: 1px solid var(--line);
       font-size: 12px;
       line-height: 1.6;
@@ -987,8 +984,16 @@
       border-bottom: none;
     }
 
+    .section-version-diff-row-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
     .section-version-diff-label {
-      flex: 0 0 auto;
+      flex: 1 1 auto;
       font-weight: bold;
     }
 
@@ -1015,17 +1020,48 @@
       color: #8a6d00;
     }
 
-    .section-version-diff-old,
-    .section-version-diff-new {
-      flex: 1 1 240px;
-      min-width: 200px;
-      word-break: break-word;
-      color: #555;
+    .section-version-diff-cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
     }
 
-    .section-version-diff-row.diff-added .section-version-diff-old,
-    .section-version-diff-row.diff-removed .section-version-diff-new {
-      display: none;
+    .section-version-diff-cell {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #fff;
+      min-width: 0;
+      word-break: break-word;
+      white-space: pre-line;
+    }
+
+    .section-version-diff-cap {
+      display: block;
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 3px;
+    }
+
+    .section-version-diff-value {
+      display: block;
+      color: #333;
+    }
+
+    .section-version-diff-value.is-empty {
+      color: #aaa;
+    }
+
+    .section-version-diff-row.diff-modified .section-version-diff-old,
+    .section-version-diff-row.diff-removed .section-version-diff-old {
+      border-color: #e5bcbc;
+      background: #fdf8f8;
+    }
+
+    .section-version-diff-row.diff-modified .section-version-diff-new,
+    .section-version-diff-row.diff-added .section-version-diff-new {
+      border-color: #b9dec2;
+      background: #f7fcf8;
     }
 
     .tenant-form-section.section-locked input:not([type="hidden"]):not([data-section-lock-ignore]),
