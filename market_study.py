@@ -1794,6 +1794,7 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'field_sources': field_sources,
         'data_date': _norm(row.get('data_date') or row.get('dataDate')),
         'notes': _norm(row.get('notes') or row.get('note')),
+        'verify_state': _norm(row.get('verify_state') or row.get('verifyState')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
     return result

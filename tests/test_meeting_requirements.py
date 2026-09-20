@@ -10849,6 +10849,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             module._verify_competitor_row(row, {'city': 'جدة'}, {})
         self.assertEqual(row.get('price_value'), '45000')
         self.assertEqual(row.get('price_type'), 'إيجار الوحدة السنوي')
+        self.assertEqual(row.get('verify_state'), 'verified')
         self.assertIn(price_page, row.get('field_sources', {}).get('price_value', []))
         self.assertIn(price_page, row.get('source_urls') or [])
         # A price citing a page the search never retrieved is rejected — the
@@ -10895,8 +10896,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         with patch.object(module, '_call_market_study_model', return_value=(foreign_res, '')):
             module._verify_competitor_row(foreign, {'city': 'جدة'}, {})
         self.assertTrue(foreign.get('no_search_evidence'))
+        self.assertEqual(foreign.get('verify_state'), 'no_match')
         self.assertFalse(foreign.get('price_value'))
         self.assertFalse(foreign.get('logo_source_url'))
+        # A provider that returns no citations is an infrastructure miss, not a
+        # fabricated name — it must not be mislabeled as unverified.
+        silent = {'choices': [{'message': {'content': '{"exists": true}'}}]}
+        quiet = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
+        with patch.object(module, '_call_market_study_model', return_value=(silent, '')):
+            module._verify_competitor_row(quiet, {'city': 'جدة'}, {})
+        self.assertEqual(quiet.get('verify_state'), 'search_not_run')
+        self.assertFalse(quiet.get('no_search_evidence'))
 
     def test_market_study_prices_require_a_dedicated_search(self):
         import market_study

@@ -21628,51 +21628,80 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     price_options = '، '.join(
         market_study.PRICE_TYPE_BY_OPERATION.get(operation)
         or market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
-    prompt = (
+    price_shape = (
+        '"price": {"type": "أحد: ' + price_options + '", "value": "الرقم فقط", '
+        '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
+        '"url": "رابط الصفحة التي ورد فيها السعر حرفيًا"}')
+    price_rule = (
+        'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
+        'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. ')
+    prompts = [(
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
         'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
-        '"price": {"type": "أحد: ' + price_options + '", "value": "الرقم فقط", '
-        '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
-        '"url": "رابط الصفحة التي ورد فيها السعر حرفيًا"}}.\n'
-        'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
-        'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
+        + price_shape + '}.\n' + price_rule +
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
-    )
-    try:
-        response, _err = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200,
-            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=False)
-    except Exception:
-        return
-    if not _market_search_ran(response):
-        return
+    )]
     tokens = _competitor_name_tokens(name)
     if not tokens:
         return
     needed = 1 if len(tokens) == 1 else 2
+    # Bare-token retry: a quoted «مشروع …» phrasing under-retrieves when the
+    # pages that name this project drop the generic prefix or use only one
+    # script of a bilingual name. It also doubles as the retry when the first
+    # call errors out or returns no citations.
+    prompts.append(
+        f'ابحث في الويب عن {" ".join(sorted(tokens))} — {city} السعودية.\n'
+        'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع '
+        'الرسمي إن وُجدت", "summary": "سطر واحد", ' + price_shape + '}.\n'
+        + price_rule + 'إن لم تجد صفحة تذكر هذا الاسم أعد exists=false.'
+    )
+    usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
+    response = None
+    search_ran_any = False
     matched = []
     official = ''
-    for page in _market_citation_pages(response):
-        url = str(page.get('url') or '').strip()
-        if url and _foreign_market_host(url):
+    for prompt in prompts:
+        try:
+            response, _err = _call_market_study_model(
+                market_study.build_consultant_system_prompt(), prompt,
+                max_tokens=1200, usage_ctx=usage_ctx, server_tools=False)
+        except Exception:
+            response = None
             continue
-        haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
-        hits = sum(1 for token in tokens if token in haystack)
-        if hits >= needed:
-            if url:
+        if not _market_search_ran(response):
+            continue
+        search_ran_any = True
+        for page in _market_citation_pages(response):
+            url = str(page.get('url') or '').strip()
+            if url and _foreign_market_host(url):
+                continue
+            haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
+            hits = sum(1 for token in tokens if token in haystack)
+            if hits >= needed:
                 matched.append(url)
-        # An official page carries the whole distinctive name — a partial match
-        # is evidence the project exists, not that the host belongs to it.
-        if url and hits >= len(tokens) and not official:
-            if not any(token in _normalized_web_host(url) for token in _AGGREGATOR_HOST_TOKENS):
-                official = url
+            # An official page carries the whole distinctive name — a partial
+            # match is evidence the project exists, not that the host belongs
+            # to it.
+            if url and hits >= len(tokens) and not official:
+                if not any(token in _normalized_web_host(url) for token in _AGGREGATOR_HOST_TOKENS):
+                    official = url
+        if matched:
+            break
+    if not search_ran_any:
+        # The provider returned no citations at all — an infrastructure miss,
+        # not proof the name is fabricated. Say so instead of mislabeling it.
+        row['verify_state'] = 'search_not_run'
+        return
+    matched = list(dict.fromkeys(matched))
     if not matched:
         # The search ran and no retrieved page mentions this name — flag the row
         # rather than silently trusting a memory-generated competitor.
         row['no_search_evidence'] = True
+        row['verify_state'] = 'no_match'
         return
     row.pop('no_search_evidence', None)
+    row['verify_state'] = 'verified'
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + matched))[:6]
     if not str(row.get('source_url') or '').strip():
