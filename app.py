@@ -21123,11 +21123,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         _radius_limit = float(payload.get('resolvedRadiusKm') or 0)
     except (TypeError, ValueError):
         _radius_limit = 0
+    cutoff = max(_radius_limit * 3, 60) if _radius_limit > 0 else 0
     if _radius_limit > 0:
         # Flagging keeps borderline rows for review, but a competitor hundreds of
         # kilometres away is noise, not a choice — drop it before counting, so a
         # list padded with far cities still triggers the expansion pass.
-        cutoff = max(_radius_limit * 3, 60)
         generated = [row for row in generated if isinstance(row, dict)]
         _kept = []
         for row in generated:
@@ -21139,26 +21139,47 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         generated = _kept
     named_generated = [row for row in generated
                        if isinstance(row, dict) and str(row.get('name') or '').strip()]
-    if (mode != 'fill' and _market_search_ran(res)
-            and len(named_generated) < market_study.COMPETITOR_MIN_DIRECT):
-        # One expansion pass: a thin list usually means the model settled for the
-        # first pages it saw. Asking for additional named projects — beyond the
-        # ones already found — gets a fresh retrieval round and a bigger table.
-        report(24, 'عدد المنافسين أقل من الحد الأدنى — بحث إضافي عن مشاريع مسماة أخرى...')
+    # Expansion passes: a thin list usually means the model settled for the
+    # first pages it saw. Each pass takes a different angle — the web plugin
+    # derives fresh queries from the prompt — so later rounds surface projects
+    # the generic first query missed. Stop at the minimum or when a pass
+    # answers cleanly yet adds nothing.
+    _scope = market_study.competitor_scope_text(payload)
+    _ptype = str(payload.get('projectType') or payload.get('project_type') or 'عقاري')
+    _city = str(payload.get('city') or '')
+    _district = str(payload.get('district') or '')
+    expansion_angles = [
+        f'قوائم وأخبار أفضل المشاريع العقارية في {_city} قرب {_district or "موقع المشروع"}',
+        f'مشاريع عقارية مسماة (كمبوند، برج، مجمع، مخطط، وجهة سكنية) في أحياء {_city} المجاورة لـ {_district or "موقع المشروع"}',
+        f'مشاريع كبار المطورين العقاريين في {_city} — قائمة أو تحت الإنشاء',
+    ]
+    seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
+    round_no = 0
+    while (mode != 'fill' and _market_search_ran(res)
+           and len(named_generated) < market_study.COMPETITOR_MIN_DIRECT
+           and round_no < len(expansion_angles)):
+        report(24 + round_no,
+               f'عدد المنافسين أقل من الحد الأدنى — بحث إضافي ({round_no + 1}) عن مشاريع مسماة أخرى...')
+        known = '، '.join(str(row.get('name') or '') for row in named_generated) or 'لا يوجد'
         expansion_prompt = (
-            user_prompt
-            + '\n\nالاستجابة السابقة أعادت منافسين قلائل: '
-            + '، '.join(str(row.get('name') or '') for row in named_generated)
-            + '. ابحث في صفحات قوائم ومقالات أخرى عن مشاريع مسماة إضافية داخل النطاق '
-              'أو وسّع تدريجيًا خارجه، وأعد قائمة كاملة أكبر تتضمن السابقين وغيرهم.')
+            f'نُجري دراسة سوق لمشروع {_ptype} في {_city}'
+            + (f' — {_district}' if _district else '')
+            + f'. نطاق المنافسين: {_scope}.\n'
+            + f'المنافسون المسجلون حتى الآن: {known}.\n'
+            + f'ابحث في الويب عن: {expansion_angles[round_no]} — مشاريع مسماة '
+              'حقيقية لم ترد في القائمة. يجوز إدراج مشاريع أبعد قليلًا مع '
+              'distance_km الحقيقية، ولا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
+              'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
+              '"operation_type":"","price_type":"","price":"","source_urls":[]}]} '
+              'مع بقية الحقول المعتادة عند توفرها.')
         res2, _err2 = _call_market_study_model(
-            system_prompt, expansion_prompt, max_tokens=14000, max_search_results=14,
+            system_prompt, expansion_prompt, max_tokens=14000, max_search_results=20,
             usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
             search_context={'city': payload.get('city'), 'country': 'SA'})
         parsed2, _parse_err2 = _parse_market_model_json(res2)
         more = parsed2.get('competitors') if isinstance(parsed2, dict) else []
+        added_this_round = 0
         if isinstance(more, list):
-            seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
             for row in more:
                 if not isinstance(row, dict):
                     continue
@@ -21171,9 +21192,16 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                     continue
                 seen_names.add(key)
                 generated.append(row)
+                named_generated.append(row)
+                added_this_round += 1
             # Prefer the richer citation set for later logo/verification passes.
             if _market_citation_urls(res2):
                 res = res2 if len(_market_citation_urls(res2)) > len(_market_citation_urls(res)) else res
+        round_no += 1
+        if not added_this_round and not _parse_err2:
+            # A clean response with no new rows means retrieval is exhausted;
+            # a malformed/empty response is a technical miss — try the next angle.
+            break
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
     _attach_retrieved_citations(merged, _market_citation_pages(res))
@@ -21210,6 +21238,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     if dropped_far:
         far_note = 'أُسقطت من الجدول مشاريع بعيدة جدًا عن النطاق: ' + '، '.join(dropped_far)
         notes = f'{notes} — {far_note}' if notes else far_note
+    expansion_note = str(parsed.get('expansionNote') or parsed.get('notes') or '').strip()
+    if round_no:
+        rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1
+                       else f'أُجريت {round_no} جولات بحث إضافية عن مشاريع أخرى')
+        expansion_note = f'{expansion_note} — {rounds_note}' if expansion_note else rounds_note
     return {
         'success': True,
         'competitors': merged,
@@ -21220,8 +21253,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         'outOfRadiusCount': out_of_radius,
         'noEvidenceCount': sum(1 for row in merged if row.get('no_search_evidence')),
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
-        'searchExpanded': bool(parsed.get('searchExpanded')),
-        'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
+        'searchExpanded': bool(parsed.get('searchExpanded')) or round_no > 0,
+        'expansionNote': expansion_note,
         'notes': notes,
     }
 
