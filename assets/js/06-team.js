@@ -940,6 +940,12 @@
       updateRevenueComponentOptions();
       updateDynamicFields();
       calculateAll();
+      const graceRevenueSelect = document.getElementById('graceRevenueId');
+      const savedGraceRevenue = snapshot.inputs && snapshot.inputs.graceRevenueId;
+      if (graceRevenueSelect && savedGraceRevenue && graceRevenueSelect.value !== savedGraceRevenue && [...graceRevenueSelect.options].some(o => o.value === savedGraceRevenue)) {
+        graceRevenueSelect.value = savedGraceRevenue;
+        calculateAll();
+      }
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && financialRoot) {
         window.WFI18n.autoTranslate(financialRoot);
       }

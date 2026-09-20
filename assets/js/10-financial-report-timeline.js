@@ -24,8 +24,9 @@
         if (tableId === 'revenueTable') {
           const compSel = row.querySelector('[data-field="component"] select');
           result.componentId = compSel ? (compSel.value || '') : (row.dataset.componentId || result.component || '');
+          if (row.dataset.revenueKey) result.id = row.dataset.revenueKey;
         }
-        if (Object.values(result).some(value => String(value ?? '').trim() !== '')) return result;
+        if (Object.entries(result).some(([key, value]) => key !== 'id' && String(value ?? '').trim() !== '')) return result;
         return null;
       }).filter(Boolean);
     }
