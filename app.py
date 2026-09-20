@@ -26541,7 +26541,7 @@ FRONTEND_JS_ORDER = (
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
     '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
-    '19-notifications.js', '20-finlab.js',
+    '19-notifications.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}
@@ -26629,52 +26629,6 @@ def static_assets(path):
     # shell after a deploy. ETag revalidation keeps repeat loads cheap.
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
-
-
-@app.route('/finlab-frame')
-def finlab_frame():
-    """Isolated financial-study lab embedded by the super-admin «معمل الدراسة
-    المالية» page. Loads every frontend part file except the app boot module
-    (17-admin-boot.js runs initTenant), mounts the study on an empty host, and
-    lets assets/js/20-finlab.js drive it. The page itself carries no tenant
-    data — draft loading still goes through the authenticated API."""
-    scripts = '\n    '.join(
-        f'<script src="/assets/js/{name}"></script>'
-        for name in FRONTEND_JS_ORDER
-        if name != '17-admin-boot.js'
-    )
-    html = (
-        '<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>معمل الدراسة المالية</title>'
-        '<link rel="stylesheet" href="/assets/app.bundle.css">'
-        '</head><body data-finlab-frame class="finlab-frame-body">'
-        '<div id="finlabStudyHost"></div>\n    ' + scripts + '\n</body></html>'
-    )
-    resp = Response(html, mimetype='text/html')
-    resp.headers['Cache-Control'] = 'no-cache'
-    return resp
-
-
-@app.route('/api/dev/finlab-apply', methods=['POST'])
-@require_auth
-def api_dev_finlab_apply():
-    """Writes the lab-patched financial model back to assets/js/09-financial.js.
-
-    Loopback-only: the formula lab is a local meeting tool, so a deployed
-    instance must never rewrite its own source over the network."""
-    if request.remote_addr not in ('127.0.0.1', '::1'):
-        return jsonify({'error': 'finlab apply is localhost only'}), 403
-    if not getattr(g, 'is_admin', False):
-        return jsonify({'error': 'finlab apply is super-admin only'}), 403
-    payload = request.get_json(silent=True) or {}
-    source = payload.get('source')
-    if not isinstance(source, str) or 'function calculateAll' not in source:
-        return jsonify({'error': 'Invalid financial source'}), 400
-    target = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'js', '09-financial.js')
-    with open(target, 'w', encoding='utf-8') as fh:
-        fh.write(source)
-    return jsonify({'ok': True, 'bytes': len(source.encode('utf-8'))})
 
 MEDIA_URL_MAX_AGE = 7 * 86400
 _MEDIA_URL_RE = re.compile(r"/uploads/[^\s<>'\"`\\),;\]\[]+")

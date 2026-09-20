@@ -25,8 +25,7 @@
       tenantCompaniesPage: 'admin/companies',
       tenantAdminRechargePage: 'admin/recharges',
       tenantAdminTicketsPage: 'admin/tickets',
-      tenantAdminPlatformPage: 'admin/platform',
-      tenantFinlabPage: 'admin/finlab'
+      tenantAdminPlatformPage: 'admin/platform'
     };
     const TENANT_SUFFIX_PAGES = Object.fromEntries(Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]));
 
@@ -72,7 +71,7 @@
 
     const TENANT_ADMIN_ONLY_PAGES = new Set([
       'tenantAdminPage', 'tenantCompaniesPage', 'tenantAdminRechargePage',
-      'tenantAdminTicketsPage', 'tenantAdminPlatformPage', 'tenantFinlabPage'
+      'tenantAdminTicketsPage', 'tenantAdminPlatformPage'
     ]);
 
     function enforceTenantRouteGuard(pageId, urlSlug) {
@@ -207,7 +206,6 @@
       tenantAdminRechargePage: 'openAdminRechargePage',
       tenantAdminTicketsPage: 'openAdminTicketsPage',
       tenantAdminPlatformPage: 'openAdminPlatformPage',
-      tenantFinlabPage: 'openFinlabPage',
       tenantOmranOpsPage: 'openOmranOpsPage',
       tenantPresentationsPage: 'openTenantPresentations',
       tenantSettingsPage: 'openTenantSettings',
@@ -608,7 +606,6 @@
       tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
       tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
       tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'],
-      tenantFinlabPage: ['page.finlab', 'معمل الدراسة المالية'],
       tenantOmranOpsPage: ['page.operations', 'العمليات']
     });
 
@@ -1103,10 +1100,6 @@
             if (!tenantUser.isAdmin) return false;
             await openAdminPlatformPage();
             return true;
-          case 'tenantFinlabPage':
-            if (!tenantUser.isAdmin) return false;
-            openFinlabPage();
-            return true;
           default:
             clearTenantNavigationState();
             return false;
@@ -1283,8 +1276,6 @@
           await openAdminTicketsPage();
         } else if (requestedPage === 'tenantAdminPlatformPage') {
           await openAdminPlatformPage();
-        } else if (requestedPage === 'tenantFinlabPage') {
-          if (tenantUser.isAdmin) openFinlabPage();
         } else {
           showTenantPage(requestedPage, true);
         }
