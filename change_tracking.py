@@ -66,7 +66,7 @@ def _images_of(html):
         '', source, flags=re.IGNORECASE,
     )
     found = _IMG_SRC_RE.findall(source) + _BG_URL_RE.findall(source)
-    return [item.strip() for item in found if item.strip()]
+    return [_URL_BUSTER_RE.sub('', item.strip()) for item in found if item.strip()]
 
 
 def _shorten(text, limit=MAX_TEXT_IN_LINE):
@@ -155,7 +155,9 @@ def describe_slide_changes(old_slides, new_slides):
 
         old_html = _slide_html(old_slide)
         new_html = _slide_html(new_slide)
-        if old_html != new_html:
+        # Compare without media signatures/cache-busters: the same slide re-saved
+        # after a fresh round of ?s= signing is not a content change.
+        if _URL_BUSTER_RE.sub('', old_html) != _URL_BUSTER_RE.sub('', new_html):
             old_mark, new_mark = _watermark_state(old_html), _watermark_state(new_html)
             if old_mark != new_mark:
                 if old_mark == 'absent' and new_mark == 'visible':
@@ -262,6 +264,13 @@ DRAFT_IGNORED_KEYS = {
     # Machinery that is rewritten on every save or chat turn — its churn used to
     # fill the log with «تم تحديث البيانات» lines that said nothing.
     'designerChat', 'slide_generation_checkpoint', 'calculate_landmark_driving',
+    # The ##MAP_*## token → url map: regenerated maps re-stamp it, and real map
+    # work already lands in the log through its own «توليد خريطة» entries.
+    'map_placeholders',
+    # Rebuilt from other blobs on every save (section statuses mirror, cover,
+    # moodboard, slides flags) — a second copy of changes already diffed at
+    # their source.
+    'pageDrafts',
 }
 
 # Draft keys ending like this are bookkeeping, not reader content.
@@ -285,10 +294,14 @@ DRAFT_BLOB_LIST_VERBS = {
 DRAFT_BLOB_INNER_SKIP = {
     'financial_study_model': {'financialCalcData', 'projection', 'tables'},
     'land_documents_analysis': {'extraction_diagnostics', 'document_processing', 'confidence'},
-    'tenantCreativeImages': {'images_signature', 'last_error', 'last_warning'},
+    'tenantCreativeImages': {'images_signature', 'last_error', 'last_warning',
+                             'map_placeholders'},
     'tenantSlidePlan': {'source_error'},
     'visual_concept': {'chat', 'promptReady', 'promptsError', 'images_signature',
-                       'last_error', 'last_warning', 'deletedInteriorSlots'},
+                       'last_error', 'last_warning', 'deletedInteriorSlots',
+                       # A slot's status only mirrors its approvedImageUrl
+                       # transitions — the approval line already says it.
+                       'status'},
 }
 
 # Labels for keys inside structured blobs: table names, row fields and the
@@ -455,6 +468,9 @@ BLOB_SKIP_KEYS = {
     'extraction_diagnostics', 'document_processing', 'confidence',
     'slide_generation_checkpoint', 'area_cache', 'row_source',
     'sourceFileId', 'styleReferenceFileIds',
+    # A nested approval-status mirror (pageDrafts.project.sectionStatuses):
+    # the real column is already diffed line-per-section on the save itself.
+    'sectionStatuses',
 }
 
 # Image/file slots: the stored URL is noise — a change reads as a replacement.
@@ -466,21 +482,65 @@ BLOB_IMAGE_KEYS = {
 }
 
 _BLOB_FILE_KEY_RE = re.compile(r'(?:_path|_url|_uri|_image|_logo|_photo|_file|_src)$', re.I)
+# Camel-case twins (referenceUrl, thumbnailUrl) — case-sensitive on purpose:
+# «profile» must not read as a file key.
+_BLOB_CAMEL_FILE_KEY_RE = re.compile(r'(?:Url|Uri|Path|Image|Logo|Photo|File|Src)$')
+
+# Sibling keys that pin the stored file behind an image URL. When one stays
+# equal, an URL rewrite is a re-publish/re-sign of the same file — not a swap.
+_STABLE_FILE_ID_KEYS = ('sourceFileId', 'source_file_id', 'fileId', 'file_id',
+                        'projectFileId', 'logoFileId', 'logo_file_id')
+
+
+def _looks_like_file_ref(value):
+    text = str(value or '').strip()
+    return text.startswith(('/uploads/', 'http://', 'https://', 'data:image',
+                            'data:', 'blob:'))
 
 
 def _is_imageish_change(key, old_v, new_v):
     """File/image slot even when the key is not in BLOB_IMAGE_KEYS: a *_path /
-    *_url / *_logo style key whose stored value is a file path or URL."""
+    *_url / *Url style key whose stored value is a file path or URL."""
     if key in BLOB_IMAGE_KEYS:
         return True
-    if not _BLOB_FILE_KEY_RE.search(str(key)):
+    if not (_BLOB_FILE_KEY_RE.search(str(key)) or _BLOB_CAMEL_FILE_KEY_RE.search(str(key))):
         return False
+    return _looks_like_file_ref(old_v) or _looks_like_file_ref(new_v)
 
-    def looks_like_file(value):
-        text = str(value or '').strip()
-        return text.startswith(('/uploads/', 'http://', 'https://', 'data:image', 'data:'))
 
-    return looks_like_file(old_v) or looks_like_file(new_v)
+def _same_file_repath(old_row, new_row, key, old_v, new_v):
+    """The URL rotated but the file id next to it did not: a heal or re-sign,
+    not a user-facing replacement. Empty sides stay real add/remove events."""
+    if _is_empty_value(old_v) or _is_empty_value(new_v):
+        return False
+    if not (_looks_like_file_ref(old_v) and _looks_like_file_ref(new_v)):
+        return False
+    if not (isinstance(old_row, dict) and isinstance(new_row, dict)):
+        return False
+    for id_key in _STABLE_FILE_ID_KEYS:
+        if id_key == key:
+            continue
+        old_id, new_id = old_row.get(id_key), new_row.get(id_key)
+        if old_id and new_id and _values_equal(old_id, new_id):
+            return True
+    return False
+
+
+def _image_change_text(key, old_v, new_v):
+    """Name the transition rather than always «استُبدلت»: an approval stamp and
+    an actual replacement are different clicks."""
+    had, has = not _is_empty_value(old_v), not _is_empty_value(new_v)
+    if key == 'approvedImageUrl':
+        if has and not had:
+            return 'اعتُمدت'
+        if had and not has:
+            return 'أُلغي الاعتماد'
+        return 'استُبدلت'
+    if has and not had:
+        return 'أُضيفت'
+    if had and not has:
+        return 'حُذفت'
+    return 'استُبدلت'
 
 _INTERNAL_KEY_RE = re.compile(
     r'^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}|[a-z]+_\d{6,}|plan_[a-z0-9_]+)$')
@@ -490,7 +550,12 @@ _INTERNAL_ID_VALUE_RE = re.compile(
     r'^(?:[a-z]+_\d{6,}(?:_[0-9a-z]{4,})?|'
     r'(?=[a-z0-9_]*\d{4,})[a-z]+(?:_[a-z0-9]+)+|'
     r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$', re.I)
-_URL_BUSTER_RE = re.compile(r'([?&](?:t|v|cb)=)[^&\s]+')
+# URL params that identify a fetch, not a file: the media signature (?s=) is
+# re-issued on every response and the cache-busters (?t=/?v=/?cb=) rotate with
+# each render — the same stored image would otherwise diff as a replacement on
+# every save. The whole parameter is stripped so a signed and an unsigned form
+# of one URL compare equal.
+_URL_BUSTER_RE = re.compile(r'(?:[?&]|&amp;)(?:t|v|cb|s)=[^&\s"\'<>]*')
 _MISSING = object()
 
 
@@ -515,7 +580,7 @@ def _norm_scalar(value):
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
-        text = _WS_RE.sub(' ', _URL_BUSTER_RE.sub(r'\1', value)).strip()
+        text = _WS_RE.sub(' ', _URL_BUSTER_RE.sub('', value)).strip()
         try:
             return float(text.replace(',', ''))
         except ValueError:
@@ -767,8 +832,18 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None,
                            list_verbs=list_verbs,
                            verbs=(list_verbs or {}).get(key))
             elif _is_imageish_change(key, old_v, new_v):
-                _emit(out, child_path, text='استُبدلت', kind='info')
+                if not _same_file_repath(old, new, key, old_v, new_v):
+                    _emit(out, child_path, text=_image_change_text(key, old_v, new_v),
+                          kind='info')
             else:
+                old_raw, new_raw = str(old_v or '').strip(), str(new_v or '').strip()
+                if (old_raw and new_raw
+                        and _INTERNAL_ID_VALUE_RE.match(old_raw)
+                        and _INTERNAL_ID_VALUE_RE.match(new_raw)
+                        and old_raw not in id_map and new_raw not in id_map):
+                    # A row reference retargeted between ids that resolve in
+                    # neither snapshot — machinery churn with nothing to name.
+                    continue
                 old_t = _ref_text(old_v, id_map, deleted=True)
                 new_t = _ref_text(new_v, id_map)
                 if not old_t and not new_t:

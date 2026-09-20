@@ -1419,6 +1419,17 @@
       return head ? head + ': ' + text : text;
     }
 
+    // The same token-level marking the section-version diff uses: inside a
+    // changed value only the words that actually differ get highlighted.
+    function changeLogMarkedValue(text, paired) {
+      const frags = (typeof diffWordMarks === 'function')
+        ? diffWordMarks(String(text || ''), String(paired || '')) : null;
+      if (!frags) return escapeHtml(String(text || ''));
+      return frags.map(frag => frag.changed
+        ? '<span class="diff-word">' + escapeHtml(frag.text) + '</span>'
+        : escapeHtml(frag.text)).join('');
+    }
+
     function renderChangeLogDetails(details) {
       const items = Array.isArray(details) ? details : [];
       // Structured items cluster under their section name even when the source
@@ -1439,19 +1450,19 @@
         const path = item.path
           ? '<span class="change-log-path">' + escapeHtml(item.path) + '</span>' : '';
         if (item.field) {
-          const oldValue = escapeHtml(String(item.old || ''));
-          const newValue = escapeHtml(String(item.new || ''));
+          const oldValue = String(item.old || '');
+          const newValue = String(item.new || '');
           let valueHtml;
           if (oldValue && newValue) {
-            valueHtml = '<span class="change-log-old">' + oldValue + '</span>' +
+            valueHtml = '<span class="change-log-old">' + changeLogMarkedValue(oldValue, newValue) + '</span>' +
               '<span class="change-log-to">إلى</span>' +
-              '<span class="change-log-new">' + newValue + '</span>';
+              '<span class="change-log-new">' + changeLogMarkedValue(newValue, oldValue) + '</span>';
           } else if (newValue) {
             valueHtml = '<span class="change-log-text">أُضيف</span>' +
-              '<span class="change-log-new">' + newValue + '</span>';
+              '<span class="change-log-new">' + escapeHtml(newValue) + '</span>';
           } else {
             valueHtml = '<span class="change-log-text">أُزيلت (كانت</span>' +
-              '<span class="change-log-old">' + oldValue + '</span>' +
+              '<span class="change-log-old">' + escapeHtml(oldValue) + '</span>' +
               '<span class="change-log-text">)</span>';
           }
           return '<div class="change-log-row">' + path +

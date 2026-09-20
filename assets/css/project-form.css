@@ -1347,6 +1347,19 @@
       word-break: break-word;
     }
 
+    .change-log-old .diff-word {
+      background: #f2b8b8;
+      border-radius: 3px;
+      padding: 0 2px;
+      font-weight: 700;
+    }
+
+    .change-log-new .diff-word {
+      background: #9fdcb4;
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+
     .change-log-to {
       color: #64748b;
       font-size: 12px;

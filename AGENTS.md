@@ -212,15 +212,26 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
   plain strings and dict items `{group, path, field, old, new, kind}`; `detail_text(item)` flattens
   either form back to one line for plain-text consumers (the versions-compare API). Table rows pair
   by `id`, then display name, then same-position; skipped machinery keys (`id`, `idx`,
-  `extraction_diagnostics`, `*_signature`, cache-buster `?t=` on URLs) never reach the log, so a save
-  that changed nothing real writes nothing. Blob key/value Arabic labels live in `BLOB_KEY_LABELS` /
+  `extraction_diagnostics`, `*_signature`) never reach the log, so a save that changed nothing real
+  writes nothing. Media URLs compare with their fetch params stripped — the `?s=` signature is
+  re-issued on every response and `?t=`/`?v=`/`?cb=` rotate per render, so a re-signed or
+  re-published URL on an unchanged `sourceFileId`/`fileId` is silent while a real file swap still
+  reads «استُبدلت» (and `approvedImageUrl` reads «اعتُمدت»/«أُلغي الاعتماد»). Derived mirrors are
+  skipped rather than re-reported: `pageDrafts.sectionStatuses`/`slides`/`moodboard`, the
+  `map_placeholders` token map, slot `status`, and row-reference churn where neither id resolves.
+  Blob key/value Arabic labels live in `BLOB_KEY_LABELS` /
   `BLOB_VALUE_LABELS` in `change_tracking.py`. Rows the draft only references by id — the team
   library entities inside `team_selection.roles`/`excluded` — resolve through the `id_names`
   argument, which app.py fills from `db.get_team_entities` via `_draft_change_id_names()`.
+- A draft save writes **one entry per touched section** — `POST /api/project-draft` buckets the diff
+  by `group` and records «تعديل «فريق العمل»»-style actions (status flips land under «تحديث حالة
+  الأقسام»), so the log reads as a feed of named actions instead of one «حفظ بيانات المشروع» row
+  carrying a whole-session dump. Creation stays a single «إنشاء ملف مشروع» entry.
 - The draft log opens as a dedicated overlay page (`#changeLogPage`, `showDraftEditLog`): entries
   grouped by day (اليوم/أمس/date), each entry shows the editor's name, the action, a
   manual/AI/system badge and a 12-hour ص/م local timestamp (`formatChangeLogStamp`), with details
-  grouped under their section name and old-vs-new values side by side. The same
+  grouped under their section name and old-vs-new values side by side — changed words are marked
+  inline (`diffWordMarks`, same as the section-version diff). The same
   `renderChangeLogEntry` renders the «كل الأحداث» list inside the presentation versions modal.
 - Every flow that changes either target writes one entry with `source` = `manual` or `ai`: the
   manual slide edit, inline text editing (quoting both sides), the AI designer chat (with the

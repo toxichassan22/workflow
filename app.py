@@ -15243,10 +15243,28 @@ def api_save_project_draft():
     details = change_tracking.describe_draft_changes(
         previous_data, draft_data, id_names=_draft_change_id_names())
     if isinstance(section_statuses, dict) and section_statuses:
-        details.extend(change_tracking.describe_section_status_changes(previous_statuses, section_statuses))
-    _record_change('draft', draft_id, 'حفظ بيانات المشروع' if previous else 'إنشاء ملف مشروع',
-                   details, source='manual',
-                   summary='' if previous else 'تم إنشاء ملف المشروع')
+        for status_line in change_tracking.describe_section_status_changes(
+                previous_statuses, section_statuses):
+            details.append({'group': 'حالة الأقسام', 'text': status_line, 'kind': 'info'})
+    if not previous:
+        _record_change('draft', draft_id, 'إنشاء ملف مشروع',
+                       details, source='manual', summary='تم إنشاء ملف المشروع')
+    else:
+        # One entry per touched section: each names its section, its author and
+        # its timestamp instead of one save dumping every accumulated
+        # difference into a single row.
+        grouped_details = {}
+        for item in details:
+            group_name = item.get('group') if isinstance(item, dict) else ''
+            grouped_details.setdefault(str(group_name or ''), []).append(item)
+        for group_name, group_items in grouped_details.items():
+            if group_name == 'حالة الأقسام':
+                entry_action = 'تحديث حالة الأقسام'
+            elif group_name:
+                entry_action = 'تعديل «%s»' % group_name
+            else:
+                entry_action = 'حفظ بيانات المشروع'
+            _record_change('draft', draft_id, entry_action, group_items, source='manual')
     # t16: an edit that drifts an approved section from its snapshot voids the
     # approval — checkpoint saves of a running job never reach this.
     if not allow_generating:

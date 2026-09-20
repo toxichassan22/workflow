@@ -7607,7 +7607,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                          headers=headers).get_json()
         self.assertTrue(log.get('log'))
         last = log['log'][0]
-        self.assertEqual(last.get('action'), 'حفظ بيانات المشروع')
+        # Each touched section lands as its own entry naming the section.
+        self.assertEqual(last.get('action'), 'تعديل «فريق العمل»')
         joined = '\n'.join(tracking.detail_text(item)
                            for item in (last.get('details') or []))
         self.assertIn('فريق العمل', joined)
@@ -7927,7 +7928,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         draft_log = client.get('/api/project-draft/history-draft/edit-log', headers=headers).get_json()
         self.assertTrue(draft_log['success'], draft_log)
         actions = [entry['action'] for entry in draft_log['log']]
-        self.assertIn('حفظ بيانات المشروع', actions)
+        self.assertIn('إنشاء ملف مشروع', actions)
+        # A save is recorded per touched section — project_name lives under
+        # «معلومات أساسية» and district under «الموقع والخرائط».
+        self.assertIn('تعديل «معلومات أساسية»', actions)
+        self.assertIn('تعديل «الموقع والخرائط»', actions)
         self.assertIn('اعتماد قسم', actions)
         import change_tracking as tracking
         details = '\n'.join(
