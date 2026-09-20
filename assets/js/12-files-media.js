@@ -1416,14 +1416,29 @@
     }
 
     function visualConceptLockMessage(slotId) {
+      if (isVisualConceptPlanSlot(slotId)) {
+        const planKind = visualConceptPlanKind(slotId);
+        if (planKind === 'uses') return 'مقفل حتى اعتماد مخطط الموقع العام.';
+        if (planKind === 'massing') return 'مقفل حتى اعتماد مخططي الموقع العام وتوزيع الأدوار.';
+      }
       if (isVisualConceptInteriorSlot(slotId)) return 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.';
       if (!visualConceptPlansApproved()) return 'اعتمد المخططات الثلاثة أولاً.';
       return 'اعتمد الصورة الرئيسية أولاً.';
     }
 
     function visualConceptSlotLocked(slotId) {
-      // Plans draw from the project facts and the approved land map, not the hero render.
-      if (isVisualConceptPlanSlot(slotId)) return false;
+      // The plan diagrams generate in sequence — each is drawn on the previous
+      // approved image, so a later plan stays locked until its predecessors
+      // are approved.
+      if (isVisualConceptPlanSlot(slotId)) {
+        const planKind = visualConceptPlanKind(slotId);
+        const slots = tenantVisualConceptState?.slots || {};
+        const siteApproved = Boolean(durableImageUrl(slots.plan_site?.approvedImageUrl));
+        const usesApproved = Boolean(durableImageUrl(slots.plan_uses?.approvedImageUrl));
+        if (planKind === 'uses') return !siteApproved;
+        if (planKind === 'massing') return !siteApproved || !usesApproved;
+        return false;
+      }
       if (isVisualConceptInteriorSlot(slotId)) {
         return !tenantVisualConceptState.slots.cover.approvedImageUrl || !visualConceptInteriorComponents().length;
       }
@@ -1627,11 +1642,15 @@
           '</div>';
       }
 
+      const lockHint = waitCover && isVisualConceptPlanSlot(slotDef.id)
+        ? '<p class="tenant-hint">' + escapeHtml(visualConceptLockMessage(slotDef.id)) + '</p>'
+        : '';
       return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head">' + heading +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
         modeSelector +
         preview +
+        lockHint +
         bodyControls +
         '</article>';
     }
@@ -1994,7 +2013,7 @@
         : '';
       const promptCards = promptReady
         ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
-          renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, false)
+          renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
         ).join('') + '</div>'
         : '<p class="tenant-hint">لم تُجهز برومبتات المخططات بعد.</p>';
       root.innerHTML =

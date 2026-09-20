@@ -9862,6 +9862,64 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(fallback.status_code, 200, fallback.get_json())
         self.assertTrue(fallback.get_json()['distribution']['rows'])
 
+    def test_plans_generate_sequentially_on_approved_plan_images(self):
+        """The diagrams are drawn in order: uses needs the approved site plan,
+        massing needs both — each previous image ships as a generation reference."""
+        module = self.application_module
+        client = self.app.test_client()
+        points = [
+            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
+            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
+            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
+        ]
+        project_data = {
+            'project_name': 'The View',
+            'croquis_land_area': 7012,
+            'survey_coordinates': points,
+            'project_components_data': [
+                {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800}],
+        }
+        workflow = {
+            'verification': {'approved': True},
+            'boundary': {'approved': True, 'points': points,
+                         'referenceUrl': '/uploads/creative/parcel-ref.png'},
+            'distribution': {'approved': True, 'rows': [{
+                'building': 'A', 'floor_range': '1-12', 'component': 'شقق',
+                'units_per_floor': 1, 'floor_area_sqm': 150, 'circulation': ''}]},
+        }
+
+        # uses is gated on the approved site image; massing on both predecessors.
+        for slot, images in (('plan_uses', {}),
+                             ('plan_uses', {'uses': '/uploads/creative/uses.png'}),
+                             ('plan_massing', {'site': '/uploads/creative/site.png'})):
+            gated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
+                'plansWorkflow': workflow, 'planImages': images})
+            self.assertEqual(gated.status_code, 400, (slot, images, gated.get_json()))
+            self.assertEqual(gated.get_json()['error_code'], 'PLANS_ORDER_REQUIRED')
+
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,U') as image_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'), \
+                patch.object(module, '_prepare_image_reference_for_model',
+                             side_effect=lambda url, tenant_id=None: 'ref:' + str(url)):
+            uses = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
+                'plansWorkflow': workflow,
+                'planImages': {'site': '/uploads/creative/site.png'}})
+            self.assertEqual(uses.status_code, 200, uses.get_json())
+            self.assertEqual(image_call.call_args.args[1], ['ref:/uploads/creative/site.png'])
+
+            massing = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'plan_massing', 'prompt': 'PROMPT', 'projectData': project_data,
+                'plansWorkflow': workflow,
+                'planImages': {'site': '/uploads/creative/site.png',
+                               'uses': '/uploads/creative/uses.png'}})
+            self.assertEqual(massing.status_code, 200, massing.get_json())
+            refs = image_call.call_args.args[1]
+            self.assertEqual(refs[:2], ['ref:/uploads/creative/site.png',
+                                        'ref:/uploads/creative/uses.png'])
+            self.assertIn('ref:/uploads/creative/parcel-ref.png', refs)
+
     def test_sbc_evidence_search_is_bounded_and_scored(self):
         module = self.application_module
         records = [

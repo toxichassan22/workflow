@@ -3187,21 +3187,37 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
     return '', ''
 
 
-def _visual_concept_plan_image_urls(data):
-    """The three approved plan diagrams the client shipped — exterior renders are
-    grounded on them, so they arrive as image references in fixed kind order."""
+def _visual_concept_plan_image_map(data):
+    """Approved plan diagram urls keyed by kind — {site, uses, massing}."""
     posted = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
     if not posted and isinstance(data.get('planImages'), list):
         posted = {kind: url for kind, url in zip(('site', 'uses', 'massing'),
                                                  data.get('planImages'))}
-    urls = []
+    urls = {}
     for kind in ('site', 'uses', 'massing'):
-        raw = str(posted.get(kind) or '').strip()
+        raw = posted.get(kind)
+        if isinstance(raw, dict):
+            raw = raw.get('approvedImageUrl') or raw.get('imageUrl')
+        raw = str(raw or '').strip()
         if not raw or raw.lower().startswith('blob:'):
             continue
         # data URIs carry the bytes inline — a length cap would corrupt them.
-        urls.append(raw[:400000] if raw.startswith('data:image/') else _visual_concept_text(raw, 2000))
+        urls[kind] = raw[:400000] if raw.startswith('data:image/') else _visual_concept_text(raw, 2000)
     return urls
+
+
+def _visual_concept_plan_image_urls(data):
+    """The three approved plan diagrams the client shipped — exterior renders are
+    grounded on them, so they arrive as image references in fixed kind order."""
+    mapped = _visual_concept_plan_image_map(data)
+    return [mapped[kind] for kind in ('site', 'uses', 'massing') if mapped.get(kind)]
+
+
+# Sequential plan generation: each diagram is drawn on the previous approved
+# image(s), so a later kind cannot run before its predecessors are approved.
+_VISUAL_PLAN_KIND_DEPENDENCIES = {'site': (), 'uses': ('site',), 'massing': ('site', 'uses')}
+_VISUAL_PLAN_KIND_LABELS = {'site': 'مخطط الموقع العام', 'uses': 'مخطط توزيع الأدوار',
+                            'massing': 'المنظور الكتلي'}
 
 
 def _visual_concept_external_gate(data, slot_id):
@@ -3258,12 +3274,16 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     if _visual_concept_is_plan_slot(slot_id):
         kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
         boundary_url = facts.get('plan_boundary_reference_url')
-        if kind == 'uses':
-            return []
+        plan_map = facts.get('plan_image_map') or {}
+        urls = [plan_map[dependency]
+                for dependency in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ())
+                if plan_map.get(dependency)]
         if kind in ('site', 'massing') and boundary_url:
-            return _visual_concept_reference_uris(urls=[boundary_url], tenant_id=tenant_id)
-        map_url = facts.get('overview_map_url')
-        return _visual_concept_reference_uris(urls=[map_url] if map_url else [], tenant_id=tenant_id)
+            urls.append(boundary_url)
+        if not urls and kind == 'site':
+            map_url = facts.get('overview_map_url')
+            urls = [map_url] if map_url else []
+        return _visual_concept_reference_uris(urls=urls, tenant_id=tenant_id)
     file_ids = list(facts.get('style_reference_file_ids') or [])[:2]
     return _visual_concept_reference_uris(
         urls=plan_urls + urls, file_ids=file_ids,
@@ -3330,6 +3350,8 @@ def _visual_concept_request_bundle(data, slot_id):
             facts['approved_plan_context'] = _visual_concept_plan_context_text(context, diagram_rules=False)
     if slot_id in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         facts['plan_image_urls'] = _visual_concept_plan_image_urls(data)
+    elif is_plan:
+        facts['plan_image_map'] = _visual_concept_plan_image_map(data)
     missing = _visual_concept_missing_fields(facts, slot_id)
     if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
         missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
@@ -5873,7 +5895,7 @@ def _visual_concept_plan_normalize_issues(issue_source, limit=30):
 
 
 def _visual_concept_plan_floor_range(text):
-    """Parse an approved-table floor cell: 'G', 'B1-B3', '5-12', 'Roof' →
+    """Parse an approved-table floor cell: 'G', 'B1-B3', '5-12', 'Roof' into
     {kind, lo, hi, count}. Basement lo/hi are negative; ground lo=hi=0."""
     value = str(text or '').strip()
     if not value:
@@ -6348,6 +6370,17 @@ def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False, r
         return {'success': False, 'error': 'اعتماد حدود الأرض مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_BOUNDARY_REQUIRED'}
     if require_distribution and not distribution.get('approved'):
         return {'success': False, 'error': 'اعتماد توزيع المكونات مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_DISTRIBUTION_REQUIRED'}
+    # Sequential generation: each diagram is drawn on the previous approved
+    # image(s), so a later kind cannot run before its predecessors are approved.
+    kind = _visual_concept_plan_kind(slot_id, data.get('planKind'))
+    plan_images = _visual_concept_plan_image_map(data)
+    missing = [dep for dep in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ())
+               if not plan_images.get(dep)]
+    if missing:
+        missing_labels = ' و'.join(_VISUAL_PLAN_KIND_LABELS[dep] for dep in missing)
+        return {'success': False,
+                'error': f'اعتمد {missing_labels} قبل توليد {_VISUAL_PLAN_KIND_LABELS.get(kind, "المخطط")}',
+                'error_code': 'PLANS_ORDER_REQUIRED'}
     return None
 
 
@@ -19227,7 +19260,7 @@ SBC_EVIDENCE_MAX_CHARS = int(os.environ.get('SBC_EVIDENCE_MAX_CHARS', '7000'))
 SBC_SNIPPET_CHARS = int(os.environ.get('SBC_SNIPPET_CHARS', '2200'))
 
 # Roots without «ال» — extracted SBC text swaps the lam past the next letter
-# («الجدران» → «اجلدران»), the same mangling the municipal terms avoid. Some
+# («الجدران» becomes «اجلدران»), the same mangling the municipal terms avoid. Some
 # spans also arrive fully reversed, so matching checks term[::-1] as well.
 SBC_TOPIC_TERMS = (
     ('إشغال', 6), ('مخارج', 6), ('اخلا', 5), ('منافذ', 5),
