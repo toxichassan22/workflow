@@ -3694,6 +3694,38 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('croquis_expiry_date', index_source)
         self.assertNotIn('croquisExpiryBadge', index_source)
 
+    def test_retired_location_fields_leave_the_backend(self):
+        """land_area, built_area, building_system, infrastructure and secondary_roads were
+        deleted from the location section — the backend must stop seeding, serving and
+        writing them, or the section keeps billing and storing fields nobody can see."""
+        retired = {'land_area', 'built_area', 'building_system', 'infrastructure', 'secondary_roads'}
+        self.assertTrue(retired <= db.REMOVED_PREBUILT_FIELDS)
+        self.assertFalse(retired & {field['key'] for field in db.PREBUILT_FIELDS})
+
+        client = self.app.test_client()
+        fields = client.get('/api/fields', headers=self._headers(self.token_a)).get_json()
+        keys = {item['fieldKey'] for item in (fields.get('fields') or [])}
+        self.assertFalse(retired & keys)
+
+        module = self.application_module
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertFalse(retired & set(module.LAND_ANALYSIS_SITE_CONTEXT_KEYS))
+        # The four retired scalars left the site-analysis whitelist entirely; land_area
+        # survives only as a stored-value fallback inside the visual-concept readers.
+        for key in ('built_area', 'building_system', 'infrastructure', 'secondary_roads'):
+            self.assertNotIn(key, app_source)
+        self.assertNotIn("'land_area', 'built_area'", app_source)
+
+        index_source = read_frontend_text()
+        # Quoted keys only: 'infrastructure_cost' is a live financial field and must not
+        # false-positive the retirement check for the deleted 'infrastructure' field.
+        for key in ('built_area', 'building_system', 'infrastructure', 'secondary_roads'):
+            self.assertNotIn(f"'{key}'", index_source)
+            self.assertNotIn(f'"{key}"', index_source)
+        # The ##land_area## template token stays but is fed by the croquis fields —
+        # the retired project field must not be read anywhere.
+        self.assertNotIn('projectData.land_area', index_source)
+
     def test_land_documents_upload_on_selection_not_on_save(self):
         """The upload used to run inside collectTenantFormData, which only executed from the
         autosave. Once autosave was removed the files sat on "saving" forever and the analyse
@@ -8849,7 +8881,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ردهة أعمال ومرافق اجتماعات', prompt)
         self.assertIn('قرب الموقع من المطار', prompt)
         self.assertIn('الكثافة السكانية', prompt)
-        self.assertIn('البنية التحتية', prompt)
+        # infrastructure was retired from the location section — the prompt must not
+        # ask the model to discuss a field that no longer exists.
+        self.assertNotIn('البنية التحتية', prompt)
         self.assertIn('فرص الاستثمار', prompt)
         self.assertIn('المعالم القريبة ومعالم المدينة', prompt)
         self.assertEqual(call_ai.call_args.kwargs['reasoning_effort'], 'max')

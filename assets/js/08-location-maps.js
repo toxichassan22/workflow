@@ -1101,7 +1101,7 @@
       renderTenantMapPolygonOverlay();
     }
 
-    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'catchment_areas', 'location_data_fetched_at']);
+    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'population_density', 'catchment_areas', 'location_data_fetched_at']);
     const TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio']);
 
     function updateClientEnteredLandFieldState(input) {

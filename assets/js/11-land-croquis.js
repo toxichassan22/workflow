@@ -4,10 +4,9 @@
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
       const projectContextKeys = [
         'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address', 'location_detail',
-        'location_lat', 'location_lng', 'location_polygon', 'main_roads', 'secondary_roads',
+        'location_lat', 'location_lng', 'location_polygon', 'main_roads',
         'nearby_landmarks', 'nearby_landmarks_data', 'city', 'district', 'city_landmarks', 'catchment_areas',
-        'population_density', 'population_density_source', 'land_area', 'built_area',
-        'building_system', 'infrastructure', 'zoning_code', 'land_use', 'building_ratio_coverage',
+        'population_density', 'population_density_source', 'zoning_code', 'land_use', 'building_ratio_coverage',
         'setbacks', 'allowed_uses', 'regulatory_constraints'
       ];
       const projectContext = {};
@@ -333,9 +332,8 @@
       const analysisKeys = [
         'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address', 'location_detail',
         'location_maps_link', 'maps_link', 'location_lat', 'location_lng', 'city', 'district', 'main_roads',
-        'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks',
-        'catchment_areas', 'population_density', 'population_density_source', 'land_area',
-        'built_area', 'building_system', 'infrastructure', 'location_polygon'
+        'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks',
+        'catchment_areas', 'population_density', 'population_density_source', 'location_polygon'
       ];
       const analysisProjectData = {};
       analysisKeys.forEach(key => {
@@ -465,7 +463,7 @@
           mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. <span>' + boundaryLabel + '</span>';
           mapHint.style.display = 'block';
         }
-        tenantProjectData = { ...tenantProjectData, ...fields, secondary_roads: '' };
+        tenantProjectData = { ...tenantProjectData, ...fields };
         tenantProjectData.location_coordinates_confirmed = false;
         tenantProjectData.location_coordinates_source = data.source || 'site_analysis';
         tenantProjectData.location_analysis_approved = false;
@@ -494,7 +492,7 @@
           renderTenantMapPolygonOverlay();
         }
         tenantCreativeImages = tenantCreativeImages || {};
-        tenantProjectData = { ...tenantProjectData, ...fields, secondary_roads: '' };
+        tenantProjectData = { ...tenantProjectData, ...fields };
         renderLocationWorkflowState();
         triggerAutoSaveDraft();
         // The reason used to live only in a toast that vanished in about two seconds, which made
@@ -675,7 +673,7 @@
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         const formData = await collectTenantFormData();
-        tenantProjectData = { ...tenantProjectData, ...formData, secondary_roads: '' };
+        tenantProjectData = { ...tenantProjectData, ...formData };
         tenantProjectData.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
         if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
         const payload = slimMapProjectData(tenantProjectData);
@@ -1483,7 +1481,6 @@
         location_lat: '24.7833',
         location_lng: '46.6250',
         main_roads: 'طريق الملك فهد\nطريق الأمير محمد بن سعد\nطريق الدمام',
-        secondary_roads: 'شارع النرجس\nشارع الراكة\nطريق وادي الدواسر',
         catchment_areas: '5 دقائق: مجمع الراشد Mall\n10 دقائق: جامعة الملك سعود\n15 دقائق: مطار الملك خالد الدولي\n20 دقائق: مركز المملكة',
 
         /* ── Financial ──────────────────────────── */
@@ -1525,10 +1522,6 @@
 
         /* ── Other / Legacy keys ────────────────── */
         plot_number: 'قطعة 1234 / مخطط 4050 — حي النرجس',
-        land_area: '85,000 م²',
-        built_area: '52,000 م²',
-        building_system: 'نظام هيكل إنشائي خرساني مسلح، فيلات منفصلة بارتفاع 2-3 طوابق',
-        infrastructure: 'كهرباء 11kV، مياه شرب من شبكة مياه الرياض، شبكة صرف صحي، إنترنت ألياف بصرية، نظام ري بالتنقيط',
         nearby_landmarks: 'مجمع الراشد Mall — 5 دقائق\nجامعة الملك سعود — 10 دقائق\nمطار الملك خالد الدولي — 15 دقائق\nمركز المملكة — 20 دقائق',
         description: 'مجمع سكني فاخر يتكون من 120 فيلا بتصميم معماري حديث في حي النرجس شمال الرياض. يتضمن المجمع مرافق ترفيهية متنوعة منها مسبح أولمبي ونادي صحي ومساحات خضراء واسعة.',
         location_maps_link: 'https://maps.app.goo.gl/narjis-riyadh',

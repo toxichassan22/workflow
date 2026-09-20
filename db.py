@@ -1310,6 +1310,7 @@ REMOVED_PREBUILT_FIELDS = {
     'north_direction', 'croquis_expiry_date', 'subdivision_number',
     'project_goal', 'initial_features', 'initial_strengths',
     'building_ratio_setbacks', 'allowed_uses_restrictions',
+    'land_area', 'built_area', 'building_system', 'infrastructure', 'secondary_roads',
 }
 
 PREBUILT_FIELDS = [
@@ -1349,12 +1350,7 @@ PREBUILT_FIELDS = [
     {'key': 'city', 'label': 'المدينة', 'type': 'text', 'section_key': 'location', 'ai_hint': 'المدينة المستخرجة تلقائيًا من رابط الموقع والخرائط — لا يكتبها العميل يدويًا', 'sort_order': 33},
     {'key': 'district', 'label': 'الحي', 'type': 'text', 'section_key': 'location', 'ai_hint': 'الحي المستخرج تلقائيًا من رابط الموقع والخرائط — لا يكتبه العميل يدويًا', 'sort_order': 34},
     {'key': 'plot_number', 'label': 'رقم المخطط / القطعة', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رقم المخطط أو القطعة', 'sort_order': 35},
-    {'key': 'land_area', 'label': 'مساحة الأرض', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة الأرض بالمتر المربع', 'sort_order': 36},
-    {'key': 'built_area', 'label': 'مساحة البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة البناء بالمتر المربع', 'sort_order': 37},
-    {'key': 'building_system', 'label': 'نظام البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'نظام البناء والارتفاعات المسموح بها', 'sort_order': 38},
-    {'key': 'infrastructure', 'label': 'البنية التحتية', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مياه، كهرباء، اتصالات، إلخ', 'sort_order': 39},
     {'key': 'main_roads', 'label': 'الطرق الرئيسية المحيطة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أسماء الطرق الرئيسية المحيطة بالمشروع وتمثل طرق الوصول إليه', 'sort_order': 40},
-    {'key': 'secondary_roads', 'label': 'طرق الوصول الفرعية', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المداخل وطرق الوصول الفرعية مع المسافة ومدة القيادة', 'sort_order': 41},
     {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 42},
     {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 43},
     {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 44},

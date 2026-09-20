@@ -771,7 +771,6 @@
         locationLat: tenantProjectData.location_lat || '',
         locationLng: tenantProjectData.location_lng || '',
         landArea: tenantProjectData.approved_financial_area || tenantProjectData.croquis_land_area || '',
-        builtArea: tenantProjectData.built_area || '',
         allowedUses: tenantProjectData.allowed_uses || '',
         components,
         competitorRadius: state.competitor_radius,

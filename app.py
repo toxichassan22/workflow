@@ -11584,16 +11584,6 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
             lines.append(f"{name} - {' - '.join(details)}" if details else name)
         return '\n'.join(lines)
 
-    def road_lines(items):
-        lines = []
-        for item in items or []:
-            name = item.get('name') or 'طريق وصول'
-            distance = item.get('distance_text')
-            duration = item.get('duration_minutes') or item.get('duration_min')
-            details = [value for value in (distance, f'{duration} دقيقة' if duration else None) if value]
-            lines.append(f"{name} - {' - '.join(details)}" if details else name)
-        return '\n'.join(lines)
-
     def enrich_road_metrics(items):
         if not items or all(item.get('distance_text') and item.get('duration_minutes') for item in items):
             return
@@ -11691,20 +11681,6 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
 
-    secondary_names = []
-    filtered_secondary_roads = []
-    for road in all_roads[6:]:
-        name = road.get('name')
-        if name and name not in road_names and name not in secondary_names:
-            secondary_names.append(name)
-            filtered_secondary_roads.append(road)
-        if len(filtered_secondary_roads) >= 4:
-            break
-    if filtered_secondary_roads:
-        enrich_road_metrics(filtered_secondary_roads)
-        fields['main_roads'] = '\n'.join(road_names)
-        fields['secondary_roads'] = road_lines(filtered_secondary_roads)
-
     city_matrix = maps_service.get_drive_matrix((lat, lng), city_items) if city_items else []
     for index, item in enumerate(city_items):
         if index < len(city_matrix) and isinstance(city_matrix[index], dict):
@@ -11793,7 +11769,6 @@ def api_analyze_site():
         fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
             project_data, g.tenant_id, lat, lng
         )
-    fields.pop('secondary_roads', None)
     fields['location_polygon_source'] = (
         'manual' if project_data.get('location_polygon_source') == 'manual'
         # 'cleared' is the user switching the highlight off; it must survive a re-analysis.
@@ -11841,7 +11816,7 @@ def api_site_analysis():
         'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
         'city', 'district', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
         'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
-        'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
+        'location_polygon'
     )
     project_data = {
         key: raw_project_data.get(key)
@@ -11869,7 +11844,12 @@ def api_site_analysis():
     filled_fields = {}
     if needs_enrichment:
         try:
-            enrichment_result = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
+            # Same metering scope as analyze-site: every Google call inside
+            # _collect_site_fields bills to this tenant/draft instead of
+            # landing as an unbillable tenant_id=NULL row.
+            site_maps_ctx = maps_service.maps_usage_ctx('site', g.tenant_id, data=data)
+            with maps_service.maps_usage_scope(site_maps_ctx):
+                enrichment_result = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
             enriched_fields, nearby_items, *_rest, enrichment_diagnostics = enrichment_result
             enrichment_diagnostics = enrichment_diagnostics or {}
             if not project_data.get('nearby_landmarks_data') and nearby_items:
@@ -11893,10 +11873,9 @@ def api_site_analysis():
   2. المميزات الأولية ونقاط القوة وفرص الاستثمار المناسبة للمشروع.
   3. طبيعة الموقع وموقعه الاستراتيجي والعنوان التفصيلي والإحداثيات.
   4. الكثافة السكانية ومصدرها إن وجدت.
-  5. البنية التحتية والخدمات العامة المتاحة.
-  6. الطرق الرئيسية وطبيعة الوصول.
-  7. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
-  8. نطاق التأثير ومناطق الالتقاط إن وجدت.
+  5. الطرق الرئيسية وطبيعة الوصول.
+  6. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
+  7. نطاق التأثير ومناطق الالتقاط إن وجدت.
 - اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته وهدفه ومرحلته والجمهور المستهدف ومميزات المشروع وفرصه.
 - اشرح العلاقة والاستنتاجات بالتفصيل دون تكرار نفس المعلومة.
 - لا تخترع أي معلومة غير موجودة في البيانات.
@@ -19654,9 +19633,9 @@ def _build_land_extraction_diagnostics(result, document_processing=None):
 
 LAND_ANALYSIS_SITE_CONTEXT_KEYS = (
     'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_polygon',
-    'city', 'district', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+    'city', 'district', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
     'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
-    'land_area', 'built_area', 'building_system', 'infrastructure', 'zoning_code', 'land_use',
+    'zoning_code', 'land_use',
 )
 
 
@@ -19677,7 +19656,12 @@ def build_land_analysis_site_context(data, tenant_id, lat, lng):
         'location_detail', 'main_roads', 'nearby_landmarks', 'city_landmarks'))
     if data.get('includeMapContext') is True and needs_enrichment:
         try:
-            enriched, nearby_items, *_rest, diagnostics = _collect_site_fields(context, tenant_id, lat, lng)
+            # The croquis job runs on a worker thread, so the scope must be
+            # opened here — a request-thread scope would never reach it, and
+            # the Google calls below would record as unbillable NULL-tenant rows.
+            site_maps_ctx = maps_service.maps_usage_ctx('site', tenant_id=tenant_id, data=data)
+            with maps_service.maps_usage_scope(site_maps_ctx):
+                enriched, nearby_items, *_rest, diagnostics = _collect_site_fields(context, tenant_id, lat, lng)
             for key, value in (enriched or {}).items():
                 if value not in (None, '', [], {}) and context.get(key) in (None, '', [], {}):
                     context[key] = value
@@ -24676,7 +24660,7 @@ def api_training_chat():
 
 ### 23. ملء بيانات المشروع في مساحة العمل من كلام المستخدم:
 ```action
-{{"tool": "update_workspace", "params": {{"projectData": {{"project_name": "...", "project_type": "...", "location_address": "...", "land_area": "...", "budget": "..."}}}}}}
+{{"tool": "update_workspace", "params": {{"projectData": {{"project_name": "...", "project_type": "...", "location_address": "...", "budget": "..."}}}}}}
 ```
 استخدمها عندما يعطيك المستخدم بيانات مشروع في المحادثة ويريد إنشاء عرض منها. أرسل الحقول المتوفرة فقط.
 

@@ -177,6 +177,51 @@ class MapsBurnTests(unittest.TestCase):
         self.assertTrue(body['success'])
         self.assertAlmostEqual(body['mapsSkuPrices']['staticmap'], 0.002)
 
+    # ── Every enrichment caller must open a usage scope ────────────────
+    # Without maps_usage_scope the Places/Matrix calls inside
+    # _collect_site_fields record tenant_id=NULL rows that
+    # bill_unbilled_usage can never claim — provider spend nobody pays for.
+
+    def test_site_analysis_enrichment_is_metered(self):
+        module = self.application_module
+        client = self.app.test_client()
+        captured = {}
+
+        def fake_collect(project_data, tenant_id, lat, lng):
+            captured['ctx'] = maps_service._current_maps_ctx()
+            return ({'location_detail': 'عنوان الموقع'}, [], [], [], [], [], None, {})
+
+        with patch.object(module, '_collect_site_fields', side_effect=fake_collect), \
+                patch.object(module, 'call_zai_chat', return_value={
+                    'choices': [{'message': {'content': 'تحليل'}}]
+                }):
+            response = client.post('/api/site-analysis', headers=self._headers(), json={
+                'projectData': {'location_lat': '24.0', 'location_lng': '46.0'},
+                'draftId': 'draft-metered',
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(captured['ctx'].get('tenant_id'), self.tenant_id)
+        self.assertEqual(captured['ctx'].get('draft_id'), 'draft-metered')
+        self.assertEqual(captured['ctx'].get('flow'), 'site')
+
+    def test_land_analysis_map_context_is_metered(self):
+        module = self.application_module
+        captured = {}
+
+        def fake_collect(context, tenant_id, lat, lng):
+            captured['ctx'] = maps_service._current_maps_ctx()
+            return ({'location_detail': 'عنوان الموقع'}, [], [], [], [], [], None, {})
+
+        with self.app.app_context(), \
+                patch.object(module, '_collect_site_fields', side_effect=fake_collect):
+            module.build_land_analysis_site_context(
+                {'includeMapContext': True, 'draftId': 'draft-croquis',
+                 'locationAddress': 'https://www.google.com/maps/@24,46,17z'},
+                self.tenant_id, 24, 46)
+        self.assertEqual(captured['ctx'].get('tenant_id'), self.tenant_id)
+        self.assertEqual(captured['ctx'].get('draft_id'), 'draft-croquis')
+        self.assertEqual(captured['ctx'].get('flow'), 'site')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -714,6 +714,7 @@ def detect_curated_city(lat, lng, tenant_id=None):
 
 
 def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
+    ambient_ctx = _current_maps_ctx()
     places = get_nearby_landmarks(
         lat,
         lng,
@@ -721,6 +722,7 @@ def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
         max_results=20,
         include_all=True,
         included_types=['shopping_mall', 'university', 'hospital'],
+        usage_ctx=ambient_ctx or maps_usage_ctx('places', tenant_id=tenant_id),
     )
     if not places.get('success'):
         return []
@@ -742,7 +744,9 @@ def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
             'category': matched[1],
             'source': 'nearest_category',
         })
-    matrix = get_drive_matrix((lat, lng), selected) if selected else []
+    matrix = get_drive_matrix(
+        (lat, lng), selected,
+        usage_ctx=ambient_ctx or maps_usage_ctx('matrix', tenant_id=tenant_id)) if selected else []
     for index, item in enumerate(selected):
         if index >= len(matrix) or not isinstance(matrix[index], dict):
             continue
@@ -769,12 +773,15 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
         seen.add(lowered_name)
         entries_to_resolve.append((name, entry))
 
+    ambient_ctx = _current_maps_ctx()
+
     def resolve_entry(item):
         name, entry = item
         cache_key = (city, name.casefold())
         geo = _CURATED_GEOCODE_CACHE.get(cache_key)
         if geo is None:
-            geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id)
+            geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id,
+                                  usage_ctx=ambient_ctx)
             if geo.get('success'):
                 _CURATED_GEOCODE_CACHE[cache_key] = geo
         if not geo.get('success'):
@@ -2772,20 +2779,26 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
     if isinstance(roads_hit, list):
         return roads_hit
     probes = _fixed_road_probe_points(route_origin_lat, route_origin_lng, lat_step, lng_step)
+    # The metering scope is thread-local, so capture it before the pool:
+    # worker threads would otherwise bill with only the tenant fallback and
+    # lose the flow/draft/presentation attribution.
+    ambient_ctx = _current_maps_ctx()
 
     def fetch(probe):
         p_lat, p_lng = probe
-        snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
+        snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id, usage_ctx=ambient_ctx)
         dest_lat = snapped['lat'] if snapped else p_lat
         dest_lng = snapped['lng'] if snapped else p_lng
         route = _google_directions_route(
-            route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id
+            route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id,
+            usage_ctx=ambient_ctx
         )
         if not route:
             return None
         name = (route.get('summary') or '').strip()
         if not name or re.search(r'[A-Za-z]', name):
-            localized_name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id)
+            localized_name = _google_reverse_geocode_road(
+                dest_lat, dest_lng, tenant_id=tenant_id, usage_ctx=ambient_ctx)
             if localized_name:
                 name = localized_name
         name = name or 'طريق قريب'

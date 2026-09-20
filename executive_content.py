@@ -203,8 +203,6 @@ def compact_facts(facts, for_block=None):
             data.get('components'),
             ('name', 'useType', 'units', 'builtArea', 'revenueArea'),
         ),
-        'infrastructure': normalize_text(data.get('infrastructure')),
-        'buildingSystem': normalize_text(data.get('buildingSystem')),
         'financialIndicators': _compact_mapping(data.get('financialIndicators'), limit=24),
         'team': _compact_items(data.get('team'), ('name', 'role', 'brief', 'experienceYears', 'notableProjects')),
         'marketSummary': {

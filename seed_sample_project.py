@@ -21,7 +21,6 @@ SAMPLE_FIELDS = [
     {"key": "location_lat",        "label": "خط العرض",                "type": "number",   "section": "location",   "required": True},
     {"key": "location_lng",        "label": "خط الطول",                "type": "number",   "section": "location",   "required": True},
     {"key": "main_roads",          "label": "الطرق الرئيسية المحيطة",  "type": "textarea", "section": "location",   "required": False, "placeholder": "طريق الملك فهد، طريق الأمير محمد بن سعد"},
-    {"key": "secondary_roads",     "label": "الطرق الفرعية",           "type": "textarea", "section": "location",   "required": False, "placeholder": "شارع النرجس، شارع الراكة"},
     {"key": "catchment_areas",     "label": "نطاق الخدمات المحيطة",   "type": "textarea", "section": "location",   "required": False, "placeholder": "5 دقائق: مجمع الراشد Mall\n10 دقائق: جامعة الملك سعود"},
 
     # ── Financial ─────────────────────────────────────────────────────
@@ -66,7 +65,6 @@ SAMPLE_PROJECT_DATA = {
     "location_lat": 24.7833,
     "location_lng": 46.6250,
     "main_roads": "طريق الملك فهد\nطريق الأمير محمد بن سعد\nطريق الدمام",
-    "secondary_roads": "شارع النرجس\nشارع الراكة\nطريق وادي الدواسر",
     "catchment_areas": "5 دقائق: مجمع الراشد Mall\n10 دقائق: جامعة الملك سعود\n15 دقائق: مطار الملك خالد الدولي\n20 دقائق: مركز المملكة",
     "total_area_sqm": 85000,
     "total_units": 120,
