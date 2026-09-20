@@ -173,6 +173,7 @@ SUMMARY_SECTIONS = [
     {'key': 'demand', 'label': 'الطلب'},
     {'key': 'competition', 'label': 'المنافسة'},
     {'key': 'market_gap', 'label': 'الفجوة السوقية'},
+    {'key': 'project_evaluation', 'label': 'تقييم المشروع'},
     {'key': 'recommendation', 'label': 'التوصية'},
     {'key': 'risks', 'label': 'المخاطر'},
 ]
@@ -264,6 +265,7 @@ SUMMARY_SECTION_HINTS = {
     'demand': 'مستوى الطلب، العملاء المستهدفون، المنتج والمساحات الأكثر طلبًا، ومعدل الامتصاص أو الإشغال عند توفره.',
     'competition': 'عدد المنافسين، عدد المنافسين المباشرين، نطاق الأسعار، وأهم نقاط القوة والضعف لديهم.',
     'market_gap': 'المنتج غير المتوفر بشكل كاف، المساحات أو الخدمات الناقصة، والفرصة التي يستطيع المشروع استهدافها.',
+    'project_evaluation': 'تقييم محايد للمشروع كما أُدخل مقابل واقع السوق: اتساق المكونات ونموذج الاستفادة والتكلفة والعوائد المدخلة مع اتجاه السوق عبر فترة البيانات وحاضره ومستقبله المتوقع حتى سنة التشغيل؛ أين تكمن فرصة الربح فعليًا؛ وهل النموذج المدخل هو الأنسب أم يوجد أعلى جدوى — دون افتراض أن المدخل صحيح.',
     'recommendation': 'الاستخدام الأنسب، المكونات المقترحة، المساحات أو مزيج الوحدات، والسعر أو الإيجار أو ADR المقترح.',
     'risks': 'أهم المخاطر السوقية وشروط نجاح المشروع.',
     'decision': 'صنّف الفرصة إلى إحدى قيم القرار المسموحة مع تفسير مختصر.',
@@ -1540,6 +1542,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
             '    "demand": "Demand axis analysis",\n'
             '    "competition": "Competition axis analysis",\n'
             '    "market_gap": "Market-gap axis analysis",\n'
+            '    "project_evaluation": "Unbiased project-evaluation axis analysis",\n'
             '    "recommendation": "Recommendation axis analysis",\n'
             '    "risks": "Risks axis analysis"\n'
             '  },\n'
@@ -1557,6 +1560,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
             '    "demand": "تحليل محور الطلب",\n'
             '    "competition": "تحليل محور المنافسة",\n'
             '    "market_gap": "تحليل محور الفجوة السوقية",\n'
+            '    "project_evaluation": "تحليل محور تقييم المشروع",\n'
             '    "recommendation": "تحليل محور التوصية",\n'
             '    "risks": "تحليل محور المخاطر"\n'
             '  },\n'
@@ -1575,6 +1579,16 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
            if en else
            'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
         + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
+        + 'البعد الزمني ملزم في التحليل: لكل محور اربط القراءة بثلاث نقاط — ماضٍ داخل '
+        + 'فترة البيانات المحددة (اتجاه الأسعار والطلب والمعروض عبرها)، وحاضر كما هو '
+        + 'اليوم، ومستقبل متوقع حتى سنة بدء التشغيل المدخلة في بيانات المشروع. لا '
+        + 'تكتفِ بوصف الوضع الراهن، ولا تكرر عبارات عامة عن السوق.\n'
+        + 'محور تقييم المشروع ملزم بالحياد الكامل: قيّم المشروع كما أُدخل — مكوناته '
+        + 'ونموذج استفادته وتكلفته وعوائده المدخلة — مقابل أرقام السوق الموثقة، ولا '
+        + 'تفترض أن المدخل هو الأنسب. قارن نماذج الاستفادة البديلة (بيع، إيجار سنوي '
+        + 'أو شهري أو يومي، تشغيل فندقي، مختلط) وحدد صراحةً أين تكمن فرصة الربح '
+        + 'الفعلية وأي نموذج أعلى جدوى ولو كان مختلفًا عما أدخله المستخدم، مع السبب '
+        + 'والأرقام. إن كان النموذج المدخل أضعف من بديل فاذكر ذلك صراحةً.\n'
         + 'مصدران إلزاميان عند الارتباط: لمؤشرات البيع وصفقات المدينة استخدم منصة المؤشرات العقارية '
         + '(site:rei.rega.gov.sa — متوسط سعر المتر حسب الحي ونوع العقار)، ولمؤشرات الإيجار استخدم '
         + 'المؤشر التفصيلي لسوق الإيجار من سكني (site:sakani.sa/reports-and-data/rental-units — '
@@ -1593,7 +1607,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + 'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر التحليل حرفيًا.\n'
         + (f'Write one_block_summary as {SUMMARY_TITLE}: one cohesive, polished English paragraph covering the full project market in about {SUMMARY_WORD_TARGET} words, never fewer than {SUMMARY_MIN_WORDS} words and no more than 400 words. Not a short multi-sentence abstract; cover market definition, city position, sector performance, supply, demand, competition, market gap, recommendation and decision conditions in a sequenced analysis. No subheadings, numbering or lists; use only the existing facts, figures and sources, with no SWOT and no sources list.\n\n'
            if en else
-           f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. لا تكتب خلاصة قصيرة من عدة جمل؛ اشرح داخل الفقرة تعريف السوق ووضع المدينة وأداء القطاع والمعروض والطلب والمنافسة والفجوة السوقية والتوصية وشروط القرار، واربطها بتحليل متسلسل. بلا عناوين فرعية ولا ترقيم ولا نقاط، واستخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n')
+           f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. لا تكتب خلاصة قصيرة من عدة جمل؛ اشرح داخل الفقرة تعريف السوق ووضع المدينة وأداء القطاع والمعروض والطلب والمنافسة والفجوة السوقية وتقييم المشروع والتوصية وشروط القرار، واربطها بتحليل متسلسل. بلا عناوين فرعية ولا ترقيم ولا نقاط، واستخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n')
         + 'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'

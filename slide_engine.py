@@ -1349,6 +1349,7 @@ def _market_summary_rows(market):
             {'key': 'demand', 'label': 'الطلب'},
             {'key': 'competition', 'label': 'المنافسة'},
             {'key': 'market_gap', 'label': 'الفجوة السوقية'},
+            {'key': 'project_evaluation', 'label': 'تقييم المشروع'},
             {'key': 'recommendation', 'label': 'التوصية'},
             {'key': 'risks', 'label': 'المخاطر'},
         ]

@@ -1760,6 +1760,7 @@
   "تطبيق علاوة حسن أداء المطور؟": "Apply Developer performance bonus?",
   "تطبيق فترة سماح؟": "Apply grace period?",
   "تطوير": "Development",
+  "تقييم المشروع": "Project Evaluation",
   "تعبئة بيانات تجريبية": "Fill sample data",
   "تعديل": "Edit",
   "تعديل الشريحة: تعديل النص وتحريك العناصر": "Edit Slide: edit text and move elements",
