@@ -1971,6 +1971,7 @@
       return findingsHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="repair-distribution" ' + (findings.length ? '' : 'disabled') + '>إصلاح التعارضات بالذكاء الاصطناعي</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
         (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
         '</div>';
@@ -2098,6 +2099,7 @@
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
+          else if (action === 'repair-distribution') repairVisualConceptPlansDistribution();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
@@ -2333,6 +2335,29 @@
         if (silent) return;
         hideLoader();
         toast(error.message || WFT('plans.distribution_check_failed', 'تعذر فحص التوزيع'));
+      }
+    }
+
+    async function repairVisualConceptPlansDistribution() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const workflow = visualConceptPlansWorkflowState();
+      if (!(workflow.distribution.rows || []).length) return;
+      showLoader(WFT('plans.distribution_repair_loading', 'جاري إصلاح التوزيع'),
+        WFT('plans.distribution_repair_loading_detail', 'يعالج الذكاء الصفوف المتعارضة ويحدّث المجاميع...'), 40);
+      try {
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        payload.distribution = { rows: workflow.distribution.rows, issues: workflow.distribution.issues };
+        const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
+        hideLoader();
+        if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return; }
+        workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
+        workflow.promptReady = false;
+        workflow.promptsError = '';
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع'));
       }
     }
 

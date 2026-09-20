@@ -6091,10 +6091,15 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
     per-component deltas against the recorded program."""
     checks = []
     by_building = {}
+    ids_by_component = {}
     parsed_rows = []
     for row in rows:
         parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
         parsed_rows.append((row, parsed))
+        row_key = _visual_concept_plan_component_key(
+            _visual_concept_plan_component_base(row.get('component')))
+        if row_key:
+            ids_by_component.setdefault(row_key, []).append(row.get('id'))
         if not parsed or parsed['kind'] in ('basement', 'roof'):
             continue
         building = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
@@ -6117,7 +6122,8 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                         'item': f'نطاقان متداخلان لمكوّن واحد — {building}',
                         'detail': (f'«{row_a.get("component") or "مكوّن"}» مسجل على «{row_a.get("floor_range")}» '
                                    f'و«{row_b.get("floor_range")}» — ادمج الصفين أو عدّل النطاق'),
-                        'result': 'متعارض', 'severity': 'high'})
+                        'result': 'متعارض', 'severity': 'high',
+                        'row_ids': [row_a.get('id'), row_b.get('id')]})
 
     cap = _visual_concept_number(regulations.get('max_floors_height') or regulations.get('table_floors'))
     if cap:
@@ -6126,7 +6132,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 checks.append({
                     'item': 'تجاوز سقف الأدوار الموثق',
                     'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد {cap}',
-                    'result': 'متعارض', 'severity': 'high'})
+                    'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
     land = _visual_concept_number(context.get('land_area') or regulations.get('croquis_land_area'))
     coverage = _visual_concept_number(context.get('coverage_ratio') or regulations.get('coverage_ratio')
                                       or regulations.get('building_ratio_coverage'))
@@ -6139,7 +6145,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 checks.append({
                     'item': 'مساحة الدور تتجاوز حد التغطية',
                     'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
-                    'result': 'يحتاج تأكيد', 'severity': 'medium'})
+                    'result': 'يحتاج تأكيد', 'severity': 'medium', 'row_ids': [row.get('id')]})
     far = _visual_concept_number(regulations.get('floor_area_ratio'))
     if not far:
         far_match = re.search(r'معامل[^\d]{0,15}(\d+(?:[.,]\d+)?)',
@@ -6158,7 +6164,10 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 'item': 'إجمالي المسطحات يتجاوز معامل البناء',
                 'detail': (f'مجموع مساحات الأدوار {total_built:g} م² يتجاوز حد المعامل '
                            f'{cap_area:g} م² ({far:g} × أرض {land:g} م²) — قلّل مساحات الأدوار'),
-                'result': 'يحتاج تأكيد', 'severity': 'medium'})
+                'result': 'يحتاج تأكيد', 'severity': 'medium',
+                'row_ids': [row.get('id') for row, parsed in parsed_rows
+                            if isinstance(row.get('floor_area_sqm'), (int, float))
+                            and (not parsed or parsed['kind'] != 'basement')]})
     for total in totals:
         for delta_key, label in (('delta_units', 'الوحدات'), ('delta_area', 'المساحة')):
             delta = total.get(delta_key)
@@ -6169,7 +6178,9 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     checks.append({
                         'item': f'فرق {label} — {total["component"]}',
                         'detail': f'التوزيع {total[delta_key.replace("delta_", "")]:g} مقابل المطلوب {wanted:g}',
-                        'result': 'يحتاج تأكيد', 'severity': 'medium'})
+                        'result': 'يحتاج تأكيد', 'severity': 'medium',
+                        'row_ids': ids_by_component.get(
+                            _visual_concept_plan_component_key(total['component']), [])})
     return checks
 
 
@@ -6762,6 +6773,101 @@ def api_visual_concept_plans_distribution_check():
     return jsonify({'success': True, 'totals': distribution['totals'],
                     'checks': distribution['checks'], 'issues': issues,
                     'canProceed': can_proceed})
+
+
+def _visual_concept_plan_surgical_rows(old_rows, new_rows, editable_ids):
+    """Keep the model's edit surgical: rows no check flagged are restored
+    verbatim — the model may edit, merge or drop only the flagged ids, and may
+    add brand-new rows (e.g. a study component the table is missing). Untouched
+    rows keep their original order; new rows append at the end."""
+    old_by_id = {row.get('id'): row for row in old_rows}
+    new_by_id = {}
+    extra_rows = []
+    for row in new_rows:
+        rid = row.get('id')
+        if rid in old_by_id or rid in new_by_id:
+            new_by_id[rid] = row
+        else:
+            extra_rows.append(row)
+    merged = []
+    for row in old_rows:
+        rid = row.get('id')
+        if rid in new_by_id:
+            merged.append(new_by_id[rid] if rid in editable_ids else row)
+        elif rid not in editable_ids:
+            merged.append(row)
+    merged.extend(extra_rows)
+    return merged
+
+
+@app.route('/api/visual-concept/plans-distribution-repair', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_distribution_repair():
+    """Surgical AI repair of a distribution: the findings (checks + issues) go to
+    the model with the row ids each finding may touch, then the server restores
+    every unflagged row verbatim — so the model fixes what is flagged, never
+    rewrites the whole table."""
+    data = request.get_json(silent=True) or {}
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    _project_data, workflow, _boundary, _points, context = _visual_concept_plans_context_from_request(data)
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    posted = (data.get('distribution') if isinstance(data.get('distribution'), dict)
+              else (workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}))
+    distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
+    if not (distribution['rows'] and (distribution['checks'] or distribution['issues'])):
+        return jsonify({'success': True, 'distribution': distribution, 'repaired': False})
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
+    editable_ids = {rid for check in distribution['checks']
+                    for rid in (check.get('row_ids') or []) if rid}
+    system_prompt = (
+        'أنت مخطط معماري مفاهيمي تصحّح جدول توزيع مكونات على الأدوار بناءً على نتيجة فحص آلي. '
+        'أعد JSON فقط بالجدول الكامل: {"rows":[{"id":"","building":"","floor_range":"",'
+        '"component":"","units_per_floor":0,"floor_area_sqm":0,"circulation":""}],"notes":[""]}. '
+        'أدواتك الجراحية: عدّل قيم الصف المعلَّم، أو ادمج صفوف المكوّن الواحد المتداخلة في صف '
+        'واحد («أرضي + ميزانين» أو نطاق رقمي)، أو قسّم صفًا إلى نطاقات، أو احذف صفًا متعارضًا، '
+        'أو أضف صفًا بمُعرّف id جديد لمكوّن تطلبه الدراسة ولا صف له. '
+        'كل بند فحص يحمل row_ids — وهي وحدها الصفوف المسموح تعديلها أو حذفها؛ أي صف آخر '
+        'تنسخه حرفيًا بنفس id ونفس القيم دون أي تغيير. '
+        'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
+        '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. component اسم الاستخدام فقط دون اسم الدور. '
+        'التزم بسقف الأدوار ومعامل البناء وحد التغطية الموثقة ومجاميع الدراسة، ولا تُنتج '
+        'تعارضًا جديدًا ولا تترك فجوة مقابل مكوّن مطلوب. لا تذكر أسماء ملفات أو مصادر.'
+    )
+    user_prompt = (
+        'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
+        + _visual_concept_plan_context_text(context, diagram_rules=False)
+        + '\n\nالبيانات التنظيمية الموثقة:\n' + json.dumps(regulations, ensure_ascii=False)
+        + '\n\nجدول التوزيع الحالي:\n'
+        + json.dumps(distribution['rows'], ensure_ascii=False)
+        + '\n\nمجاميع التوزيع مقابل المطلوب في الدراسة:\n'
+        + json.dumps(distribution['totals'], ensure_ascii=False)
+        + '\n\nنتائج الفحص المطلوب معالجتها كلها:\n'
+        + json.dumps(distribution['checks'], ensure_ascii=False)
+        + ('\n\nملاحظات مراجعة سابقة (استرشادية):\n'
+           + json.dumps(distribution['issues'], ensure_ascii=False)
+           if distribution['issues'] else '')
+    )
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=8000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        result = parse_json_object(_get_chat_response_text(response))
+    except Exception as error:
+        return jsonify({'success': False, 'error': 'تعذر إصلاح التوزيع بالذكاء الاصطناعي',
+                        'detail': str(error)[:300]}), 503
+    if not isinstance(result, dict) or not result.get('rows'):
+        return jsonify({'success': False, 'error': 'تعذر إصلاح التوزيع بالذكاء الاصطناعي'}), 503
+    candidate = _visual_concept_plan_normalize_distribution(result, context, regulations)
+    enforced = _visual_concept_plan_surgical_rows(
+        distribution['rows'], candidate['rows'], editable_ids)
+    repaired = _visual_concept_plan_normalize_distribution(
+        {'rows': enforced, 'issues': result.get('issues')}, context, regulations)
+    return jsonify({'success': True, 'distribution': repaired, 'repaired': True})
 
 
 @app.route('/api/visual-concept/plans-prompts', methods=['POST'])

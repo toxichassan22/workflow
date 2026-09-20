@@ -9940,6 +9940,77 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('17906', far_check['detail'])
         self.assertNotIn('22906', far_check['detail'])
 
+    def test_plans_distribution_repair_edits_only_flagged_rows(self):
+        """The AI repair is surgical: the model receives the flagged row ids and
+        may edit/merge/drop them, but any row no check named is restored
+        verbatim even if the model rewrote it."""
+        module = self.application_module
+        client = self.app.test_client()
+        points = [
+            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
+            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
+            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
+        ]
+        project_data = {
+            'project_name': 'The View',
+            'croquis_land_area': 7012,
+            'survey_coordinates': points,
+            'project_components_data': [
+                {'name': 'مكاتب', 'useType': 'office', 'units': 16, 'builtArea': 3200},
+                {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800},
+            ],
+        }
+        workflow = {'verification': {'approved': True},
+                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/x.png'}}
+        # r1/r2 overlap on the same component; r3 is clean and matches the study.
+        distribution = {'rows': [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب',
+             'units_per_floor': 2, 'floor_area_sqm': 400},
+            {'id': 'r2', 'building': 'A', 'floor_range': '4-9', 'component': 'مكاتب',
+             'units_per_floor': 1, 'floor_area_sqm': 300},
+            {'id': 'r3', 'building': 'A', 'floor_range': '10-13', 'component': 'شقق',
+             'units_per_floor': 3, 'floor_area_sqm': 450},
+        ]}
+        ai_reply = {'rows': [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب',
+             'units_per_floor': 2, 'floor_area_sqm': 400},
+            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب',
+             'units_per_floor': 1, 'floor_area_sqm': 300},
+            # The model was told not to touch r3 — it did anyway; the server reverts it.
+            {'id': 'r3', 'building': 'A', 'floor_range': '10-13', 'component': 'شقق',
+             'units_per_floor': 99, 'floor_area_sqm': 1},
+        ]}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(ai_reply, ensure_ascii=False)}}]
+        }):
+            repaired = client.post('/api/visual-concept/plans-distribution-repair',
+                                   headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow,
+                'distribution': distribution})
+        self.assertEqual(repaired.status_code, 200, repaired.get_json())
+        result_rows = {row['id']: row for row in repaired.get_json()['distribution']['rows']}
+        self.assertEqual(result_rows['r2']['floor_range'], '6-9')
+        self.assertEqual(result_rows['r3']['units_per_floor'], 3)
+        self.assertEqual(result_rows['r3']['floor_area_sqm'], 450)
+        self.assertFalse(any(item['result'] == 'متعارض'
+                             for item in repaired.get_json()['distribution']['checks']))
+
+        # A clean table short-circuits — no model call, nothing changes.
+        clean = {'rows': [
+            {'id': 'c1', 'building': 'A', 'floor_range': '1-8', 'component': 'مكاتب',
+             'units_per_floor': 2, 'floor_area_sqm': 400},
+            {'id': 'c2', 'building': 'A', 'floor_range': '11-15', 'component': 'شقق',
+             'units_per_floor': 2.4, 'floor_area_sqm': 360},
+        ]}
+        with patch.object(module, 'call_openrouter_chat',
+                          side_effect=AssertionError('no findings — model must not run')):
+            untouched = client.post('/api/visual-concept/plans-distribution-repair',
+                                    headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow,
+                'distribution': clean})
+        self.assertEqual(untouched.status_code, 200, untouched.get_json())
+        self.assertFalse(untouched.get_json()['repaired'])
+
     def test_plans_generate_sequentially_on_approved_plan_images(self):
         """The diagrams are drawn in order: uses needs the approved site plan,
         massing needs both — each previous image ships as a generation reference."""
