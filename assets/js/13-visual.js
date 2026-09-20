@@ -518,22 +518,6 @@
         const totalSlides = (tenantSlidePlan.slides || []).length;
         if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
 
-        if (!options.approvalGranted && !options.resume) {
-          if (typeof showGenerationApprovalModal === 'function') {
-            isGeneratingTenantSlides = false;
-            const approved = await showGenerationApprovalModal({
-              draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
-              slidesCount: totalSlides,
-              projectName: options.presentationTitle || tenantPresentationTitle || tenantProjectData.project_name || 'عرض بدون عنوان',
-              sectionKey: sectionKey || ''
-            });
-            if (!approved) {
-              return;
-            }
-            isGeneratingTenantSlides = true;
-          }
-        }
-
         const planSignature = tenantSlidePlanFingerprint(tenantSlidePlan);
         const savedCheckpoint = tenantSlideGenerationCheckpoint || tenantProjectData.slide_generation_checkpoint;
         const resumeRequested = options.resume === true;
@@ -546,11 +530,31 @@
           toast('لا توجد نقطة توقف متوافقة مع خطة العرض الحالية');
           return;
         }
-        if (!canResume) tenantSlidesData = [];
         const startIndex = canResume
           ? Math.min(totalSlides, Math.min(
             Math.max(0, Number(savedCheckpoint.nextIndex) || 0), tenantSlidesData.length))
           : 0;
+
+        // The approval gate is per-run: pausing settled the old approval and
+        // released its escrow, so a resume must open a fresh one. The draft is
+        // saved first so the approval prices and snapshots exactly the inputs
+        // this run will send, and only the slides still left are reserved.
+        if (!options.approvalGranted) {
+          if (typeof showGenerationApprovalModal === 'function') {
+            if (resumeRequested && !(await saveProjectAsDraftNow(true, false))) return;
+            isGeneratingTenantSlides = false;
+            const approved = await showGenerationApprovalModal({
+              draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
+              slidesCount: totalSlides - startIndex,
+              projectName: options.presentationTitle || tenantPresentationTitle || tenantProjectData.project_name || 'عرض بدون عنوان',
+              sectionKey: sectionKey || ''
+            });
+            if (!approved) {
+              return;
+            }
+            isGeneratingTenantSlides = true;
+          }
+        }
         tenantSlideGenerationCheckpoint = {
           ...(canResume ? savedCheckpoint : {}),
           planSignature,
