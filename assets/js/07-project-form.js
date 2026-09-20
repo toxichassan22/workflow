@@ -881,10 +881,36 @@
       total: 'الإجمالي', count: 'العدد', percent: 'النسبة', notes: 'ملاحظات',
       distance_km: 'المسافة (كم)', duration_minutes: 'المدة (دقيقة)',
       duration_min: 'المدة (دقيقة)', show_on_map: 'يظهر على الخريطة',
+      audience: 'الفئة المستهدفة', components: 'المكونات', segments: 'الفئات',
+      access: 'خريطة الوصول', catchment: 'خريطة التغطية', landmarks: 'خريطة المعالم',
+      overview: 'الخريطة العامة', enabled: 'مفعّل', visible: 'ظاهر',
+      residential: 'سكني', commercial: 'تجاري', offices: 'مكاتب', retail: 'تجزئة',
+      hotel: 'فندقي', mixed: 'مختلط', area: 'المساحة', floors: 'الأدوار',
+      revenue: 'الإيراد', cost: 'التكلفة', year: 'السنة', month: 'الشهر',
+      start: 'البداية', end: 'النهاية', phase: 'المرحلة', milestone: 'المرحلة',
+      task: 'المهمة', owner: 'المسؤول', duration: 'المدة', progress: 'التقدم',
     };
 
     function diffBlobKeyLabel(key) {
       return DIFF_BLOB_KEY_LABELS[key] || key;
+    }
+
+    // Some fields store structured data as serialized JSON text; a string that
+    // parses to an object/array renders structured like a real blob — printing
+    // it raw would also garble the braces under RTL bidi.
+    function diffParseJsonString(value) {
+      if (typeof value !== 'string') return null;
+      const trimmed = value.trim();
+      if (trimmed.length < 2) return null;
+      const first = trimmed[0];
+      const last = trimmed[trimmed.length - 1];
+      if ((first !== '{' || last !== '}') && (first !== '[' || last !== ']')) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return (parsed && typeof parsed === 'object') ? parsed : null;
+      } catch (e) {
+        return null;
+      }
     }
 
     function diffScalarText(value) {
@@ -950,7 +976,9 @@
         items.forEach(item => {
           const sub = document.createElement('div');
           sub.className = 'section-version-diff-sub';
+          const parsed = diffParseJsonString(item);
           if (item && typeof item === 'object') sub.appendChild(diffValueNode(item));
+          else if (parsed) sub.appendChild(diffValueNode(parsed));
           else { sub.classList.add('section-version-diff-line'); sub.textContent = diffScalarText(item); }
           box.appendChild(sub);
         });
@@ -966,10 +994,16 @@
         k.className = 'section-version-diff-key';
         k.textContent = diffBlobKeyLabel(key);
         kv.appendChild(k);
+        const parsed = diffParseJsonString(item);
         if (item && typeof item === 'object') {
           const nested = document.createElement('div');
           nested.className = 'section-version-diff-nested';
           nested.appendChild(diffValueNode(item));
+          kv.appendChild(nested);
+        } else if (parsed) {
+          const nested = document.createElement('div');
+          nested.className = 'section-version-diff-nested';
+          nested.appendChild(diffValueNode(parsed));
           kv.appendChild(nested);
         } else {
           const val = document.createElement('span');
@@ -1006,10 +1040,11 @@
         const names = diffAttachmentNames(value);
         if (names.length) val.textContent = names.join('\n');
         else val.appendChild(diffValueNode(value));
-      } else if (typeof value === 'object') {
-        val.appendChild(diffValueNode(value));
       } else {
-        val.textContent = diffScalarText(value);
+        const parsed = diffParseJsonString(value);
+        if (parsed) val.appendChild(diffValueNode(parsed));
+        else if (typeof value === 'object') val.appendChild(diffValueNode(value));
+        else val.textContent = diffScalarText(value);
       }
       cell.appendChild(val);
       return cell;
