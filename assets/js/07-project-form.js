@@ -846,13 +846,141 @@
     // section stays visible until it is closed or another version is compared.
     const sectionVersionDiffCache = {};
 
-    function diffValueText(value) {
-      if (value === null || value === undefined || value === '') return '—';
+    // Blob values (objects/arrays) never render as raw JSON in the preview —
+    // they are laid out as labelled key/value rows, and a uniform array of flat
+    // objects becomes a real table. Telemetry keys (diagnostics, confidence
+    // maps, per-document processing) are processing metadata, not land data, so
+    // they stay out of the view.
+    const DIFF_BLOB_SKIP_KEYS = new Set(['extraction_diagnostics', 'document_processing', 'confidence']);
+
+    const DIFF_BLOB_KEY_LABELS = {
+      parcel_id: 'القطعة', plot_number: 'رقم القطعة', plan_number: 'رقم المخطط',
+      subdivision_number: 'البلك', deed_number: 'رقم الصك', deed_date: 'تاريخ الصك',
+      area_sqm: 'المساحة (م²)', zoning_code: 'كود التنظيم', allowed_uses: 'الاستخدامات',
+      allowed_uses_restrictions: 'قيود الاستخدامات', building_ratio: 'نسبة البناء',
+      building_ratio_coverage: 'نسب البناء والتغطية', building_ratio_setbacks: 'نسب البناء والارتدادات',
+      coverage_ratio: 'نسبة التغطية', floor_area_ratio: 'معامل مسطح البناء (FAR)',
+      max_floors_height: 'الأدوار والارتفاع', table_floors: 'الأدوار بموجب الجدول',
+      setbacks: 'الارتدادات', facades_count: 'عدد الواجهات', facades_directions: 'اتجاهات الواجهات',
+      north_direction: 'اتجاه الشمال', summary: 'الملخص',
+      north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب',
+      point: 'النقطة', eastings: 'شرقيات', northings: 'شماليات',
+      boundary_length_m: 'طول الحد (م)', street_name: 'اسم الشارع', street_width_m: 'عرض الشارع (م)',
+      uses: 'الحد/الاستخدام', setback: 'الارتداد', lat: 'خط العرض', lng: 'خط الطول',
+      directions: 'الاتجاهات', coordinates: 'الإحداثية', survey_coordinates: 'إحداثيات المساحة',
+      regulation_coordinates: 'إحداثيات التنظيم', coordinate_tables: 'جداول الإحداثيات',
+      coordinates_table_name: 'جدول الإحداثيات', coordinates_table_source_page: 'صفحة جدول الإحداثيات',
+      regulation_text: 'النص التنظيمي', table_name: 'الجدول', rows: 'الصفوف',
+      parcels: 'القطع', conflicts: 'التعارضات', sources: 'المصادر', source: 'المصدر',
+      source_priority: 'أولوية المصادر', land_use_status: 'حالة الاستخدام',
+      parking_requirements: 'اشتراطات المواقف', entrances_exits_requirements: 'اشتراطات المداخل والمخارج',
+      regulatory_constraints: 'القيود التنظيمية',
+      name: 'الاسم', category: 'النوع', type: 'النوع', value: 'القيمة', field: 'الحقل',
+      label: 'الوصف', description: 'الوصف', role: 'الدور', company: 'الشركة',
+      status: 'الحالة', date: 'التاريخ', amount: 'المبلغ', price: 'السعر',
+      total: 'الإجمالي', count: 'العدد', percent: 'النسبة', notes: 'ملاحظات',
+      distance_km: 'المسافة (كم)', duration_minutes: 'المدة (دقيقة)',
+      duration_min: 'المدة (دقيقة)', show_on_map: 'يظهر على الخريطة',
+    };
+
+    function diffBlobKeyLabel(key) {
+      return DIFF_BLOB_KEY_LABELS[key] || key;
+    }
+
+    function diffScalarText(value) {
       if (typeof value === 'boolean') return value ? 'نعم' : 'لا';
-      if (typeof value === 'object') {
-        try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
-      }
       return String(value);
+    }
+
+    function sectionVersionValueIsEmpty(value) {
+      if (value === null || value === undefined || value === '') return true;
+      if (Array.isArray(value)) return !value.length;
+      if (typeof value === 'object') return !Object.keys(value).length;
+      return false;
+    }
+
+    function diffValueNode(value) {
+      const box = document.createElement('div');
+      box.className = 'section-version-diff-struct';
+      if (Array.isArray(value)) {
+        const items = value.filter(item => !sectionVersionValueIsEmpty(item));
+        if (!items.length) { box.textContent = '—'; return box; }
+        const allScalar = items.every(item => typeof item !== 'object' || item === null);
+        const flatObjects = !allScalar && items.every(item =>
+          item && typeof item === 'object' && !Array.isArray(item) &&
+          Object.keys(item).every(key => item[key] === null || typeof item[key] !== 'object'));
+        if (allScalar) {
+          items.forEach(item => {
+            const line = document.createElement('div');
+            line.className = 'section-version-diff-line';
+            line.textContent = diffScalarText(item);
+            box.appendChild(line);
+          });
+          return box;
+        }
+        if (flatObjects) {
+          const cols = [];
+          items.forEach(item => Object.keys(item).forEach(key => {
+            if (!DIFF_BLOB_SKIP_KEYS.has(key) && !cols.includes(key)) cols.push(key);
+          }));
+          if (cols.length && cols.length <= 6) {
+            const table = document.createElement('table');
+            table.className = 'section-version-diff-table';
+            const headRow = document.createElement('tr');
+            cols.forEach(key => {
+              const th = document.createElement('th');
+              th.textContent = diffBlobKeyLabel(key);
+              headRow.appendChild(th);
+            });
+            table.appendChild(headRow);
+            items.forEach(item => {
+              const tr = document.createElement('tr');
+              cols.forEach(key => {
+                const td = document.createElement('td');
+                const cell = item[key];
+                td.textContent = cell === null || cell === undefined || cell === '' ? '—' : diffScalarText(cell);
+                tr.appendChild(td);
+              });
+              table.appendChild(tr);
+            });
+            box.appendChild(table);
+            return box;
+          }
+        }
+        items.forEach(item => {
+          const sub = document.createElement('div');
+          sub.className = 'section-version-diff-sub';
+          if (item && typeof item === 'object') sub.appendChild(diffValueNode(item));
+          else { sub.classList.add('section-version-diff-line'); sub.textContent = diffScalarText(item); }
+          box.appendChild(sub);
+        });
+        return box;
+      }
+      Object.keys(value).forEach(key => {
+        if (DIFF_BLOB_SKIP_KEYS.has(key)) return;
+        const item = value[key];
+        if (sectionVersionValueIsEmpty(item)) return;
+        const kv = document.createElement('div');
+        kv.className = 'section-version-diff-kv';
+        const k = document.createElement('span');
+        k.className = 'section-version-diff-key';
+        k.textContent = diffBlobKeyLabel(key);
+        kv.appendChild(k);
+        if (item && typeof item === 'object') {
+          const nested = document.createElement('div');
+          nested.className = 'section-version-diff-nested';
+          nested.appendChild(diffValueNode(item));
+          kv.appendChild(nested);
+        } else {
+          const val = document.createElement('span');
+          val.className = 'section-version-diff-val';
+          val.textContent = diffScalarText(item);
+          kv.appendChild(val);
+        }
+        box.appendChild(kv);
+      });
+      if (!box.children.length) box.textContent = '—';
+      return box;
     }
 
     // One side of the comparison: a captioned box so the previous value always
@@ -865,19 +993,24 @@
       cap.className = 'section-version-diff-cap';
       cap.textContent = side === 'old'
         ? WFT('sectionver.diff_col_old', 'القيمة السابقة')
-        : WFT('sectionver.diff_col_new', 'القيمة الجديدة');
+        : side === 'same'
+          ? WFT('sectionver.diff_col_value', 'القيمة')
+          : WFT('sectionver.diff_col_new', 'القيمة الجديدة');
       cell.appendChild(cap);
-      const val = document.createElement('span');
+      const val = document.createElement('div');
       val.className = 'section-version-diff-value';
-      let text;
-      if (isAttachment) {
+      if (sectionVersionValueIsEmpty(value)) {
+        val.textContent = '—';
+        val.classList.add('is-empty');
+      } else if (isAttachment) {
         const names = diffAttachmentNames(value);
-        text = names.length ? names.join('\n') : diffValueText(value);
+        if (names.length) val.textContent = names.join('\n');
+        else val.appendChild(diffValueNode(value));
+      } else if (typeof value === 'object') {
+        val.appendChild(diffValueNode(value));
       } else {
-        text = diffValueText(value);
+        val.textContent = diffScalarText(value);
       }
-      val.textContent = text;
-      if (text === '—') val.classList.add('is-empty');
       cell.appendChild(val);
       return cell;
     }
@@ -1006,7 +1139,7 @@
           // Identical on both sides — one box states the value without
           // duplicating long content such as polygon or table data.
           cols.classList.add('single');
-          cols.appendChild(sectionVersionDiffCell('new', item.new_value, item._diffAttachment));
+          cols.appendChild(sectionVersionDiffCell('same', item.new_value, item._diffAttachment));
         } else {
           cols.appendChild(sectionVersionDiffCell('old', item.old_value, item._diffAttachment));
           cols.appendChild(sectionVersionDiffCell('new', item.new_value, item._diffAttachment));

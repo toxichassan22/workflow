@@ -1052,10 +1052,72 @@
     .section-version-diff-value {
       display: block;
       color: #333;
+      max-height: 420px;
+      overflow: auto;
     }
 
     .section-version-diff-value.is-empty {
       color: #aaa;
+    }
+
+    .section-version-diff-struct {
+      font-size: 11px;
+      line-height: 1.7;
+    }
+
+    .section-version-diff-kv {
+      display: grid;
+      grid-template-columns: minmax(110px, auto) 1fr;
+      gap: 2px 10px;
+      align-items: start;
+    }
+
+    .section-version-diff-key {
+      color: #7a8494;
+    }
+
+    .section-version-diff-val,
+    .section-version-diff-line {
+      word-break: break-word;
+      white-space: pre-line;
+    }
+
+    .section-version-diff-nested {
+      grid-column: 1 / -1;
+      margin-inline-start: 6px;
+      padding-inline-start: 8px;
+      border-inline-start: 2px solid var(--line);
+    }
+
+    .section-version-diff-sub {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .section-version-diff-sub:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+
+    .section-version-diff-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 4px 0;
+    }
+
+    .section-version-diff-table th,
+    .section-version-diff-table td {
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      text-align: right;
+      font-weight: normal;
+    }
+
+    .section-version-diff-table th {
+      background: #f4f6f8;
+      font-weight: 700;
     }
 
     .section-version-diff-row.diff-modified .section-version-diff-old,
