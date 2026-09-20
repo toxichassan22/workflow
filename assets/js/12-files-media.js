@@ -2350,6 +2350,7 @@
         const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
         hideLoader();
         if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return; }
+        if (response.repaired === false) toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
         workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
         workflow.promptReady = false;
         workflow.promptsError = '';

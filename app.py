@@ -5975,10 +5975,13 @@ def _visual_concept_plan_component_key(name):
 
 def _visual_concept_plan_component_base(name):
     """Component name without a leading floor tag: «طابق أرضي - سكني» resolves to
-    «سكني» so the study's per-floor rows and the distribution's per-use rows
-    compare like for like. Names without a dash tag pass through unchanged."""
+    «سكني» and «ملحق علوي - خدمات أخرى» to «خدمات أخرى», so the study's
+    per-floor rows and the distribution's per-use rows compare like for like.
+    Names without a dash tag pass through unchanged."""
     text = _visual_concept_plan_sanitize_text(name)
-    stripped = re.sub(r'^(?:ال)?(?:طابق|دور|floor|level)\s+[^-–—:]*[-–—:]\s*', '', text).strip()
+    stripped = re.sub(
+        r'^(?:ال)?(?:طابق|دور|ملحق|بدروم|سطح|floor|level|basement|roof)\s+[^-–—:]*[-–—:]\s*',
+        '', text).strip()
     return stripped or text
 
 
@@ -6832,6 +6835,10 @@ def api_visual_concept_plans_distribution_repair():
         'أو أضف صفًا بمُعرّف id جديد لمكوّن تطلبه الدراسة ولا صف له. '
         'كل بند فحص يحمل row_ids — وهي وحدها الصفوف المسموح تعديلها أو حذفها؛ أي صف آخر '
         'تنسخه حرفيًا بنفس id ونفس القيم دون أي تغيير. '
+        'بند فحص بقائمة row_ids فارغة يعني مكوّنًا مطلوبًا في الدراسة لا صف له في الجدول — '
+        'أضف له صفًا جديدًا أو أعد تسمية صف معلَّم يضمّه فعلًا. '
+        'وإن كان تجاوز معامل البناء أو الحد التنظيمي متأصلًا في البرنامج المعتمد نفسه، '
+        'فلا تحلّه بتقليص مساحات دون مجاميع الدراسة — أولويتك مطابقة المجاميع وحل التداخلات. '
         'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
         '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. component اسم الاستخدام فقط دون اسم الدور. '
         'التزم بسقف الأدوار ومعامل البناء وحد التغطية الموثقة ومجاميع الدراسة، ولا تُنتج '
@@ -23142,7 +23149,9 @@ def api_compare_versions(pres_id):
     if not before.get('legacy') and not after.get('legacy'):
         if old.get('title') != new.get('title'):
             changes.insert(0, f'عنوان العرض: من «{old.get("title") or ""}» إلى «{new.get("title") or ""}»')
-        changes.extend(change_tracking.describe_draft_changes(old['projectData'], new['projectData']))
+        changes.extend(change_tracking.detail_text(item)
+                       for item in change_tracking.describe_draft_changes(
+                           old['projectData'], new['projectData']))
         if old.get('status') != new.get('status'):
             changes.append(f'حالة العرض: من «{old.get("status") or ""}» إلى «{new.get("status") or ""}»')
     return jsonify({'success': True, 'from': _presentation_version_payload(before, True),
@@ -23207,7 +23216,8 @@ def api_get_draft_edit_log(draft_id):
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if not draft or not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'Draft not found'}), 404
-    return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'draft', draft_id)})
+    return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'draft', draft_id),
+                    'title': draft.get('title') or ''})
 
 
 @app.route('/api/presentations/<pres_id>/log', methods=['POST'])

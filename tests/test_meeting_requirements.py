@@ -9888,6 +9888,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'name': 'طابق مسروق - تجاري', 'builtArea': 640.74},
             {'name': 'طابق أرضي - خدمات', 'builtArea': 336.36},
             {'name': 'طابق أول - خدمات', 'builtArea': 2780.7},
+            {'name': 'ملحق علوي - خدمات أخرى', 'builtArea': 500.0},
             {'name': 'طابق أرضي - مساحات أخرى', 'builtArea': 1223.47},
             {'name': 'طابق مسروق - مساحات أخرى', 'builtArea': 688.5},
             {'name': 'طابق أول - مساحات أخرى', 'builtArea': 868.73},
@@ -9925,7 +9926,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Long float tails are rounded before they reach the client.
         self.assertEqual(totals['تجاري']['area'], 2029.0)
         self.assertEqual(totals['تجاري']['required_area'], 2029.0)
-        self.assertEqual(totals['خدمات']['required_area'], 3117.06)
+        self.assertEqual(totals['خدمات']['required_area'], 3617.06)
         # Study rows with no distribution counterpart merge into one entry.
         self.assertEqual(totals['مساحات أخرى']['units'], 0)
         self.assertEqual(totals['مساحات أخرى']['required_area'], 2780.7)
