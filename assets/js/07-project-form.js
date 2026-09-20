@@ -1133,9 +1133,11 @@
       panel.appendChild(counts);
       const attachments = Array.isArray(diff.attachments) ? diff.attachments : [];
       const order = sectionFieldOrderMap(sectionKey);
+      // Only what changed: unchanged fields add noise and are already counted
+      // in the summary line above.
       const items = (Array.isArray(diff.fields) ? diff.fields : [])
         .concat(attachments.map(att => Object.assign({ _diffAttachment: true }, att)))
-        .filter(item => item && item.key)
+        .filter(item => item && item.key && item.status !== 'unchanged')
         .map((item, idx) => ({ item: item, idx: idx }))
         .sort((a, b) => {
           const oa = order[a.item.key];
