@@ -4757,7 +4757,64 @@ def _visual_concept_plan_boundary_points(value):
     return points if len(points) >= 3 else []
 
 
+_VISUAL_PLAN_FACT_LABELS = {
+    'plot_number_croquis': 'رقم القطعة', 'plan_number': 'رقم المخطط',
+    'croquis_land_area': 'مساحة الأرض', 'boundary_lengths': 'أطوال الحدود',
+    'surrounding_streets': 'الشوارع المحيطة', 'north_direction': 'اتجاه الشمال',
+    'building_ratio': 'نسبة البناء', 'coverage_ratio': 'نسبة التغطية',
+    'building_ratio_coverage': 'نسبة البناء/التغطية', 'building_ratio_setbacks': 'الارتدادات',
+    'setbacks': 'الارتدادات', 'floor_area_ratio': 'معامل كتلة البناء',
+    'table_floors': 'عدد الأدوار', 'max_floors_height': 'أقصى ارتفاع/أدوار',
+    'allowed_uses': 'الاستخدامات المسموحة', 'regulatory_constraints': 'الاشتراطات والقيود',
+    'parking_requirements': 'متطلبات المواقف', 'entrances_exits_requirements': 'متطلبات المداخل والمخارج',
+    'land_use': 'استخدام الأرض', 'zoning_code': 'كود التنظيم',
+    'document_summary': 'ملخص المستند', 'summary': 'الملخص',
+    'allowed_uses_restrictions': 'قيود الاستخدامات', 'directions': 'الاتجاهات',
+}
+
+
+def _visual_concept_plan_site_facts(source, analysis=None, parcel=None):
+    """Site facts used to select the applicable regulation block. They are an
+    input to rule lookup — never a verification target — so reading them from
+    projectData is safe."""
+    source = source if isinstance(source, dict) else {}
+    analysis = analysis if isinstance(analysis, dict) else {}
+    parcel = parcel if isinstance(parcel, dict) else {}
+
+    def pick(*keys):
+        for key in keys:
+            for holder in (parcel, analysis, source):
+                value = holder.get(key)
+                if value not in (None, ''):
+                    return value
+        return ''
+
+    widths = []
+    directions = (parcel.get('directions') or analysis.get('directions')
+                  or source.get('directions') or source.get('directions_table'))
+    entries = directions.values() if isinstance(directions, dict) else (
+        directions if isinstance(directions, list) else [])
+    for entry in entries:
+        if isinstance(entry, dict):
+            width = _visual_concept_number(entry.get('street_width_m') or entry.get('street_width'))
+            if width:
+                widths.append(width)
+    return {
+        'zoning_code': pick('zoning_code', 'planning_code', 'zone_code'),
+        'area_sqm': pick('croquis_land_area', 'area_sqm', 'land_area'),
+        'street_width_m': max(widths) if widths else pick('street_width_m', 'main_street_width'),
+        'building_type': pick('building_type', 'project_type'),
+        'land_use': pick('land_use', 'allowed_uses'),
+        'city': pick('city'),
+        'project_type': pick('project_type'),
+    }
+
+
 def _visual_concept_plan_regulation_facts(project_data):
+    """Documented regulatory facts for verification: the verified rules digest
+    (rules/*.json, built from the municipal اشتراطات) supplies authoritative
+    values first, then land-document analysis fills what the digest does not
+    cover. ProjectData is never a source — the project cannot verify itself."""
     source = project_data if isinstance(project_data, dict) else {}
     analysis = source.get('land_documents_analysis')
     if isinstance(analysis, str):
@@ -4774,26 +4831,65 @@ def _visual_concept_plan_regulation_facts(project_data):
         'document_summary', 'summary', 'allowed_uses_restrictions', 'directions',
     )
     facts = {}
+    review_points = []
+    sources = []
+
+    digest = {}
+    if REGULATION_DIGEST_ENABLED:
+        try:
+            digest = regulation_digest.build_regulation_digest(
+                _visual_concept_plan_site_facts(source, analysis, parcel))
+        except Exception:
+            digest = {}
+    if digest.get('matched'):
+        zone_label = _visual_concept_plan_sanitize_text(digest.get('zone_key'))
+        if zone_label:
+            facts['regulatory_zone'] = zone_label
+            sources.append(f'القواعد الموثقة للمنطقة «{zone_label}»')
+        if digest.get('text'):
+            facts['zone_rules'] = _visual_concept_plan_sanitize_text(
+                _visual_concept_text(digest['text'], 3000))
+        for key, value in (digest.get('fields') or {}).items():
+            if value not in (None, '', []):
+                facts[key] = _visual_concept_plan_sanitize_text(_visual_concept_text(value, 1800))
+    for note in digest.get('notes') or []:
+        text = _visual_concept_plan_sanitize_text(note)
+        if text:
+            review_points.append(text)
+    for conflict in digest.get('conflicts') or []:
+        detail = conflict.get('detail') if isinstance(conflict, dict) else str(conflict)
+        text = _visual_concept_plan_sanitize_text(detail)
+        if text:
+            review_points.append(text)
+
     for key in keys:
         value = parcel.get(key)
         if value in (None, ''):
             value = analysis.get(key)
-        if value in (None, ''):
-            value = source.get(key)
         if isinstance(value, (dict, list)):
             value = json.dumps(value, ensure_ascii=False)
         text = _visual_concept_plan_sanitize_text(_visual_concept_text(value, 1800))
-        if text:
-            facts[key] = text
+        if not text:
+            continue
+        sources.append('مستندات الأرض والكروكي')
+        existing = facts.get(key)
+        if existing and existing != text:
+            review_points.append(
+                f'قيمة «{_VISUAL_PLAN_FACT_LABELS.get(key, key)}» في مستندات الأرض ({text}) '
+                f'تختلف عن القاعدة الموثقة ({existing}).')
+            continue
+        facts.setdefault(key, text)
+
     conflicts = analysis.get('conflicts') if isinstance(analysis.get('conflicts'), list) else []
     coordinate_rows = parcel.get('survey_coordinates') or analysis.get('survey_coordinates') or source.get('survey_coordinates') or []
     facts['survey_coordinate_count'] = len(coordinate_rows) if isinstance(coordinate_rows, list) else 0
-    facts['existing_review_points'] = [
-        _visual_concept_plan_sanitize_text(
+    for item in conflicts:
+        text = _visual_concept_plan_sanitize_text(
             item if isinstance(item, str) else item.get('description') or item.get('field') or '')
-        for item in conflicts
-    ]
-    facts['existing_review_points'] = [item for item in facts['existing_review_points'] if item][:30]
+        if text:
+            review_points.append(text)
+    facts['existing_review_points'] = list(dict.fromkeys(review_points))[:30]
+    facts['regulatory_sources'] = list(dict.fromkeys(sources))
     return facts
 
 
@@ -5673,6 +5769,8 @@ def _visual_concept_plan_prompt_templates(context, model=None):
 def _visual_concept_plan_sanitize_text(value):
     text = str(value or '').strip()
     text = re.sub(r'اشتراطات\s*[12](?:\.pdf)?', 'المرجع التنظيمي', text, flags=re.IGNORECASE)
+    text = re.sub(r'SBC\s*201[\s_-]*AR[\s_-]*2024(?:\.pdf)?|SBC201_AR2024(?:\.pdf)?',
+                  'كود البناء السعودي', text, flags=re.IGNORECASE)
     text = re.sub(r'(?:صفحة|صفحات|ص)\s*[0-9٠-٩]+(?:\s*[-–—]\s*[0-9٠-٩]+)?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\b(?:source_file|filename|source|document_processing)\b\s*[:=][^،\n]+', '', text, flags=re.IGNORECASE)
     return re.sub(r'\s{2,}', ' ', text).strip(' -–—')
@@ -6262,6 +6360,31 @@ def api_visual_concept_plans_verify():
         return _billing_guard
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     context = _visual_concept_plan_context(project_data)
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    context['regulations'] = regulations
+
+    # Saudi Building Code evidence — the second official source of truth next to
+    # the municipal digest. Bounded snippets join the facts the model compares
+    # against; the page list is kept for internal traceability.
+    sbc_query = ' '.join(str(part) for part in [
+        'إشغال مخارج مواقف ارتفاع طوابق مداخل منافذ إعاقة منحدر',
+        regulations.get('land_use'), regulations.get('zoning_code'),
+        ' '.join(_visual_concept_text(item.get('name'), 60)
+                 for item in (context.get('components') or [])[:12]),
+    ] if part)
+    try:
+        sbc_packet, sbc_warnings = search_sbc_evidence(sbc_query, regulations)
+    except Exception as sbc_error:
+        sbc_packet, sbc_warnings = {'context': '', 'pages': [], 'matched': False}, [
+            f'تعذر قراءة كود البناء السعودي: {sbc_error}']
+    if sbc_packet.get('context'):
+        regulations['saudi_building_code'] = _visual_concept_text(sbc_packet['context'], 9000)
+        sources = regulations.get('regulatory_sources')
+        sources = sources if isinstance(sources, list) else []
+        if 'كود البناء السعودي' not in sources:
+            sources.append('كود البناء السعودي')
+        regulations['regulatory_sources'] = sources
+
     system_prompt = (
         'أنت مدقق اتساق لرسومات تخطيطية مفاهيمية لمشروع عقاري. '
         'قارن فقط بين بيانات المشروع المسجلة والبيانات التنظيمية الموثقة المجهولة أدناه. '
@@ -6299,10 +6422,18 @@ def api_visual_concept_plans_verify():
                 'action': 'مراجعة القيمة قبل الاعتماد.',
                 'severity': 'medium'
             })
+    for warning in sbc_warnings:
+        verification.setdefault('issues', []).append({
+            'id': str(len(verification.get('issues', [])) + 1),
+            'title': 'كود البناء السعودي',
+            'points': [_visual_concept_plan_sanitize_text(warning)],
+            'action': 'التحقق من توفر المصدر الرسمي ثم إعادة التحقق.',
+            'severity': 'medium'
+        })
     return jsonify({'success': True, 'verification': verification, 'planContext': context, 'context': {
         'boundaryPointCount': len(context.get('boundary_points') or []),
         'componentCount': len(context.get('components') or []),
-    }})
+    }, 'evidence': {'sbc_matched': bool(sbc_packet.get('matched')), 'sbc_pages': sbc_packet.get('pages') or []}})
 
 
 @app.route('/api/visual-concept/plans-boundary', methods=['POST'])
@@ -19085,6 +19216,135 @@ def search_official_regulations_evidence(query_text='', site_facts=None):
         'documents': documents,
         'table_pages': table_pages,
     }, warnings
+
+
+# Saudi Building Code (SBC 201-AR-2024) — a separate official corpus searched
+# during plans verification. It deliberately stays out of REGULATION_PDF_NAMES
+# so the zoning-extraction flow keeps its two-document municipal scope.
+SBC_PDF_NAMES = ('SBC201_AR2024.pdf',)
+SBC_EVIDENCE_MAX_PAGES = int(os.environ.get('SBC_EVIDENCE_MAX_PAGES', '4'))
+SBC_EVIDENCE_MAX_CHARS = int(os.environ.get('SBC_EVIDENCE_MAX_CHARS', '7000'))
+SBC_SNIPPET_CHARS = int(os.environ.get('SBC_SNIPPET_CHARS', '2200'))
+
+# Roots without «ال» — extracted SBC text swaps the lam past the next letter
+# («الجدران» → «اجلدران»), the same mangling the municipal terms avoid. Some
+# spans also arrive fully reversed, so matching checks term[::-1] as well.
+SBC_TOPIC_TERMS = (
+    ('إشغال', 6), ('مخارج', 6), ('اخلا', 5), ('منافذ', 5),
+    ('مواقف', 5), ('موقف', 3), ('مدخل', 3),
+    ('ارتفاع', 4), ('طوابق', 4), ('قبو', 3), ('سطح', 2), ('ملحق', 2),
+    ('إعاقة', 5), ('ذوي', 3), ('منحدر', 3),
+    ('مصاعد', 3), ('سعة', 3), ('درج', 2),
+    ('ممرات', 2), ('مسار', 2), ('حريق', 2), ('مقاومة', 2),
+    ('سكني', 2), ('تجاري', 2), ('تصنيف', 2), ('مساحة البناء', 3),
+)
+
+_SBC_PAGE_INDEX = None
+_SBC_PAGE_INDEX_SIGNATURE = None
+
+
+def sbc_pdf_paths():
+    """Absolute paths of the Saudi Building Code PDFs that exist on disk."""
+    base = os.path.dirname(__file__)
+    return [os.path.join(base, name) for name in SBC_PDF_NAMES
+            if os.path.isfile(os.path.join(base, name))]
+
+
+def _clean_sbc_text(text):
+    """Strip the SBC running header, then reuse the shared regulation cleaner."""
+    text = re.sub(r'SBC\s*201[^\n]*', ' ', text or '')
+    return _clean_regulation_text(text)
+
+
+def _build_sbc_page_index():
+    """Page-level text index of the code PDFs. Built lazily once per process —
+    the codebook is ~600 pages, so it is indexed only when verification needs it.
+    Tables are not detected: verification consumes text snippets only."""
+    global _SBC_PAGE_INDEX, _SBC_PAGE_INDEX_SIGNATURE
+    paths = sbc_pdf_paths()
+    signature = _regulation_index_signature(paths)
+    if _SBC_PAGE_INDEX_SIGNATURE == signature and _SBC_PAGE_INDEX is not None:
+        return _SBC_PAGE_INDEX
+    try:
+        import fitz
+    except ImportError:
+        _SBC_PAGE_INDEX = []
+        _SBC_PAGE_INDEX_SIGNATURE = signature
+        return []
+    records = []
+    for path in paths:
+        name = os.path.basename(path)
+        try:
+            document = fitz.open(path)
+        except Exception:
+            continue
+        try:
+            for index in range(len(document)):
+                cleaned = _clean_sbc_text(document[index].get_text())
+                if cleaned and not _is_regulation_index_page(cleaned):
+                    records.append({'name': name, 'path': path, 'page': index + 1,
+                                    'text': cleaned, 'has_table': False})
+        finally:
+            document.close()
+    _SBC_PAGE_INDEX = records
+    _SBC_PAGE_INDEX_SIGNATURE = signature
+    return records
+
+
+def _sbc_term_present(term, text):
+    if term in text:
+        return True
+    # Whole-span reversal happens in some extracted runs; only reverse Arabic
+    # words so digit tokens never match backwards.
+    return bool(re.search(r'[\u0600-\u06FF]', term)) and term[::-1] in text
+
+
+def _score_sbc_page(text, query_tokens):
+    score = sum(weight for term, weight in SBC_TOPIC_TERMS
+                if _sbc_term_present(term, text))
+    for token in query_tokens:
+        if token and _sbc_term_present(token, text):
+            score += 8
+    if re.search(r'\d{2}\s*%', text):
+        score += 3
+    if re.search(r'[0-9٠-٩]+\s*(?:م|متر)\b', text):
+        score += 2
+    return score
+
+
+def search_sbc_evidence(query_text='', site_facts=None):
+    """Bounded Saudi Building Code evidence packet for plans verification.
+
+    Returns ({'context', 'pages', 'matched'}, warnings). Hard-bounded by
+    SBC_EVIDENCE_MAX_PAGES / SBC_EVIDENCE_MAX_CHARS so the codebook can never
+    flood the verification prompt.
+    """
+    records = _build_sbc_page_index()
+    if not records:
+        return {'context': '', 'pages': [], 'matched': False}, [
+            'كود البناء السعودي غير متاح — لا يوجد ملف قابل للبحث: ' + '، '.join(SBC_PDF_NAMES)]
+    query_tokens = _regulation_search_tokens(query_text, site_facts)
+    scored = sorted(
+        ({**record, 'score': _score_sbc_page(record['text'], query_tokens)} for record in records),
+        key=lambda record: (-record['score'], record['page']))
+    matched = [record for record in scored if record['score'] > 0][:SBC_EVIDENCE_MAX_PAGES]
+    if not matched:
+        return {'context': '', 'pages': [], 'matched': False}, [
+            'لم يتم العثور على نصوص مطابقة في كود البناء السعودي']
+    parts = []
+    pages = []
+    remaining = SBC_EVIDENCE_MAX_CHARS
+    for record in matched:
+        if remaining <= 0:
+            break
+        snippet = record['text'][:min(SBC_SNIPPET_CHARS, remaining)]
+        if not snippet:
+            continue
+        pages.append(record['page'])
+        parts.append(
+            f"--- {record['name']} — صفحة {record['page']} — score={record['score']} ---\n{snippet}")
+        remaining -= len(snippet)
+    return {'context': '\n\n'.join(parts), 'pages': pages, 'matched': bool(parts)}, []
 
 
 def split_regulation_context(context, max_chars=None):

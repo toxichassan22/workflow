@@ -9862,6 +9862,110 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(fallback.status_code, 200, fallback.get_json())
         self.assertTrue(fallback.get_json()['distribution']['rows'])
 
+    def test_sbc_evidence_search_is_bounded_and_scored(self):
+        module = self.application_module
+        records = [
+            {'name': 'SBC201_AR2024.pdf', 'path': 'sbc.pdf', 'page': 9,
+             'text': 'إشغال ومخارج ومواقف وارتفاع طوابق', 'has_table': False},
+            {'name': 'SBC201_AR2024.pdf', 'path': 'sbc.pdf', 'page': 40,
+             'text': 'نص لا علاقة له بالموضوع', 'has_table': False},
+            # Some extracted spans arrive reversed; matching must still find them.
+            {'name': 'SBC201_AR2024.pdf', 'path': 'sbc.pdf', 'page': 77,
+             'text': 'فقاوم السيارات داخل المبنى', 'has_table': False},
+        ]
+        with patch.object(module, '_build_sbc_page_index', return_value=records), \
+                patch.object(module, 'SBC_EVIDENCE_MAX_PAGES', 2):
+            packet, warnings = module.search_sbc_evidence('مخارج', {})
+        self.assertEqual(warnings, [])
+        self.assertTrue(packet['matched'])
+        self.assertEqual(packet['pages'][0], 9)
+        self.assertIn(77, packet['pages'])
+        self.assertNotIn('نص لا علاقة', packet['context'])
+        self.assertLessEqual(len(packet['context']), module.SBC_EVIDENCE_MAX_CHARS + 200)
+
+    def test_sbc_evidence_missing_file_warns(self):
+        module = self.application_module
+        with patch.object(module, '_build_sbc_page_index', return_value=[]):
+            packet, warnings = module.search_sbc_evidence('إشغال', {})
+        self.assertFalse(packet['matched'])
+        self.assertEqual(packet['pages'], [])
+        self.assertTrue(any('كود البناء' in warning for warning in warnings))
+
+    def test_regulation_facts_never_fall_back_to_project_data(self):
+        """A missing documented value must surface as غير متوفر — the project
+        can never be its own regulatory source."""
+        module = self.application_module
+        facts = module._visual_concept_plan_regulation_facts({
+            'coverage_ratio': 60, 'boundary_lengths': '120م', 'setbacks': '5م'})
+        self.assertNotIn('coverage_ratio', facts)
+        self.assertNotIn('boundary_lengths', facts)
+        self.assertNotIn('setbacks', facts)
+
+    def test_plans_verify_uses_saudi_code_evidence_and_digest(self):
+        module = self.application_module
+        client = self.app.test_client()
+        project_data = {
+            'project_name': 'SBC Tower',
+            'city': 'جدة',
+            'croquis_land_area': 3000,
+            'approved_coverage_ratio': 55,
+            'land_documents_analysis': {'parcels': [{
+                'zoning_code': 'س ع', 'croquis_land_area': 3000,
+                'coverage_ratio': '65%', 'table_floors': '4',
+                'directions': {'north': {'street_width_m': 20}},
+            }]},
+        }
+        captured = {}
+
+        def fake_chat(system_prompt, user_prompt, **kwargs):
+            captured['user'] = user_prompt
+            return {'choices': [{'message': {'content': json.dumps(
+                {'checks': [], 'issues': [], 'summary': 'ok', 'canProceed': True},
+                ensure_ascii=False)}}]}
+
+        sbc_packet = {
+            'context': '--- SBC201_AR2024.pdf — صفحة 9 — score=40 ---\nمتطلبات الإشغال والمخارج',
+            'pages': [9], 'matched': True,
+        }
+        with patch.object(module, 'search_sbc_evidence', return_value=(sbc_packet, [])) as sbc_search, \
+                patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+            response = client.post('/api/visual-concept/plans-verify',
+                                   headers=self._headers(self.token_a),
+                                   json={'projectData': project_data})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(sbc_search.called)
+        evidence = response.get_json()['evidence']
+        self.assertTrue(evidence['sbc_matched'])
+        self.assertEqual(evidence['sbc_pages'], [9])
+        payload = json.loads(captured['user'].split(':\n', 1)[1].rsplit('\nرتّب', 1)[0])
+        regulatory = payload['regulatory_facts']
+        self.assertIn('متطلبات الإشغال والمخارج', regulatory['saudi_building_code'])
+        self.assertEqual(regulatory['regulatory_zone'], 'س ع')
+        self.assertIn('كود البناء السعودي', regulatory['regulatory_sources'])
+        # The digest's authoritative value wins over the parcel's differing
+        # number, and the difference is recorded for review — not silently kept.
+        self.assertIn('75%', regulatory['coverage_ratio'])
+        self.assertNotIn('55', str(regulatory.get('coverage_ratio')))
+        self.assertTrue(any('التغطية' in point and 'مستندات الأرض' in point
+                            for point in regulatory['existing_review_points']))
+
+    def test_plans_verify_surfaces_missing_saudi_code(self):
+        module = self.application_module
+        client = self.app.test_client()
+        with patch.object(module, 'search_sbc_evidence',
+                          return_value=({'context': '', 'pages': [], 'matched': False},
+                                        ['كود البناء السعودي غير متاح — لا يوجد ملف قابل للبحث'])), \
+                patch.object(module, 'call_openrouter_chat', return_value={
+                    'choices': [{'message': {'content': json.dumps(
+                        {'checks': [], 'issues': [], 'summary': '', 'canProceed': True})}}]}):
+            response = client.post('/api/visual-concept/plans-verify',
+                                   headers=self._headers(self.token_a),
+                                   json={'projectData': {'project_name': 'X'}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse(response.get_json()['evidence']['sbc_matched'])
+        titles = [issue['title'] for issue in response.get_json()['verification']['issues']]
+        self.assertIn('كود البناء السعودي', titles)
+
     def test_executive_content_section_generates_each_block_from_existing_facts(self):
         import executive_content
 
