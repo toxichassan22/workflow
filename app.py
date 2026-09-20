@@ -5873,15 +5873,31 @@ def _visual_concept_plan_fallback_verification(context):
     return {'checks': checks, 'issues': issues, 'summary': 'تمت مقارنة المدخلات المتاحة مع البيانات التنظيمية المسجلة.', 'canProceed': True, 'approved': False}
 
 
+def _visual_concept_plan_scrub_internal_ids(text):
+    """Strip internal row ids (row_4) the review model sometimes echoes — they
+    mean nothing to the client."""
+    if not text:
+        return ''
+    cleaned = re.sub(r'(?<![A-Za-z0-9_])(?:و\s*)?row_\w+', '', str(text))
+    cleaned = re.sub(r'(\s*[،,]\s*){2,}', '، ', cleaned)
+    cleaned = re.sub(r'\bو\s*و\b', 'و', cleaned)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+    return re.sub(r'^\s*(?:,\s*|،\s*|و(?=\s|$)\s*)+', '', cleaned)
+
+
 def _visual_concept_plan_normalize_issues(issue_source, limit=30):
     issues = []
     for index, item in enumerate(issue_source if isinstance(issue_source, list) else [issue_source], 1):
         if isinstance(item, dict):
-            title = _visual_concept_plan_sanitize_text(item.get('title') or item.get('item') or f'ملاحظة {index}')
-            bullets = _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))
-            action = _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))
-            suggestion = _visual_concept_plan_sanitize_text(
-                item.get('suggestion') or item.get('resolution') or item.get('solution') or action)
+            title = _visual_concept_plan_scrub_internal_ids(_visual_concept_plan_sanitize_text(
+                item.get('title') or item.get('item') or f'ملاحظة {index}'))
+            bullets = [_visual_concept_plan_scrub_internal_ids(bullet) for bullet in
+                       _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))]
+            bullets = [bullet for bullet in bullets if bullet]
+            action = _visual_concept_plan_scrub_internal_ids(
+                _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation')))
+            suggestion = _visual_concept_plan_scrub_internal_ids(_visual_concept_plan_sanitize_text(
+                item.get('suggestion') or item.get('resolution') or item.get('solution') or action))
             severity = _visual_concept_plan_sanitize_text(item.get('severity') or 'medium')
         else:
             title = f'ملاحظة {index}'
@@ -5914,6 +5930,31 @@ def _visual_concept_plan_floor_range(text):
         return {'kind': 'ground', 'lo': 0, 'hi': 0, 'count': 1} if ground else None
     lo, hi = (0, numbers[-1]) if ground else (numbers[0], numbers[-1])
     return {'kind': 'range', 'lo': lo, 'hi': hi, 'count': max(1, hi - lo + 1)}
+
+
+_VISUAL_PLAN_FLOOR_LABEL_AR = {
+    'g': 'أرضي', 'gf': 'أرضي', 'ground': 'أرضي', 'ground floor': 'أرضي',
+    'm': 'ميزانين', 'mezzanine': 'ميزانين', 'mezz': 'ميزانين',
+    'roof': 'ملحق علوي', 'rooftop': 'ملحق علوي', 'r': 'ملحق علوي',
+    'podium': 'بوديوم', 'basement': 'بدروم', 'b': 'بدروم',
+}
+
+
+def _visual_concept_plan_floor_label(text):
+    """Display label for a floor cell: Latin tokens the model emits (G, M,
+    B1-B3, Roof) become the Arabic names the client actually reads. Ranges and
+    already-Arabic labels pass through."""
+    value = str(text or '').strip()
+    if not value:
+        return value
+    lowered = value.casefold()
+    if lowered in _VISUAL_PLAN_FLOOR_LABEL_AR:
+        return _VISUAL_PLAN_FLOOR_LABEL_AR[lowered]
+    basement = re.fullmatch(r'b\s*(\d+)(?:\s*-\s*b?\s*(\d+))?', lowered)
+    if basement:
+        start, end = basement.group(1), basement.group(2)
+        return f'بدروم {start}' + (f'-{end}' if end else '')
+    return value
 
 
 def _visual_concept_plan_component_key(name):
@@ -6024,18 +6065,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                         'detail': (f'«{row_a.get("component") or "مكوّن"}» مسجل على «{row_a.get("floor_range")}» '
                                    f'و«{row_b.get("floor_range")}» — ادمج الصفين أو عدّل النطاق'),
                         'result': 'متعارض', 'severity': 'high'})
-        by_range = {}
-        for parsed, row in entries:
-            by_range.setdefault(str(row.get('floor_range') or ''), []).append(row)
-        for range_label, sharing in sorted(by_range.items()):
-            names = list(dict.fromkeys(
-                _visual_concept_plan_sanitize_text(item.get('component')) or 'مكوّن'
-                for item in sharing))
-            if len(names) > 1:
-                checks.append({
-                    'item': f'تقاسم النطاق «{range_label}» — {building}',
-                    'detail': ' و'.join(names) + ' على النطاق نفسه — تأكد أن تقاسم الدور مقصود وليس ازدواجًا في المساحة',
-                    'result': 'يحتاج تأكيد', 'severity': 'low'})
+
     cap = _visual_concept_number(regulations.get('max_floors_height') or regulations.get('table_floors'))
     if cap:
         for row, parsed in parsed_rows:
@@ -6057,6 +6087,24 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     'item': 'مساحة الدور تتجاوز حد التغطية',
                     'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
                     'result': 'يحتاج تأكيد', 'severity': 'medium'})
+    far = _visual_concept_number(regulations.get('floor_area_ratio'))
+    if not far:
+        far_match = re.search(r'معامل[^\d]{0,15}(\d+(?:[.,]\d+)?)',
+                              str(regulations.get('zone_rules') or '') + ' ' +
+                              str(regulations.get('building_ratio') or ''))
+        far = _visual_concept_number(far_match.group(1)) if far_match else None
+    if land and far:
+        total_built = sum(
+            row.get('floor_area_sqm') * (parsed['count'] if parsed else 1)
+            for row, parsed in parsed_rows
+            if isinstance(row.get('floor_area_sqm'), (int, float)))
+        cap_area = land * far
+        if total_built > cap_area * 1.02:
+            checks.append({
+                'item': 'إجمالي المسطحات يتجاوز معامل البناء',
+                'detail': (f'مجموع مساحات الأدوار {total_built:g} م² يتجاوز حد المعامل '
+                           f'{cap_area:g} م² ({far:g} × أرض {land:g} م²) — قلّل مساحات الأدوار'),
+                'result': 'يحتاج تأكيد', 'severity': 'medium'})
     for total in totals:
         for delta_key, label in (('delta_units', 'الوحدات'), ('delta_area', 'المساحة')):
             delta = total.get(delta_key)
@@ -6082,8 +6130,9 @@ def _visual_concept_plan_normalize_distribution(raw, context, regulations):
         component = _visual_concept_plan_sanitize_text(
             item.get('component') or item.get('use') or item.get('name'))
         building = _visual_concept_plan_sanitize_text(item.get('building') or item.get('mass'))
-        floor_range = _visual_concept_plan_sanitize_text(
-            item.get('floor_range') or item.get('floors') or item.get('range'))
+        floor_range = _visual_concept_plan_floor_label(
+            _visual_concept_plan_sanitize_text(
+                item.get('floor_range') or item.get('floors') or item.get('range')))
         if not (component or building or floor_range):
             continue
         rows.append({
@@ -6572,7 +6621,10 @@ def api_visual_concept_plans_distribution():
         'أنت مخطط معماري مفاهيمي. وزّع مكونات المشروع المعتمدة على المباني والأدوار في جدول. '
         'أعد JSON فقط: {"rows":[{"building":"","floor_range":"","component":"","units_per_floor":0,'
         '"floor_area_sqm":0,"circulation":""}],"notes":[""]}. '
-        'صيغ floor_range: "G" للأرضي، "B1" أو "B1-B3" للبدروم، "5-12" لنطاق أدوار، "Roof" للسطح. '
+        'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
+        '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. '
+        'component هو اسم الاستخدام فقط (سكني، تجاري، خدمات، مواقف...) دون اسم الدور — '
+        'الدور موجود في floor_range. '
         'التزم بسقوف الارتفاع ونسبة التغطية والارتدادات الموثقة، ووزّع الوحدات بحيث يطابق إجماليها '
         'الوحدات والمساحات المطلوبة في بيانات المشروع، وراعِ العلاقات بين الاستخدامات (فصل مداخل '
         'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
@@ -6628,7 +6680,8 @@ def api_visual_concept_plans_distribution_check():
             'لا تكتب بنود «لم يوثّق» عمّا لا يمكن لجدول توزيع إثباته بطبيعته (أبعاد المواقف، '
             'عروض الممرات والمنحدرات، مسافات الإخلاء، تفاصيل الحريق) — فهي مرحلة تصميم لاحقة. '
             'كل بند يجب أن يكون إجراءً واضحًا قابلاً للتنفيذ على الجدول: «عدّل قيمة X في صف Y إلى Z» '
-            'أو «أضف مكوّنًا لـ…»، وبحد أقصى 8 بنود مرتبة بالأهمية. أعد JSON فقط: '
+            'أو «أضف مكوّنًا لـ…»، وبحد أقصى 8 بنود مرتبة بالأهمية. '
+            'سمّ الصفوف باسم المكوّن والدور («صف سكني في الدور أرضي»)، ولا تذكر معرّفات داخلية. أعد JSON فقط: '
             '{"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],"canProceed":true}. '
             'لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
         )
