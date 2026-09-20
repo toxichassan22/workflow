@@ -183,8 +183,9 @@
         ? '<div data-logo-progress class="market-logo-progress"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
         : '';
       const warning = (!hasLogo && !busy) ? String(tr.dataset.logoImportWarning || '').trim() : '';
+      const faviconHost = String(tr.dataset.logoFaviconHost || '').trim();
       const lowResNote = (hasLogo && !busy && tr.dataset.logoLowRes === '1')
-        ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">أيقونة الموقع الرسمي (دقة منخفضة)</div>'
+        ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">أيقونة ' + escapeHtml(faviconHost || 'الموقع الرسمي') + ' (دقة منخفضة)</div>'
         : '';
       const actions = hasLogo
         ? '<div class="market-logo-actions"><button type="button" class="btn ghost small" data-preview-competitor-logo>تكبير</button><button type="button" class="btn ghost small" data-remove-competitor-logo>حذف</button></div>'
@@ -228,6 +229,7 @@
       tr.dataset.conflictWarnings = JSON.stringify(row.conflict_warnings || row.conflictWarnings || []);
       tr.dataset.logoImportWarning = row.logo_import_warning || row.logoImportWarning || '';
       tr.dataset.logoLowRes = row.logo_low_res || row.logoLowRes ? '1' : '';
+      tr.dataset.logoFaviconHost = row.logo_favicon_host || row.logoFaviconHost || '';
       tr.dataset.notes = row.notes || row.note || '';
       tr.dataset.district = row.district || row.neighborhood || '';
       tr.dataset.distanceKm = row.distance_km || row.distanceKm || '';
@@ -398,6 +400,7 @@
       if (tr.dataset.sourcesUnverified) row.sources_unverified = true;
       if (tr.dataset.noSearchEvidence) row.no_search_evidence = true;
       if (tr.dataset.logoLowRes) row.logo_low_res = true;
+      if (tr.dataset.logoFaviconHost) row.logo_favicon_host = tr.dataset.logoFaviconHost;
       return row;
     }
 

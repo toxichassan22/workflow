@@ -20901,12 +20901,19 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         return
     needed = 1 if len(tokens) == 1 else 2
     matched = []
+    official = ''
     for page in _market_citation_pages(response):
-        haystack = market_study._fold_choice(f"{page.get('title') or ''} {page.get('url') or ''}")
-        if sum(1 for token in tokens if token in haystack) >= needed:
-            url = str(page.get('url') or '').strip()
+        url = str(page.get('url') or '').strip()
+        haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
+        hits = sum(1 for token in tokens if token in haystack)
+        if hits >= needed:
             if url:
                 matched.append(url)
+        # An official page carries the whole distinctive name — a partial match
+        # is evidence the project exists, not that the host belongs to it.
+        if url and hits >= len(tokens) and not official:
+            if not any(token in _normalized_web_host(url) for token in _AGGREGATOR_HOST_TOKENS):
+                official = url
     if not matched:
         # The search ran and no retrieved page mentions this name — flag the row
         # rather than silently trusting a memory-generated competitor.
@@ -20917,9 +20924,6 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         market_study.competitor_source_urls(row) + matched))[:6]
     if not str(row.get('source_url') or '').strip():
         row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
-    official = next((url for url in matched
-                     if not any(token in _normalized_web_host(url)
-                                for token in _AGGREGATOR_HOST_TOKENS)), '')
     if official and not str(row.get('logo_source_url') or '').strip():
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
@@ -23016,6 +23020,11 @@ def _official_logo_candidates(official_url):
         if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username
                 or not _same_official_host(candidate, official_url)):
             continue
+        # Ad-license stamps (رواج / REGA) ship inside listing pages as images on
+        # the same host — never a competitor's own logo.
+        lowered = candidate.casefold()
+        if any(token in lowered for token in ('ruwaj', 'rawaj', 'rowaj', '/rwaj', 'rega')):
+            continue
         key = candidate.casefold()
         if key in seen:
             continue
@@ -23037,6 +23046,8 @@ def _safe_download_competitor_logo(logo_url, official_url):
         return None, None, None, 'رابط الشعار الرسمي غير صالح'
     if not _same_official_host(logo_url, official_url):
         return None, None, None, 'شعار المنافس خارج الموقع الرسمي'
+    if any(token in str(logo_url).casefold() for token in ('ruwaj', 'rawaj', 'rowaj', '/rwaj', 'rega')):
+        return None, None, None, 'شعار منصة إعلانات وليس شعار المنافس'
     addresses = _public_host_addresses(parsed.hostname)
     if not addresses or not _public_host_addresses(official.hostname):
         return None, None, None, 'عنوان موقع الشعار غير مسموح'
@@ -23139,21 +23150,27 @@ def _download_official_favicon(official_url):
 # their og:image is the portal's own logo, so they are excluded from the
 # citation-based official-page match.
 _AGGREGATOR_HOST_TOKENS = (
-    'sakani.', 'ejar.', 'rega.gov', 'aqar.', 'aqaar.', 'wasalt.', 'bayut.',
+    'sakani.', 'ejar.', 'rega.gov', 'ruwaj', 'rawaj', 'rowaj',
+    'aqar.', 'aqaar.', 'aqarmap', 'wasalt.', 'bayut.',
     'dubizzle', 'propertyfinder', 'opensooq', 'haraj', 'lamudi', 'exxl',
+    'estater', 'muqawil', 'dealmap', 'eqqar',
     'wikipedia', 'twitter.', 'x.com', 'facebook.', 'instagram.', 'linkedin.',
     'youtube.', 'tiktok.', 'google.', 'bing.', 'maps.',
 )
 
 
 def _official_citation_pages(pages, name):
-    """Citation pages that look like the competitor's own site: the title or
-    URL mentions its distinctive name tokens and the host is not an
-    aggregator, index, or social platform."""
+    """Citation pages that look like the competitor's own site.
+
+    A page that merely *mentions* the project is not its official page — a
+    district article on a developer's site would otherwise hand that
+    developer's favicon to an unrelated competitor. The page must carry ALL
+    distinctive name tokens and live on a non-aggregator host.
+    """
     tokens = _competitor_name_tokens(name)
     if not tokens:
         return []
-    needed = 1 if len(tokens) == 1 else 2
+    needed = len(tokens)
     matches = []
     for page in pages or []:
         url = str(page.get('url') or '').strip()
@@ -23252,12 +23269,35 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
             row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')
         return
     parsed, _parse_error = _parse_market_model_json(response)
-    citations = _market_citation_urls(response)
+    discovery_pages = _market_citation_pages(response)
     results = parsed.get('results') if isinstance(parsed, dict) else None
     if not isinstance(results, list):
         results = [parsed] if isinstance(parsed, dict) else []
     by_id = {str(row.get('id') or ''): row for row in batch}
     by_name = {str(row.get('name') or '').strip().casefold(): row for row in batch}
+
+    def _trusted_official_hosts(name):
+        """Hosts whose retrieved pages carry the competitor's whole name.
+
+        The model's claimed official_url is only as good as the retrieval
+        behind it: accept a host when a real retrieved page on it mentions all
+        distinctive name tokens — otherwise a district article on a developer
+        site would brand an unrelated project with that developer's logo.
+        """
+        tokens = _competitor_name_tokens(name)
+        if not tokens:
+            return set()
+        hosts = set()
+        for page in discovery_pages:
+            page_url = str(page.get('url') or '')
+            haystack = market_study._fold_choice(f"{page.get('title') or ''} {page_url}")
+            if sum(1 for token in tokens if token in haystack) < len(tokens):
+                continue
+            host = _normalized_web_host(page_url)
+            if host and not any(token in host for token in _AGGREGATOR_HOST_TOKENS):
+                hosts.add(host)
+        return hosts
+
     for item in results:
         if not isinstance(item, dict):
             continue
@@ -23270,7 +23310,10 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
             item.get('official_url') or item.get('official_website') or item.get('website')
             or item.get('logo_source_url') or item.get('source_url') or item.get('url') or ''
         ).strip()
-        if not official or not any(_related_official_hosts(official, c) for c in citations):
+        official_host = _normalized_web_host(official)
+        if not official_host or not any(
+                _related_official_hosts(f'https://{official_host}', f'https://{host}')
+                for host in _trusted_official_hosts(row.get('name'))):
             continue
         row['logo_url'] = str(item.get('logo_url') or '').strip()
         row['logo_source_url'] = official
@@ -23279,7 +23322,6 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     # retrieved pages. When the reply is malformed (Gemini emits
     # MALFORMED_FUNCTION_CALL on multi-lookup prompts) or misses a row, match
     # those pages to each competitor's name directly.
-    discovery_pages = _market_citation_pages(response)
     for row in batch:
         if row.get('logo_official_verified'):
             continue
@@ -23358,6 +23400,7 @@ def _store_imported_competitor_logo(row, draft_id=None):
                         f'&fallback_opts=TYPE,SIZE,URL&url=http://{_normalized_web_host(official_url)}&size=128')
             row['logo_url'] = logo_url
             row['logo_low_res'] = True
+            row['logo_favicon_host'] = _normalized_web_host(official_url)
             error = ''
     if error or not content:
         row['logo_import_warning'] = error or 'تعذر استيراد شعار المنافس'
