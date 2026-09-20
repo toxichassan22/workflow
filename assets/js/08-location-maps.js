@@ -574,6 +574,7 @@
       if (input) input.value = tenantRoadEditSelectedIndex >= 0
         ? tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || ''
         : tenantRoadEditDraft?.newName || '';
+      renderTenantMapPolygonOverlay();
     }
 
     function updateAccessRoadDraftName(value) {
@@ -624,6 +625,7 @@
       if (select) select.value = String(index);
       if (input) input.value = tenantRoadEditDraft.rows[index].name;
       pushRoadEditHistory();
+      highlightMapPlacePair('road', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
       const move = moveEvent => {
         const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
@@ -635,6 +637,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', stop);
         window.removeEventListener('pointercancel', stop);
+        highlightMapPlacePair('road', name, false, true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', stop);
@@ -861,6 +864,7 @@
       if (!tenantCatchmentEditMode || !tenantCatchmentEditDraft) return;
       pushCatchmentEditHistory();
       updateTenantCatchmentControls();
+      highlightMapPlacePair('catchment', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
       const move = moveEvent => {
         const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
@@ -872,6 +876,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', stop);
         window.removeEventListener('pointercancel', stop);
+        highlightMapPlacePair('catchment', name, false, true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', stop);
@@ -886,6 +891,7 @@
       if (!item) return;
       pushCatchmentEditHistory();
       updateTenantCatchmentControls();
+      highlightMapPlacePair('catchment', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
       const startLat = Number(item.lat);
       const startLng = Number(item.lng);
@@ -907,6 +913,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', stop);
         window.removeEventListener('pointercancel', stop);
+        highlightMapPlacePair('catchment', name, false, true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', stop);
@@ -999,6 +1006,7 @@
       if (!tenantLandmarksEditMode || !tenantLandmarksEditDraft) return;
       pushLandmarksEditHistory();
       updateTenantLandmarksControls();
+      highlightMapPlacePair('landmark', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
       const move = moveEvent => {
         const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
@@ -1010,6 +1018,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', stop);
         window.removeEventListener('pointercancel', stop);
+        highlightMapPlacePair('landmark', name, false, true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', stop);
@@ -1024,6 +1033,7 @@
       if (!item) return;
       pushLandmarksEditHistory();
       updateTenantLandmarksControls();
+      highlightMapPlacePair('landmark', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
       const startLat = Number(item.lat);
       const startLng = Number(item.lng);
@@ -1045,6 +1055,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', stop);
         window.removeEventListener('pointercancel', stop);
+        highlightMapPlacePair('landmark', name, false, true);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', stop);
@@ -1420,11 +1431,6 @@
                 renderLocationWorkflowState();
               }
             });
-            input.addEventListener('blur', () => {
-              geocodeTenantLocationLink(input, latInput, lngInput, false).catch(error => {
-                console.warn('[LOCATION LINK] geocoding failed', error);
-              });
-            });
           }
           if (f.fieldKey === 'location_lat') { latInput = input; locationSection = sectionDiv; }
           if (f.fieldKey === 'location_lng') { lngInput = input; locationSection = sectionDiv; }
@@ -1514,7 +1520,7 @@
             checkOther();
           }
 
-          // Add geocode button and auto-geocode on blur
+          // Geocoding stays explicit: the button is the only trigger for the pasted link.
           if (f.fieldKey === 'location_address' && addressInput && sectionKey === 'location') {
             const btn = document.createElement('button');
             btn.type = 'button';

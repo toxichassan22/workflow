@@ -1135,6 +1135,30 @@
       if (input) input.value = value;
     }
 
+    function mapPlaceLinkClass(prefix, name) {
+      return mapPlaceLinked && mapPlaceLinked.prefix === prefix && mapPlaceLinked.name === name ? ' map-place-linked' : '';
+    }
+
+    function highlightMapPlacePair(prefix, name, on, pinned = false) {
+      if (on) {
+        if (mapPlaceLinked && mapPlaceLinked.pinned && !pinned) return;
+        mapPlaceLinked = { prefix: prefix, name: name, pinned: !!pinned };
+      } else if (pinned || (mapPlaceLinked && !mapPlaceLinked.pinned)) {
+        mapPlaceLinked = null;
+      }
+      const roots = [document.getElementById('mapLabelOverlay'), document.getElementById('mapPolygonOverlay')];
+      roots.forEach(root => {
+        if (!root) return;
+        root.querySelectorAll('.map-place-linked').forEach(el => el.classList.remove('map-place-linked'));
+        if (!mapPlaceLinked) return;
+        const esc = (window.CSS && CSS.escape) ? CSS.escape(mapPlaceLinked.name) : String(mapPlaceLinked.name).replace(/["\\]/g, '\\$&');
+        ['label', 'marker', 'link', 'path'].forEach(kind => {
+          root.querySelectorAll('[data-' + mapPlaceLinked.prefix + '-' + kind + '="' + esc + '"]')
+            .forEach(el => el.classList.add('map-place-linked'));
+        });
+      });
+    }
+
     function renderAccessRoadLabels(roadPaths, toPoint, visible) {
       const layer = document.getElementById('mapLabelOverlay');
       if (!layer) return;
@@ -1154,8 +1178,11 @@
         const deleteAction = tenantRoadEditMode
           ? '<button type="button" class="map-road-label-delete" onpointerdown="event.stopPropagation()" onclick="deleteAccessRoadFromDraft(event,decodeURIComponent(\'' + encodedName + '\'))">حذف</button>'
           : '';
-        return '<div class="map-road-label' + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px"' +
-          (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(path.name) + deleteAction + '</div>';
+        const hoverAttrs = tenantRoadEditMode
+          ? ' onmouseenter="highlightMapPlacePair(\'road\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'road\',decodeURIComponent(\'' + encodedName + '\'),false)"'
+          : '';
+        return '<div class="map-road-label' + mapPlaceLinkClass('road', path.name) + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px"' +
+          (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + escapeHtml(path.name) + deleteAction + '</div>';
       }).join('');
     }
 
@@ -1172,10 +1199,15 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
         const encodedName = encodeURIComponent(String(item.name)).replace(/'/g, '%27');
         const index = items.indexOf(item) + 1;
-        const marker = '<div class="map-place-marker' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
-          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + index + '</div>';
-        const label = '<div class="map-place-label' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
-          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(item.name) + '</div>';
+        const linked = mapPlaceLinkClass('catchment', item.name);
+        const hoverAttrs = tenantCatchmentEditMode
+          ? ' onmouseenter="highlightMapPlacePair(\'catchment\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'catchment\',decodeURIComponent(\'' + encodedName + '\'),false)"'
+          : '';
+        const numChip = tenantCatchmentEditMode ? '<span class="map-place-label-num">' + index + '</span>' : '';
+        const marker = '<div class="map-place-marker' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
+          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + index + '</div>';
+        const label = '<div class="map-place-label' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
         return marker + label;
       }).join('');
     }
@@ -1192,10 +1224,15 @@
         const y = customPoint?.[1] ?? markerPoint[1] + 5;
         if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
         const encodedName = encodeURIComponent(String(item.name)).replace(/'/g, '%27');
-        const marker = '<div class="map-place-marker' + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
-          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + (index + 1) + '</div>';
-        const label = '<div class="map-place-label' + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
-          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(item.name) + '</div>';
+        const linked = mapPlaceLinkClass('landmark', item.name);
+        const hoverAttrs = tenantLandmarksEditMode
+          ? ' onmouseenter="highlightMapPlacePair(\'landmark\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'landmark\',decodeURIComponent(\'' + encodedName + '\'),false)"'
+          : '';
+        const numChip = tenantLandmarksEditMode ? '<span class="map-place-label-num">' + (index + 1) + '</span>' : '';
+        const marker = '<div class="map-place-marker' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
+          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + (index + 1) + '</div>';
+        const label = '<div class="map-place-label' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
         return marker + label;
       }).join('');
     }
@@ -1251,18 +1288,37 @@
         pinMarkup = '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="2.2" fill="rgba(107,28,35,.24)" stroke="#fff" stroke-width="0.7"></circle>' +
           '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="1.25" fill="#6B1C23" stroke="#6B1C23" stroke-width="0.35"><title>موقع المبنى</title></circle>';
       }
+      const selectedRoadName = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
+        ? String(tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || '')
+        : (tenantRoadDrawingTarget ? String(tenantRoadDrawingTarget.name || '') : '');
       const roadMarkup = showRoads ? roadPaths.map(path => {
         const roadPoints = (path.points || []).map(toPoint);
         if (roadPoints.length < 2) return '';
         const label = String(path.name || '');
+        const pathClass = 'map-road-path' +
+          (selectedRoadName && accessRoadNameKey(label) === accessRoadNameKey(selectedRoadName) ? ' map-road-path-selected' : '') +
+          mapPlaceLinkClass('road', label);
         return '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8"></polyline>' +
-          '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>';
+          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>';
       }).join('') : '';
+      const linkLinePairs = (showLandmarks && tenantLandmarksEditMode)
+        ? landmarkItems.map(item => ['landmark', item])
+        : (showCatchment && tenantCatchmentEditMode)
+          ? catchmentItems.map(item => ['catchment', item])
+          : [];
+      const linkLineMarkup = linkLinePairs.map(pair => {
+        const item = pair[1];
+        if (!item?.name || !Array.isArray(item.label_point)) return '';
+        const [mx, my] = toPoint([item.lat, item.lng]).split(',').map(Number);
+        const [lx, ly] = toPoint(item.label_point).split(',').map(Number);
+        if (![mx, my, lx, ly].every(Number.isFinite) || Math.abs(lx - mx) + Math.abs(ly - my) < 0.4) return '';
+        return '<line class="map-place-link-line' + mapPlaceLinkClass(pair[0], item.name) + '" data-' + pair[0] + '-link="' + escapeHtml(item.name) + '" x1="' + mx.toFixed(3) + '%" y1="' + my.toFixed(3) + '%" x2="' + lx.toFixed(3) + '%" y2="' + ly.toFixed(3) + '%"></line>';
+      }).join('');
       const roadPointMarkup = tenantRoadDrawingTarget ? tenantRoadDrawingTarget.points.map(point => {
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
       }).join('') : '';
-      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + pinMarkup;
+      overlay.innerHTML = boundaryMarkup + roadMarkup + linkLineMarkup + roadPointMarkup + pinMarkup;
       if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);
       else if (showCatchment) renderCatchmentLabels(catchmentItems, toPoint);
       else if (showLandmarks) renderLandmarksLabels(landmarkItems, toPoint);

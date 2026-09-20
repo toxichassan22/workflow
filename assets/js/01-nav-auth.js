@@ -201,6 +201,7 @@
     let tenantLandmarksEditDraft = null;
     let tenantLandmarksEditHistory = [];
     let tenantLandmarkPlacementTarget = null;
+    let mapPlaceLinked = null;
     let tenantNearbyLandmarks = [];
     let tenantSelectedMapType = 'overview';
 
@@ -221,18 +222,21 @@
       tenantRoadEditDraft = null;
       tenantRoadEditHistory = [];
       tenantRoadEditSelectedIndex = -1;
+      mapPlaceLinked = null;
     }
 
     function resetTenantCatchmentMode() {
       tenantCatchmentEditMode = false;
       tenantCatchmentEditDraft = null;
       tenantCatchmentEditHistory = [];
+      mapPlaceLinked = null;
     }
 
     function resetTenantLandmarksEditMode() {
       tenantLandmarksEditMode = false;
       tenantLandmarksEditDraft = null;
       tenantLandmarksEditHistory = [];
+      mapPlaceLinked = null;
     }
 
     function invalidateTenantMapAssets() {

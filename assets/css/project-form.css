@@ -1307,6 +1307,52 @@
       cursor: move;
     }
 
+    .map-place-label-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 3px;
+      margin-inline-end: 5px;
+      border-radius: 50%;
+      background: #d4a359;
+      color: #254b66;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1;
+      vertical-align: middle;
+    }
+
+    .map-place-label.map-place-linked,
+    .map-road-label.map-place-linked {
+      border-color: #ffb020;
+      box-shadow: 0 0 0 2px rgba(255, 176, 32, .55), 0 1px 3px rgba(0, 0, 0, .18);
+    }
+
+    .map-place-marker.map-place-linked {
+      border-color: #ffb020;
+      box-shadow: 0 0 0 3px rgba(255, 176, 32, .55), 0 2px 5px rgba(0, 0, 0, .35);
+    }
+
+    .map-place-link-line {
+      stroke: #254b66;
+      stroke-width: .35;
+      stroke-dasharray: 1 .8;
+      opacity: .8;
+    }
+
+    .map-place-link-line.map-place-linked {
+      stroke: #ffb020;
+      opacity: 1;
+    }
+
+    polyline.map-road-path-selected,
+    polyline.map-place-linked {
+      stroke: #ffb020;
+      stroke-width: 1.6;
+    }
+
     .map-road-label-delete {
       position: absolute;
       top: -12px;

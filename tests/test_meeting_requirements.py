@@ -3551,6 +3551,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("btn.onclick = () => analyzeTenantSite();", index_source)
         self.assertNotIn("addressInput.addEventListener('paste'", index_source)
         self.assertNotIn("addressInput.addEventListener('blur'", index_source)
+        address_block = index_source.split("if (f.fieldKey === 'location_address') {", 1)[1].split("if (f.fieldKey === 'location_lat')", 1)[0]
+        self.assertNotIn("addEventListener('paste'", address_block)
+        self.assertNotIn("addEventListener('blur'", address_block)
+        self.assertNotIn('geocodeTenantLocationLink(', address_block)
 
     def test_financial_visibility_has_native_hidden_guard_for_optional_sections(self):
         index_source = read_frontend_text()
