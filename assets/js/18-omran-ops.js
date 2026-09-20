@@ -408,7 +408,7 @@
             '</div>'
           : '';
         return '<div class="tenant-presentation-card">' +
-          '<div><h3><span>' + omEscape(r.package_name) + '</span> — ' + (r.price_sar ? r.price_sar + ' <span>ريال</span>' : (r.amount_usd + ' <span>دولار</span>')) + '</h3>' +
+          '<div><h3><span>' + omEscape(r.package_name) + '</span> — ' + ((r.price_sar != null ? r.price_sar : (r.amount_sar != null ? r.amount_sar : 0)) + ' <span>ريال</span>') + '</h3>' +
           '<div class="meta">' + tenantInfo + '<span>' + omStatus(r.status) + '</span> | <span>' + omEscape(date) + '</span>' + ref + inv + '</div>' +
           actions +
           '</div></div>';
@@ -430,7 +430,7 @@
       }
       select.innerHTML = omRechargePackages.map(p =>
         '<option value="' + omEscape(p.id) + '">' + omEscape(p.name) +
-        ' (' + (p.credit_usd || 0) + ' <span>دولار</span>' +
+        ' (' + (p.credit_sar != null ? p.credit_sar : (p.credit_usd || 0)) + ' <span>ريال</span>' +
         (p.price_sar ? ' — ' + p.price_sar + ' <span>ريال</span>' : '') + ')</option>'
       ).join('');
       omShowPackageInfo();
@@ -726,13 +726,13 @@
         return;
       }
       box.innerHTML = omAdminPackages.map(p => {
-        const cost = (p.est_cost_usd != null)
-          ? ' | <span>التكلفة التقديرية: ' + omEscape(String(p.est_cost_usd)) + ' <span>دولار</span></span>' : '';
+        const cost = (p.est_cost_sar != null)
+          ? ' | <span>التكلفة التقديرية: ' + omEscape(String(p.est_cost_sar)) + ' <span>ريال</span></span>' : '';
         const margin = (p.est_margin_sar != null)
           ? ' | <span>الربح التقديري: ' + omEscape(String(p.est_margin_sar)) + ' <span>ريال</span></span>' : '';
         return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + omEscape(p.name) + '</h3>' +
           '<div class="meta"><span>' + (p.price_sar != null ? omEscape(String(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
-          ' | <span>' + omEscape(String(p.credit_usd || 0)) + ' <span>دولار رصيد</span></span>' + cost + margin +
+          ' | <span>' + omEscape(String(p.credit_sar != null ? p.credit_sar : (p.credit_usd || 0))) + ' <span>ريال رصيد</span></span>' + cost + margin +
           ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' + omEscape(p.id) + '\')">تعديل</button>' +
@@ -750,7 +750,7 @@
       omEditingPackageId = packageId;
       document.getElementById('adminPackageName').value = p.name || '';
       document.getElementById('adminPackagePrice').value = (p.price_sar != null ? p.price_sar : '');
-      document.getElementById('adminPackageCredit').value = (p.credit_usd != null ? p.credit_usd : '');
+      document.getElementById('adminPackageCredit').value = (p.credit_sar != null ? p.credit_sar : '');
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
       const cancel = document.getElementById('adminPackageCancel');
@@ -774,7 +774,7 @@
       const payload = {
         name: document.getElementById('adminPackageName').value.trim(),
         priceSar: Number(document.getElementById('adminPackagePrice').value),
-        creditUsd: Number(document.getElementById('adminPackageCredit').value)
+        creditSar: Number(document.getElementById('adminPackageCredit').value)
       };
       const res = omEditingPackageId
         ? await api('PUT', '/api/admin/packages/' + omEditingPackageId, payload).catch(e => e)

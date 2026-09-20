@@ -174,6 +174,78 @@ class PackagesFxTests(unittest.TestCase):
         with self.app.app_context():
             self.assertEqual(db.usd_to_sar(10.0, 3.5), 35.0)
             self.assertEqual(db.usd_to_sar(0.374, 3.75), 1.4)
+            self.assertEqual(db.sar_to_usd(35.0, 3.5), 10.0)
+            self.assertEqual(db.sar_to_usd(37.5, 3.75), 10.0)
+
+    def test_package_credit_keyed_in_sar(self):
+        client = self.app.test_client()
+        client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                   json={'mode': 'manual', 'rate': 2.5})
+        created = client.post(
+            '/api/admin/packages', headers=self._admin_headers(),
+            json={'name': 'باقة ريال', 'creditSar': 100, 'priceSar': 100})
+        self.assertEqual(created.status_code, 201, created.get_json())
+        package = created.get_json()['package']
+        self.assertAlmostEqual(package['credit_usd'], 40.0)
+
+        updated = client.put(
+            f"/api/admin/packages/{package['id']}", headers=self._admin_headers(),
+            json={'creditSar': 200})
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertAlmostEqual(updated.get_json()['package']['credit_usd'], 80.0)
+
+        listed = client.get('/api/admin/packages', headers=self._admin_headers()).get_json()
+        row = next(p for p in listed['packages'] if p['id'] == package['id'])
+        self.assertAlmostEqual(row['credit_sar'], 200.0)
+
+        # The client catalog feed exposes the riyal figure as well.
+        company_token = auth.create_token(
+            self.tenant_id, 'pack@example.test', user_id=None,
+            user_name='Pack Admin', user_role='company_admin')
+        feed = client.get('/api/billing/packages',
+                          headers={'Authorization': f'Bearer {company_token}'}).get_json()
+        feed_row = next(p for p in feed['packages'] if p['id'] == package['id'])
+        self.assertAlmostEqual(feed_row['credit_sar'], 200.0)
+
+    def test_tenant_credit_balance_keyed_in_sar(self):
+        client = self.app.test_client()
+        client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                   json={'mode': 'manual', 'rate': 2.5})
+        saved = client.put(
+            f'/api/admin/tenants/{self.tenant_id}', headers=self._admin_headers(),
+            json={'creditBalanceSar': 250})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertAlmostEqual(saved.get_json()['tenant']['creditBalanceSar'], 250.0)
+        with self.app.app_context():
+            tenant = db.get_tenant_by_id(self.tenant_id)
+        self.assertAlmostEqual(float(tenant['credit_balance']), 100.0)
+
+    def test_usage_totals_carry_sar(self):
+        client = self.app.test_client()
+        client.put('/api/admin/fx-rate', headers=self._admin_headers(),
+                   json={'mode': 'manual', 'rate': 4.0})
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_id, 'model-x', flow='slide', total_tokens=10,
+                cost_usd=1.0, draft_id='draft-sar')
+        company_token = auth.create_token(
+            self.tenant_id, 'pack@example.test', user_id=None,
+            user_name='Pack Admin', user_role='company_admin')
+        body = client.get(
+            '/api/usage-totals?draftIds=draft-sar',
+            headers={'Authorization': f'Bearer {company_token}'}).get_json()
+        project = body['projects']['draft-sar']
+        self.assertAlmostEqual(project['cost_usd'], 1.0)
+        self.assertAlmostEqual(project['cost_sar'], 4.0)
+
+    def test_frontend_has_no_dollar_strings(self):
+        parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+        for name in ('assets/css/base.css', 'assets/css/project-form.css'):
+            parts.append((ROOT / name).read_text(encoding='utf-8'))
+        for name in sorted((ROOT / 'assets' / 'js').glob('*.js')):
+            parts.append(name.read_text(encoding='utf-8'))
+        frontend = '\n'.join(parts)
+        self.assertNotIn('دولار', frontend)
 
     # ── Forced reset ───────────────────────────────────────────────────
 

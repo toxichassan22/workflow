@@ -1025,7 +1025,7 @@ def _maybe_notify_low_balance(tenant_id):
             return
         _notify_tenant_billing(
             tenant_id, 'رصيد المحفظة منخفض',
-            f'الرصيد الحالي ${float(balance):.2f}',
+            f'الرصيد الحالي {db.usd_to_sar(balance):.2f} ريال',
             entity_type='wallet', entity_id='low-balance')
     except Exception as exc:
         print(f'[NOTIFY] low-balance check failed for {tenant_id}: {exc}')
@@ -1039,7 +1039,7 @@ def _on_balance_changed(tenant_id):
 db.BALANCE_CHANGE_HOOK = _on_balance_changed
 
 
-def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
+def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, usage_ctx=None):
     gate = _tenant_key_gate(usage_ctx)
     if gate is not None:
         return {"error": gate}
@@ -1080,6 +1080,8 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         payload["tools"] = tools
     if plugins:
         payload["plugins"] = plugins
+    if max_tool_calls:
+        payload["max_tool_calls"] = max_tool_calls
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
@@ -1925,6 +1927,8 @@ def _require_billing_balance(flow_key):
             'error_code': 'INSUFFICIENT_BALANCE',
             'required_usd': round(estimate, 2),
             'available_usd': round(balance, 2),
+            'required_sar': db.usd_to_sar(estimate),
+            'available_sar': db.usd_to_sar(balance),
         }), 402
     return None
 
@@ -2004,6 +2008,9 @@ def api_ai_usage():
                 'cost_usd': ai_cost + maps_cost,
                 'ai_cost_usd': ai_cost,
                 'maps_cost_usd': maps_cost,
+                'cost_sar': db.usd_to_sar(ai_cost + maps_cost),
+                'ai_cost_sar': db.usd_to_sar(ai_cost),
+                'maps_cost_sar': db.usd_to_sar(maps_cost),
             },
             'billing': billing_info,
             'reconcile': reconcile_status,
@@ -2114,6 +2121,7 @@ def api_billing_ledger():
         return jsonify({
             'success': True,
             'balance_usd': db.get_tenant_balance(g.tenant_id),
+            'balance_sar': db.usd_to_sar(db.get_tenant_balance(g.tenant_id)),
             'multiplier': db.get_billing_multiplier(),
             'enforced': db.billing_enforcement_enabled(),
             'unbilled': db.get_unbilled_usage(g.tenant_id),
@@ -2147,6 +2155,8 @@ def api_billing_checkout():
             'error': 'الرصيد غير كافٍ لإتمام الفوترة. اشحن رصيد الشركة ثم أعد المحاولة',
             'error_code': 'INSUFFICIENT_BALANCE',
             'required_usd': round(short.required_usd, 2),
+            'required_sar': db.usd_to_sar(short.required_usd),
+            'available_sar': db.usd_to_sar(getattr(short, 'available_usd', None)),
             'available_usd': round(short.available_usd, 2),
         }), 402
     except Exception as exc:
@@ -2154,17 +2164,20 @@ def api_billing_checkout():
         return jsonify({'success': False, 'error': 'تعذر إتمام الفوترة'}), 500
     if not result.get('billed'):
         return jsonify({'success': True, 'billed': False, 'reason': result.get('reason'),
-                        'balance_usd': db.get_tenant_balance(g.tenant_id)})
+                        'balance_usd': db.get_tenant_balance(g.tenant_id),
+                        'balance_sar': db.usd_to_sar(db.get_tenant_balance(g.tenant_id))})
     try:
         entry = result.get('entry') or {}
         _notify_tenant_billing(
             g.tenant_id, 'خُصم من المحفظة',
-            f'${float(entry.get("amount_usd") or 0):.2f} — الرصيد الحالي ${float(result.get("balance_usd") or 0):.2f}',
+            f'{db.usd_to_sar(entry.get("amount_usd")):.2f} ريال — الرصيد الحالي '
+            f'{db.usd_to_sar(result.get("balance_usd")):.2f} ريال',
             entity_type='wallet', entity_id='debit:' + str(entry.get('id') or ''))
     except Exception:
         pass
     return jsonify({'success': True, 'billed': True, 'entry': result.get('entry'),
-                    'balance_usd': result.get('balance_usd')})
+                    'balance_usd': result.get('balance_usd'),
+                    'balance_sar': db.usd_to_sar(result.get('balance_usd'))})
 
 
 @app.route('/api/admin/billing/reset-all', methods=['POST'])
@@ -2213,8 +2226,13 @@ def api_billing_topup():
         return jsonify({'success': False,
                         'error': _OMRAN_ERROR_MESSAGES_AR['platform_tenant_recharge_forbidden'],
                         'error_code': 'platform_tenant_recharge_forbidden'}), 403
+    # The wallet books in USD internally, but the desk keys amounts in riyals —
+    # a SAR figure is converted at the active rate before it lands.
     try:
-        amount = float(data.get('amount_usd') or data.get('amount') or 0.0)
+        amount_sar = data.get('amount_sar', data.get('amountSar'))
+        amount = db.sar_to_usd(amount_sar) \
+            if amount_sar is not None \
+            else float(data.get('amount_usd') or data.get('amount') or 0.0)
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': 'مبلغ الشحن غير صالح'}), 400
     if amount <= 0:
@@ -2235,12 +2253,15 @@ def api_billing_topup():
             entry = result.get('entry') or {}
             _notify_tenant_billing(
                 tenant_id, 'أُضيف رصيد إلى المحفظة',
-                f'${amount:.2f} — الرصيد الحالي ${float(result.get("balance_usd") or 0):.2f}',
+                f'{db.usd_to_sar(amount):.2f} ريال — الرصيد الحالي '
+                f'{db.usd_to_sar(result.get("balance_usd")):.2f} ريال',
                 entity_type='wallet', entity_id='topup:' + str(entry.get('id') or ''))
         except Exception:
             pass
     return jsonify({'success': True, 'credited': result.get('credited'),
-                    'entry': result.get('entry'), 'balance_usd': result.get('balance_usd')})
+                    'entry': result.get('entry'), 'balance_usd': result.get('balance_usd'),
+                    'balance_sar': db.usd_to_sar(result.get('balance_usd')),
+                    'amount_sar': db.usd_to_sar(amount)})
 
 
 def extract_chat_content(response, label="GLM"):
@@ -11223,6 +11244,20 @@ def api_slide_plan():
         return jsonify({'success': False, 'error': 'قسم المشروع غير صالح'}), 400
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
+    if section_target:
+        # A section-scoped plan is bound to that section's own approval — the
+        # all-sections gate belongs to the full-file generation only. Only a
+        # draft the request actually names can be checked; a draftless call
+        # (e.g. replanning slides of a saved presentation) has nothing to
+        # verify against and passes.
+        section_draft_id = (project_data.get('draftId') or project_data.get('draft_id')
+                            or data.get('draftId'))
+        section_draft = (db.get_project_draft_by_id(g.tenant_id, section_draft_id)
+                         if section_draft_id else None)
+        if section_draft and (section_draft.get('section_statuses') or {}).get(project_section_key) != 'approved':
+            return jsonify({'success': False,
+                            'error': 'توليد هذا القسم يتطلب اعتماده أولًا',
+                            'error_code': 'section_not_approved'}), 409
 
     target_section_keys = section_target[0] if section_target else None
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
@@ -12195,7 +12230,7 @@ def _generation_sent_input_matches(key, sent_value, stored_value):
     return _generation_sent_value_matches(sent_value, stored_value)
 
 
-def _generation_inputs_guard(project_data):
+def _generation_inputs_guard(project_data, section_key=''):
     """t14-04/t15-01: draft-scoped generation stays inside its approval gate.
 
     Returns None when the run is clean. Once projectData names a draft, a live
@@ -12205,6 +12240,11 @@ def _generation_inputs_guard(project_data):
     must agree with that stored draft — slimmed keys legitimately absent from
     the payload are skipped, reshaped fields are compared normalized. A lookup
     failure fails closed rather than letting generation slip the gate.
+
+    A ``section_key`` scopes the run to one project section: the approval must
+    then carry the same scope (a full-file approval does not cover a section
+    run and vice versa) and that section — not every section — must be
+    approved on the draft.
     """
     draft_id = project_data.get('draftId') or project_data.get('draft_id')
     if not draft_id:
@@ -12214,24 +12254,46 @@ def _generation_inputs_guard(project_data):
         return None
     if not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'المشروع غير موجود'}), 404
+    section_key = str(section_key or '').strip() or None
     try:
-        approval = db.get_db().execute(
-            "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
-            "AND status = 'approved' ORDER BY decided_at DESC LIMIT 1",
-            (g.tenant_id, draft_id)).fetchone()
+        if section_key:
+            approval = db.get_db().execute(
+                "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+                "AND status = 'approved' AND section_key = ? ORDER BY decided_at DESC LIMIT 1",
+                (g.tenant_id, draft_id, section_key)).fetchone()
+        else:
+            approval = db.get_db().execute(
+                "SELECT * FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+                "AND status = 'approved' AND (section_key IS NULL OR section_key = '') "
+                "ORDER BY decided_at DESC LIMIT 1",
+                (g.tenant_id, draft_id)).fetchone()
     except Exception:
         app.logger.warning('generation gate lookup failed for draft %s', draft_id, exc_info=True)
         return jsonify({'error': 'تعذر التحقق من اعتماد التوليد — أعد المحاولة',
                         'error_code': 'generation_gate_unverified'}), 503
+    if section_key and (draft.get('section_statuses') or {}).get(section_key) != 'approved':
+        return jsonify({'error': 'توليد هذا القسم يتطلب اعتماده أولًا',
+                        'error_code': 'section_not_approved'}), 409
     if not approval:
         return jsonify({'error': 'توليد هذا المشروع يتطلب اعتماد توليد ساريًا',
                         'error_code': 'generation_not_approved'}), 409
     snapshot = db._json_object(approval['input_snapshot'] if 'input_snapshot' in approval.keys() else None)
     stored_data = draft.get('draft_data') or {}
-    wanted = snapshot.get('draft_hash')
-    if wanted and db.draft_generation_input_hash(stored_data) != wanted:
-        return jsonify({'error': 'مدخلات المشروع تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
-                        'error_code': 'inputs_changed'}), 409
+    if section_key:
+        # A section approval froze that section's inputs only — drift anywhere
+        # else is none of this run's business.
+        wanted = snapshot.get('section_hash')
+        if wanted:
+            live_hash = db.section_snapshot_hash(_section_snapshot_slice(
+                stored_data, section_key, _draft_field_section_map(g.tenant_id)))
+            if live_hash != wanted:
+                return jsonify({'error': 'مدخلات هذا القسم تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
+                                'error_code': 'inputs_changed'}), 409
+    else:
+        wanted = snapshot.get('draft_hash')
+        if wanted and db.draft_generation_input_hash(stored_data) != wanted:
+            return jsonify({'error': 'مدخلات المشروع تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
+                            'error_code': 'inputs_changed'}), 409
     for key, value in project_data.items():
         if key in db.GENERATION_INPUT_EXCLUDED_KEYS:
             continue
@@ -12253,7 +12315,7 @@ def api_generate_slide_single():
     if _billing_guard is not None:
         return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
-    _inputs_guard = _generation_inputs_guard(project_data)
+    _inputs_guard = _generation_inputs_guard(project_data, section_key=data.get('sectionKey'))
     if _inputs_guard is not None:
         return _inputs_guard
     presentation_id = str(data.get('presentationId') or '').strip() or None
@@ -12453,7 +12515,8 @@ def api_generate_slide_single_job():
     """Queue one slide so a slow AI response cannot become a proxy 404."""
     data = request.json or {}
     _inputs_guard = _generation_inputs_guard(
-        data.get('projectData') if isinstance(data.get('projectData'), dict) else {})
+        data.get('projectData') if isinstance(data.get('projectData'), dict) else {},
+        section_key=data.get('sectionKey'))
     if _inputs_guard is not None:
         return _inputs_guard
     slide_plan = data.get('slidePlan') or {}
@@ -12513,7 +12576,7 @@ def api_generate_slides():
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
-    _inputs_guard = _generation_inputs_guard(project_data)
+    _inputs_guard = _generation_inputs_guard(project_data, section_key=data.get('sectionKey'))
     if _inputs_guard is not None:
         return _inputs_guard
     slide_plan = data.get('slidePlan', {})
@@ -16890,6 +16953,7 @@ def _company_payload(tenant):
         'email': tenant['email'],
         'plan': tenant.get('plan', 'free'),
         'creditBalance': float(tenant.get('credit_balance') or 0),
+        'creditBalanceSar': db.usd_to_sar(tenant.get('credit_balance')),
         'isActive': bool(tenant.get('is_active')),
         'isAdmin': bool(tenant.get('is_admin')),
         'primaryUserId': tenant.get('primary_user_id'),
@@ -22765,7 +22829,10 @@ def api_admin_tenants():
         is_active = bool(data.get('isActive', True))
         send_welcome = bool(data.get('sendWelcomeEmail', True))
         try:
-            credit_balance = float(data.get('creditBalance') or 0)
+            if data.get('creditBalanceSar') is not None:
+                credit_balance = db.sar_to_usd(data.get('creditBalanceSar'))
+            else:
+                credit_balance = float(data.get('creditBalance') or 0)
         except (TypeError, ValueError):
             return jsonify({'error': 'Credit balance must be a valid number'}), 400
 
@@ -22893,6 +22960,12 @@ def api_admin_update_tenant(tenant_id):
             company_fields[db_key] = str(data[db_key] or '').strip()
     if 'trialEndsAt' in data:
         company_fields['trial_ends_at'] = data['trialEndsAt']
+    # The desk keys balances in riyals; the wallet stores dollars.
+    if data.get('creditBalanceSar') is not None:
+        try:
+            company_fields['credit_balance'] = db.sar_to_usd(data.get('creditBalanceSar'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Credit balance must be a valid number'}), 400
 
     if 'company_name' in company_fields:
         company_fields['company_name'] = str(company_fields['company_name'] or '').strip()
@@ -23480,6 +23553,8 @@ def api_admin_packages():
             credit = 0.0
         cost = credit / multiplier
         package['est_cost_usd'] = round(cost, 2)
+        package['credit_sar'] = db.usd_to_sar(credit, fx_rate or None)
+        package['est_cost_sar'] = db.usd_to_sar(cost, fx_rate or None)
         price_sar = package.get('price_sar')
         if price_sar is not None and fx_rate > 0:
             margin_usd = float(price_sar) / fx_rate - cost
@@ -23493,12 +23568,24 @@ def api_admin_packages():
 @app.route('/api/admin/packages', methods=['POST'])
 @require_admin
 def api_admin_packages_create():
-    """Create a package (custom by default). credit_usd may be zero."""
+    """Create a package (custom by default). credit_usd may be zero.
+
+    The desk keys the wallet credit in riyals (``creditSar``); it is converted
+    to the internal USD figure at the active rate. ``creditUsd`` stays accepted
+    for old callers.
+    """
     data = request.json or {}
+    credit_usd = data.get('creditUsd', data.get('credit_usd'))
+    credit_sar = data.get('creditSar', data.get('credit_sar'))
+    if credit_sar is not None:
+        try:
+            credit_usd = db.sar_to_usd(credit_sar)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid credit_sar'}), 400
     try:
         package = db.create_billing_package(
             data.get('name'),
-            data.get('creditUsd', data.get('credit_usd', 0)),
+            credit_usd if credit_usd is not None else 0,
             data.get('priceSar', data.get('price_sar')),
             is_custom=bool(data.get('isCustom', data.get('is_custom', True))),
         )
@@ -23515,7 +23602,12 @@ def api_admin_package_update(package_id):
     kwargs = {}
     if 'name' in data:
         kwargs['name'] = data.get('name')
-    if 'creditUsd' in data or 'credit_usd' in data:
+    if 'creditSar' in data or 'credit_sar' in data:
+        try:
+            kwargs['credit_usd'] = db.sar_to_usd(data.get('creditSar', data.get('credit_sar')))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid credit_sar'}), 400
+    elif 'creditUsd' in data or 'credit_usd' in data:
         kwargs['credit_usd'] = data.get('creditUsd', data.get('credit_usd'))
     if 'priceSar' in data or 'price_sar' in data:
         kwargs['price_sar'] = data.get('priceSar', data.get('price_sar'))
@@ -27128,7 +27220,8 @@ _OMRAN_CONFLICT = {'title_exists', 'role_name_exists', 'approval_already_pending
                    'invalid_transition', 'approval_not_pending', 'request_not_pending', 'reservation_not_reserved',
                    'request_not_active', 'version_pending_exists', 'inputs_changed', 'content_changed',
                    'unchanged_since_rejection', 'already_approved', 'section_version_expired',
-                   'sections_not_approved', 'archive_required', 'job_not_approved', 'job_not_active'}
+                   'sections_not_approved', 'section_not_approved', 'archive_required',
+                   'job_not_approved', 'job_not_active'}
 _OMRAN_FORBIDDEN = {'self_approval_not_allowed', 'cancel_not_allowed', 'platform_tenant_recharge_forbidden',
                     'manual_transition_not_allowed', 'self_approval_blocked_by_policy',
                     'section_scope_forbidden', 'post_approval_edit_required', 'admin_required',
@@ -27194,6 +27287,8 @@ _OMRAN_ERROR_MESSAGES_AR = {
     'already_approved': 'هذا الملف معتمد بالفعل ولم يتغير محتواه',
     'section_version_expired': 'انتهت صلاحية اعتماد بعض الأقسام — أعد إرسالها للاعتماد',
     'sections_not_approved': 'يجب اعتماد جميع أقسام المشروع قبل هذه الخطوة',
+    'section_not_approved': 'توليد هذا القسم يتطلب اعتماده أولًا',
+    'invalid_section': 'قسم المشروع غير صالح',
     'archive_required': 'لهذا السجل مسار اعتماد محفوظ — استخدم الأرشفة بدل الحذف',
     'job_not_found': 'مهمة التوليد غير موجودة',
     'job_not_approved': 'مهمة التوليد تتطلب اعتمادًا ساريًا',
@@ -27279,6 +27374,11 @@ def api_create_generation_approval():
     # t20: a scope-limited user may only request generation for drafts in scope.
     if not _omran_actor_is_admin() and not db.user_may_access_draft(g.user_id, draft):
         return jsonify({'error': 'No project draft found', 'error_code': 'draft_not_found'}), 404
+    # A section-scoped request gates on that section's own approval instead of
+    # the whole file — the all-sections requirement stays with the full run.
+    section_key = str(data.get('sectionKey') or '').strip() or None
+    if section_key and section_key not in PROJECT_SECTION_PRESENTATION_TARGETS:
+        return jsonify({'error': 'قسم المشروع غير صالح', 'error_code': 'invalid_section'}), 400
     estimate = db.estimate_generation_cost(
         g.tenant_id, draft_id=draft_id,
         slides_count=int(data.get('slidesCount') or draft.get('slide_count') or 0),
@@ -27287,7 +27387,6 @@ def api_create_generation_approval():
     # still matches this snapshot, and the job record carries it.
     overview = db.section_versions_overview(g.tenant_id, draft_id)
     input_snapshot = {
-        'draft_hash': db.draft_generation_input_hash(draft.get('draft_data') or {}),
         'section_hashes': {key: meta.get('snapshot_hash') for key, meta in overview.items()},
         'captured_at': db._utcnow().isoformat(),
         'slides_count': estimate['slides_count'],
@@ -27296,9 +27395,19 @@ def api_create_generation_approval():
         'estimated_cost_usd': estimate['estimated_cost_usd'],
         'estimated_points': estimate['estimated_points'],
     }
+    if section_key:
+        # The drift check for a section run watches only that section's
+        # inputs — an edit anywhere else must not void its approval.
+        input_snapshot['section_key'] = section_key
+        input_snapshot['section_hash'] = db.section_snapshot_hash(
+            _section_snapshot_slice(draft.get('draft_data') or {}, section_key,
+                                    _draft_field_section_map(g.tenant_id)))
+    else:
+        input_snapshot['draft_hash'] = db.draft_generation_input_hash(draft.get('draft_data') or {})
     approval = db.create_generation_approval(
         g.tenant_id, draft_id, estimate, _omran_actor_id(), _omran_actor_name(),
         presentation_id=data.get('presentationId'), input_snapshot=input_snapshot,
+        section_key=section_key,
     )
     failure = _omran_error(approval)
     if failure:
@@ -27368,10 +27477,20 @@ def api_decide_generation_approval(approval_id):
     if decision in {'approved', 'rejected'} and not _omran_can('approve_generation') \
             and not (self_decision and policy_self_ok):
         return _omran_forbidden('اعتماد أو رفض طلب التوليد يتطلب صلاحية معتمد التوليد')
+    # A section-scoped request is drift-checked against its own section's live
+    # inputs — the whole-draft hash is meaningless for it.
+    current_section_hash = None
+    approval_section = str((approval_row or {}).get('section_key') or '').strip()
+    if approval_section and (approval_row or {}).get('draft_id'):
+        scoped_draft = db.get_project_draft_by_id(g.tenant_id, approval_row['draft_id'])
+        current_section_hash = db.section_snapshot_hash(_section_snapshot_slice(
+            (scoped_draft or {}).get('draft_data') or {}, approval_section,
+            _draft_field_section_map(g.tenant_id)))
     result = db.decide_generation_approval(
         g.tenant_id, approval_id, decision, _omran_actor_id(), _omran_actor_name(),
         note=data.get('note'),
         allow_self=_omran_actor_is_admin() or (self_decision and policy_self_ok),
+        current_section_hash=current_section_hash,
     )
     failure = _omran_error(result)
     if failure:
@@ -28305,7 +28424,7 @@ def api_admin_list_recharge_requests():
 def api_billing_packages():
     """t33: the purchase screen lists every active package the super admin
     manages, never hardcoded prices."""
-    packages = db.list_billing_packages(active_only=True)
+    packages = db.with_sar_fields(db.list_billing_packages(active_only=True))
     return jsonify({'success': True, 'packages': packages, 'taxRate': db.TAX_RATE_SAR})
 
 
@@ -28344,8 +28463,17 @@ def api_admin_ledger_adjust():
     tenant_id = data.get('tenantId')
     if not tenant_id:
         return jsonify({'error': 'الشركة مطلوبة', 'error_code': 'tenant_required'}), 400
+    # The desk keys adjustments in riyals; the ledger books them in USD.
+    amount_usd = data.get('amountUsd')
+    amount_sar = data.get('amountSar', data.get('amount_sar'))
+    if amount_sar is not None:
+        try:
+            fx_rate = float((db.get_fx_rate() or {}).get('rate') or db.FX_DEFAULT_USD_SAR)
+            amount_usd = float(amount_sar) / fx_rate
+        except (TypeError, ValueError):
+            return jsonify({'error': 'مبلغ الحركة غير صالح', 'error_code': 'invalid_amount'}), 400
     result = db.record_ledger_adjustment(
-        tenant_id, data.get('amountUsd'), kind, note=data.get('note'),
+        tenant_id, amount_usd, kind, note=data.get('note'),
         actor=_omran_actor_id() or 'platform_admin', reversal_of=data.get('reversalOf'),
         idempotency_key=data.get('idempotencyKey'))
     failure = _omran_error(result)

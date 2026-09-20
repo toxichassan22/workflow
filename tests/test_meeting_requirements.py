@@ -7705,12 +7705,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_html = read_frontend_text()
         self.assertIn("'/api/usage-totals?draftIds='", index_html)
         self.assertIn("'/api/usage-totals?presentationIds='", index_html)
-        self.assertIn('function formatUsageCost(usd)', index_html)
+        self.assertIn('function formatUsageCost(sar)', index_html)
         self.assertIn('costByProject', index_html)
         self.assertIn('costByPresentation', index_html)
         self.assertIn('costByProject[d.id]', index_html)
         self.assertIn('costByPresentation[item.id]', index_html)
-        self.assertIn('maps_cost_usd', index_html)
+        self.assertIn('maps_cost_sar', index_html)
         self.assertIn("'<span>التكلفة:</span> '", index_html)
 
     def test_presentation_creation_links_prior_draft_spend_without_stealing(self):

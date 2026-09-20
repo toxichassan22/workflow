@@ -515,6 +515,12 @@
         toast('يوجد عرض قيد التوليد حاليًا');
         return;
       }
+      // Section generation is bound to that section's own approval — the
+      // all-sections requirement belongs to the full-file run only.
+      if ((tenantProjectSectionStatuses || {})[sectionKey] !== 'approved') {
+        toast('توليد هذا القسم يتطلب اعتماده أولًا');
+        return;
+      }
 
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
@@ -595,10 +601,11 @@
       const draftId = opts.draftId || (tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id));
       const slidesCount = opts.slidesCount || (tenantSlidePlan && (tenantSlidePlan.slides || []).length) || 10;
       const projectName = opts.projectName || (tenantProjectData && (tenantProjectData.project_name || tenantProjectData.projectName)) || 'عرض بدون عنوان';
+      const sectionKey = String(opts.sectionKey || '').trim();
 
       let estimateData = null;
       try {
-        estimateData = await api('POST', '/api/generation-approvals', { draftId, slidesCount });
+        estimateData = await api('POST', '/api/generation-approvals', { draftId, slidesCount, sectionKey: sectionKey || undefined });
       } catch (err) {
         console.warn('Generation approval estimate error:', err);
       }
@@ -614,6 +621,7 @@
               estimate: {
                 estimated_points: existing.approval.estimated_points,
                 estimated_cost_usd: existing.approval.estimated_cost_usd,
+                estimated_cost_sar: existing.approval.estimated_cost_sar,
                 slides_count: existing.approval.slides_count,
               },
             };
@@ -636,7 +644,10 @@
         return null;
       }
       const points = estimate.estimated_points ?? 500;
-      const costUsd = Number(estimate.estimated_cost_usd ?? 25);
+      const costSar = Number(estimate.estimated_cost_sar ?? ((estimate.estimated_cost_usd ?? 0) * 3.75) ?? 0);
+      const sectionLabel = sectionKey
+        ? ((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[sectionKey]) || sectionKey)
+        : '';
 
       // d02: the requester never decides their own request unless the company
       // policy opens it (generation_self_approval='allow', reported by the
@@ -647,22 +658,19 @@
         ((tenantUser && tenantUser._userRole) || 'company_admin') === 'company_admin' ||
         Boolean(estimateData && estimateData.can_self_decide);
 
-      let remainingUsd = 0;
       let remainingSar = 0;
       try {
         const ov = await api('GET', '/api/client/overview');
         if (ov?.package) {
-          remainingUsd = Number(ov.package.remaining_usd) || 0;
-          remainingSar = Number(ov.package.remaining_sar) || 0;
-        } else if (ov?.balance_usd) {
-          remainingUsd = Number(ov.balance_usd) || 0;
-          remainingSar = Number(ov.balance_sar) || 0;
+          remainingSar = Number(ov.package.remaining_sar ?? ov.package.remaining_usd) || 0;
+        } else {
+          remainingSar = Number(ov?.balance_sar ?? ov?.balance_usd) || 0;
         }
       } catch (err) {
         console.warn('Overview fetch error:', err);
       }
 
-      const isBalanceSufficient = remainingUsd >= costUsd || remainingUsd > 0;
+      const isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
 
       return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -674,11 +682,12 @@
           '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">بوابة الاعتماد الثانية — تقدير التكلفة وحجز رصيد المحفظة</p>' +
           '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">' +
           '<div><span style="color:#64748b;">المشروع:</span> <strong>' + escapeHtml(projectName) + '</strong></div>' +
+          (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +
           '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
           '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>' + points + ' نقطة</strong></div>' +
-          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costUsd + ' دولار</strong></div>' +
+          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ريال</strong></div>' +
           '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
-          '<span>رصيد المحفظة المتاح:</span><strong>' + remainingUsd.toFixed(2) + ' دولار (' + remainingSar.toFixed(2) + ' ريال)</strong>' +
+          '<span>رصيد المحفظة المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال</strong>' +
           '</div></div>' +
           (!isBalanceSufficient
             ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px;border-radius:8px;font-size:12px;margin-bottom:14px;">' +

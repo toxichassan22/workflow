@@ -314,9 +314,9 @@
       // kept this list on its loader while the server reconciled costs.
       const renderPresentationCard = (item, itemCost, itemReconcile) => {
         const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
-        const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
+        const itemMapsCost = Number(itemCost?.maps_cost_sar) || 0;
         return '<div class="tenant-presentation-card" data-presentation-id="' + item.id + '"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
+          '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_sar || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
           '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
           '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
       };
@@ -846,10 +846,10 @@
       const pkg = (data && data.package) || null;
       // The server resolves the quota: a real package carries its own credit,
       // and a bare wallet reports everything the platform ever credited.
-      const balance = Number((data && data.balance_usd) || 0);
-      const remaining = pkg ? Number(pkg.remaining_usd || 0) : balance;
-      const consumed = pkg ? Number(pkg.consumed_usd || 0) : 0;
-      const credit = pkg ? Number(pkg.credit_usd || 0) : remaining;
+      const balance = Number((data && (data.balance_sar ?? data.balance_usd)) || 0);
+      const remaining = pkg ? Number((pkg.remaining_sar ?? pkg.remaining_usd) || 0) : balance;
+      const consumed = pkg ? Number((pkg.consumed_sar ?? pkg.consumed_usd) || 0) : 0;
+      const credit = pkg ? Number((pkg.credit_sar ?? pkg.credit_usd) || 0) : remaining;
       const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;
       const valueEl = document.getElementById('dashBalanceValue');
       if (valueEl) valueEl.textContent = sagFmtMoney(remaining);
@@ -879,7 +879,7 @@
       const el = document.getElementById('tenantActivityChart');
       if (!el || typeof sagLineChart !== 'function') return;
       const labels = trends.labels || [];
-      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+      const spendSeries = (trends.ai_spend_sar || trends.ai_spend || []).map((v, i) => v + (((trends.maps_spend_sar || trends.maps_spend) || [])[i] || 0));
       const series = [
         { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
         { name: WFT('dashboard.legend_presentations', 'عروض جديدة'), values: trends.presentations || [], color: 'var(--chart-2)', fmt: sagFmtNum },

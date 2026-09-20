@@ -459,6 +459,134 @@ class WorkflowGateDbTests(unittest.TestCase):
         self.assertEqual(db.purge_expired_archives('tenant-1')['drafts'], 1)
         self.assertIsNone(db.get_project_draft_by_id('tenant-1', 'draft-1'))
 
+    # ── Section-scoped generation approvals ──────────────────────────────
+    # A section run is bound to that section's own approval only; the
+    # all-sections requirement and the draft lifecycle moves belong to the
+    # full-file run.
+
+    def _set_sections(self, statuses):
+        conn = db.get_db()
+        conn.execute(
+            'UPDATE project_drafts SET section_statuses = ? WHERE id = ?',
+            (json.dumps(statuses), 'draft-1'))
+        conn.commit()
+
+    def test_section_request_gates_on_its_own_section_only(self):
+        self._set_sections({'basic': 'approved', 'section-team': 'draft'})
+        # The full-file request still refuses: a tracked section is unapproved.
+        full = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One')
+        self.assertEqual(full.get('error'), 'sections_not_approved')
+        # The scoped request asks only about its own section.
+        scoped = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic')
+        self.assertEqual(scoped.get('status'), 'pending', scoped)
+        self.assertEqual(scoped.get('section_key'), 'basic')
+        # A section request never moves the draft lifecycle.
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'draft')
+
+    def test_section_request_refuses_an_unapproved_section(self):
+        self._set_sections({'basic': 'approved', 'section-team': 'draft'})
+        refused = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='section-team')
+        self.assertEqual(refused.get('error'), 'section_not_approved')
+        self.assertEqual(refused.get('section'), 'section-team')
+
+    def test_pending_generation_requests_are_scoped(self):
+        self._set_sections({'basic': 'approved', 'location': 'approved'})
+        first = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic')
+        self.assertEqual(first.get('status'), 'pending', first)
+        # A different section is a different scope — its own queue slot.
+        second = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='location')
+        self.assertEqual(second.get('status'), 'pending', second)
+        # The same scope still refuses a parallel pending request.
+        duplicate = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic')
+        self.assertEqual(duplicate.get('error'), 'approval_already_pending')
+        self.assertEqual(duplicate.get('approval_id'), first['id'])
+        # And the full-file request is its own scope as well.
+        full = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One')
+        self.assertEqual(full.get('status'), 'pending', full)
+
+    def test_section_decide_and_settle_leave_the_lifecycle_alone(self):
+        self._set_sections({'basic': 'approved', 'section-team': 'draft'})
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One',
+            section_key='basic')
+        # Approving still verifies its own section — and nothing more.
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        self.assertEqual(decided.get('status'), 'approved', decided)
+        self.assertTrue(decided.get('reservation_id'))
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
+        self.assertEqual(draft['status'], 'draft')
+
+        job = db.create_generation_job(
+            'tenant-1', approval_id=approval['id'], draft_id='draft-1', slides_total=3)
+        settled = db.settle_generation_approval(
+            'tenant-1', approval['id'], job['id'], consumed=True, settled_by='user-1')
+        self.assertEqual(settled['status'], 'consumed')
+        self.assertNotIn('draft_status', settled)
+        self.assertEqual(
+            db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'draft')
+
+    def test_section_decide_refuses_when_the_section_slips_back(self):
+        self._set_sections({'basic': 'approved'})
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic')
+        # The section's approval was voided while the request waited.
+        self._set_sections({'basic': 'draft'})
+        refused = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        self.assertEqual(refused.get('error'), 'section_not_approved')
+
+    def test_section_drift_check_uses_the_section_snapshot(self):
+        self._set_sections({'basic': 'approved'})
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic',
+            input_snapshot={'section_hash': 'hash-at-request'})
+        refused = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver',
+            current_section_hash='hash-after-edit')
+        self.assertEqual(refused.get('error'), 'inputs_changed')
+        allowed = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver',
+            current_section_hash='hash-at-request')
+        self.assertEqual(allowed.get('status'), 'approved', allowed)
+
+    def test_expired_other_section_does_not_block_a_section_request(self):
+        self._set_sections({'basic': 'approved', 'location': 'approved'})
+        version = db.create_section_version(
+            'tenant-1', 'draft-1', 'basic', {'project_name': 'A'}, 'user-1', 'User One')
+        db.decide_section_version('tenant-1', version['id'], 'approved', 'user-2', 'Approver')
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE section_versions SET expires_at = '2000-01-01T00:00:00' WHERE id = ?",
+            (version['id'],))
+        conn.commit()
+        self.assertIn('basic', db.expired_approved_sections('tenant-1', 'draft-1'))
+        # The expiry belongs to 'basic'; a 'location' run is unaffected.
+        scoped = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='location')
+        self.assertEqual(scoped.get('status'), 'pending', scoped)
+        refused = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(), 'user-1', 'User One',
+            section_key='basic')
+        self.assertEqual(refused.get('error'), 'section_version_expired')
+
 
 class ExportDownloadGateTests(unittest.TestCase):
     """GET /api/exports/<id>/download: drafts ship marked, officials gated."""

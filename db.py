@@ -1870,6 +1870,9 @@ def _migrate_generation_approval_columns(conn):
         if 'prior_status' not in existing_cols:
             conn.execute("ALTER TABLE generation_approvals ADD COLUMN prior_status TEXT")
             print("[DB MIGRATION] Added generation_approvals column: prior_status")
+        if 'section_key' not in existing_cols:
+            conn.execute("ALTER TABLE generation_approvals ADD COLUMN section_key TEXT")
+            print("[DB MIGRATION] Added generation_approvals column: section_key")
         conn.commit()
     except Exception as e:
         print(f"[DB GENERATION MIGRATION ERR] {e}")
@@ -6882,7 +6885,8 @@ def get_ai_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit=5
         status = get_ai_usage_status_counts(tenant_id, draft_id=draft_id, presentation_id=presentation_id)
     except Exception:
         status = {}
-    return {'totals': totals, 'by_flow': by_flow, 'by_model': by_model, 'recent': recent, 'status': status}
+    return with_sar_fields({'totals': totals, 'by_flow': by_flow, 'by_model': by_model,
+                            'recent': recent, 'status': status})
 
 
 def get_ai_usage_pending_costs(limit=15, tenant_id=None):
@@ -6992,7 +6996,7 @@ def get_maps_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit
         f'FROM map_usage_events {where} ORDER BY created_at DESC LIMIT ?',
         params + [int(limit)]
     ).fetchall()]
-    return {'totals': totals, 'by_flow': by_flow, 'by_sku': by_sku, 'recent': recent}
+    return with_sar_fields({'totals': totals, 'by_flow': by_flow, 'by_sku': by_sku, 'recent': recent})
 
 
 def get_maps_discovery_cache(tenant_id, cache_key):
@@ -7249,13 +7253,13 @@ def get_unbilled_usage(tenant_id, draft_id=None, presentation_id=None):
     maps_calls = int(dict(maps_row).get('calls') or 0)
     ai_cost = float(dict(ai_row).get('cost_usd') or 0.0)
     maps_cost = float(dict(maps_row).get('cost_usd') or 0.0)
-    return {
+    return with_sar_fields({
         'ai_calls': ai_calls,
         'maps_calls': maps_calls,
         'ai_cost_usd': ai_cost,
         'maps_cost_usd': maps_cost,
         'raw_cost_usd': ai_cost + maps_cost,
-    }
+    })
 
 
 def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
@@ -7482,7 +7486,7 @@ def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=N
         ' ORDER BY created_at DESC LIMIT ?',
         params + [int(limit)]
     ).fetchall()
-    return [dict(r) for r in rows]
+    return with_sar_fields([dict(r) for r in rows])
 
 
 def points_overview(tenant_id):
@@ -7501,7 +7505,7 @@ def points_overview(tenant_id):
     reserved_usd = buckets.get('reserved', {}).get('usd', 0.0)
     expired_usd = buckets.get('expired', {}).get('usd', 0.0)
     total_usd = balance + reserved_usd
-    return {
+    return with_sar_fields({
         'balance_usd': round(total_usd, 2),
         'balance_points': int(round(total_usd * POINTS_PER_USD)),
         'current_points': int(round(total_usd * POINTS_PER_USD)),
@@ -7514,7 +7518,7 @@ def points_overview(tenant_id):
         'consumed_usd': round(buckets.get('consumed', {}).get('usd', 0.0), 2),
         'released_usd': round(buckets.get('released', {}).get('usd', 0.0), 2),
         'reservations': buckets,
-    }
+    })
 
 
 LEDGER_ADJUSTMENT_KINDS = ('refund', 'correction', 'expiry')
@@ -8147,6 +8151,49 @@ def usd_to_sar(amount_usd, rate=None):
         return 0.0
 
 
+def sar_to_usd(amount_sar, rate=None):
+    """Convert a riyal amount keyed by the desk back into wallet dollars."""
+    try:
+        active = float(rate) if rate else float(get_fx_rate()['rate'])
+    except (TypeError, ValueError):
+        active = FX_DEFAULT_USD_SAR
+    if not active:
+        active = FX_DEFAULT_USD_SAR
+    return round(float(amount_sar) / active + 1e-9, 2)
+
+
+def with_sar_fields(payload, rate=None):
+    """Return a copy of ``payload`` where every ``*_usd`` numeric leaf gains a
+    ``*_sar`` sibling converted at the active rate — nested dicts and lists
+    included. The wallet books in dollars internally, but nothing that leaves
+    the server should require the client to know that.
+    """
+    try:
+        active = float(rate) if rate else float(get_fx_rate().get('rate') or FX_DEFAULT_USD_SAR)
+    except (TypeError, ValueError):
+        active = FX_DEFAULT_USD_SAR
+
+    def _convert(value):
+        try:
+            return round(float(value) * active + 1e-9, 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _walk(node):
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        out = {}
+        for key, value in node.items():
+            out[key] = _walk(value)
+            if isinstance(key, str) and key.endswith('_usd') and isinstance(value, (int, float)):
+                out[key[:-4] + '_sar'] = _convert(value)
+        return out
+
+    return _walk(payload)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Project File Storage
 # ─────────────────────────────────────────────────────────────────────────────
@@ -8389,7 +8436,7 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
 
     for entry in list(projects.values()) + list(presentations.values()):
         entry['cost_usd'] = entry['ai_cost_usd'] + entry['maps_cost_usd']
-    return {'projects': projects, 'presentations': presentations}
+    return with_sar_fields({'projects': projects, 'presentations': presentations})
 
 
 def link_draft_usage_to_presentation(tenant_id, draft_id, presentation_id):
@@ -8532,7 +8579,8 @@ def _create_omran_tables(conn):
         decided_at TEXT,
         decision_note TEXT,
         job_id TEXT,
-        prior_status TEXT
+        prior_status TEXT,
+        section_key TEXT
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_generation_approvals_tenant ON generation_approvals(tenant_id, status, requested_at DESC)')
 
@@ -9371,6 +9419,7 @@ def estimate_generation_cost(tenant_id, draft_id=None, slides_count=0, presentat
         sum(units[key] * prices.get(key, 0.0) for key in units) + 1e-9, 4)
     return {
         'estimated_cost_usd': estimated,
+        'estimated_cost_sar': usd_to_sar(estimated),
         'estimated_points': int(round(estimated * POINTS_PER_USD)),
         'slides_count': slides,
         'units': units,
@@ -9403,7 +9452,7 @@ def _draft_gate_transition(tenant_id, draft_id, target_status, actor_id, actor_n
 
 
 def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requested_by_name,
-                               presentation_id=None, input_snapshot=None):
+                               presentation_id=None, input_snapshot=None, section_key=None):
     """Open a generation approval carrying the estimate shown to the approver.
 
     The request is what moves the draft into ``generation_approval_pending``:
@@ -9412,15 +9461,31 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
     generating draft refuses a new request. ``prior_status`` remembers where a
     rejected or released request returns the draft. ``input_snapshot`` freezes
     the priced inputs so the decision can verify nothing drifted meanwhile.
+
+    A ``section_key`` scopes the request to one project section: the gate then
+    asks only that section to be approved — the all-sections requirement
+    belongs to the full-file run — and the draft lifecycle stays untouched
+    (the section presentation, not the whole file, is what is being built).
     """
+    section_key = str(section_key or '').strip() or None
     conn = get_db()
     draft = get_project_draft_by_id(tenant_id, draft_id)
     if not draft:
         return {'error': 'draft_not_found'}
-    pending = conn.execute(
-        "SELECT id FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? AND status = 'pending'",
-        (tenant_id, draft_id),
-    ).fetchone()
+    # One pending request per scope: a section request does not block another
+    # section's request nor the full-file one.
+    if section_key:
+        pending = conn.execute(
+            "SELECT id FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+            "AND status = 'pending' AND section_key = ?",
+            (tenant_id, draft_id, section_key),
+        ).fetchone()
+    else:
+        pending = conn.execute(
+            "SELECT id FROM generation_approvals WHERE tenant_id = ? AND draft_id = ? "
+            "AND status = 'pending' AND (section_key IS NULL OR section_key = '')",
+            (tenant_id, draft_id),
+        ).fetchone()
     if pending:
         return {'error': 'approval_already_pending', 'approval_id': pending['id']}
     norm = normalize_proposal_status(draft.get('status'))
@@ -9434,53 +9499,70 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
         norm = normalize_proposal_status(draft.get('status'))
     if proposal_status_is_locked(norm):
         return {'error': 'draft_locked', 'status': norm}
-    expired = expired_approved_sections(tenant_id, draft_id)
-    if expired:
-        return {'error': 'section_version_expired', 'sections': expired}
-    if norm == 'generated_draft':
-        # Regeneration: the file exists, a new gate opens on top of it.
-        prior_status = 'generated_draft'
-    elif norm in {'draft', 'sections_in_progress', 'section_approval_pending',
-                  'rejected_for_revision', 'sections_approved'}:
-        statuses = draft.get('section_statuses') or {}
-        if statuses and any(value != 'approved' for value in statuses.values()):
-            return {'error': 'sections_not_approved', 'section_statuses': statuses}
-        prior_status = 'sections_approved'
-        if norm != 'sections_approved':
-            res = _draft_gate_transition(
-                tenant_id, draft_id, 'sections_approved', requested_by, requested_by_name,
-                'جميع أقسام المشروع معتمدة — تأهيل تلقائي قبل طلب التوليد')
-            if res is None:
-                return {'error': 'invalid_transition', 'current_status': norm,
-                        'target_status': 'sections_approved'}
+    statuses = draft.get('section_statuses') or {}
+    if section_key:
+        expired = [key for key in expired_approved_sections(tenant_id, draft_id)
+                   if key == section_key]
+        if expired:
+            return {'error': 'section_version_expired', 'sections': expired}
+        if statuses.get(section_key) != 'approved':
+            return {'error': 'section_not_approved', 'section': section_key,
+                    'section_statuses': statuses}
+        prior_status = norm
     else:
-        return {'error': 'invalid_transition', 'current_status': norm}
+        expired = expired_approved_sections(tenant_id, draft_id)
+        if expired:
+            return {'error': 'section_version_expired', 'sections': expired}
+        if norm == 'generated_draft':
+            # Regeneration: the file exists, a new gate opens on top of it.
+            prior_status = 'generated_draft'
+        elif norm in {'draft', 'sections_in_progress', 'section_approval_pending',
+                      'rejected_for_revision', 'sections_approved'}:
+            if statuses and any(value != 'approved' for value in statuses.values()):
+                return {'error': 'sections_not_approved', 'section_statuses': statuses}
+            prior_status = 'sections_approved'
+            if norm != 'sections_approved':
+                res = _draft_gate_transition(
+                    tenant_id, draft_id, 'sections_approved', requested_by, requested_by_name,
+                    'جميع أقسام المشروع معتمدة — تأهيل تلقائي قبل طلب التوليد')
+                if res is None:
+                    return {'error': 'invalid_transition', 'current_status': norm,
+                            'target_status': 'sections_approved'}
+        else:
+            return {'error': 'invalid_transition', 'current_status': norm}
     approval_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO generation_approvals
            (id, tenant_id, draft_id, presentation_id, estimated_cost_usd, estimated_points,
-            slides_count, status, requested_by, requested_by_name, prior_status, input_snapshot)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)''',
+            slides_count, status, requested_by, requested_by_name, prior_status, input_snapshot,
+            section_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)''',
         (approval_id, tenant_id, draft_id, presentation_id,
          float(estimate.get('estimated_cost_usd') or 0), int(estimate.get('estimated_points') or 0),
          int(estimate.get('slides_count') or 0), requested_by, requested_by_name, prior_status,
-         json.dumps(input_snapshot, ensure_ascii=False) if isinstance(input_snapshot, dict) else None),
+         json.dumps(input_snapshot, ensure_ascii=False) if isinstance(input_snapshot, dict) else None,
+         section_key),
     )
     conn.commit()
-    _draft_gate_transition(
-        tenant_id, draft_id, 'generation_approval_pending', requested_by, requested_by_name,
-        'طلب اعتماد التوليد')
+    if not section_key:
+        _draft_gate_transition(
+            tenant_id, draft_id, 'generation_approval_pending', requested_by, requested_by_name,
+            'طلب اعتماد التوليد')
     row = conn.execute('SELECT * FROM generation_approvals WHERE id = ?', (approval_id,)).fetchone()
     return dict(row)
 
 
 def decide_generation_approval(tenant_id, approval_id, decision, decided_by, decided_by_name,
-                               note=None, allow_self=False):
+                               note=None, allow_self=False, current_section_hash=None):
     """Approve, reject or cancel. Approval reserves the points atomically.
 
     Separation of duties (d02): the requester cannot approve or reject their own
     request. Only a company-level administrator may combine both hats, which the
     route expresses through allow_self.
+
+    ``current_section_hash`` is the live hash of the scoped section's inputs —
+    required to decide a section-scoped request, so a drifted section fails
+    closed rather than slipping through unverified.
     """
     if decision not in {'approved', 'rejected', 'cancelled'}:
         return {'error': 'invalid_decision'}
@@ -9498,28 +9580,44 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
     if decision in {'approved', 'rejected'} and not allow_self \
             and row['requested_by'] and str(row['requested_by']) == str(decided_by):
         return {'error': 'self_approval_not_allowed'}
+    section_scope = (row['section_key'] if 'section_key' in row.keys() else None) or None
     if decision == 'approved' and row['draft_id']:
-        # Approving generation confirms the gate behind it: every tracked
-        # section of the draft must already be approved.
+        # Approving generation confirms the gate behind it: a section-scoped
+        # request asks only its own section, a full-file request asks every
+        # tracked section of the draft.
         draft = get_project_draft_by_id(tenant_id, row['draft_id'])
         statuses = (draft or {}).get('section_statuses') or {}
-        if statuses and any(value != 'approved' for value in statuses.values()):
+        if section_scope:
+            if statuses.get(section_scope) != 'approved':
+                return {'error': 'section_not_approved', 'section': section_scope,
+                        'section_statuses': statuses}
+        elif statuses and any(value != 'approved' for value in statuses.values()):
             return {'error': 'sections_not_approved', 'section_statuses': statuses}
         # d05: an approval that expired while the request waited is no
         # longer a gate the run can rely on.
         expired = expired_approved_sections(tenant_id, row['draft_id'])
+        if section_scope:
+            expired = [key for key in expired if key == section_scope]
         if expired:
             return {'error': 'section_version_expired', 'sections': expired}
         # t14-04/t15-01: the inputs the approver saw and priced must still be
-        # what generation will run on — edits after the request void it.
+        # what generation will run on — edits after the request void it. A
+        # section-scoped request froze only its own section's inputs, so it is
+        # compared against the hash the caller computed for that section.
         snapshot = _json_object(row['input_snapshot'] if 'input_snapshot' in row.keys() else None)
-        wanted_hash = snapshot.get('draft_hash')
-        if wanted_hash and draft \
-                and draft_generation_input_hash(draft.get('draft_data') or {}) != wanted_hash:
-            return {'error': 'inputs_changed'}
+        if section_scope and snapshot.get('section_hash'):
+            if current_section_hash is None or snapshot['section_hash'] != current_section_hash:
+                return {'error': 'inputs_changed'}
+        else:
+            wanted_hash = snapshot.get('draft_hash')
+            if wanted_hash and draft \
+                    and draft_generation_input_hash(draft.get('draft_data') or {}) != wanted_hash:
+                return {'error': 'inputs_changed'}
         # And the draft must be able to enter 'generating' right now — an
         # approved reservation on an unreachable state would strand the run.
-        if draft and not can_transition_proposal_status(draft.get('status'), 'generating'):
+        # A section-scoped run never moves the draft, so it skips this check.
+        if not section_scope and draft \
+                and not can_transition_proposal_status(draft.get('status'), 'generating'):
             return {'error': 'invalid_transition',
                     'current_status': normalize_proposal_status(draft.get('status')),
                     'target_status': 'generating'}
@@ -9557,26 +9655,31 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
     if decision == 'approved':
         if reservation_id:
             updated['reservation_id'] = reservation_id
-        # Approval starts the run: the draft leaves the queue for 'generating'.
-        lifecycle = _draft_gate_transition(
-            tenant_id, row['draft_id'], 'generating', decided_by, decided_by_name,
-            'اعتماد طلب التوليد — بدء التنفيذ')
-        if lifecycle:
-            updated['draft_status'] = lifecycle.get('current_status')
-        elif row['draft_id']:
-            # The gate could not open — roll the decision and the reservation
-            # back so nothing is approved against a draft that never started.
-            if reservation_id:
-                release_points(tenant_id, reservation_id, settled_by=decided_by,
-                               note='تراجع الاعتماد: تعذر الانتقال إلى التوليد')
-            conn.execute(
-                "UPDATE generation_approvals SET status = 'pending', decided_by = NULL, "
-                'decided_by_name = NULL, decided_at = NULL WHERE id = ?',
-                (approval_id,),
-            )
-            conn.commit()
-            return {'error': 'lifecycle_transition_failed', 'target_status': 'generating'}
-    else:
+        if section_scope:
+            # A section run leaves the draft where it is — only the section's
+            # own presentation is being built.
+            pass
+        else:
+            # Approval starts the run: the draft leaves the queue for 'generating'.
+            lifecycle = _draft_gate_transition(
+                tenant_id, row['draft_id'], 'generating', decided_by, decided_by_name,
+                'اعتماد طلب التوليد — بدء التنفيذ')
+            if lifecycle:
+                updated['draft_status'] = lifecycle.get('current_status')
+            elif row['draft_id']:
+                # The gate could not open — roll the decision and the reservation
+                # back so nothing is approved against a draft that never started.
+                if reservation_id:
+                    release_points(tenant_id, reservation_id, settled_by=decided_by,
+                                   note='تراجع الاعتماد: تعذر الانتقال إلى التوليد')
+                conn.execute(
+                    "UPDATE generation_approvals SET status = 'pending', decided_by = NULL, "
+                    'decided_by_name = NULL, decided_at = NULL WHERE id = ?',
+                    (approval_id,),
+                )
+                conn.commit()
+                return {'error': 'lifecycle_transition_failed', 'target_status': 'generating'}
+    elif not section_scope:
         # Rejected or withdrawn: the draft returns to the state it was requested
         # from — approved sections, or the generated file for a re-run.
         prior = ((row['prior_status'] if 'prior_status' in row.keys() else '') or '').strip()
@@ -9624,7 +9727,12 @@ def settle_generation_approval(tenant_id, approval_id, job_id, consumed=True, se
         ('consumed' if consumed else 'rejected', job_id, approval_id),
     )
     conn.commit()
-    if consumed:
+    lifecycle = None
+    if (row['section_key'] if 'section_key' in row.keys() else None):
+        # A section-scoped run never moved the draft — settlement leaves the
+        # lifecycle untouched too.
+        pass
+    elif consumed:
         lifecycle = _draft_gate_transition(
             tenant_id, row['draft_id'], 'generated_draft', settled_by, settled_by,
             'اكتمال التوليد وحفظ العرض')
@@ -9868,7 +9976,9 @@ def consume_points(tenant_id, reservation_id, settled_by=None, note=None):
     except InsufficientBalance as short:
         conn.rollback()
         return {'error': 'insufficient_balance', 'required_usd': short.required_usd,
-                'available_usd': short.available_usd}
+                'available_usd': short.available_usd,
+                'required_sar': usd_to_sar(short.required_usd),
+                'available_sar': usd_to_sar(short.available_usd)}
     if result.get('error'):
         conn.rollback()
         return result
@@ -10047,7 +10157,7 @@ def get_generation_approval(tenant_id, approval_id):
         'SELECT * FROM generation_approvals WHERE id = ? AND tenant_id = ?',
         (approval_id, tenant_id),
     ).fetchone()
-    return dict(row) if row else None
+    return with_sar_fields(dict(row)) if row else None
 
 
 def list_generation_approvals(tenant_id, status=None, limit=50):
@@ -10062,7 +10172,7 @@ def list_generation_approvals(tenant_id, status=None, limit=50):
         params.append(status)
     query += ' ORDER BY ga.requested_at DESC LIMIT ?'
     params.append(int(limit))
-    return [dict(row) for row in conn.execute(query, params).fetchall()]
+    return with_sar_fields([dict(row) for row in conn.execute(query, params).fetchall()])
 
 
 # ── t15: final approval, digital stamp and the downloads library ────────────
@@ -11307,7 +11417,7 @@ def list_recharge_requests(tenant_id=None, status=None, limit=100):
         query += ' WHERE ' + ' AND '.join(clauses)
     query += ' ORDER BY requested_at DESC LIMIT ?'
     params.append(int(limit))
-    return [dict(row) for row in conn.execute(query, params).fetchall()]
+    return with_sar_fields([dict(row) for row in conn.execute(query, params).fetchall()])
 
 
 # ── t40: support tickets ────────────────────────────────────────────────────
@@ -11610,11 +11720,21 @@ def operational_overview(months=12, from_month=None, to_month=None):
         'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)', bucket=bucket),
         'revenue': monthly_map('recharge_requests', 'COALESCE(SUM(amount_usd), 0)',
                                date_col='reviewed_at', where="status = 'approved'", bucket=bucket),
+        # Recharges are paid in riyals — the SAR series reads price_sar
+        # directly instead of converting the wallet-dollar figure.
+        'revenue_sar': monthly_map('recharge_requests', 'COALESCE(SUM(price_sar), 0)',
+                                   date_col='reviewed_at', where="status = 'approved'", bucket=bucket),
         'tickets': monthly_map('support_tickets', bucket=bucket),
     }
+    try:
+        fx_rate = float((get_fx_rate() or {}).get('rate') or FX_DEFAULT_USD_SAR)
+    except (TypeError, ValueError):
+        fx_rate = FX_DEFAULT_USD_SAR
     trends = {'labels': labels}
     for key, mmap in series_maps.items():
         trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
+    trends['ai_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['ai_spend']]
+    trends['maps_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['maps_spend']]
 
     def delta(mmap):
         cur = mmap.get(bucket_keys[-1], 0)
@@ -11652,10 +11772,16 @@ def operational_overview(months=12, from_month=None, to_month=None):
         'revenue': {
             'month_usd': round(revenue_map.get(bucket_keys[-1], 0), 2),
             'total_usd': round(sum(revenue_map.values()), 2),
+            'month_sar': round(series_maps['revenue_sar'].get(bucket_keys[-1], 0), 2),
+            'total_sar': round(sum(series_maps['revenue_sar'].values()), 2),
         },
         'spend': {
             'month_usd': round(spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0), 2),
             'total_usd': round(sum(spend_map.values()) + sum(maps_map.values()), 2),
+            'month_sar': usd_to_sar(
+                spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0), fx_rate),
+            'total_sar': usd_to_sar(
+                sum(spend_map.values()) + sum(maps_map.values()), fx_rate),
         },
         'trends': trends,
         'deltas': {
@@ -11778,6 +11904,7 @@ def client_dashboard(tenant_id):
         'open_tickets': _count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
         'unread_notifications': notifications_unread,
         'month_consumption_usd': round(month_ai + month_maps, 4),
+        'month_consumption_sar': usd_to_sar(month_ai + month_maps),
         'recent_files': recent_files,
         'pending_generation': _count('generation_approvals', "status = 'pending'"),
         'pending_final': _count('final_file_approvals', "status = 'pending'"),
@@ -11809,9 +11936,15 @@ def client_activity_trends(tenant_id, months=12, from_month=None, to_month=None)
         'ai_spend': monthly_map('ai_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
         'maps_spend': monthly_map('map_usage_events', 'COALESCE(SUM(cost_usd), 0)'),
     }
+    try:
+        fx_rate = float((get_fx_rate() or {}).get('rate') or FX_DEFAULT_USD_SAR)
+    except (TypeError, ValueError):
+        fx_rate = FX_DEFAULT_USD_SAR
     trends = {'labels': labels}
     for key, mmap in series_maps.items():
         trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
+    trends['ai_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['ai_spend']]
+    trends['maps_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['maps_spend']]
     return trends
 
 
@@ -11907,14 +12040,14 @@ def company_admin_dashboard(tenant_id):
     except Exception:
         pass
 
-    return {
+    return with_sar_fields({
         'overdue_sections': overdue_sections,
         'overdue_count': len(overdue_sections),
         'avg_approval_hours': avg_approval_hours,
         'pending_section_approvals': pending_approvals,
         'spend_by_project': spend_by_project,
         'activity_by_user': spend_by_user,
-    }
+    })
 
 
 def ledger_report_rows(tenant_id=None, from_date=None, to_date=None, kind=None, limit=5000):
@@ -11941,10 +12074,10 @@ def ledger_report_rows(tenant_id=None, from_date=None, to_date=None, kind=None, 
     query += ' ORDER BY l.created_at DESC LIMIT ?'
     params.append(int(limit))
     rows = conn.execute(query, params).fetchall()
-    headers = ['التاريخ', 'الشركة', 'النوع', 'المبلغ USD', 'التكلفة الخام', 'المضاعف',
+    headers = ['التاريخ', 'الشركة', 'النوع', 'المبلغ (ريال)', 'التكلفة الخام (ريال)', 'المضاعف',
                'أحداث AI', 'أحداث الخرائط', 'مرجع عدم التكرار', 'ملاحظة']
-    body = [[r['created_at'], r['company_name'], r['kind'], r['amount_usd'],
-             r['raw_cost_usd'], r['multiplier'], r['ai_events_count'],
+    body = [[r['created_at'], r['company_name'], r['kind'], usd_to_sar(r['amount_usd']),
+             usd_to_sar(r['raw_cost_usd']), r['multiplier'], r['ai_events_count'],
              r['maps_events_count'], r['idempotency_key'], r['note']] for r in rows]
     return headers, body
 

@@ -618,6 +618,10 @@
         _slideNum: Number(slideIndex) + 1,
         _totalSlides: Number(totalSlides) || 1
       };
+      // A slide regenerated inside a section-scoped presentation is checked
+      // against that section's generation approval, not the full-file gate.
+      const scopeMatch = String(tenantProjectData.presentation_scope || '').match(/^section:(.+)$/);
+      if (scopeMatch) payload.sectionKey = scopeMatch[1];
       if (tenantPresentationId) payload.presentationId = tenantPresentationId;
 
       const data = await requestTenantSlideGeneration(payload);

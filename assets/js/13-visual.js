@@ -524,7 +524,8 @@
             const approved = await showGenerationApprovalModal({
               draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),
               slidesCount: totalSlides,
-              projectName: options.presentationTitle || tenantPresentationTitle || tenantProjectData.project_name || 'عرض بدون عنوان'
+              projectName: options.presentationTitle || tenantPresentationTitle || tenantProjectData.project_name || 'عرض بدون عنوان',
+              sectionKey: sectionKey || ''
             });
             if (!approved) {
               return;
@@ -725,6 +726,7 @@
             slidePlan: { slides: [_snapSlide] },
             images: generationImages,
             slideIndex: 0,
+            sectionKey: sectionKey || '',
             _slideNum: (i + 1),
             _totalSlides: totalSlides
           };

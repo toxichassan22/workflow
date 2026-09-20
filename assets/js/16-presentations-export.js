@@ -98,8 +98,8 @@
         const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
         const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status) : (stMeta.label || 'مسودة');
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
-        const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
-        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
+        const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
+        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_sar || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
         const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
         // Admins (approvals permission) approve directly whenever they want; employees
         // only send a request and the draft stays pending until an admin approves it.
@@ -1173,7 +1173,7 @@
     function sagFmtMoney(v) {
       const n = Number(v || 0);
       const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
-      return '$' + n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+      return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال';
     }
 
     function sagDeltaChip(d) {
@@ -1357,7 +1357,7 @@
       const activityEl = document.getElementById('sagActivityChart');
       if (!activityEl) return;
       const labels = trends.labels || [];
-      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+      const spendSeries = (trends.ai_spend_sar || trends.ai_spend || []).map((v, i) => v + (((trends.maps_spend_sar || trends.maps_spend) || [])[i] || 0));
       const series = [
         { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
         { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)', fmt: sagFmtNum },
@@ -1462,13 +1462,13 @@
       const deltas = overview.deltas || {};
       const spend = overview.spend || {};
       const revenue = overview.revenue || {};
-      const spendSeries = (trends.ai_spend || []).map((v, i) => v + ((trends.maps_spend || [])[i] || 0));
+      const spendSeries = (trends.ai_spend_sar || trends.ai_spend || []).map((v, i) => v + (((trends.maps_spend_sar || trends.maps_spend) || [])[i] || 0));
 
       if (statsEl) {
         const kpis = [
           { label: WFT('admin.kpi_companies', 'إجمالي الشركات'), value: sagFmtNum(tenants.companies != null ? tenants.companies : tenants.total || sagAllTenants.filter(t => !t.isAdmin).length), sub: WFT('admin.kpi_active', '{n} نشطة', { n: sagFmtNum(tenants.active_companies != null ? tenants.active_companies : tenants.active || 0) }), delta: deltas.companies, spark: trends.companies, color: 'var(--chart-1)' },
-          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoney(spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
-          { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoney(revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue, color: 'var(--chart-5)' },
+          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoney(spend.month_sar != null ? spend.month_sar : spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_sar != null ? spend.total_sar : spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
+          { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoney(revenue.month_sar != null ? revenue.month_sar : revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_sar != null ? revenue.total_sar : revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue_sar || trends.revenue, color: 'var(--chart-5)' },
         ];
         statsEl.innerHTML = kpis.map(k =>
           '<div class="admin-kpi-card">' +
@@ -1714,7 +1714,7 @@
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
           planBadge + ' | ' + statusBadge + ' | <span>رصيد</span> ' +
-          Number(t.creditBalance || 0).toLocaleString('en-US') +
+          Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US') + ' <span>ريال</span>' +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
@@ -2049,7 +2049,7 @@
         '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
         '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
         '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
-        '<div class="tenant-field"><label for="sagDetailCredit">الرصيد</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalance || 0) + '" required></div>' +
+        '<div class="tenant-field"><label for="sagDetailCredit">الرصيد (ريال)</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)) + '" required></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
@@ -2139,7 +2139,7 @@
         phone: document.getElementById('sagDetailPhone').value.trim(),
         username: document.getElementById('sagDetailUsername').value.trim().toLowerCase(),
         plan: document.getElementById('sagDetailPlan').value,
-        creditBalance: document.getElementById('sagDetailCredit').value,
+        creditBalanceSar: document.getElementById('sagDetailCredit').value,
         isActive: document.getElementById('sagDetailStatus').value === 'active',
         legalName: (document.getElementById('sagDetailLegalName') || {}).value || '',
         taxNumber: (document.getElementById('sagDetailTaxNumber') || {}).value || '',
@@ -2446,13 +2446,13 @@
         .replace(/'/g, '&#039;');
     }
 
-    function formatUsageCost(usd) {
-      const value = Number(usd) || 0;
+    function formatUsageCost(sar) {
+      const value = Number(sar) || 0;
       const digits = value >= 1 ? 2 : value >= 0.01 ? 2 : 4;
-      const text = '$' + (value >= 1
+      const text = (value >= 1
         ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : value.toFixed(digits));
-      return '<span dir="ltr">' + text + '</span>';
+      return '<span dir="ltr">' + text + '</span> <span>ريال</span>';
     }
 
     function aiReconcileStatusText(entry) {
