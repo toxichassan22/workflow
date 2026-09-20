@@ -183,13 +183,16 @@
         ? '<div data-logo-progress class="market-logo-progress"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
         : '';
       const warning = (!hasLogo && !busy) ? String(tr.dataset.logoImportWarning || '').trim() : '';
+      const lowResNote = (hasLogo && !busy && tr.dataset.logoLowRes === '1')
+        ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">أيقونة الموقع الرسمي (دقة منخفضة)</div>'
+        : '';
       const actions = hasLogo
         ? '<div class="market-logo-actions"><button type="button" class="btn ghost small" data-preview-competitor-logo>تكبير</button><button type="button" class="btn ghost small" data-remove-competitor-logo>حذف</button></div>'
         : '';
       cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">' + (busy ? busyLabel : 'لا يوجد') + '</div>') +
         progress + actions +
         '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px"' + (busy ? ' disabled' : '') + '>' +
-        (warning ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">' + escapeHtml(warning) + '</div>' : '');
+        (warning ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">' + escapeHtml(warning) + '</div>' : '') + lowResNote;
       cell.querySelector('[data-competitor-logo]')?.addEventListener('change', event => uploadCompetitorLogo(event.target, tr));
       cell.querySelector('[data-preview-competitor-logo]')?.addEventListener('click', () => openCompetitorLogoPreview(tr));
       cell.querySelector('[data-remove-competitor-logo]')?.addEventListener('click', () => removeCompetitorLogo(tr));
@@ -224,6 +227,7 @@
       tr.dataset.logoSourceUrl = row.logo_source_url || row.logoSourceUrl || '';
       tr.dataset.conflictWarnings = JSON.stringify(row.conflict_warnings || row.conflictWarnings || []);
       tr.dataset.logoImportWarning = row.logo_import_warning || row.logoImportWarning || '';
+      tr.dataset.logoLowRes = row.logo_low_res || row.logoLowRes ? '1' : '';
       tr.dataset.notes = row.notes || row.note || '';
       tr.dataset.district = row.district || row.neighborhood || '';
       tr.dataset.distanceKm = row.distance_km || row.distanceKm || '';
@@ -233,6 +237,7 @@
       tr.dataset.deadSourceUrls = JSON.stringify(row.dead_source_urls || row.deadSourceUrls || []);
       tr.dataset.outOfRadius = row.out_of_radius || row.outOfRadius ? '1' : '';
       tr.dataset.sourcesUnverified = row.sources_unverified || row.sourcesUnverified ? '1' : '';
+      tr.dataset.noSearchEvidence = row.no_search_evidence || row.noSearchEvidence ? '1' : '';
       const areaCache = row.area_cache || row.areaCache || {};
       tr.dataset.areaFixed = cleanMarketNumber(row.area_sqm || row.areaSqm || areaCache.area_sqm || '');
       tr.dataset.areaFrom = cleanMarketNumber(row.area_from || row.areaFrom || areaCache.area_from || '');
@@ -255,6 +260,9 @@
       }).join('') +
       (tr.dataset.sourcesUnverified
         ? '<div style="color:#92400e;margin-top:4px">روابط هذا الصف لم تُسترجع عبر البحث — معروضة للمراجعة وغير موثقة.</div>'
+        : '') +
+      (tr.dataset.noSearchEvidence
+        ? '<div style="color:#b91c1c;margin-top:4px">لم يظهر اسم هذا المنافس في أي صفحة من نتائج البحث — الاسم غير موثق.</div>'
         : '');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
@@ -388,6 +396,8 @@
       if (dead_source_urls.length) row.dead_source_urls = dead_source_urls;
       if (tr.dataset.outOfRadius) row.out_of_radius = true;
       if (tr.dataset.sourcesUnverified) row.sources_unverified = true;
+      if (tr.dataset.noSearchEvidence) row.no_search_evidence = true;
+      if (tr.dataset.logoLowRes) row.logo_low_res = true;
       return row;
     }
 
@@ -891,6 +901,7 @@
             (conflictCount ? ' — تم الإبقاء على ' + conflictCount + ' قيمة حالية متعارضة' : '') +
             (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة' : '') +
             ((res.outOfRadiusCount || 0) ? ' — ' + res.outOfRadiusCount + ' منافس خارج النطاق المحدد' : '') +
+            ((res.noEvidenceCount || 0) ? ' — ' + res.noEvidenceCount + ' منافس لم تظهر أسماؤهم في نتائج البحث' : '') +
             (extra ? ' — ' + extra : '');
         }
         toast(mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة');

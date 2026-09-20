@@ -3176,6 +3176,33 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
     return '', ''
 
 
+def _visual_concept_plan_image_urls(data):
+    """The three approved plan diagrams the client shipped — exterior renders are
+    grounded on them, so they arrive as image references in fixed kind order."""
+    posted = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
+    if not posted and isinstance(data.get('planImages'), list):
+        posted = {kind: url for kind, url in zip(('site', 'uses', 'massing'),
+                                                 data.get('planImages'))}
+    urls = []
+    for kind in ('site', 'uses', 'massing'):
+        url = _visual_concept_text(posted.get(kind), 4000)
+        if url and not url.lower().startswith('blob:'):
+            urls.append(url)
+    return urls
+
+
+def _visual_concept_external_gate(data, slot_id):
+    """Exterior slots (cover + the four angles) render the approved plans, so
+    they are blocked until the client ships all three approved plan images."""
+    if slot_id not in VISUAL_CONCEPT_EXTERNAL_SLOTS:
+        return None
+    if len(_visual_concept_plan_image_urls(data)) >= 3:
+        return None
+    return {'success': False,
+            'error': 'اعتمد المخططات الثلاثة قبل توليد التصور الخارجي',
+            'error_code': 'PLANS_IMAGES_REQUIRED'}
+
+
 def _visual_concept_cover_image(data, tenant_id=None):
     cover = str(data.get('coverImage') or data.get('cover_image') or '').strip()
     # A blob: URL is meaningless outside the browser tab that made it, so an old draft
@@ -3190,11 +3217,20 @@ def _visual_concept_cover_image(data, tenant_id=None):
 
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image='', tenant_id=None):
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
+    plan_urls = list(facts.get('plan_image_urls') or [])
+    # Exterior slots render the approved plans: the three diagrams lead the
+    # reference set, then the hero image (angles only) and any style refs.
+    external_cap = 3 + VISUAL_CONCEPT_MAX_REFERENCE_IMAGES
     if slot_id == 'cover':
-        file_ids = list(facts.get('style_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
-        map_urls = []
-        if len(file_ids) < VISUAL_CONCEPT_MAX_REFERENCE_IMAGES and facts.get('overview_map_url'):
-            map_urls.append(facts['overview_map_url'])
+        file_ids = list(facts.get('style_reference_file_ids') or [])
+        map_urls = [facts['overview_map_url']] if facts.get('overview_map_url') else []
+        if plan_urls:
+            return _visual_concept_reference_uris(
+                urls=plan_urls + map_urls, file_ids=file_ids,
+                max_images=external_cap, urls_first=True, tenant_id=tenant_id)
+        file_ids = file_ids[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
+        if len(file_ids) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
+            map_urls = []
         return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids, tenant_id=tenant_id)
     urls = [cover_image] if cover_image else []
     if _visual_concept_is_internal_slot(slot_id):
@@ -3215,7 +3251,10 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             return _visual_concept_reference_uris(urls=[boundary_url], tenant_id=tenant_id)
         map_url = facts.get('overview_map_url')
         return _visual_concept_reference_uris(urls=[map_url] if map_url else [], tenant_id=tenant_id)
-    return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True, tenant_id=tenant_id)
+    file_ids = list(facts.get('style_reference_file_ids') or [])[:2]
+    return _visual_concept_reference_uris(
+        urls=plan_urls + urls, file_ids=file_ids,
+        max_images=external_cap, urls_first=True, tenant_id=tenant_id)
 
 
 def _visual_concept_request_bundle(data, slot_id):
@@ -3276,6 +3315,8 @@ def _visual_concept_request_bundle(data, slot_id):
             # plan diagrams draw from — the spec text only, never the diagram's
             # color legend or labelling rules.
             facts['approved_plan_context'] = _visual_concept_plan_context_text(context, diagram_rules=False)
+    if slot_id in VISUAL_CONCEPT_EXTERNAL_SLOTS:
+        facts['plan_image_urls'] = _visual_concept_plan_image_urls(data)
     missing = _visual_concept_missing_fields(facts, slot_id)
     if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
         missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
@@ -6482,6 +6523,9 @@ def api_visual_concept_prompt():
             'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
             'missingFields': missing,
         }), 400
+    external_gate = _visual_concept_external_gate(data, slot_id)
+    if external_gate:
+        return jsonify(external_gate), 400
     cover_image = _visual_concept_cover_image(data)
     if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({
@@ -19252,7 +19296,15 @@ def _chat_error_message(res):
     error = res.get('error')
     if isinstance(error, dict):
         return str(error.get('message') or error)[:400]
-    return str(error or 'unknown provider error')[:400]
+    if error:
+        return str(error)[:400]
+    # Choice-level failures (e.g. MALFORMED_FUNCTION_CALL) carry no top-level
+    # error — surface the finish reason instead of the misleading fallback.
+    for choice in (res.get('choices') or []):
+        finish = (choice or {}).get('native_finish_reason') or (choice or {}).get('finish_reason') or ''
+        if str(finish).lower() not in ('', 'stop', 'end_turn', 'length'):
+            return f'provider finished with {finish}'
+    return 'unparseable provider response' if res.get('choices') else 'no provider response'
 
 
 def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_tokens=None, truncation_ceiling=None, usage_ctx=None):
@@ -20622,8 +20674,14 @@ def _market_search_ran(res):
     return requests_count > 0 or bool(_market_citation_urls(res))
 
 
-def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None, search_context=None):
-    """Search-backed market call with JSON, provider, and credit fallbacks."""
+def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None,
+                             search_context=None, server_tools=True):
+    """Search-backed market call with JSON, provider, and credit fallbacks.
+
+    ``server_tools=False`` drops the openrouter:web_search tool — Gemini answers
+    it with MALFORMED_FUNCTION_CALL when the prompt asks for several lookups, so
+    bounded tasks (logo discovery) run on the always-on Exa plugin alone.
+    """
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
     # One search cannot price several competitors, so the model is allowed a search per
     # competitor plus the market-wide ones; without max_uses it settled for a single call
@@ -20656,9 +20714,10 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
     # that pair silently dropped the search on every call and the model answered from
     # memory with homepage links. Search first, JSON mode only as a fallback.
-    attempts = [
+    attempts = ([
         (tools, None),
         (tools, {'type': 'json_object'}),
+    ] if server_tools else []) + [
         (None, {'type': 'json_object'}),
         (None, None),
     ]
@@ -20720,9 +20779,10 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     return last_response, last_error
 
 
-def _market_citation_urls(res):
-    """Collect the url_citation pages the web search actually retrieved."""
-    urls = []
+def _market_citation_pages(res):
+    """Citation pages with titles — the url_citation annotations the search returned."""
+    pages = []
+    seen = set()
     for choice in (res.get('choices') or []) if isinstance(res, dict) else []:
         message = (choice or {}).get('message') or {}
         for annotation in message.get('annotations') or []:
@@ -20730,9 +20790,144 @@ def _market_citation_urls(res):
                 continue
             citation = annotation.get('url_citation') if isinstance(annotation.get('url_citation'), dict) else {}
             url = str(citation.get('url') or annotation.get('url') or '').strip()
-            if url and url not in urls:
-                urls.append(url)
-    return urls
+            if url and url not in seen:
+                seen.add(url)
+                pages.append({'url': url, 'title': str(citation.get('title') or '').strip()})
+    return pages
+
+
+def _market_citation_urls(res):
+    """Collect the url_citation pages the web search actually retrieved."""
+    return [page['url'] for page in _market_citation_pages(res)]
+
+
+# Words shared by nearly every project name; a citation match must rest on the
+# distinctive part of the name, not on «مجمع» or «residence».
+_CITATION_GENERIC_TOKENS = {
+    'مجمع', 'مشروع', 'ابراج', 'برج', 'سكني', 'السكني', 'حي', 'مدينه', 'مدينة',
+    'مركز', 'وحدات', 'عقاري', 'عقارات',
+    'compound', 'project', 'projects', 'residence', 'residential', 'tower',
+    'towers', 'city', 'district', 'saudi', 'jeddah', 'riyadh', 'real', 'estate',
+    'al', 'el', 'the',
+}
+
+
+def _competitor_name_tokens(name):
+    folded = market_study._fold_choice(name)
+    return {token for token in re.findall(r'[\w]+', folded)
+            if len(token) >= 4 and token not in _CITATION_GENERIC_TOKENS}
+
+
+def _attach_retrieved_citations(rows, pages):
+    """Give source-less rows the retrieved pages that actually name them.
+
+    The model sometimes writes no URLs even though the search returned pages.
+    Those citations are real evidence — attach the ones whose title or URL
+    mentions the competitor's distinctive name tokens (2+ hits, or the only
+    distinctive token when the name carries just one).
+    """
+    if not pages:
+        return
+    for row in rows or []:
+        if not isinstance(row, dict) or (row.get('row_source') or 'ai') != 'ai':
+            continue
+        if market_study.competitor_source_urls(row):
+            continue
+        tokens = _competitor_name_tokens(row.get('name'))
+        if not tokens:
+            continue
+        needed = 1 if len(tokens) == 1 else 2
+        matched = []
+        for page in pages:
+            haystack = market_study._fold_choice(
+                f"{page.get('title') or ''} {page.get('url') or ''}")
+            if sum(1 for token in tokens if token in haystack) >= needed:
+                matched.append(page['url'])
+        if matched:
+            row['source_urls'] = matched[:4]
+            if not str(row.get('source_url') or '').strip():
+                row['source_url'] = market_study.prefer_specific_source_url(*matched)
+
+
+def _verify_competitor_row(row, payload, data, tenant_id=None):
+    """One targeted web search per competitor.
+
+    The main call's single Exa query only retrieves market-level index pages,
+    so the model fills names from memory. A per-competitor query retrieves the
+    pages that actually mention THIS name: they become its source links, its
+    official page feeds the logo import, and a name no retrieved page mentions
+    is flagged as unverified instead of being silently trusted.
+    """
+    name = str(row.get('name') or '').strip()
+    if not name:
+        return
+    city = str(payload.get('city') or '').strip() or 'السعودية'
+    prompt = (
+        f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
+        'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
+        'للمشروع أو مطوّره إن وُجدت", "price_note": "أي سعر أو إيجار ورد في الصفحات", '
+        '"summary": "سطر واحد عن المشروع"}.\n'
+        'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
+    )
+    try:
+        response, _err = _call_market_study_model(
+            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200,
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=False)
+    except Exception:
+        return
+    if not _market_search_ran(response):
+        return
+    tokens = _competitor_name_tokens(name)
+    if not tokens:
+        return
+    needed = 1 if len(tokens) == 1 else 2
+    matched = []
+    for page in _market_citation_pages(response):
+        haystack = market_study._fold_choice(f"{page.get('title') or ''} {page.get('url') or ''}")
+        if sum(1 for token in tokens if token in haystack) >= needed:
+            url = str(page.get('url') or '').strip()
+            if url:
+                matched.append(url)
+    if not matched:
+        # The search ran and no retrieved page mentions this name — flag the row
+        # rather than silently trusting a memory-generated competitor.
+        row['no_search_evidence'] = True
+        return
+    row.pop('no_search_evidence', None)
+    row['source_urls'] = list(dict.fromkeys(
+        market_study.competitor_source_urls(row) + matched))[:6]
+    if not str(row.get('source_url') or '').strip():
+        row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
+    official = next((url for url in matched
+                     if not any(token in _normalized_web_host(url)
+                                for token in _AGGREGATOR_HOST_TOKENS)), '')
+    if official and not str(row.get('logo_source_url') or '').strip():
+        row['logo_source_url'] = official
+        row['logo_official_verified'] = True
+
+
+def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
+    report = progress if callable(progress) else (lambda *_args: None)
+    targets = [row for row in (rows or [])
+               if isinstance(row, dict)
+               and (row.get('row_source') or 'ai') == 'ai'
+               and str(row.get('name') or '').strip()]
+    if not targets:
+        return
+    done = [0]
+    total = len(targets)
+
+    def verify(row):
+        try:
+            _verify_competitor_row(row, payload, data, tenant_id=tenant_id)
+        finally:
+            done[0] += 1
+            report(30 + int(28 * done[0] / total),
+                   f'التحقق من «{row.get("name") or "منافس"}» ({done[0]} من {total})...')
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4, total)) as pool:
+        list(pool.map(verify, targets))
 
 
 def _parse_market_model_json(res):
@@ -20923,8 +21118,18 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
+    _attach_retrieved_citations(merged, _market_citation_pages(res))
+    report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
+    _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id, progress=report)
     report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
-    if _market_search_ran(res):
+    search_ran = _market_search_ran(res)
+    if search_ran:
+        # A grounded run that still leaves a row with zero source URLs means the
+        # name came from the model's memory — flag it for the owner's review.
+        for row in merged:
+            if (row.get('row_source') or 'ai') == 'ai' and not market_study.competitor_source_urls(row):
+                row['no_search_evidence'] = True
+    if search_ran:
         dead_urls = _verify_market_urls(
             url for row in merged for url in _competitor_claimed_urls(row))
         for row in merged:
@@ -20937,7 +21142,9 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 market_study.flag_unverified_competitor_sources(row)
     out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
     report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
-    _auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id, progress=report)
+    _auto_import_competitor_logos(
+        merged, payload, data, tenant_id=tenant_id, progress=report,
+        citation_pages=_market_citation_pages(res))
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
@@ -20949,6 +21156,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         'updated': updated,
         'searchVerified': _market_search_ran(res),
         'outOfRadiusCount': out_of_radius,
+        'noEvidenceCount': sum(1 for row in merged if row.get('no_search_evidence')),
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')),
         'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
@@ -22672,15 +22880,17 @@ def _safe_read_official_logo_page(official_url):
 
 
 def _official_logo_candidates(official_url):
-    page, _error = _safe_read_official_logo_page(official_url)
+    """(candidates, error) — the error explains why nothing was extractable so the
+    row warning can say so instead of a generic failure."""
+    page, page_error = _safe_read_official_logo_page(official_url)
     if not page:
-        return []
+        return [], page_error or 'تعذر قراءة صفحة الموقع الرسمي'
     parser = _OfficialLogoHTMLParser()
     try:
         parser.feed(page)
         parser.close()
     except Exception:
-        return []
+        return [], 'تعذر تحليل صفحة الموقع الرسمي'
     candidates = []
     seen = set()
     for _priority, raw_url in sorted(parser.candidates, key=lambda item: item[0]):
@@ -22694,7 +22904,7 @@ def _official_logo_candidates(official_url):
             continue
         seen.add(key)
         candidates.append(candidate)
-    return candidates
+    return candidates, '' if candidates else 'لا توجد صورة شعار على الصفحة الرسمية'
 
 
 def _safe_download_competitor_logo(logo_url, official_url):
@@ -22743,9 +22953,15 @@ def _safe_download_competitor_logo(logo_url, official_url):
                     return None, None, None, 'أبعاد شعار المنافس غير صالحة'
                 detected = {'PNG': ('image/png', '.png'), 'JPEG': ('image/jpeg', '.jpg'), 'WEBP': ('image/webp', '.webp')}.get((image.format or '').upper())
                 if not detected:
-                    return None, None, None, 'نوع ملف الشعار غير مدعوم'
+                    # Any other PIL-readable raster (GIF, AVIF, BMP…) is a real
+                    # image — re-encode it to PNG instead of rejecting it.
+                    buffer = BytesIO()
+                    image.convert('RGBA').save(buffer, 'PNG')
+                    content = bytearray(buffer.getvalue())
+                    detected = ('image/png', '.png')
+                else:
+                    image.verify()
                 mime_type, extension = detected
-                image.verify()
         except (UnidentifiedImageError, OSError):
             return None, None, None, 'ملف شعار المنافس غير صالح'
         return bytes(content), mime_type, extension, ''
@@ -22754,13 +22970,94 @@ def _safe_download_competitor_logo(logo_url, official_url):
         pool.close()
 
 
-def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=None):
+def _download_official_favicon(official_url):
+    """Last-resort logo: Google's favicon service returns the icon the official
+    site itself publishes — reachable even when the site blocks direct reads
+    (Cloudflare 403/timeouts). Only used once the domain is already verified
+    as the competitor's official page."""
+    host = _normalized_web_host(official_url)
+    if not host:
+        return None, None, None, ''
+    # The s2 endpoint 301-redirects to gstatic faviconV2 — call it directly.
+    favicon_url = ('https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON'
+                   f'&fallback_opts=TYPE,SIZE,URL&url=http://{host}&size=128')
+    parsed = urlsplit(favicon_url)
+    addresses = _public_host_addresses(parsed.hostname)
+    if not addresses:
+        return None, None, None, ''
+    try:
+        pool, response = _open_pinned_https(parsed, addresses)
+    except Exception:
+        return None, None, None, ''
+    try:
+        if response.status != 200:
+            return None, None, None, ''
+        content = bytes(b''.join(response.stream(64 * 1024)))
+        if not content or len(content) > COMPETITOR_LOGO_MAX_BYTES:
+            return None, None, None, ''
+        from PIL import Image, UnidentifiedImageError
+        try:
+            with Image.open(BytesIO(content)) as image:
+                if image.size[0] <= 0 or image.size[1] <= 0:
+                    return None, None, None, ''
+                mime_type, extension = {'PNG': ('image/png', '.png'), 'JPEG': ('image/jpeg', '.jpg'),
+                                        'WEBP': ('image/webp', '.webp')}.get(
+                                            (image.format or '').upper(), ('', ''))
+                if not extension:
+                    buffer = BytesIO()
+                    image.convert('RGBA').save(buffer, 'PNG')
+                    content = buffer.getvalue()
+                    mime_type, extension = 'image/png', '.png'
+                else:
+                    image.verify()
+        except (UnidentifiedImageError, OSError):
+            return None, None, None, ''
+        return content, mime_type, extension, ''
+    finally:
+        response.release_conn()
+        pool.close()
+
+
+# Aggregator/index hosts list a competitor but are never its official site —
+# their og:image is the portal's own logo, so they are excluded from the
+# citation-based official-page match.
+_AGGREGATOR_HOST_TOKENS = (
+    'sakani.', 'ejar.', 'rega.gov', 'aqar.', 'aqaar.', 'wasalt.', 'bayut.',
+    'dubizzle', 'propertyfinder', 'opensooq', 'haraj', 'lamudi', 'exxl',
+    'wikipedia', 'twitter.', 'x.com', 'facebook.', 'instagram.', 'linkedin.',
+    'youtube.', 'tiktok.', 'google.', 'bing.', 'maps.',
+)
+
+
+def _official_citation_pages(pages, name):
+    """Citation pages that look like the competitor's own site: the title or
+    URL mentions its distinctive name tokens and the host is not an
+    aggregator, index, or social platform."""
+    tokens = _competitor_name_tokens(name)
+    if not tokens:
+        return []
+    needed = 1 if len(tokens) == 1 else 2
+    matches = []
+    for page in pages or []:
+        url = str(page.get('url') or '').strip()
+        host = _normalized_web_host(url)
+        if not host or any(token in host for token in _AGGREGATOR_HOST_TOKENS):
+            continue
+        haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
+        if sum(1 for token in tokens if token in haystack) >= needed:
+            matches.append(url)
+    return matches
+
+
+def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=None,
+                                  citation_pages=None):
     """Import official logos during competitor generation — no per-row button needed.
 
     Pass 1 is free: rows whose source_url already verifies as the official site go
-    straight to HTML extraction. Pass 2 runs ONE extra search call to discover the
-    official site + logo for the rest, then extracts/downloads per row. A discovered
-    official URL is only trusted when it matches a real search citation host.
+    straight to HTML extraction. Pass 1.5 is free too: citation pages the main
+    search already retrieved are matched to each competitor's name and treated as
+    its official page. Pass 2 runs ONE extra search call to discover the official
+    site + logo for whatever remains, then extracts/downloads per row.
     """
     report = progress if callable(progress) else (lambda *_args: None)
     draft_id = payload.get('draftId') or payload.get('draft_id')
@@ -22769,14 +23066,30 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     for index, row in enumerate(rows):
         if row.get('logo_file_id') or row.get('logo_path'):
             continue
-        official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
         dead_keys = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+        official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
         if official_url.strip().casefold() in dead_keys:
             official_url = ''
         verified = bool(official_url and (
             row.get('logo_official_verified')
             or market_study.official_source_reliability(
                 row.get('name'), row.get('source'), official_url)))
+        if not verified:
+            for page_url in _official_citation_pages(citation_pages, row.get('name')):
+                if page_url.casefold() in dead_keys:
+                    continue
+                official_url = page_url
+                row['logo_source_url'] = page_url
+                row['logo_official_verified'] = True
+                field_sources = market_study.competitor_field_sources(row)
+                urls = field_sources.setdefault('logo_url', [])
+                if page_url not in urls:
+                    urls.append(page_url)
+                row['field_sources'] = field_sources
+                row['source_urls'] = list(dict.fromkeys(
+                    market_study.competitor_source_urls(row) + [page_url]))
+                verified = True
+                break
         if verified:
             report(74 + int(8 * index / total),
                    f'استخراج شعار «{row.get("name") or "منافس"}» من موقعه الرسمي...')
@@ -22785,7 +23098,12 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
             except Exception as exc:
                 row['logo_import_warning'] = str(exc)
         if not row.get('logo_file_id') and not row.get('logo_path'):
-            missing.append(row)
+            if row.get('no_search_evidence'):
+                # No retrieved page even names this competitor — paying a
+                # discovery call for a likely-fabricated name is wasted spend.
+                row.setdefault('logo_import_warning', 'اسم المنافس غير موثق — لا يوجد موقع رسمي لاستيراد الشعار')
+            else:
+                missing.append(row)
     if not missing:
         return
     batch = missing[:8]
@@ -22804,22 +23122,23 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         'إن لم تجد دليلًا رسميًا لمشروع أعد حقوله فارغة، ولا تخمّن أي رابط.'
     )
     try:
+        # No server tool here: the prompt asks for a lookup per project, which
+        # Gemini answers with MALFORMED_FUNCTION_CALL and an empty message. The
+        # Exa plugin still grounds every attempt with real retrieved pages.
         response, _provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), prompt, max_tokens=2500,
-            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+            market_study.build_consultant_system_prompt(), prompt, max_tokens=4000,
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=False)
     except Exception:
-        return
+        response = None
     if not _market_search_ran(response):
         for row in batch:
             row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')
         return
-    parsed, parse_error = _parse_market_model_json(response)
-    if parse_error or not isinstance(parsed, dict):
-        return
+    parsed, _parse_error = _parse_market_model_json(response)
     citations = _market_citation_urls(response)
-    results = parsed.get('results')
+    results = parsed.get('results') if isinstance(parsed, dict) else None
     if not isinstance(results, list):
-        results = [parsed]
+        results = [parsed] if isinstance(parsed, dict) else []
     by_id = {str(row.get('id') or ''): row for row in batch}
     by_name = {str(row.get('name') or '').strip().casefold(): row for row in batch}
     for item in results:
@@ -22830,19 +23149,42 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
             row = by_name.get(str(item.get('name') or '').strip().casefold())
         if row is None:
             continue
-        official = str(item.get('official_url') or item.get('logo_source_url') or '').strip()
+        official = str(
+            item.get('official_url') or item.get('official_website') or item.get('website')
+            or item.get('logo_source_url') or item.get('source_url') or item.get('url') or ''
+        ).strip()
         if not official or not any(_related_official_hosts(official, c) for c in citations):
             continue
         row['logo_url'] = str(item.get('logo_url') or '').strip()
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
+    # The model's JSON is only a formatter — the Exa citations carry the actual
+    # retrieved pages. When the reply is malformed (Gemini emits
+    # MALFORMED_FUNCTION_CALL on multi-lookup prompts) or misses a row, match
+    # those pages to each competitor's name directly.
+    discovery_pages = _market_citation_pages(response)
+    for row in batch:
+        if row.get('logo_official_verified'):
+            continue
+        dead_keys = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+        for page_url in _official_citation_pages(discovery_pages, row.get('name')):
+            if page_url.casefold() in dead_keys:
+                continue
+            row['logo_source_url'] = page_url
+            row['logo_official_verified'] = True
+            break
+    for row in batch:
+        if not row.get('logo_official_verified'):
+            continue
+        official = str(row.get('logo_source_url') or '').strip()
         field_sources = market_study.competitor_field_sources(row)
         urls = field_sources.setdefault('logo_url', [])
-        if official not in urls:
+        if official and official not in urls:
             urls.append(official)
         row['field_sources'] = field_sources
-        row['source_urls'] = list(dict.fromkeys(
-            market_study.competitor_source_urls(row) + [official]))
+        if official:
+            row['source_urls'] = list(dict.fromkeys(
+                market_study.competitor_source_urls(row) + [official]))
         report(86 + int(6 * (batch.index(row) if row in batch else 0) / max(1, len(batch))),
                f'تحميل شعار «{row.get("name") or "منافس"}»...')
         try:
@@ -22878,7 +23220,8 @@ def _store_imported_competitor_logo(row, draft_id=None):
             row['logo_url'] = candidate
             break
     if not content:
-        for candidate in _official_logo_candidates(official_url):
+        candidates, page_error = _official_logo_candidates(official_url)
+        for candidate in candidates:
             key = str(candidate or '').strip().casefold()
             if not key or key in seen:
                 continue
@@ -22888,6 +23231,17 @@ def _store_imported_competitor_logo(row, draft_id=None):
                 logo_url = candidate
                 row['logo_url'] = candidate
                 break
+        if not content and page_error:
+            error = page_error
+    if not content:
+        favicon_content, favicon_mime, favicon_ext, _favicon_error = _download_official_favicon(official_url)
+        if favicon_content:
+            content, mime_type, extension = favicon_content, favicon_mime, favicon_ext
+            logo_url = ('https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON'
+                        f'&fallback_opts=TYPE,SIZE,URL&url=http://{_normalized_web_host(official_url)}&size=128')
+            row['logo_url'] = logo_url
+            row['logo_low_res'] = True
+            error = ''
     if error or not content:
         row['logo_import_warning'] = error or 'تعذر استيراد شعار المنافس'
         return row
@@ -30032,6 +30386,22 @@ def api_company_export_report(report_name):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == '__main__':
+    print("=" * 60)
+    print("  Real Estate Proposal Generator - GLM-First Architecture")
+    print("=" * 60)
+    print(f"  GLM Model: {GLM_MODEL}")
+    print(f"  Image Model: {IMAGE_MODEL}")
+    print(f"  Output Dir: {OUTPUT_DIR}")
+    print("=" * 60)
+    port = int(os.environ.get('PORT', 7860))
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+    print(f"  Image Model: {IMAGE_MODEL}")
+    print(f"  Output Dir: {OUTPUT_DIR}")
+    print("=" * 60)
+    port = int(os.environ.get('PORT', 7860))
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
     print("=" * 60)
     print("  Real Estate Proposal Generator - GLM-First Architecture")
     print("=" * 60)
