@@ -154,6 +154,37 @@
     }
   };
 
+  /* Arabic meaning for the variables the expressions are built from, so the
+     editor reads like the formula instead of raw code. */
+  const VAR_LABELS = {
+    costTotal: 'إجمالي التكاليف', developerCost: 'أتعاب المطور', developerBaseAmount: 'أساس المطور',
+    externalCost: 'البنود الخارجية', landCostIncluded: 'الأرض الداخلة في التكلفة',
+    projectCost: 'تكلفة المشروع قبل التمويل', totalFinanceCost: 'إجمالي تكلفة التمويل',
+    arrangementFee: 'رسوم ترتيب التمويل', totalFinanceInterest: 'إجمالي فوائد التمويل',
+    projectCostWithFinance: 'تكلفة المشروع شامل التمويل', adjustedProjectCost: 'إجمالي تكلفة الاستثمار',
+    totalFundFees: 'إجمالي أتعاب الصندوق', totalFundManagementFees: 'أتعاب الإدارة',
+    totalAdditionalFundFees: 'الأتعاب الإضافية', fundExitFeeTotal: 'أتعاب التخارج',
+    performanceFeeTotal: 'حافز الأداء', operatingRevenue: 'إيرادات التشغيل',
+    opexAnnual: 'المصروفات السنوية', annualLandRent: 'إيجار الأرض السنوي', noi: 'صافي الدخل التشغيلي',
+    revenueY1: 'إيراد أول سنة تشغيل', opexY1: 'مصروفات أول سنة', noiY1: 'NOI أول سنة',
+    saleRevenue: 'إيرادات البيع', saleExitNet: 'صافي التخارج البيعي', operatingExitNet: 'صافي التخارج التشغيلي',
+    saleExitGross: 'إجمالي التخارج البيعي', operatingExitGross: 'إجمالي التخارج التشغيلي',
+    terminal: 'إجمالي صافي التخارج', facilityAmount: 'قيمة التسهيل', financeBaseAmount: 'أساس التمويل',
+    landValue: 'قيمة الأرض', landArea: 'مساحة الأرض', coverageRate: 'نسبة التغطية',
+    builtUpAreaAbove: 'مسطحات فوق الأرض', basementArea: 'مساحة البدرومات', totalBuiltUpArea: 'إجمالي المسطحات',
+    coveredArea: 'المساحة المغطاة', openArea: 'المساحات المفتوحة',
+    developmentYears: 'سنوات التطوير', operationYears: 'سنوات التشغيل', salesYears: 'سنوات البيع',
+    totalYears: 'إجمالي سنوات المشروع', roiInflows: 'إجمالي التدفقات الداخلة', roiOutflows: 'إجمالي التدفقات الخارجة',
+    roi: 'العائد ROI', totalCashEquity: 'الضخ النقدي', landEquityContribution: 'مساهمة الأرض العينية',
+    totalEquityRequired: 'إجمالي حقوق الملكية', leasable: 'المساحة التأجيرية',
+    fullOccupancyRevenue: 'إيراد الإشغال الكامل', fullOccupancyOpex: 'مصروفات الإشغال الكامل',
+    fullOccupancyNOI: 'NOI الإشغال الكامل', fullBaseAnnual: 'قاعدة الإيراد الكاملة',
+    graceDiscount: 'خصم السماح', revenueBase: 'قاعدة الإيرادات', executionCost: 'تكلفة التنفيذ',
+    projectIrr: 'IRR المشروع', irrVal: 'IRR حقوق الملكية', payback: 'فترة الاسترداد',
+    equityPayback: 'استرداد حقوق الملكية', designCostTotal: 'إجمالي التصميم',
+    servicesCostTotal: 'إجمالي الخدمات', advertisingCostTotal: 'إجمالي الدعاية'
+  };
+
   /* ---------- helpers ---------- */
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -300,6 +331,160 @@
   /* ---------- source editing ---------- */
   function sourceLines() { return state.source.split('\n'); }
 
+  /* ---------- expression editing ----------
+     A metric's write line is e.g. setTxt('resNOIY1', money(noiY1)) — the formula
+     itself lives where the variable was assigned. resolveExpression walks that
+     chain (noiY1 = noi  ->  noi = operatingRevenue - opexAnnual - landRent) and
+     hands the panel just the right-hand expression to edit. */
+  function varAssignedAt(lineText, varName) {
+    const re = new RegExp('\\b' + varName.replace(/[$]/g, '\\$&') + '\\s*=', 'g');
+    let m;
+    while ((m = re.exec(lineText))) {
+      const eq = m.index + m[0].length - 1;
+      const before = lineText[eq - 1] || '';
+      const after = lineText[eq + 1] || '';
+      if ('=!<>+-*/%&|^'.includes(before) || after === '=' || after === '>') continue;
+      return m.index + m[0].length;
+    }
+    return -1;
+  }
+
+  function exprEndAt(lineText, start) {
+    let depth = 0, quote = null;
+    for (let i = start; i < lineText.length; i++) {
+      const c = lineText[i];
+      if (quote) { if (c === quote && lineText[i - 1] !== '\\') quote = null; continue; }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') depth--;
+      else if (depth === 0 && c === ';') return i;
+      else if (depth === 0 && c === ',') {
+        if (/^\s*[\w$]+\s*=/.test(lineText.slice(i + 1))) return i;
+      }
+    }
+    return lineText.length;
+  }
+
+  function findAssignment(varName, beforeLine, hintLines) {
+    const lines = sourceLines();
+    const order = [...(hintLines || []), ...Array.from({ length: Math.min(beforeLine, lines.length) }, (_, i) => beforeLine - i)];
+    for (const n of order) {
+      if (n < 1 || n > lines.length) continue;
+      const text = lines[n - 1];
+      const start = varAssignedAt(text, varName);
+      if (start === -1) continue;
+      const end = exprEndAt(text, start);
+      return { line: n, start, end, varName, expr: text.slice(start, end).trim() };
+    }
+    return null;
+  }
+
+  function resolveExpression(el) {
+    const info = state.trace.get(el);
+    if (!info) return null;
+    const lines = sourceLines();
+    const writeText = lines[info.line - 1] || '';
+    const call = writeText.match(/(?:setTxt|setVal|setHtml|setText)\([^,]+,\s*(?:\w+\()?([\w$]+)/);
+    const dict = el.id ? FORMULA_BY_ID[el.id] : null;
+    let target = call && call[1];
+    if (!target) {
+      // Not a setTxt line — offer the line itself if it is a plain assignment.
+      const assign = writeText.match(/([\w$]+)\s*=/);
+      if (assign) target = assign[1];
+    }
+    if (!target) return null;
+    for (let hop = 0; hop < 4 && target; hop++) {
+      const found = findAssignment(target, info.line, dict ? dict.code : null);
+      if (!found) return hop ? found : null;
+      if (/^[\w$]+$/.test(found.expr)) { target = found.expr; continue; }  // alias: follow it
+      return found;
+    }
+    return null;
+  }
+
+  function collectVars() {
+    const names = new Set();
+    const re = /(?:const|let|var)\s+([\w$]+)\s*=/g;
+    for (const line of sourceLines()) { let m; while ((m = re.exec(line))) names.add(m[1]); }
+    return [...names];
+  }
+
+  function varLabel(name) { return VAR_LABELS[name] || ''; }
+
+  function renderVarChips(expr) {
+    const box = $('finlab-vars');
+    if (!box) return;
+    const ids = [...new Set(expr.match(/[\w$]+/g) || [])]
+      .filter(w => !/^\d/.test(w) && !['const', 'let', 'var', 'Math', 'null', 'true', 'false', 'undefined'].includes(w));
+    box.innerHTML = ids.map(w =>
+      `<button type="button" class="finlab-var" data-var="${esc(w)}" title="${esc(varLabel(w) || w)}">${esc(varLabel(w) || w)}</button>`
+    ).join('');
+    box.querySelectorAll('[data-var]').forEach(b => b.addEventListener('click', () => {
+      insertAtCursor($('finlab-expr'), b.dataset.var);
+    }));
+  }
+
+  function fillVarPicker() {
+    const sel = $('finlab-var-add');
+    if (!sel || sel.options.length > 1) return;
+    const vars = collectVars().sort((a, b) => (varLabel(a) ? 0 : 1) - (varLabel(b) ? 0 : 1) || a.localeCompare(b));
+    sel.innerHTML = '<option value="">— متغيرات النموذج —</option>' + vars.map(v =>
+      `<option value="${esc(v)}">${esc(varLabel(v) ? varLabel(v) + ' (' + v + ')' : v)}</option>`).join('');
+  }
+
+  function insertAtCursor(area, text) {
+    const s = area.selectionStart ?? area.value.length, e = area.selectionEnd ?? s;
+    area.value = area.value.slice(0, s) + text + area.value.slice(e);
+    area.selectionStart = area.selectionEnd = s + text.length;
+    area.focus();
+  }
+
+  function showExpression(res) {
+    const block = $('finlab-expr-block');
+    if (!block) return;
+    if (!res) { block.style.display = 'none'; return; }
+    block.style.display = 'block';
+    $('finlab-expr-varname').textContent = (varLabel(res.varName) ? varLabel(res.varName) + ' — ' : '') + res.varName + ' (سطر ' + res.line + ')';
+    $('finlab-expr').value = res.expr;
+    renderVarChips(res.expr);
+    state.exprTarget = res;
+  }
+
+  function applyExpression() {
+    const res = state.exprTarget;
+    if (!res) return;
+    const lines = sourceLines();
+    let text = lines[res.line - 1] || '';
+    if (text.slice(res.start, res.end).trim() !== res.expr) {
+      // Line drifted since selection — re-resolve against the current source.
+      const fresh = findAssignment(res.varName, res.line + 1, null);
+      if (!fresh) { showErr('تغيّر سطر المعادلة — حدّد الناتج من جديد'); return; }
+      Object.assign(res, fresh);
+      text = lines[res.line - 1] || '';
+    }
+    const start = varAssignedAt(text, res.varName);
+    if (start === -1) { showErr('تعذر تحديد المعادلة في السطر'); return; }
+    const end = exprEndAt(text, start);
+    const nextExpr = $('finlab-expr').value;
+    lines[res.line - 1] = text.slice(0, start) + nextExpr + text.slice(end);
+    const next = lines.join('\n');
+    const before = snapshotSection();
+    try {
+      compileSource(next);
+    } catch (err) {
+      showErr('خطأ في المعادلة — لم تُطبَّق: ' + err.message);
+      return;
+    }
+    state.edits.push(state.source);
+    state.source = next;
+    try { tracedRecalc(); } catch (err) { showErr('المعادلة طُبّقت لكن الحساب فشل: ' + err.message); }
+    renderDiff(diffSnapshots(before, snapshotSection()));
+    renderEdits();
+    refreshSelection();
+    status('مصدر معدّل — ' + state.edits.length + ' تعديل');
+    showErr('');
+  }
+
   function applyEdit() {
     const from = Math.max(1, parseInt($('finlab-from')?.value, 10) || 0);
     const to = Math.max(from, parseInt($('finlab-to')?.value, 10) || from);
@@ -403,6 +588,7 @@
     $('finlab-sel-code').textContent = lines.slice(Math.max(0, info.line - 2), Math.min(lines.length, info.line + 1))
       .map((l, i) => (Math.max(1, info.line - 1) + i) + ' | ' + l).join('\n');
     loadRange(info.line, info.line);
+    showExpression(resolveExpression(traced));
     state.selected = traced;
     const list = $('finlab-sel-codelines');
     if (list) {
@@ -530,6 +716,8 @@
       [data-finlab-traced]{transition:outline .1s}
       .finlab-link{border:0;background:none;color:#2563eb;cursor:pointer;font:600 12px inherit;text-decoration:underline;padding:0 2px}
       .finlab-block{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-top:10px}
+      .finlab-vars{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+      .finlab-var{border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;border-radius:14px;padding:2px 10px;font:600 11px inherit;cursor:pointer}
       #finlabStudyHost{padding:18px}
       .finlab-frame-body{margin:0;background:#f3f4f6}
     `;
@@ -552,15 +740,26 @@
         <span id="finlab-status" class="finlab-empty"></span>
       </div>
       <div class="finlab-block">
-        <div class="finlab-kv"><span>الخانة</span><b id="finlab-sel-label">—</b></div>
+        <select id="finlab-pick" style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:8px;font:12px inherit"></select>
+        <div class="finlab-kv" style="margin-top:8px"><span>الخانة</span><b id="finlab-sel-label">—</b></div>
         <div class="finlab-kv"><span>القيمة الحالية</span><b id="finlab-sel-value">—</b></div>
         <div class="finlab-kv"><span>المعادلة</span><b id="finlab-sel-formula">—</b></div>
         <div class="finlab-kv"><span>المصدر</span><b id="finlab-sel-line">—</b></div>
         <div id="finlab-sel-codelines" style="margin-top:4px"></div>
         <div id="finlab-sel-code" class="finlab-code">—</div>
       </div>
+      <div class="finlab-block" id="finlab-expr-block" style="display:none">
+        <h4>المعادلة</h4>
+        <div class="finlab-kv"><span>المتغير</span><b id="finlab-expr-varname"></b></div>
+        <textarea id="finlab-expr" spellcheck="false" style="width:100%;min-height:56px;direction:ltr;text-align:left;font:12px/1.5 Consolas,monospace;border:1px solid #d1d5db;border-radius:8px;padding:8px;box-sizing:border-box"></textarea>
+        <div id="finlab-vars" class="finlab-vars"></div>
+        <div class="finlab-range"><select id="finlab-var-add" style="flex:1;padding:4px;border:1px solid #d1d5db;border-radius:6px;font:12px inherit"></select></div>
+        <div class="finlab-actions">
+          <button type="button" class="finlab-btn primary" id="finlab-expr-apply">تطبيق المعادلة</button>
+        </div>
+      </div>
       <div class="finlab-block">
-        <h4>محرر المصدر</h4>
+        <h4>محرر المصدر (متقدم)</h4>
         <div class="finlab-range">من سطر <input id="finlab-from" type="number" min="1"> إلى سطر <input id="finlab-to" type="number" min="1"> <button type="button" class="finlab-btn" id="finlab-load-range">عرض النطاق</button></div>
         <textarea id="finlab-editor" spellcheck="false"></textarea>
         <div class="finlab-actions">
@@ -598,6 +797,29 @@
       const to = Math.max(from, parseInt($('finlab-to').value, 10) || from);
       loadRange(from, to);
     });
+    $('finlab-expr-apply').addEventListener('click', applyExpression);
+    $('finlab-expr').addEventListener('input', e => renderVarChips(e.target.value));
+    $('finlab-var-add').addEventListener('change', e => {
+      if (e.target.value) insertAtCursor($('finlab-expr'), e.target.value);
+      e.target.value = '';
+    });
+    $('finlab-pick').addEventListener('change', e => {
+      const el = state.pickList && state.pickList[+e.target.value];
+      if (el) selectElement(el);
+    });
+  }
+
+  function fillOutputPicker() {
+    const sel = $('finlab-pick');
+    if (!sel || !state.section) return;
+    const seen = new Map();
+    state.section.querySelectorAll('[data-finlab-traced]').forEach(el => {
+      const key = pathFor(el);
+      if (!seen.has(key)) seen.set(key, el);
+    });
+    state.pickList = [...seen.values()];
+    sel.innerHTML = '<option value="">— النواتج المحسوبة —</option>' +
+      state.pickList.map((el, i) => `<option value="${i}">${esc(labelFor(el))}</option>`).join('');
   }
 
   function buildLauncher() {
@@ -630,6 +852,8 @@
     try { tracedRecalc(); } catch (e) { showErr('الحساب الأول فشل: ' + e.message); }
     if (!state.listenersHooked) { state.listenersHooked = true; hookInspector(); }
     state.ready = true;
+    fillOutputPicker();
+    fillVarPicker();
     status('جاهز');
     renderEdits();
   }
