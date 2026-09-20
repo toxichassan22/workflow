@@ -1167,7 +1167,7 @@
       const landContributionType = val('landContributionType') || 'inKind';
       const landContributionYear = Math.max(1, Math.min(totalYears, Math.round(num('landContributionYear') || 1)));
       const covEl = document.getElementById('coveredArea'), openEl = document.getElementById('openArea'), tBuiltEl = document.getElementById('totalBuiltUpArea'), opStartEl = document.getElementById('operationStartYear'), lValEl = document.getElementById('landValue'), aRentEl = document.getElementById('annualLandRent');
-      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (opStartEl) opStartEl.value = modeFlags.rental && operationYears ? 'السنة ' + operationStartYear : 'غير مطبق'; if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
+      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (opStartEl) opStartEl.value = modeFlags.rental ? (num('developmentYears') ? 'السنة ' + operationStartYear : '') : 'غير مطبق'; if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
       if (document.getElementById('landCostIncluded')) document.getElementById('landCostIncluded').value = money(landCostIncluded);
       if (document.getElementById('landRentSummary')) document.getElementById('landRentSummary').value = money(landRent);
 
