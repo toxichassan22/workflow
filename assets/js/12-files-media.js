@@ -1957,7 +1957,6 @@
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
-      const notes = Array.isArray(distribution.notes) ? distribution.notes : [];
       const findings = checks.map(item =>
           (item.result && item.result !== 'مطابق' ? item.result + ': ' : '') + (item.detail || item.item || ''))
         .concat(issues.flatMap(item =>
@@ -1967,10 +1966,8 @@
         ? '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
           findings.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
         : (rows.length ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>' : '');
-      const notesHtml = notes.length
-        ? '<ul class="plans-issue-list">' + notes.map(note => '<li>' + escapeHtml(note) + '</li>').join('') + '</ul>' : '';
       const canApprove = rows.length > 0 && !visualConceptDistributionBlocking(distribution).length;
-      return findingsHtml + notesHtml +
+      return findingsHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +

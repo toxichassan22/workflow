@@ -9827,13 +9827,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(totals['مكاتب']['units'], 20)
         self.assertEqual(totals['مكاتب']['required_units'], 20)
         self.assertEqual(totals['شقق']['units'], 12)
-        self.assertEqual(distribution['notes'], ['فصل المداخل'])
+        self.assertNotIn('notes', distribution)
 
-        # The local re-check is deterministic — overlapping ranges in one building flag
-        # a conflict with no model call at all.
+        # The local re-check is deterministic — the same component claiming
+        # overlapping ranges in one building is a hard conflict; different
+        # components sharing a floor only get a soft confirmation note.
         overlapping = {'rows': [
             {'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب'},
-            {'building': 'A', 'floor_range': '4-9', 'component': 'شقق'},
+            {'building': 'A', 'floor_range': '4-9', 'component': 'المكاتب'},
         ]}
         with patch.object(module, 'call_openrouter_chat', side_effect=AssertionError('local check is deterministic')):
             checked = client.post('/api/visual-concept/plans-distribution-check', headers=self._headers(self.token_a), json={
@@ -9841,6 +9842,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(checked.status_code, 200, checked.get_json())
         self.assertFalse(checked.get_json()['canProceed'])
         self.assertTrue(any(item['result'] == 'متعارض' for item in checked.get_json()['checks']))
+
+        shared_floor = {'rows': [
+            {'building': 'A', 'floor_range': 'G', 'component': 'سكني'},
+            {'building': 'A', 'floor_range': 'G', 'component': 'تجاري'},
+        ]}
+        with patch.object(module, 'call_openrouter_chat', side_effect=AssertionError('local check is deterministic')):
+            shared = client.post('/api/visual-concept/plans-distribution-check', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow, 'distribution': shared_floor})
+        self.assertEqual(shared.status_code, 200, shared.get_json())
+        self.assertTrue(all(item['result'] != 'متعارض' for item in shared.get_json()['checks']))
 
         # mode=ai layers sol's conflict review on top of the deterministic pass.
         ai_review = {'issues': [{'title': 'المواقف', 'points': ['نقص مواقف'], 'suggestion': '', 'action': '', 'severity': 'low'}],

@@ -6007,13 +6007,35 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
         building = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
         by_building.setdefault(building, []).append((parsed, row))
     for building, entries in by_building.items():
-        ordered = sorted(entries, key=lambda item: item[0]['lo'])
-        for (first, row_a), (second, row_b) in zip(ordered, ordered[1:]):
-            if second['lo'] <= first['hi']:
+        # Hard conflict only when the SAME component claims overlapping ranges —
+        # different components sharing a floor is normal mixed use, so it is a
+        # soft "confirm the share" note instead of a blocker.
+        by_component = {}
+        for parsed, row in entries:
+            key = _visual_concept_plan_component_key(row.get('component'))
+            if key:
+                by_component.setdefault(key, []).append((parsed, row))
+        for comp_entries in by_component.values():
+            ordered = sorted(comp_entries, key=lambda item: item[0]['lo'])
+            for (first, row_a), (second, row_b) in zip(ordered, ordered[1:]):
+                if second['lo'] <= first['hi']:
+                    checks.append({
+                        'item': f'نطاقان متداخلان لمكوّن واحد — {building}',
+                        'detail': (f'«{row_a.get("component") or "مكوّن"}» مسجل على «{row_a.get("floor_range")}» '
+                                   f'و«{row_b.get("floor_range")}» — ادمج الصفين أو عدّل النطاق'),
+                        'result': 'متعارض', 'severity': 'high'})
+        by_range = {}
+        for parsed, row in entries:
+            by_range.setdefault(str(row.get('floor_range') or ''), []).append(row)
+        for range_label, sharing in sorted(by_range.items()):
+            names = list(dict.fromkeys(
+                _visual_concept_plan_sanitize_text(item.get('component')) or 'مكوّن'
+                for item in sharing))
+            if len(names) > 1:
                 checks.append({
-                    'item': f'تداخل أدوار — {building}',
-                    'detail': f'النطاق «{row_a.get("floor_range")}» يتداخل مع «{row_b.get("floor_range")}»',
-                    'result': 'متعارض', 'severity': 'high'})
+                    'item': f'تقاسم النطاق «{range_label}» — {building}',
+                    'detail': ' و'.join(names) + ' على النطاق نفسه — تأكد أن تقاسم الدور مقصود وليس ازدواجًا في المساحة',
+                    'result': 'يحتاج تأكيد', 'severity': 'low'})
     cap = _visual_concept_number(regulations.get('max_floors_height') or regulations.get('table_floors'))
     if cap:
         for row, parsed in parsed_rows:
@@ -6080,11 +6102,11 @@ def _visual_concept_plan_normalize_distribution(raw, context, regulations):
     return {
         'rows': rows,
         'totals': totals,
-        'notes': _visual_concept_plan_bullets(source.get('notes') or source.get('assumptions'), 12),
         'checks': _visual_concept_plan_distribution_checks(rows, totals, context, regulations),
         'issues': _visual_concept_plan_normalize_issues(source.get('issues') or []),
         'approved': False,
     }
+
 
 
 def _visual_concept_plan_fallback_distribution(context, regulations):
