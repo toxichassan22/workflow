@@ -19259,9 +19259,10 @@ SBC_EVIDENCE_MAX_PAGES = int(os.environ.get('SBC_EVIDENCE_MAX_PAGES', '4'))
 SBC_EVIDENCE_MAX_CHARS = int(os.environ.get('SBC_EVIDENCE_MAX_CHARS', '7000'))
 SBC_SNIPPET_CHARS = int(os.environ.get('SBC_SNIPPET_CHARS', '2200'))
 
-# Roots without «ال» — extracted SBC text swaps the lam past the next letter
-# («الجدران» becomes «اجلدران»), the same mangling the municipal terms avoid. Some
-# spans also arrive fully reversed, so matching checks term[::-1] as well.
+# Roots without «ال» — the PyMuPDF scoring index swaps the lam past the next
+# letter («الجدران» becomes «اجلدران»), the same mangling the municipal terms
+# avoid. Some spans also arrive fully reversed, so matching checks term[::-1]
+# as well. Snippets shown to the model are re-extracted cleanly via pypdf.
 SBC_TOPIC_TERMS = (
     ('إشغال', 6), ('مخارج', 6), ('اخلا', 5), ('منافذ', 5),
     ('مواقف', 5), ('موقف', 3), ('مدخل', 3),
@@ -19324,6 +19325,35 @@ def _build_sbc_page_index():
     return records
 
 
+def _pdf_clean_page_texts(path, page_numbers, cleaner=None):
+    """Clean text for specific PDF pages via pypdf. PyMuPDF swaps adjacent
+    Arabic letter pairs in these files' CFF-encoded runs («الجدران» becomes
+    «اجلدران»), so the snippets handed to the model are re-extracted with
+    pypdf — the PyMuPDF index stays in place for fast scoring only."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return {}
+    try:
+        reader = PdfReader(path)
+    except Exception:
+        return {}
+    cleaned = {}
+    try:
+        for page in page_numbers:
+            try:
+                text = reader.pages[page - 1].extract_text() or ''
+                cleaned[page] = cleaner(text) if cleaner else text
+            except Exception:
+                cleaned[page] = ''
+    finally:
+        try:
+            reader.stream.close()
+        except Exception:
+            pass
+    return cleaned
+
+
 def _sbc_term_present(term, text):
     if term in text:
         return True
@@ -19364,18 +19394,22 @@ def search_sbc_evidence(query_text='', site_facts=None):
     if not matched:
         return {'context': '', 'pages': [], 'matched': False}, [
             'لم يتم العثور على نصوص مطابقة في كود البناء السعودي']
+    clean_pages = {}
+    for path in {record['path'] for record in matched}:
+        wanted = [record['page'] for record in matched if record['path'] == path]
+        clean_pages.update(_pdf_clean_page_texts(path, wanted, _clean_sbc_text))
     parts = []
     pages = []
     remaining = SBC_EVIDENCE_MAX_CHARS
     for record in matched:
         if remaining <= 0:
             break
-        snippet = record['text'][:min(SBC_SNIPPET_CHARS, remaining)]
+        snippet = (clean_pages.get(record['page']) or record['text'])[
+            :min(SBC_SNIPPET_CHARS, remaining)]
         if not snippet:
             continue
         pages.append(record['page'])
-        parts.append(
-            f"--- {record['name']} — صفحة {record['page']} — score={record['score']} ---\n{snippet}")
+        parts.append(f"--- مقتطف من كود البناء السعودي ---\n{snippet}")
         remaining -= len(snippet)
     return {'context': '\n\n'.join(parts), 'pages': pages, 'matched': bool(parts)}, []
 
