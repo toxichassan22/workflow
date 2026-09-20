@@ -259,6 +259,14 @@
       tr.dataset.conflictWarnings = JSON.stringify(row.conflict_warnings || row.conflictWarnings || []);
       tr.dataset.logoImportWarning = row.logo_import_warning || row.logoImportWarning || '';
       tr.dataset.notes = row.notes || row.note || '';
+      tr.dataset.district = row.district || row.neighborhood || '';
+      tr.dataset.distanceKm = row.distance_km || row.distanceKm || '';
+      tr.dataset.lat = row.lat || '';
+      tr.dataset.lng = row.lng || '';
+      tr.dataset.dataDate = row.data_date || row.dataDate || '';
+      tr.dataset.deadSourceUrls = JSON.stringify(row.dead_source_urls || row.deadSourceUrls || []);
+      tr.dataset.outOfRadius = row.out_of_radius || row.outOfRadius ? '1' : '';
+      tr.dataset.sourcesUnverified = row.sources_unverified || row.sourcesUnverified ? '1' : '';
       const areaCache = row.area_cache || row.areaCache || {};
       tr.dataset.areaFixed = cleanMarketNumber(row.area_sqm || row.areaSqm || areaCache.area_sqm || '');
       tr.dataset.areaFrom = cleanMarketNumber(row.area_from || row.areaFrom || areaCache.area_from || '');
@@ -272,9 +280,16 @@
       try { warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { warnings = []; }
       const warningsHtml = warnings.map(item => {
         const label = marketSourceFieldLabel(item.field || '');
-        const link = safeHttpUrl(item.source_url) ? ' <a href="' + escapeHtml(safeHttpUrl(item.source_url)) + '" target="_blank" rel="noopener noreferrer">المصدر الرسمي</a>' : '';
+        const link = safeMarketUrl(item.source_url) ? ' <a href="' + escapeHtml(safeMarketUrl(item.source_url)) + '" target="_blank" rel="noopener noreferrer">المصدر الرسمي</a>' : '';
+        if (item.field === 'distance_km') {
+          return '<div style="color:#92400e;margin-top:4px">' + escapeHtml(String(item.source || 'خارج نطاق المنافسين')) +
+            ': ' + escapeHtml(String(item.incoming || '')) + ' مقابل ' + escapeHtml(String(item.existing || '')) + '</div>';
+        }
         return '<div style="color:#92400e;margin-top:4px">تعارض في ' + escapeHtml(label) + ': تم الإبقاء على القيمة الحالية.' + link + '</div>';
-      }).join('');
+      }).join('') +
+      (tr.dataset.sourcesUnverified
+        ? '<div style="color:#92400e;margin-top:4px">مصادر هذا الصف لم تُسترجع عبر البحث — أُزيلت الروابط غير الموثقة.</div>'
+        : '');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td data-field="logo_cell"></td>' +
@@ -366,7 +381,9 @@
         area_from: cleanMarketNumber(tr.dataset.areaFrom || ''),
         area_to: cleanMarketNumber(tr.dataset.areaTo || '')
       };
-      return {
+      let dead_source_urls = [];
+      try { dead_source_urls = JSON.parse(tr.dataset.deadSourceUrls || '[]') || []; } catch (error) { dead_source_urls = []; }
+      const row = {
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
@@ -394,9 +411,18 @@
         source_url: source_urls[0] || '',
         source_urls,
         field_sources,
+        district: tr.dataset.district || '',
+        distance_km: cleanMarketNumber(tr.dataset.distanceKm || ''),
+        lat: cleanMarketNumber(tr.dataset.lat || ''),
+        lng: cleanMarketNumber(tr.dataset.lng || ''),
+        data_date: tr.dataset.dataDate || '',
         notes: tr.dataset.notes || '',
         row_source: tr.dataset.rowSource || 'manual'
       };
+      if (dead_source_urls.length) row.dead_source_urls = dead_source_urls;
+      if (tr.dataset.outOfRadius) row.out_of_radius = true;
+      if (tr.dataset.sourcesUnverified) row.sources_unverified = true;
+      return row;
     }
 
     function collectMarketCompetitorRows() {
@@ -840,6 +866,8 @@
             ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس')
             : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس')) +
             (conflictCount ? ' — تم الإبقاء على ' + conflictCount + ' قيمة حالية متعارضة' : '') +
+            (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ أُزيلت الروابط غير الموثقة من الصفوف' : '') +
+            ((res.outOfRadiusCount || 0) ? ' — ' + res.outOfRadiusCount + ' منافس خارج النطاق المحدد' : '') +
             (extra ? ' — ' + extra : '');
         }
         toast(mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة');
@@ -938,6 +966,9 @@
         const hasCurrent = marketSummaryHasContent(currentSummary)
           || currentOneBlock
           || Object.values(currentSwot).some(value => String(value || '').trim());
+        const unverifiedNote = res.searchVerified === false
+          ? ' — مصادر الملخص غير موثقة: لم يعمل البحث في الويب أثناء التوليد'
+          : '';
         marketSummaryPending = {
           summary: res.summary,
           swot: res.swot || {},
@@ -948,7 +979,7 @@
         };
         if (hasCurrent) {
           renderMarketSummaryCompare(currentSummary, res.summary, currentSwot, res.swot || {}, currentOneBlock, marketSummaryPending.oneBlockSummary);
-          toast('النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.');
+          toast('النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.' + unverifiedNote);
         } else {
           const state = getMarketStudyState();
           state.summary = res.summary;
@@ -962,7 +993,7 @@
           state.one_block_summary = res.one_block_summary || res.oneBlockSummary || '';
           applyMarketStudyState(state);
           persistMarketStudyFromDom();
-          toast('تم توليد ملخص السوق وتحليل SWOT');
+          toast('تم توليد ملخص السوق وتحليل SWOT' + unverifiedNote);
         }
         updateLoaderProgress(100, 'اكتمل ملخص السوق');
       } catch (error) {

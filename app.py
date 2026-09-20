@@ -19986,15 +19986,46 @@ def _read_market_job(tenant_id, job_id):
     return _read_job('.market_jobs', tenant_id, job_id)
 
 
-def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None):
+MARKET_SEARCH_ENGINE = (os.environ.get('MARKET_SEARCH_ENGINE') or 'auto').strip() or 'auto'
+
+
+def _market_search_ran(res):
+    """Whether the response proves a web search actually executed.
+
+    ``usage.server_tool_use.web_search_requests`` counts executed queries and
+    ``url_citation`` annotations carry the retrieved pages; a parseable JSON
+    with neither is the model answering from memory, which used to be accepted
+    silently as a sourced study.
+    """
+    if not isinstance(res, dict):
+        return False
+    usage = res.get('usage') or {}
+    tool_use = usage.get('server_tool_use') or {}
+    try:
+        requests_count = int(tool_use.get('web_search_requests') or 0)
+    except (TypeError, ValueError):
+        requests_count = 0
+    return requests_count > 0 or bool(_market_citation_urls(res))
+
+
+def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None, search_context=None):
     """Search-backed market call with JSON, provider, and credit fallbacks."""
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
     # One search cannot price several competitors, so the model is allowed a search per
     # competitor plus the market-wide ones; without max_uses it settled for a single call
     # and left every price blank.
+    search_params = {'engine': MARKET_SEARCH_ENGINE,
+                     'max_results': 8, 'max_uses': 10, 'max_total_results': 60}
+    # The engine runs the provider's native search on 'auto' — Google grounding for
+    # Gemini — and user_location biases those results toward the project's city.
+    context = search_context if isinstance(search_context, dict) else {}
+    city = str(context.get('city') or '').strip()
+    country = str(context.get('country') or 'SA').strip() or 'SA'
+    if city or country:
+        search_params['user_location'] = {'type': 'approximate', 'city': city, 'country': country}
     tools = [{
         'type': 'openrouter:web_search',
-        'parameters': {'engine': 'exa', 'max_results': 8, 'max_uses': 10, 'max_total_results': 60},
+        'parameters': search_params,
     }]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
@@ -20008,9 +20039,16 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     ]
     last_response = {}
     last_error = ''
+    # A parseable JSON with zero executed searches is kept as a fallback, never as a
+    # success — the tool attempts get retried before a memory answer is accepted.
+    unverified_response = None
     for _cap_attempt in range(4):
         retry_cap = None
         for index, (attempt_tools, response_format) in enumerate(attempts):
+            if unverified_response is not None and not attempt_tools:
+                # A parseable memory answer is already in hand — tool-less
+                # attempts can only produce another unverified one, at a cost.
+                break
             if index:
                 print(
                     '[MARKET STUDY] retrying competitor/summary call with '
@@ -20028,10 +20066,17 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                 tools=attempt_tools,
                 timeout=240,
                 usage_ctx=usage_ctx or _usage_ctx('market'),
+                max_tool_calls=14,
             )
             last_error = _chat_error_message(last_response)
             text = _get_chat_response_text(last_response)
             if _has_chat_choices(last_response) and parse_json_object(text):
+                if attempt_tools and not _market_search_ran(last_response):
+                    print('[MARKET STUDY] parseable JSON but zero searches ran — '
+                          'keeping it as fallback and retrying with tools')
+                    if unverified_response is None:
+                        unverified_response = last_response
+                    continue
                 return last_response, ''
             affordable = _AFFORDABLE_TOKENS_RE.search(last_error or '')
             if affordable:
@@ -20044,6 +20089,8 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
             break
         print(f'[MARKET STUDY] provider refused cap={cap}; retrying with cap={retry_cap}')
         cap = retry_cap
+    if unverified_response is not None:
+        return unverified_response, ''
     return last_response, last_error
 
 
@@ -20070,6 +20117,121 @@ def _parse_market_model_json(res):
     if not parsed:
         return {}, 'invalid_json'
     return parsed, ''
+
+
+_MARKET_URL_CHECK_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'ar,en;q=0.9',
+}
+
+
+def _market_url_alive(url, timeout=8):
+    """Probe a claimed source URL; False only when the page provably does not exist.
+
+    Redirects are not followed (a 3xx means the address resolves), and 401/403/429
+    count as alive — bot-blocking is not a dead page. Only 404/410, DNS or
+    connection failures, and timeouts mark the link dead.
+    """
+    parsed = urlsplit(str(url or '').strip())
+    if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
+        return False
+    try:
+        invalid_port = parsed.port not in (None, 80, 443, 8080)
+    except ValueError:
+        invalid_port = True
+    if invalid_port or parsed.username or not _public_host_addresses(parsed.hostname):
+        return False
+    for method in ('head', 'get'):
+        try:
+            request = getattr(requests, method)
+            response = request(
+                url, headers=_MARKET_URL_CHECK_HEADERS, timeout=timeout,
+                allow_redirects=False, stream=True)
+            try:
+                status = response.status_code
+            finally:
+                response.close()
+        except requests.RequestException:
+            continue
+        if status in (404, 410):
+            return False
+        if status < 500 or status == 503:
+            # 2xx/3xx resolve, 401/403/405/429 are bot walls, 503 is transient.
+            return True
+        # 500/502/504: fall through to the GET attempt before calling it dead.
+    return False
+
+
+def _verify_market_urls(urls, max_workers=6):
+    """Return the subset of urls that provably fail; never raises."""
+    unique = []
+    seen = set()
+    for url in urls or []:
+        value = str(url or '').strip()
+        key = value.casefold()
+        if not value.startswith(('http://', 'https://')) or key in seen:
+            continue
+        seen.add(key)
+        unique.append(value)
+    if not unique:
+        return set()
+    from concurrent.futures import ThreadPoolExecutor
+    dead = set()
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for url, alive in zip(unique, pool.map(_market_url_alive, unique)):
+                if not alive:
+                    dead.add(url)
+    except Exception as exc:
+        print(f'[MARKET STUDY] url verification failed: {exc}')
+        return set()
+    if dead:
+        print(f'[MARKET STUDY] {len(dead)} dead source urls dropped: {sorted(dead)[:5]}')
+    return dead
+
+
+def _competitor_claimed_urls(row):
+    """Every URL a competitor row asserts — sources plus the logo page."""
+    urls = list(market_study.competitor_source_urls(row))
+    for extra in (row.get('logo_source_url'), row.get('logo_url')):
+        value = str(extra or '').strip()
+        if value.startswith(('http://', 'https://')):
+            urls.append(value)
+    return urls
+
+
+def _prune_dead_competitor_urls(row, dead):
+    """Move dead URLs out of the row's source fields into ``dead_source_urls``."""
+    if not isinstance(row, dict) or not dead:
+        return row
+    dead_keys = {str(url).strip().casefold() for url in dead}
+    removed = []
+    kept = [url for url in market_study.competitor_source_urls(row)
+            if str(url).strip().casefold() not in dead_keys]
+    removed.extend(url for url in market_study.competitor_source_urls(row)
+                   if str(url).strip().casefold() in dead_keys)
+    row['source_urls'] = kept
+    if str(row.get('source_url') or '').strip().casefold() in dead_keys:
+        row['source_url'] = ''
+    row['source_url'] = market_study.prefer_specific_source_url(row.get('source_url'), *kept)
+    field_sources = market_study.competitor_field_sources(row)
+    cleaned = {}
+    for field, urls in field_sources.items():
+        remaining = [url for url in urls if str(url).strip().casefold() not in dead_keys]
+        removed.extend(url for url in urls if str(url).strip().casefold() in dead_keys)
+        if remaining:
+            cleaned[field] = remaining
+    row['field_sources'] = cleaned
+    for key in ('logo_source_url', 'logo_url'):
+        if str(row.get(key) or '').strip().casefold() in dead_keys:
+            removed.append(row.get(key))
+            row[key] = ''
+    if removed:
+        row['dead_source_urls'] = list(dict.fromkeys(
+            list(row.get('dead_source_urls') or []) + removed))
+    return row
 
 
 def _market_period_label(data):
@@ -20104,6 +20266,11 @@ def _prepare_market_payload(data):
     payload['resolvedRadiusKm'] = resolved
     payload['competitorRadiusLabel'] = _market_radius_label(payload, resolved)
     payload['dataPeriodLabel'] = _market_period_label(payload)
+    payload['dataPeriodBounds'] = market_study.data_period_bounds(
+        payload.get('dataPeriod') or payload.get('data_period'),
+        payload.get('dataPeriodFrom') or payload.get('data_period_from'),
+        payload.get('dataPeriodTo') or payload.get('data_period_to'),
+    )
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
     return payload
@@ -20123,8 +20290,10 @@ def _execute_market_competitors(data, tenant_id=None):
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
-    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=6000,
-                                                       usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+    res, provider_error = _call_market_study_model(
+        system_prompt, user_prompt, max_tokens=6000,
+        usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
+        search_context={'city': payload.get('city'), 'country': 'SA'})
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -20137,6 +20306,17 @@ def _execute_market_competitors(data, tenant_id=None):
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
+    if _market_search_ran(res):
+        dead_urls = _verify_market_urls(
+            url for row in merged for url in _competitor_claimed_urls(row))
+        for row in merged:
+            _prune_dead_competitor_urls(row, dead_urls)
+    else:
+        # The model answered from memory: no link it wrote can stand as a source.
+        for row in merged:
+            if (row.get('row_source') or 'ai') == 'ai':
+                market_study.strip_unverified_competitor_sources(row)
+    out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
     draft_id = payload.get('draftId') or payload.get('draft_id')
     for row in merged:
         if row.get('logo_file_id') or row.get('logo_path'):
@@ -20145,12 +20325,16 @@ def _execute_market_competitors(data, tenant_id=None):
             _store_imported_competitor_logo(row, draft_id=draft_id)
         except Exception as exc:
             row['logo_import_warning'] = str(exc)
+    sources = market_study.competitor_source_rows(merged)
+    market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     return {
         'success': True,
         'competitors': merged,
-        'sources': market_study.competitor_source_rows(merged),
+        'sources': sources,
         'added': added,
         'updated': updated,
+        'searchVerified': _market_search_ran(res),
+        'outOfRadiusCount': out_of_radius,
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')),
         'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
@@ -20182,8 +20366,10 @@ def _execute_market_summary(data, tenant_id=None):
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
-    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
-                                                       usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+    res, provider_error = _call_market_study_model(
+        system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
+        usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
+        search_context={'city': payload.get('city'), 'country': 'SA'})
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -20201,9 +20387,32 @@ def _execute_market_summary(data, tenant_id=None):
             'failureReason': 'empty_response',
             'providerError': provider_error,
         }
+    search_verified = _market_search_ran(res)
     market_study.apply_search_citations(normalized.get('sources'), _market_citation_urls(res), url_key='url')
+    sources = normalized.get('sources') or []
+    if search_verified:
+        dead_urls = _verify_market_urls(
+            row.get('url') for row in sources if isinstance(row, dict))
+        for row in sources:
+            url = str(row.get('url') or '').strip()
+            if url and url in dead_urls:
+                row['dead_url'] = url
+                row['url'] = ''
+                row['note'] = (str(row.get('note') or '').strip() + ' — ' if row.get('note') else '') + 'الرابط لم يعد يعمل'
+    else:
+        for row in sources:
+            if str(row.get('url') or '').strip():
+                row['dead_url'] = row['url']
+                row['url'] = ''
+            row['sources_unverified'] = True
+            marker = 'رابط غير موثق — لم يصل من نتائج البحث'
+            note = str(row.get('note') or '').strip()
+            if marker not in note:
+                row['note'] = f'{note} — {marker}' if note else marker
+    market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     return {
         'success': True,
+        'searchVerified': search_verified,
         **normalized,
     }
 

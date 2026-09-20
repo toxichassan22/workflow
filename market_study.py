@@ -200,6 +200,57 @@ DECISION_OPTIONS = [
 
 MISSING_VALUE_PHRASE = 'غير متوفر من مصدر موثوق'
 CURRENCY_LABEL = 'ريال سعودي'
+
+# The chosen data period becomes a hard publication-date window; the model is
+# ordered to refuse figures sourced outside it, and flag_out_of_period_sources
+# marks any source row whose date escapes the window.
+_DATA_PERIOD_MONTHS = {'12m': 12, '24m': 24, '3y': 36, '5y': 60}
+
+
+def data_period_bounds(period_value, from_date='', to_date='', today=None):
+    """Resolve the data-period choice into an ISO [from, to] window.
+
+    Returns {} when nothing bounds the period (custom with no dates entered),
+    so callers can skip the constraint instead of printing a fake window.
+    """
+    today = today or date.today()
+    months = _DATA_PERIOD_MONTHS.get(_norm(period_value))
+    if months:
+        total = today.year * 12 + (today.month - 1) - months
+        start = date(total // 12, total % 12 + 1, min(today.day, 28))
+        return {'from': start.isoformat(), 'to': today.isoformat()}
+    start = _norm(from_date)
+    end = _norm(to_date)
+    if not start and not end:
+        return {}
+    return {'from': start, 'to': end or today.isoformat()}
+
+
+def data_period_window_text(payload):
+    """«من … إلى …» window text for prompts, or '' when unbounded."""
+    bounds = payload.get('dataPeriodBounds') if isinstance(payload, dict) else None
+    if not bounds:
+        bounds = data_period_bounds(
+            (payload or {}).get('dataPeriod') or (payload or {}).get('data_period'),
+            (payload or {}).get('dataPeriodFrom') or (payload or {}).get('data_period_from'),
+            (payload or {}).get('dataPeriodTo') or (payload or {}).get('data_period_to'),
+        )
+    if not bounds:
+        return ''
+    return f"من {bounds.get('from') or 'غير محدد'} إلى {bounds.get('to') or 'تاريخ اليوم'}"
+
+
+def competitor_scope_text(payload):
+    """«داخل نطاق N كم من إحداثيات المشروع» or the city label."""
+    resolved = (payload or {}).get('resolvedRadiusKm')
+    label = _norm((payload or {}).get('competitorRadiusLabel')) or 'تلقائي'
+    try:
+        km = float(resolved)
+    except (TypeError, ValueError):
+        km = 0
+    if km > 0:
+        return f'داخل نطاق {km:g} كم من موقع المشروع ({label})'
+    return label
 SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 350
 SUMMARY_MIN_WORDS = 300
@@ -550,6 +601,21 @@ _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'priceFrom': 'price_from',
     'price_to': 'price_to',
     'priceTo': 'price_to',
+    'district': 'district',
+    'neighborhood': 'district',
+    'الحي': 'district',
+    'distance_km': 'distance_km',
+    'distanceKm': 'distance_km',
+    'distance': 'distance_km',
+    'المسافة': 'distance_km',
+    'المسافة بالكيلومتر': 'distance_km',
+    'lat': 'lat',
+    'latitude': 'lat',
+    'خط العرض': 'lat',
+    'lng': 'lng',
+    'lon': 'lng',
+    'longitude': 'lng',
+    'خط الطول': 'lng',
 }
 
 _COMPETITOR_SOURCE_FIELD_LABELS = {
@@ -566,6 +632,10 @@ _COMPETITOR_SOURCE_FIELD_LABELS = {
     'price_value': 'قيمة السعر',
     'price_from': 'حد السعر الأدنى',
     'price_to': 'حد السعر الأعلى',
+    'district': 'الحي',
+    'distance_km': 'المسافة من موقع المشروع',
+    'lat': 'خط العرض',
+    'lng': 'خط الطول',
 }
 
 
@@ -820,6 +890,10 @@ def empty_competitor(source='manual'):
         'logo_path': '',
         'logo_url': '',
         'logo_source_url': '',
+        'district': '',
+        'distance_km': '',
+        'lat': '',
+        'lng': '',
         'conflict_warnings': [],
         'operation_type': '',
         'price_type': '',
@@ -830,6 +904,7 @@ def empty_competitor(source='manual'):
         'source_url': '',
         'source_urls': [],
         'field_sources': {},
+        'data_date': '',
         'row_source': source,
     }
 
@@ -1159,8 +1234,9 @@ def _project_input_block(payload):
         f"- المكونات الأولية: {components_text or payload.get('projectComponents') or payload.get('project_components') or 'غير مدخل'}",
         f"- مستوى المشروع: {payload.get('projectLevel') or payload.get('project_level') or 'غير مدخل'}",
         f"- الفئة المستهدفة: {audience_text or 'غير مدخل'}",
-        f"- نطاق المنافسين: {payload.get('competitorRadiusLabel') or payload.get('competitor_radius') or 'تلقائي'}",
+        f"- نطاق المنافسين: {competitor_scope_text(payload)}",
         f"- فترة البيانات المطلوبة: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
+        f"- فترة البيانات الملزمة (تاريخ نشر المصدر): {data_period_window_text(payload) or 'غير مقيدة'}",
     ]
     return '\n'.join(lines)
 
@@ -1214,6 +1290,13 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'مع بيان ما بحثت عنه في notes. الصف الناقص السعر مقبول؛ الرقم المختلق مرفوض.\n'
         '6. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
         f'({"، ".join(sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
+        '7. النطاق الجغرافي ملزم: ابحث عن منافسين داخل النطاق المكتوب في بيانات المشروع فقط. '
+        'لكل منافس اكتب حيه في district ومسافته التقريبية من موقع المشروع بالكيلومتر في distance_km '
+        'وإحداثياته في lat وlng إن ظهرت في المصدر. '
+        'إن لم يكفِ عدد المنافسين داخل النطاق وسّع البحث تدريجيًا وفعّل searchExpanded '
+        'واذكر أقصى مسافة وصلت إليها في expansionNote.\n'
+        '8. فترة البيانات الملزمة مكتوبة في بيانات المشروع: ارفض أي سعر أو مساحة مصدرها أقدم من '
+        'بداية الفترة، واكتب تاريخ البيانات التي وجدتها لكل صف داخل notes.\n'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )
@@ -1252,9 +1335,14 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source": "",\n'
         '      "source_url": "",\n'
         '      "source_urls": [],\n'
+        '      "district": "حي المشروع المنافس",\n'
+        '      "distance_km": "المسافة التقريبية من موقع المشروع بالكيلومتر — رقم",\n'
+        '      "lat": "خط العرض أو فارغ",\n'
+        '      "lng": "خط الطول أو فارغ",\n'
         '      "logo_url": "رابط صورة الشعار من الموقع الرسمي فقط أو فارغ",\n'
         '      "logo_source_url": "صفحة الموقع الرسمي التي تثبت الشعار أو فارغ",\n'
-        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "area_from": [], "area_to": [], "status": [], "classification": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": [], "logo_url": []},\n'
+        '      "field_sources": {"name": [], "project_type": [], "district": [], "distance_km": [], "area_sqm": [], "area_from": [], "area_to": [], "status": [], "classification": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": [], "logo_url": []},\n'
+        '      "data_date": "تاريخ بيانات الصف كما ورد في المصدر — سنة أو شهر/سنة",\n'
         '      "notes": "",\n'
         '      "row_source": "ai"\n'
         '    }\n'
@@ -1327,10 +1415,14 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
            if en else
            'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
         + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
-        f'إذا لم تتوفر معلومة فاكتب داخل المحور: {MISSING_VALUE_PHRASE}.\n'
+        + 'فترة البيانات الملزمة مكتوبة في بيانات المشروع: كل رقم أو مؤشر يجب أن يأتي من مصدر '
+        + 'نُشر داخل تلك الفترة، ويُكتب تاريخ بياناته في data_date بصيغة YYYY-MM-DD أو YYYY-MM أو سنة. '
+        + 'أي مصدر خارج الفترة غير مقبول — لا تستخدمه ولا تدرجه في sources.\n'
+        + f'إذا لم تتوفر معلومة فاكتب داخل المحور: {MISSING_VALUE_PHRASE}.\n'
         'حقل القرار يجب أن يكون قيمة واحدة فقط من: '
         + '، '.join(DECISION_OPTIONS)
-        + '.\n'
+        + '. لا تختر «البيانات غير كافية» إلا إذا تعذر كتابة أغلب المحاور فعلًا؛ '
+        + 'وجود منافسين وأسعار ومصادر في الجدول يعني أن البيانات كافية لتصنيف حقيقي.\n'
         + ('After the market-analysis axes, write an independent SWOT in four cells: Strengths, Weaknesses, Opportunities, Threats.\n'
            if en else
            'بعد محاور تحليل السوق اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n')
@@ -1435,6 +1527,12 @@ def normalize_competitor_row(row, fallback_source='ai'):
         row.get('logo_source_url'), row.get('logoSourceUrl'),
         *(field_sources.get('logo_url') or []),
     )
+    district = _norm(row.get('district') or row.get('neighborhood') or row.get('الحي'))
+    distance_km = _clean_numeric(_first_nonempty(
+        row.get('distance_km'), row.get('distanceKm'), row.get('distance'), row.get('المسافة')))
+    lat = _clean_numeric(_first_nonempty(row.get('lat'), row.get('latitude'), row.get('خط العرض')))
+    lng = _clean_numeric(_first_nonempty(
+        row.get('lng'), row.get('lon'), row.get('longitude'), row.get('خط الطول')))
     conflict_warnings = row.get('conflict_warnings') if isinstance(row.get('conflict_warnings'), list) else []
     result = {
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
@@ -1451,6 +1549,10 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'logo_path': _norm(row.get('logo_path') or row.get('logoPath')),
         'logo_url': logo_url,
         'logo_source_url': logo_source_url,
+        'district': district,
+        'distance_km': distance_km,
+        'lat': lat,
+        'lng': lng,
         'conflict_warnings': list(conflict_warnings),
         'operation_type': operation,
         'price_type': price_type,
@@ -1462,6 +1564,7 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'source_url': source_url,
         'source_urls': source_urls,
         'field_sources': field_sources,
+        'data_date': _norm(row.get('data_date') or row.get('dataDate')),
         'notes': _norm(row.get('notes') or row.get('note')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
@@ -1540,7 +1643,7 @@ def competitor_source_rows(competitors):
                 'source_fields': source_fields,
                 'name': source_name,
                 'url': url,
-                'data_date': '',
+                'data_date': _norm(competitor.get('data_date')),
                 'accessed_at': date.today().isoformat(),
                 'reliability': official_source_reliability(name, source_name, url),
                 'note': source_note,
@@ -1751,6 +1854,117 @@ def normalize_summary(raw):
         'disclaimer': disclaimer,
         'one_block_summary': one_block_summary,
     }
+
+
+def _number_in_text(value):
+    """First number inside a possibly unit-suffixed string («3.5 كم» → 3.5)."""
+    text = str(value or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    match = re.search(r'\d+(?:[.,]\d+)?', text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(',', '.'))
+    except ValueError:
+        return None
+
+
+def flag_out_of_radius(competitors, resolved_km):
+    """Mark AI rows whose self-declared distance escapes the chosen radius.
+
+    The model declares each row's distance; when it places a competitor beyond
+    the bound the row stays (the user may still want it) but carries an
+    ``out_of_radius`` flag and a conflict warning that surfaces in the UI.
+    A 25% slack absorbs the model's approximate distance estimates.
+    """
+    try:
+        limit = float(resolved_km)
+    except (TypeError, ValueError):
+        limit = 0
+    if not limit or limit <= 0:
+        return 0
+    flagged = 0
+    for row in competitors or []:
+        if not isinstance(row, dict):
+            continue
+        if _norm(row.get('row_source')) != 'ai':
+            continue
+        distance = _number_in_text(row.get('distance_km'))
+        if distance is None or distance <= limit * 1.25:
+            continue
+        warnings = list(row.get('conflict_warnings') or [])
+        signature = ('distance_km', str(distance))
+        if not any(isinstance(item, dict) and (item.get('field'), str(item.get('incoming'))) == signature
+                   for item in warnings):
+            warnings.append({
+                'field': 'distance_km',
+                'existing': f'نطاق {limit:g} كم',
+                'incoming': f'{distance:g} كم',
+                'source': 'خارج نطاق المنافسين',
+                'source_url': '',
+            })
+        row['conflict_warnings'] = warnings
+        row['out_of_radius'] = True
+        flagged += 1
+    return flagged
+
+
+def flag_out_of_period_sources(sources, bounds):
+    """Mark source rows whose data_date escapes the binding period window.
+
+    ``data_date`` arrives as free text («2025», «الربع الأول 2025»,
+    «2025-03»); the honest granularity is the year, so a row is flagged only
+    when a stated year clearly falls outside the window.
+    """
+    if not isinstance(bounds, dict) or not bounds:
+        return 0
+    start_year = int(str(bounds.get('from') or '0000')[:4] or 0)
+    end_year = int(str(bounds.get('to') or '9999')[:4] or 9999)
+    if not start_year and end_year == 9999:
+        return 0
+    flagged = 0
+    for row in sources or []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get('data_date') or '').translate(
+            str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+        years = [int(item) for item in re.findall(r'(?<!\d)(19\d{2}|20\d{2})(?!\d)', text)]
+        if not years:
+            continue
+        if any(year < start_year or year > end_year for year in years):
+            row['outside_data_period'] = True
+            note = _norm(row.get('note'))
+            marker = 'خارج فترة البيانات المحددة'
+            if marker not in note:
+                row['note'] = f'{note} — {marker}' if note else marker
+            flagged += 1
+    return flagged
+
+
+def strip_unverified_competitor_sources(row):
+    """Drop AI-written URLs from a row produced with no search behind it.
+
+    When the response reports zero executed searches and no citations, every
+    ``source_url`` the model wrote is memory, not evidence — keeping it would
+    dress a guess as a citation. The links move to ``dead_source_urls`` so the
+    UI can still show what was claimed, and the row is flagged so it is never
+    mistaken for a sourced result.
+    """
+    if not isinstance(row, dict):
+        return row
+    claimed = _unique_values(
+        competitor_source_urls(row)
+        + [row.get('logo_source_url')]
+        + list(_iter_source_values(row.get('logo_url')))
+    )
+    row['source_url'] = ''
+    row['source_urls'] = []
+    row['field_sources'] = {}
+    row['logo_url'] = ''
+    row['logo_source_url'] = ''
+    if claimed:
+        row['dead_source_urls'] = _unique_values((row.get('dead_source_urls') or []) + claimed)
+    row['sources_unverified'] = True
+    return row
 
 
 def extract_city_district(address_components, formatted_address=''):

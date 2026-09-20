@@ -794,25 +794,35 @@
       return result;
     }
 
+    const MARKET_SOURCE_FIELD_LABELS = {
+      name: 'اسم المشروع', project_name: 'اسم المشروع',
+      project_type: 'نوع المشروع', projectType: 'نوع المشروع',
+      area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
+      area_from: 'مساحة الوحدة من', areaFrom: 'مساحة الوحدة من',
+      area_to: 'مساحة الوحدة إلى', areaTo: 'مساحة الوحدة إلى',
+      status: 'الحالة', project_status: 'الحالة',
+      classification: 'التصنيف', logo_url: 'شعار المنافس', logoUrl: 'شعار المنافس',
+      operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
+      price_type: 'نوع السعر', priceType: 'نوع السعر',
+      price_value: 'قيمة السعر', priceValue: 'قيمة السعر', value: 'قيمة السعر',
+      price_from: 'حد السعر الأدنى', priceFrom: 'حد السعر الأدنى',
+      price_to: 'حد السعر الأعلى', priceTo: 'حد السعر الأعلى',
+      district: 'الحي', neighborhood: 'الحي',
+      distance_km: 'المسافة من موقع المشروع', distanceKm: 'المسافة من موقع المشروع',
+      lat: 'خط العرض', latitude: 'خط العرض',
+      lng: 'خط الطول', lon: 'خط الطول', longitude: 'خط الطول',
+      data_date: 'تاريخ البيانات', dataDate: 'تاريخ البيانات'
+    };
+
+    function marketSourceFieldLabel(field) {
+      return MARKET_SOURCE_FIELD_LABELS[String(field || '').trim()] || String(field || '').trim();
+    }
+
     function marketSourceFields(row, url) {
-      const labels = {
-        name: 'اسم المشروع', project_name: 'اسم المشروع',
-        project_type: 'نوع المشروع', projectType: 'نوع المشروع',
-        area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
-        area_from: 'مساحة الوحدة من', areaFrom: 'مساحة الوحدة من',
-        area_to: 'مساحة الوحدة إلى', areaTo: 'مساحة الوحدة إلى',
-        status: 'الحالة', project_status: 'الحالة',
-        classification: 'التصنيف', logo_url: 'شعار المنافس', logoUrl: 'شعار المنافس',
-        operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
-        price_type: 'نوع السعر', priceType: 'نوع السعر',
-        price_value: 'قيمة السعر', priceValue: 'قيمة السعر', value: 'قيمة السعر',
-        price_from: 'حد السعر الأدنى', priceFrom: 'حد السعر الأدنى',
-        price_to: 'حد السعر الأعلى', priceTo: 'حد السعر الأعلى'
-      };
       const target = String(url || '').toLowerCase();
       return Object.entries(marketFieldSources(row))
         .filter(([, urls]) => urls.some(item => String(item).toLowerCase() === target))
-        .map(([field]) => labels[field] || field);
+        .map(([field]) => marketSourceFieldLabel(field));
     }
 
     function marketSourceNote(row, sourceFields) {
@@ -872,7 +882,7 @@
             source_fields: sourceFields,
             name: competitor.source || 'مصدر المنافس',
             url,
-            data_date: '',
+            data_date: competitor.data_date || competitor.dataDate || '',
             accessed_at: '',
             reliability: marketOfficialSourceReliability(competitor.name, competitor.source, url),
             note: marketSourceNote(competitor, sourceFields)

@@ -10245,12 +10245,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('إيجار المتر السنوي', prompt)
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("'max_uses': 10", app_source)
-        self.assertIn("'engine': 'exa'", app_source)
+        self.assertIn("MARKET_SEARCH_ENGINE", app_source)
 
     def test_market_study_lowers_token_cap_when_credit_is_limited(self):
         module = self.application_module
         refusal = {'error': {'message': 'You requested up to 6000 tokens, but can only afford 3000'}}
-        success = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
+        success = {
+            'choices': [{'message': {'content': '{"competitors": []}'}}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
         caps = []
 
         def fake_call(system_prompt, user_content, **kwargs):
@@ -10285,10 +10288,14 @@ class MeetingRequirementsTests(unittest.TestCase):
                 }
             ]
         }
+        fake_response = {
+            'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
+            'usage': {'server_tool_use': {'web_search_requests': 3}},
+        }
         with patch.object(self.application_module, '_call_market_study_model', return_value=(
-            {'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}]},
+            fake_response,
             '',
-        )):
+        )), patch.object(self.application_module, '_verify_market_urls', return_value=set()):
             generated = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني',
                 'city': 'الرياض',
@@ -10323,6 +10330,133 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
         self.assertEqual(missing.status_code, 404)
+
+    def test_market_competitors_strip_sources_when_no_search_ran(self):
+        """A parseable answer with zero executed searches is memory, not evidence."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        fake = {
+            'competitors': [{
+                'name': 'برج الوهم',
+                'project_type': 'سكني',
+                'source': 'موقع المطور',
+                'source_url': 'https://developer.example/tower',
+                'source_urls': ['https://developer.example/tower'],
+                'logo_url': 'https://developer.example/logo.png',
+                'logo_source_url': 'https://developer.example',
+            }]
+        }
+        memory_response = {
+            'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
+        }
+        with patch.object(self.application_module, '_call_market_study_model', return_value=(
+            memory_response, '',
+        )):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        self.assertEqual(res.status_code, 200, res.get_json())
+        payload = res.get_json()
+        self.assertFalse(payload.get('searchVerified'))
+        row = payload['competitors'][0]
+        self.assertTrue(row.get('sources_unverified'))
+        self.assertEqual(row.get('source_urls'), [])
+        self.assertEqual(row.get('source_url'), '')
+        self.assertEqual(row.get('logo_url'), '')
+        self.assertIn('https://developer.example/tower', row.get('dead_source_urls') or [])
+        self.assertEqual(payload.get('sources'), [])
+
+    def test_market_competitors_prune_dead_urls(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        fake = {
+            'competitors': [{
+                'name': 'برج الجنوب',
+                'project_type': 'سكني',
+                'source': 'موقع المطور',
+                'source_urls': [
+                    'https://developer.example/south-tower',
+                    'https://dead.example/gone',
+                ],
+            }]
+        }
+        verified_response = {
+            'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
+            'usage': {'server_tool_use': {'web_search_requests': 2}},
+        }
+        with patch.object(self.application_module, '_call_market_study_model', return_value=(
+            verified_response, '',
+        )), patch.object(self.application_module, '_verify_market_urls',
+                         return_value={'https://dead.example/gone'}):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        self.assertEqual(res.status_code, 200, res.get_json())
+        row = res.get_json()['competitors'][0]
+        self.assertEqual(row.get('source_urls'), ['https://developer.example/south-tower'])
+        self.assertIn('https://dead.example/gone', row.get('dead_source_urls') or [])
+        self.assertEqual(
+            [s['url'] for s in res.get_json()['sources']],
+            ['https://developer.example/south-tower'],
+        )
+
+    def test_market_competitors_flag_out_of_radius_rows(self):
+        import market_study
+        rows = [
+            {'name': 'داخل النطاق', 'row_source': 'ai', 'distance_km': '4'},
+            {'name': 'خارج النطاق', 'row_source': 'ai', 'distance_km': '15'},
+            {'name': 'يدوي خارج النطاق', 'row_source': 'manual', 'distance_km': '30'},
+        ]
+        flagged = market_study.flag_out_of_radius(rows, 5)
+        self.assertEqual(flagged, 1)
+        self.assertTrue(rows[1].get('out_of_radius'))
+        self.assertFalse(rows[0].get('out_of_radius'))
+        self.assertFalse(rows[2].get('out_of_radius'))
+        self.assertTrue(rows[1]['conflict_warnings'])
+
+    def test_market_sources_flag_out_of_period(self):
+        import market_study
+        bounds = {'from': '2025-09-01', 'to': '2026-09-01'}
+        sources = [
+            {'name': 'أ', 'url': 'https://a.example/x', 'data_date': '2026-01'},
+            {'name': 'ب', 'url': 'https://b.example/y', 'data_date': '2022'},
+            {'name': 'ج', 'url': 'https://c.example/z', 'data_date': ''},
+        ]
+        flagged = market_study.flag_out_of_period_sources(sources, bounds)
+        self.assertEqual(flagged, 1)
+        self.assertTrue(sources[1].get('outside_data_period'))
+        self.assertIn('خارج فترة البيانات المحددة', sources[1].get('note') or '')
+        self.assertFalse(sources[0].get('outside_data_period'))
+        self.assertFalse(sources[2].get('outside_data_period'))
+
+    def test_market_study_model_retries_when_search_never_ran(self):
+        module = self.application_module
+        memory = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
+        searched = {
+            'choices': [{'message': {'content': '{"competitors": []}'}}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        calls = []
+
+        def fake_call(system_prompt, user_content, **kwargs):
+            calls.append(kwargs.get('tools'))
+            return memory if len(calls) == 1 else searched
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call):
+            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+        self.assertEqual(error, '')
+        self.assertIs(response, searched)
+        self.assertTrue(all(calls), 'tool attempts must keep the search tool')
+        self.assertEqual(len(calls), 2)
+
+    def test_market_study_model_accepts_memory_answer_as_last_resort(self):
+        module = self.application_module
+        memory = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
+
+        with patch.object(module, 'call_openrouter_chat', return_value=memory):
+            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+        self.assertEqual(error, '')
+        self.assertIs(response, memory)
 
     def test_market_source_priority_matches_owner_order(self):
         import market_study
