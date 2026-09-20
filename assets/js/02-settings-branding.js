@@ -318,7 +318,8 @@
         return '<div class="tenant-presentation-card" data-presentation-id="' + item.id + '"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
           '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_sar || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
           '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
-          '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
+          '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button>' +
+          '<button type="button" class="btn ghost small" onclick="showDownloadsLibraryModal(\'' + item.id + '\')">مكتبة التنزيلات</button></div></div>';
       };
       const renderPresentationGroups = (costByPresentation, reconcileByPresentation) => {
         const groups = [

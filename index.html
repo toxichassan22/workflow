@@ -659,13 +659,9 @@
           <button type="button" class="slide-toolbar-back" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
         </div>
         <div class="tenant-btns slide-toolbar-actions">
-          <button type="button" class="btn slide-toolbar-btn primary"
-            style="background:#1a4d6f;color:#fff;font-weight:700" onclick="directGenerateProposalFile()"
-            id="btnGenerateSlidesToolbar">توليد العرض</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
             onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
           <button type="button" id="presentationSaveButton" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="savePresentationFromToolbar()">حفظ كمسودة</button>
-          <button type="button" class="btn slide-toolbar-btn" onclick="showPresentationVersions(tenantPresentationId)">سجل التعديلات والنسخ</button>
           <button type="button" id="presentationUndoButton" class="btn slide-toolbar-btn" onclick="undoPresentationChange()" disabled>تراجع</button>
           <button type="button" id="presentationRedoButton" class="btn slide-toolbar-btn" onclick="redoPresentationChange()" disabled>إعادة التنفيذ</button>
 
@@ -678,12 +674,6 @@
               <button type="button" class="btn ghost" data-permission="company_settings"
                 onclick="openPresentationFontSettings(); closeTenantDropdown()">نوع الخط</button>
               <button type="button" class="btn ghost" onclick="savePresentationCopy(); closeTenantDropdown()">حفظ نسخة مستقلة</button>
-              <button type="button" class="btn ghost" onclick="toggleMapStylePanel(); closeTenantDropdown()">نوع
-                الخرائط</button>
-              <div class="slide-toolbar-menu-divider"></div>
-              <button type="button" class="btn ghost"
-                onclick="closeTenantDropdown(); ensureProjectAssets({force:true, needMaps:false}).then(()=>toast('تم إعادة توليد الصور'))">إعادة
-                توليد الصور</button>
             </div>
           </div>
 
@@ -697,13 +687,8 @@
                 PDF</button>
               <button type="button" class="btn ghost" onclick="exportTenantSlides('pptx'); closeTenantDropdown()">تصدير
                 PPTX</button>
-              <div class="slide-toolbar-menu-divider"></div>
-              <button type="button" class="btn ghost" onclick="showFinalApprovalModal(); closeTenantDropdown()">اعتماد الملف النهائي</button>
-              <button type="button" class="btn ghost" onclick="showDownloadsLibraryModal(); closeTenantDropdown()">مكتبة التنزيلات</button>
             </div>
           </div>
-          <button type="button" class="btn slide-toolbar-btn ghost" data-permission-any="create_presentation,approve_final_file" onclick="showFinalApprovalModal()">اعتماد الملف النهائي</button>
-          <button type="button" class="btn slide-toolbar-btn ghost" onclick="showDownloadsLibraryModal()">مكتبة التنزيلات</button>
         </div>
       </div>
 

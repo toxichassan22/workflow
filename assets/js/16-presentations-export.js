@@ -834,10 +834,11 @@
       }
     }
 
-    async function showDownloadsLibraryModal() {
+    async function showDownloadsLibraryModal(presentationId) {
+      const scopePresentationId = presentationId || tenantPresentationId;
       let downloads = [];
       try {
-        const query = tenantPresentationId ? '?presentationId=' + encodeURIComponent(tenantPresentationId) : '';
+        const query = scopePresentationId ? '?presentationId=' + encodeURIComponent(scopePresentationId) : '';
         const resp = await api('GET', '/api/downloads' + query);
         if (resp && resp.success) downloads = resp.downloads || [];
       } catch (err) {

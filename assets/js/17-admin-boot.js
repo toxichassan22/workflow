@@ -1231,10 +1231,14 @@
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;direction:rtl';
       modal.innerHTML = '<div style="background:#fff;border-radius:18px;padding:24px;width:min(1180px,100%);max-height:92vh;overflow:auto">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><h3 style="margin:0">سجل التعديلات والنسخ</h3>' +
-        '<button class="btn ghost" id="closePresentationHistory">إغلاق</button></div>' +
+        '<div style="display:flex;gap:8px">' +
+        '<button class="btn ghost" id="presentationHistoryDownloads">مكتبة التنزيلات</button>' +
+        '<button class="btn ghost" id="closePresentationHistory">إغلاق</button></div></div>' +
         '<div id="presentationHistoryContent" aria-live="polite" style="margin-top:18px">جاري تحميل النسخ والسجل...</div></div>';
       document.body.appendChild(modal);
       modal.querySelector('#closePresentationHistory').onclick = () => { modal.remove(); tenantPresentationHistory = null; };
+      const historyDownloadsBtn = modal.querySelector('#presentationHistoryDownloads');
+      if (historyDownloadsBtn) historyDownloadsBtn.onclick = () => showDownloadsLibraryModal(presId);
       const host = modal.querySelector('#presentationHistoryContent');
       try {
         const [versions, log] = await Promise.all([
