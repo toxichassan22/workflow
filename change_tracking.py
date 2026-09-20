@@ -280,6 +280,8 @@ DRAFT_BLOB_INNER_SKIP = {
     'land_documents_analysis': {'extraction_diagnostics', 'document_processing', 'confidence'},
     'tenantCreativeImages': {'images_signature', 'last_error', 'last_warning'},
     'tenantSlidePlan': {'source_error'},
+    'visual_concept': {'chat', 'promptReady', 'promptsError', 'images_signature',
+                       'last_error', 'last_warning', 'deletedInteriorSlots'},
 }
 
 # Labels for keys inside structured blobs: table names, row fields and the
@@ -372,8 +374,11 @@ BLOB_KEY_LABELS = {
     # land / croquis tables
     'rows': 'الصفوف', 'point': 'النقطة', 'eastings': 'الإحداثي الشرقي',
     'northings': 'الإحداثي الشمالي', 'parcel_id': 'القطعة', 'source': 'المصدر',
-    'direction': 'الاتجاه', 'label': 'الحد', 'regulation_text': 'النص التنظيمي',
+    'direction': 'الاتجاه', 'label': 'الاسم', 'regulation_text': 'النص التنظيمي',
     'boundary_length_m': 'طول الحد', 'street_name': 'اسم الشارع',
+    'issues': 'الملاحظات', 'distribution': 'التوزيع', 'boundary': 'حدود الأرض',
+    'points': 'النقاط', 'floorRange': 'الأدوار', 'building': 'المبنى',
+    'floors': 'عدد الأدوار', 'area': 'المساحة', 'prompts': 'الطلبات',
     'street_width_m': 'عرض الشارع', 'parcels': 'القطع', 'conflicts': 'التعارضات',
     'document_summary': 'ملخص المستندات',
     # market study
@@ -414,6 +419,9 @@ BLOB_KEY_LABELS = {
     'logo': 'الشعار', 'logo_path': 'الشعار', 'logo_url': 'الشعار',
     'image_path': 'الصورة', 'photo_path': 'الصورة', 'cover_path': 'الغلاف',
     'map_path': 'الخريطة', 'file_path': 'الملف',
+    'imageUrl': 'الصورة', 'approvedImageUrl': 'الصورة المعتمدة',
+    'caption': 'التسمية', 'mode': 'النمط', 'sourceFileName': 'الملف المرفوع',
+    'styleReferenceNames': 'الصور المرجعية',
 }
 
 # Stored enum codes read back as the same Arabic words the form shows.
@@ -429,6 +437,7 @@ BLOB_VALUE_LABELS = {
     'auto': 'تلقائي', 'fixed': 'ثابت', 'north': 'شمال', 'south': 'جنوب',
     'east': 'شرق', 'west': 'غرب', 'approved': 'معتمد', 'pending': 'قيد المراجعة',
     'draft': 'مسودة', 'ai': 'الذكاء الاصطناعي', 'user': 'يدوي',
+    'upload': 'رفع ملف', 'replaced': 'استُبدلت',
 }
 
 # Keys that never say anything a reader cares about inside a blob.
@@ -436,6 +445,7 @@ BLOB_SKIP_KEYS = {
     'id', 'idx', 'version', 'signature', 'created_at', 'updated_at',
     'extraction_diagnostics', 'document_processing', 'confidence',
     'slide_generation_checkpoint', 'area_cache', 'row_source',
+    'sourceFileId', 'styleReferenceFileIds',
 }
 
 # Image/file slots: the stored URL is noise — a change reads as a replacement.
@@ -443,6 +453,7 @@ BLOB_IMAGE_KEYS = {
     'image', 'imageUrl', 'image_url', 'src', 'logo', 'fileId', 'file_id',
     'fileName', 'file_name', 'cover', 'plan_image', 'photo', 'thumbnail',
     'logo_path', 'image_path', 'photo_path', 'map_path', 'cover_path',
+    'approvedImageUrl',
 }
 
 _BLOB_FILE_KEY_RE = re.compile(r'(?:_path|_url|_uri|_image|_logo|_photo|_file|_src)$', re.I)
@@ -468,6 +479,7 @@ _INTERNAL_KEY_RE = re.compile(
 # never readable on screen; resolve it to the referenced row's name instead.
 _INTERNAL_ID_VALUE_RE = re.compile(
     r'^(?:[a-z]+_\d{6,}(?:_[0-9a-z]{4,})?|'
+    r'(?=[a-z0-9_]*\d{4,})[a-z]+(?:_[a-z0-9]+)+|'
     r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$', re.I)
 _URL_BUSTER_RE = re.compile(r'([?&](?:t|v|cb)=)[^&\s]+')
 _MISSING = object()
@@ -518,12 +530,41 @@ def _is_empty_value(value):
     return value is None or value == '' or value == {} or value == []
 
 
-def _blob_label(key):
+# Dict keys that are generated ids rather than names — search form so ids
+# nested inside a longer key («interior_p_1789906…_1») are caught too.
+_MACHINE_KEY_RE = re.compile(r'[a-z]+_\d{6,}|[0-9a-f]{8}-[0-9a-f]{4}|[a-z]+_[0-9a-f]{10,}', re.I)
+
+
+def _child_row_name(child):
+    """Display name carried inside a dict child (slots keep it in «label»)."""
+    if not isinstance(child, dict):
+        return ''
+    for name_key in ('name', 'title', 'label', 'direction', 'point', 'street_name',
+                     'milestone', 'task', 'company', 'role', 'year'):
+        text = _blob_text(child.get(name_key))
+        if text:
+            return text
+    return ''
+
+
+def _blob_label(key, child=None):
     if key in BLOB_KEY_LABELS:
         return BLOB_KEY_LABELS[key]
-    if _INTERNAL_KEY_RE.match(str(key)):
+    key_text = str(key)
+    parsed = _parse_jsonish(child)
+    # A machine-generated dict key («plan_site», a uuid, or a slot id like
+    # «interior_p_1789906…_1») — or a key that is simply the child's own id
+    # («right» → {id: 'right'}): the key is a row identifier, so name the row
+    # instead — «الخانات › «الصورة الرئيسية»» rather than «أحد العناصر».
+    if isinstance(parsed, dict):
+        child_id = str(parsed.get('id') or parsed.get('key') or '').strip()
+        if (_INTERNAL_KEY_RE.match(key_text) or _MACHINE_KEY_RE.search(key_text)
+                or (child_id and child_id == key_text)):
+            name = _child_row_name(parsed)
+            return f'«{name}»' if name else 'أحد العناصر'
+    if _INTERNAL_KEY_RE.match(key_text):
         return 'أحد العناصر'
-    return str(key)
+    return key_text
 
 
 def _blob_text(value):
@@ -563,6 +604,14 @@ def _collect_id_names(*roots):
                     if text:
                         id_map[row_id] = text
                         break
+            for child_key, child in node.items():
+                # Slot-style dicts are keyed by the row id itself
+                # («slots: {interior_p_…: {label: …}}») — map the key too, so a
+                # bare id in a list («الخانات المحذوفة») still resolves.
+                if isinstance(child, dict) and child_key not in id_map:
+                    name = _child_row_name(child)
+                    if name:
+                        id_map[child_key] = name
             stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
         elif isinstance(node, list):
             stack.extend(v for v in node if isinstance(v, (dict, list)))
@@ -690,10 +739,11 @@ def _diff_blob(old, new, path, out, depth=0, extra_skip=(), state=None):
             # the caller's fallback knows this was a real change, not churn.
             if state is not None:
                 state['saw'] = True
-            label = _blob_label(key)
+            label = _blob_label(key, new_v if not _is_empty_value(_parse_jsonish(new_v)) else old_v)
             child_path = path + ([label] if label else [])
             if isinstance(_parse_jsonish(old_v), (dict, list)) or isinstance(_parse_jsonish(new_v), (dict, list)):
-                _diff_blob(old_v, new_v, child_path, out, depth + 1, state=state)
+                _diff_blob(old_v, new_v, child_path, out, depth + 1,
+                           extra_skip=extra_skip, state=state)
             elif _is_imageish_change(key, old_v, new_v):
                 _emit(out, child_path, text='استُبدلت', kind='info')
             else:
@@ -749,8 +799,11 @@ def _diff_list(old_items, new_items, path, out, depth, state=None):
                 _emit(out, path, text='أُعيد ترتيب الصفوف', kind='info')
         return
     from collections import Counter
-    old_counter = Counter(text for text in (_blob_text(item) for item in old_items) if text)
-    new_counter = Counter(text for text in (_blob_text(item) for item in new_items) if text)
+    id_map = state.get('id_map') if state else {}
+    old_counter = Counter(text for text in
+                          (_ref_text(item, id_map, deleted=True) for item in old_items) if text)
+    new_counter = Counter(text for text in
+                          (_ref_text(item, id_map) for item in new_items) if text)
     removed = list((old_counter - new_counter).elements())
     added = list((new_counter - old_counter).elements())
     if removed:

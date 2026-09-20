@@ -2947,6 +2947,17 @@ def sync_primary_company_admin(tenant_id, **fields):
     return True
 
 
+def get_primary_admin_name(tenant_id):
+    """Display name of the tenant's primary company admin — the person behind a
+    tenant-level login, which otherwise only knows the company name."""
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT COALESCE(NULLIF(u.name, ''), NULLIF(t.account_manager_name, ''), '') AS name
+           FROM tenants t LEFT JOIN users u ON u.id = t.primary_user_id
+           WHERE t.id = ?''', (tenant_id,)).fetchone()
+    return (row['name'] or '') if row else ''
+
+
 def is_primary_company_admin(tenant_id, user_id):
     """True when this users row is the tenant's designated primary admin.
 

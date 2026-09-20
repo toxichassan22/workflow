@@ -3391,6 +3391,22 @@ def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=N
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: record who changed what, on a presentation or a project file
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _history_actor_name():
+    """The person behind the acting identity. A tenant-level login carries the
+    company name, so the log reads «شركة ليؤمرا» for every edit — resolve it to
+    the primary company admin's name instead, falling back to the stored name."""
+    name = getattr(g, 'user_name', None)
+    if name and not getattr(g, 'user_id', None):
+        # A tenant-level session (the company login) only knows the company
+        # name — resolve it to the primary admin's name. Entries with no
+        # session actor at all (system jobs) keep their empty name.
+        try:
+            name = db.get_primary_admin_name(getattr(g, 'tenant_id', None)) or name
+        except Exception:
+            pass
+    return name
+
+
 def _record_audit_event(action, entity_type, entity_id, entity_name=None,
                         old_value=None, new_value=None, metadata=None):
     """Write an immutable audit log entry. Never fails a request."""
@@ -3410,7 +3426,7 @@ def _record_audit_event(action, entity_type, entity_id, entity_name=None,
             entity_type=entity_type,
             entity_id=entity_id,
             user_id=getattr(g, 'user_id', None),
-            user_name=getattr(g, 'user_name', None) or 'مستخدم غير معروف',
+            user_name=_history_actor_name() or 'مستخدم غير معروف',
             user_role=getattr(g, 'user_role', None),
             entity_name=entity_name,
             old_value=old_value,
@@ -3439,7 +3455,7 @@ def _record_change(target_type, target_id, action, details, source='manual', sum
         return db.log_change(
             g.tenant_id, target_type, target_id,
             getattr(g, 'user_id', None),
-            getattr(g, 'user_name', None) or ('الذكاء الاصطناعي' if source == 'ai' else 'مستخدم غير معروف'),
+            _history_actor_name() or ('الذكاء الاصطناعي' if source == 'ai' else 'مستخدم غير معروف'),
             action, summary=summary, details=lines, source=source,
         )
     except Exception as exc:
