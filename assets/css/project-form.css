@@ -211,6 +211,16 @@
       gap: 16px;
     }
 
+    /* Grid children default to min-width:auto and would refuse to shrink below
+       their content — the 980px distribution table then stretches the whole
+       panel past the canvas instead of scrolling inside its wrap. */
+    .visual-concept-page > *,
+    .plans-workflow-card > *,
+    .plans-workflow-panel > *,
+    .plans-boundary-editor > * {
+      min-width: 0;
+    }
+
     .plans-workflow-steps {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -405,7 +415,11 @@
     }
 
     .plans-boundary-preview {
-      min-height: 280px;
+      min-width: 0;
+      width: 100%;
+      max-width: 640px;
+      margin-inline: auto;
+      min-height: 220px;
       display: grid;
       place-items: center;
       padding: 10px;
@@ -426,7 +440,8 @@
     .plans-boundary-svg {
       display: block;
       width: 100%;
-      max-height: 360px;
+      height: auto;
+      max-height: 320px;
     }
 
     @media (max-width: 860px) {
