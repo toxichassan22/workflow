@@ -779,8 +779,52 @@
       persistMarketStudyFromDom();
       const state = getMarketStudyState();
       const components = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : []).map(row => ({
-        name: row.name, useType: row.useType, units: row.units, builtArea: row.builtArea, revenueArea: row.revenueArea
+        name: row.name, useType: row.useType, units: row.units, unitArea: row.unitArea,
+        builtArea: row.builtArea, revenueArea: row.revenueArea,
+        investmentModel: row.investmentModel, leasable: row.leasable
       }));
+      const financialModel = (typeof parseFinancialStudySnapshot === 'function'
+        ? (parseFinancialStudySnapshot(document.getElementById('financialCalcData')?.value)
+          || parseFinancialStudySnapshot(tenantProjectData.financial_calc_data)
+          || parseFinancialStudySnapshot(tenantProjectData.financial_study_model))
+        : null) || {};
+      const liveFinancial = window.__financialProjection || {};
+      const financial = {
+        unitRevenueMode: financialModel.unitRevenueMode || liveFinancial?.modeFlags?.mode || '',
+        projectCost: liveFinancial.projectCost ?? financialModel.projectCost ?? '',
+        projectCostWithFinance: liveFinancial.projectCostWithFinance ?? financialModel.projectCostWithFinance ?? '',
+        adjustedProjectCost: liveFinancial.adjustedProjectCost ?? financialModel.adjustedProjectCost ?? '',
+        revenueY1: liveFinancial.revenueY1 ?? '',
+        noiY1: liveFinancial.noiY1 ?? '',
+        fullOccupancyRevenue: liveFinancial.fullOccupancyRevenue ?? '',
+        saleRevenueTotal: liveFinancial.saleRevenueTotal ?? '',
+        roi: liveFinancial.roi ?? financialModel.roi ?? '',
+        projectIrr: liveFinancial.projectIrr ?? financialModel.projectIrr ?? '',
+        equityIrr: liveFinancial.irr ?? financialModel.equityIrr ?? '',
+        payback: liveFinancial.payback ?? financialModel.payback ?? '',
+        equityPayback: liveFinancial.equityPayback ?? financialModel.equityPayback ?? '',
+        totalEquityRequired: liveFinancial.totalEquityRequired ?? financialModel.totalEquityRequired ?? '',
+        saleExitValue: liveFinancial.saleExitValue ?? '',
+        operatingExitValue: liveFinancial.operatingExitValue ?? '',
+        saleExitYear: liveFinancial.saleExitYear ?? financialModel.saleExitYear ?? '',
+        operatingExitYear: liveFinancial.operatingExitYear ?? financialModel.operatingExitYear ?? '',
+        developmentYears: liveFinancial.developmentYears ?? financialModel.developmentYears ?? '',
+        salesStartYear: liveFinancial.salesStartYear ?? financialModel.salesStartYear ?? '',
+        salesYears: liveFinancial.salesYears ?? financialModel.salesYears ?? '',
+        operationYears: liveFinancial.operationYears ?? financialModel.operationYears ?? '',
+        operationStartYear: liveFinancial.operationStartYear ?? '',
+        totalYears: liveFinancial.totalYears ?? '',
+        floorCount: financialModel.floorCount ?? '',
+        coverageRate: financialModel.coverageRate ?? '',
+        builtUpAreaAbove: financialModel.builtUpAreaAbove ?? '',
+        basementArea: financialModel.basementArea ?? ''
+      };
+      const landmarkRows = Array.isArray(tenantProjectData.nearby_landmarks_data) ? tenantProjectData.nearby_landmarks_data : [];
+      const nearbyLandmarks = landmarkRows.map(item => {
+        const name = String(item?.name || item?.original_name || '').trim();
+        const category = String(item?.category || item?.type || '').trim();
+        return category ? name + ' (' + category + ')' : name;
+      }).filter(Boolean).slice(0, 12);
       return {
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id || '',
         projectName: tenantProjectData.project_name || '',
@@ -798,6 +842,12 @@
         locationLng: tenantProjectData.location_lng || '',
         landArea: tenantProjectData.approved_financial_area || tenantProjectData.croquis_land_area || '',
         allowedUses: tenantProjectData.allowed_uses || '',
+        approvedFloorCount: tenantProjectData.approved_floor_count || financial.floorCount || '',
+        approvedCoverageRatio: tenantProjectData.approved_coverage_ratio || financial.coverageRate || '',
+        setbacks: tenantProjectData.setbacks || '',
+        mainRoads: tenantProjectData.main_roads || '',
+        nearbyLandmarks,
+        financial,
         components,
         competitorRadius: state.competitor_radius,
         competitorRadiusCustomKm: state.competitor_radius_custom_km,

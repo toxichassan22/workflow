@@ -11,6 +11,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlsplit, urlunsplit
 import json
+import math
 import re
 import uuid
 
@@ -1207,6 +1208,132 @@ def build_consultant_system_prompt(offer_lang=None):
     )
 
 
+REVENUE_MODE_LABELS = {
+    'sale': 'وحدات بيعية فقط',
+    'rental': 'وحدات تأجيرية فقط',
+    'mixed': 'مختلطة: وحدات بيعية ووحدات تأجيرية',
+    'nonRevenue': 'بدون إيراد (مشروع غير بيعي ولا تأجيري)',
+}
+INVESTMENT_MODEL_LABELS = {
+    'sale': 'بيع وحدات',
+    'dailyRent': 'إيجار يومي',
+    'monthlyRent': 'إيجار شهري',
+    'annualRent': 'إيجار سنوي',
+    'operating': 'تأجير/تشغيل آخر',
+    'nonRevenue': 'بدون إيراد',
+}
+
+
+def _fmt_money(value):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(num) or num <= 0:
+        return ''
+    if num >= 1_000_000:
+        return f"{num / 1_000_000:,.1f} مليون ريال"
+    return f"{num:,.0f} ريال"
+
+
+def _fmt_area(value):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(num) or num <= 0:
+        return ''
+    return f"{num:,.0f} م²"
+
+
+def _fmt_pct(value):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(num):
+        return ''
+    if abs(num) <= 1.5:
+        num *= 100
+    return f"{num:.1f}%"
+
+
+def _fmt_years(value):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(num) or num <= 0:
+        return ''
+    return f"{num:g} سنة"
+
+
+def _fmt_count(value, prefix=''):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if not math.isfinite(num) or num <= 0:
+        return ''
+    return f"{prefix}{num:g}"
+
+
+def _financial_input_lines(payload):
+    fin = payload.get('financial')
+    if not isinstance(fin, dict):
+        fin = payload.get('financial_model') if isinstance(payload.get('financial_model'), dict) else {}
+    if not fin:
+        return []
+    mode = _norm(fin.get('unitRevenueMode'))
+    rows = [
+        ('إجمالي تكلفة المشروع', _fmt_money(fin.get('projectCost'))),
+        ('التكلفة مع التمويل', _fmt_money(fin.get('projectCostWithFinance') or fin.get('adjustedProjectCost'))),
+        ('إجمالي إيرادات البيع', _fmt_money(fin.get('saleRevenueTotal'))),
+        ('إيراد التشغيل للسنة الأولى', _fmt_money(fin.get('revenueY1'))),
+        ('صافي دخل التشغيل (NOI) للسنة الأولى', _fmt_money(fin.get('noiY1'))),
+        ('الإيراد عند الإشغال الكامل', _fmt_money(fin.get('fullOccupancyRevenue'))),
+        ('العائد على الاستثمار ROI', _fmt_pct(fin.get('roi'))),
+        ('معدل العائد الداخلي للمشروع IRR', _fmt_pct(fin.get('projectIrr'))),
+        ('معدل العائد الداخلي للملكية Equity IRR', _fmt_pct(fin.get('equityIrr'))),
+        ('فترة استرداد رأس المال', _fmt_years(fin.get('payback'))),
+        ('قيمة التخارج البيعي', _fmt_money(fin.get('saleExitValue'))),
+        ('قيمة التخارج التشغيلي', _fmt_money(fin.get('operatingExitValue'))),
+        ('مدة التطوير', _fmt_years(fin.get('developmentYears'))),
+        ('سنة بدء البيع', _fmt_count(fin.get('salesStartYear'), prefix='السنة ')),
+        ('سنوات التشغيل', _fmt_years(fin.get('operationYears'))),
+        ('عدد الأدوار', _fmt_count(fin.get('floorCount'))),
+        ('نسبة التغطية', _fmt_pct(fin.get('coverageRate'))),
+        ('المساحة المبنية فوق الأرض', _fmt_area(fin.get('builtUpAreaAbove'))),
+        ('مساحة القبو', _fmt_area(fin.get('basementArea'))),
+    ]
+    lines = [f"- {label}: {value}" for label, value in rows if value]
+    if mode:
+        lines.insert(0, f"- طبيعة الإيرادات: {REVENUE_MODE_LABELS.get(mode, mode)}")
+    return lines
+
+
+def _site_context_lines(payload):
+    rows = []
+    floors = payload.get('approvedFloorCount') or payload.get('approved_floor_count')
+    coverage = payload.get('approvedCoverageRatio') or payload.get('approved_coverage_ratio')
+    if floors:
+        rows.append(f"- عدد الأدوار المعتمدة: {floors}")
+    if coverage:
+        rows.append(f"- نسبة التغطية المعتمدة: {coverage}")
+    setbacks = payload.get('setbacks')
+    if isinstance(setbacks, str) and setbacks.strip():
+        rows.append(f"- الارتدادات: {setbacks.strip()}")
+    roads = payload.get('mainRoads') or payload.get('main_roads')
+    if isinstance(roads, str) and roads.strip():
+        rows.append(f"- الطرق الرئيسية المحيطة: {'، '.join(roads.splitlines()) if chr(10) in roads else roads}")
+    landmarks = payload.get('nearbyLandmarks') or payload.get('nearby_landmarks')
+    if isinstance(landmarks, list) and landmarks:
+        rows.append(f"- المعالم القريبة: {'، '.join(str(item) for item in landmarks if item)}")
+    elif isinstance(landmarks, str) and landmarks.strip():
+        rows.append(f"- المعالم القريبة: {landmarks.strip()}")
+    return rows
+
+
 def _project_input_block(payload):
     components = payload.get('components')
     if isinstance(components, list) and components:
@@ -1241,6 +1368,18 @@ def _project_input_block(payload):
         f"- فترة البيانات المطلوبة: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
         f"- فترة البيانات الملزمة (تاريخ نشر المصدر): {data_period_window_text(payload) or 'غير مقيدة'}",
     ]
+    site_lines = _site_context_lines(payload)
+    if site_lines:
+        lines.append('### خصائص الأرض ومحيط الموقع')
+        lines.extend(site_lines)
+    financial_lines = _financial_input_lines(payload)
+    if financial_lines:
+        lines.append('### مؤشرات الدراسة المالية للمشروع (مدخلات موثقة — لا تخمّنها)')
+        lines.extend(financial_lines)
+        lines.append(
+            '- مفتاح investmentModel في المكونات: ' +
+            '، '.join(f'{key} = {label}' for key, label in INVESTMENT_MODEL_LABELS.items())
+        )
     return '\n'.join(lines)
 
 
@@ -1305,6 +1444,9 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'الوحدات السكنية أو التجارية أو كلتيهما حسب مكونات المشروع. وإن كان البيع هو نوع التشغيل فابحث '
         'في منصة المؤشرات العقارية (site:rei.rega.gov.sa) عن صفقات المدينة ومتوسط سعر المتر حسب الحي '
         'ونوع العقار، واستخدم نتائجها كمرجعية رسمية للأسعار.\n'
+        '10. طبيعة الإيرادات في بيانات المشروع ملزمة ولا تخمَّن: المشروع البيعي يقارَن بمنافسين '
+        'بيعيين (سعر وحدة/متر)، والتأجيري بتأجيريين (إيجار/ليلة/ADR حسب نموذج الاستفادة)، '
+        'والمختلط يقارَن بالنوعين مع مطابقة كل منافس لنموذج استفادة مكوّنه.\n'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )

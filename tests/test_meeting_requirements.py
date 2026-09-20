@@ -10247,6 +10247,44 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("'max_uses': 10", app_source)
         self.assertIn("MARKET_SEARCH_ENGINE", app_source)
 
+    def test_market_study_prompt_carries_financial_and_site_context(self):
+        import market_study
+        payload = {
+            'city': 'جدة',
+            'financial': {
+                'unitRevenueMode': 'rental',
+                'projectCost': 800_000_000,
+                'noiY1': 45_000_000,
+                'projectIrr': 0.183,
+                'payback': 6.5,
+                'developmentYears': 4,
+                'salesStartYear': 1,
+                'operationYears': 10,
+                'floorCount': 20,
+                'coverageRate': 0.6,
+            },
+            'approvedFloorCount': '20',
+            'approvedCoverageRatio': '60%',
+            'mainRoads': 'طريق الملك فهد\nطريق التحلية',
+            'nearbyLandmarks': ['مجمع الراشد (تسوق)', 'مستشفى الحرس'],
+            'components': [
+                {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'annualRent'},
+            ],
+        }
+        prompt = market_study.build_competitors_user_prompt(payload, [], mode='generate')
+        self.assertIn('وحدات تأجيرية فقط', prompt)
+        self.assertIn('مؤشرات الدراسة المالية', prompt)
+        self.assertIn('800.0 مليون ريال', prompt)
+        self.assertIn('45.0 مليون ريال', prompt)
+        self.assertIn('18.3%', prompt)
+        self.assertIn('طريق الملك فهد', prompt)
+        self.assertIn('مجمع الراشد (تسوق)', prompt)
+        self.assertIn('annualRent = إيجار سنوي', prompt)
+        self.assertIn('طبيعة الإيرادات في بيانات المشروع ملزمة', prompt)
+        # A project with no financial data must not render the block at all.
+        bare = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
+        self.assertNotIn('مؤشرات الدراسة المالية', bare)
+
     def test_market_study_lowers_token_cap_when_credit_is_limited(self):
         module = self.application_module
         refusal = {'error': {'message': 'You requested up to 6000 tokens, but can only afford 3000'}}
