@@ -1705,7 +1705,9 @@
     function visualConceptImageUrl(url) {
       const value = String(url || '');
       if (!value.startsWith('/uploads/')) return value;
-      return value.split('?')[0] + '?t=' + Date.now();
+      // The media route needs the expiring ?s= signature from the JSON response —
+      // keep it and only append a cache-buster, or a fresh image 404s until reload.
+      return value + (value.includes('?') ? '&' : '?') + 't=' + Date.now();
     }
 
     function renderVisualConceptStyleReference() {
