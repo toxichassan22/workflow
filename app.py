@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 import json
 import time
 import math
@@ -19123,6 +19124,28 @@ def _regulation_index_signature(paths):
     return tuple(signature)
 
 
+def _regulation_transcription_pages(pdf_name):
+    """Page-numbered text from the manually verified transcription markdowns
+    (clean_*.md). Each file names its source PDF in the first heading and marks
+    pages with --- صفحة N --- matching the PDF page number. Returns {} when no
+    transcription covers this file."""
+    pages = {}
+    base = os.path.dirname(__file__)
+    for md_path in sorted(glob.glob(os.path.join(base, 'clean*.md'))):
+        try:
+            with open(md_path, encoding='utf-8') as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        if pdf_name not in text.split('\n', 1)[0]:
+            continue
+        for match in re.finditer(
+                r'---\s*صفحة\s*(\d+)\s*---\s*\n(.*?)(?=---\s*صفحة\s*\d+\s*---|\Z)',
+                text, re.S):
+            pages[int(match.group(1))] = match.group(2).strip()
+    return pages
+
+
 def _build_regulation_page_index():
     global _REGULATION_PAGE_INDEX, _REGULATION_PAGE_INDEX_SIGNATURE
     paths = regulation_pdf_paths()
@@ -19139,32 +19162,47 @@ def _build_regulation_page_index():
     records = []
     for path in paths:
         name = os.path.basename(path)
+        # Verified transcriptions win — PyMuPDF mangles this file family's
+        # Arabic extraction. The PDF still opens for the page count, gap
+        # filling, and table-page rendering downstream.
+        transcribed = _regulation_transcription_pages(name)
         try:
             document = fitz.open(path)
         except Exception:
-            continue
+            document = None
         try:
-            for index in range(len(document)):
-                page = document[index]
-                raw = page.get_text()
-                if _is_regulation_index_page(raw):
+            total = len(document) if document else max(transcribed, default=0)
+            for page_no in range(1, total + 1):
+                text = transcribed.get(page_no)
+                if text is not None:
+                    if _is_regulation_index_page(text):
+                        continue
+                    cleaned = _clean_regulation_text(text)
+                    has_table = bool(re.search(r'(?m)^\s*\|.*\|\s*$', text))
+                elif document is not None:
+                    page = document[page_no - 1]
+                    raw = page.get_text()
+                    if _is_regulation_index_page(raw):
+                        continue
+                    cleaned = _clean_regulation_text(raw)
+                    try:
+                        has_table = bool(page.find_tables().tables)
+                    except Exception:
+                        has_table = False
+                else:
                     continue
-                cleaned = _clean_regulation_text(raw)
-                try:
-                    has_table = bool(page.find_tables().tables)
-                except Exception:
-                    has_table = False
                 if not cleaned and not has_table:
                     continue
                 records.append({
                     'name': name,
                     'path': path,
-                    'page': index + 1,
+                    'page': page_no,
                     'text': cleaned,
                     'has_table': has_table,
                 })
         finally:
-            document.close()
+            if document:
+                document.close()
     _REGULATION_PAGE_INDEX = records
     _REGULATION_PAGE_INDEX_SIGNATURE = signature
     return records
