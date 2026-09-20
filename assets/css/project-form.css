@@ -389,6 +389,14 @@
       white-space: nowrap;
     }
 
+    .plans-distribution-table {
+      min-width: 980px;
+    }
+
+    .plans-distribution-table td {
+      vertical-align: middle;
+    }
+
     .plans-boundary-editor {
       display: grid;
       grid-template-columns: 1fr;

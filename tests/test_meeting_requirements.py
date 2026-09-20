@@ -9276,6 +9276,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-visual-plans-tab="upload"', index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-verify'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-distribution'", index_source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-distribution-check'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-prompts'", index_source)
         self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض')", index_source)
         self.assertIn('const canApprove = !conflicts.length', index_source)
@@ -9294,6 +9296,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn("data-plans-workflow-action=\"back-verify\"", index_source)
         self.assertNotIn("data-plans-workflow-action=\"back-boundary\"", index_source)
         self.assertIn("data-plans-workflow-action=\"open-land-data\"", index_source)
+        self.assertIn('data-plans-workflow-action="propose-distribution"', index_source)
+        self.assertIn('data-plans-workflow-action="check-distribution"', index_source)
+        self.assertIn('data-plans-workflow-action="approve-distribution"', index_source)
+        self.assertIn('data-plans-workflow-action="add-distribution-row"', index_source)
+        self.assertIn('data-dist-field="', index_source)
+        self.assertIn('data-dist-remove="', index_source)
+        self.assertIn('رسم الحدود وتوزيع المكونات', index_source)
         self.assertNotIn('data-plan-boundary-field', index_source)
         self.assertNotIn('data-plans-boundary-rows', index_source)
         self.assertIn('plans-workflow-success', index_source)
@@ -9565,7 +9574,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             plan_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}, 'distribution': {'approved': True}},
                 'projectData': facts,
             })
         self.assertEqual(plan_prompt.status_code, 200, plan_prompt.get_json())
@@ -9578,7 +9587,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
                 'instruction': 'وسّع اللاندسكيب',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}, 'distribution': {'approved': True}},
                 'projectData': facts,
             })
         self.assertEqual(plan_edit.status_code, 200, plan_edit.get_json())
@@ -9590,7 +9599,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'prompt': 'Conceptual site plan',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}, 'distribution': {'approved': True}},
                 'projectData': facts,
             })
         self.assertEqual(plan.status_code, 200, plan.get_json())
@@ -9665,25 +9674,64 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(boundary.get_json()['referenceUrl'], '/uploads/creative/parcel-ref.png')
         self.assertEqual(len(boundary.get_json()['points']), 3)
 
-        with patch.object(module, 'call_openrouter_chat', side_effect=AssertionError('plan prompts must not call a text model')):
+        approved_rows = [{
+            'building': 'Main Tower', 'floor_range': '26-52', 'component': 'Luxury Apartments',
+            'units_per_floor': 9, 'floor_area_sqm': 1350, 'circulation': 'main core'}]
+        gated = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+            'projectData': project_data,
+            'plansWorkflow': {
+                'verification': {'approved': True},
+                'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}
+            }
+        })
+        self.assertEqual(gated.status_code, 400, gated.get_json())
+        self.assertEqual(gated.get_json()['error_code'], 'PLANS_DISTRIBUTION_REQUIRED')
+
+        # sol adapts the fixed DRAWING REQUESTED bodies to the approved distribution;
+        # the header + APPROVED DISTRIBUTION MODEL spec are spliced back verbatim, so
+        # approved facts (name, floors, areas) cannot be dropped by the rewrite.
+        adapted = {
+            'site': "DRAWING REQUESTED — 'CONCEPTUAL SITE PLAN': adapted site body — no podium, no basement pocket, single approved tower. " * 2,
+            'uses': "DRAWING REQUESTED — 'VERTICAL PROGRAM': adapted stack body — one approved band only. " * 3,
+            'massing': "DRAWING REQUESTED — 'CONCEPTUAL MASSING': adapted massing body — one volume only. " * 3,
+        }
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(adapted, ensure_ascii=False)}}]
+        }) as adapt_call:
             prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
                 'projectData': project_data,
                 'plansWorkflow': {
                     'verification': {'approved': True},
-                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}
+                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'},
+                    'distribution': {'approved': True, 'rows': approved_rows},
                 }
             })
         self.assertEqual(prompts.status_code, 200, prompts.get_json())
+        self.assertTrue(adapt_call.called)
         site_prompt = prompts.get_json()['prompts']['site']
         self.assertIn('اسم المشروع: The View', site_prompt)
         self.assertIn('APPROVED DISTRIBUTION MODEL', site_prompt)
-        self.assertIn('DRAWING REQUESTED', site_prompt)
+        self.assertIn('adapted site body', site_prompt)
         self.assertIn('Luxury Apartments', site_prompt)
+        self.assertIn('26-52', site_prompt)
         for kind in ('uses', 'massing'):
             self.assertIn('APPROVED DISTRIBUTION MODEL', prompts.get_json()['prompts'][kind])
         serialized_prompts = json.dumps(prompts.get_json()['prompts'], ensure_ascii=False)
         self.assertNotIn('اشتراطات1', serialized_prompts)
         self.assertNotIn('اشتراطات2', serialized_prompts)
+
+        # When the adaptation call fails, the deterministic bodies still ship.
+        with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')):
+            prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+                'projectData': project_data,
+                'plansWorkflow': {
+                    'verification': {'approved': True},
+                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'},
+                    'distribution': {'approved': True, 'rows': approved_rows},
+                }
+            })
+        self.assertEqual(prompts.status_code, 200, prompts.get_json())
+        self.assertIn('DRAWING REQUESTED', prompts.get_json()['prompts']['site'])
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,CCCC') as image_call, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'), \
@@ -9691,11 +9739,95 @@ class MeetingRequirementsTests(unittest.TestCase):
             generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site', 'planKind': 'site', 'prompt': 'SITE PROMPT',
                 'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}, 'distribution': {'approved': True, 'rows': approved_rows}},
                 'projectData': project_data
             })
         self.assertEqual(generated.status_code, 200, generated.get_json())
         self.assertTrue(any('parcel-ref.png' in str(item) for item in image_call.call_args.args[1]))
+
+    def test_plans_distribution_is_proposed_checked_and_gates_prompts(self):
+        module = self.application_module
+        client = self.app.test_client()
+        points = [
+            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
+            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
+            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
+        ]
+        project_data = {
+            'project_name': 'The View',
+            'city': 'جدة',
+            'croquis_land_area': 7012,
+            'approved_floor_count': 30,
+            'approved_coverage_ratio': 60,
+            'survey_coordinates': points,
+            'project_components_data': [
+                {'name': 'مكاتب', 'useType': 'office', 'units': 20, 'builtArea': 4000},
+                {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800},
+            ],
+        }
+        workflow = {'verification': {'approved': True},
+                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/x.png'}}
+
+        # The proposal is gated on the approved verification like the rest of the flow.
+        refused = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
+            'projectData': project_data, 'plansWorkflow': {}})
+        self.assertEqual(refused.status_code, 400, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'PLANS_VERIFICATION_REQUIRED')
+
+        proposed = {'rows': [
+            {'building': 'المبنى الرئيسي', 'floor_range': '1-10', 'component': 'مكاتب',
+             'units_per_floor': 2, 'floor_area_sqm': 400, 'circulation': 'بهو'},
+            {'building': 'المبنى الرئيسي', 'floor_range': '11-15', 'component': 'شقق',
+             'units_per_floor': 2.4, 'floor_area_sqm': 360, 'circulation': ''},
+            {'building': 'المبنى الرئيسي', 'floor_range': 'B1', 'component': 'مواقف سيارات',
+             'circulation': 'منحدر'},
+        ], 'notes': ['فصل المداخل']}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(proposed, ensure_ascii=False)}}]
+        }):
+            proposal = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow})
+        self.assertEqual(proposal.status_code, 200, proposal.get_json())
+        distribution = proposal.get_json()['distribution']
+        self.assertEqual(len(distribution['rows']), 3)
+        totals = {row['component']: row for row in distribution['totals']}
+        self.assertEqual(totals['مكاتب']['units'], 20)
+        self.assertEqual(totals['مكاتب']['required_units'], 20)
+        self.assertEqual(totals['شقق']['units'], 12)
+        self.assertEqual(distribution['notes'], ['فصل المداخل'])
+
+        # The local re-check is deterministic — overlapping ranges in one building flag
+        # a conflict with no model call at all.
+        overlapping = {'rows': [
+            {'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب'},
+            {'building': 'A', 'floor_range': '4-9', 'component': 'شقق'},
+        ]}
+        with patch.object(module, 'call_openrouter_chat', side_effect=AssertionError('local check is deterministic')):
+            checked = client.post('/api/visual-concept/plans-distribution-check', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow, 'distribution': overlapping})
+        self.assertEqual(checked.status_code, 200, checked.get_json())
+        self.assertFalse(checked.get_json()['canProceed'])
+        self.assertTrue(any(item['result'] == 'متعارض' for item in checked.get_json()['checks']))
+
+        # mode=ai layers sol's conflict review on top of the deterministic pass.
+        ai_review = {'issues': [{'title': 'المواقف', 'points': ['نقص مواقف'], 'suggestion': '', 'action': '', 'severity': 'low'}],
+                     'canProceed': True}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(ai_review, ensure_ascii=False)}}]
+        }) as review_call:
+            ai_checked = client.post('/api/visual-concept/plans-distribution-check', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow, 'distribution': overlapping, 'mode': 'ai'})
+        self.assertEqual(ai_checked.status_code, 200, ai_checked.get_json())
+        self.assertTrue(review_call.called)
+        self.assertEqual(ai_checked.get_json()['issues'][0]['title'], 'المواقف')
+
+        # When sol is offline the proposal falls back to the deterministic inferred
+        # distribution so the client still gets an editable table.
+        with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')):
+            fallback = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow})
+        self.assertEqual(fallback.status_code, 200, fallback.get_json())
+        self.assertTrue(fallback.get_json()['distribution']['rows'])
 
     def test_executive_content_section_generates_each_block_from_existing_facts(self):
         import executive_content

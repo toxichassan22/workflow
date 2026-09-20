@@ -3257,9 +3257,18 @@ def _visual_concept_request_bundle(data, slot_id):
                 data.get('planDescription') or data.get('plan_description'), 2000)
             facts['plan_kind'] = _visual_concept_plan_kind(slot_id, data.get('planKind'))
             facts['approved_plan_context'] = _visual_concept_plan_context_text(context)
-            facts['plan_prompt_draft'] = (
-                _visual_concept_plan_drawing_prompt(facts['plan_kind'], context)
-                if facts['plan_kind'] else '')
+            stored_prompts = workflow.get('prompts') if isinstance(workflow.get('prompts'), dict) else {}
+            stored_draft = _visual_concept_text(stored_prompts.get(facts['plan_kind']), 12000)
+            if stored_draft:
+                facts['plan_prompt_draft'] = stored_draft
+            else:
+                distribution = (workflow.get('distribution')
+                                if isinstance(workflow.get('distribution'), dict) else {})
+                model = _visual_concept_plan_model_from_distribution(
+                    distribution, context, context.get('regulations') or {})
+                facts['plan_prompt_draft'] = (
+                    _visual_concept_plan_drawing_prompt(facts['plan_kind'], context, model=model)
+                    if facts['plan_kind'] else '')
             facts['plan_boundary_reference_url'] = _visual_concept_text(
                 boundary.get('referenceUrl') or data.get('planBoundaryReferenceUrl'), 500)
         elif _visual_concept_plan_context_has_measurements(context):
@@ -5113,6 +5122,37 @@ def _visual_concept_plan_use_color(context, use_label):
     return ''
 
 
+def _visual_concept_plan_direction_scan(context):
+    """Classify recorded direction rows: which edges are streets, which is the
+    sea/corniche frontage. Returns (street_dirs, other_dirs, sea_dir)."""
+    street_dirs, other_dirs, sea_dir = [], [], ''
+    for item in context.get('directions') or []:
+        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
+        key = _visual_concept_plan_direction_key(item.get('direction'))
+        if not key:
+            continue
+        if re.search(r'sea|shore|coast|بحر|شاطئ|كورنيش|corniche|waterfront|واجهة\s+بحرية',
+                     text, flags=re.IGNORECASE):
+            sea_dir = sea_dir or key
+        if re.search(r'street|road|corniche|شارع|طريق|كورنيش', text, flags=re.IGNORECASE):
+            street_dirs.append(key)
+        else:
+            other_dirs.append(key)
+    return street_dirs, other_dirs, sea_dir
+
+
+def _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector):
+    """The main entry belongs on the sea/corniche frontage when one is recorded;
+    the residential entry takes the next street and the service entry a third
+    street when one exists — never a neighbor edge (no entry crosses a plot line)."""
+    main_dir = sea_dir or (street_dirs[0] if street_dirs else (
+        high_sector['direction'] if high_sector else ''))
+    res_dir = next((direction for direction in street_dirs if direction != main_dir), '')
+    svc_dir = next((direction for direction in street_dirs
+                    if direction not in (main_dir, res_dir)), res_dir)
+    return main_dir, res_dir, svc_dir
+
+
 def _visual_concept_plan_model(context, regulations):
     """One derived concept distribution shared by all three plan prompts —
     bands in fixed stack order, tower on the uncapped sector, low block on the
@@ -5153,19 +5193,7 @@ def _visual_concept_plan_model(context, regulations):
                   if not hint.get('cap') and hint is not low_sector]
     high_sector = (explicit_open or open_hints or [None])[0]
 
-    street_dirs, other_dirs, sea_dir = [], [], ''
-    for item in context.get('directions') or []:
-        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
-        key = _visual_concept_plan_direction_key(item.get('direction'))
-        if not key:
-            continue
-        if re.search(r'sea|shore|coast|بحر|شاطئ|كورنيش|corniche|waterfront|واجهة\s+بحرية',
-                     text, flags=re.IGNORECASE):
-            sea_dir = sea_dir or key
-        if re.search(r'street|road|corniche|شارع|طريق|كورنيش', text, flags=re.IGNORECASE):
-            street_dirs.append(key)
-        else:
-            other_dirs.append(key)
+    street_dirs, _other_dirs, sea_dir = _visual_concept_plan_direction_scan(context)
 
     floor_count = _visual_concept_number(context.get('floor_count'))
     floor_count = int(floor_count) if floor_count else 0
@@ -5224,14 +5252,20 @@ def _visual_concept_plan_model(context, regulations):
                 context, _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')),
         })
 
-    # The main entry belongs on the sea/corniche frontage when one is recorded;
-    # the residential entry takes the next street and the service entry a third
-    # street when one exists — never a neighbor edge (no entry crosses a plot line).
-    main_dir = sea_dir or (street_dirs[0] if street_dirs else (
-        high_sector['direction'] if high_sector else ''))
-    res_dir = next((direction for direction in street_dirs if direction != main_dir), '')
-    svc_dir = next((direction for direction in street_dirs
-                    if direction not in (main_dir, res_dir)), res_dir)
+    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector)
+    has_residential = any(band['category'] == 'residential' for band in bands_out)
+    block_label = (f"{low_sector['direction'].title()} Block"
+                   if low_sector and low_sector.get('direction') else 'Low Block')
+    blocks = []
+    if low_sector:
+        blocks.append({
+            'label': block_label,
+            'cap': low_sector.get('cap') or 0,
+            'direction': low_sector.get('direction') or '',
+            'use': 'Residential' if has_residential else 'Low-rise',
+            'color': _visual_concept_plan_use_color(context, 'Residential') or 'soft-blue',
+            'bands': [],
+        })
     return {
         'bands': bands_out,
         'below': below,
@@ -5239,14 +5273,14 @@ def _visual_concept_plan_model(context, regulations):
         'open_uses': open_uses,
         'high_sector': high_sector,
         'low_sector': low_sector,
+        'blocks': blocks,
         'floor_count': floor_count,
         'main_dir': main_dir,
         'res_dir': res_dir,
         'svc_dir': svc_dir,
         'sea_dir': sea_dir,
-        'has_residential': any(band['category'] == 'residential' for band in bands_out),
-        'block_label': (f"{low_sector['direction'].title()} Block"
-                        if low_sector and low_sector.get('direction') else 'Low Block'),
+        'has_residential': has_residential,
+        'block_label': block_label,
     }
 
 
@@ -5325,7 +5359,8 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
             article = 'an' if band['label'][:1].lower() in 'aeiou' else 'a'
             if position == 0:
                 storey = f"{band['floors']}-storey " if band['floors'] else ''
-                phrase = f"{article} {storey}{band['label']} podium base"
+                noun = 'podium base' if len(model['bands']) > 1 and (band['floors'] or 0) <= 8 else 'base'
+                phrase = f"{article} {storey}{band['label']} {noun}"
             elif position == last:
                 phrase = f"{article} {band['label']} top band"
             else:
@@ -5335,19 +5370,21 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
             tower += ' — ' + ', '.join(band_phrases[:-1]) + (
                 f', and {band_phrases[-1]}' if len(band_phrases) > 1 else band_phrases[0])
         masses = [f'(1) {tower}']
-        if model['low_sector']:
-            kind = 'residential' if model['has_residential'] else 'low-rise'
-            masses.append(f"(2) a {model['low_sector']['cap']}-storey {kind} "
-                          f"'{model['block_label']}' on the "
-                          f"{model['low_sector']['direction']} part")
-        masses.append('(3) multi-level basement parking across the parcel — drawn only in the '
-                      'floor-distribution stack')
+        for index, block in enumerate(model.get('blocks') or [], 2):
+            cap_text = f"{block['cap']}-storey " if block.get('cap') else 'low-rise '
+            on_part = f" on the {block['direction']} part" if block.get('direction') else ''
+            masses.append(f"({index}) a {cap_text}{block.get('use') or 'mixed-use'} "
+                          f"'{block['label']}'{on_part}")
+        if model.get('below'):
+            masses.append(f"({len(masses) + 1}) multi-level basement parking across the parcel — "
+                          'drawn only in the floor-distribution stack')
         lines.append('- Approved masses: ' + '; '.join(masses) + '.')
         open_bits = []
         if model['sea_dir']:
             open_bits.append(f"along the {model['sea_dir']} edge")
-        if model['low_sector']:
-            open_bits.append(f"around the '{model['block_label']}'")
+        block_labels = [block['label'] for block in model.get('blocks') or [] if block.get('label')]
+        if block_labels:
+            open_bits.append('around ' + ', '.join(f"the '{label}'" for label in block_labels))
         lines.append('- Open areas: landscaping '
                      + (' and '.join(open_bits) if open_bits
                         else 'on the remaining open ground inside the setback envelope') + '.')
@@ -5387,18 +5424,26 @@ def _visual_concept_plan_site_body(context, model, regulations):
         high_dir = model['high_sector']['direction'] if model['high_sector'] else ''
         podium_color = model['bands'][0]['color'] if model['bands'] else 'soft-teal'
         crown_color = (model['bands'][-1]['color'] if model['bands'] else '') or 'soft-blue'
-        footprints = [f"the podium+tower zone" + (f' on the {high_dir} part' if high_dir else '')
-                      + f' ({podium_color} podium footprint with a smaller {crown_color} tower '
-                        "footprint inside it labeled 'Tower')"]
-        if model['low_sector']:
-            res_color = _visual_concept_plan_use_color(context, 'Residential') or 'soft-blue'
-            footprints.append(f"the {model['low_sector']['cap']}-storey {res_color} "
-                              f"'{model['block_label']}' footprint on the "
-                              f"{model['low_sector']['direction']} part")
+        # Same podium heuristic the spec uses: a short first band under a taller
+        # stack is a podium base; otherwise the tower sits on the ground directly.
+        has_podium = len(model['bands']) > 1 and (model['bands'][0]['floors'] or 0) <= 8
+        if has_podium:
+            footprints = [f"the podium+tower zone" + (f' on the {high_dir} part' if high_dir else '')
+                          + f' ({podium_color} podium footprint with a smaller {crown_color} tower '
+                            "footprint inside it labeled 'Tower')"]
+        else:
+            footprints = [f"the tower zone" + (f' on the {high_dir} part' if high_dir else '')
+                          + f" ({crown_color} tower footprint labeled 'Tower')"]
+        for block in model.get('blocks') or []:
+            cap_text = f"{block['cap']}-storey " if block.get('cap') else ''
+            on_part = f" on the {block['direction']} part" if block.get('direction') else ''
+            footprints.append(f"the {cap_text}{block.get('color') or 'muted'} "
+                              f"'{block['label']}' footprint{on_part}")
         footprints.append('pale-green landscaping filling the rest')
-        pocket_dir = model['svc_dir'] or model['res_dir']
-        footprints.append('a light-grey service/parking pocket'
-                          + (f' on the {pocket_dir} part' if pocket_dir else ''))
+        if model.get('below'):
+            pocket_dir = model['svc_dir'] or model['res_dir']
+            footprints.append('a light-grey service/parking pocket'
+                              + (f' on the {pocket_dir} part' if pocket_dir else ''))
         parts.append(', '.join(footprints) + '. ')
         entries = []
         if model['main_dir']:
@@ -5437,8 +5482,13 @@ def _visual_concept_plan_uses_body(context, model, regulations):
     if model:
         stacks = []
         tower_bits = []
-        tower_bits.append("several light-grey 'Basement Parking' bands below a dark navy "
-                          "'Ground Level' line")
+        below_count = len(model.get('below') or [])
+        if below_count:
+            tower_bits.append(f"{below_count} light-grey 'Basement Parking' level"
+                              + ('s' if below_count > 1 else '')
+                              + " below a dark navy 'Ground Level' line")
+        else:
+            tower_bits.append("a dark navy 'Ground Level' line at the base")
         for band in model['bands']:
             color = band['color'] or 'muted'
             count = band['floors']
@@ -5453,15 +5503,29 @@ def _visual_concept_plan_uses_body(context, model, regulations):
                       else 'mixed-use tower')
         stacks.append('Left stack — the ' + tower_name + ', bands bottom to top exactly: '
                       + ', '.join(tower_bits) + '.')
-        if model['low_sector']:
-            res_color = _visual_concept_plan_use_color(context, 'Residential') or 'soft-blue'
-            cap = model['low_sector']['cap']
-            band_use = 'Residential' if model['has_residential'] else model['block_label']
-            stacks.append(f"Right stack — the {cap}-storey '{model['block_label']}': {cap} "
-                          f"{res_color} '{band_use} (G-{cap})' bands above the same ground line "
-                          'with its own light-grey parking band below.')
-        parts.append(('TWO stacks side by side. ' if len(stacks) > 1 else 'ONE stack. ')
-                     + ' '.join(stacks) + ' ')
+        for position, block in enumerate(model.get('blocks') or []):
+            side = 'Right' if not position else f"Side stack {position + 1}"
+            if block.get('bands'):
+                block_bits = []
+                for band in block['bands']:
+                    band_text = (f"{band['floors']} {band['color'] or 'muted'} '{band['label']}"
+                                 + (f" ({band['range']})'" if band.get('range') else "'")
+                                 + ' bands')
+                    block_bits.append(band_text)
+                stacks.append(f"{side} stack — the '{block['label']}': "
+                              + ', '.join(block_bits)
+                              + ' above its own ground line.')
+            else:
+                cap = block.get('cap') or 0
+                stacks.append(f"{side} stack — the {cap or 'low'}-storey '{block['label']}': "
+                              f"{cap or 'several'} {block.get('color') or 'muted'} "
+                              f"'{block.get('use') or block['label']} (G-{cap})' bands above the "
+                              'same ground line'
+                              + (' with its own light-grey parking band below' if below_count else '')
+                              + '.')
+        count_word = {1: 'ONE stack. ', 2: 'TWO stacks side by side. '}.get(
+            len(stacks), f'{len(stacks)} stacks side by side. ')
+        parts.append(count_word + ' '.join(stacks) + ' ')
     else:
         parts.append('No distribution is recorded; draw one generic stack per recorded component '
                      'with no labeled floors. ')
@@ -5491,7 +5555,8 @@ def _visual_concept_plan_massing_body(context, model, regulations):
             noun = _VISUAL_PLAN_USE_LABEL.get(band['category'], 'Amenities').lower()
             if position == 0:
                 storey = f"{band['floors']}-storey " if band['floors'] else ''
-                tiers.append(f'{color} {storey}podium base')
+                base_noun = 'podium base' if len(model['bands']) > 1 and (band['floors'] or 0) <= 8 else 'base'
+                tiers.append(f'{color} {storey}{base_noun}')
             elif position == last:
                 tiers.append(f'{color} {noun} crown')
             else:
@@ -5502,17 +5567,18 @@ def _visual_concept_plan_massing_body(context, model, regulations):
             'horizontal floor lines and dark navy outlines: the ' + tower_name
             + (f' on the {high_dir} part' if high_dir else '')
             + ', shown as one volume banded by use (' + ', '.join(tiers) + ')')
-        if model['low_sector']:
-            res_color = _visual_concept_plan_use_color(context, 'Residential') or 'soft-blue'
-            parts.append(f" plus the separate low {model['low_sector']['cap']}-storey {res_color} "
-                         f"'{model['block_label']}' on the {model['low_sector']['direction']} part")
+        for block in model.get('blocks') or []:
+            cap_text = f"{block['cap']}-storey " if block.get('cap') else 'low '
+            on_part = f" on the {block['direction']} part" if block.get('direction') else ''
+            parts.append(f" plus the separate {cap_text}{block.get('color') or 'muted'} "
+                         f"'{block['label']}'{on_part}")
         parts.append('. Pale-green landscaping with round trees fills the open areas')
         if model['sea_dir']:
             parts.append(f"; a pale-cyan 'Sea' band runs beyond the {model['sea_dir']} edge")
-        callouts = [band['label'] + (' Podium' if i == 0 else '')
+        callouts = [band['label'] + (' Podium' if i == 0 and len(model['bands']) > 1
+                                     and (band['floors'] or 0) <= 8 else '')
                     for i, band in enumerate(model['bands'])]
-        if model['low_sector']:
-            callouts.append(model['block_label'])
+        callouts += [block['label'] for block in model.get('blocks') or [] if block.get('label')]
         parts.append('. English callout labels on dotted leader lines: '
                      + ', '.join(f"'{label}'" for label in callouts)
                      + '. Edge labels: each recorded street and neighbor named with its '
@@ -5529,10 +5595,11 @@ def _visual_concept_plan_massing_body(context, model, regulations):
     return ''.join(parts)
 
 
-def _visual_concept_plan_drawing_prompt(kind, context):
+def _visual_concept_plan_drawing_prompt(kind, context, model=None):
     context = context if isinstance(context, dict) else {}
     regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
-    model = _visual_concept_plan_model(context, regulations)
+    if model is None:
+        model = _visual_concept_plan_model(context, regulations)
     spec = _visual_concept_plan_distribution_spec(context, model, regulations)
     body = {
         'site': _visual_concept_plan_site_body,
@@ -5542,9 +5609,9 @@ def _visual_concept_plan_drawing_prompt(kind, context):
     return (_visual_concept_plan_prompt_header(kind, context) + spec + '\n' + body)
 
 
-def _visual_concept_plan_prompt_templates(context):
+def _visual_concept_plan_prompt_templates(context, model=None):
     return {
-        definition['kind']: _visual_concept_plan_drawing_prompt(definition['kind'], context)
+        definition['kind']: _visual_concept_plan_drawing_prompt(definition['kind'], context, model=model)
         for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS
     }
 
@@ -5595,24 +5662,8 @@ def _visual_concept_plan_normalize_verification(raw):
             )[:800],
             'action': _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))[:600],
         })
-    issue_source = source.get('issues') or source.get('blocking_issues') or []
-    issues = []
-    for index, item in enumerate(issue_source if isinstance(issue_source, list) else [issue_source], 1):
-        if isinstance(item, dict):
-            title = _visual_concept_plan_sanitize_text(item.get('title') or item.get('item') or f'ملاحظة {index}')
-            bullets = _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))
-            action = _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))
-            suggestion = _visual_concept_plan_sanitize_text(
-                item.get('suggestion') or item.get('resolution') or item.get('solution') or action)
-            severity = _visual_concept_plan_sanitize_text(item.get('severity') or 'medium')
-        else:
-            title = f'ملاحظة {index}'
-            bullets = _visual_concept_plan_bullets(item)
-            action = ''
-            suggestion = ''
-            severity = 'medium'
-        if bullets or title:
-            issues.append({'id': str(index), 'title': title, 'points': bullets, 'action': action, 'suggestion': suggestion, 'severity': severity})
+    issues = _visual_concept_plan_normalize_issues(
+        source.get('issues') or source.get('blocking_issues') or [])
     summary = _visual_concept_plan_sanitize_text(source.get('summary'))
     return {
         'checks': checks,
@@ -5645,6 +5696,437 @@ def _visual_concept_plan_fallback_verification(context):
         if item['result'] in {'يحتاج تأكيد', 'غير متوفر'}:
             issues.append({'id': str(len(issues) + 1), 'title': item['item'], 'points': ['القيمة تحتاج مراجعة يدوية قبل اعتمادها.'], 'action': 'مراجعة القيمة وتأكيدها.', 'suggestion': item.get('suggestion') or '', 'severity': 'medium'})
     return {'checks': checks, 'issues': issues, 'summary': 'تمت مقارنة المدخلات المتاحة مع البيانات التنظيمية المسجلة.', 'canProceed': True, 'approved': False}
+
+
+def _visual_concept_plan_normalize_issues(issue_source, limit=30):
+    issues = []
+    for index, item in enumerate(issue_source if isinstance(issue_source, list) else [issue_source], 1):
+        if isinstance(item, dict):
+            title = _visual_concept_plan_sanitize_text(item.get('title') or item.get('item') or f'ملاحظة {index}')
+            bullets = _visual_concept_plan_bullets(item.get('points') or item.get('issues') or item.get('description'))
+            action = _visual_concept_plan_sanitize_text(item.get('action') or item.get('recommendation'))
+            suggestion = _visual_concept_plan_sanitize_text(
+                item.get('suggestion') or item.get('resolution') or item.get('solution') or action)
+            severity = _visual_concept_plan_sanitize_text(item.get('severity') or 'medium')
+        else:
+            title = f'ملاحظة {index}'
+            bullets = _visual_concept_plan_bullets(item)
+            action = ''
+            suggestion = ''
+            severity = 'medium'
+        if bullets or title:
+            issues.append({'id': str(index), 'title': title, 'points': bullets,
+                           'action': action, 'suggestion': suggestion, 'severity': severity})
+    return issues[:limit]
+
+
+def _visual_concept_plan_floor_range(text):
+    """Parse an approved-table floor cell: 'G', 'B1-B3', '5-12', 'Roof' →
+    {kind, lo, hi, count}. Basement lo/hi are negative; ground lo=hi=0."""
+    value = str(text or '').strip()
+    if not value:
+        return None
+    lowered = value.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).lower()
+    if re.search(r'roof|سطح|روف|ملحق|ملاحق', lowered):
+        return {'kind': 'roof', 'lo': 0, 'hi': 0, 'count': 1}
+    if re.search(r'\bb\s*\d|basement|بدروم|قبو|سرداب|تحت\s*الأرض', lowered):
+        digits = [int(d) for d in re.findall(r'\d+', lowered)]
+        count = max(digits) if digits else 1
+        return {'kind': 'basement', 'lo': -count, 'hi': -1, 'count': count}
+    numbers = [int(d) for d in re.findall(r'\d+', lowered)]
+    ground = bool(re.search(r'\bg\b|ground|أرضي|الارضي|الأرضي|ميزانين|mezzanine', lowered))
+    if not numbers:
+        return {'kind': 'ground', 'lo': 0, 'hi': 0, 'count': 1} if ground else None
+    lo, hi = (0, numbers[-1]) if ground else (numbers[0], numbers[-1])
+    return {'kind': 'range', 'lo': lo, 'hi': hi, 'count': max(1, hi - lo + 1)}
+
+
+def _visual_concept_plan_component_key(name):
+    text = re.sub(r'[^\w\u0600-\u06FF]+', '', str(name or '')
+                  .translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).casefold())
+    return text
+
+
+def _visual_concept_plan_distribution_totals(rows, context):
+    """Per-component totals from the distribution table, each matched against the
+    required figure recorded in the project components / financial study rows."""
+    groups = {}
+    order = []
+    for row in rows:
+        name = _visual_concept_plan_sanitize_text(row.get('component')) or 'غير محدد'
+        key = _visual_concept_plan_component_key(name) or name
+        if key not in groups:
+            groups[key] = {'component': name, 'units': 0.0, 'area': 0.0,
+                           'has_units': False, 'has_area': False}
+            order.append(key)
+        parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
+        count = parsed['count'] if parsed else 1
+        units = row.get('units_per_floor')
+        area = row.get('floor_area_sqm')
+        if isinstance(units, (int, float)):
+            groups[key]['units'] += units * count
+            groups[key]['has_units'] = True
+        if isinstance(area, (int, float)):
+            groups[key]['area'] += area * count
+            groups[key]['has_area'] = True
+    required = []
+    for comp in context.get('components') or []:
+        required.append({
+            'key': _visual_concept_plan_component_key(comp.get('name')),
+            'component': _visual_concept_plan_sanitize_text(comp.get('name')),
+            'required_units': comp.get('units'),
+            'required_area': comp.get('builtArea') or comp.get('unitArea'),
+        })
+    totals = []
+    for key in order:
+        entry = groups[key]
+        match = next((item for item in required
+                      if item['key'] and (item['key'] == key
+                                          or (len(item['key']) >= 3 and item['key'] in key)
+                                          or (len(key) >= 3 and key in item['key']))), None)
+        total = {
+            'component': entry['component'],
+            'units': entry['units'] if entry['has_units'] else None,
+            'area': entry['area'] if entry['has_area'] else None,
+            'required_units': match['required_units'] if match else None,
+            'required_area': match['required_area'] if match else None,
+        }
+        for pair in (('units', 'required_units', 'delta_units'),
+                     ('area', 'required_area', 'delta_area')):
+            value, wanted = total[pair[0]], total[pair[1]]
+            total[pair[2]] = (round(value - wanted, 2)
+                              if isinstance(value, (int, float)) and isinstance(wanted, (int, float))
+                              else None)
+        totals.append(total)
+    covered = {key for key in order}
+    for item in required:
+        if not item['key'] or any(item['key'] == key or item['key'] in key or key in item['key']
+                                  for key in covered):
+            continue
+        totals.append({'component': item['component'], 'units': 0, 'area': 0,
+                       'required_units': item['required_units'], 'required_area': item['required_area'],
+                       'delta_units': (-item['required_units']
+                                       if isinstance(item['required_units'], (int, float)) else None),
+                       'delta_area': (-item['required_area']
+                                      if isinstance(item['required_area'], (int, float)) else None)})
+    return totals
+
+
+def _visual_concept_plan_distribution_checks(rows, totals, context, regulations):
+    """Deterministic re-check of an (edited) distribution table — instant, no model:
+    floor-range overlaps per building, height caps, coverage footprint, and the
+    per-component deltas against the recorded program."""
+    checks = []
+    by_building = {}
+    parsed_rows = []
+    for row in rows:
+        parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
+        parsed_rows.append((row, parsed))
+        if not parsed or parsed['kind'] in ('basement', 'roof'):
+            continue
+        building = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
+        by_building.setdefault(building, []).append((parsed, row))
+    for building, entries in by_building.items():
+        ordered = sorted(entries, key=lambda item: item[0]['lo'])
+        for (first, row_a), (second, row_b) in zip(ordered, ordered[1:]):
+            if second['lo'] <= first['hi']:
+                checks.append({
+                    'item': f'تداخل أدوار — {building}',
+                    'detail': f'النطاق «{row_a.get("floor_range")}» يتداخل مع «{row_b.get("floor_range")}»',
+                    'result': 'متعارض', 'severity': 'high'})
+    cap = _visual_concept_number(regulations.get('max_floors_height') or regulations.get('table_floors'))
+    if cap:
+        for row, parsed in parsed_rows:
+            if parsed and parsed['kind'] == 'range' and parsed['hi'] > cap:
+                checks.append({
+                    'item': 'تجاوز سقف الأدوار الموثق',
+                    'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد {cap}',
+                    'result': 'متعارض', 'severity': 'high'})
+    land = _visual_concept_number(context.get('land_area') or regulations.get('croquis_land_area'))
+    coverage = _visual_concept_number(context.get('coverage_ratio') or regulations.get('coverage_ratio')
+                                      or regulations.get('building_ratio_coverage'))
+    if land and coverage:
+        ratio = coverage / 100 if coverage > 1.5 else coverage
+        footprint_cap = land * ratio
+        for row, _parsed in parsed_rows:
+            area = row.get('floor_area_sqm')
+            if isinstance(area, (int, float)) and area > footprint_cap * 1.02:
+                checks.append({
+                    'item': 'مساحة الدور تتجاوز حد التغطية',
+                    'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
+                    'result': 'يحتاج تأكيد', 'severity': 'medium'})
+    for total in totals:
+        for delta_key, label in (('delta_units', 'الوحدات'), ('delta_area', 'المساحة')):
+            delta = total.get(delta_key)
+            required_key = 'required_units' if delta_key == 'delta_units' else 'required_area'
+            wanted = total.get(required_key)
+            if isinstance(delta, (int, float)) and isinstance(wanted, (int, float)) and wanted:
+                if abs(delta) > max(1.0, abs(wanted) * 0.1):
+                    checks.append({
+                        'item': f'فرق {label} — {total["component"]}',
+                        'detail': f'التوزيع {total[delta_key.replace("delta_", "")]:g} مقابل المطلوب {wanted:g}',
+                        'result': 'يحتاج تأكيد', 'severity': 'medium'})
+    return checks
+
+
+def _visual_concept_plan_normalize_distribution(raw, context, regulations):
+    """Normalize the distribution table (proposed or client-edited) and attach the
+    deterministic totals + checks so every edit re-verifies the same way."""
+    source = raw if isinstance(raw, dict) else {}
+    rows = []
+    for item in (source.get('rows') if isinstance(source.get('rows'), list) else []):
+        if not isinstance(item, dict):
+            continue
+        component = _visual_concept_plan_sanitize_text(
+            item.get('component') or item.get('use') or item.get('name'))
+        building = _visual_concept_plan_sanitize_text(item.get('building') or item.get('mass'))
+        floor_range = _visual_concept_plan_sanitize_text(
+            item.get('floor_range') or item.get('floors') or item.get('range'))
+        if not (component or building or floor_range):
+            continue
+        rows.append({
+            'id': _visual_concept_plan_sanitize_text(item.get('id'))[:40] or f'row_{len(rows) + 1}',
+            'building': building[:160],
+            'floor_range': floor_range[:80],
+            'component': component[:160],
+            'units_per_floor': _visual_concept_number(item.get('units_per_floor') or item.get('units')),
+            'floor_area_sqm': _visual_concept_number(item.get('floor_area_sqm') or item.get('floor_area')),
+            'circulation': _visual_concept_plan_sanitize_text(
+                item.get('circulation') or item.get('services'))[:400],
+        })
+        if len(rows) >= 60:
+            break
+    totals = _visual_concept_plan_distribution_totals(rows, context)
+    return {
+        'rows': rows,
+        'totals': totals,
+        'notes': _visual_concept_plan_bullets(source.get('notes') or source.get('assumptions'), 12),
+        'checks': _visual_concept_plan_distribution_checks(rows, totals, context, regulations),
+        'issues': _visual_concept_plan_normalize_issues(source.get('issues') or []),
+        'approved': False,
+    }
+
+
+def _visual_concept_plan_fallback_distribution(context, regulations):
+    """No-model proposal: flatten the inferred plan model into table rows so the
+    client still gets an editable starting point when the text call fails."""
+    model = _visual_concept_plan_model(context, regulations)
+    rows = []
+    if model:
+        for band in model.get('bands') or []:
+            names = '، '.join(_visual_concept_plan_sanitize_text(item.get('name'))
+                              for item in band.get('items') or [] if item.get('name'))
+            floors = band.get('floors') or 1
+            units = sum(item['units'] for item in band.get('items') or []
+                        if isinstance(item.get('units'), (int, float)))
+            area = sum(item['builtArea'] for item in band.get('items') or []
+                       if isinstance(item.get('builtArea'), (int, float)))
+            rows.append({
+                'building': 'المبنى الرئيسي', 'floor_range': band.get('range') or '',
+                'component': names or band.get('label') or '',
+                'units_per_floor': round(units / floors, 2) if units else None,
+                'floor_area_sqm': round(area / floors, 2) if area else None,
+                'circulation': ''})
+        for block in model.get('blocks') or []:
+            rows.append({
+                'building': block.get('label') or 'مبنى ثانٍ', 'floor_range': f"1-{block.get('cap') or 1}",
+                'component': block.get('use') or '', 'units_per_floor': None,
+                'floor_area_sqm': None, 'circulation': ''})
+        if model.get('below'):
+            rows.append({'building': 'المبنى الرئيسي', 'floor_range': 'B1',
+                         'component': 'مواقف سيارات', 'units_per_floor': None,
+                         'floor_area_sqm': None, 'circulation': 'اتصال رأسي بالمبنى'})
+        if model.get('roof'):
+            rows.append({'building': 'المبنى الرئيسي', 'floor_range': 'Roof',
+                         'component': 'خدمات وسطح', 'units_per_floor': None,
+                         'floor_area_sqm': None, 'circulation': ''})
+    return {'rows': rows, 'notes': ['توزيع آلي أولي من البيانات المعتمدة — يحتاج مراجعة.']}
+
+
+def _visual_concept_plan_model_from_distribution(distribution, context, regulations):
+    """Build the shared plan model from the CLIENT-APPROVED distribution table
+    instead of the inferred banding. Returns None when no usable rows exist so
+    callers can fall back to the inferred model."""
+    raw_rows = (distribution or {}).get('rows')
+    rows = [row for row in raw_rows or [] if isinstance(row, dict)
+            and (str(row.get('component') or '').strip() or str(row.get('floor_range') or '').strip())]
+    if not rows:
+        return None
+
+    def parsed_of(row):
+        return _visual_concept_plan_floor_range(row.get('floor_range'))
+
+    def top_floor(group_rows):
+        top = 0
+        for row in group_rows:
+            parsed = parsed_of(row)
+            if parsed and parsed['kind'] not in ('basement', 'roof'):
+                top = max(top, parsed['hi'])
+        return top
+
+    def band_for(row):
+        parsed = parsed_of(row) or {'kind': 'range', 'lo': 0, 'hi': 0, 'count': 1}
+        component = _visual_concept_plan_sanitize_text(row.get('component'))
+        _order, category = _visual_concept_plan_use_category({'name': component})
+        count = parsed['count']
+        units = row.get('units_per_floor')
+        area = row.get('floor_area_sqm')
+        label = _visual_concept_plan_component_en(component)
+        if not label or re.search(r'[\u0600-\u06FF]', label):
+            label = _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')
+        return {
+            'category': category,
+            'label': label,
+            'items': [{
+                'name': component,
+                'units': (units * count) if isinstance(units, (int, float)) else units,
+                'builtArea': (area * count) if isinstance(area, (int, float)) else area,
+                'floorRange': _visual_concept_plan_sanitize_text(row.get('floor_range')),
+                'building': _visual_concept_plan_sanitize_text(row.get('building')),
+                'notes': _visual_concept_plan_sanitize_text(row.get('circulation')),
+            }],
+            'floors': count,
+            'range': _visual_concept_plan_sanitize_text(row.get('floor_range')),
+            'color': _visual_concept_plan_use_color(
+                context, _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')),
+            'kind': parsed['kind'],
+        }
+
+    buildings, by_key = [], {}
+    for row in rows:
+        name = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
+        key = name.casefold()
+        if key not in by_key:
+            by_key[key] = len(buildings)
+            buildings.append({'name': name, 'rows': []})
+        buildings[by_key[key]]['rows'].append(row)
+    tower = max(buildings, key=lambda group: top_floor(group['rows']))
+    secondaries = [group for group in buildings if group is not tower]
+
+    def sort_bands(bands):
+        return sorted(bands, key=lambda band: (
+            parsed_of({'floor_range': band['range']}) or {'lo': 0})['lo'])
+
+    bands, below, roof, open_uses = [], [], [], []
+    for row in tower['rows']:
+        band = band_for(row)
+        if band['kind'] == 'basement' or band['category'] == 'parking':
+            below.append(band)
+        elif band['kind'] == 'roof' or band['category'] == 'service':
+            roof.append(band)
+        elif band['category'] == 'landscape':
+            open_uses.append(band)
+        else:
+            bands.append(band)
+    bands = sort_bands(bands)
+    blocks = []
+    for index, group in enumerate(secondaries):
+        block_bands = []
+        for row in group['rows']:
+            band = band_for(row)
+            if band['kind'] == 'basement' or band['category'] == 'parking':
+                below.append(band)
+            elif band['kind'] == 'roof' or band['category'] == 'service':
+                roof.append(band)
+            elif band['category'] == 'landscape':
+                open_uses.append(band)
+            else:
+                block_bands.append(band)
+        block_bands = sort_bands(block_bands)
+        label_en = _visual_concept_plan_component_en(group['name'])
+        if not label_en or re.search(r'[\u0600-\u06FF]', label_en):
+            label_en = (block_bands[0]['label'] if block_bands
+                        else f'Block {chr(66 + index)}')
+        category = block_bands[0]['category'] if block_bands else 'amenity'
+        blocks.append({
+            'label': label_en,
+            'cap': top_floor(group['rows']) or sum(b['floors'] for b in block_bands),
+            'direction': _visual_concept_plan_direction_key(group['name']) or '',
+            'use': _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities'),
+            'color': (block_bands[0]['color'] if block_bands
+                      else _visual_concept_plan_use_color(context, 'Amenities')),
+            'bands': block_bands,
+        })
+
+    hints = _visual_concept_plan_sector_hints(regulations)
+    capped = [hint for hint in hints if hint.get('cap')]
+    low_sector = min(capped, key=lambda hint: hint['cap']) if capped else None
+    explicit_open = [hint for hint in hints
+                     if hint.get('uncapped') and hint is not low_sector]
+    open_hints = [hint for hint in hints
+                  if not hint.get('cap') and hint is not low_sector]
+    high_sector = (explicit_open or open_hints or [None])[0]
+    street_dirs, _other_dirs, sea_dir = _visual_concept_plan_direction_scan(context)
+    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector)
+    all_bands = bands + [band for block in blocks for band in block['bands']]
+    return {
+        'bands': bands,
+        'below': below,
+        'roof': roof,
+        'open_uses': open_uses,
+        'high_sector': high_sector,
+        'low_sector': low_sector,
+        'blocks': blocks,
+        'floor_count': top_floor(tower['rows']),
+        'main_dir': main_dir,
+        'res_dir': res_dir,
+        'svc_dir': svc_dir,
+        'sea_dir': sea_dir,
+        'has_residential': any(band['category'] == 'residential' for band in all_bands),
+        'block_label': blocks[0]['label'] if blocks else 'Low Block',
+    }
+
+
+_PLAN_BODY_TITLES = {
+    'site': 'CONCEPTUAL SITE PLAN',
+    'uses': 'VERTICAL PROGRAM',
+    'massing': 'CONCEPTUAL MASSING',
+}
+
+
+def _visual_concept_plan_adapt_bodies(distribution, bodies, data):
+    """sol rewrites each fixed DRAWING REQUESTED paragraph so the template matches
+    the client-approved distribution (no podium without a base row, no basement
+    without parking rows, extra approved buildings added). Only the body leaves
+    the model — the header and the APPROVED DISTRIBUTION MODEL block are spliced
+    back verbatim, so an approved fact can never be dropped by the adaptation."""
+    rows = (distribution or {}).get('rows') or []
+    if not rows or not isinstance(bodies, dict):
+        return {}
+    system_prompt = (
+        'You adapt fixed architectural diagram prompts to an approved project distribution. '
+        'For each kind, rewrite ONLY the DRAWING REQUESTED paragraph so it matches the approved '
+        'distribution: drop any element the distribution does not contain (podium, low block, '
+        'basement parking, sea band, extra entries), and add approved elements the template lacks. '
+        'Keep the flat pastel style, English labels, legend, titles, and "NOT TO SCALE" caption. '
+        'Never change an approved number, direction, color, or label; never mention sources or files. '
+        'Return JSON only: {"site":"...","uses":"...","massing":"..."} with the full adapted '
+        'DRAWING REQUESTED paragraph per kind.'
+    )
+    user_prompt = (
+        'APPROVED DISTRIBUTION (client-approved, the only program truth):\n'
+        + json.dumps({'rows': rows, 'totals': distribution.get('totals') or []}, ensure_ascii=False)
+        + '\n\nFIXED PROMPT BODIES TO ADAPT:\n'
+        + '\n\n'.join(f"=== {kind} ===\n{bodies[kind]}" for kind in ('site', 'uses', 'massing')
+                      if kind in bodies)
+    )
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=9000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        parsed = parse_json_object(_get_chat_response_text(response))
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    adapted = {}
+    for kind in bodies:
+        title = _PLAN_BODY_TITLES.get(kind, '')
+        text = str(parsed.get(kind) or '').strip()
+        if len(text) >= 200 and 'DRAWING REQUESTED' in text and (not title or title in text):
+            adapted[kind] = text
+    return adapted
 
 
 def _visual_concept_render_plan_boundary_reference(points, tenant_id):
@@ -5701,16 +6183,19 @@ def _visual_concept_plan_regulation_input(project_data, context):
     }
 
 
-def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False):
+def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False, require_distribution=False):
     if _visual_concept_plan_kind(slot_id) not in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values():
         return None
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     verification = workflow.get('verification') if isinstance(workflow.get('verification'), dict) else {}
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
+    distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
     if not verification.get('approved'):
         return {'success': False, 'error': 'اعتماد نتيجة التحقق مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_VERIFICATION_REQUIRED'}
     if require_boundary and not boundary.get('approved'):
         return {'success': False, 'error': 'اعتماد حدود الأرض مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_BOUNDARY_REQUIRED'}
+    if require_distribution and not distribution.get('approved'):
+        return {'success': False, 'error': 'اعتماد توزيع المكونات مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_DISTRIBUTION_REQUIRED'}
     return None
 
 
@@ -5810,24 +6295,150 @@ def api_visual_concept_plans_boundary():
     return jsonify({'success': True, 'points': points, 'referenceUrl': reference_url, 'reply': reply})
 
 
+def _visual_concept_plans_context_from_request(data):
+    """Shared context assembly for the plans workflow endpoints: boundary points
+    from the approved boundary stage (or the recorded survey), then the cached
+    planContext when the verify step already built it."""
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
+    points = _visual_concept_plan_boundary_points(
+        boundary.get('points') or project_data.get('survey_coordinates'))
+    context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
+    context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
+    context['boundary_points'] = points or context.get('boundary_points') or []
+    return project_data, workflow, boundary, points, context
+
+
+@app.route('/api/visual-concept/plans-distribution', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_distribution():
+    data = request.get_json(silent=True) or {}
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
+    project_data, workflow, _boundary, _points, context = _visual_concept_plans_context_from_request(data)
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    system_prompt = (
+        'أنت مخطط معماري مفاهيمي. وزّع مكونات المشروع المعتمدة على المباني والأدوار في جدول. '
+        'أعد JSON فقط: {"rows":[{"building":"","floor_range":"","component":"","units_per_floor":0,'
+        '"floor_area_sqm":0,"circulation":""}],"notes":[""]}. '
+        'صيغ floor_range: "G" للأرضي، "B1" أو "B1-B3" للبدروم، "5-12" لنطاق أدوار، "Roof" للسطح. '
+        'التزم بسقوف الارتفاع ونسبة التغطية والارتدادات الموثقة، ووزّع الوحدات بحيث يطابق إجماليها '
+        'الوحدات والمساحات المطلوبة في بيانات المشروع، وراعِ العلاقات بين الاستخدامات (فصل مداخل '
+        'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
+        'معتمدًا، ولا تذكر أسماء ملفات أو مصادر.'
+    )
+    user_prompt = (
+        'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
+        + _visual_concept_plan_context_text(context, diagram_rules=False)
+        + '\nأعد جدول التوزيع المقترح: كل صف = مبنى + دور أو نطاق أدوار + مكوّن + عدد الوحدات لكل دور '
+        '+ مساحة الدور الإجمالية + الحركة والخدمات ضمن المساحة.'
+    )
+    result = {}
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=8000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        result = parse_json_object(_get_chat_response_text(response))
+    except Exception:
+        result = {}
+    if not isinstance(result, dict) or not result.get('rows'):
+        result = _visual_concept_plan_fallback_distribution(context, regulations)
+    distribution = _visual_concept_plan_normalize_distribution(result, context, regulations)
+    return jsonify({'success': True, 'distribution': distribution, 'planContext': context})
+
+
+@app.route('/api/visual-concept/plans-distribution-check', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plans_distribution_check():
+    """Re-verify an edited distribution. mode 'local' (default) runs only the
+    deterministic checks — instant and free; mode 'ai' additionally asks the text
+    model for a conflict review against the documented regulations."""
+    data = request.get_json(silent=True) or {}
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    _project_data, workflow, _boundary, _points, context = _visual_concept_plans_context_from_request(data)
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    posted = (data.get('distribution') if isinstance(data.get('distribution'), dict)
+              else (workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}))
+    distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
+    issues = distribution['issues']
+    can_proceed = not any(check.get('result') == 'متعارض' for check in distribution['checks'])
+    if str(data.get('mode') or '').lower() == 'ai':
+        _billing_guard = _require_billing_balance('visual_concept')
+        if _billing_guard is not None:
+            return _billing_guard
+        system_prompt = (
+            'أنت مدقق اشتراطات لمخطط مفاهيمي. راجع جدول التوزيع مقابل البيانات التنظيمية الموثقة '
+            'فقط، وركّز على الارتدادات والمواقف والمداخل والمخارج والاستخدامات المسموحة وسقوف '
+            'الارتفاع ومعامل البناء. أعد JSON فقط: '
+            '{"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],"canProceed":true}. '
+            'لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
+        )
+        user_prompt = (
+            'البيانات التنظيمية الموثقة:\n' + json.dumps(regulations, ensure_ascii=False)
+            + '\n\nبيانات المشروع المعتمدة:\n'
+            + _visual_concept_plan_context_text(context, diagram_rules=False)
+            + '\n\nالتوزيع المدخل للمراجعة:\n'
+            + json.dumps({'rows': distribution['rows'], 'totals': distribution['totals']},
+                         ensure_ascii=False)
+        )
+        try:
+            response = call_openrouter_chat(
+                system_prompt, user_prompt, temperature=None, max_tokens=5000,
+                model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+                response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+            parsed = parse_json_object(_get_chat_response_text(response))
+        except Exception:
+            parsed = {}
+        if isinstance(parsed, dict):
+            issues = _visual_concept_plan_normalize_issues(parsed.get('issues') or [])
+            if parsed.get('canProceed') is False:
+                can_proceed = False
+    return jsonify({'success': True, 'totals': distribution['totals'],
+                    'checks': distribution['checks'], 'issues': issues,
+                    'canProceed': can_proceed})
+
+
 @app.route('/api/visual-concept/plans-prompts', methods=['POST'])
 @require_permission('generate_images')
 def api_visual_concept_plans_prompts():
     data = request.get_json(silent=True) or {}
-    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site', require_boundary=True)
+    workflow_error = _visual_concept_plan_workflow_error(
+        data, 'plan_site', require_boundary=True, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
-    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-    boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
-    points = _visual_concept_plan_boundary_points(boundary.get('points') or project_data.get('survey_coordinates'))
-    context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
-    context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
-    context['boundary_points'] = points or context.get('boundary_points') or []
-    # Plan prompts ship verbatim: a text-model pass was observed dropping approved
-    # facts (e.g. the East Block mass) and swapping entry directions.
-    prompts = _visual_concept_plan_prompt_templates(context)
-    return jsonify({'success': True, 'prompts': prompts, 'context': context, 'referenceUrl': boundary.get('referenceUrl') or ''})
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
+    project_data, workflow, boundary, points, context = _visual_concept_plans_context_from_request(data)
+    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
+    distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
+    # The approved-facts spec is always built deterministically from the approved
+    # distribution; sol only rewrites the DRAWING REQUESTED body, so a model pass
+    # can no longer drop an approved mass or swap an entry direction.
+    model = (_visual_concept_plan_model_from_distribution(distribution, context, regulations)
+             or _visual_concept_plan_model(context, regulations))
+    spec = _visual_concept_plan_distribution_spec(context, model, regulations)
+    bodies = {
+        'site': _visual_concept_plan_site_body(context, model, regulations),
+        'uses': _visual_concept_plan_uses_body(context, model, regulations),
+        'massing': _visual_concept_plan_massing_body(context, model, regulations),
+    }
+    adapted = _visual_concept_plan_adapt_bodies(distribution, bodies, data)
+    prompts = {}
+    for definition in VISUAL_CONCEPT_PLAN_DEFINITIONS:
+        kind = definition['kind']
+        prompts[kind] = (_visual_concept_plan_prompt_header(kind, context) + spec + '\n'
+                         + (adapted.get(kind) or bodies[kind]))
+    return jsonify({'success': True, 'prompts': prompts, 'context': context,
+                    'referenceUrl': boundary.get('referenceUrl') or ''})
 
 
 @app.route('/api/visual-concept/preflight', methods=['POST'])
@@ -5859,7 +6470,8 @@ def api_visual_concept_prompt():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
-    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    workflow_error = _visual_concept_plan_workflow_error(
+        data, slot_id, require_boundary=True, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
@@ -5927,7 +6539,8 @@ def api_visual_concept_generate():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
-    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    workflow_error = _visual_concept_plan_workflow_error(
+        data, slot_id, require_boundary=True, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
@@ -5975,7 +6588,8 @@ def api_visual_concept_chat():
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
-    workflow_error = _visual_concept_plan_workflow_error(data, slot_id, require_boundary=True)
+    workflow_error = _visual_concept_plan_workflow_error(
+        data, slot_id, require_boundary=True, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
