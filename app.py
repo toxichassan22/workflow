@@ -2908,8 +2908,15 @@ def _visual_concept_slot_instruction(slot_id, facts):
             if facts.get('style_reference_file_ids') else
             'No style-reference image was supplied; invent the architecture from the project facts only. '
         )
+        plan_note = (
+            'The attached planning diagrams (site plan, vertical program, conceptual massing) are the '
+            'approved design: the building massing, heights, use bands, footprints, and entries in the '
+            'render must match them exactly. '
+            if facts.get('plan_image_urls') else ''
+        )
         return (
             f'Create the primary architectural hero photograph of {name}. '
+            + plan_note +
             'Use the attached site/map image as the actual ground and plot background when it is included. Place the building on that plot. '
             + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
@@ -2918,7 +2925,11 @@ def _visual_concept_slot_instruction(slot_id, facts):
         view_name = _visual_concept_slot_label(slot_id, facts)
         return (
             f'Render the "{view_name}" view of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Follow the named viewpoint.'
+            + ('The attached approved planning diagrams define its massing, heights, and use bands — keep the '
+               'architecture, materials, height, and massing identical to both. '
+               if facts.get('plan_image_urls') else
+               'Keep the architecture, materials, height, and massing unchanged. ')
+            + 'Follow the named viewpoint.'
         )
     if _visual_concept_is_internal_slot(slot_id):
         selected = facts.get('selected_component') if isinstance(facts.get('selected_component'), dict) else {}
@@ -3185,9 +3196,11 @@ def _visual_concept_plan_image_urls(data):
                                                  data.get('planImages'))}
     urls = []
     for kind in ('site', 'uses', 'massing'):
-        url = _visual_concept_text(posted.get(kind), 4000)
-        if url and not url.lower().startswith('blob:'):
-            urls.append(url)
+        raw = str(posted.get(kind) or '').strip()
+        if not raw or raw.lower().startswith('blob:'):
+            continue
+        # data URIs carry the bytes inline — a length cap would corrupt them.
+        urls.append(raw[:400000] if raw.startswith('data:image/') else _visual_concept_text(raw, 2000))
     return urls
 
 
@@ -6651,6 +6664,9 @@ def api_visual_concept_chat():
             'missingFields': missing,
         }), 400
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
+    external_gate = _visual_concept_external_gate(data, slot_id)
+    if external_gate:
+        return jsonify(external_gate), 400
     cover_image = _visual_concept_cover_image(data)
     if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
         return jsonify({

@@ -9466,35 +9466,65 @@ class MeetingRequirementsTests(unittest.TestCase):
             'project_components_data': [{'name': 'مكاتب', 'useType': 'office', 'units': 20, 'builtArea': 4000}],
             'tenantCreativeImages': {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}},
         }
+        plan_images = {
+            'site': '/uploads/creative/plan_site.png',
+            'uses': '/uploads/creative/plan_uses.png',
+            'massing': '/uploads/creative/plan_massing.png',
+        }
         ready = client.post('/api/visual-concept/preflight', headers=self._headers(self.token_a), json={'projectData': facts})
         self.assertEqual(ready.status_code, 200, ready.get_json())
         self.assertTrue(ready.get_json()['success'])
 
+        # Exterior slots render the approved plan diagrams: without the three
+        # plan images the request stops before even reaching the cover check.
         moodboard_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
             'slotId': 'right',
             'prompt': 'Right elevation',
             'projectData': facts,
         })
         self.assertEqual(moodboard_blocked.status_code, 400, moodboard_blocked.get_json())
-        self.assertEqual(moodboard_blocked.get_json()['error_code'], 'COVER_REQUIRED')
+        self.assertEqual(moodboard_blocked.get_json()['error_code'], 'PLANS_IMAGES_REQUIRED')
+
+        cover_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'cover',
+            'prompt': 'Hero image from the project facts',
+            'projectData': facts,
+        })
+        self.assertEqual(cover_blocked.status_code, 400, cover_blocked.get_json())
+        self.assertEqual(cover_blocked.get_json()['error_code'], 'PLANS_IMAGES_REQUIRED')
+
+        moodboard_no_cover = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'right',
+            'prompt': 'Right elevation',
+            'planImages': plan_images,
+            'projectData': facts,
+        })
+        self.assertEqual(moodboard_no_cover.status_code, 400, moodboard_no_cover.get_json())
+        self.assertEqual(moodboard_no_cover.get_json()['error_code'], 'COVER_REQUIRED')
 
         generated = 'data:image/png;base64,AAAA'
         with patch.object(self.application_module, 'call_images_api', return_value=generated) as image_call, \
-                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/cover.png'):
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/cover.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
             cover = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'cover',
                 'prompt': 'Hero image from the project facts',
+                'planImages': plan_images,
                 'projectData': facts,
             })
         self.assertEqual(cover.status_code, 200, cover.get_json())
         self.assertEqual(cover.get_json()['image'], '/uploads/creative/cover.png')
         self.assertTrue(image_call.called)
         self.assertEqual(image_call.call_args.args[0], 'Hero image from the project facts')
+        cover_refs = [str(item) for item in image_call.call_args.args[1]]
+        self.assertTrue(any('plan_site.png' in item for item in cover_refs))
+        self.assertTrue(any('plan_massing.png' in item for item in cover_refs))
 
         with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Revised right prompt', 'تم')):
             east_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'east',
                 'coverImage': '/uploads/creative/cover.png',
+                'planImages': plan_images,
                 'projectData': facts,
             })
         self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
@@ -9514,9 +9544,11 @@ class MeetingRequirementsTests(unittest.TestCase):
             grounded = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'right',
                 'coverImage': '/uploads/creative/cover.png',
+                'planImages': plan_images,
                 'projectData': facts,
             })
         self.assertEqual(grounded.status_code, 200, grounded.get_json())
+        self.assertEqual(captured_facts.get('plan_image_urls'), list(plan_images.values()))
         plan_context = captured_facts.get('approved_plan_context') or ''
         self.assertIn('APPROVED PLAN CONTEXT', plan_context)
         self.assertIn('Approved floor count/height: 12', plan_context)

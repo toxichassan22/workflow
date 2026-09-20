@@ -466,6 +466,7 @@ class BillingLedgerTests(unittest.TestCase):
                 'plansWorkflow': {
                     'verification': {'approved': True},
                     'boundary': {'approved': True},
+                    'distribution': {'approved': True},
                 },
             }),
             ('/api/generate-images', {'projectData': {}}),

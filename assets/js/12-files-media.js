@@ -1386,9 +1386,11 @@
           ? (visualConceptPlans().find(item => item.id === slotId)?.description || '')
           : '',
         planKind: visualConceptPlanKind(slotId),
-        // Exterior slots also ship the workflow: the server grounds their prompts
-        // on the same deterministic plan measurements when the workflow carries data.
+        // Exterior slots also ship the workflow + the approved plan diagrams:
+        // the server grounds their prompts on the deterministic measurements and
+        // feeds the three plan images as generation references.
         plansWorkflow: normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow),
+        planImages: visualConceptPlanImageMap(),
         planBoundaryPoints: isVisualConceptWorkflowPlan(slotId)
           ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.points
           : [],
@@ -1398,12 +1400,37 @@
       };
     }
 
+    function visualConceptPlansApproved() {
+      const slots = tenantVisualConceptState?.slots || {};
+      return VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(slots[item.id]?.approvedImageUrl));
+    }
+
+    function visualConceptPlanImageMap() {
+      const slots = tenantVisualConceptState?.slots || {};
+      const map = {};
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(item => {
+        const url = durableImageUrl(slots[item.id]?.approvedImageUrl);
+        if (url) map[item.kind] = url;
+      });
+      return map;
+    }
+
+    function visualConceptLockMessage(slotId) {
+      if (isVisualConceptInteriorSlot(slotId)) return 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.';
+      if (!visualConceptPlansApproved()) return 'اعتمد المخططات الثلاثة أولاً.';
+      return 'اعتمد الصورة الرئيسية أولاً.';
+    }
+
     function visualConceptSlotLocked(slotId) {
       // Plans draw from the project facts and the approved land map, not the hero render.
       if (isVisualConceptPlanSlot(slotId)) return false;
       if (isVisualConceptInteriorSlot(slotId)) {
         return !tenantVisualConceptState.slots.cover.approvedImageUrl || !visualConceptInteriorComponents().length;
       }
+      // Exterior renders are built on the approved plan diagrams, so they stay
+      // locked until all three plans are approved; the angles still wait for
+      // the hero image on top of that.
+      if (!visualConceptPlansApproved()) return true;
       return slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
     }
 

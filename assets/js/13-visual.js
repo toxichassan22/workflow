@@ -7,12 +7,16 @@
       updateVisualConceptHomeCards();
       if (!host) return;
       renderVisualConceptStyleReference();
+      const plansApproved = visualConceptPlansApproved();
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
-      const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
-      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
+      const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], !plansApproved);
+      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !plansApproved || !coverApproved)).join('');
+      const lockHint = !plansApproved
+        ? '<p class="tenant-hint">التصورات الخارجية مقفلة حتى اعتماد المخططات الثلاثة.</p>'
+        : (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>');
       host.innerHTML = coverHtml +
         '<div class="visual-concept-stack">' +
-        (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>') +
+        lockHint +
         angleHtml + '</div>';
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
@@ -212,7 +216,7 @@
     async function generateVisualConceptPrompt(slotId, instruction) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
-        toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
+        toast(visualConceptLockMessage(slotId));
         return;
       }
       showLoader('جاري إنشاء وصف التصور البصري', 'يتم قراءة بيانات المشروع والصور المرجعية...');
@@ -246,7 +250,7 @@
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
       if (!liveSlot() || liveSlot().status === 'generating') return;
       if (visualConceptSlotLocked(slotId)) {
-        toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
+        toast(visualConceptLockMessage(slotId));
         return;
       }
       if (!liveSlot().prompt) {
@@ -356,7 +360,7 @@
     async function sendVisualConceptChat(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
-        toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
+        toast(visualConceptLockMessage(slotId));
         return;
       }
       const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
