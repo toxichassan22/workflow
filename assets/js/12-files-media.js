@@ -2120,13 +2120,6 @@
           scheduleVisualConceptDistributionCheck();
         });
       }
-      // Prompts used to sit un-prepared forever after a failed request or a draft saved
-      // mid-flow, leaving the generate stage as a bare "not ready" message. Approved
-      // inputs are all the endpoint needs, so a rendered not-ready stage retries once —
-      // promptsError blocks a retry loop until a new attempt clears it.
-      if (activeStage === 'generate' && verified && boundaryApproved && distApproved && !promptReady && !workflow.promptsError) {
-        prepareVisualConceptPlansPrompts();
-      }
     }
 
     function renderVisualConceptPlans() {
@@ -2194,7 +2187,6 @@
       if (!workflow.boundary.points.length) workflow.boundary.points = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
       markVisualConceptDirty();
       renderVisualConceptPage();
-      if (workflow.boundary.points.length >= 3) refreshVisualConceptPlansBoundary();
     }
 
     async function refreshVisualConceptPlansBoundary() {
@@ -2258,7 +2250,6 @@
       workflow.promptReady = false;
       markVisualConceptDirty();
       renderVisualConceptPage();
-      if (workflow.distribution.approved) prepareVisualConceptPlansPrompts();
     }
 
     let visualConceptDistCheckTimer = null;
@@ -2373,7 +2364,6 @@
       workflow.viewStage = workflow.boundary.approved ? 'generate' : 'boundary';
       markVisualConceptDirty();
       renderVisualConceptPage();
-      if (workflow.boundary.approved) prepareVisualConceptPlansPrompts();
     }
 
     let visualConceptPlansPromptsPending = false;
