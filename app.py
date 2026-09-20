@@ -14777,17 +14777,18 @@ def _section_snapshot_slice(draft_data, section_key, section_map=None):
         if key in SECTION_SNAPSHOT_EXCLUDED_KEYS:
             continue
         if _draft_section_of_key(section_map, key) == section_key:
-            selected[key] = value
+            selected[key] = change_tracking.strip_url_fetch_params(value)
     for key in SECTION_SNAPSHOT_BLOBS.get(section_key, []):
         if key in data:
-            selected[key] = data[key]
+            selected[key] = change_tracking.strip_url_fetch_params(data[key])
     if section_key == 'location':
         for key in SECTION_SNAPSHOT_LOCATION_EXTRAS:
             if key in data:
-                selected[key] = data[key]
+                selected[key] = change_tracking.strip_url_fetch_params(data[key])
         creative = data.get('tenantCreativeImages')
         if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
-            selected['map_approvals'] = dict(creative.get('map_approvals'))
+            selected['map_approvals'] = change_tracking.strip_url_fetch_params(
+                dict(creative.get('map_approvals')))
     return selected
 
 

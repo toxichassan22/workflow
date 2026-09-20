@@ -559,6 +559,18 @@ _URL_BUSTER_RE = re.compile(r'(?:[?&]|&amp;)(?:t|v|cb|s)=[^&\s"\'<>]*')
 _MISSING = object()
 
 
+def strip_url_fetch_params(value):
+    """Remove rotating fetch params (?s=, ?t=, ?v=, ?cb=) from every string in a
+    nested structure — a re-signed upload URL is the same content."""
+    if isinstance(value, dict):
+        return {key: strip_url_fetch_params(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [strip_url_fetch_params(item) for item in value]
+    if isinstance(value, str):
+        return _URL_BUSTER_RE.sub('', value)
+    return value
+
+
 def _parse_jsonish(value):
     """A stored JSON string behaves like the object it encodes."""
     if not isinstance(value, str):
