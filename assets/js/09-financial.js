@@ -194,17 +194,17 @@
           <h3>2. مدة المشروع والأرض ومساحات البناء</h3>
           <div class="grid four">
             <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «عدد السنوات» في قسم الجدول الزمني — عدّلها من هناك.</span></div>
-            <div id="salesStartYearWrap"><label>سنة بدء بيع الوحدات</label><input id="salesStartYear" type="number" min="1" value="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع البيعي أو المختلط.</span></div>
-            <div id="salesYearsWrap"><label>عدد سنوات بيع الوحدات</label><input id="salesYears" type="number" min="1" value="4" oninput="calculateAll()"><span class="help input">توزع المبيعات على هذه السنوات.</span></div>
-            <div id="operationYearsWrap"><label>عدد سنوات التشغيل</label><input id="operationYears" type="number" min="1" value="10" oninput="calculateAll()"><span class="help input">يظهر للمشروع التأجيري أو المختلط.</span></div>
+            <div id="salesStartYearWrap"><label>سنة بدء بيع الوحدات</label><input id="salesStartYear" type="number" min="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع البيعي أو المختلط.</span></div>
+            <div id="salesYearsWrap"><label>عدد سنوات بيع الوحدات</label><input id="salesYears" type="number" min="1" oninput="calculateAll()"><span class="help input">توزع المبيعات على هذه السنوات.</span></div>
+            <div id="operationYearsWrap"><label>عدد سنوات التشغيل</label><input id="operationYears" type="number" min="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع التأجيري أو المختلط.</span></div>
             <div id="operationStartYearWrap"><label>سنة بدء التشغيل</label><input id="operationStartYear" readonly><span class="help formula">مدة التطوير + 1.</span></div>
             <div><label>إجمالي سنوات المشروع</label><input id="totalProjectYearsDisplay" readonly><span class="help formula">مدة التطوير + مدة التشغيل.</span></div>
 
             <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
-            <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" value="100000" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
-            <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" value="30078" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
+            <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
+            <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
 
             <div><label>إجمالي مسطحات البناء م²</label><input id="totalBuiltUpArea" readonly><span class="help formula">فوق الأرض + البدرومات.</span></div>
             <div><label>المساحة المغطاة م²</label><input id="coveredArea" readonly><span class="help formula">مساحة الأرض × نسبة التغطية.</span></div>
@@ -215,8 +215,8 @@
               <option value="manual">قيمة ثابتة يدوية</option>
               <option value="perM2" selected>مساحة الأرض × سعر متر الأرض</option>
             </select></div>
-            <div id="landPricePerM2Wrap"><label>سعر متر الأرض</label><input id="landPricePerM2" type="number" value="7500" oninput="calculateAll()"></div>
-            <div id="manualLandValueWrap"><label>قيمة الأرض اليدوية</label><input id="manualLandValue" type="number" value="0" oninput="calculateAll()"></div>
+            <div id="landPricePerM2Wrap"><label>سعر متر الأرض</label><input id="landPricePerM2" type="number" oninput="calculateAll()"></div>
+            <div id="manualLandValueWrap"><label>قيمة الأرض اليدوية</label><input id="manualLandValue" type="number" oninput="calculateAll()"></div>
             <div><label>حالة الأرض</label><select id="landStatus" onchange="calculateAll()">
               <option value="ownedIncluded">مملوكة وتدخل ضمن تكلفة المشروع</option>
               <option value="ownedInfoOnly">مملوكة وتظهر كمعلومة فقط</option>
@@ -229,7 +229,7 @@
               <option value="cash">شراء نقدي للأرض</option>
               <option value="none">لا تظهر في التدفقات</option>
             </select><span class="help input">المساهمة العينية تدخل في Project IRR وEquity IRR دون اعتبارها ضخًا نقديًا.</span></div>
-            <div><label>سنة تسجيل الأرض</label><input id="landContributionYear" type="number" min="1" value="1" oninput="calculateAll()"></div>
+            <div><label>سنة تسجيل الأرض</label><input id="landContributionYear" type="number" min="1" oninput="calculateAll()"></div>
 
             <div><label>طريقة احتساب إيجار الأرض</label><select id="landRentMethod" onchange="calculateAll()">
               <option value="none">لا يوجد إيجار أرض</option>
@@ -237,9 +237,9 @@
               <option value="percentLandValue" selected>نسبة من قيمة الأرض</option>
               <option value="monthlyFixed">قيمة شهرية × 12</option>
             </select></div>
-            <div id="landRentRateWrap"><label>نسبة إيجار الأرض السنوي %</label><input id="landRentRate" type="number" value="2.5" oninput="calculateAll()"></div>
-            <div id="manualAnnualLandRentWrap"><label>إيجار الأرض السنوي</label><input id="manualAnnualLandRent" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="monthlyLandRentWrap"><label>إيجار الأرض الشهري</label><input id="monthlyLandRent" type="number" value="0" oninput="calculateAll()"></div>
+            <div id="landRentRateWrap"><label>نسبة إيجار الأرض السنوي %</label><input id="landRentRate" type="number" oninput="calculateAll()"></div>
+            <div id="manualAnnualLandRentWrap"><label>إيجار الأرض السنوي</label><input id="manualAnnualLandRent" type="number" oninput="calculateAll()"></div>
+            <div id="monthlyLandRentWrap"><label>إيجار الأرض الشهري</label><input id="monthlyLandRent" type="number" oninput="calculateAll()"></div>
             <div><label>قيمة الأرض المحسوبة</label><input id="landValue" readonly></div>
             <div><label>إيجار الأرض السنوي المحسوب</label><input id="annualLandRent" readonly></div>
           </div>
@@ -282,9 +282,9 @@
             <div><label>طريقة احتساب السماح</label><select id="graceMethod" onchange="calculateAll()"><option value="percentage">نسبة ومدة بالأشهر</option><option value="schedule">جدول خصومات سنوية ثابتة</option></select></div>
             <div><label>نطاق فترة السماح</label><select id="graceScope" onchange="calculateAll()"><option value="allRental">جميع الإيرادات التأجيرية</option><option value="selectedRevenue">إيراد محدد</option></select></div>
             <div id="graceRevenueWrap"><label>الإيراد المشمول</label><select id="graceRevenueId" onchange="calculateAll()"></select></div>
-            <div><label>سنة بداية السماح</label><input id="graceStartYear" type="number" min="1" value="1" oninput="calculateAll()"></div>
-            <div><label>مدة السماح (شهر)</label><input id="graceDurationMonths" type="number" min="0" value="0" oninput="calculateAll()"></div>
-            <div><label>نسبة الخصم خلال السماح %</label><input id="graceDiscountRate" type="number" min="0" max="100" value="100" oninput="calculateAll()"></div>
+            <div><label>سنة بداية السماح</label><input id="graceStartYear" type="number" min="1" oninput="calculateAll()"></div>
+            <div><label>مدة السماح (شهر)</label><input id="graceDurationMonths" type="number" min="0" oninput="calculateAll()"></div>
+            <div><label>نسبة الخصم خلال السماح %</label><input id="graceDiscountRate" type="number" min="0" max="100" oninput="calculateAll()"></div>
             <div><label>إجمالي خصم فترة السماح</label><input id="graceTotalDiscount" readonly></div>
           </div>
           <div id="graceScheduleWrap"><h4>جدول خصومات فترة السماح</h4><div class="table-wrap"><table id="graceScheduleTable" class="compact-table"><thead><tr><th>السنة في الدراسة</th><th>قيمة الخصم</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div><br><button type="button" class="btn ghost" onclick="addGraceScheduleRow()">+ إضافة سنة سماح</button></div>
@@ -294,7 +294,7 @@
         <div class="finance-block">
           <h3>6. تكاليف المشروع وأتعاب المطور</h3>
           <div class="grid four">
-            <div><label>نسبة المطور %</label><input id="developerRate" type="number" value="10" oninput="calculateAll()"></div>
+            <div><label>نسبة المطور %</label><input id="developerRate" type="number" oninput="calculateAll()"></div>
             <div><label>أساس احتساب نسبة المطور</label><select id="developerBase" onchange="calculateAll()">
               <option value="executionOnly" selected>تكلفة التنفيذ فقط</option>
               <option value="executionServices">التنفيذ + رسوم الخدمات</option>
@@ -344,13 +344,13 @@
           <div class="grid four">
             <div><label>استخدام تمويل؟</label><select id="financeEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>أساس احتساب التمويل</label><select id="financeBase" onchange="calculateAll()"><option value="withLand">إجمالي تكلفة المشروع مع قيمة الأرض</option><option value="withoutLand">إجمالي تكلفة المشروع بدون قيمة الأرض</option></select></div>
-            <div><label>نسبة التمويل من تكلفة المشروع %</label><input id="financingRate" type="number" value="60" oninput="calculateAll()"></div>
-            <div><label>رسوم ترتيب التمويل %</label><input id="financeArrangementFeeRate" type="number" value="1.5" oninput="calculateAll()"></div>
+            <div><label>نسبة التمويل من تكلفة المشروع %</label><input id="financingRate" type="number" oninput="calculateAll()"></div>
+            <div><label>رسوم ترتيب التمويل %</label><input id="financeArrangementFeeRate" type="number" oninput="calculateAll()"></div>
             <div><label>طريقة احتساب الفائدة</label><select id="financeInterestMethod" onchange="calculateAll()"><option value="fixed">ثابتة على أصل التسهيل</option><option value="declining">متناقصة على الرصيد المتبقي</option></select></div>
-            <div><label>معدل الفائدة السنوي %</label><input id="annualFinanceRate" type="number" value="7" oninput="calculateAll()"></div>
-            <div><label>عدد سنوات سحب التمويل</label><input id="financeDrawYears" type="number" min="1" value="4" oninput="syncFinanceDrawPlan();calculateAll()"></div>
-            <div><label>سنة بدء سداد التمويل</label><input id="financeRepaymentStartYear" type="number" min="1" value="5" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
-            <div><label>عدد سنوات التمويل والسداد</label><input id="financeRepaymentYears" type="number" min="1" value="10" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
+            <div><label>معدل الفائدة السنوي %</label><input id="annualFinanceRate" type="number" oninput="calculateAll()"></div>
+            <div><label>عدد سنوات سحب التمويل</label><input id="financeDrawYears" type="number" min="1" oninput="syncFinanceDrawPlan();calculateAll()"></div>
+            <div><label>سنة بدء سداد التمويل</label><input id="financeRepaymentStartYear" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
+            <div><label>عدد سنوات التمويل والسداد</label><input id="financeRepaymentYears" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
             <div><label>قيمة أساس التمويل</label><input id="financeBaseAmount" readonly></div>
             <div><label>قيمة التسهيل التمويلي</label><input id="facilityAmount" readonly></div>
             <div><label>رسوم ترتيب التمويل</label><input id="arrangementFeeTotal" readonly></div>
@@ -374,15 +374,15 @@
             <div><label>وجود صندوق للمشروع؟</label><select id="fundEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
             <div><label>تطبيق أتعاب إدارة الصندوق</label><select id="fundFeesEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>أساس احتساب الأتعاب</label><select id="fundFeeBase" onchange="calculateAll()"><option value="fundCapital">رأس مال الصندوق</option><option value="investedCapital">رأس المال المستثمر فعليًا</option><option value="nav">صافي قيمة الأصول</option><option value="projectCost">إجمالي تكلفة المشروع</option><option value="fixed">مبلغ ثابت</option></select></div>
-            <div id="fundCapitalInputWrap"><label>رأس مال الصندوق</label><input id="fundCapitalInput" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="fundNavInputWrap"><label>صافي قيمة الأصول NAV</label><input id="fundNavInput" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="fundManagementRateWrap"><label>نسبة أتعاب الإدارة السنوية %</label><input id="fundManagementRate" type="number" value="1" oninput="calculateAll()"></div>
-            <div id="fundFixedAnnualFeeWrap"><label>مبلغ الأتعاب السنوي الثابت</label><input id="fundFixedAnnualFee" type="number" value="0" oninput="calculateAll()"></div>
-            <div><label>سنة بداية الاحتساب</label><input id="fundFeeStartYear" type="number" min="1" step="0.25" value="1" oninput="calculateAll()"></div>
-            <div><label>سنة نهاية الاحتساب</label><input id="fundFeeEndYear" type="number" min="1" step="0.25" value="4" oninput="calculateAll()"></div>
+            <div id="fundCapitalInputWrap"><label>رأس مال الصندوق</label><input id="fundCapitalInput" type="number" oninput="calculateAll()"></div>
+            <div id="fundNavInputWrap"><label>صافي قيمة الأصول NAV</label><input id="fundNavInput" type="number" oninput="calculateAll()"></div>
+            <div id="fundManagementRateWrap"><label>نسبة أتعاب الإدارة السنوية %</label><input id="fundManagementRate" type="number" oninput="calculateAll()"></div>
+            <div id="fundFixedAnnualFeeWrap"><label>مبلغ الأتعاب السنوي الثابت</label><input id="fundFixedAnnualFee" type="number" oninput="calculateAll()"></div>
+            <div><label>سنة بداية الاحتساب</label><input id="fundFeeStartYear" type="number" min="1" step="0.25" oninput="calculateAll()"></div>
+            <div><label>سنة نهاية الاحتساب</label><input id="fundFeeEndYear" type="number" min="1" step="0.25" oninput="calculateAll()"></div>
             <div><label>دورية السداد</label><select id="fundFeeFrequency" onchange="calculateAll()"><option value="monthly">شهري</option><option value="quarterly">ربع سنوي</option><option value="semiannual">نصف سنوي</option><option value="annual">سنوي</option></select></div>
             <div><label>توقيت السداد</label><select id="fundFeeTiming" onchange="calculateAll()"><option value="beginning">بداية الفترة</option><option value="end">نهاية الفترة</option></select></div>
-            <div><label>نسبة الزيادة السنوية في الأتعاب %</label><input id="fundFeeGrowthRate" type="number" value="0" oninput="calculateAll()"></div>
+            <div><label>نسبة الزيادة السنوية في الأتعاب %</label><input id="fundFeeGrowthRate" type="number" oninput="calculateAll()"></div>
             <div><label>إجمالي أتعاب الإدارة المحسوبة</label><input id="fundManagementFeesTotal" readonly></div>
           </div>
           <h4>الأتعاب الإضافية الاختيارية</h4>
@@ -392,16 +392,16 @@
           <div class="grid four" id="fundExitPerformanceGrid">
             <div id="fundExitFeeEnabledWrap"><label>تطبيق أتعاب التخارج</label><select id="fundExitFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
             <div id="fundExitFeeBaseWrap"><label>أساس احتساب أتعاب التخارج</label><select id="fundExitFeeBase" onchange="calculateAll()"><option value="saleValue">قيمة البيع</option><option value="profits">الأرباح</option><option value="fixed">مبلغ ثابت</option></select></div>
-            <div id="fundExitFeeRateWrap"><label>نسبة أتعاب التخارج %</label><input id="fundExitFeeRate" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="fundExitFixedFeeWrap"><label>مبلغ أتعاب التخارج الثابت</label><input id="fundExitFixedFee" type="number" value="0" oninput="calculateAll()"></div>
+            <div id="fundExitFeeRateWrap"><label>نسبة أتعاب التخارج %</label><input id="fundExitFeeRate" type="number" oninput="calculateAll()"></div>
+            <div id="fundExitFixedFeeWrap"><label>مبلغ أتعاب التخارج الثابت</label><input id="fundExitFixedFee" type="number" oninput="calculateAll()"></div>
             <div id="performanceFeeEnabledWrap"><label>تطبيق حافز أداء</label><select id="performanceFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
-            <div id="hurdleRateWrap"><label>الحد الأدنى للعائد Hurdle Rate %</label><input id="hurdleRate" type="number" value="8" oninput="calculateAll()"></div>
+            <div id="hurdleRateWrap"><label>الحد الأدنى للعائد Hurdle Rate %</label><input id="hurdleRate" type="number" oninput="calculateAll()"></div>
             <div id="hurdleMethodWrap"><label>طريقة احتساب الحد الأدنى</label><select id="hurdleMethod" onchange="calculateAll()"><option value="compound">تراكمي مركب</option><option value="simple">بسيط</option></select></div>
-            <div id="performanceFeeRateWrap"><label>نسبة حافز الأداء %</label><input id="performanceFeeRate" type="number" value="20" oninput="calculateAll()"></div>
+            <div id="performanceFeeRateWrap"><label>نسبة حافز الأداء %</label><input id="performanceFeeRate" type="number" oninput="calculateAll()"></div>
             <div id="performanceFeeBaseWrap"><label>أساس الاحتساب</label><select id="performanceFeeBase" onchange="calculateAll()"><option value="aboveHurdle">الأرباح فوق الحد الأدنى</option><option value="projectProfit">أرباح المشروع</option></select></div>
             <div id="catchupEnabledWrap"><label>تطبيق Catch-up</label><select id="catchupEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
-            <div id="catchupRateWrap"><label>نسبة الاستدراك %</label><input id="catchupRate" type="number" value="100" oninput="calculateAll()"></div>
-            <div id="performanceCrystallizationYearWrap"><label>سنة احتساب حافز الأداء</label><input id="performanceCrystallizationYear" type="number" min="1" value="10" oninput="calculateAll()"></div>
+            <div id="catchupRateWrap"><label>نسبة الاستدراك %</label><input id="catchupRate" type="number" oninput="calculateAll()"></div>
+            <div id="performanceCrystallizationYearWrap"><label>سنة احتساب حافز الأداء</label><input id="performanceCrystallizationYear" type="number" min="1" oninput="calculateAll()"></div>
             <div id="performanceFeeTotalWrap"><label>إجمالي حافز الأداء المحسوب</label><input id="performanceFeeTotal" readonly></div>
             <div><label>إجمالي تكاليف الصندوق</label><input id="fundFeesTotal" readonly></div>
           </div>
@@ -409,7 +409,7 @@
           <div class="table-wrap"><table id="fundFeeScheduleTable"><thead><tr><th>السنة</th><th>أتعاب الإدارة</th><th>الأتعاب الإضافية</th><th>أتعاب التخارج</th><th>حافز الأداء</th><th>إجمالي أتعاب الصندوق</th><th>دورية السداد</th><th>توقيت السداد</th></tr></thead><tbody></tbody></table></div>
         </div>
 
-        <div class="finance-block" id="developerBonusBlock"><h3>11. علاوة حسن أداء المطور</h3><div class="section-switch"><label>تطبيق علاوة حسن أداء المطور؟</label><select id="developerBonusEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div><div id="developerBonusDetails" class="grid four"><div><label>نسبة المطور من الزيادة في سعر البيع %</label><input id="developerUpliftShare" type="number" value="20" oninput="calculateAll()"></div></div></div>
+        <div class="finance-block" id="developerBonusBlock"><h3>11. علاوة حسن أداء المطور</h3><div class="section-switch"><label>تطبيق علاوة حسن أداء المطور؟</label><select id="developerBonusEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div><div id="developerBonusDetails" class="grid four"><div><label>نسبة المطور من الزيادة في سعر البيع %</label><input id="developerUpliftShare" type="number" oninput="calculateAll()"></div></div></div>
 
         <div class="finance-block" id="externalBlock"><h3>12. بنود خارجية مرنة</h3><div class="section-switch"><label>تطبيق بنود خارجية مرنة؟</label><select id="externalEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div><div id="externalDetails"><div class="table-wrap"><table id="externalTable"><thead><tr><th>اسم البند</th><th>نوع البند</th><th>طريقة الحساب</th><th>القيمة الأساسية</th><th>الكمية</th><th>السعر/النسبة</th><th>يبدأ سنة</th><th>ينتهي سنة</th><th>نمو %</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div><br><button type="button" class="btn ghost" onclick="addExternal()">+ إضافة بند خارجي</button></div></div>
 
@@ -418,21 +418,21 @@
           <div class="grid four">
             <div><label>تطبيق التخارج؟</label><select id="exitEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div id="saleExitMethodWrap"><label>طريقة التخارج البيعي</label><select id="saleExitMethod" onchange="calculateAll()"><option value="none">بدون تخارج بيعي إضافي</option><option value="remainingArea">المساحة المتبقية × سعر البيع</option><option value="fixed">قيمة بيعية ثابتة</option></select></div>
-            <div id="saleExitYearWrap"><label>سنة التخارج البيعي</label><input id="saleExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
-            <div id="saleExitRemainingAreaWrap"><label>المساحة البيعية المتبقية م²</label><input id="saleExitRemainingArea" type="number" value="0" oninput="calculateAll()"></div>
+            <div id="saleExitYearWrap"><label>سنة التخارج البيعي</label><input id="saleExitYear" type="number" min="1" oninput="calculateAll()"></div>
+            <div id="saleExitRemainingAreaWrap"><label>المساحة البيعية المتبقية م²</label><input id="saleExitRemainingArea" type="number" oninput="calculateAll()"></div>
             <div id="saleExitAreaReferenceWrap"><label>المساحة البيعية في بنود الإيرادات م²</label><input id="saleExitAreaReference" readonly class="readonly-highlight"></div>
-            <div id="saleExitPricePerM2Wrap"><label>سعر بيع متر التخارج</label><input id="saleExitPricePerM2" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="saleExitFixedValueWrap"><label>قيمة التخارج البيعي الثابتة</label><input id="saleExitFixedValue" type="number" value="0" oninput="calculateAll()"></div>
-            <div id="saleExitCostRateWrap"><label>تكاليف التخارج البيعي %</label><input id="saleExitCostRate" type="number" min="0" value="0" oninput="calculateAll()"></div>
+            <div id="saleExitPricePerM2Wrap"><label>سعر بيع متر التخارج</label><input id="saleExitPricePerM2" type="number" oninput="calculateAll()"></div>
+            <div id="saleExitFixedValueWrap"><label>قيمة التخارج البيعي الثابتة</label><input id="saleExitFixedValue" type="number" oninput="calculateAll()"></div>
+            <div id="saleExitCostRateWrap"><label>تكاليف التخارج البيعي %</label><input id="saleExitCostRate" type="number" min="0" oninput="calculateAll()"></div>
             <div><label>طريقة التخارج التشغيلي</label><select id="exitMethod" onchange="calculateAll()"><option value="capRate">الربح التشغيلي ÷ معدل الرسملة</option><option value="fixed">قيمة تشغيلية ثابتة</option><option value="noiMultiple">الربح التشغيلي × مضاعف</option><option value="revenueMultiple">الإيرادات × مضاعف</option><option value="none">بدون تخارج تشغيلي</option></select></div>
-            <div><label>سنة التخارج التشغيلي</label><input id="operatingExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
-            <div><label>معدل الرسملة % / المضاعف / القيمة</label><input id="exitInput" type="number" value="8" oninput="calculateAll()"></div>
-            <div><label>تكاليف التخارج التشغيلي %</label><input id="operatingExitCostRate" type="number" min="0" value="0" oninput="calculateAll()"></div>
+            <div><label>سنة التخارج التشغيلي</label><input id="operatingExitYear" type="number" min="1" oninput="calculateAll()"></div>
+            <div><label>معدل الرسملة % / المضاعف / القيمة</label><input id="exitInput" type="number" oninput="calculateAll()"></div>
+            <div><label>تكاليف التخارج التشغيلي %</label><input id="operatingExitCostRate" type="number" min="0" oninput="calculateAll()"></div>
             <div><label>سداد رصيد التمويل عند التخارج التشغيلي</label><select id="settleDebtAtExit" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>فترة احتساب ROI</label><select id="roiPeriod" onchange="calculateAll()"><option value="development">مدة التطوير فقط</option><option value="full">التطوير والتشغيل</option><option value="custom">حتى سنة محددة</option></select></div>
-            <div id="roiEndYearWrap"><label>آخر سنة في ROI</label><input id="roiEndYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
+            <div id="roiEndYearWrap"><label>آخر سنة في ROI</label><input id="roiEndYear" type="number" min="1" oninput="calculateAll()"></div>
             <div><label>فترة احتساب IRR</label><select id="irrPeriod" onchange="calculateAll()"><option value="full">كامل دورة الاستثمار</option><option value="development">مدة التطوير فقط</option><option value="custom">حتى سنة محددة</option></select></div>
-            <div id="irrEndYearWrap"><label>آخر سنة في IRR</label><input id="irrEndYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
+            <div id="irrEndYearWrap"><label>آخر سنة في IRR</label><input id="irrEndYear" type="number" min="1" oninput="calculateAll()"></div>
           </div>
           <div id="saleExitStatusNote" class="calculation-note" hidden></div>
           <div id="analysisWarnings" class="analysis-warning"></div>
