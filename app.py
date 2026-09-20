@@ -20642,12 +20642,15 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         'parameters': search_params,
     }]
     # The server tool leaves the search decision to the model, which could skip
-    # it entirely and answer from memory. The `web` plugin grounds EVERY request
-    # once regardless, so a real search always runs and citations always come
-    # back — the tool stays on top for the per-competitor follow-up searches.
-    plugin = {'id': 'web', 'max_results': 8}
-    if MARKET_SEARCH_ENGINE != 'auto':
-        plugin['engine'] = MARKET_SEARCH_ENGINE
+    # it entirely and answer from memory — and on Google, `auto` native
+    # grounding is model-decided too, so it silently does nothing. The `web`
+    # plugin with engine `exa` runs the search on OpenRouter's side for EVERY
+    # request and injects the retrieved pages — real grounding is guaranteed.
+    plugin = {
+        'id': 'web',
+        'engine': (os.environ.get('MARKET_SEARCH_PLUGIN_ENGINE') or 'exa').strip() or 'exa',
+        'max_results': 8,
+    }
     plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
@@ -20888,7 +20891,8 @@ def _prepare_market_payload(data):
     return payload
 
 
-def _execute_market_competitors(data, tenant_id=None):
+def _execute_market_competitors(data, tenant_id=None, progress=None):
+    report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
     existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
@@ -20902,6 +20906,7 @@ def _execute_market_competitors(data, tenant_id=None):
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
+    report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
     res, provider_error = _call_market_study_model(
         system_prompt, user_prompt, max_tokens=6000,
         usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
@@ -20918,6 +20923,7 @@ def _execute_market_competitors(data, tenant_id=None):
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
+    report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
     if _market_search_ran(res):
         dead_urls = _verify_market_urls(
             url for row in merged for url in _competitor_claimed_urls(row))
@@ -20930,7 +20936,9 @@ def _execute_market_competitors(data, tenant_id=None):
             if (row.get('row_source') or 'ai') == 'ai':
                 market_study.flag_unverified_competitor_sources(row)
     out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
-    _auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id)
+    report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
+    _auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id, progress=report)
+    report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     return {
@@ -20948,7 +20956,8 @@ def _execute_market_competitors(data, tenant_id=None):
     }
 
 
-def _execute_market_summary(data, tenant_id=None):
+def _execute_market_summary(data, tenant_id=None, progress=None):
+    report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     raw_current = data.get('currentSummary')
@@ -20972,10 +20981,12 @@ def _execute_market_summary(data, tenant_id=None):
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
+    report(18, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
     res, provider_error = _call_market_study_model(
         system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
         usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
         search_context={'city': payload.get('city'), 'country': 'SA'})
+    report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -21037,17 +21048,33 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             'success': True,
             'message': 'جاري البحث في المصادر الرسمية وإعداد النتائج...',
             'kind': kind,
+            'progress': 8,
         })
+
+        def report(pct, message):
+            try:
+                pct_value = max(0, min(99, int(pct)))
+            except (TypeError, ValueError):
+                pct_value = 0
+            _write_market_job(tenant_id, job_id, {
+                'status': 'running',
+                'success': True,
+                'kind': kind,
+                'progress': pct_value,
+                'message': str(message or '').strip() or 'جاري إعداد دراسة السوق...',
+            })
+
         try:
             if kind == 'competitors':
-                payload = _execute_market_competitors(data, tenant_id)
+                payload = _execute_market_competitors(data, tenant_id, progress=report)
             else:
-                payload = _execute_market_summary(data, tenant_id)
+                payload = _execute_market_summary(data, tenant_id, progress=report)
             status = 'completed' if payload.get('success') else 'failed'
             _write_market_job(tenant_id, job_id, {
                 **payload,
                 'status': status,
                 'kind': kind,
+                'progress': 100,
                 'message': payload.get('error') or 'اكتملت دراسة السوق',
             })
         except Exception as exc:
@@ -22727,7 +22754,7 @@ def _safe_download_competitor_logo(logo_url, official_url):
         pool.close()
 
 
-def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
+def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=None):
     """Import official logos during competitor generation — no per-row button needed.
 
     Pass 1 is free: rows whose source_url already verifies as the official site go
@@ -22735,9 +22762,11 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
     official site + logo for the rest, then extracts/downloads per row. A discovered
     official URL is only trusted when it matches a real search citation host.
     """
+    report = progress if callable(progress) else (lambda *_args: None)
     draft_id = payload.get('draftId') or payload.get('draft_id')
     missing = []
-    for row in rows:
+    total = max(1, len(rows))
+    for index, row in enumerate(rows):
         if row.get('logo_file_id') or row.get('logo_path'):
             continue
         official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
@@ -22749,6 +22778,8 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
             or market_study.official_source_reliability(
                 row.get('name'), row.get('source'), official_url)))
         if verified:
+            report(74 + int(8 * index / total),
+                   f'استخراج شعار «{row.get("name") or "منافس"}» من موقعه الرسمي...')
             try:
                 _store_imported_competitor_logo(row, draft_id=draft_id)
             except Exception as exc:
@@ -22758,6 +22789,7 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
     if not missing:
         return
     batch = missing[:8]
+    report(82, 'البحث عن المواقع الرسمية وشعارات المنافسين المتبقية...')
     listing = json.dumps(
         [{'id': str(row.get('id') or ''), 'name': str(row.get('name') or '')} for row in batch],
         ensure_ascii=False)
@@ -22811,6 +22843,8 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
         row['field_sources'] = field_sources
         row['source_urls'] = list(dict.fromkeys(
             market_study.competitor_source_urls(row) + [official]))
+        report(86 + int(6 * (batch.index(row) if row in batch else 0) / max(1, len(batch))),
+               f'تحميل شعار «{row.get("name") or "منافس"}»...')
         try:
             _store_imported_competitor_logo(row, draft_id=draft_id)
         except Exception as exc:

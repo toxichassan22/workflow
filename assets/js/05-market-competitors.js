@@ -859,8 +859,15 @@
         if (res && res.jobId && !Array.isArray(res.competitors)) {
           updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
           res = await pollMarketStudyJob(res.jobId, job => {
-            updateLoaderProgress(job && job.status === 'running' ? 60 : 40, (job && job.message) || 'جاري البحث...');
+            const pct = Number(job && job.progress);
+            updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : (job && job.status === 'running' ? 55 : 40),
+              (job && job.message) || 'جاري البحث...');
           });
+        }
+        if (res && res.success && res.status === 'running') {
+          if (note) note.textContent = 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.';
+          toast('استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.');
+          return;
         }
         if (!res || !res.success) {
           if (note) note.textContent = (res && (res.error || res.providerError)) || 'تعذر تحديث المنافسين.';
@@ -970,8 +977,16 @@
         if (res && res.jobId && !res.summary) {
           updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
           res = await pollMarketStudyJob(res.jobId, job => {
-            updateLoaderProgress(job && job.status === 'running' ? 65 : 45, (job && job.message) || 'جاري إعداد الملخص...');
+            const pct = Number(job && job.progress);
+            updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : (job && job.status === 'running' ? 60 : 45),
+              (job && job.message) || 'جاري إعداد الملخص...');
           });
+        }
+        if (res && res.success && res.status === 'running') {
+          const stillRunning = 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.';
+          if (fail) fail.textContent = stillRunning;
+          toast(stillRunning);
+          return;
         }
         if (!res || !res.success || !res.summary) {
           const message = (res && (res.error || res.providerError)) || 'تعذر توليد الملخص. لم يُستبدل النص الحالي.';
