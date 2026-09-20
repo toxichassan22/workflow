@@ -17,7 +17,7 @@
         projectContext[key] = raw && typeof raw === 'object' ? raw : String(raw || '').trim();
       });
       tenantProjectData = { ...tenantProjectData, ...projectContext };
-      const files = Array.from(input?.files || []).slice(0, 2);
+      const files = Array.from(input?.files || []).slice(0, LAND_DOCUMENTS_MAX);
       let uploaded = [];
       if (files.length) uploaded = await uploadTenantProjectFileInput(input, targetKey);
       if (!files.length && Array.isArray(tenantProjectData[targetKey + '_file_meta'])) {
@@ -26,11 +26,11 @@
       const documents = (Array.isArray(uploaded) ? uploaded : []).map((file, index) => ({
         key: 'land_document',
         fileId: file.id,
-        filename: files[index]?.name || file.originalName || ('مستند ' + (index + 1)),
-        mimeType: files[index]?.type || file.mimeType || ''
+        filename: file.originalName || file.name || files[index]?.name || ('مستند ' + (index + 1)),
+        mimeType: file.mimeType || files[index]?.type || ''
       })).filter(document => document.fileId);
       if (!documents.length) {
-        toast('يرجى رفع الكروكي، والرخصة إذا كانت متوفرة، داخل الخانة أولًا');
+        toast(WFT('land.docs.required', 'يرجى رفع الكروكي والرخصة وأي مستندات مساندة داخل الخانة أولًا'));
         return;
       }
       const locationInput = document.querySelector('#tenantProjectForm [data-key="location_address"]');
@@ -54,7 +54,10 @@
       tenantProjectData = { ...tenantProjectData, ...projectContext };
       clearLandAnalysisFailure();
       clearLandAnalysisDiagnostics();
-      showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
+      showLoader(
+        WFT('land.docs.analyzing', 'تحليل الكروكي والمستندات معًا'),
+        WFT('land.docs.analyzing_wait', 'جاري تحليل الملفات واستخراج التنظيم والاتجاهات والإحداثيات...'),
+        10);
       try {
         updateLoaderProgress(25, 'جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
         let res = await api('POST', '/api/extract-croquis', {
@@ -635,7 +638,7 @@
         // immediately for drafts; otherwise reload restores the previous placeholder.
         // A failed save keeps the workspace but must be said, or the map looks
         // persisted while a reload quietly drops it.
-        if (!(await saveProjectAsDraftNow(true))) toast('تعذر حفظ حالة الخريطة على الخادم');
+        if (!(await saveProjectAsDraftNow(true))) toast(WFT('map.save_state_failed', 'تعذر حفظ حالة الخريطة على الخادم'));
       } else {
         triggerAutoSaveDraft();
       }

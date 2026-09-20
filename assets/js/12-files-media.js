@@ -79,6 +79,9 @@
     }
 
     const LAND_PHOTOS_MAX = 4;
+    // Croquis + licence + deed + supporting documents share one upload box; the
+    // analysis endpoint accepts up to 10 documents per request.
+    const LAND_DOCUMENTS_MAX = 4;
 
     // Thumbnails render through the authenticated preview route, so each card needs a blob URL.
     async function attachProjectFileThumbnail(imageElement, fileId) {
@@ -254,7 +257,7 @@
       if (!host) return;
       const items = Array.isArray(files) ? files.filter(Boolean) : [];
       if (!items.length) {
-        host.innerHTML = '<div class="tenant-hint">لم يتم حفظ ملفات على السيرفر بعد. اختر ملف الرخصة وملف الكروكي.</div>';
+        host.innerHTML = '<div class="tenant-hint">لم تُحفظ ملفات على السيرفر بعد — الكروكي والرخصة وأي مستندات مساندة (حتى 4 ملفات).</div>';
         return;
       }
       host.innerHTML = '<div style="border:1px solid #b9e1d1;background:#edf7f3;border-radius:8px;padding:10px">' +
@@ -314,11 +317,12 @@
     // inside collectTenantFormData, which ran from the autosave, so once autosave was removed the
     // files sat on "saving" forever and the analyse button saw no ids to send.
     async function uploadLandDocuments(input) {
-      const chosen = Array.from(input?.files || []).slice(0, 2);
+      const chosen = Array.from(input?.files || []).slice(0, LAND_DOCUMENTS_MAX);
       if (!chosen.length) return;
-      renderLandDocumentsUploadState(chosen.map(file => ({
+      const existing = tenantProjectData.land_documents_files_file_meta || [];
+      renderLandDocumentsUploadState(existing.concat(chosen.map(file => ({
         originalName: file.name, fileSize: file.size, status: 'pending'
-      })));
+      }))));
       try {
         const uploaded = await uploadTenantProjectFileInput(input, 'land_documents_files');
         renderLandDocumentsUploadState(Array.isArray(uploaded) ? uploaded : []);
@@ -346,14 +350,15 @@
       }
       renderLandDocumentsUploadState(meta);
       triggerAutoSaveDraft();
-      toast(meta.length ? 'تم حذف الملف من هذا المشروع' : 'تم حذف الملفات — ارفع الرخصة والكروكي من جديد');
+      toast(meta.length ? 'تم حذف الملف من هذا المشروع' : 'تم حذف الملفات — ارفع مستندات الأرض من جديد');
     }
 
     async function uploadTenantProjectFileInput(input, key) {
       // The client decides how many 2D plans a project has, so that key is not capped at 2.
       const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX
-        : (key === 'visual_style_reference' ? 5
-          : (key === 'visual_plan_2d' ? VISUAL_CONCEPT_MAX_PLANS : 2));
+        : (key === 'land_documents_files' ? LAND_DOCUMENTS_MAX
+          : (key === 'visual_style_reference' ? 5
+            : (key === 'visual_plan_2d' ? VISUAL_CONCEPT_MAX_PLANS : 2)));
       const files = Array.from(input?.files || []).slice(0, input?.multiple ? multiLimit : 1);
       const fileType = input?.dataset?.projectFileType;
       if (!files.length || !fileType) {
@@ -364,9 +369,27 @@
       if (input.multiple) {
         try { multiCache = JSON.parse(input.dataset.uploadSignatures || '{}') || {}; } catch (e) { multiCache = {}; }
       }
+      // A file input only holds the latest picker gesture, so a second selection must ADD to
+      // the stored list — overwriting it used to drop the licence (or the croquis) picked
+      // earlier, and the analysis then saw a single document.
+      const mergeExisting = input.multiple && key === 'land_documents_files';
+      const previousMeta = mergeExisting && Array.isArray(tenantProjectData[key + '_file_meta'])
+        ? tenantProjectData[key + '_file_meta'].filter(item => item && item.id) : [];
+      const storedIds = new Set(previousMeta.map(item => item.id));
+      const storedIdentities = new Set(previousMeta.map(item =>
+        String(item.originalName || item.name || '') + ':' + Number(item.fileSize || item.size || 0)));
+      let remainingSlots = mergeExisting ? Math.max(0, multiLimit - previousMeta.length) : multiLimit;
+      let overflowCount = 0;
       for (const file of files) {
         const signature = [file.name, file.size, file.lastModified, fileType].join(':');
         const cachedId = input.multiple ? multiCache[signature] : input.dataset.projectFileId;
+        if (mergeExisting) {
+          const alreadyStored = (cachedId && storedIds.has(cachedId))
+            || storedIdentities.has(file.name + ':' + Number(file.size || 0));
+          if (alreadyStored) continue;
+          if (!remainingSlots) { overflowCount += 1; continue; }
+          remainingSlots -= 1;
+        }
         if (cachedId) {
           uploaded.push({ id: cachedId, originalName: file.name, mimeType: file.type });
           continue;
@@ -388,16 +411,22 @@
           input.dataset.projectFileId = response.file.id;
         }
       }
+      if (mergeExisting && overflowCount) {
+        toast(WFT('land.docs.overflow', 'الحد الأقصى {n} ملفات — تم تجاهل {m} ملف إضافي', { n: multiLimit, m: overflowCount }));
+      }
       const ids = uploaded.map(file => file.id);
       if (input.multiple) {
         // Re-uploads return fresh metadata, so any caption already typed has to be carried over.
-        const previousMeta = Array.isArray(tenantProjectData[key + '_file_meta'])
+        const earlierMeta = Array.isArray(tenantProjectData[key + '_file_meta'])
           ? tenantProjectData[key + '_file_meta'] : [];
-        const merged = uploaded.map(file => {
-          const previous = previousMeta.find(item => item && item.id === file.id);
+        const fresh = uploaded.map(file => {
+          const previous = earlierMeta.find(item => item && item.id === file.id);
           return previous?.description ? { ...file, description: previous.description } : file;
         });
-        tenantProjectData[key + '_file_ids'] = ids;
+        const merged = mergeExisting
+          ? previousMeta.concat(fresh.filter(file => file && !storedIds.has(file.id)))
+          : fresh;
+        tenantProjectData[key + '_file_ids'] = mergeExisting ? merged.map(item => item.id) : ids;
         tenantProjectData[key + '_file_meta'] = merged;
         if (key === 'land_documents_files') renderLandDocumentsUploadState(merged);
         if (key === 'land_photos') renderLandPhotos(merged);

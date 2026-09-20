@@ -378,6 +378,7 @@
     "land.docs.analyzing_wait": "جاري تحليل الملفات واستخراج التنظيم والاتجاهات والإحداثيات...",
     "land.docs.max_files": "يمكن رفع {n} ملفات كحد أقصى: الكروكي والرخصة وأي مستندات مساندة",
     "land.docs.overflow": "الحد الأقصى {n} ملفات — تم تجاهل {m} ملف إضافي",
+    "map.save_state_failed": "تعذر حفظ حالة الخريطة على الخادم",
     "notif.cat.platform": "المنصة"
   }/*I18N_AR_END*/;
 
@@ -725,6 +726,7 @@
     "land.docs.analyzing_wait": "Analyzing the files and extracting zoning, directions, and coordinates...",
     "land.docs.max_files": "Up to {n} files can be uploaded: the croquis, permit, and any supporting documents",
     "land.docs.overflow": "Maximum {n} files — {m} extra file(s) ignored",
+    "map.save_state_failed": "Could not save the map state on the server",
     "notif.cat.platform": "Platform"
   }/*I18N_EN_END*/;
 
@@ -3451,7 +3453,6 @@
   "يمكن تعديل الحقول المخصصة فقط": "Only custom fields can be edited",
   "يمكن تغيير حالة الحقول المخصصة فقط": "Only custom Field status can be changed",
   "يمكن رفع": "Can upload",
-  "يمكن رفع {n} ملفات كحد أقصى: الكروكي والرخصة وأي مستندات مساندة": "Up to {n} files can be uploaded: the croquis, permit, and any supporting documents",
   "يمين": "Right",
   "ينتهي سنة": "Ends in year",
   "يوجد إعداد خطة جارٍ حاليًا": "A plan setup is currently in progress",

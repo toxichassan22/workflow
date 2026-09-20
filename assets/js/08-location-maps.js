@@ -1306,7 +1306,7 @@
             input = document.createElement('input');
             input.type = 'file';
             input.multiple = f.fieldKey === 'land_documents_files';
-            input.maxLength = 2;
+            input.maxLength = LAND_DOCUMENTS_MAX;
             input.accept = 'image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp';
             input.dataset.filetype = 'pdf';
             input.dataset.projectFileType = 'land_document';
@@ -1315,11 +1315,11 @@
               uploadStatus.id = 'landDocumentsUploadStatus';
               uploadStatus.style.cssText = 'margin-top:8px;';
               input.addEventListener('change', () => {
-                if (input.files.length > 2) {
+                if (input.files.length > LAND_DOCUMENTS_MAX) {
                   const transfer = new DataTransfer();
-                  Array.from(input.files).slice(0, 2).forEach(file => transfer.items.add(file));
+                  Array.from(input.files).slice(0, LAND_DOCUMENTS_MAX).forEach(file => transfer.items.add(file));
                   input.files = transfer.files;
-                  toast('يمكن رفع ملفين فقط: الرخصة والكروكي');
+                  toast(WFT('land.docs.max_files', 'يمكن رفع {n} ملفات كحد أقصى: الكروكي والرخصة وأي مستندات مساندة', { n: LAND_DOCUMENTS_MAX }));
                 }
                 uploadLandDocuments(input);
               });
@@ -1474,7 +1474,7 @@
             const analyzeButton = document.createElement('button');
             analyzeButton.type = 'button';
             analyzeButton.className = 'btn primary small land-documents-action-btn';
-            analyzeButton.textContent = 'تحليل الرخصة والكروكي معًا';
+            analyzeButton.textContent = 'تحليل الكروكي والمستندات معًا';
             analyzeButton.style.cssText = 'margin-top:10px;width:100%;';
             analyzeButton.onclick = () => extractTenantCroquisData('land_documents_files');
             div.appendChild(analyzeButton);

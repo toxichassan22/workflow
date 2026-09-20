@@ -3095,7 +3095,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-key="survey_coordinates"', index_source)
         self.assertIn('data-key="directions_table"', index_source)
         self.assertIn("f.fieldKey === 'land_documents_files'", index_source)
-        self.assertIn("analyzeButton.textContent = 'تحليل الرخصة والكروكي معًا'", index_source)
+        self.assertIn("analyzeButton.textContent = 'تحليل الكروكي والمستندات معًا'", index_source)
         self.assertNotIn('analyzeLandDocumentsButton', index_source)
         self.assertIn('regulation_text', index_source)
         self.assertIn('landAnalysisDiagnostics', index_source)
@@ -3192,6 +3192,111 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('الارتداد: 5م', by_label['شمال'])
         self.assertEqual(by_label['جنوب'], 'الارتداد: 3م')
         self.assertNotIn('شرق', by_label)
+
+    def test_direction_setbacks_normalize_model_key_aliases_and_compass_text(self):
+        """The model writes a direction's setback under several key names, and a
+        compass-named value inside the setbacks narrative must reach the empty
+        direction cell instead of leaving the table column blank."""
+        module = self.application_module
+        directions = module._normalize_direction_map({
+            'north': {'setback_m': '5م'},
+            'east': {'الارتداد': '2م'},
+            'west': {'setbacks': '3م'},
+        })
+        self.assertEqual(directions['north']['setback'], '5م')
+        self.assertEqual(directions['east']['setback'], '2م')
+        self.assertEqual(directions['west']['setback'], '3م')
+
+        parcel = {
+            'directions': module._normalize_direction_map({'north': {}, 'south': {}, 'east': {}}),
+            'setbacks': 'الارتداد الشمالي 5م، والارتداد الجنوبي 3م',
+        }
+        module._fill_direction_setbacks_from_text(parcel)
+        self.assertEqual(parcel['directions']['north']['setback'], '5م')
+        self.assertEqual(parcel['directions']['south']['setback'], '3م')
+        self.assertFalse(parcel['directions']['east'].get('setback'))
+
+        # A boundary length next to a direction word is not a setback.
+        parcel = {
+            'directions': module._normalize_direction_map({'north': {}}),
+            'setbacks': 'الارتدادات غير مذكورة؛ يحد الأرض من الشمال شارع بطول 20م',
+        }
+        module._fill_direction_setbacks_from_text(parcel)
+        self.assertFalse(parcel['directions']['north'].get('setback'))
+
+        # And the summary field is composed from the direction table when the
+        # model only filled the cells.
+        parcel = {
+            'directions': module._normalize_direction_map({
+                'north': {'setback': '5م'}, 'south': {'setback': '3م'},
+            }),
+            'setbacks': '',
+        }
+        module._normalize_parcel_scalar_fields(parcel)
+        self.assertEqual(parcel['setbacks'], 'شمال: 5م | جنوب: 3م')
+
+    def test_land_documents_accumulate_across_picker_gestures(self):
+        """A file input only holds the latest picker gesture: picking the licence
+        then the croquis used to overwrite the metadata list, so the analysis saw
+        a single document. The merge keeps earlier picks up to the cap."""
+        index_source = read_frontend_text()
+        self.assertIn('const LAND_DOCUMENTS_MAX = 4', index_source)
+        self.assertIn("key === 'land_documents_files'", index_source)
+        self.assertIn('storedIds.has(cachedId)', index_source)
+        self.assertIn('storedIdentities.has(', index_source)
+        self.assertIn('previousMeta.concat(', index_source)
+        self.assertIn("slice(0, LAND_DOCUMENTS_MAX)", index_source)
+
+    def test_extract_croquis_sends_every_uploaded_document_to_the_model(self):
+        """The licence is analysed together with the croquis: every uploaded
+        document must be rendered and labelled by kind in the final prompt."""
+        module = self.application_module
+        prepared = []
+
+        def fake_prepare(document, budget=None, diagnostics=None):
+            prepared.append((document['key'], document['filename']))
+            return ([{'type': 'image_url',
+                      'image_url': {'url': 'data:image/png;base64,x', 'detail': 'high'}}],
+                    [], 1, 'image_direct')
+
+        model_payload = {
+            'parcels': [{'parcel_id': 'P-1', 'plot_number': '9991'}],
+            'conflicts': [],
+        }
+        provider_response = {
+            'choices': [{'finish_reason': 'stop',
+                         'message': {'content': json.dumps(model_payload, ensure_ascii=False)}}]
+        }
+        calls = []
+
+        def fake_call(system_prompt, user_content, max_tokens, **kwargs):
+            calls.append(user_content)
+            return provider_response, 9000, ''
+
+        with patch.object(module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(module, '_prepare_document_vision_parts', side_effect=fake_prepare), \
+                patch.object(module, 'search_official_regulations_evidence', return_value=(
+                    {'context': '', 'documents': [], 'table_pages': []}, []
+                )), \
+                patch.object(module, '_call_land_analysis_model', side_effect=fake_call):
+            result = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'documents': [
+                    {'fileData': 'data:application/pdf;base64,JVZERg==', 'filename': 'كروكي الأرض.pdf', 'mimeType': 'application/pdf'},
+                    {'fileData': 'data:application/pdf;base64,JVZERg==', 'filename': 'رخصة البناء.pdf', 'mimeType': 'application/pdf'},
+                ],
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
+            })
+
+        self.assertEqual(result.status_code, 200, result.get_json())
+        self.assertEqual([item[1] for item in prepared], ['كروكي الأرض.pdf', 'رخصة البناء.pdf'])
+        self.assertEqual([item[0] for item in prepared], ['croquis', 'building_license'])
+        self.assertEqual(len(result.get_json()['documentProcessing']), 2)
+        final_prompt = json.dumps(calls[-1], ensure_ascii=False)
+        self.assertIn('كروكي الأرض.pdf', final_prompt)
+        self.assertIn('رخصة البناء.pdf', final_prompt)
+        self.assertIn('building_license', final_prompt)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
@@ -6790,7 +6895,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         # A section nobody opened had no stored status, and the approval gate walks the stored
         # map, so the file could be submitted with that section never approved.
         self.assertIn('applySectionStatuses(initialStatuses);', index_source)
-        self.assertIn("sectionStatuses: statuses", index_source)
+        # The save payload ships the stored map and request-approval walks it
+        # server-side — a section nobody opened cannot slip through unapproved.
+        self.assertIn("sectionStatuses: tenantProjectSectionStatuses", index_source)
+        self.assertIn("'/api/project-draft/request-approval', { draftId", index_source)
         self.assertIn('def update_draft_section_statuses(', (ROOT / 'db.py').read_text(encoding='utf-8'))
 
     def test_components_block_shows_the_regulated_uses(self):
