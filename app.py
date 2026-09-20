@@ -21699,6 +21699,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         # The provider returned no citations at all — an infrastructure miss,
         # not proof the name is fabricated. Say so instead of mislabeling it.
         row['verify_state'] = 'search_not_run'
+        if response:
+            row['verify_provider_error'] = _chat_error_message(response) or 'empty_response'
         return
     matched = list(dict.fromkeys(matched))
     if not matched:

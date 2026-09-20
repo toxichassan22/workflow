@@ -241,6 +241,7 @@
       tr.dataset.sourcesUnverified = row.sources_unverified || row.sourcesUnverified ? '1' : '';
       tr.dataset.noSearchEvidence = row.no_search_evidence || row.noSearchEvidence ? '1' : '';
       tr.dataset.verifyState = row.verify_state || row.verifyState || '';
+      tr.dataset.verifyProviderError = row.verify_provider_error || row.verifyProviderError || '';
       const areaCache = row.area_cache || row.areaCache || {};
       tr.dataset.areaFixed = cleanMarketNumber(row.area_sqm || row.areaSqm || areaCache.area_sqm || '');
       tr.dataset.areaFrom = cleanMarketNumber(row.area_from || row.areaFrom || areaCache.area_from || '');
@@ -269,6 +270,9 @@
         : '') +
       (tr.dataset.verifyState === 'search_not_run'
         ? '<div style="color:#b91c1c;margin-top:4px">تعذر تشغيل بحث التحقق لهذا المنافس — لم يرجع مزود البحث أي صفحة.</div>'
+        : '') +
+      (tr.dataset.verifyProviderError
+        ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">تفاصيل المزود: ' + escapeHtml(tr.dataset.verifyProviderError) + '</div>'
         : '');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
@@ -404,6 +408,7 @@
       if (tr.dataset.sourcesUnverified) row.sources_unverified = true;
       if (tr.dataset.noSearchEvidence) row.no_search_evidence = true;
       if (tr.dataset.verifyState) row.verify_state = tr.dataset.verifyState;
+      if (tr.dataset.verifyProviderError) row.verify_provider_error = tr.dataset.verifyProviderError;
       if (tr.dataset.logoLowRes) row.logo_low_res = true;
       if (tr.dataset.logoFaviconHost) row.logo_favicon_host = tr.dataset.logoFaviconHost;
       return row;
