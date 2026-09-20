@@ -1066,15 +1066,31 @@ asked again. Now:
 
 The project timeline is the single source of truth for two things the financial study displays:
 
-- `developmentYears` ("مدة تطوير المشروع") mirrors the timeline's `tlYears` ("عدد السنوات").
+- `developmentYears` ("مدة تطوير المشروع") mirrors the timeline's `tlYears` ("عدد السنوات"), which
+  ships empty — no invented duration.
 - The `scheduleTable` stage list (name + year) mirrors the named timeline phases.
+
+The project start is «تاريخ البداية» (`#tlStartDate`, `timeline_start_date`): an
+`input[type=month]` holding `YYYY-MM`. «تاريخ النهاية» (`#tlEndDate`, read-only) is
+`formatTimelineMonth(start.index + years * 12)` — the same month, N years later (2/2030 + 5 →
+2/2035). Timeline rows store **project-relative** years (`1..tlYears`) and quarters; each project
+year begins at the start month, so «السنة 1 — الربع 1» of a 2/2030 project covers 2–4/2030.
+Drafts saved before the field existed carry `timeline_start_year` + **calendar**-year rows;
+hydration maps that year to January (`legacyStartYear + '-01'`) and rewrites the rows to relative
+years (`calendarYear - legacyStartYear + 1`). `slide_engine.parse_timeline_phases()` does the same
+server-side, so both ends agree.
+
+Every new project seeds `TIMELINE_DEFAULT_PHASES` — the five standard phase names with no dates or
+durations — via `seedDefaultTimelinePhases()` in `startTenantProject()`. They are ordinary editable
+rows; hydration clears and rebuilds the table from stored rows, so drafts never receive the
+defaults and an empty stored table stays empty.
 
 Both are rendered `readonly` in the financial study; only `costPct` and `devPct` are editable there,
 and they are carried across a rebuild by matching on stage name. `syncFinancialFromTimeline()` does
 the mirroring and is called from `recalcTimeline()`, `saveTimelineData()`, the financial seeding
-block and draft hydration. Timeline years are **calendar** years while the cashflow uses years
-**relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
-`[1, developmentYears]`. Developer and development-cost amounts are spread evenly across every
+block and draft hydration. Timeline rows already carry project-relative years — the same axis the
+cashflow uses — so `syncFinancialFromTimeline()` clamps them to `[1, developmentYears]` with no
+calendar conversion. Developer and development-cost amounts are spread evenly across every
 cashflow year the phase covers (`stageYear` through `stageEndYear` from «إلى»), not dumped into
 the start year only. If the timeline has no named phases, do not rebuild/wipe `scheduleTable`;
 keep the hydrated financial stages. **That guard covers the stage table only.** It used to cover
@@ -1093,12 +1109,14 @@ writes the empty string when the source is cleared — the old `if (area > 0)` f
 value behind. The same applies to any field added to `TENANT_CLIENT_ENTERED_LAND_FIELDS` or to a
 new mirror: carry the source's emptiness, do not invent a placeholder number.
 
-Each phase row has a start year/quarter and a duration in months. `computeTimelineEnd()` fills the
-read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`). Clients only type the
-start and the months; never ask them to enter the end. The notes column is part of the timeline
+Each phase row has a relative start year/quarter and a duration in months. `computeTimelineEnd()`
+fills the read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`); when the start
+date is known the cell also shows the real month (`سنة 2 — الربع 1 (1/2031)`). Clients only type
+the start and the months; never ask them to enter the end. The notes column is part of the timeline
 slide: `parse_timeline_phases()` / `_timeline_data_note()` inject the full phase list (including
-notes) into the slide-plan and slide-generation prompts, because the truncated project JSON can
-drop `timeline_table_data`. Notes are not mirrored into the financial study.
+notes and real `M/YYYY` start/end labels) into the slide-plan and slide-generation prompts, because
+the truncated project JSON can drop `timeline_table_data`. Notes are not mirrored into the
+financial study.
 
 An empty timeline is allowed but surfaces `#timelineStagesWarning`, because with no stages the
 development cost never reaches the cashflow. Note that `scheduleTable` no longer has an actions

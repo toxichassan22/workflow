@@ -2189,7 +2189,8 @@
       font-variant-numeric: tabular-nums !important;
     }
 
-    #section-financial-calc .readonly-highlight {
+    #section-financial-calc .readonly-highlight,
+    #section-timeline .readonly-highlight {
       background: #eef5fb !important;
       color: #082646 !important;
       font-weight: 900 !important;

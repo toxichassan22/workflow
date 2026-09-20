@@ -1536,7 +1536,7 @@
         fin_cap_rate: '8',
 
         /* ── Timeline fields ────────────────────── */
-        timeline_start_year: '2026',
+        timeline_start_date: '2026-01',
         timeline_years: '3',
       };
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');

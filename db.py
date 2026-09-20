@@ -5816,6 +5816,9 @@ def diff_section_versions(tenant_id, version_id, base_version_id=None):
 
     known_labels = {
         'timeline_table_data': 'الجدول الزمني ومراحل المشروع',
+        'timeline_start_date': 'تاريخ بداية المشروع',
+        'timeline_start_year': 'سنة بداية المشروع',
+        'timeline_years': 'عدد سنوات المشروع',
         'financial_study_model': 'الدراسة المالية والمؤشرات',
         'team_selection': 'فريق العمل والجهات المشاركة',
         'market_study_data': 'دراسة السوق وتحليل المنافسين',

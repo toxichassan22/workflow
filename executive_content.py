@@ -193,11 +193,12 @@ def compact_facts(facts, for_block=None):
         'landUseStatus': normalize_text(data.get('landUseStatus')),
         'regulatoryConstraints': normalize_document(data.get('regulatoryConstraints')),
         'landSummary': normalize_document(data.get('landSummary')),
+        'timelineStartDate': normalize_text(data.get('timelineStartDate')),
         'timelineStartYear': normalize_text(data.get('timelineStartYear')),
         'timelineYears': normalize_text(data.get('timelineYears')),
         'timelineStages': _compact_items(
             data.get('timelineStages'),
-            ('name', 'year', 'quarter', 'duration', 'end', 'notes'),
+            ('name', 'year', 'quarter', 'duration', 'start', 'end', 'notes'),
         ),
         'components': _compact_items(
             data.get('components'),
@@ -236,7 +237,10 @@ def readiness_from_facts(facts):
         data['croquisLandArea'] or data['approvedFinancialArea'] or data['allowedUses']
         or data['landSummary'] or data['buildingRatioCoverage'] or data['plotNumber']
     )
-    has_timeline = bool(data['timelineStartYear'] or data['timelineYears'] or data['timelineStages'])
+    has_timeline = bool(
+        data['timelineStartDate'] or data['timelineStartYear']
+        or data['timelineYears'] or data['timelineStages']
+    )
     has_financial = bool(data['financialIndicators'] or data['components'])
     has_market = bool(data['marketSummary'] or data['marketDecision'] or data['marketSwot'])
     groups = {

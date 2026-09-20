@@ -585,11 +585,12 @@
       div.dataset.section = 'section-timeline';
       div.innerHTML = `
         <h3 class="tenant-section-title">الجدول الزمني للمشروع</h3>
-        <div class="tenant-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px">
-          <div class="tenant-field"><label>سنة البداية</label><input type="number" id="tlStartYear" data-key="timeline_start_year" data-type="number" value="2026" onchange="recalcTimeline()"></div>
-          <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" onchange="recalcTimeline()"></div>
+        <div class="tenant-grid" style="grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">
+          <div class="tenant-field"><label>تاريخ البداية</label><input type="month" id="tlStartDate" data-key="timeline_start_date" data-type="text" onchange="recalcTimeline()"></div>
+          <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" min="1" value="" onchange="recalcTimeline()"></div>
+          <div class="tenant-field"><label>تاريخ النهاية</label><input type="text" id="tlEndDate" readonly class="readonly-highlight" title="تاريخ البداية بعد عدد السنوات"></div>
         </div>
-        <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» — بدونها تُحسب كل المراحل في السنة الأولى.</div>
+        <div id="timelineStartYearWarning" class="validation-panel error" hidden>تاريخ البداية غير محدد — تُعرض السنوات والأرباع كأرقام نسبية دون تواريخ فعلية.</div>
         <div class="fin-table-wrap">
           <table class="fin-table" id="timelineTable">
             <thead><tr><th>المرحلة</th><th>من (السنة)</th><th>من (الربع)</th><th>المدة (أشهر)</th><th>إلى</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>
@@ -608,20 +609,133 @@
 
     const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
 
+    // The standard development phases a new project opens with; the client edits them freely.
+    const TIMELINE_DEFAULT_PHASES = [
+      'التصميم، الدراسات، التراخيص',
+      'تجهيز الموقع والأساسات والهيكل الإنشائي',
+      'استكمال الهيكل وأعمال الكهرباء والميكانيكا',
+      'التشطيبات والأعمال الخارجية',
+      'الاختبارات والتسليم والتسويق',
+    ];
+
+    function parseTimelineStartValue(raw) {
+      const match = String(raw || '').trim().match(/^(\d{4})-(\d{1,2})$/);
+      if (!match) return null;
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10);
+      if (month < 1 || month > 12) return null;
+      return { year, month, index: year * 12 + (month - 1) };
+    }
+
+    // The start date is a month+year the client picks; drafts saved before it existed carry a
+    // bare start year, which maps to January.
+    function timelineProjectStart() {
+      return parseTimelineStartValue(document.getElementById('tlStartDate')?.value)
+        || parseTimelineStartValue(tenantProjectData?.timeline_start_date)
+        || (() => {
+          const year = parseInt(tenantProjectData?.timeline_start_year, 10);
+          return Number.isFinite(year) ? { year, month: 1, index: year * 12 } : null;
+        })();
+    }
+
+    function formatTimelineMonth(index) {
+      if (!Number.isFinite(index)) return '';
+      return ((index % 12) + 1) + '/' + Math.floor(index / 12);
+    }
+
+    function formatTimelineStart(raw) {
+      const start = parseTimelineStartValue(raw);
+      return start ? formatTimelineMonth(start.index) : String(raw || '').trim();
+    }
+
+    // Rows store the relative year number; months are counted from the project's first month,
+    // so the end lands on a relative year/quarter that maps back onto the calendar once the
+    // start date is known.
     function computeTimelineEnd(year, quarter, duration) {
       const startYear = parseInt(year, 10);
       const quarterIndex = TIMELINE_QUARTERS.indexOf(String(quarter || '').trim());
       const months = parseInt(duration, 10);
-      if (!Number.isFinite(startYear) || quarterIndex < 0 || !Number.isFinite(months) || months <= 0) return null;
-      const endMonth = startYear * 12 + quarterIndex * 3 + months - 1;
+      if (!Number.isFinite(startYear) || startYear <= 0 || quarterIndex < 0 || !Number.isFinite(months) || months <= 0) return null;
+      const endMonth = (startYear - 1) * 12 + quarterIndex * 3 + months - 1;
       return {
-        year: Math.floor(endMonth / 12),
-        quarter: TIMELINE_QUARTERS[Math.floor((endMonth % 12) / 3)]
+        year: Math.floor(endMonth / 12) + 1,
+        quarter: TIMELINE_QUARTERS[Math.floor((endMonth % 12) / 3)],
+        monthIndex: endMonth
       };
     }
 
     function formatTimelineEnd(end) {
-      return end ? (end.year + ' ' + end.quarter) : '';
+      if (!end) return '';
+      const relative = 'سنة ' + end.year + ' — الربع ' + (TIMELINE_QUARTERS.indexOf(end.quarter) + 1);
+      const start = timelineProjectStart();
+      return start && Number.isFinite(end.monthIndex)
+        ? relative + ' (' + formatTimelineMonth(start.index + end.monthIndex) + ')'
+        : relative;
+    }
+
+    // The year picker offers only the project's own years (1..«عدد السنوات»); a stored value
+    // outside them stays as an extra option rather than being silently wiped.
+    function timelineYearOptionsHtml(chosen) {
+      const declared = parseInt(document.getElementById('tlYears')?.value, 10);
+      let max = Number.isFinite(declared) && declared > 0 ? declared : 1;
+      const picked = parseInt(chosen, 10);
+      if (Number.isFinite(picked) && picked > max) max = picked;
+      const start = timelineProjectStart();
+      let html = '<option value="">—</option>';
+      for (let year = 1; year <= max; year++) {
+        let label = 'السنة ' + year;
+        if (start) {
+          const first = start.index + (year - 1) * 12;
+          label += ' (' + formatTimelineMonth(first) + ' – ' + formatTimelineMonth(first + 11) + ')';
+        }
+        html += '<option value="' + year + '"' + (String(chosen) === String(year) ? ' selected' : '') + '>' + label + '</option>';
+      }
+      return html;
+    }
+
+    function timelineQuarterOptionsHtml(chosen) {
+      return ['<option value="">—</option>'].concat(TIMELINE_QUARTERS.map(
+        (quarter, index) => '<option value="' + quarter + '"' + (String(chosen).trim() === quarter ? ' selected' : '') + '>الربع ' + (index + 1) + '</option>'
+      )).join('');
+    }
+
+    // Once the row's year and the start date are known, each quarter option names the real
+    // months it covers — the quarters belong to the project year, which starts at the start
+    // month.
+    function refreshTimelineQuarterLabels(row) {
+      const select = row?.querySelector('.tl-quarter');
+      if (!select) return;
+      const start = timelineProjectStart();
+      const year = parseInt(row.querySelector('.tl-year')?.value, 10);
+      Array.from(select.options).forEach(option => {
+        const quarterIndex = TIMELINE_QUARTERS.indexOf(option.value);
+        if (quarterIndex < 0) return;
+        let label = 'الربع ' + (quarterIndex + 1);
+        if (start && Number.isFinite(year)) {
+          const first = start.index + (year - 1) * 12 + quarterIndex * 3;
+          label += ' (' + formatTimelineMonth(first) + ' – ' + formatTimelineMonth(first + 2) + ')';
+        }
+        option.textContent = label;
+      });
+    }
+
+    function refreshTimelineRowPickers() {
+      document.querySelectorAll('#timelineTableBody tr').forEach(row => {
+        const yearSelect = row.querySelector('.tl-year');
+        if (yearSelect) yearSelect.innerHTML = timelineYearOptionsHtml(yearSelect.value);
+        refreshTimelineQuarterLabels(row);
+        updateTimelineRowEnd(row);
+      });
+    }
+
+    function updateTimelineProjectEnd() {
+      const output = document.getElementById('tlEndDate');
+      if (!output) return;
+      const start = timelineProjectStart();
+      const years = parseInt(document.getElementById('tlYears')?.value, 10);
+      output.value = start && Number.isFinite(years) && years > 0
+        ? formatTimelineMonth(start.index + years * 12)
+        : '';
     }
 
     function updateTimelineRowEnd(row) {
@@ -636,31 +750,41 @@
       return end;
     }
 
-    // One builder for every path (blank row, "add phase", and draft hydration) so the columns
-    // cannot drift apart between them.
+    // One builder for every path (blank row, "add phase", seeding, and draft hydration) so the
+    // columns cannot drift apart between them.
     function timelineRowHtml(data = {}) {
-      const chosen = String(data.quarter || '').trim();
-      const options = ['<option value="">—</option>'].concat(TIMELINE_QUARTERS.map(
-        quarter => '<option value="' + quarter + '"' + (chosen === quarter ? ' selected' : '') + '>' + quarter + '</option>'
-      )).join('');
       const attr = value => escapeHtml(value === undefined || value === null ? '' : String(value));
       const end = computeTimelineEnd(data.year, data.quarter, data.duration);
       return '<td><input type="text" class="tl-name" value="' + attr(data.name) + '" placeholder="مثال: التصميم والتراخيص" onchange="saveTimelineData()"></td>' +
-        '<td><input type="number" class="tl-year" value="' + attr(data.year) + '" placeholder="السنة" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()"></td>' +
-        '<td><select class="tl-quarter" style="min-width:78px" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()">' + options + '</select></td>' +
+        '<td><select class="tl-year" style="min-width:150px" onchange="refreshTimelineQuarterLabels(this.closest(\'tr\')); updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()">' + timelineYearOptionsHtml(data.year) + '</select></td>' +
+        '<td><select class="tl-quarter" style="min-width:120px" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()">' + timelineQuarterOptionsHtml(data.quarter) + '</select></td>' +
         '<td><input type="number" class="tl-duration" min="1" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" oninput="updateTimelineRowEnd(this.closest(\'tr\'))" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()"></td>' +
         '<td><input type="text" class="tl-end" value="' + attr(formatTimelineEnd(end)) + '" readonly title="تُحسب من البداية والمدة"></td>' +
         '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظة تظهر في الشريحة" onchange="saveTimelineData()"></td>' +
         '<td><button type="button" class="btn danger small" style="padding:4px 9px;font-size:11px" onclick="removeTimelineRow(this)" title="حذف المرحلة">حذف</button></td>';
     }
 
-    // Phases are entered by the client, so the table starts blank instead of seeding invented
-    // stages that would otherwise be mistaken for real project data.
     function recalcTimeline() {
       const tbody = document.getElementById('timelineTableBody');
       if (!tbody) return;
       if (!tbody.rows.length) addTimelineRow();
-      // Start year / number of years feed the financial study, so re-mirror them on every change.
+      // «تاريخ البداية» and «عدد السنوات» bound the pickers and feed the financial study, so
+      // every change rebuilds them and re-mirrors the study.
+      refreshTimelineRowPickers();
+      updateTimelineProjectEnd();
+      syncFinancialFromTimeline();
+    }
+
+    // New projects open with the standard phases already named — a starting point the client
+    // edits freely, not fixed data. Drafts and presentations hydrate their own rows instead.
+    function seedDefaultTimelinePhases() {
+      const tbody = document.getElementById('timelineTableBody');
+      if (!tbody) return;
+      if (Array.from(tbody.rows).some(row => (row.querySelector('.tl-name')?.value || '').trim())) return;
+      tbody.innerHTML = '';
+      TIMELINE_DEFAULT_PHASES.forEach(name => addTimelineRow({ name }));
+      const hidden = document.getElementById('timelineTableData');
+      if (hidden) hidden.value = JSON.stringify(collectTimelineRows());
       syncFinancialFromTimeline();
     }
 
@@ -680,6 +804,7 @@
       const tr = document.createElement('tr');
       tr.innerHTML = timelineRowHtml(data);
       tbody.appendChild(tr);
+      refreshTimelineQuarterLabels(tr);
       updateTimelineRowEnd(tr);
       return tr;
     }
@@ -720,7 +845,7 @@
       if (!scheduleBody && !devYearsInput) return;
 
       const timelineYears = parseInt(document.getElementById('tlYears')?.value, 10);
-      const startYear = parseInt(document.getElementById('tlStartYear')?.value, 10);
+      const projectStart = timelineProjectStart();
       const namedStages = collectTimelineRows().filter(row => row.name.trim());
 
       // «عدد السنوات» is the timeline's own field, so it mirrors whether or not a stage has been
@@ -743,11 +868,11 @@
 
       const warning = document.getElementById('timelineStagesWarning');
       if (warning) warning.hidden = namedStages.length > 0;
-      // Without a start year the calendar-to-relative conversion below cannot run, and every stage
-      // silently collapses into year 1 — wrong numbers with no visible cause.
+      // Without a start date the rows keep working as relative years/quarters, but no real
+      // month labels can be shown for them.
       const startYearWarning = document.getElementById('timelineStartYearWarning');
       if (startYearWarning) {
-        startYearWarning.hidden = Number.isFinite(startYear) || !namedStages.length;
+        startYearWarning.hidden = !!projectStart || !namedStages.length;
       }
       if (!scheduleBody) {
         if (devYearsChanged) recalculate();
@@ -778,23 +903,18 @@
       scheduleBody.innerHTML = '';
       namedStages.forEach(row => {
         const name = row.name.trim();
-        const calendarYear = parseInt(row.year, 10);
-        // Timeline years are calendar years; the cashflow uses years relative to project start.
-        const relative = (Number.isFinite(calendarYear) && Number.isFinite(startYear))
-          ? calendarYear - startYear + 1
-          : 1;
+        // Timeline rows already carry project-relative years — the same axis the cashflow uses.
+        const relative = parseInt(row.year, 10);
         const kept = previous.get(name) || {};
-        const startRelative = Math.max(1, Math.min(devYears, relative || 1));
-        const calendarEndYear = parseInt(row.endYear, 10);
-        const endRelative = (Number.isFinite(calendarEndYear) && Number.isFinite(startYear))
-          ? calendarEndYear - startYear + 1
-          : startRelative;
+        const startRelative = Math.max(1, Math.min(devYears, Number.isFinite(relative) ? relative : 1));
+        const relativeEnd = parseInt(row.endYear, 10);
+        const endRelative = Number.isFinite(relativeEnd) ? relativeEnd : startRelative;
         addScheduleStage({
           name,
           year: startRelative,
-          endYear: Math.max(startRelative, Math.min(devYears, endRelative || startRelative)),
-          costPct: kept.costPct ?? previous.get(name)?.costPct ?? 0,
-          devPct: kept.devPct ?? previous.get(name)?.devPct ?? 0
+          endYear: Math.max(startRelative, Math.min(devYears, endRelative)),
+          costPct: kept.costPct ?? 0,
+          devPct: kept.devPct ?? 0
         });
       });
       window.__batchLoading = wasBatching;

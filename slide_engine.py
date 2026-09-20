@@ -2749,25 +2749,51 @@ def _maybe_map_slide_type(title, project_data):
 TIMELINE_QUARTERS = ('Q1', 'Q2', 'Q3', 'Q4')
 
 
+def _timeline_project_start_index(project_data):
+    """Project start as an absolute month index (year*12 + month-1), or None.
+
+    The client picks a month+year start («2030-02»); drafts saved before that field carry a
+    bare start year, which maps to January.
+    """
+    source = project_data if isinstance(project_data, dict) else {}
+    raw = str(source.get('timeline_start_date') or '').strip()
+    match = re.match(r'^(\d{4})-(\d{1,2})$', raw)
+    if match and 1 <= int(match.group(2)) <= 12:
+        return int(match.group(1)) * 12 + (int(match.group(2)) - 1)
+    legacy = str(source.get('timeline_start_year') or '').strip()
+    if re.match(r'^\d{4}$', legacy):
+        return int(legacy) * 12
+    return None
+
+
+def _format_timeline_month(index):
+    return f'{(index % 12) + 1}/{index // 12}'
+
+
 def compute_timeline_end(year, quarter, duration):
-    """Return the inclusive end year/quarter from a start quarter and duration in months."""
+    """Inclusive end as a project-relative year/quarter plus its month offset from start."""
     try:
         start_year = int(year)
         quarter_index = TIMELINE_QUARTERS.index(str(quarter or '').strip())
         months = int(duration)
     except (TypeError, ValueError):
         return None
-    if months <= 0:
+    if start_year <= 0 or months <= 0:
         return None
-    end_month = start_year * 12 + quarter_index * 3 + months - 1
+    end_month = (start_year - 1) * 12 + quarter_index * 3 + months - 1
     return {
-        'year': str(end_month // 12),
+        'year': str(end_month // 12 + 1),
         'quarter': TIMELINE_QUARTERS[(end_month % 12) // 3],
+        'month_index': end_month,
     }
 
 
 def parse_timeline_phases(project_data):
-    """Return named timeline phases from the draft table, including notes."""
+    """Return named timeline phases from the draft table, including notes.
+
+    Rows keep project-relative years/quarters anchored to the start date; when that date is
+    known each phase also carries its real start/end month labels.
+    """
     source = project_data if isinstance(project_data, dict) else {}
     raw = source.get('timeline_table_data')
     if raw in (None, '', []):
@@ -2779,6 +2805,14 @@ def parse_timeline_phases(project_data):
             raw = []
     if not isinstance(raw, list):
         return []
+    start_index = _timeline_project_start_index(source)
+    # A bare start year with no start date marks a pre-migration draft: its rows hold calendar
+    # years and January-anchored quarters, so shift them onto the relative axis.
+    legacy_start_year = None
+    if not str(source.get('timeline_start_date') or '').strip():
+        legacy = str(source.get('timeline_start_year') or '').strip()
+        if re.match(r'^\d{4}$', legacy):
+            legacy_start_year = int(legacy)
     phases = []
     for item in raw:
         if not isinstance(item, dict):
@@ -2791,12 +2825,17 @@ def parse_timeline_phases(project_data):
         duration = str(item.get('duration') or '').strip()
         end_year = str(item.get('endYear') or '').strip()
         end_quarter = str(item.get('endQuarter') or '').strip()
+        if legacy_start_year is not None:
+            if year.isdigit() and int(year) >= 1000:
+                year = str(max(1, int(year) - legacy_start_year + 1))
+            if end_year.isdigit() and int(end_year) >= 1000:
+                end_year = str(max(1, int(end_year) - legacy_start_year + 1))
+        computed = compute_timeline_end(year, quarter, duration)
         if not end_year or not end_quarter:
-            computed = compute_timeline_end(year, quarter, duration)
             if computed:
                 end_year = end_year or computed['year']
                 end_quarter = end_quarter or computed['quarter']
-        phases.append({
+        phase = {
             'name': name,
             'year': year,
             'quarter': quarter,
@@ -2804,13 +2843,39 @@ def parse_timeline_phases(project_data):
             'endYear': end_year,
             'endQuarter': end_quarter,
             'notes': str(item.get('notes') or '').strip(),
-        })
+        }
+        if start_index is not None:
+            try:
+                phase['start_label'] = _format_timeline_month(
+                    start_index + (int(year) - 1) * 12 + TIMELINE_QUARTERS.index(quarter) * 3)
+            except (TypeError, ValueError):
+                pass
+            end_month_index = computed['month_index'] if computed else None
+            if end_month_index is None:
+                try:
+                    end_month_index = (
+                        (int(end_year) - 1) * 12 + TIMELINE_QUARTERS.index(end_quarter) * 3 + 2)
+                except (TypeError, ValueError):
+                    end_month_index = None
+            if end_month_index is not None:
+                phase['end_label'] = _format_timeline_month(start_index + end_month_index)
+        phases.append(phase)
     return phases
 
 
 def format_timeline_phase_line(phase):
-    start = ' '.join(part for part in (phase.get('year'), phase.get('quarter')) if part)
-    end = ' '.join(part for part in (phase.get('endYear'), phase.get('endQuarter')) if part)
+    def _point(year, quarter, label):
+        if label:
+            return label
+        parts = []
+        if year:
+            parts.append(f'سنة {year}')
+        if quarter:
+            parts.append(f'الربع {str(quarter).lstrip("Q")}')
+        return ' '.join(parts)
+
+    start = _point(phase.get('year'), phase.get('quarter'), phase.get('start_label'))
+    end = _point(phase.get('endYear'), phase.get('endQuarter'), phase.get('end_label'))
     span = f'{start} إلى {end}' if start and end else (start or end)
     duration = phase.get('duration')
     duration_text = f' لمدة {duration} شهر' if duration else ''
@@ -3175,6 +3240,7 @@ EXTRA_FIELD_LABELS = {
     'zoning_code': 'كود التنظيم',
     'population_density': 'الكثافة السكانية',
     'population_density_source': 'مصدر الكثافة السكانية',
+    'timeline_start_date': 'تاريخ بداية المشروع',
     'timeline_start_year': 'سنة بداية المشروع',
     'timeline_years': 'عدد سنوات المشروع',
 }

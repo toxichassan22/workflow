@@ -235,6 +235,13 @@ DRAFT_BLOB_LABELS = {
     'landmarks_matrix': 'مسافات المعالم',
 }
 
+# Scalar draft keys with no PREBUILT_FIELDS row of their own — still worth a readable name.
+DRAFT_SCALAR_LABELS = {
+    'timeline_start_date': 'تاريخ بداية المشروع',
+    'timeline_start_year': 'سنة بداية المشروع',
+    'timeline_years': 'عدد سنوات المشروع',
+}
+
 DRAFT_IGNORED_KEYS = {
     'draftId', 'draft_id', 'sectionStatuses', 'regen_seed', 'refresh_maps',
     'updated_at', 'created_at', 'revision',
@@ -277,6 +284,7 @@ def describe_draft_changes(old_data, new_data, field_labels=None):
     old_data = old_data if isinstance(old_data, dict) else {}
     new_data = new_data if isinstance(new_data, dict) else {}
     labels = dict(field_labels or _draft_field_labels())
+    labels.update(DRAFT_SCALAR_LABELS)
     labels.update(DRAFT_BLOB_LABELS)
     lines = []
 

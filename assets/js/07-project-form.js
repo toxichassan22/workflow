@@ -88,11 +88,34 @@
       refreshClientEnteredLandFieldStates();
       const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
       const timelineBody = document.getElementById('timelineTableBody');
-      if (timelineBody && timelineRows.length) {
+      if (timelineBody) {
+        // Drafts saved before «تاريخ البداية» stored calendar years against a bare start year;
+        // map that year to January and rewrite the rows as project-relative years.
+        const storedStart = typeof parseTimelineStartValue === 'function'
+          ? parseTimelineStartValue(source.timeline_start_date) : null;
+        const legacyStartYear = parseInt(source.timeline_start_year, 10);
+        if (!storedStart && Number.isFinite(legacyStartYear)) {
+          const startInput = document.getElementById('tlStartDate');
+          if (startInput) startInput.value = legacyStartYear + '-01';
+          tenantProjectData.timeline_start_date = legacyStartYear + '-01';
+          ['year', 'endYear'].forEach(field => timelineRows.forEach(row => {
+            const calendarYear = parseInt(row && row[field], 10);
+            if (Number.isFinite(calendarYear) && calendarYear >= 1000) {
+              row[field] = String(Math.max(1, calendarYear - legacyStartYear + 1));
+            }
+          }));
+        }
+        // The stored rows are authoritative even when empty: a cleared timeline hydrates to one
+        // blank row instead of reviving whatever the builder left behind.
         timelineBody.innerHTML = '';
-        timelineRows.forEach(row => addTimelineRow(row));
+        if (timelineRows.length) {
+          timelineRows.forEach(row => addTimelineRow(row));
+        } else {
+          addTimelineRow();
+        }
         const timelineInput = document.getElementById('timelineTableData');
         if (timelineInput) timelineInput.value = JSON.stringify(timelineRows);
+        if (typeof updateTimelineProjectEnd === 'function') updateTimelineProjectEnd();
       }
       const legacyFinancial = parseFinancialStudySnapshot(source.financial_calc_data);
       const compatibleComponents = parseStoredProjectTable(source.project_components_data);
@@ -185,6 +208,8 @@
       resetPresentationUndo();
       showTenantPage('tenantProjectPage');
       if (await loadTenantProjectForm()) {
+        // A new project opens with the standard development phases already named.
+        if (typeof seedDefaultTimelinePhases === 'function') seedDefaultTimelinePhases();
         // A new project is legitimately blank, so its freshly built form counts as filled.
         markTenantProjectFormFilled();
         refreshGlobalRail();
