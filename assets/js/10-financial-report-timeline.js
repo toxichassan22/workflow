@@ -587,7 +587,7 @@
         <h3 class="tenant-section-title">الجدول الزمني للمشروع</h3>
         <div class="tenant-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px">
           <div class="tenant-field"><label>سنة البداية</label><input type="number" id="tlStartYear" data-key="timeline_start_year" data-type="number" value="2026" onchange="recalcTimeline()"></div>
-          <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" value="3" onchange="recalcTimeline()"></div>
+          <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" onchange="recalcTimeline()"></div>
         </div>
         <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» — بدونها تُحسب كل المراحل في السنة الأولى.</div>
         <div class="fin-table-wrap">

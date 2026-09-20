@@ -682,7 +682,7 @@
       tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr);
     }
     function syncFinanceDrawPlan(plan) {
-      const years = Math.max(1, Math.min(20, Math.round(num('financeDrawYears') || 1)));
+      const years = Math.max(0, Math.min(20, Math.round(num('financeDrawYears'))));
       const tb = document.querySelector('#financeDrawTable tbody'); if (!tb) return;
       const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, drawPct: parseNumber(tr.querySelector('[data-field="drawPct"] input')?.value) }));
       tb.innerHTML = '';
@@ -695,7 +695,7 @@
     }
     function syncFinanceRepaymentPlan(plan) {
       const startYear = Math.max(1, Math.min(60, Math.round(num('financeRepaymentStartYear') || 1)));
-      const years = Math.max(1, Math.min(40, Math.round(num('financeRepaymentYears') || 1)));
+      const years = Math.max(0, Math.min(40, Math.round(num('financeRepaymentYears'))));
       const tb = document.querySelector('#financeRepaymentTable tbody'); if (!tb) return;
       const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({
         year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1,
@@ -717,7 +717,7 @@
     function fundAdditionalFeeFormulaText(method) { return { fixed: 'المبلغ المدخل مباشرة', percentFundCapital: 'رأس مال الصندوق × النسبة', percentProjectCost: 'إجمالي تكلفة المشروع × النسبة', percentExit: 'إجمالي قيمة التخارج × النسبة', percentProfit: 'الربح السنوي الموجب × النسبة' }[method] || '—' }
     function calculateFundAdditionalFee(method, value, bases = {}) { const entered = Math.max(0, Number(value) || 0); if (method === 'fixed') return entered; if (method === 'percentFundCapital') return Math.max(0, Number(bases.fundCapital) || 0) * entered / 100; if (method === 'percentProjectCost') return Math.max(0, Number(bases.projectCost) || 0) * entered / 100; if (method === 'percentExit') return Math.max(0, Number(bases.exitValue) || 0) * entered / 100; if (method === 'percentProfit') return Math.max(0, Number(bases.profit) || 0) * entered / 100; return 0 }
     function addOccupancyRampYear(d = {}) { const tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="operationYear"><input type="number" value="${financialInputNumber(d.operationYear, 1)}" readonly></td><td data-field="studyYear"><input type="number" value="${financialInputNumber(d.studyYear, ((num('developmentYears') || 0) + financialInputNumber(d.operationYear, 1)))}" readonly></td><td data-field="reachPct"><input type="number" min="0" max="100" value="${financialInputNumber(d.reachPct, 100)}"></td><td class="row-result rampRevenue">0</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
-    function syncOccupancyRamp(plan) { const years = Math.max(1, Math.min(40, Math.round(num('operationYears') || 1))), developmentYears = Math.max(1, Math.round(num('developmentYears') || 1)), tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ operationYear: parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value), reachPct: parseNumber(tr.querySelector('[data-field="reachPct"] input')?.value) })); tb.innerHTML = ''; const defaults = [60, 75, 90, 100]; for (let operationYear = 1; operationYear <= years; operationYear++) { const found = existing.find(r => Number(r.operationYear) === operationYear); addOccupancyRampYear(found || { operationYear, studyYear: developmentYears + operationYear, reachPct: defaults[operationYear - 1] ?? 100 }); } }
+    function syncOccupancyRamp(plan) { const years = Math.max(0, Math.min(40, Math.round(num('operationYears')))), developmentYears = Math.max(1, Math.round(num('developmentYears') || 1)), tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ operationYear: parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value), reachPct: parseNumber(tr.querySelector('[data-field="reachPct"] input')?.value) })); tb.innerHTML = ''; const defaults = [60, 75, 90, 100]; for (let operationYear = 1; operationYear <= years; operationYear++) { const found = existing.find(r => Number(r.operationYear) === operationYear); addOccupancyRampYear(found || { operationYear, studyYear: developmentYears + operationYear, reachPct: defaults[operationYear - 1] ?? 100 }); } }
     function occupancyReachForYear(operationYear) { if (operationYear < 1) return 0; const row = [...document.querySelectorAll('#occupancyRampTable tbody tr')].find(tr => parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value) === operationYear); return Math.max(0, Math.min(100, parseNumber(row?.querySelector('[data-field="reachPct"] input')?.value))) / 100 }
 
     // A schedule table must stop where its own entered period stops. Both tables used to render one
@@ -1033,7 +1033,7 @@
 
     function projectModeFlags() { const mode = val('unitRevenueMode') || 'mixed'; return { mode, sales: mode === 'sale' || mode === 'mixed', rental: mode === 'rental' || mode === 'mixed', anyRevenue: mode !== 'nonRevenue' } }
     function syncProjectYearBounds(totalYears, developmentYears) {
-      ['salesStartYear', 'landContributionYear', 'saleExitYear', 'operatingExitYear', 'roiEndYear', 'irrEndYear', 'fundFeeStartYear', 'fundFeeEndYear', 'performanceCrystallizationYear', 'graceStartYear'].forEach(id => { const el = document.getElementById(id); if (!el) return; el.max = String(totalYears); const n = parseNumber(el.value); if (n > totalYears) el.value = String(totalYears); if (n < 1) el.value = '1' });
+      ['salesStartYear', 'landContributionYear', 'saleExitYear', 'operatingExitYear', 'roiEndYear', 'irrEndYear', 'fundFeeStartYear', 'fundFeeEndYear', 'performanceCrystallizationYear', 'graceStartYear'].forEach(id => { const el = document.getElementById(id); if (!el) return; el.max = String(totalYears); const raw = String(el.value ?? '').trim(); if (raw === '') return; const n = parseNumber(raw); if (n > totalYears) el.value = String(totalYears); if (n < 1) el.value = '1' });
       document.querySelectorAll('#scheduleTable tbody tr').forEach(tr => { const year = parseNumber(tr.dataset.stageYear || 1); if (year > developmentYears) tr.dataset.stageYear = String(developmentYears) });
     }
     function validateComponentAreas() {
@@ -1139,7 +1139,7 @@
       updateDynamicFields();
       updateGraceRevenueOptions();
       const developmentYears = Math.max(1, Math.min(20, Math.round(num('developmentYears') || 1)));
-      const operationYears = modeFlags.rental ? Math.max(1, Math.min(40, Math.round(num('operationYears') || 10))) : 0;
+      const operationYears = modeFlags.rental ? Math.max(0, Math.min(40, Math.round(num('operationYears')))) : 0;
       if (modeFlags.rental && document.querySelectorAll('#occupancyRampTable tbody tr').length !== operationYears) syncOccupancyRamp();
       const salesStartYear = Math.max(1, Math.round(num('salesStartYear') || 1));
       const salesYears = Math.max(1, Math.min(20, Math.round(num('salesYears') || 1)));
@@ -1149,7 +1149,9 @@
       const naturalTotalYears = Math.max(developmentYears, rentalEndYear, salesEndYear);
       const totalYears = naturalTotalYears;
       syncProjectYearBounds(totalYears, developmentYears);
-      const disp = document.getElementById('totalProjectYearsDisplay'); if (disp) disp.value = totalYears + ' سنة';
+      const disp = document.getElementById('totalProjectYearsDisplay');
+      const enteredYears = num('developmentYears') || num('operationYears') || num('salesYears') || num('salesStartYear');
+      if (disp) disp.value = enteredYears ? totalYears + ' سنة' : '';
       const landArea = num('landArea'), coverage = num('coverageRate') / 100, basement = num('basementArea');
       const builtUpAreaAbove = num('builtUpAreaAbove');
       const landMethod = val('landValueMethod'), landStatus = val('landStatus'), rentMethod = val('landRentMethod');
@@ -1165,7 +1167,7 @@
       const landContributionType = val('landContributionType') || 'inKind';
       const landContributionYear = Math.max(1, Math.min(totalYears, Math.round(num('landContributionYear') || 1)));
       const covEl = document.getElementById('coveredArea'), openEl = document.getElementById('openArea'), tBuiltEl = document.getElementById('totalBuiltUpArea'), opStartEl = document.getElementById('operationStartYear'), lValEl = document.getElementById('landValue'), aRentEl = document.getElementById('annualLandRent');
-      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (opStartEl) opStartEl.value = modeFlags.rental ? 'السنة ' + operationStartYear : 'غير مطبق'; if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
+      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (opStartEl) opStartEl.value = modeFlags.rental && operationYears ? 'السنة ' + operationStartYear : 'غير مطبق'; if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
       if (document.getElementById('landCostIncluded')) document.getElementById('landCostIncluded').value = money(landCostIncluded);
       if (document.getElementById('landRentSummary')) document.getElementById('landRentSummary').value = money(landRent);
 
@@ -1242,12 +1244,12 @@
       const exitOn = val('exitEnabled') === 'yes', exitMethod = exitOn && modeFlags.rental ? val('exitMethod') : 'none', exitInput = num('exitInput'), saleExitMethod = exitOn && modeFlags.sales ? (val('saleExitMethod') || 'none') : 'none', saleExitYear = Math.max(1, Math.min(totalYears, Math.round(num('saleExitYear') || totalYears))), operatingExitYear = Math.max(1, Math.min(totalYears, Math.round(num('operatingExitYear') || totalYears))), saleExitCostRate = Math.max(0, num('saleExitCostRate')) / 100, operatingExitCostRate = Math.max(0, num('operatingExitCostRate')) / 100, settleDebtAtExit = val('settleDebtAtExit') !== 'no';
       const activeExitYears = []; if (saleExitMethod !== 'none') activeExitYears.push(saleExitYear); if (exitMethod !== 'none') activeExitYears.push(operatingExitYear);
       const equityDistributionYear = activeExitYears.length ? Math.max(...activeExitYears) : totalYears;
-      const financeOn = val('financeEnabled') === 'yes', financeShare = financeOn ? Math.max(0, Math.min(100, num('financingRate'))) / 100 : 0, financeBase = val('financeBase') || 'withLand', financeBaseAmount = Math.max(0, financeBase === 'withoutLand' ? projectCost - landCostIncluded : projectCost), facilityAmount = financeBaseAmount * financeShare, arrangementFee = financeOn ? facilityAmount * (num('financeArrangementFeeRate') / 100) : 0, annualFinanceRate = financeOn ? num('annualFinanceRate') / 100 : 0, financeInterestMethod = val('financeInterestMethod') || 'declining', financeDrawYears = Math.max(1, Math.min(20, Math.round(num('financeDrawYears') || 1)));
+      const financeOn = val('financeEnabled') === 'yes', financeShare = financeOn ? Math.max(0, Math.min(100, num('financingRate'))) / 100 : 0, financeBase = val('financeBase') || 'withLand', financeBaseAmount = Math.max(0, financeBase === 'withoutLand' ? projectCost - landCostIncluded : projectCost), facilityAmount = financeBaseAmount * financeShare, arrangementFee = financeOn ? facilityAmount * (num('financeArrangementFeeRate') / 100) : 0, annualFinanceRate = financeOn ? num('annualFinanceRate') / 100 : 0, financeInterestMethod = val('financeInterestMethod') || 'declining', financeDrawYears = Math.max(0, Math.min(20, Math.round(num('financeDrawYears'))));
       if (document.querySelectorAll('#financeDrawTable tbody tr').length !== financeDrawYears) syncFinanceDrawPlan();
       const financePlan = [...document.querySelectorAll('#financeDrawTable tbody tr')].map(tr => ({ tr, year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, drawPct: Math.max(0, parseNumber(tr.querySelector('[data-field="drawPct"] input')?.value)) }));
       const financeDrawPctTotal = financePlan.reduce((sum, row) => sum + row.drawPct, 0);
       financePlan.forEach(row => { const amount = financeDrawPctTotal ? facilityAmount * (row.drawPct / financeDrawPctTotal) : 0; const c = row.tr.querySelector('.financeDrawAmount'); if (c) c.textContent = money(amount); });
-      const financeRepaymentStartYear = Math.max(1, Math.min(totalYears, Math.round(num('financeRepaymentStartYear') || 1))), financeRepaymentYears = Math.max(1, Math.min(40, Math.round(num('financeRepaymentYears') || 1)));
+      const financeRepaymentStartYear = Math.max(1, Math.min(totalYears, Math.round(num('financeRepaymentStartYear') || 1))), financeRepaymentYears = Math.max(0, Math.min(40, Math.round(num('financeRepaymentYears'))));
       if (document.querySelectorAll('#financeRepaymentTable tbody tr').length !== financeRepaymentYears) syncFinanceRepaymentPlan();
       const financeRepaymentPlan = [...document.querySelectorAll('#financeRepaymentTable tbody tr')].map(tr => ({ tr, year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, repaymentPct: Math.max(0, parseNumber(tr.querySelector('[data-field="repaymentPct"] input')?.value)) }));
       const financeRepaymentPctTotal = financeRepaymentPlan.reduce((sum, row) => sum + row.repaymentPct, 0);
