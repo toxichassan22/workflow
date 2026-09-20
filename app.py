@@ -324,7 +324,12 @@ if TENANT_OPENROUTER_DEFAULT_RESET not in ('daily', 'weekly', 'monthly', 'none')
 # own is refused before any provider call instead of silently burning the
 # shared global key. Super-admin operations always use the global key.
 # Default 0 keeps the historical fallback until the owner enables it.
-REQUIRE_TENANT_OPENROUTER_KEY = (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
+# The management key must also be configured; without it per-tenant keys cannot
+# be provisioned, so enforcing strict mode would block every AI call.
+REQUIRE_TENANT_OPENROUTER_KEY = (
+    (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
+    and bool(OPENROUTER_MANAGEMENT_KEY)
+)
 GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
