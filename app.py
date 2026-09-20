@@ -20675,7 +20675,7 @@ def _market_search_ran(res):
 
 
 def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None,
-                             search_context=None, server_tools=True):
+                             search_context=None, server_tools=True, max_search_results=8):
     """Search-backed market call with JSON, provider, and credit fallbacks.
 
     ``server_tools=False`` drops the openrouter:web_search tool — Gemini answers
@@ -20707,7 +20707,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     plugin = {
         'id': 'web',
         'engine': (os.environ.get('MARKET_SEARCH_PLUGIN_ENGINE') or 'exa').strip() or 'exa',
-        'max_results': 8,
+        'max_results': max(4, min(20, int(max_search_results or 8))),
     }
     plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
@@ -21102,8 +21102,10 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
     report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
+    # The reasoning budget counts against max_tokens on this model — a tight cap
+    # truncates the competitors array mid-generation and returns a thin table.
     res, provider_error = _call_market_study_model(
-        system_prompt, user_prompt, max_tokens=6000,
+        system_prompt, user_prompt, max_tokens=14000, max_search_results=14,
         usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
         search_context={'city': payload.get('city'), 'country': 'SA'})
     parsed, parse_error = _parse_market_model_json(res)
@@ -21116,6 +21118,62 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             'providerError': provider_error,
         }
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
+    dropped_far = []
+    try:
+        _radius_limit = float(payload.get('resolvedRadiusKm') or 0)
+    except (TypeError, ValueError):
+        _radius_limit = 0
+    if _radius_limit > 0:
+        # Flagging keeps borderline rows for review, but a competitor hundreds of
+        # kilometres away is noise, not a choice — drop it before counting, so a
+        # list padded with far cities still triggers the expansion pass.
+        cutoff = max(_radius_limit * 3, 60)
+        generated = [row for row in generated if isinstance(row, dict)]
+        _kept = []
+        for row in generated:
+            distance = market_study._number_in_text(row.get('distance_km'))
+            if distance is not None and distance > cutoff:
+                dropped_far.append(str(row.get('name') or '').strip())
+                continue
+            _kept.append(row)
+        generated = _kept
+    named_generated = [row for row in generated
+                       if isinstance(row, dict) and str(row.get('name') or '').strip()]
+    if (mode != 'fill' and _market_search_ran(res)
+            and len(named_generated) < market_study.COMPETITOR_MIN_DIRECT):
+        # One expansion pass: a thin list usually means the model settled for the
+        # first pages it saw. Asking for additional named projects — beyond the
+        # ones already found — gets a fresh retrieval round and a bigger table.
+        report(24, 'عدد المنافسين أقل من الحد الأدنى — بحث إضافي عن مشاريع مسماة أخرى...')
+        expansion_prompt = (
+            user_prompt
+            + '\n\nالاستجابة السابقة أعادت منافسين قلائل: '
+            + '، '.join(str(row.get('name') or '') for row in named_generated)
+            + '. ابحث في صفحات قوائم ومقالات أخرى عن مشاريع مسماة إضافية داخل النطاق '
+              'أو وسّع تدريجيًا خارجه، وأعد قائمة كاملة أكبر تتضمن السابقين وغيرهم.')
+        res2, _err2 = _call_market_study_model(
+            system_prompt, expansion_prompt, max_tokens=14000, max_search_results=14,
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
+            search_context={'city': payload.get('city'), 'country': 'SA'})
+        parsed2, _parse_err2 = _parse_market_model_json(res2)
+        more = parsed2.get('competitors') if isinstance(parsed2, dict) else []
+        if isinstance(more, list):
+            seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
+            for row in more:
+                if not isinstance(row, dict):
+                    continue
+                key = market_study._fold_choice(row.get('name'))
+                if not key or key in seen_names:
+                    continue
+                distance = market_study._number_in_text(row.get('distance_km'))
+                if _radius_limit > 0 and distance is not None and distance > cutoff:
+                    dropped_far.append(str(row.get('name') or '').strip())
+                    continue
+                seen_names.add(key)
+                generated.append(row)
+            # Prefer the richer citation set for later logo/verification passes.
+            if _market_citation_urls(res2):
+                res = res2 if len(_market_citation_urls(res2)) > len(_market_citation_urls(res)) else res
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
     _attach_retrieved_citations(merged, _market_citation_pages(res))
@@ -21148,6 +21206,10 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
+    notes = str(parsed.get('notes') or '').strip()
+    if dropped_far:
+        far_note = 'أُسقطت من الجدول مشاريع بعيدة جدًا عن النطاق: ' + '، '.join(dropped_far)
+        notes = f'{notes} — {far_note}' if notes else far_note
     return {
         'success': True,
         'competitors': merged,
@@ -21160,7 +21222,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')),
         'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
-        'notes': parsed.get('notes') or '',
+        'notes': notes,
     }
 
 
