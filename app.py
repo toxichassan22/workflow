@@ -449,6 +449,18 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                     'error_code': 'TENANT_KEY_CHECK_FAILED'}
         if raw:
             return None
+        # A management key is configured: try to provision one on the fly
+        # instead of blocking the call. This keeps strict mode useful while
+        # not requiring a manual key creation step for every new company.
+        if _openrouter_management_key():
+            print(f"[OPENROUTER KEY] auto-provisioning key for tenant {tid}")
+            try:
+                _ensure_tenant_openrouter_key(tid)
+            except Exception as exc:
+                print(f"[OPENROUTER KEY] auto-provision failed: {exc}")
+            raw = db.get_tenant_openrouter_key_raw(tid)
+            if raw:
+                return None
         return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
                 'error_code': 'NO_TENANT_KEY'}
     except Exception as exc:
