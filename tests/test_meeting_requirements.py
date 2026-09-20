@@ -10876,6 +10876,27 @@ class MeetingRequirementsTests(unittest.TestCase):
         with patch.object(module, '_call_market_study_model', return_value=(response, '')):
             module._verify_competitor_row(filled, {'city': 'جدة'}, {})
         self.assertEqual(filled.get('price_value'), '30000')
+        # Same-name projects in other Arab markets are not evidence: a Dubai
+        # page must not feed the row, its price, or its logo.
+        foreign_res = {
+            'choices': [{'message': {
+                'content': json.dumps({'exists': True, 'price': {
+                    'type': 'إيجار الوحدة السنوي', 'value': '45000',
+                    'url': 'https://propertyfinder.ae/ar/new-projects/olu'}}),
+                'annotations': [
+                    {'type': 'url_citation', 'url_citation': {
+                        'url': 'https://propertyfinder.ae/ar/new-projects/olu',
+                        'title': 'مشروع علو الرحاب دبي'}},
+                ],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        foreign = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
+        with patch.object(module, '_call_market_study_model', return_value=(foreign_res, '')):
+            module._verify_competitor_row(foreign, {'city': 'جدة'}, {})
+        self.assertTrue(foreign.get('no_search_evidence'))
+        self.assertFalse(foreign.get('price_value'))
+        self.assertFalse(foreign.get('logo_source_url'))
 
     def test_market_study_prices_require_a_dedicated_search(self):
         import market_study

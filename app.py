@@ -21655,6 +21655,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     official = ''
     for page in _market_citation_pages(response):
         url = str(page.get('url') or '').strip()
+        if url and _foreign_market_host(url):
+            continue
         haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
         hits = sum(1 for token in tokens if token in haystack)
         if hits >= needed:
@@ -21679,8 +21681,9 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
     parsed, _parse_error = _parse_market_model_json(response)
-    _apply_verified_competitor_price(
-        row, parsed, set(_market_citation_urls(response)))
+    # A project price is only as good as the page naming this competitor —
+    # the figure must come from a matched page, not any retrieved one.
+    _apply_verified_competitor_price(row, parsed, set(matched))
 
 
 def _apply_verified_competitor_price(row, parsed, citation_urls):
@@ -23969,6 +23972,27 @@ _AGGREGATOR_HOST_TOKENS = (
     'youtube.', 'tiktok.', 'google.', 'bing.', 'maps.',
 )
 
+# Same-name projects in other Arab markets are a constant trap: «أورا» matched
+# Dubai pages and would have imported a dirham price and an off-country logo.
+# Saudi competitors never live on these hosts.
+_FOREIGN_ARAB_TLDS = (
+    '.ae', '.eg', '.qa', '.kw', '.bh', '.om', '.jo', '.lb',
+    '.ma', '.tn', '.dz', '.ly', '.iq', '.sd', '.sy', '.ps',
+)
+_FOREIGN_ARAB_HOST_TOKENS = (
+    'dubai', 'abudhabi', 'sharjah', 'uae', 'egypt', 'cairo',
+    'qatar', 'kuwait', 'bahrain', 'oman', 'jordan', 'morocco',
+)
+
+
+def _foreign_market_host(url):
+    """True when a URL's host points at another Arab market, not Saudi."""
+    host = _normalized_web_host(url)
+    if not host:
+        return False
+    return host.endswith(_FOREIGN_ARAB_TLDS) or any(
+        token in host for token in _FOREIGN_ARAB_HOST_TOKENS)
+
 
 def _official_citation_pages(pages, name):
     """Citation pages that look like the competitor's own site.
@@ -23986,7 +24010,8 @@ def _official_citation_pages(pages, name):
     for page in pages or []:
         url = str(page.get('url') or '').strip()
         host = _normalized_web_host(url)
-        if not host or any(token in host for token in _AGGREGATOR_HOST_TOKENS):
+        if (not host or any(token in host for token in _AGGREGATOR_HOST_TOKENS)
+                or _foreign_market_host(url)):
             continue
         haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
         if sum(1 for token in tokens if token in haystack) >= needed:
