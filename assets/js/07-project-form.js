@@ -565,45 +565,106 @@
         if (badge && badge.nextSibling) header.insertBefore(line, badge.nextSibling);
         else header.appendChild(line);
       }
-      let block = section.querySelector(':scope > .section-version-block');
-      if (!block) {
-        block = document.createElement('div');
-        block.className = 'section-version-block';
-        block.hidden = true;
-        const history = document.createElement('div');
-        history.className = 'section-version-history';
-        history.id = 'section-version-history-' + sectionKey;
-        history.hidden = true;
-        block.appendChild(history);
-        if (header && header.nextSibling) section.insertBefore(block, header.nextSibling);
-        else section.appendChild(block);
+      return line;
+    }
+
+    // ── Versions page: a dedicated overlay instead of an inline panel ────────
+    // The section's "الإصدارات" button opens a page of its own listing every
+    // snapshot; "معاينة" renders one version like the section itself with each
+    // field's previous and new value side by side.
+    let sectionVersionsPageKey = null;
+
+    function ensureSectionVersionsPage() {
+      let overlay = document.getElementById('sectionVersionsPage');
+      if (overlay) return overlay;
+      overlay = document.createElement('div');
+      overlay.id = 'sectionVersionsPage';
+      overlay.className = 'om-modal-overlay section-versions-overlay';
+      overlay.setAttribute('data-a11y-modal', '');
+      overlay.addEventListener('click', event => {
+        if (event.target === overlay) closeSectionVersionsPage();
+      });
+      const card = document.createElement('div');
+      card.className = 'om-modal-card section-versions-card';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+      const head = document.createElement('div');
+      head.className = 'sag-modal-head';
+      const title = document.createElement('h2');
+      title.id = 'sectionVersionsPageTitle';
+      head.appendChild(title);
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'btn ghost small';
+      closeBtn.textContent = WFT('common.close', 'إغلاق');
+      closeBtn.addEventListener('click', closeSectionVersionsPage);
+      head.appendChild(closeBtn);
+      card.appendChild(head);
+      const body = document.createElement('div');
+      body.id = 'sectionVersionsPageBody';
+      card.appendChild(body);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      return overlay;
+    }
+
+    function openSectionVersionsPage(sectionKey) {
+      const overlay = ensureSectionVersionsPage();
+      sectionVersionsPageKey = sectionKey;
+      sectionVersionsOpen[sectionKey] = true;
+      const title = document.getElementById('sectionVersionsPageTitle');
+      const section = getProjectSectionElement(sectionKey);
+      const header = section && section.querySelector(':scope > h3.tenant-section-title');
+      const label = (header && header.dataset.arLabel) || PROJECT_SECTION_PRESENTATION_TITLES[sectionKey] || sectionKey;
+      title.textContent = WFT('sectionver.page_title', 'إصدارات القسم — {s}', { s: label });
+      const body = document.getElementById('sectionVersionsPageBody');
+      body.innerHTML = '';
+      const history = document.createElement('div');
+      history.className = 'section-version-history';
+      history.id = 'section-version-history-' + sectionKey;
+      body.appendChild(history);
+      overlay.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(overlay);
+      renderSectionVersionBlock(sectionKey);
+      if (!(sectionVersionCache[sectionKey] || []).length) {
+        void loadAllSectionVersions().then(() => {
+          if (sectionVersionsPageKey === sectionKey) renderSectionVersionBlock(sectionKey);
+        });
       }
-      return block;
+    }
+
+    function closeSectionVersionsPage() {
+      const overlay = document.getElementById('sectionVersionsPage');
+      if (overlay) overlay.style.display = 'none';
+      sectionVersionsPageKey = null;
+      if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
     }
 
     function renderSectionVersionBlock(sectionKey) {
-      const block = attachSectionVersionBlock(sectionKey);
+      attachSectionVersionBlock(sectionKey);
       const line = document.getElementById('section-version-line-' + sectionKey);
       const history = document.getElementById('section-version-history-' + sectionKey);
       const versions = sectionVersionCache[sectionKey] || [];
       // The empty state holds no permanent space: the status line renders only
-      // once a version exists, and the empty message stays inside the history
-      // panel the user opens through the versions button.
+      // once a version exists, and the versions list itself lives on the
+      // dedicated versions page — without it open there is nothing to render into.
       if (line) {
         line.hidden = !versions.length;
         line.textContent = versions.length ? sectionVersionLineText(versions[0]) : '';
       }
-      // The block now only carries the opened history panel.
-      if (block) block.hidden = !sectionVersionsOpen[sectionKey];
       if (!history) return;
-      if (!sectionVersionsOpen[sectionKey]) { history.hidden = true; history.innerHTML = ''; return; }
       history.hidden = false;
       history.innerHTML = '';
+      const hint = document.createElement('p');
+      hint.className = 'tenant-hint';
+      if (sectionVersionsLoading && !versions.length) {
+        hint.textContent = WFT('loader.loading', 'جاري التحميل...');
+        history.appendChild(hint);
+        return;
+      }
       if (!versions.length) {
-        const empty = document.createElement('p');
-        empty.className = 'tenant-hint';
-        empty.textContent = WFT('sectionver.line_none', 'لا توجد إصدارات');
-        history.appendChild(empty);
+        hint.textContent = WFT('sectionver.line_none', 'لا توجد إصدارات');
+        history.appendChild(hint);
         return;
       }
       versions.forEach(version => {
@@ -641,7 +702,7 @@
           row.appendChild(btn);
           return btn;
         };
-        addBtn('مقارنة', () => toggleSectionVersionDiff(version.id, sectionKey));
+        addBtn(WFT('sectionver.preview', 'معاينة'), () => toggleSectionVersionDiff(version.id, sectionKey));
         if (version.status === 'pending') {
           addBtn('اعتماد', () => decideSectionVersion(version.id, sectionKey, 'approved'));
           addBtn('إعادة للتعديل', () => decideSectionVersion(version.id, sectionKey, 'returned'));
@@ -694,12 +755,7 @@
     }
 
     function toggleSectionVersions(sectionKey) {
-      sectionVersionsOpen[sectionKey] = !sectionVersionsOpen[sectionKey];
-      if (sectionVersionsOpen[sectionKey] && !(sectionVersionCache[sectionKey] || []).length) {
-        void loadAllSectionVersions().then(() => renderSectionVersionBlock(sectionKey));
-      } else {
-        renderSectionVersionBlock(sectionKey);
-      }
+      openSectionVersionsPage(sectionKey);
     }
 
     async function sendSectionVersion(sectionKey) {
@@ -729,8 +785,8 @@
           }
           return;
         }
-        sectionVersionsOpen[sectionKey] = true;
         toast(WFT('sectionver.send_done', 'تم إرسال القسم للاعتماد'));
+        openSectionVersionsPage(sectionKey);
         await loadAllSectionVersions();
       } finally {
         if (btn) btn.disabled = false;
@@ -776,8 +832,8 @@
         hideLoader();
         if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.restore_failed', 'تعذر الاستعادة')); return; }
         if (result.revision !== undefined) tenantDraftRevision = Number(result.revision) || tenantDraftRevision;
-        sectionVersionsOpen[sectionKey] = true;
         toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
+        openSectionVersionsPage(sectionKey);
         await loadAllSectionVersions();
       } finally {
         try { hideLoader(); } catch (e) {}
@@ -802,7 +858,7 @@
     // One side of the comparison: a captioned box so the previous value always
     // sits next to the new value, even when one of them is empty (added fields
     // have no previous value, removed fields have no new one).
-    function sectionVersionDiffCell(side, value) {
+    function sectionVersionDiffCell(side, value, isAttachment) {
       const cell = document.createElement('div');
       cell.className = 'section-version-diff-cell section-version-diff-' + side;
       const cap = document.createElement('span');
@@ -813,11 +869,50 @@
       cell.appendChild(cap);
       const val = document.createElement('span');
       val.className = 'section-version-diff-value';
-      const text = diffValueText(value);
+      let text;
+      if (isAttachment) {
+        const names = diffAttachmentNames(value);
+        text = names.length ? names.join('\n') : diffValueText(value);
+      } else {
+        text = diffValueText(value);
+      }
       val.textContent = text;
       if (text === '—') val.classList.add('is-empty');
       cell.appendChild(val);
       return cell;
+    }
+
+    // Attachment snapshots store file objects/ids; names read better than JSON.
+    function diffAttachmentNames(value) {
+      const names = [];
+      const walk = item => {
+        if (!item) return;
+        if (Array.isArray(item)) { item.forEach(walk); return; }
+        if (typeof item === 'object') {
+          const name = item.originalName || item.original_name || item.name || item.filename;
+          if (typeof name === 'string' && name.trim()) names.push(name);
+          else Object.keys(item).forEach(key => walk(item[key]));
+          return;
+        }
+        if (typeof item === 'string' && item.trim()) names.push(item);
+      };
+      walk(value);
+      return names;
+    }
+
+    // The preview mirrors the section's own field order: controls carry
+    // data-key, so their DOM position orders the diff rows. Snapshot-only keys
+    // (stored blobs, attachments) keep their diff order at the end.
+    function sectionFieldOrderMap(sectionKey) {
+      const order = {};
+      const section = getProjectSectionElement(sectionKey);
+      if (section) {
+        section.querySelectorAll('[data-key]').forEach((el, idx) => {
+          const key = el.dataset ? el.dataset.key : '';
+          if (key && order[key] === undefined) order[key] = idx;
+        });
+      }
+      return order;
     }
 
     function sectionVersionDiffStatusText(status) {
@@ -828,33 +923,37 @@
     }
 
     function renderSectionDiffPanel(sectionKey) {
+      const body = document.getElementById('sectionVersionsPageBody');
       const history = document.getElementById('section-version-history-' + sectionKey);
-      if (!history) return;
-      let panel = history.querySelector(':scope > .section-version-diff');
+      if (!body || !history) return;
+      let panel = body.querySelector(':scope > .section-version-diff');
       if (!panel) {
         panel = document.createElement('div');
         panel.className = 'section-version-diff';
-        history.insertBefore(panel, history.firstChild);
+        body.appendChild(panel);
       }
       const diff = sectionVersionDiffCache[sectionKey];
-      if (!diff) { panel.hidden = true; panel.innerHTML = ''; return; }
+      if (!diff) { panel.hidden = true; panel.innerHTML = ''; history.hidden = false; return; }
+      // The preview takes over the versions page: the list stays mounted but
+      // hidden until the approver goes back.
       panel.hidden = false;
+      history.hidden = true;
       panel.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'section-version-diff-head';
       const title = document.createElement('strong');
       title.textContent = diff.base_version_number
-        ? WFT('sectionver.diff_title_between', 'مقارنة الإصدار {n} مع الإصدار {b}', { n: diff.version_number, b: diff.base_version_number })
-        : WFT('sectionver.diff_title_first', 'مقارنة الإصدار {n}', { n: diff.version_number });
+        ? WFT('sectionver.preview_title_between', 'معاينة الإصدار {n} — مقارنة مع الإصدار {b}', { n: diff.version_number, b: diff.base_version_number })
+        : WFT('sectionver.preview_title_first', 'معاينة الإصدار {n}', { n: diff.version_number });
       head.appendChild(title);
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'section-approve-btn';
       closeBtn.dataset.sectionLockIgnore = '1';
-      setSectionVersionChrome(closeBtn, 'إغلاق');
+      closeBtn.textContent = WFT('common.back', 'رجوع');
       closeBtn.addEventListener('click', () => {
         delete sectionVersionDiffCache[sectionKey];
-        renderSectionDiffPanel(sectionKey);
+        renderSectionVersionBlock(sectionKey);
       });
       head.appendChild(closeBtn);
       panel.appendChild(head);
@@ -865,38 +964,57 @@
         { m: summary.modified || 0, a: summary.added || 0, r: summary.removed || 0 });
       panel.appendChild(counts);
       const attachments = Array.isArray(diff.attachments) ? diff.attachments : [];
-      const changed = (Array.isArray(diff.fields) ? diff.fields : [])
-        .concat(attachments)
-        .filter(item => item && item.status !== 'unchanged');
-      if (!changed.length) {
+      const order = sectionFieldOrderMap(sectionKey);
+      const items = (Array.isArray(diff.fields) ? diff.fields : [])
+        .concat(attachments.map(att => Object.assign({ _diffAttachment: true }, att)))
+        .filter(item => item && item.key)
+        .map((item, idx) => ({ item: item, idx: idx }))
+        .sort((a, b) => {
+          const oa = order[a.item.key];
+          const ob = order[b.item.key];
+          const ia = oa === undefined ? Number.MAX_SAFE_INTEGER : oa;
+          const ib = ob === undefined ? Number.MAX_SAFE_INTEGER : ob;
+          return ia === ib ? a.idx - b.idx : ia - ib;
+        })
+        .map(x => x.item);
+      if (!items.length) {
         const empty = document.createElement('p');
         empty.className = 'tenant-hint';
         empty.textContent = WFT('sectionver.diff_none', 'لا توجد تغييرات بين الإصدارين');
         panel.appendChild(empty);
         return;
       }
-      changed.forEach(item => {
+      const grid = document.createElement('div');
+      grid.className = 'section-version-diff-grid';
+      items.forEach(item => {
         const row = document.createElement('div');
-        row.className = 'section-version-diff-row diff-' + item.status;
-        const isAttachment = attachments.some(att => att && att.key === item.key);
-        const head = document.createElement('div');
-        head.className = 'section-version-diff-row-head';
-        const label = document.createElement('span');
+        row.className = 'tenant-field section-version-diff-row diff-' + item.status;
+        const rowHead = document.createElement('div');
+        rowHead.className = 'section-version-diff-row-head';
+        const label = document.createElement('label');
         label.className = 'section-version-diff-label';
-        label.textContent = (isAttachment ? WFT('sectionver.diff_attachment', 'مرفق') + ': ' : '') + (item.label || item.key);
-        head.appendChild(label);
+        label.textContent = (item._diffAttachment ? WFT('sectionver.diff_attachment', 'مرفق') + ': ' : '') + (item.label || item.key);
+        rowHead.appendChild(label);
         const status = document.createElement('span');
         status.className = 'section-version-diff-status';
         status.textContent = sectionVersionDiffStatusText(item.status);
-        head.appendChild(status);
-        row.appendChild(head);
+        rowHead.appendChild(status);
+        row.appendChild(rowHead);
         const cols = document.createElement('div');
         cols.className = 'section-version-diff-cols';
-        cols.appendChild(sectionVersionDiffCell('old', item.old_value));
-        cols.appendChild(sectionVersionDiffCell('new', item.new_value));
+        if (item.status === 'unchanged') {
+          // Identical on both sides — one box states the value without
+          // duplicating long content such as polygon or table data.
+          cols.classList.add('single');
+          cols.appendChild(sectionVersionDiffCell('new', item.new_value, item._diffAttachment));
+        } else {
+          cols.appendChild(sectionVersionDiffCell('old', item.old_value, item._diffAttachment));
+          cols.appendChild(sectionVersionDiffCell('new', item.new_value, item._diffAttachment));
+        }
         row.appendChild(cols);
-        panel.appendChild(row);
+        grid.appendChild(row);
       });
+      panel.appendChild(grid);
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
         try { window.WFI18n.autoTranslate(panel); } catch (e) {}
       }
