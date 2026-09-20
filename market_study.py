@@ -1781,6 +1781,7 @@ def competitor_source_rows(competitors):
         note = _norm(competitor.get('notes') or competitor.get('note'))
         competitor_id = _norm(competitor.get('id'))
         field_sources = competitor_field_sources(competitor)
+        dead_keys = {str(item).casefold() for item in (competitor.get('dead_source_urls') or [])}
         for url in competitor_source_urls(competitor):
             source_fields = [
                 _COMPETITOR_SOURCE_FIELD_LABELS.get(field, field)
@@ -1788,7 +1789,9 @@ def competitor_source_rows(competitors):
                 if any(str(item).casefold() == url.casefold() for item in urls)
             ]
             field_note = 'الحقول: ' + '، '.join(source_fields) if source_fields else ''
-            source_note = ' — '.join(item for item in (note, field_note) if item)
+            unverified_note = 'رابط غير موثق — لم يصل من نتائج البحث' if competitor.get('sources_unverified') else ''
+            dead_note = 'الرابط لم يعد يعمل' if str(url).casefold() in dead_keys else ''
+            source_note = ' — '.join(item for item in (note, field_note, unverified_note, dead_note) if item)
             rows.append({
                 'id': str(uuid.uuid4()),
                 'competitor_id': competitor_id,
@@ -2094,30 +2097,17 @@ def flag_out_of_period_sources(sources, bounds):
     return flagged
 
 
-def strip_unverified_competitor_sources(row):
-    """Drop AI-written URLs from a row produced with no search behind it.
+def flag_unverified_competitor_sources(row):
+    """Mark AI-written links from a search-less answer without deleting them.
 
     When the response reports zero executed searches and no citations, every
-    ``source_url`` the model wrote is memory, not evidence — keeping it would
-    dress a guess as a citation. The links move to ``dead_source_urls`` so the
-    UI can still show what was claimed, and the row is flagged so it is never
-    mistaken for a sourced result.
+    ``source_url`` the model wrote is memory rather than retrieved evidence.
+    The links stay on the row — the owner reviews them and decides to keep or
+    reject — while ``sources_unverified`` makes sure they are never passed off
+    as sourced results.
     """
-    if not isinstance(row, dict):
-        return row
-    claimed = _unique_values(
-        competitor_source_urls(row)
-        + [row.get('logo_source_url')]
-        + list(_iter_source_values(row.get('logo_url')))
-    )
-    row['source_url'] = ''
-    row['source_urls'] = []
-    row['field_sources'] = {}
-    row['logo_url'] = ''
-    row['logo_source_url'] = ''
-    if claimed:
-        row['dead_source_urls'] = _unique_values((row.get('dead_source_urls') or []) + claimed)
-    row['sources_unverified'] = True
+    if isinstance(row, dict):
+        row['sources_unverified'] = True
     return row
 
 

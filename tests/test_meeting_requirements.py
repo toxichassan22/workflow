@@ -10250,6 +10250,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("'max_uses': 10", app_source)
         self.assertIn("MARKET_SEARCH_ENGINE", app_source)
+        # The `web` plugin grounds every market call once — the server tool
+        # alone left the search decision to the model, which could skip it.
+        self.assertIn("'id': 'web'", app_source)
+        self.assertIn("plugins=plugins", app_source)
 
     def test_market_study_prompt_carries_financial_and_site_context(self):
         import market_study
@@ -10402,11 +10406,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(payload.get('searchVerified'))
         row = payload['competitors'][0]
         self.assertTrue(row.get('sources_unverified'))
-        self.assertEqual(row.get('source_urls'), [])
-        self.assertEqual(row.get('source_url'), '')
-        self.assertEqual(row.get('logo_url'), '')
-        self.assertIn('https://developer.example/tower', row.get('dead_source_urls') or [])
-        self.assertEqual(payload.get('sources'), [])
+        # Unverified links stay visible for the owner to review — flagged,
+        # never deleted.
+        self.assertEqual(row.get('source_urls'), ['https://developer.example/tower'])
+        self.assertEqual(row.get('source_url'), 'https://developer.example/tower')
+        self.assertEqual(row.get('logo_url'), 'https://developer.example/logo.png')
+        self.assertFalse(row.get('dead_source_urls'))
+        source_rows = payload.get('sources') or []
+        self.assertEqual([s['url'] for s in source_rows], ['https://developer.example/tower'])
+        self.assertIn('رابط غير موثق', source_rows[0].get('note') or '')
 
     def test_market_competitors_prune_dead_urls(self):
         client = self.app.test_client()
@@ -10435,12 +10443,13 @@ class MeetingRequirementsTests(unittest.TestCase):
             })
         self.assertEqual(res.status_code, 200, res.get_json())
         row = res.get_json()['competitors'][0]
-        self.assertEqual(row.get('source_urls'), ['https://developer.example/south-tower'])
+        # Dead links stay on the row for review — flagged, not deleted.
+        self.assertEqual(row.get('source_urls'), [
+            'https://developer.example/south-tower', 'https://dead.example/gone'])
         self.assertIn('https://dead.example/gone', row.get('dead_source_urls') or [])
-        self.assertEqual(
-            [s['url'] for s in res.get_json()['sources']],
-            ['https://developer.example/south-tower'],
-        )
+        sources = res.get_json()['sources']
+        dead_source = next(s for s in sources if s['url'] == 'https://dead.example/gone')
+        self.assertIn('لم يعد يعمل', dead_source.get('note') or '')
 
     def test_market_competitors_flag_out_of_radius_rows(self):
         import market_study

@@ -254,7 +254,7 @@
         return '<div style="color:#92400e;margin-top:4px">تعارض في ' + escapeHtml(label) + ': تم الإبقاء على القيمة الحالية.' + link + '</div>';
       }).join('') +
       (tr.dataset.sourcesUnverified
-        ? '<div style="color:#92400e;margin-top:4px">مصادر هذا الصف لم تُسترجع عبر البحث — أُزيلت الروابط غير الموثقة.</div>'
+        ? '<div style="color:#92400e;margin-top:4px">روابط هذا الصف لم تُسترجع عبر البحث — معروضة للمراجعة وغير موثقة.</div>'
         : '');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
@@ -882,7 +882,7 @@
             ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس')
             : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس')) +
             (conflictCount ? ' — تم الإبقاء على ' + conflictCount + ' قيمة حالية متعارضة' : '') +
-            (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ أُزيلت الروابط غير الموثقة من الصفوف' : '') +
+            (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة' : '') +
             ((res.outOfRadiusCount || 0) ? ' — ' + res.outOfRadiusCount + ' منافس خارج النطاق المحدد' : '') +
             (extra ? ' — ' + extra : '');
         }

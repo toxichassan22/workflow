@@ -20027,6 +20027,14 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         'type': 'openrouter:web_search',
         'parameters': search_params,
     }]
+    # The server tool leaves the search decision to the model, which could skip
+    # it entirely and answer from memory. The `web` plugin grounds EVERY request
+    # once regardless, so a real search always runs and citations always come
+    # back — the tool stays on top for the per-competitor follow-up searches.
+    plugin = {'id': 'web', 'max_results': 8}
+    if MARKET_SEARCH_ENGINE != 'auto':
+        plugin['engine'] = MARKET_SEARCH_ENGINE
+    plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
     # that pair silently dropped the search on every call and the model answered from
@@ -20064,6 +20072,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                 response_format=response_format,
                 provider=provider,
                 tools=attempt_tools,
+                plugins=plugins,
                 timeout=240,
                 usage_ctx=usage_ctx or _usage_ctx('market'),
                 max_tool_calls=14,
@@ -20202,35 +20211,24 @@ def _competitor_claimed_urls(row):
     return urls
 
 
-def _prune_dead_competitor_urls(row, dead):
-    """Move dead URLs out of the row's source fields into ``dead_source_urls``."""
+def _flag_dead_competitor_urls(row, dead):
+    """Flag dead URLs on the row without removing them.
+
+    The owner keeps the full trail — every claimed link stays visible, and
+    ``dead_source_urls`` marks the ones that failed liveness so the UI can
+    label them instead of silently dropping them.
+    """
     if not isinstance(row, dict) or not dead:
         return row
     dead_keys = {str(url).strip().casefold() for url in dead}
-    removed = []
-    kept = [url for url in market_study.competitor_source_urls(row)
-            if str(url).strip().casefold() not in dead_keys]
-    removed.extend(url for url in market_study.competitor_source_urls(row)
-                   if str(url).strip().casefold() in dead_keys)
-    row['source_urls'] = kept
-    if str(row.get('source_url') or '').strip().casefold() in dead_keys:
-        row['source_url'] = ''
-    row['source_url'] = market_study.prefer_specific_source_url(row.get('source_url'), *kept)
-    field_sources = market_study.competitor_field_sources(row)
-    cleaned = {}
-    for field, urls in field_sources.items():
-        remaining = [url for url in urls if str(url).strip().casefold() not in dead_keys]
-        removed.extend(url for url in urls if str(url).strip().casefold() in dead_keys)
-        if remaining:
-            cleaned[field] = remaining
-    row['field_sources'] = cleaned
-    for key in ('logo_source_url', 'logo_url'):
+    found = [url for url in market_study.competitor_source_urls(row)
+             if str(url).strip().casefold() in dead_keys]
+    for key in ('source_url', 'logo_source_url', 'logo_url'):
         if str(row.get(key) or '').strip().casefold() in dead_keys:
-            removed.append(row.get(key))
-            row[key] = ''
-    if removed:
+            found.append(row.get(key))
+    if found:
         row['dead_source_urls'] = list(dict.fromkeys(
-            list(row.get('dead_source_urls') or []) + removed))
+            list(row.get('dead_source_urls') or []) + found))
     return row
 
 
@@ -20310,12 +20308,13 @@ def _execute_market_competitors(data, tenant_id=None):
         dead_urls = _verify_market_urls(
             url for row in merged for url in _competitor_claimed_urls(row))
         for row in merged:
-            _prune_dead_competitor_urls(row, dead_urls)
+            _flag_dead_competitor_urls(row, dead_urls)
     else:
-        # The model answered from memory: no link it wrote can stand as a source.
+        # The model answered from memory: keep the links visible for review,
+        # flagged — the owner accepts or rejects each one.
         for row in merged:
             if (row.get('row_source') or 'ai') == 'ai':
-                market_study.strip_unverified_competitor_sources(row)
+                market_study.flag_unverified_competitor_sources(row)
     out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
     _auto_import_competitor_logos(merged, payload, data, tenant_id=tenant_id)
     sources = market_study.competitor_source_rows(merged)
@@ -20390,14 +20389,13 @@ def _execute_market_summary(data, tenant_id=None):
             url = str(row.get('url') or '').strip()
             if url and url in dead_urls:
                 row['dead_url'] = url
-                row['url'] = ''
                 row['note'] = (str(row.get('note') or '').strip() + ' — ' if row.get('note') else '') + 'الرابط لم يعد يعمل'
     else:
+        # Memory answers keep their links — flagged unverified so the owner
+        # can inspect the claimed origin instead of losing the trail.
         for row in sources:
             if str(row.get('url') or '').strip():
-                row['dead_url'] = row['url']
-                row['url'] = ''
-            row['sources_unverified'] = True
+                row['sources_unverified'] = True
             marker = 'رابط غير موثق — لم يصل من نتائج البحث'
             note = str(row.get('note') or '').strip()
             if marker not in note:
@@ -22129,6 +22127,9 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None):
         if row.get('logo_file_id') or row.get('logo_path'):
             continue
         official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
+        dead_keys = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+        if official_url.strip().casefold() in dead_keys:
+            official_url = ''
         verified = bool(official_url and (
             row.get('logo_official_verified')
             or market_study.official_source_reliability(
