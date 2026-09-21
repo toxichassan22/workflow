@@ -417,6 +417,13 @@ def _has_any_openrouter_key(usage_ctx=None, tenant_id=None):
     return bool(_resolve_openrouter_key(usage_ctx, tenant_id))
 
 
+# Auto-provisioning is retried at most once per window per tenant — an
+# unprovisionable company used to fire a Management-API create/delete pair on
+# every gated call (the log showed ~40 attempts inside one market job).
+_PROVISION_ATTEMPT_AT = {}
+_PROVISION_RETRY_SECONDS = 300
+
+
 def _tenant_key_gate(usage_ctx=None, tenant_id=None):
     """Strict-mode refusal for companies without an active key of their own.
 
@@ -459,17 +466,25 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                           else 'stored key failed to decrypt')
         print(f"[OPENROUTER KEY] gate refused tenant {tid}: {refusal_reason}")
         # A management key is configured: try to provision one on the fly
-        # instead of blocking the call. This keeps strict mode useful while
-        # not requiring a manual key creation step for every new company.
+        # instead of blocking the call. Rate-limited per tenant — a company
+        # that cannot be provisioned would otherwise fire a create/delete pair
+        # at the Management API on every gated call in a job.
         if _openrouter_management_key():
-            print(f"[OPENROUTER KEY] auto-provisioning key for tenant {tid}")
-            try:
-                _ensure_tenant_openrouter_key(tid)
-            except Exception as exc:
-                print(f"[OPENROUTER KEY] auto-provision failed: {exc}")
-            raw = db.get_tenant_openrouter_key_raw(tid)
-            if raw:
-                return None
+            now = time.time()
+            if now - _PROVISION_ATTEMPT_AT.get(tid, 0) >= _PROVISION_RETRY_SECONDS:
+                _PROVISION_ATTEMPT_AT[tid] = now
+                print(f"[OPENROUTER KEY] auto-provisioning key for tenant {tid}")
+                try:
+                    _ensure_tenant_openrouter_key(tid)
+                except Exception as exc:
+                    print(f"[OPENROUTER KEY] auto-provision failed: {exc}")
+                try:
+                    raw = db.get_tenant_openrouter_key_raw(tid)
+                except Exception:
+                    raw = None
+                if raw:
+                    _PROVISION_ATTEMPT_AT.pop(tid, None)
+                    return None
         return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
                 'error_code': 'NO_TENANT_KEY'}
     except Exception as exc:
@@ -821,6 +836,11 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
             TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
             limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
         )
+        if not meta:
+            # The refusal is the visible symptom; this is the cause — without
+            # it the gate log only ever says «no key row» forever.
+            print(f"[OPENROUTER KEYS] auto-provision failed for tenant {tenant_id}: "
+                  f"{_error or 'unknown'}")
         return meta
     except Exception as exc:
         print(f"[OPENROUTER KEYS] auto-provision failed: {exc}")
