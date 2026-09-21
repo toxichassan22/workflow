@@ -10536,7 +10536,6 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
-                     or market_source.startswith('site_analysis')
                      or market_source in {'executive_content.summary',
                                            'executive_content.opportunity', 'executive_content.features',
                                            'land_and_building_summary'}
@@ -12624,12 +12623,12 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             )
     html = _canonicalize_slide_root_class(html)
     is_map_summary = (
-        content_source == 'executive_content.summary'
+        (isinstance(content_source, str) and (content_source.startswith('site_analysis') or content_source == 'executive_content.summary'))
         and (
-            '##MAP_' in str(html or '')
-            or 'data-map-summary-background' in str(html or '')
+            'data-map-summary-background' in str(html or '')
             or 'data-map-summary-card' in str(html or '')
-            or bool(re.search(r'/uploads/maps/|/api/map-images/', str(html or '')))
+            or ('##MAP_' in str(html or '') and 'grid-template-columns' not in str(html or ''))
+            or (bool(re.search(r'/uploads/maps/|/api/map-images/', str(html or ''))) and 'grid-template-columns' not in str(html or ''))
         )
     )
     if is_map_summary:
