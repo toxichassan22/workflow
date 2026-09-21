@@ -12651,6 +12651,35 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(row['price_type'], 'إيجار الوحدة السنوي')
         self.assertTrue(row['price_listed'])
 
+    def test_market_url_alive_keeps_probe_failures_and_drops_only_proven_dead(self):
+        """The search provider retrieved the page once, so a slow bot wall
+        (Cloudflare holds the socket until the probe times out) is not a dead
+        link. Only 404/410 and DNS failure count as proof."""
+        import socket as _socket
+        module = self.application_module
+
+        class _Resp:
+            def __init__(self, status):
+                self.status_code = status
+            def close(self):
+                pass
+
+        url = 'https://wasalt.sa/property/rent/1'
+        with patch.object(module, '_public_host_addresses', return_value=('1.2.3.4',)):
+            with patch.object(module.requests, 'head',
+                              side_effect=module.requests.ReadTimeout('t')), \
+                 patch.object(module.requests, 'get',
+                              side_effect=module.requests.ConnectTimeout('t')):
+                self.assertTrue(module._market_url_alive(url))
+            with patch.object(module.requests, 'head', return_value=_Resp(403)):
+                self.assertTrue(module._market_url_alive(url))
+            with patch.object(module.requests, 'head', return_value=_Resp(404)):
+                self.assertFalse(module._market_url_alive(url))
+            dns_err = module.requests.ConnectionError('nxdomain')
+            dns_err.__cause__ = _socket.gaierror(-2, 'Name or service not known')
+            with patch.object(module.requests, 'head', side_effect=dns_err):
+                self.assertFalse(module._market_url_alive(url))
+
     def test_import_competitor_listing_photo_stores_og_image(self):
         """A portal-only competitor with no official site gets the listing
         page's own og:image — marked as a listing photo, never a portal logo."""

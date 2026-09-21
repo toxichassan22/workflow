@@ -22140,12 +22140,28 @@ _MARKET_URL_CHECK_HEADERS = {
 }
 
 
+def _market_dns_failure(exc):
+    """True when a request failure traces back to DNS — the only network
+    error that proves the host does not exist. urllib3 hides the resolution
+    error behind layers of wrappers, so the cause chain is walked."""
+    seen = exc
+    while seen is not None:
+        if isinstance(seen, socket.gaierror):
+            return True
+        if type(seen).__name__ in ('NameResolutionError', 'FailedNameResolution'):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
 def _market_url_alive(url, timeout=8):
     """Probe a claimed source URL; False only when the page provably does not exist.
 
-    Redirects are not followed (a 3xx means the address resolves), and 401/403/429
-    count as alive — bot-blocking is not a dead page. Only 404/410, DNS or
-    connection failures, and timeouts mark the link dead.
+    The search provider already retrieved this page once, so the link is
+    presumed real: only a 404/410 or a DNS failure is proof of death. Bot
+    walls (401/403/429), 5xx, timeouts, refused connections and TLS errors
+    are probe problems — a Cloudflare challenge holds the socket open and
+    would otherwise read as a dead page.
     """
     parsed = urlsplit(str(url or '').strip())
     if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
@@ -22166,15 +22182,17 @@ def _market_url_alive(url, timeout=8):
                 status = response.status_code
             finally:
                 response.close()
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            if _market_dns_failure(exc):
+                return False
             continue
         if status in (404, 410):
             return False
-        if status < 500 or status == 503:
-            # 2xx/3xx resolve, 401/403/405/429 are bot walls, 503 is transient.
-            return True
-        # 500/502/504: fall through to the GET attempt before calling it dead.
-    return False
+        # Any other status means a live server answered — 2xx/3xx resolve,
+        # 401/403/405/429 are bot walls, 5xx is an origin problem, not a
+        # missing page.
+        return True
+    return True
 
 
 def _verify_market_urls(urls, max_workers=6):
