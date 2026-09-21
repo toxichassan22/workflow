@@ -22,6 +22,12 @@ import db
 
 _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
+# Renderer/plan-version stamp. Bump this whenever slide renderers, deterministic
+# builders or plan normalization change: every normalized plan carries it, the
+# client folds it into the generation-checkpoint fingerprint, and stored slides
+# produced by older code can no longer be resumed into a new presentation.
+SLIDE_ENGINE_VERSION = '2026-09-22.1'
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Content Distribution Rules
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3037,6 +3043,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     normalized = dict(plan)
     normalized['slides'] = slides
     normalized['offer_lang'] = lang
+    normalized['engine_version'] = SLIDE_ENGINE_VERSION
     return refresh_index_entries(normalized, offer_lang=lang)
 
 

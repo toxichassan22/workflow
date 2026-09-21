@@ -13181,6 +13181,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(chunks[0][:40], ranged_note)
         self.assertNotIn('رقم 29', ranged_note)
 
+    def test_normalized_plan_carries_engine_version_for_checkpoint_safety(self):
+        engine = self.application_module.slide_engine
+        draft = {'project_name': 'مشروع', 'executive_content': json.dumps(
+            {'summary': 'الملخص التنفيذي\n\nالموقع\n\nنص معتمد للموقع يفيض عن الحد.'},
+            ensure_ascii=False)}
+        plan = engine.normalize_presentation_plan(
+            {'slides': [{'title': 'الملخص التنفيذي', 'type': 'content',
+                         'section_key': 'executive_summary'}]}, draft, {})
+        self.assertTrue(engine.SLIDE_ENGINE_VERSION)
+        self.assertEqual(plan.get('engine_version'), engine.SLIDE_ENGINE_VERSION)
+        filtered = engine.filter_presentation_plan_sections(plan, ('executive_summary',))
+        self.assertEqual(filtered.get('engine_version'), engine.SLIDE_ENGINE_VERSION)
+
 
 if __name__ == '__main__':
     unittest.main()

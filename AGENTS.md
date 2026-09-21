@@ -1449,3 +1449,18 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
   with out-of-order failures and a blocked checkpoint, and checks that a later
   successful run still completes. `node tests/test_presentation_undo.js` covers
   the neighboring editor state.
+
+## Slide engine versioning (checkpoint safety)
+
+- `slide_engine.SLIDE_ENGINE_VERSION` rides in every normalized plan as
+  `plan['engine_version']`, and `tenantSlidePlanFingerprint` folds it into the
+  generation-checkpoint signature. A resumable run can only reuse stored slide
+  HTML when the plan AND the engine version both match — slides rendered by
+  older code must never be resumed into a new presentation.
+- **Bump `SLIDE_ENGINE_VERSION` whenever slide renderers, deterministic
+  builders, or plan normalization change** (new layouts, pagination rules,
+  source routing). Forgetting the bump lets a paused run resume stale HTML as
+  if the code had not changed.
+- The draft persists `tenantSlidesData` and `slide_generation_checkpoint` inside
+  `draft_data`; a hard refresh does not clear them. A fresh (non-resume)
+  generation clears `tenantSlidesData` before launching — keep it that way.

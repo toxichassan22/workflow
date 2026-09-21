@@ -430,7 +430,11 @@
     let isRegeneratingTenantSlide = false;
 
     function tenantSlidePlanFingerprint(plan) {
-      return JSON.stringify((plan?.slides || []).map(slide => ({
+      // The engine version rides in every normalized plan: a checkpoint stored
+      // under older rendering code must never resume — its stored slide HTML
+      // was produced by a different renderer and would come back unchanged.
+      const engineVersion = String(plan?.engine_version || plan?.engineVersion || '');
+      return engineVersion + '|' + JSON.stringify((plan?.slides || []).map(slide => ({
         title: slide?.title || '',
         type: slide?.type || 'content',
         section_key: slide?.section_key || '',

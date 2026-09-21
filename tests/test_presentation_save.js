@@ -66,6 +66,7 @@ vm.runInContext(source.slice(start, end), context);
   await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
   testSlidePartialGate();
+  testPlanFingerprintIncludesEngineVersion();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
 })().catch(error => { console.error(error); process.exitCode=1; });
 
@@ -375,4 +376,25 @@ function testSlidePartialGate() {
   assert.equal(gate.slidePartialComplete('<div class="slide"><div>نص</div>'), false);
   assert.equal(gate.slidePartialComplete('<div class="slide"><div>نص</div></div>'), true);
   assert.equal(gate.slidePartialComplete('```html\n<div class="slide rtl"><p>أ</p></div>\n```'), true);
+}
+
+function testPlanFingerprintIncludesEngineVersion() {
+  const match = /^    function tenantSlidePlanFingerprint\(/m.exec(source);
+  assert(match, 'tenantSlidePlanFingerprint must exist at module scope');
+  // The function ends at the next line that closes it at the same indent.
+  const rest = source.slice(match.index);
+  const endIdx = rest.indexOf('\n    }');
+  const fnSource = rest.slice(0, endIdx + 6);
+  const ctx = { String, JSON };
+  vm.createContext(ctx);
+  vm.runInContext(fnSource, ctx);
+  const slides = [
+    { title: 'أ', type: 'content', section_key: 'market', content_source: 'market_study_data.summary' },
+    { title: 'ب', type: 'content', section_key: 'executive_summary', content_source: 'executive_content.summary:2:4' },
+  ];
+  const v1 = ctx.tenantSlidePlanFingerprint({ engine_version: 'v1', slides });
+  const v2 = ctx.tenantSlidePlanFingerprint({ engine_version: 'v2', slides });
+  const none = ctx.tenantSlidePlanFingerprint({ slides });
+  assert.notEqual(v1, v2, 'a renderer upgrade must break checkpoint compatibility');
+  assert.notEqual(v1, none, 'a versioned plan must not match a checkpoint stored before versioning');
 }

@@ -597,7 +597,8 @@
       const planned = tenantSlidePlan?.slides?.[slideIndex] || {};
       const snapshot = { ...planned };
       ['title', 'type', 'section_key', 'content_source', 'source_table', 'design_style', 'designStyle',
-        'chart_type', 'image_tokens', 'bullets', 'metrics', 'media_only'].forEach(key => {
+        'chart_type', 'image_tokens', 'bullets', 'metrics', 'media_only',
+        'market_row_start', 'market_row_end', 'index_entries'].forEach(key => {
         const missing = snapshot[key] === undefined || snapshot[key] === null ||
           (Array.isArray(snapshot[key]) && !snapshot[key].length && Array.isArray(current[key]) && current[key].length);
         if (missing && current[key] !== undefined) snapshot[key] = current[key];
