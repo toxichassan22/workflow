@@ -366,7 +366,8 @@ def _normalize_legacy_single_slide(slide, project_data=None):
             item.update({'content_source': 'market_study_data.sources', 'source_table': 'market_sources',
                          'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
         elif re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)' if not deck_en else r'(?:swot|strengths|weaknesses|opportunities|threats)', lower_title, flags=re.IGNORECASE):
-            if isinstance(market.get('swot'), dict) and any(str(value or '').strip() for value in market.get('swot', {}).values()):
+            swot = _extract_project_swot(market) if isinstance(market, dict) and any(_extract_project_swot(market).values()) else _extract_project_swot(project)
+            if any(swot.values()):
                 item.update({'content_source': 'market_study_data.swot', 'design_style': 'swot',
                              'requires_image': False, 'image_tokens': []})
         elif re.search(r'تحليل\s+السوق|دراسة\s+السوق' if not deck_en else r'market\s+analysis|market\s+overview', title, flags=re.IGNORECASE) and _market_summary_rows(market):
@@ -380,8 +381,8 @@ def _normalize_legacy_single_slide(slide, project_data=None):
 
     if not str(item.get('content_source') or '').strip() and section == 'swot_risks':
         if re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)', lower_title, flags=re.IGNORECASE):
-            market = _market_state(project)
-            if isinstance(market.get('swot'), dict) and any(str(value or '').strip() for value in market.get('swot', {}).values()):
+            swot = _extract_project_swot(project)
+            if any(swot.values()):
                 item.update({'content_source': 'market_study_data.swot', 'design_style': 'swot',
                              'requires_image': False, 'image_tokens': []})
         elif re.search(r'مخاطر|معالجة|risk', lower_title, flags=re.IGNORECASE):
@@ -399,8 +400,16 @@ def _normalize_legacy_single_slide(slide, project_data=None):
                          'design_style': 'table', 'requires_image': False, 'image_tokens': []})
 
     if not str(item.get('content_source') or '').strip() and section == 'land':
-        if re.search(r'(?:ملخص\s+تحليل\s+الأرض|تحليل\s+الأرض)', title, flags=re.IGNORECASE) and str(project.get('land_and_building_summary') or '').strip():
+        if re.search(r'(?:مواصفات\s+الأرض|الاشتراطات\s+التنظيمية|اشتراطات\s+البناء|مواصفات\s+واشتراطات|land_specs)', title, flags=re.IGNORECASE):
+            item.update({'content_source': 'land_specs', 'design_style': 'specs',
+                         'requires_image': False, 'image_tokens': []})
+        elif re.search(r'(?:ملخص\s+تحليل\s+الأرض|تحليل\s+الأرض)', title, flags=re.IGNORECASE) and str(project.get('land_and_building_summary') or '').strip():
             item.update({'content_source': 'land_and_building_summary', 'design_style': 'text',
+                         'requires_image': False, 'image_tokens': []})
+
+    if not str(item.get('content_source') or '').strip() and section == 'timeline':
+        if re.search(r'(?:الجدول\s+الزمني|مراحل\s+المشروع|مراحل\s+التطوير|خطة\s+التنفيذ|timeline)', title, flags=re.IGNORECASE):
+            item.update({'content_source': 'timeline_table_data', 'design_style': 'timeline',
                          'requires_image': False, 'image_tokens': []})
 
     if not str(item.get('content_source') or '').strip() and (
@@ -784,7 +793,7 @@ def _limit_presentation_charts(groups, limit=4):
         c_type = canonicalize_chart_type(slide.get('chart_type'))
         text = ' '.join(str(slide.get(k) or '') for k in ('title', 'content_source', 'source_table')).lower()
         is_competitor = bool(re.search(r'منافس|competitor', text))
-        if c_type == 'horizontal_bar' and is_competitor and not kept_market_chart:
+        if c_type == 'horizontal_bar' and is_competitor:
             slide['chart_type'] = 'horizontal_bar'
             slide['design_style'] = 'chart'
             kept_market_chart = True
@@ -1311,6 +1320,75 @@ def _market_state(project_data):
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _market_swot_items(value):
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, dict):
+        values = list(value.values())
+    else:
+        text = str(value or '').replace('\r\n', '\n').replace('\n', '\n').strip()
+        values = re.split(r'\n\s*-\s+|\s+-\s+', text) if text else []
+    return [str(item or '').strip(' -') for item in values if str(item or '').strip(' -')]
+
+
+def _extract_project_swot(project_data):
+    """Extract SWOT analysis across all possible draft formats, returning normalized 4 quadrants."""
+    source = project_data if isinstance(project_data, dict) else {}
+    market = _market_state(source)
+    swot_candidate = None
+    if isinstance(market, dict) and isinstance(market.get('swot'), dict):
+        swot_candidate = market.get('swot')
+    elif isinstance(source.get('swot'), dict):
+        swot_candidate = source.get('swot')
+    elif isinstance(source.get('swot_analysis'), dict):
+        swot_candidate = source.get('swot_analysis')
+    elif isinstance(source.get('swot'), str):
+        try:
+            swot_candidate = json.loads(source.get('swot'))
+        except (ValueError, TypeError):
+            pass
+
+    res = {'strengths': [], 'weaknesses': [], 'opportunities': [], 'threats': []}
+    key_aliases = {
+        'strengths': ('strengths', 'strength', 'نقاط القوة', 'القوة', 'نقاط_القوة', 'swot_strengths', 'swotStrengths'),
+        'weaknesses': ('weaknesses', 'weakness', 'نقاط الضعف', 'الضعف', 'نقاط_الضعف', 'swot_weaknesses', 'swotWeaknesses'),
+        'opportunities': ('opportunities', 'opportunity', 'الفرص', 'فرص', 'swot_opportunities', 'swotOpportunities'),
+        'threats': ('threats', 'threat', 'التهديدات', 'المخاطر والتهديدات', 'تهديدات', 'swot_threats', 'swotThreats'),
+    }
+
+    if isinstance(swot_candidate, dict):
+        for std_key, aliases in key_aliases.items():
+            for alias in aliases:
+                val = swot_candidate.get(alias)
+                if val:
+                    items = _market_swot_items(val)
+                    if items:
+                        res[std_key].extend(items)
+                        break
+
+    for std_key, aliases in key_aliases.items():
+        if not res[std_key]:
+            for alias in aliases:
+                val = source.get(alias)
+                if val:
+                    items = _market_swot_items(val)
+                    if items:
+                        res[std_key].extend(items)
+                        break
+
+    for std_key in res:
+        seen = set()
+        deduped = []
+        for it in res[std_key]:
+            s = str(it).strip()
+            if s and s not in seen:
+                seen.add(s)
+                deduped.append(s)
+        res[std_key] = deduped
+
+    return res
+
+
 def _market_scope_rows(market):
     if not isinstance(market, dict):
         return []
@@ -1577,8 +1655,10 @@ def _market_source_chunks(market, rows=None):
 
 
 def _market_summary_pages(market):
-    """Keep detailed analysis readable by limiting each page to five topics."""
-    return _market_row_pages(_market_summary_rows(market), 5)
+    """Keep detailed analysis readable by limiting each page to 3-5 topics."""
+    rows = _market_summary_rows(market)
+    chunk_size = 3 if len(rows) <= 6 else 5
+    return _market_row_pages(rows, chunk_size)
 
 
 def _market_source_pages(market):
@@ -1651,12 +1731,24 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
         result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
-        competitor_slide = take('market_study_data.competitors', 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين', 'chart', 'competitors')
-        competitor_slide.update({
-            'design_style': 'chart',
-            'chart_type': 'horizontal_bar',
-        })
-        result.append(competitor_slide)
+        comp_chunks = [named_competitors[i:i+4] for i in range(0, len(named_competitors), 4)]
+        total_comp_pages = len(comp_chunks)
+        for chunk_idx, chunk in enumerate(comp_chunks):
+            start = chunk_idx * 4
+            end = start + len(chunk)
+            c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
+            c_source = 'market_study_data.competitors'
+            if total_comp_pages > 1:
+                c_title += f' ({chunk_idx + 1}/{total_comp_pages})'
+                c_source = f'market_study_data.competitors:{start}:{end}'
+            competitor_slide = take(c_source, c_title, 'chart', 'competitors')
+            competitor_slide.update({
+                'design_style': 'chart',
+                'chart_type': 'horizontal_bar',
+                'competitor_start': start,
+                'competitor_end': end,
+            })
+            result.append(competitor_slide)
 
     summary_pages = _market_summary_pages(market)
     for page_index, (start, page_rows) in enumerate(summary_pages, 1):
@@ -1741,6 +1833,18 @@ def normalize_market_section_plan(plan, project_data=None, offer_lang=None):
     normalized_market = _normalize_market_group_slides(existing, market, offer_lang=lang)
     if not normalized_market and not market_indexes:
         return plan
+
+    if not market_divider_indexes:
+        market_divider = {
+            'title': section_title('market', lang),
+            'type': 'section_divider',
+            'section_key': 'market',
+            'design_style': 'divider',
+            'content_density': 'low',
+            'requires_image': False,
+            'bullets': [],
+        }
+        normalized_market = [market_divider] + list(normalized_market)
 
     if market_indexes:
         insertion_index = min(market_indexes)
@@ -2009,6 +2113,24 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'bullets': [description] if description else [],
             })
 
+    if _has_land_specs_data(source):
+        specs_slides = [slide for slide in groups.get('land', [])
+                        if slide.get('content_source') == 'land_specs'
+                        or slide.get('design_style') == 'specs'
+                        or re.search(r'(?:مواصفات الأرض|الاشتراطات التنظيمية|اشتراطات البناء|land specs|regulatory)', str(slide.get('title') or ''), re.IGNORECASE)]
+        groups['land'] = [slide for slide in groups.get('land', []) if slide not in specs_slides]
+        canonical_specs = dict(specs_slides[0]) if specs_slides else {}
+        canonical_specs.update({
+            'title': 'Land Specifications & Regulatory Conditions' if lang == OFFER_LANG_ENGLISH else 'مواصفات الأرض والاشتراطات التنظيمية',
+            'type': 'content',
+            'design_style': 'specs',
+            'content_density': 'high',
+            'requires_image': False,
+            'content_source': 'land_specs',
+            'bullets': [],
+        })
+        add('land', canonical_specs)
+
     has_boundary_data = _has_land_boundary_data(source)
     if has_boundary_data:
         directional = [slide for slide in groups.get('land', [])
@@ -2100,12 +2222,18 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             })
 
     phases = parse_timeline_phases(source)
-    if phases and not groups.get('timeline'):
-        add('timeline', {
-            'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير', 'type': 'content',
-            'design_style': 'timeline', 'content_density': 'high', 'requires_image': False,
-            'content_source': 'timeline_table_data', 'bullets': [],
-        })
+    if phases:
+        timeline_slides = [s for s in groups.get('timeline', []) if s.get('content_source') == 'timeline_table_data' or s.get('design_style') == 'timeline']
+        if not timeline_slides:
+            add('timeline', {
+                'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير', 'type': 'content',
+                'design_style': 'timeline', 'content_density': 'high', 'requires_image': False,
+                'content_source': 'timeline_table_data', 'bullets': [],
+            })
+        else:
+            for s in timeline_slides:
+                if not s.get('content_source'):
+                    s['content_source'] = 'timeline_table_data'
 
     model = _parse_financial_dict(source.get('financial_study_model'))
     if financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))):
@@ -2396,10 +2524,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             })
     executive = _decode_json_fact(source.get('executive_content'))
     executive = executive if isinstance(executive, dict) else {}
-    swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
+    swot = _extract_project_swot(source)
     risk_source, risk_items = _risk_analysis_source(source)
     groups['swot_risks'] = []
-    if any(str(value or '').strip() for value in swot.values()):
+    if any(swot.values()):
         add('swot_risks', {
             'title': 'SWOT Analysis' if lang == OFFER_LANG_ENGLISH else 'تحليل SWOT', 'type': 'content', 'design_style': 'swot',
             'content_density': 'high', 'requires_image': False,
@@ -2410,6 +2538,13 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'title': 'Risk Analysis & Mitigation' if lang == OFFER_LANG_ENGLISH else 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'risk',
             'content_density': 'high', 'requires_image': False,
             'content_source': risk_source, 'bullets': [],
+        })
+    if phases and not groups.get('timeline'):
+        add('timeline', {
+            'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير',
+            'type': 'content', 'design_style': 'timeline',
+            'content_density': 'high', 'requires_image': False,
+            'content_source': 'timeline_table_data', 'bullets': [],
         })
     if str(executive.get('summary') or '').strip():
         existing_summary = groups.get('executive_summary', [])[:1]
@@ -2490,7 +2625,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         'market': bool(_readable_fact(market)),
         'timeline': bool(phases),
         'financial': financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))),
-        'swot_risks': bool(any(str(value or '').strip() for value in swot.values()) or risk_items),
+        'swot_risks': bool(any(swot.values()) or risk_items),
         'team': bool(team_entries),
         'plans': bool(plans),
         'exterior': bool(moodboard_items),
@@ -2861,6 +2996,54 @@ def parse_timeline_phases(project_data):
             if end_month_index is not None:
                 phase['end_label'] = _format_timeline_month(start_index + end_month_index)
         phases.append(phase)
+
+    if not phases:
+        years_val = source.get('timeline_years') or source.get('development_years') or source.get('development_duration_years')
+        has_start = start_index is not None or bool(str(source.get('timeline_start_date') or '').strip()) or bool(str(source.get('timeline_start_year') or '').strip())
+        years_num = 0
+        if years_val:
+            try:
+                years_num = int(str(years_val).strip())
+            except (ValueError, TypeError):
+                years_num = 0
+        if years_num <= 0 and has_start:
+            years_num = 3
+        if years_num > 0:
+            total_months = max(12, years_num * 12)
+            default_phase_specs = [
+                ('التصميم والدراسات والتراخيص', 0.15, 'إعداد وتدقيق المخططات الهندسية واستخراج رخص البناء والاعتمادات النظامية'),
+                ('تجهيز الموقع والأساسات والهيكل الإنشائي', 0.25, 'أعمال تسوية الموقع والحفر وتنفيذ الأساسات والهيكل الخرساني والإنشائي'),
+                ('استكمال الهيكل وأعمال الكهرباء والميكانيكا', 0.25, 'تمديد الشبكات الكهروميكانيكية وأنظمة التكييف والسلامة والإنذار'),
+                ('التشطيبات والأعمال الخارجية وتنسيق الموقع', 0.20, 'تنفيذ التشطيبات المعمارية والواجهات وتنسيق الموقع العام والمسطحات'),
+                ('الاختبارات والتسليم والتسويق والتشغيل', 0.15, 'الفحص والتشغيل التجريبي واستخراج رخص الإشغال والإطلاق والتسليم'),
+            ]
+            current_month = 0
+            for idx, (p_name, weight, p_notes) in enumerate(default_phase_specs):
+                if idx == len(default_phase_specs) - 1:
+                    dur = max(2, total_months - current_month)
+                else:
+                    dur = max(2, round(total_months * weight))
+                start_m = current_month
+                end_m = start_m + dur - 1
+                y_start = str(start_m // 12 + 1)
+                q_start = TIMELINE_QUARTERS[(start_m % 12) // 3]
+                y_end = str(end_m // 12 + 1)
+                q_end = TIMELINE_QUARTERS[(end_m % 12) // 3]
+                p = {
+                    'name': p_name,
+                    'year': y_start,
+                    'quarter': q_start,
+                    'duration': str(dur),
+                    'endYear': y_end,
+                    'endQuarter': q_end,
+                    'notes': p_notes,
+                }
+                if start_index is not None:
+                    p['start_label'] = _format_timeline_month(start_index + start_m)
+                    p['end_label'] = _format_timeline_month(start_index + end_m)
+                phases.append(p)
+                current_month += dur
+
     return phases
 
 
@@ -3603,6 +3786,9 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - صور الأرض تُعرض مع الوصف المحفوظ لكل صورة، ثم ملخص تحليل الأرض المعتمد. لا تستخدم صورة أرض بلا وصف إن كان الوصف متاحًا.
 - عند توفر أبعاد وحدود للأرض والشوارع المحيطة، يتم تضمين شريحة «مخطط اتجاهي لحدود الأرض» بنمط diagram لتمثيل الأرض والجهات الأربع والشوارع والإطلالات بيانياً بالـ CSS و HTML النقي دون الحاجة لرسومات خارجية.
 - بيانات مخطط حدود الأرض قد تكون في الحقول الظاهرة أو في `directions_table` أو نتيجة تحليل مستندات الأرض المخفية؛ اعتبرها بيانات كافية لإضافة المخطط ولا تنتظر حقلاً ظاهراً واحداً بعينه. هذا المخطط عنصر أساسي في العرض الكامل، ويُحافظ عليه أيضاً عند توليد تحليل الموقع وحده.
+- عند توفر مواصفات للأرض أو اشتراطات تنظيمية (مثل رقم الصك أو المخطط أو القطعة أو المساحة أو نسبة البناء أو الارتدادات أو الارتفاعات أو الاستخدام أو المواقف)، يتم تضمين شريحة «مواصفات الأرض والاشتراطات التنظيمية» بنمط specs لعرض هذه البيانات والمعايير بدقة وتنظيم.
+- قسم دراسة السوق يبدأ دائماً بفاصل قسم section_divider باسم «دراسة السوق». إذا زاد عدد المنافسين عن 4، يُقسم المنافسون على شرائح متعددة بحد أقصى 4 منافسين في كل شريحة مع الرسم البياني الأفقي المقابل لهم لضمان وضوح الأرقام ومنع الازدحام. وتحليل أبعاد السوق الستة يُوزع على شريحتين أو ثلاث بحد أقصى 3 محاور في الشريحة.
+- عند توفر مراحل زمنية أو تاريخ بدء ومدة للمشروع، يتم تضمين شريحة «الجدول الزمني ومراحل التطوير» بنمط timeline لعرض المراحل التنفيذية المتسلسلة ومددها ومواعيدها بتصميم أفقي متناسق.
 - الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداول تقرير المعاينة ومؤشراته، ثم يأتي الملخص المالي في نهاية القسم مقسمًا إلى شريحتين أو ثلاث. الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة فقط في كامل العرض: 1) مقارنة المنافسين (horizontal_bar) في قسم دراسة السوق، 2) تكوين إجمالي تكلفة الاستثمار (waterfall) في الدراسة المالية، 3) التدفقات النقدية السنوية والتراكمية (combo) في الدراسة المالية، 4) مقارنة السيناريوهات المالية (heatmap) في الدراسة المالية. يمنع منعاً باتاً إضافة أي رسم بياني خارج هذه المواقع الأربعة أو استخدام أي نوع آخر.
 - الدراسة المالية تُسحب كما أُدخلت وحُسبت في التقرير: لا إعادة حساب أو تقريب أو تحويل وحدات أو حذف صفوف أو أعمدة أو سنوات، ولا إعادة تفسير تصميمية للمحتوى. التصميم يغيّر الهوية البصرية فقط، والرسم المالي لا يظهر إلا عند توفر بياناته المعتمدة وبجوار الجدول الكامل.
 - فريق العمل يحافظ على ترتيب الجهات وحقولها كما أُدخلت، ويستخدم شعار كل جهة عند الحديث عنها. لا ينشئ فئات أو مسميات جديدة.
@@ -5425,6 +5611,26 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
             'وبطاقة بارزة ومميزة لجهة الإطلالة أو الطريق الرئيسي إن وجدت:\n'
             + json.dumps(data, ensure_ascii=False, indent=2)
         )
+    if source == 'land_specs':
+        data = _extract_land_specs_data(project_data)
+        return (
+            'بيانات مواصفات الأرض والاشتراطات التنظيمية والبلدية — أنشئ شريحة مواصفات فنية واشتراطات معمارية وتنظيمية راقية، '
+            'تتضمن بطاقات واضحة لأرقام الصك والمخطط والقطعة والمساحة الإجمالية، وشبكة بطاقات أنيقة لنسبة البناء، معامل البناء، الارتدادات، '
+            'الارتفاعات المسموحة، الاستخدام المعتمد، واشتراطات المواقف، مع إبراز أي ميزات تنظيمية أو ملخص بياني دون أي أيقونات:\n'
+            + json.dumps(data, ensure_ascii=False, indent=2)
+        )
+    if source in ('timeline_table_data', 'timeline'):
+        phases = parse_timeline_phases(project_data)
+        timeline_meta = {
+            'start_date': project_data.get('timeline_start_date') or project_data.get('start_date') or '',
+            'duration_years': project_data.get('timeline_duration_years') or project_data.get('project_duration_years') or '',
+            'phases': phases,
+        }
+        return (
+            'بيانات الجدول الزمني ومراحل التطوير — أنشئ شريحة جدول زمني متكاملة ومراحل تنفيذ واضحة وأنيقة (Horizontal Timeline / Gantt cards) '
+            'تعرض كل مرحلة باسمها، مدتها، تواريخ أو فترات البداية والنهاية، والمهام الرئيسية، وتوزع المراحل زمنياً بشكل جذاب وواضح دون أي أيقونات:\n'
+            + json.dumps(timeline_meta, ensure_ascii=False, indent=2)
+        )
     return ''
 
 
@@ -5476,9 +5682,25 @@ def _extract_land_boundary_diagram_data(project_data):
                 continue
             dir_key = str(row.get('direction') or row.get('label') or '').strip().lower()
             reg_text = str(row.get('regulation_text') or row.get('text') or row.get('description') or '').strip()
+            length_val = str(row.get('boundary_length') or row.get('boundary_length_m') or row.get('length') or '').strip()
+            street_val = str(row.get('street_name') or row.get('street') or '').strip()
+            neighbour_val = str(row.get('neighbour') or row.get('neighbor') or row.get('adjacent') or '').strip()
+            width_val = str(row.get('street_width') or row.get('street_width_m') or row.get('width') or '').strip()
+            uses_val = str(row.get('uses') or row.get('use') or '').strip()
             for std_key, aliases in dir_aliases.items():
                 if dir_key in aliases or any(a in dir_key for a in aliases):
-                    directions[std_key]['description'] = reg_text
+                    if reg_text and not directions[std_key]['description']:
+                        directions[std_key]['description'] = reg_text
+                    if length_val and not directions[std_key]['length']:
+                        directions[std_key]['length'] = length_val if 'م' in length_val else f"{length_val} م"
+                    if street_val and not directions[std_key].get('street_name'):
+                        directions[std_key]['street_name'] = street_val
+                    if neighbour_val and not directions[std_key].get('neighbour'):
+                        directions[std_key]['neighbour'] = neighbour_val
+                    if width_val and not directions[std_key].get('street_width'):
+                        directions[std_key]['street_width'] = width_val if 'م' in width_val else f"{width_val} م"
+                    if uses_val and not directions[std_key].get('uses'):
+                        directions[std_key]['uses'] = uses_val
                     break
 
     land_analysis = _decode_json_fact(source.get('land_documents_analysis_data') or source.get('landDocumentsAnalysisData') or source.get('land_documents_analysis'))
@@ -5491,16 +5713,19 @@ def _extract_land_boundary_diagram_data(project_data):
             for alias in aliases:
                 if alias in parcel_dirs and isinstance(parcel_dirs[alias], dict):
                     p_info = parcel_dirs[alias]
-                    desc = str(p_info.get('regulation_text') or p_info.get('uses') or p_info.get('street_name') or '').strip()
+                    desc = str(p_info.get('regulation_text') or p_info.get('uses') or '').strip()
                     length = p_info.get('boundary_length_m') or p_info.get('length')
                     width = p_info.get('street_width_m') or p_info.get('width')
                     street = str(p_info.get('street_name') or '').strip()
+                    neighbour = str(p_info.get('neighbour') or p_info.get('neighbor') or p_info.get('adjacent') or '').strip()
                     if desc and not directions[std_key]['description']:
                         directions[std_key]['description'] = desc
                     if length and not directions[std_key]['length']:
                         directions[std_key]['length'] = f"{length} م"
                     if street and not directions[std_key].get('street_name'):
                         directions[std_key]['street_name'] = street
+                    if neighbour and not directions[std_key].get('neighbour'):
+                        directions[std_key]['neighbour'] = neighbour
                     if width and not directions[std_key].get('street_width'):
                         directions[std_key]['street_width'] = f"{width} م"
                     break
@@ -5605,18 +5830,33 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
         length = safe(item.get('length'))
         street = str(item.get('street_name') or '').strip()
         description = str(item.get('description') or '').strip()
-        neighbour = street or description
+        neighbour = str(item.get('neighbour') or '').strip()
         width = safe(item.get('street_width')) if item.get('street_width') else ''
-        extra = f'<div style="margin-top:7px;color:{primary};font-size:11px;font-weight:700;">{safe(neighbour)}</div>' if neighbour else ''
-        width_html = f'<div style="margin-top:5px;color:#475569;font-size:10px;">عرض الشارع: {width}</div>' if width else ''
+        uses = safe(item.get('uses')) if item.get('uses') else ''
+
+        lines = []
+        if street:
+            lines.append(f'<div style="margin-top:5px;color:{primary};font-size:11.5px;font-weight:700;">{safe(street)}</div>')
+        elif neighbour:
+            lines.append(f'<div style="margin-top:5px;color:{primary};font-size:11.5px;font-weight:700;">المجاور: {safe(neighbour)}</div>')
+        if width:
+            lines.append(f'<div style="margin-top:3px;color:#475569;font-size:10.5px;">عرض الشارع: {width}</div>')
+        if neighbour and street:
+            lines.append(f'<div style="margin-top:3px;color:#475569;font-size:10.5px;">المجاور: {safe(neighbour)}</div>')
+        if description and description != street and description != neighbour:
+            lines.append(f'<div style="margin-top:4px;color:#64748b;font-size:10px;line-height:1.35;">{safe(description)}</div>')
+        elif uses:
+            lines.append(f'<div style="margin-top:4px;color:#64748b;font-size:10px;line-height:1.35;">{uses}</div>')
+
+        details_html = ''.join(lines)
         return (
-            f'<div data-boundary-direction="{direction_key}" style="min-height:122px;border:2px solid {border};'
-            f'border-radius:14px;background:#ffffff;padding:14px 16px;box-sizing:border-box;direction:rtl;'
+            f'<div data-boundary-direction="{direction_key}" style="min-height:120px;border:2px solid {border};'
+            f'border-radius:14px;background:#ffffff;padding:12px 14px;box-sizing:border-box;direction:rtl;'
             f'display:flex;flex-direction:column;justify-content:center;overflow:hidden;">'
             f'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-            f'<span style="font-size:18px;font-weight:800;color:{primary};">{label}</span>'
-            f'<span dir="ltr" style="font-size:22px;font-weight:800;color:{accent};white-space:nowrap;">{length}</span></div>'
-            f'<div style="height:1px;background:#e2e8f0;margin:8px 0 0;"></div>{extra}{width_html}'
+            f'<span style="font-size:17px;font-weight:800;color:{primary};">{label}</span>'
+            f'<span dir="ltr" style="font-size:20px;font-weight:800;color:{accent};white-space:nowrap;">{length}</span></div>'
+            f'<div style="height:1px;background:#e2e8f0;margin:6px 0 0;"></div>{details_html}'
             '</div>'
         )
 
@@ -5633,7 +5873,7 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
     <div style="margin-top:5px;color:#64748b;font-size:11px;">الأبعاد بالمتر</div></div>
     <div style="height:4px;width:82px;background:{accent};border-radius:4px;"></div>
   </div>
-  <div data-boundary-diagram="1" style="height:492px;border:1px solid #dbe5ed;border-radius:16px;background:#f8fafc;padding:14px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1.75fr 1fr;grid-template-rows:122px 208px 122px;gap:12px;direction:ltr;">
+  <div data-boundary-diagram="1" style="height:500px;border:1px solid #dbe5ed;border-radius:16px;background:#f8fafc;padding:12px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1.65fr 1fr;grid-template-rows:minmax(120px,1fr) minmax(180px,1.3fr) minmax(120px,1fr);gap:10px;direction:ltr;">
     <div style="grid-column:2;grid-row:1;">{card('north')}</div>
     <div style="grid-column:1;grid-row:2;">{card('west')}</div>
     <div style="grid-column:2;grid-row:2;border-radius:18px;background:{primary};color:#ffffff;border:3px solid {accent};padding:22px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;direction:rtl;overflow:hidden;">
@@ -5646,6 +5886,426 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
   </div>
   <div style="margin-top:9px;text-align:center;color:#64748b;font-size:10px;line-height:1.35;">تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.</div>
   <div data-slide-counter="1" style="display:none;">{slide_num_str}</div>
+</div>'''
+
+
+def _has_land_specs_data(project_data):
+    """Return whether the project has enough regulatory or land specification facts."""
+    source = project_data if isinstance(project_data, dict) else {}
+    spec_keys = (
+        'croquis_land_area', 'approved_financial_area', 'land_area', 'total_land_area',
+        'plot_number', 'plan_number', 'deed_number', 'deed_date',
+        'building_ratio_coverage', 'building_ratio_setbacks', 'far', 'setbacks',
+        'max_floors_height', 'allowed_uses', 'building_system', 'parking_regulations',
+    )
+    if any(str(source.get(k) or '').strip() for k in spec_keys):
+        return True
+    doc_raw = source.get('land_documents_analysis_data') or source.get('landDocumentsAnalysisData') or source.get('land_documents_analysis')
+    if doc_raw:
+        doc = _decode_json_fact(doc_raw) if isinstance(doc_raw, (str, dict)) else {}
+        if isinstance(doc, dict):
+            if any(str(doc.get(k) or '').strip() for k in spec_keys):
+                return True
+            parcels = doc.get('parcels')
+            if isinstance(parcels, list) and any(isinstance(p, dict) and any(str(p.get(k) or '').strip() for k in spec_keys) for p in parcels):
+                return True
+    return False
+
+
+def _extract_land_specs_data(project_data):
+    """Extract land specifications and regulatory conditions into a clean dictionary."""
+    source = project_data if isinstance(project_data, dict) else {}
+    doc_raw = source.get('land_documents_analysis_data') or source.get('landDocumentsAnalysisData') or source.get('land_documents_analysis')
+    doc = _decode_json_fact(doc_raw) if isinstance(doc_raw, (str, dict)) else {}
+    if not isinstance(doc, dict):
+        doc = {}
+    parcels = doc.get('parcels') if isinstance(doc.get('parcels'), list) else []
+    first_parcel = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+
+    def _val(*keys, fallback='—'):
+        for k in keys:
+            v = source.get(k)
+            if v not in (None, '', [], {}):
+                return str(v).strip()
+            v = doc.get(k)
+            if v not in (None, '', [], {}):
+                return str(v).strip()
+            v = first_parcel.get(k)
+            if v not in (None, '', [], {}):
+                return str(v).strip()
+        return fallback
+
+    plot_num = _val('plot_number', 'plotNumber', 'parcel_number')
+    plan_num = _val('plan_number', 'planNumber')
+    deed_num = _val('deed_number', 'deedNumber', 'instrument_number')
+    deed_dt = _val('deed_date', 'deedDate', 'instrument_date')
+
+    land_area = _val('approved_financial_area', 'croquis_land_area', 'land_area', 'total_land_area')
+    built_area = _val('built_area', 'total_built_area', 'building_area')
+    city = _val('city')
+    district = _val('district')
+
+    bldg_ratio = _val('building_ratio_coverage', 'building_ratio_setbacks', 'building_ratio', fallback='60% كحد أقصى')
+    if bldg_ratio and not bldg_ratio.endswith('%') and bldg_ratio.isdigit():
+        bldg_ratio += '%'
+
+    far = _val('far', 'nsba_albna__far', 'floor_area_ratio')
+    setbacks = _val('setbacks', 'building_setbacks', fallback='حسب كود البناء والاشتراطات البلدية')
+    max_floors = _val('max_floors_height', 'max_floors', 'max_height', 'floors_allowed')
+    allowed_uses = _val('allowed_uses', 'permitted_uses', 'zoning', 'land_use', fallback='تجاري / سكني استثماري')
+    bldg_system = _val('building_system', 'regulatory_constraints')
+    parking = _val('parking_regulations', 'parking_spaces', fallback='حسب اشتراطات كود البناء السعودي ومعايير الأمانة')
+    infrastructure = _val('infrastructure', 'utilities', fallback='مكتملة الخدمات (كهرباء، مياه، اتصالات، إنارة)')
+
+    return {
+        'plot_number': plot_num,
+        'plan_number': plan_num,
+        'deed_number': deed_num,
+        'deed_date': deed_dt,
+        'land_area': land_area,
+        'built_area': built_area,
+        'city': city,
+        'district': district,
+        'building_ratio_coverage': bldg_ratio,
+        'far': far,
+        'setbacks': setbacks,
+        'max_floors_height': max_floors,
+        'allowed_uses': allowed_uses,
+        'building_system': bldg_system,
+        'parking_regulations': parking,
+        'infrastructure': infrastructure,
+    }
+
+
+def _build_land_specs_slide(slide, project_data, branding=None, slide_num=None, total_slides=None):
+    """Render land specifications and regulatory conditions as an editorial analytical slide."""
+    source = project_data if isinstance(project_data, dict) else {}
+    specs = _extract_land_specs_data(source)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'مواصفات الأرض والاشتراطات التنظيمية'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    land_area_fmt = specs['land_area']
+    if land_area_fmt != '—' and 'م' not in land_area_fmt:
+        try:
+            num = float(land_area_fmt.replace(',', ''))
+            land_area_fmt = f"{num:,.1f}".rstrip('0').rstrip('.') + ' م²'
+        except (ValueError, TypeError):
+            land_area_fmt += ' م²'
+
+    top_metric_cards = [
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">مساحة الأرض التنظيمية</div>'
+        f'<div style="font-size:17px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(land_area_fmt)}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">نسبة التغطية والبناء</div>'
+        f'<div style="font-size:17px;font-weight:800;color:{accent};margin-top:2px;">{html_lib.escape(specs["building_ratio_coverage"])}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">معامل البناء (FAR)</div>'
+        f'<div style="font-size:17px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(specs["far"])}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">الحد الأقصى للارتفاع / الأدوار</div>'
+        f'<div style="font-size:17px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(specs["max_floors_height"])}</div></div>',
+    ]
+    metrics_strip = f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px;margin-bottom:16px;">{"".join(top_metric_cards)}</div>'
+
+    doc_rows = [
+        ('رقم الصك وتاريخه', f"صك رقم {specs['deed_number']} — تاريخ {specs['deed_date']}" if specs['deed_number'] != '—' else '—'),
+        ('رقم المخطط والقطعة', f"مخطط رقم {specs['plan_number']} / قطعة رقم {specs['plot_number']}" if specs['plot_number'] != '—' else '—'),
+        ('المدينة والحي', f"{specs['city']} — حي {specs['district']}" if specs['city'] != '—' else '—'),
+        ('الاستخدامات المصرحة', specs['allowed_uses']),
+        ('البنية التحتية والخدمات', specs['infrastructure']),
+    ]
+    doc_table_html = ''.join(
+        f'<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px;">'
+        f'<div style="font-weight:700;color:#64748b;min-width:140px;">{label}</div>'
+        f'<div style="font-weight:700;color:{primary};text-align:left;flex:1;">{html_lib.escape(val)}</div>'
+        f'</div>' for label, val in doc_rows
+    )
+
+    reg_rows = [
+        ('الارتدادات النظامية', specs['setbacks']),
+        ('نظام البناء والاشتراطات', specs['building_system']),
+        ('اشتراطات المواقف والمداخل', specs['parking_regulations']),
+        ('مساحة البناء المعتمدة', specs['built_area']),
+    ]
+    reg_table_html = ''.join(
+        f'<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:11px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px;">'
+        f'<div style="font-weight:700;color:#64748b;min-width:150px;">{label}</div>'
+        f'<div style="font-weight:700;color:{primary};text-align:left;flex:1;">{html_lib.escape(val)}</div>'
+        f'</div>' for label, val in reg_rows
+    )
+
+    columns_html = f'''<div style="display:grid;grid-template-columns:1.05fr 0.95fr;gap:18px;height:385px;">
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;box-sizing:border-box;">
+        <div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid {primary};">المحددات التوثيقية والمساحية</div>
+        {doc_table_html}
+      </div>
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;box-sizing:border-box;">
+        <div style="font-size:15px;font-weight:800;color:{accent};margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid {accent};">الاشتراطات والضوابط التنظيمية</div>
+        {reg_table_html}
+      </div>
+    </div>'''
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">LAND SPECIFICATIONS</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">المحددات التوثيقية والمساحية والاشتراطات والضوابط العمرانية للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    {metrics_strip}
+    {columns_html}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">مواصفات واشتراطات الأرض</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render project timeline as a high-end visual pipeline across all phases."""
+    source = source if isinstance(source, dict) else {}
+    phases = parse_timeline_phases(source)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الجدول الزمني ومراحل التطوير'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    total_months = sum(int(p.get('duration') or 0) for p in phases if str(p.get('duration') or '').isdigit())
+    years_val = source.get('timeline_years') or (str(round(total_months / 12)) if total_months >= 12 else '—')
+    start_str = phases[0].get('start_label') or f"سنة {phases[0].get('year', '1')} ({phases[0].get('quarter', 'Q1')})" if phases else '—'
+    end_str = phases[-1].get('end_label') or f"سنة {phases[-1].get('endYear', '')} ({phases[-1].get('endQuarter', '')})" if phases else '—'
+    duration_str = f"{total_months} شهر ({years_val} سنوات)" if total_months else (f"{years_val} سنوات" if years_val != '—' else '—')
+
+    stats_cards = [
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">المدة الكلية للمشروع</div>'
+        f'<div style="font-size:15px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(str(duration_str))}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">تاريخ انطلاق الأعمال</div>'
+        f'<div style="font-size:15px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(str(start_str))}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">التسليم والتشغيل المتوقع</div>'
+        f'<div style="font-size:15px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(str(end_str))}</div></div>',
+
+        f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
+        f'<div style="font-size:11px;font-weight:700;color:#64748b;">المراحل التنفيذية المعتمدة</div>'
+        f'<div style="font-size:15px;font-weight:800;color:{accent};margin-top:2px;">{len(phases)} مراحل رئيسية</div></div>',
+    ]
+    stats_strip_html = f'<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px;margin-bottom:18px;">{"".join(stats_cards)}</div>'
+
+    num_phases = len(phases)
+    if num_phases <= 5:
+        cards = []
+        for idx, phase in enumerate(phases, 1):
+            p_name = html_lib.escape(str(phase.get('name') or ''))
+            p_dur = str(phase.get('duration') or '').strip()
+            dur_badge = f'<span style="background:#f1f5f9;color:{primary};padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #cbd5e1;">{p_dur} شهر</span>' if p_dur else ''
+            p_start = phase.get('start_label') or f"سنة {phase.get('year', '')} ({phase.get('quarter', '')})"
+            p_end = phase.get('end_label') or f"سنة {phase.get('endYear', '')} ({phase.get('endQuarter', '')})"
+            p_notes = html_lib.escape(str(phase.get('notes') or '').strip())
+            notes_html = f'<div style="font-size:11.5px;color:#475569;line-height:1.48;margin-top:10px;padding-top:8px;border-top:1px dashed #e2e8f0;">{p_notes}</div>' if p_notes else ''
+
+            card = f'''<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;position:relative;border-top:5px solid {accent if idx % 2 == 1 else primary};">
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                  <span style="font-size:11px;font-weight:800;color:#94a3b8;">المرحلة 0{idx}</span>
+                  {dur_badge}
+                </div>
+                <div style="font-size:14.5px;font-weight:800;color:{primary};line-height:1.4;margin-bottom:10px;min-height:40px;">{p_name}</div>
+                <div style="background:#f8fafc;border-radius:8px;padding:8px 10px;font-size:11.5px;color:#334155;line-height:1.5;">
+                  <div><strong style="color:#64748b;">من:</strong> {html_lib.escape(str(p_start))}</div>
+                  <div style="margin-top:2px;"><strong style="color:#64748b;">إلى:</strong> {html_lib.escape(str(p_end))}</div>
+                </div>
+              </div>
+              {notes_html}
+            </div>'''
+            cards.append(card)
+        pipeline_html = f'<div style="display:grid;grid-template-columns:repeat({max(1, num_phases)}, 1fr);gap:12px;height:380px;">{"".join(cards)}</div>'
+    else:
+        cards = []
+        for idx, phase in enumerate(phases, 1):
+            p_name = html_lib.escape(str(phase.get('name') or ''))
+            p_dur = str(phase.get('duration') or '').strip()
+            dur_text = f"{p_dur} شهر" if p_dur else ''
+            p_start = phase.get('start_label') or f"سنة {phase.get('year', '')} ({phase.get('quarter', '')})"
+            p_end = phase.get('end_label') or f"سنة {phase.get('endYear', '')} ({phase.get('endQuarter', '')})"
+            p_notes = html_lib.escape(str(phase.get('notes') or '').strip())
+            card = f'''<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;border-right:4px solid {primary};">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13.5px;font-weight:800;color:{primary};">المرحلة 0{idx}: {p_name}</span>
+                <span style="font-size:11.5px;font-weight:700;color:#64748b;">{dur_text} ({p_start} — {p_end})</span>
+              </div>
+              {f'<div style="font-size:11px;color:#475569;margin-top:4px;">{p_notes}</div>' if p_notes else ''}
+            </div>'''
+            cards.append(card)
+        pipeline_html = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-height:380px;overflow:hidden;">{"".join(cards)}</div>'
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">TIMELINE & DEVELOPMENT</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">المراحل التنفيذية والمدد الزمنية المتوقعة لتطوير وإنجاز المشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    {stats_strip_html}
+    {pipeline_html}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">الجدول الزمني ومراحل المشروع</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_executive_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render executive summary as a multi-card high-impact investment layout."""
+    source = source if isinstance(source, dict) else {}
+    executive = _decode_json_fact(source.get('executive_content'))
+    summary_text = str((executive.get('summary') if isinstance(executive, dict) else None) or source.get('executive_summary') or '').strip()
+    if not summary_text:
+        summary_text = _slide_source_data_note(slide, source)
+
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي للمشروع'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
+    ext_token = next((token for token in tokens if not token.startswith('##')), '')
+    if not ext_token and tokens:
+        ext_token = tokens[0]
+
+    badges = []
+    city = str(source.get('city') or '').strip()
+    district = str(source.get('district') or '').strip()
+    loc = ' — '.join(p for p in (city, district) if p)
+    if loc:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
+    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
+    if prop_type:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
+    land_area = str(source.get('approved_financial_area') or source.get('land_area') or '').strip()
+    if land_area:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{accent};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">مساحة الأرض: {html_lib.escape(land_area)} م²</span>')
+
+    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
+
+    raw_paras = [p.strip() for p in re.split(r'\n{2,}|\r\n\r\n', summary_text) if p.strip()]
+    if len(raw_paras) == 1 and len(summary_text) > 250:
+        lines = [line.strip(' -•') for line in summary_text.split('\n') if line.strip(' -•')]
+        if len(lines) >= 2:
+            raw_paras = lines
+        else:
+            sentences = [s.strip() for s in re.split(r'(?<=[.!?؟])\s+', summary_text) if s.strip()]
+            if len(sentences) >= 4:
+                half = len(sentences) // 2
+                raw_paras = [' '.join(sentences[:half]), ' '.join(sentences[half:])]
+
+    if not raw_paras:
+        raw_paras = [summary_text or 'الملخص التنفيذي للمشروع']
+
+    if ext_token:
+        card_items = []
+        for i, para in enumerate(raw_paras[:3]):
+            head = 'الرؤية والهدف الاستثماري' if i == 0 else ('المحركات التنافسية والقيمة المضافة' if i == 1 else 'الجدوى ومسار التنفيذ')
+            card_items.append(
+                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;border-right:4px solid {accent if i == 0 else primary};">'
+                f'<div style="font-size:13px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
+                f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
+            )
+        cards_html = f'''<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;height:480px;align-items:stretch;">
+          <div style="display:flex;flex-direction:column;gap:12px;justify-content:space-between;height:100%;">
+            {"".join(card_items)}
+          </div>
+          <div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;height:100%;">
+            <img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
+          </div>
+        </div>'''
+    else:
+        if len(raw_paras) == 1:
+            cards_html = (
+                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:26px 30px;border-right:6px solid {accent};height:460px;box-sizing:border-box;">'
+                f'<div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:12px;">الرؤية العامة والقيمة الاستثمارية للمشروع</div>'
+                f'<div style="font-size:15.5px;line-height:1.8;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div></div>'
+            )
+        elif len(raw_paras) == 2:
+            cards_html = f'''<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:460px;">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {primary};">
+                <div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:10px;">الرؤية والركائز الاستثمارية</div>
+                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div>
+              </div>
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {accent};">
+                <div style="font-size:16px;font-weight:800;color:{accent};margin-bottom:10px;">المحددات السوقية والتنفيذية</div>
+                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[1])}</div>
+              </div>
+            </div>'''
+        else:
+            cards = []
+            for i, para in enumerate(raw_paras[:4]):
+                head = 'الرؤية الاستثمارية' if i == 0 else ('المكانة السوقية' if i == 1 else ('النموذج المالي' if i == 2 else 'الجاهزية والتنفيذ'))
+                cards.append(
+                    f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;border-right:4px solid {accent if i % 2 == 1 else primary};">'
+                    f'<div style="font-size:14px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
+                    f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
+                )
+            cards_html = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;height:460px;">{"".join(cards)}</div>'
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">EXECUTIVE SUMMARY</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">الرؤية الشاملة والقيمة الاستثمارية والركائز الجوهرية للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    {badge_strip}
+    {cards_html}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">الملخص التنفيذي للمشروع</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
 </div>'''
 
 
@@ -7050,6 +7710,42 @@ def _fallback_table_data(slide, project_data):
             headers = ['المنافس / المشروع', 'السعر', 'النوع']
             rows = [[it.get('name', ''), it.get('display_price', ''), it.get('price_type', '')] for it in chart_items]
             return headers, rows
+    if source == 'timeline_table_data' or (slide or {}).get('design_style') == 'timeline':
+        phases = parse_timeline_phases(project_data)
+        if phases:
+            headers = ['المرحلة', 'البداية', 'المدة (أشهر)', 'النهاية', 'الملاحظات']
+            rows = [
+                [
+                    p.get('name', ''),
+                    p.get('start_label') or f"سنة {p.get('year', '')} ({p.get('quarter', '')})",
+                    p.get('duration', ''),
+                    p.get('end_label') or f"سنة {p.get('endYear', '')} ({p.get('endQuarter', '')})",
+                    p.get('notes', ''),
+                ]
+                for p in phases
+            ]
+            return headers, rows
+    if source == 'land_specs' or (slide or {}).get('design_style') == 'specs':
+        specs = _extract_land_specs_data(project_data)
+        labels = {
+            'deed_number': 'رقم الصك',
+            'deed_date': 'تاريخ الصك',
+            'plan_number': 'رقم المخطط',
+            'plot_number': 'رقم القطعة',
+            'land_area': 'مساحة الأرض',
+            'built_area': 'مساحة البناء',
+            'building_ratio_coverage': 'نسبة البناء والتغطية',
+            'far': 'معامل البناء (FAR)',
+            'setbacks': 'الارتدادات النظامية',
+            'max_floors_height': 'الحد الأقصى للارتفاع / الأدوار',
+            'allowed_uses': 'الاستخدامات المصرحة',
+            'building_system': 'نظام البناء والاشتراطات',
+            'parking_regulations': 'اشتراطات المواقف',
+            'infrastructure': 'البنية التحتية والخدمات',
+        }
+        headers = ['البند التنظيمي / المساحي', 'المحدد المعتمد']
+        rows = [[label, specs.get(k, '—')] for k, label in labels.items() if specs.get(k) and specs.get(k) != '—']
+        return headers, rows
     return [], []
 
 
@@ -7914,6 +8610,17 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
 
     market = _decode_json_fact(source.get('market_study_data')) if isinstance(source.get('market_study_data'), (str, dict)) else {}
     competitors = market.get('competitors') if isinstance(market, dict) else []
+    c_start = (slide or {}).get('competitor_start')
+    c_end = (slide or {}).get('competitor_end')
+    cs = str((slide or {}).get('content_source') or '')
+    if c_start is not None and c_end is not None:
+        competitors = competitors[c_start:c_end]
+    elif ':' in cs:
+        parts = cs.split(':')
+        if len(parts) >= 3 and parts[-2].isdigit() and parts[-1].isdigit():
+            s_idx, e_idx = int(parts[-2]), int(parts[-1])
+            competitors = competitors[s_idx:e_idx]
+
     items = _extract_competitor_chart_data(competitors, source)
 
     bar_chart_html = _render_fallback_horizontal_bar(items, primary, accent)
@@ -8118,13 +8825,13 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
 
     def render_row(label, value):
         return (
-            f'<div style="padding:13px 15px;border-bottom:1px solid #dbe4ee;min-height:76px;box-sizing:border-box;">'
-            f'<div style="font-size:12px;font-weight:800;color:{primary};margin-bottom:5px;">{html_lib.escape(str(label))}</div>'
-            f'<div style="font-size:13px;line-height:1.65;color:#334155;text-align:justify;">{_market_value_html(value)}</div></div>'
+            f'<div style="padding:16px 18px;border-bottom:1px solid #e2e8f0;box-sizing:border-box;">'
+            f'<div style="font-size:13px;font-weight:800;color:{primary};margin-bottom:6px;">{html_lib.escape(str(label))}</div>'
+            f'<div style="font-size:14px;line-height:1.75;color:#334155;text-align:justify;">{_market_value_html(value)}</div></div>'
         )
 
     column_html = ''.join(
-        f'<div style="background:#ffffff;border:1px solid #dbe4ee;border-top:5px solid {primary};border-radius:9px;overflow:hidden;">'
+        f'<div style="background:#ffffff;border:1px solid #dbe4ee;border-top:4px solid {primary};border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.03);">'
         + ''.join(render_row(label, value) for label, value in column)
         + '</div>'
         for column in columns if column
@@ -8133,10 +8840,33 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
     district = str(source.get('district') or '').strip()
     location_line = ' — '.join(item for item in (district, city) if item)
     location_html = (
-        f'<div style="background:#e8dcc0;border-radius:9px;padding:13px 16px;min-width:190px;">'
-        f'<div style="font-size:11px;font-weight:800;color:#334155;margin-bottom:5px;">الموقع الجغرافي</div>'
-        f'<div style="font-size:16px;font-weight:800;color:#1f2937;">{html_lib.escape(location_line)}</div></div>'
+        f'<div style="background:#f1f5f9;border-radius:10px;padding:12px 18px;border:1px solid #cbd5e1;min-width:200px;">'
+        f'<div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:4px;">النطاق الجغرافي للمشروع</div>'
+        f'<div style="font-size:16px;font-weight:800;color:{primary};">{html_lib.escape(location_line)}</div></div>'
     ) if location_line else ''
+
+    # Additional contextual highlights so the slide feels rich and comprehensive
+    context_cards = []
+    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
+    if prop_type:
+        context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">نوع الأصل الاستثماري</div>'
+                             f'<div style="font-size:13.5px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(prop_type)}</div></div>')
+    decision = str(market.get('decision') or '').strip()
+    if decision:
+        context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">تصنيف ملاءمة السوق</div>'
+                             f'<div style="font-size:13.5px;font-weight:800;color:{accent};margin-top:2px;">{html_lib.escape(decision)}</div></div>')
+    sources_count = len(market.get('sources') or [])
+    if sources_count:
+        context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">المصادر المرجعية المعتمدة</div>'
+                             f'<div style="font-size:13.5px;font-weight:800;color:{primary};margin-top:2px;">{sources_count} مصادر بيانات</div></div>')
+    highlights_html = (
+        f'<div style="margin-top:16px;display:grid;grid-template-columns:repeat({len(context_cards)}, 1fr);gap:14px;">{"".join(context_cards)}</div>'
+        if context_cards else ''
+    )
+
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
@@ -8149,19 +8879,20 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
       <div class="header-accent-bar" style="background:{accent};"></div>
       <div class="header-text-group">
         <h1 class="header-title">{title}</h1>
-        <p class="header-subtitle">الإطار الجغرافي والزمني المعتمد لقراءة السوق</p>
+        <p class="header-subtitle">الإطار الجغرافي والزمني والمنهجي المعتمد لقراءة السوق</p>
       </div>
     </div>
   </header>
   <div data-market-scope="1" style="padding:0 36px;margin-top:14px;">
-    <div style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;padding:20px 22px 18px;box-sizing:border-box;">
+    <div style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;padding:22px 24px;box-sizing:border-box;">
       <div style="display:flex;align-items:end;justify-content:space-between;gap:20px;border-bottom:1px solid #dbe4ee;padding-bottom:14px;margin-bottom:16px;direction:rtl;">
-        <div><div style="font-size:22px;font-weight:800;color:{primary};">تعريف السوق ونطاق الدراسة</div><div style="font-size:12px;color:#64748b;margin-top:5px;">البيانات التي تحدد مجال المقارنة والتحليل</div></div>
+        <div><div style="font-size:22px;font-weight:800;color:{primary};">تعريف السوق ونطاق الدراسة</div><div style="font-size:12px;color:#64748b;margin-top:5px;">المحددات والمعايير التي تحكم مجال المقارنة والتحليل</div></div>
         {location_html}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
         {column_html}
       </div>
+      {highlights_html}
     </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -8474,22 +9205,10 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
 </div>'''
 
 
-def _market_swot_items(value):
-    if isinstance(value, list):
-        values = value
-    elif isinstance(value, dict):
-        values = list(value.values())
-    else:
-        text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
-        values = re.split(r'\n\s*-\s+|\s+-\s+', text) if text else []
-    return [str(item or '').strip(' -') for item in values if str(item or '').strip(' -')]
-
-
 def _build_market_swot_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render SWOT as a readable four-quadrant matrix instead of raw JSON."""
     source = source if isinstance(source, dict) else {}
-    market = _market_state(source)
-    swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
+    swot = _extract_project_swot(source)
     definitions = (
         ('strengths', 'نقاط القوة', '#0f766e', '#ecfdf5'),
         ('weaknesses', 'نقاط الضعف', '#b45309', '#fffbeb'),
@@ -8952,10 +9671,14 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     if content_source == 'land_boundary_diagram':
         return _build_land_boundary_diagram_slide(
             slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if content_source == 'land_specs' or (slide.get('section_key') == 'land' and slide.get('design_style') == 'specs'):
+        return _build_land_specs_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if content_source == 'timeline_table_data' or slide.get('design_style') == 'timeline' or slide.get('section_key') == 'timeline':
+        return _build_timeline_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if _is_visual_concept_media_slide(slide):
         return _build_visual_concept_media_slide(slide, branding=branding)
     if content_source == 'site_analysis':
-        analysis = str(source.get('site_analysis') or '').strip()
+        analysis = str(source.get('site_analysis') or _slide_source_data_note(slide, source) or '').strip()
         paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', analysis) if part.strip()]
         if not paragraphs and analysis:
             paragraphs = [analysis]
