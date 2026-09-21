@@ -12673,7 +12673,12 @@ class MeetingRequirementsTests(unittest.TestCase):
                 self.assertTrue(module._market_url_alive(url))
             with patch.object(module.requests, 'head', return_value=_Resp(403)):
                 self.assertTrue(module._market_url_alive(url))
-            with patch.object(module.requests, 'head', return_value=_Resp(404)):
+            # A HEAD-only 404 is a server quirk, not proof — the GET decides.
+            with patch.object(module.requests, 'head', return_value=_Resp(404)), \
+                 patch.object(module.requests, 'get', return_value=_Resp(200)):
+                self.assertTrue(module._market_url_alive(url))
+            with patch.object(module.requests, 'head', return_value=_Resp(404)), \
+                 patch.object(module.requests, 'get', return_value=_Resp(404)):
                 self.assertFalse(module._market_url_alive(url))
             dns_err = module.requests.ConnectionError('nxdomain')
             dns_err.__cause__ = _socket.gaierror(-2, 'Name or service not known')

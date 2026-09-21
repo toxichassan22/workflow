@@ -22186,8 +22186,12 @@ def _market_url_alive(url, timeout=8):
             if _market_dns_failure(exc):
                 return False
             continue
+        # A HEAD 404 proves nothing — misconfigured servers answer it wrongly
+        # for pages that GET fine. Only the GET's 404/410 is proof of death.
         if status in (404, 410):
-            return False
+            if method == 'get':
+                return False
+            continue
         # Any other status means a live server answered — 2xx/3xx resolve,
         # 401/403/405/429 are bot walls, 5xx is an origin problem, not a
         # missing page.
