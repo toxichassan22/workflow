@@ -1684,11 +1684,13 @@ _MARKET_COMPETITORS_PER_SLIDE = 4
 
 
 def _market_competitor_ranges(count):
-    """Slice competitors into slides of at most _MARKET_COMPETITORS_PER_SLIDE."""
-    return [
-        (start, min(start + _MARKET_COMPETITORS_PER_SLIDE, count))
-        for start in range(0, count, _MARKET_COMPETITORS_PER_SLIDE)
-    ]
+    """Slice competitors into balanced slides of at most _MARKET_COMPETITORS_PER_SLIDE.
+
+    Pages fill evenly rather than sequentially: 5 split 3+2, 9 split
+    3+3+3 — never a crowded page followed by a near-empty one.
+    """
+    return _balanced_row_ranges(
+        count, max_per_slide=_MARKET_COMPETITORS_PER_SLIDE, min_per_slide=2)
 
 
 def _market_summary_topic_height(label, value, lead=False):
@@ -8337,14 +8339,7 @@ def _competitor_area_display(comp):
 
 
 def _competitor_source_display(comp):
-    source = _competitor_value(comp, 'source', 'المصدر')
-    source_html = f'<div>{html_lib.escape(_competitor_display_text(source))}</div>'
-    data_date = _competitor_value(comp, 'data_date', 'dataDate', 'source_date', 'date', 'تاريخ البيانات')
-    reliability = _competitor_value(comp, 'reliability', 'source_reliability', 'موثوقية المصدر')
-    if data_date:
-        source_html += f'<div style="margin-top:2px;color:#475569;font-size:8px;">تاريخ البيانات: {html_lib.escape(_competitor_display_text(data_date))}</div>'
-    if reliability:
-        source_html += f'<div style="margin-top:2px;color:#475569;font-size:8px;">الموثوقية: {html_lib.escape(_competitor_display_text(reliability))}</div>'
+    """The sources column carries numbered source links only — no extra prose."""
     urls = comp.get('source_urls') if isinstance(comp, dict) and isinstance(comp.get('source_urls'), list) else []
     if not urls:
         single_url = _competitor_value(comp, 'source_url')
@@ -8355,14 +8350,11 @@ def _competitor_source_display(comp):
         if re.match(r'^https?://', url_text, re.IGNORECASE):
             links.append(
                 f'<a href="{html_lib.escape(url_text, quote=True)}" target="_blank" rel="noopener noreferrer" '
-                f'style="color:#2563eb;font-size:8px;word-break:break-all;">المصدر {index}</a>'
+                f'style="color:#2563eb;font-size:9px;">المصدر {index}</a>'
             )
-    if links:
-        source_html += '<div style="margin-top:3px;display:flex;flex-direction:column;gap:2px;">' + ''.join(links) + '</div>'
-    notes = _competitor_value(comp, 'notes', 'note', 'ملاحظات')
-    if notes:
-        source_html += f'<div style="margin-top:3px;color:#64748b;font-size:8px;white-space:pre-line;">{html_lib.escape(_competitor_display_text(notes))}</div>'
-    return source_html
+    if not links:
+        return '<div style="color:#94a3b8;">—</div>'
+    return '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;">' + ''.join(links) + '</div>'
 
 
 def _render_competitor_table(competitors, primary):
@@ -8416,7 +8408,7 @@ def _render_competitor_table(competitors, primary):
         )
     if not rows_html:
         return '<div data-competitor-table="1" style="padding:20px;text-align:center;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;">لا توجد بيانات منافسين</div>'
-    headers = ('الشعار', 'اسم المشروع', 'النوع والتصنيف', 'المساحة م²', 'الحالة', 'نوع العملية', 'بيانات السعر', 'المصدر والملاحظات')
+    headers = ('الشعار', 'اسم المشروع', 'النوع والتصنيف', 'المساحة م²', 'الحالة', 'نوع العملية', 'بيانات السعر', 'المصادر')
     header_html = ''.join(
         f'<th style="background:{primary};color:#fff;padding:6px 4px;font-size:9px;text-align:center;vertical-align:middle;line-height:1.2;">{header}</th>'
         for header in headers

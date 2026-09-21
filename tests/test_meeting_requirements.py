@@ -2546,26 +2546,24 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]}, project, {})
         comp_slides = [slide for slide in plan['slides']
                        if str(slide.get('content_source') or '').startswith('market_study_data.competitors')]
-        # Four competitors per slide: 5 split into pages of 4 and 1.
+        # At most four competitors per slide: 5 split into balanced 3+2 pages.
         self.assertEqual(len(comp_slides), 2)
-        self.assertEqual((comp_slides[0].get('competitor_start'), comp_slides[0].get('competitor_end')), (0, 4))
-        self.assertEqual((comp_slides[1].get('competitor_start'), comp_slides[1].get('competitor_end')), (4, 5))
+        self.assertEqual((comp_slides[0].get('competitor_start'), comp_slides[0].get('competitor_end')), (0, 3))
+        self.assertEqual((comp_slides[1].get('competitor_start'), comp_slides[1].get('competitor_end')), (3, 5))
         html_1 = engine._build_sol_horizontal_bar_slide(
             comp_slides[0], project, {'primary_color': '#123456'}, slide_num=3, total_slides=8)
-        for name in ('منافس أ', 'منافس ب', 'منافس ج', 'منافس د'):
+        for name in ('منافس أ', 'منافس ب', 'منافس ج'):
             self.assertIn(name, html_1)
+        self.assertNotIn('منافس د', html_1)
         self.assertNotIn('منافس هـ', html_1)
+        # Page 2 holds the sale+rent pair: mixed price units stay in the
+        # chart as separately labelled sections.
         html_2 = engine._build_sol_horizontal_bar_slide(
             comp_slides[1], project, {'primary_color': '#123456'}, slide_num=4, total_slides=8)
+        self.assertIn('منافس د', html_2)
         self.assertIn('منافس هـ', html_2)
-        # Mixed price units stay in the chart as separately labelled sections.
-        mixed_slide = dict(comp_slides[0], competitor_start=3, competitor_end=5)
-        mixed_html = engine._build_sol_horizontal_bar_slide(
-            mixed_slide, project, {'primary_color': '#123456'}, slide_num=3, total_slides=8)
-        self.assertIn('منافس د', mixed_html)
-        self.assertIn('منافس هـ', mixed_html)
-        self.assertIn('مشاريع البيع', mixed_html)
-        self.assertIn('مشاريع الإيجار', mixed_html)
+        self.assertIn('مشاريع البيع', html_2)
+        self.assertIn('مشاريع الإيجار', html_2)
         items = engine._extract_competitor_chart_data(competitors, project)
         chart_names = {item.get('name') for item in items}
         self.assertEqual(chart_names, {'منافس أ', 'منافس ب', 'منافس ج', 'منافس د', 'منافس هـ'})
@@ -4845,9 +4843,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         for value in ('data-competitor-table="1"', 'رافلز', 'سومو', 'فندقي', 'مباشر',
                       '1,200', 'تحت الإنشاء', 'تشغيل فندقي', '1,548', '900,000',
-                      'https://example.com/raffles', 'بيانات موثقة', 'نطاق المنافسين',
+                      'https://example.com/raffles', 'المصدر 1', 'نطاق المنافسين',
                       '##COMPETITOR_LOGO_1##', '##COMPETITOR_LOGO_2##', 'width:100%'):
             self.assertIn(value, raw)
+        # The sources column carries numbered links only — no notes prose.
+        self.assertNotIn('بيانات موثقة', raw)
         self.assertGreaterEqual(raw.count('<tr'), 3)
 
         finished = engine.finalize_slide_html(
@@ -12984,8 +12984,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'http://portal.example/insecure.jpg'):
             self.assertEqual(module._download_listing_image(url), (None, None, None))
 
-    def test_market_competitors_chunked_into_slides_of_four(self):
-        """At most 4 competitors per slide; 6 split into pages of 4 and 2."""
+    def test_market_competitors_chunked_into_balanced_slides(self):
+        """At most 4 competitors per slide, split evenly: 6 become 3+3, 9 become 3+3+3."""
         engine = self.application_module.slide_engine
 
         def plan_for(count):
@@ -13006,27 +13006,32 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(comp_slides4), 1)
         self.assertEqual((comp_slides4[0]['competitor_start'], comp_slides4[0]['competitor_end']), (0, 4))
 
+        _draft9, comp_slides9 = plan_for(9)
+        self.assertEqual(
+            [(s['competitor_start'], s['competitor_end']) for s in comp_slides9],
+            [(0, 3), (3, 6), (6, 9)])
+
         draft6, comp_slides = plan_for(6)
         self.assertEqual(len(comp_slides), 2)
         self.assertEqual(comp_slides[0]['competitor_start'], 0)
-        self.assertEqual(comp_slides[0]['competitor_end'], 4)
+        self.assertEqual(comp_slides[0]['competitor_end'], 3)
         self.assertIn('(1/2)', comp_slides[0]['title'])
-        self.assertEqual(comp_slides[1]['competitor_start'], 4)
+        self.assertEqual(comp_slides[1]['competitor_start'], 3)
         self.assertEqual(comp_slides[1]['competitor_end'], 6)
         self.assertIn('(2/2)', comp_slides[1]['title'])
 
-        # Verify rendering of slide 1 contains only the first 4 competitors
+        # Verify rendering of slide 1 contains only the first 3 competitors
         html_1 = engine._build_structured_fallback_slide(comp_slides[0], draft6, {})
-        for index in range(1, 5):
+        for index in range(1, 4):
             self.assertIn(f'منافس {index}', html_1)
-        for index in range(5, 7):
+        for index in range(4, 7):
             self.assertNotIn(f'منافس {index}', html_1)
 
-        # Verify rendering of slide 2 contains only the remaining 2 competitors
+        # Verify rendering of slide 2 contains only the remaining 3 competitors
         html_2 = engine._build_structured_fallback_slide(comp_slides[1], draft6, {})
-        for index in range(1, 5):
+        for index in range(1, 4):
             self.assertNotIn(f'منافس {index}', html_2)
-        for index in range(5, 7):
+        for index in range(4, 7):
             self.assertIn(f'منافس {index}', html_2)
 
     def test_executive_content_multi_slide_planning_and_rendering(self):
