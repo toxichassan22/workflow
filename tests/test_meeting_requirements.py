@@ -12632,6 +12632,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(row['price_type'], 'إيجار الوحدة الشهري')
         self.assertEqual(row['price_value'], '30000')
 
+    def test_fill_competitor_price_uses_citation_content_before_fetching(self):
+        """The search provider's excerpt already carries the figure for pages
+        the direct fetch cannot reach (bayut answers 401 to the pinned GET) —
+        the citation content is searched first and the page is never fetched."""
+        module = self.application_module
+        pages = [{'url': 'https://bayut.sa/listing-401',
+                  'title': 'محل للإيجار',
+                  'content': 'محل تجاري للإيجار 18,000 ريال سنوياً في حي الرحاب'}]
+        row = {'name': 'مجمع الرحاب', 'operation_type': 'إيجار',
+               'source_urls': ['https://bayut.sa/listing-401']}
+        with patch.object(module, '_read_market_source_page',
+                          side_effect=AssertionError('must not fetch — the excerpt has the price')):
+            filled = module._fill_competitor_price_from_listings(
+                row, ['https://bayut.sa/listing-401'], pages=pages)
+        self.assertTrue(filled)
+        self.assertEqual(row['price_value'], '18000')
+        self.assertEqual(row['price_type'], 'إيجار الوحدة السنوي')
+        self.assertTrue(row['price_listed'])
+
     def test_import_competitor_listing_photo_stores_og_image(self):
         """A portal-only competitor with no official site gets the listing
         page's own og:image — marked as a listing photo, never a portal logo."""

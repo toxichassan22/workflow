@@ -21517,9 +21517,14 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     # competitor plus the market-wide ones; without max_uses it settled for a single call
     # and left every price blank.
     search_params = {'engine': MARKET_SEARCH_ENGINE,
-                     'max_results': 8, 'max_uses': 10, 'max_total_results': 60}
+                     'max_results': 10, 'max_uses': 10, 'max_total_results': 60,
+                     # Exa's adaptive highlight is ~2-4K chars — usually too thin
+                     # to carry the listing's price. Pin the excerpt budget to
+                     # the 8K _market_citation_pages keeps.
+                     'max_characters': 8000}
     # The engine runs the provider's native search on 'auto' — Google grounding for
-    # Gemini — and user_location biases those results toward the project's city.
+    # Gemini — and user_location biases those results toward the project's city
+    # (native search only; Exa ignores it, so the query itself names the city).
     context = search_context if isinstance(search_context, dict) else {}
     city = str(context.get('city') or '').strip()
     country = str(context.get('country') or 'SA').strip() or 'SA'
@@ -21764,6 +21769,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     response = None
     search_ran_any = False
     matched = []
+    matched_pages = {}
     official = ''
     last_error = ''
     for prompt in prompts:
@@ -21804,6 +21810,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
             hits = sum(1 for token in tokens if token in haystack)
             if hits >= needed:
                 prompt_matched.append(url)
+                matched_pages[url] = page
             # An official page carries the whole distinctive name in its title
             # or URL — a content-only mention is evidence the project exists,
             # not that the host belongs to it.
@@ -21843,10 +21850,12 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     row.pop('no_search_evidence', None)
     if not any(str(row.get(key) or '').strip()
                for key in ('price_value', 'price_from', 'price_to')):
-        # The citation excerpt rarely carries the figure — the fetched page
-        # does. Read the grounded pages directly and take the median.
+        # The model's reply rarely carries the figure — the retrieved evidence
+        # does. Search the citation excerpts first (they survive bot walls),
+        # then the fetched pages, and take the median.
         _fill_competitor_price_from_listings(
-            row, matched + market_study.competitor_source_urls(row))
+            row, matched + market_study.competitor_source_urls(row),
+            pages=list(matched_pages.values()))
     row['verify_state'] = 'verified'
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + matched))[:6]
@@ -21975,21 +21984,31 @@ def _extract_listing_prices(html):
     return list(found.values())
 
 
-def _fill_competitor_price_from_listings(row, urls):
+def _fill_competitor_price_from_listings(row, urls, pages=None):
     """Derive a grounded price from the retrieved pages themselves.
 
-    The verify searches leave the price fields empty when the citation
-    excerpt omits the figure — but the page renders it in markup. The median
-    of the mentions becomes a «متوسط» price; a single mention keeps its own
-    type. price_listed flags it as evidence from real fetched pages, not an
-    officially documented tariff.
+    The verify searches leave the price fields empty when the model's reply
+    omits the figure — but the retrieved evidence carries it in two places:
+    the citation content the search provider already returned (free, works
+    even on bot-walled portals like bayut) and the fetched page markup for
+    pages that are readable directly. The median of the mentions becomes a
+    «متوسط» price; a single mention keeps its own type. price_listed flags
+    it as listing evidence, not an officially documented tariff.
     """
     dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+    page_content = {}
+    for page in pages or []:
+        if isinstance(page, dict):
+            page_content[str(page.get('url') or '').strip()] = str(page.get('content') or '')
     mentions = []
     for url in list(dict.fromkeys(urls or []))[:4]:
         if str(url).strip().casefold() in dead:
             continue
-        html, _err = _read_market_source_page(url)
+        # The citation excerpt is searched first — fetching is the fallback
+        # for pages the provider did not quote (or quoted too thinly).
+        html = page_content.get(url) or ''
+        if not html:
+            html, _err = _read_market_source_page(url)
         for item in _extract_listing_prices(html):
             item['url'] = url
             mentions.append(item)
@@ -21997,6 +22016,8 @@ def _fill_competitor_price_from_listings(row, urls):
             break
     if not mentions:
         return False
+    print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» listing prices: "
+          f"{len(mentions)} mentions from {len({m['url'] for m in mentions})} pages")
     operation = str(row.get('operation_type') or '').strip() or 'أخرى'
     options = market_study.PRICE_TYPE_BY_OPERATION.get(
         operation, market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
