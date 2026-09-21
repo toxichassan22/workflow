@@ -1433,3 +1433,19 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
   owned media repairs legacy duplicated signatures; foreign references remain
   untouched. `SignedMediaUrlTests` covers repeated HTML round-trips and serving
   the repaired URLs. Keep generation input normalization aligned with this repair.
+
+## Slide worker failure scheduling
+
+- The parallel slide scheduler must stop launching new jobs as soon as any worker
+  fails, not only when ordered commits reach the failed index. Earlier slides or
+  checkpoint saves can still be in flight; waiting for them before stopping new
+  launches floods the gate with repeated 409s. Keep the already-completed prefix
+  dense and persist the pause at its first failed index.
+- Keep the server refusal visible in the paused banner and preserve `error_code`
+  in diagnostic output without logging project payloads. A progress refresh must
+  not overwrite the paused banner. A console HTTP 409 alone does not establish
+  whether the approval is missing, a snapshot drifted, or sent inputs differ.
+- `node tests/test_presentation_save.js` executes the actual generation function
+  with out-of-order failures and a blocked checkpoint, and checks that a later
+  successful run still completes. `node tests/test_presentation_undo.js` covers
+  the neighboring editor state.

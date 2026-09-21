@@ -688,6 +688,7 @@
         let commitAgain = false;
 
         function updateGenerationBanner() {
+          if (generationFinished) return;
           const done = tenantSlidesData.length;
           const slidePct = Math.round(20 + (done / totalSlides) * 75);
           const activeTitles = [];
@@ -819,13 +820,13 @@
           const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
           const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
           setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
-            checkpointSaved
+            (lastError ? lastError + ' — ' : '') + (checkpointSaved
               ? 'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.'
-              : 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.', slidePct);
+              : 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.'), slidePct);
           renderTenantSlidesSidebar();
-          toast(checkpointSaved
+          toast(lastError || (checkpointSaved
             ? 'تم حفظ نقطة التوقف عند الشريحة ' + (i + 1)
-            : 'تعذر حفظ نقطة التوقف على الخادم');
+            : 'تعذر حفظ نقطة التوقف على الخادم'));
           if (typeof finishResolve === 'function') finishResolve();
         }
 
@@ -867,7 +868,8 @@
 
         function pumpSlideLaunches() {
           if (generationStopped || generationFinished) return;
-          while (inFlightCount < SLIDE_GENERATION_CONCURRENCY && launchIndex < totalSlides) {
+          while (!generationStopped && !generationFinished
+            && inFlightCount < SLIDE_GENERATION_CONCURRENCY && launchIndex < totalSlides) {
             const i = launchIndex;
             launchIndex += 1;
             inFlightCount += 1;
@@ -878,6 +880,7 @@
               // A preview-only DOM failure must pause the slide like a
               // generation failure, never leak the in-flight slot.
               pendingSlides[i] = { error: (markError && markError.message) || 'خطأ في العرض' };
+              generationStopped = true;
               inFlightCount -= 1;
               drainCommits();
               continue;
@@ -903,17 +906,15 @@
                 generated = data.slide;
               } else {
                 lastError = data.error || 'استجابة غير مكتملة من الخادم';
+                console.error('[SLIDE GENERATION]', { slideIndex: i, error_code: data.error_code, error: lastError });
               }
             } catch (err) {
               lastError = err.message || 'خطأ في الاتصال';
               console.error('Slide generation error for index', i, 'attempt', attempt, err);
             }
-            if (!generated && attempt < 3) {
-              const plan = tenantSlidePlan.slides[i] || {};
-              setLiveGenBanner(true, 'إعادة المحاولة ' + (attempt + 1) + ' للشريحة ' + (i + 1), plan.title || '', Math.round(20 + (tenantSlidesData.length / totalSlides) * 75));
-            }
           }
 
+          if (!generated) generationStopped = true;
           pendingSlides[i] = generated ? { slide: generated } : { error: lastError };
           inFlightCount -= 1;
           await drainCommits();

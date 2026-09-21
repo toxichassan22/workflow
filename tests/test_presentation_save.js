@@ -61,5 +61,92 @@ vm.runInContext(source.slice(start, end), context);
   assert.equal(context.tenantPresentationRevision,8);
   assert.equal(requests.filter(x=>x.method==='POST').length,0);
   assert.equal(requests[2].body.expectedRevision,8);
-  console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse.');
+  await testSlideGenerationFailures();
+  console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
 })().catch(error => { console.error(error); process.exitCode=1; });
+
+async function testSlideGenerationFailures() {
+  const match = /^    async function generateTenantSlides\(/m.exec(source);
+  assert(match);
+  const generateSource = source.slice(match.index, source.indexOf('\n    }', match.index) + 6);
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const slide = { success: true, slide: { html: '<div class="slide">saved</div>' } };
+  for (const blockedCheckpoint of [false, true]) {
+    const requests = [], checkpoints = [], banners = [], settlements = [];
+    const saving = deferred();
+    const generation = {
+      console, JSON, Math, Number, String, Promise, window: {},
+      isGeneratingTenantSlides: false,
+      tenantSlidePlan: { slides: Array.from({ length: 8 }, (_, i) => ({ title: 'Slide ' + i })) },
+      tenantProjectData: { draftId: 'draft', project_name: 'Approved project' },
+      tenantSlidesData: [], tenantSlideGenerationCheckpoint: null,
+      tenantPresentationId: 'presentation', tenantPresentationTitle: 'Title',
+      tenantCreativeImages: {}, tempCoverImage: null, tempMoodboardImages: {}, activeSlideIndex: 0,
+      document: { getElementById: () => null, querySelectorAll: () => [] },
+      tenantSlidePlanFingerprint: () => 'plan', tenantSlideGenerationOptions: options => options,
+      collectTenantFormData: async () => ({}), persistVisualConceptDraftState() {},
+      buildPresentationGenerationImages: () => ({}), slimGenerationProjectData: data => data,
+      containsSlideRoot: value => value.includes('class="slide"'), showTenantPage() {},
+      toast() {}, renderTenantSlidesSidebar() {}, renderTenantDesignerChat() {},
+      checkpointPresentationUndo() {}, updatePresentationUndoButtons() {},
+      setLiveGenBanner: (...args) => banners.push(args),
+      settleGenerationRun: async consumed => settlements.push(consumed),
+      requestTenantSlideGeneration(payload) {
+        const request = deferred();
+        requests.push({ index: payload._slideNum - 1, ...request });
+        return request.promise;
+      },
+      async saveTenantSlideGenerationCheckpoint(index, status, error) {
+        checkpoints.push({ index, status, error });
+        if (blockedCheckpoint && status === 'running') await saving.promise;
+        return true;
+      },
+    };
+    vm.createContext(generation);
+    vm.runInContext(generateSource, generation);
+    const run = generation.generateTenantSlides({ approvalGranted: true, financialValidated: true });
+    await flush();
+    assert.deepEqual(requests.map(request => request.index), [0, 1, 2]);
+    if (blockedCheckpoint) {
+      requests[0].resolve(slide);
+      await flush();
+      assert.equal(checkpoints[0].status, 'running');
+    }
+    const message = 'Approved inputs changed';
+    requests[1].resolve({ error_code: 'inputs_changed', error: message });
+    await flush();
+    assert.equal(requests.length, 3, 'A rejected worker must stop launches before ordered checkpointing');
+    if (!blockedCheckpoint) requests[0].resolve(slide);
+    requests[2].resolve(slide);
+    saving.resolve();
+    await run;
+    assert.equal(generation.tenantSlidesData.length, 1);
+    assert.equal(checkpoints.at(-1).status, 'paused');
+    assert.equal(checkpoints.at(-1).index, 1);
+    assert.equal(checkpoints.at(-1).error, message);
+    assert.deepEqual(settlements, [false]);
+    assert.equal(generation.isGeneratingTenantSlides, false);
+    assert(banners.at(-1)[1].includes('توقف التوليد'));
+    assert(banners.at(-1)[2].includes(message), 'The server refusal must remain visible');
+
+    generation.tenantSlidesData = [];
+    generation.requestTenantSlideGeneration = async payload => {
+      requests.push({ index: payload._slideNum - 1 });
+      return slide;
+    };
+    generation.saveTenantPresentation = async () => true;
+    generation.triggerAutoSaveDraft = () => {};
+    generation.selectTenantSlide = () => {};
+    generation.setSlidesEditorInfo = () => {};
+    generation.setTimeout = () => {};
+    await generation.generateTenantSlides({ approvalGranted: true, financialValidated: true });
+    assert.equal(generation.tenantSlidesData.length, 8);
+    assert.equal(checkpoints.at(-1).status, 'complete');
+    assert.deepEqual(settlements, [false, true]);
+  }
+}
