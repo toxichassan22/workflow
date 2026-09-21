@@ -421,15 +421,15 @@ def _normalize_legacy_single_slide(slide, project_data=None):
             executive = {}
         if re.search(r'فرصة|opportunity', title, flags=re.IGNORECASE) and str(executive.get('opportunity') or '').strip():
             item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
-                         'content_source': 'executive_content.opportunity', 'design_style': 'cards',
+                         'content_source': 'executive_content.opportunity', 'design_style': 'editorial',
                          'requires_image': False, 'image_tokens': []})
         elif re.search(r'ممي[زس]|feature', title, flags=re.IGNORECASE) and str(executive.get('features') or '').strip():
             item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
-                         'content_source': 'executive_content.features', 'design_style': 'cards',
+                         'content_source': 'executive_content.features', 'design_style': 'editorial',
                          'requires_image': False, 'image_tokens': []})
         elif str(executive.get('summary') or '').strip() or str(project.get('executive_summary') or '').strip():
             item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
-                         'content_source': 'executive_content.summary', 'design_style': 'text',
+                         'content_source': 'executive_content.summary', 'design_style': 'editorial',
                          'requires_image': False, 'image_tokens': []})
 
     return item
@@ -1740,9 +1740,11 @@ _EXEC_LABEL_RE = re.compile(r'^[^.،,؛:؟!…\-]{2,60}$')
 def _executive_summary_sections(project_data):
     """Split the approved executive summary into (label, text) blocks.
 
-    The stored document uses short unnumbered label lines (البيانات الأساسية،
-    الموقع، الجدول الزمني …) followed by paragraph blocks separated by blank
-    lines. Unlabelled documents collapse to a single summary block.
+    The stored document usually uses short unnumbered label lines (البيانات
+    الأساسية، الموقع، الجدول الزمني …) followed by paragraph blocks separated
+    by blank lines. Some generations write the canonical headings inline as
+    «الموقع: …» inside a flowing paragraph — those are normalised to label
+    lines first. Unlabelled documents collapse to one summary block.
     """
     executive = _decode_json_fact((project_data or {}).get('executive_content'))
     text = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
@@ -1750,6 +1752,15 @@ def _executive_summary_sections(project_data):
         text = str((project_data or {}).get('executive_summary') or '').strip()
     if not text:
         return []
+    try:
+        from executive_content import SUMMARY_HEADINGS
+    except Exception:
+        SUMMARY_HEADINGS = ()
+    if SUMMARY_HEADINGS:
+        label_alt = '|'.join(re.escape(str(h).strip()) for h in SUMMARY_HEADINGS if str(h or '').strip())
+        if label_alt:
+            text = re.sub(rf'(^|\n)\s*({label_alt})\s*[:：]', r'\n\n\2\n\n', text)
+            text = re.sub(rf'(?<=[.!؟])\s+({label_alt})\s*[:：]', r'\n\n\1\n\n', text)
     blocks = []
     current = []
     for raw in text.splitlines():
@@ -1763,8 +1774,10 @@ def _executive_summary_sections(project_data):
     if current:
         blocks.append(current)
 
+    doc_titles = {'الملخص التنفيذي', 'الملخص التنفيذي الشامل', 'ملخص تنفيذي', 'executive summary'}
+
     def is_label(block):
-        joined = ' '.join(block)
+        joined = ' '.join(block).strip(':： ').strip()
         return len(block) == 1 and len(joined.split()) <= 6 and bool(_EXEC_LABEL_RE.match(joined))
 
     if not any(is_label(block) for block in blocks):
@@ -1777,7 +1790,8 @@ def _executive_summary_sections(project_data):
             if current_paras or current_label:
                 sections.append((current_label, ' '.join(current_paras)))
                 current_paras = []
-            current_label = ' '.join(block)
+            label = ' '.join(block).strip(':： ').strip()
+            current_label = '' if label.lower() in doc_titles else label
         else:
             current_paras.append(' '.join(block))
     if current_paras or current_label:
@@ -2684,63 +2698,59 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if str(s.get('content_source') or '').strip()
         }
         groups['executive_summary'] = []
-        if has_opp:
-            opp_slide = existing_by_source.get('executive_content.opportunity') or {}
-            opp_tokens = opp_slide.get('image_tokens') or []
-            opp_slide.update({
-                'title': 'Investment Opportunity' if lang == OFFER_LANG_ENGLISH else 'الفرصة الاستثمارية',
+
+        def exec_page_source(base, start, count, total_pages):
+            return base if total_pages == 1 or start == 0 else f'{base}:{start}:{start + count}'
+
+        def exec_page_slide(base_slide, base, title_ar, title_en, start, rows, total_pages, index):
+            page_slide = dict(base_slide)
+            title = title_en if lang == OFFER_LANG_ENGLISH else title_ar
+            if total_pages > 1:
+                title += f' ({index}/{total_pages})'
+            page_slide.update({
+                'title': title,
                 'type': 'content',
                 'section_key': 'executive_summary',
-                'design_style': 'cards',
-                'content_density': 'high',
-                'requires_image': bool(opp_tokens),
-                'content_source': 'executive_content.opportunity',
-                'image_tokens': opp_tokens,
-                'bullets': [],
-            })
-            add('executive_summary', opp_slide)
-        if has_feat:
-            feat_slide = existing_by_source.get('executive_content.features') or {}
-            feat_slide.update({
-                'title': 'Project Features & Opportunities' if lang == OFFER_LANG_ENGLISH else 'المميزات وفرص الاستثمار',
-                'type': 'content',
-                'section_key': 'executive_summary',
-                'design_style': 'cards',
+                'design_style': 'editorial',
                 'content_density': 'high',
                 'requires_image': False,
-                'content_source': 'executive_content.features',
+                'content_source': exec_page_source(base, start, len(rows), total_pages),
                 'image_tokens': [],
+                'market_row_start': start,
+                'market_row_end': start + len(rows),
                 'bullets': [],
             })
-            add('executive_summary', feat_slide)
+            return page_slide
+
+        if has_opp:
+            opp_slide = existing_by_source.get('executive_content.opportunity') or {}
+            opp_rows = [('', chunk) for chunk in _exec_text_chunks(str(executive.get('opportunity') or ''))]
+            opp_pages = _budget_row_pages(opp_rows) or [(0, opp_rows)]
+            for index, (start, page_rows) in enumerate(opp_pages, 1):
+                add('executive_summary', exec_page_slide(
+                    opp_slide, 'executive_content.opportunity',
+                    'الفرصة الاستثمارية', 'Investment Opportunity',
+                    start, page_rows, len(opp_pages), index))
+        if has_feat:
+            feat_slide = existing_by_source.get('executive_content.features') or {}
+            feat_items = _executive_feature_items(source)
+            mean_len = (sum(len(item) for item in feat_items) / len(feat_items)) if feat_items else 0
+            feat_per_page = 14 if mean_len <= 140 else (10 if mean_len <= 260 else 8)
+            feat_ranges = _balanced_row_ranges(len(feat_items), feat_per_page) or [(0, 0)]
+            for index, (start, end) in enumerate(feat_ranges, 1):
+                add('executive_summary', exec_page_slide(
+                    feat_slide, 'executive_content.features',
+                    'المميزات وفرص الاستثمار', 'Project Features & Opportunities',
+                    start, feat_items[start:end], len(feat_ranges), index))
         if has_sum or (not has_opp and not has_feat):
             summary_slide = existing_by_source.get('executive_content.summary') or (existing_exec[0] if existing_exec and not has_opp and not has_feat else {})
-            summary_ext_token = '##MOODBOARD_1##' if moodboard_items else (overview_map_tokens[0] if overview_map_tokens else '')
-            summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
             summary_pages = _executive_summary_pages(source) or [(0, [])]
-            for page_index, (start, page_rows) in enumerate(summary_pages, 1):
-                page_slide = dict(summary_slide)
-                summary_tokens = [summary_ext_token] if summary_ext_token and start == 0 else []
-                s_title = section_title('executive_summary', lang)
-                s_source = 'executive_content.summary'
-                if len(summary_pages) > 1:
-                    s_title += f' ({page_index}/{len(summary_pages)})'
-                    if start:
-                        s_source = f'executive_content.summary:{start}:{start + len(page_rows)}'
-                page_slide.update({
-                    'title': s_title,
-                    'type': 'content',
-                    'section_key': 'executive_summary',
-                    'design_style': summary_style,
-                    'content_density': 'high',
-                    'requires_image': bool(summary_tokens),
-                    'content_source': s_source,
-                    'image_tokens': summary_tokens,
-                    'market_row_start': start,
-                    'market_row_end': start + len(page_rows),
-                    'bullets': [],
-                })
-                add('executive_summary', page_slide)
+            for index, (start, page_rows) in enumerate(summary_pages, 1):
+                add('executive_summary', exec_page_slide(
+                    summary_slide, 'executive_content.summary',
+                    section_title('executive_summary', lang),
+                    section_title('executive_summary', lang),
+                    start, page_rows, len(summary_pages), index))
 
     if lang == OFFER_LANG_ENGLISH:
         summaries = (
@@ -5720,11 +5730,19 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
                 end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
                 value = '\n\n'.join(paragraphs[start:end])
         return 'ملخص الموقع المعتمد دون إضافة أو تكرار:\n' + value if value else ''
+    def _explicit_row_range():
+        start = (slide or {}).get('market_row_start')
+        end = (slide or {}).get('market_row_end')
+        if start is None or end is None:
+            return None
+        return max(int(start), 0), max(int(end), 0)
+
     summary_match = re.fullmatch(r'executive_content\.summary(?::(\d+):(\d+))?', str(source or ''))
     if summary_match:
-        if summary_match.group(1) is not None:
+        explicit = _explicit_row_range()
+        if explicit is not None or summary_match.group(1) is not None:
             sections = _executive_summary_sections(project_data)
-            start, end = int(summary_match.group(1)), int(summary_match.group(2))
+            start, end = explicit or (int(summary_match.group(1)), int(summary_match.group(2)))
             value = '\n\n'.join(
                 (f'{label}\n{text}' if label else text)
                 for label, text in sections[start:end]
@@ -5735,18 +5753,24 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
             if not value:
                 value = str(project_data.get('executive_summary') or '').strip()
         return 'الملخص التنفيذي المعتمد دون إضافة أو تكرار:\n' + value if value else ''
-    if source == 'executive_content.opportunity':
+    opp_match = re.fullmatch(r'executive_content\.opportunity(?::(\d+):(\d+))?', str(source or ''))
+    if opp_match:
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
+        explicit = _explicit_row_range()
+        if value and (explicit is not None or opp_match.group(1) is not None):
+            chunks = _exec_text_chunks(value)
+            start, end = explicit or (int(opp_match.group(1)), int(opp_match.group(2)))
+            value = '\n\n'.join(chunks[start:end])
         return 'الفرصة الاستثمارية المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
-    if source == 'executive_content.features':
-        executive = _decode_json_fact(project_data.get('executive_content'))
-        features_raw = executive.get('features') if isinstance(executive, dict) else []
-        if isinstance(features_raw, list):
-            items = [str(it).strip() for it in features_raw if str(it).strip()]
-            value = '\n'.join(f'- {it}' for it in items)
-        else:
-            value = str(features_raw or '').strip()
+    feat_match = re.fullmatch(r'executive_content\.features(?::(\d+):(\d+))?', str(source or ''))
+    if feat_match:
+        items = _executive_feature_items(project_data)
+        explicit = _explicit_row_range()
+        if explicit is not None or feat_match.group(1) is not None:
+            start, end = explicit or (int(feat_match.group(1)), int(feat_match.group(2)))
+            items = items[start:end]
+        value = '\n'.join(f'- {it}' for it in items)
         return 'المميزات وفرص الاستثمار المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
     if source == 'contact_closing':
         contact = _contact_facts(project_data)
@@ -6567,6 +6591,11 @@ def _exec_text_chunks(text, target=620):
 
 
 def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
+    """Editorial block: dark lead section + numbered rows with highlighted figures.
+
+    Executive slides carry no images or maps; ext_token is accepted for
+    backwards compatibility but never rendered.
+    """
     """Editorial block: dark lead section + numbered rows with highlighted figures."""
     rows = list(rows or [])
     if not rows:
@@ -6590,14 +6619,6 @@ def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
         f'{_market_rich_text(lead_value, accent)}</div>'
         f'</div>'
     )
-    if ext_token:
-        lead_html = (
-            f'<div style="display:grid;grid-template-columns:1.45fr 1fr;gap:18px;align-items:stretch;">'
-            f'{lead_html}'
-            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;min-height:220px;">'
-            f'<img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
-            f'</div>'
-        )
 
     def render_topic(index, label, value):
         label_html = (
@@ -6641,15 +6662,8 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
     title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
-    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
-    ext_token = next((token for token in tokens if not token.startswith('##')), '')
-    if not ext_token and tokens:
-        ext_token = tokens[0]
-    if row_offset != 0:
-        ext_token = ''
-
     badge_strip = _exec_badges_strip(source, primary, accent) if row_offset == 0 else ''
-    body_content = _exec_editorial_body(rows, row_offset, primary, accent, ext_token)
+    body_content = _exec_editorial_body(rows, row_offset, primary, accent)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6690,16 +6704,12 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
     title = html_lib.escape(str((slide or {}).get('title') or 'الفرصة الاستثمارية'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
-    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
-    ext_token = next((token for token in tokens if not token.startswith('##')), '')
-    if not ext_token and tokens:
-        ext_token = tokens[0]
-
     badge_strip = _exec_badges_strip(source, primary, accent)
 
     chunks = _exec_text_chunks(opp_text)
-    rows = [('', chunk) for chunk in chunks] or [('', 'الفرصة الاستثمارية للمشروع')]
-    body_content = _exec_editorial_body(rows, 0, primary, accent, ext_token)
+    all_rows = [('', chunk) for chunk in chunks] or [('', 'الفرصة الاستثمارية للمشروع')]
+    rows, row_offset = _market_rows_for_slide(slide, 'executive_content.opportunity', all_rows)
+    body_content = _exec_editorial_body(rows, row_offset, primary, accent)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6755,9 +6765,11 @@ def _executive_feature_items(source, slide=None):
 def _build_executive_features_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render executive differentiators as a numbered editorial list."""
     source = source if isinstance(source, dict) else {}
-    items = _executive_feature_items(source, slide)
+    all_items = _executive_feature_items(source, slide)
+    item_rows, row_offset = _market_rows_for_slide(slide, 'executive_content.features', all_items)
+    items = list(item_rows)
     if not items:
-        items = ['مقومات تنافسية متميزة للمشروع', 'موقع استراتيجي وتدفقات مستهدفة', 'عوائد استثمارية مجدية ونمو مستدام']
+        items = all_items or ['مقومات تنافسية متميزة للمشروع', 'موقع استراتيجي وتدفقات مستهدفة', 'عوائد استثمارية مجدية ونمو مستدام']
 
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
@@ -6784,7 +6796,7 @@ def _build_executive_features_slide(slide, source, branding=None, slide_num=None
         block = items[col * col_size:(col + 1) * col_size]
         if not block:
             continue
-        inner = ''.join(render_item(col * col_size + i + 1, item) for i, item in enumerate(block))
+        inner = ''.join(render_item(row_offset + col * col_size + i + 1, item) for i, item in enumerate(block))
         col_blocks.append(
             f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:6px 20px;box-sizing:border-box;">{inner}</div>'
         )
@@ -7045,6 +7057,17 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append(
             'هذه شريحة تحليل AI للموقع: انقل نص حقل تحليل AI للموقع المعتمد كاملاً كما هو، '
             'دون تلخيص أو إعادة صياغة أو استبدال فقراته بنص جديد. يجب أن يظهر النص نفسه مرئياً داخل الشريحة.'
+        )
+    if re.fullmatch(r'executive_content\.(?:summary|opportunity|features)(?::\d+:\d+)?', content_source):
+        notes.append(
+            'هذه شريحة من قسم المحتوى التنفيذي (نص فقط، بلا صور أو خرائط). الكانفس 1280×720 بكسل: '
+            'المحتوى يبدأ تحت هيدر النظام (~68px) وينتهي قبل الفوتر (~40px)، أي مساحة صالحة ~600px بعرض كامل. '
+            'لـ SOL حرية كاملة في ابتكار تكوين تحريري جذاب بصرياً — هرمية واضحة، مساحات بيضاء مدروسة، '
+            'أرقام ومؤشرات مميزة باللون الذهبي، تقسيم النص على عمودين عند طوله. '
+            'ممنوع حشر النص كله في بطاقة واحدة أو شبكة بطاقات متشابهة، وممنوع ترك مساحة كبيرة فارغة بجانب كتلة نصية ضيقة — '
+            'وزّع المحتوى على عرض الشريحة كاملاً. '
+            'سطر «المعتمد دون إضافة أو تكرار» تعليمة داخلية وليس جزءاً من المحتوى — لا تعرضه. '
+            'النص المعتمد يظهر كاملاً حرفياً دون حذف أو اختصار.'
         )
     if content_source in ('site_analysis', 'executive_content.summary') and '##MAP_OVERVIEW##' in (slide.get('image_tokens') or []):
         marker_side = str((project_data or {}).get('_map_marker_side') or 'right')
@@ -7956,21 +7979,37 @@ def _required_slide_texts(slide, project_data):
                 end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
                 paragraphs = paragraphs[start:end]
         return [p for p in paragraphs if len(p) > 15]
-    if source == 'executive_content.opportunity':
+    def _req_row_range():
+        start = (slide or {}).get('market_row_start')
+        end = (slide or {}).get('market_row_end')
+        if start is None or end is None:
+            return None
+        return max(int(start), 0), max(int(end), 0)
+
+    opp_match = re.fullmatch(r'executive_content\.opportunity(?::(\d+):(\d+))?', str(source or ''))
+    if opp_match:
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
+        explicit = _req_row_range()
+        if value and (explicit is not None or opp_match.group(1) is not None):
+            chunks = _exec_text_chunks(value)
+            start, end = explicit or (int(opp_match.group(1)), int(opp_match.group(2)))
+            return chunks[start:end]
         return [value] if value else []
-    if source == 'executive_content.features':
-        executive = _decode_json_fact(project_data.get('executive_content'))
-        features_raw = executive.get('features') if isinstance(executive, dict) else []
-        if isinstance(features_raw, list):
-            return [str(it).strip() for it in features_raw if str(it).strip()]
-        return [line.strip(' -•*') for line in str(features_raw or '').split('\n') if line.strip(' -•*')]
+    feat_match = re.fullmatch(r'executive_content\.features(?::(\d+):(\d+))?', str(source or ''))
+    if feat_match:
+        items = _executive_feature_items(project_data)
+        explicit = _req_row_range()
+        if explicit is not None or feat_match.group(1) is not None:
+            start, end = explicit or (int(feat_match.group(1)), int(feat_match.group(2)))
+            items = items[start:end]
+        return items
     summary_match = re.fullmatch(r'executive_content\.summary(?::(\d+):(\d+))?', str(source or ''))
     if summary_match:
-        if summary_match.group(1) is not None:
+        explicit = _req_row_range()
+        if explicit is not None or summary_match.group(1) is not None:
             sections = _executive_summary_sections(project_data)
-            start, end = int(summary_match.group(1)), int(summary_match.group(2))
+            start, end = explicit or (int(summary_match.group(1)), int(summary_match.group(2)))
             return [f'{label}\n{text}' if label else text for label, text in sections[start:end]]
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
@@ -10695,9 +10734,6 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
-                     or re.fullmatch(
-                           r'executive_content\.(?:summary(?::\d+:\d+)?|opportunity|features)',
-                           str(market_source or ''))
                      or market_source == 'land_and_building_summary'
                      or _slide_section_key(slide) == 'financial'))):
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)

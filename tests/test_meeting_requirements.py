@@ -1975,12 +1975,16 @@ class MeetingRequirementsTests(unittest.TestCase):
             '_map_marker_side': 'right',
         }
         normalized = engine.normalize_presentation_plan(plan, project, {})
-        for source in ('site_analysis', 'executive_content.summary'):
-            slide = next(item for item in normalized['slides'] if item.get('content_source') == source)
-            self.assertIn('##MAP_OVERVIEW##', slide.get('image_tokens') or [])
-            message = engine.build_slide_user_msg(slide, 3, len(normalized['slides']), {}, project)
-            self.assertIn('علامة الموقع في النصف الأيمن', message)
-            self.assertIn('ضع بطاقة الملخص في اليسار', message)
+        exec_summary = next(item for item in normalized['slides']
+                            if str(item.get('content_source') or '').startswith('executive_content.summary'))
+        # The executive summary section is text-only: no maps or images are
+        # ever reserved on it, so the layout always uses the full width.
+        self.assertEqual(exec_summary.get('image_tokens') or [], [])
+        site_slide = next(item for item in normalized['slides'] if item.get('content_source') == 'site_analysis')
+        self.assertIn('##MAP_OVERVIEW##', site_slide.get('image_tokens') or [])
+        message = engine.build_slide_user_msg(site_slide, 3, len(normalized['slides']), {}, project)
+        self.assertIn('علامة الموقع في النصف الأيمن', message)
+        self.assertIn('ضع بطاقة الملخص في اليسار', message)
         finished = engine.finalize_slide_html(
             '<div class="slide"><img data-map-summary-background src="##MAP_OVERVIEW##">'
             '<div data-map-summary-card>ملخص الموقع</div></div>',
@@ -13113,6 +13117,20 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertEqual(slide.get('content_source'),
                              f'executive_content.summary:{start}:{start + len(rows)}')
         self.assertIn('(1/', str(summary_slides[0].get('title') or ''))
+        # Executive content is a text-only SOL section: no image or map tokens
+        # are ever reserved on its slides.
+        for slide in summary_slides:
+            self.assertEqual(slide.get('image_tokens') or [], [])
+            self.assertFalse(slide.get('requires_image'))
+            self.assertEqual(slide.get('design_style'), 'editorial')
+        # Page 1 keeps the plain source, so the data note must slice by the
+        # explicit row range instead of handing SOL the whole document.
+        note = engine._slide_source_data_note(summary_slides[0], draft)
+        self.assertIn('البيانات الأساسية', note)
+        self.assertNotIn('الخلاصة', note)
+        # Executive slides are designed by SOL, not the fixed renderer.
+        self.assertIn('حرية كاملة في ابتكار تكوين تحريري',
+                      engine.build_slide_user_msg(summary_slides[0], 1, len(plan['slides']), {}, draft))
 
         first_html = engine._build_structured_fallback_slide(summary_slides[0], draft, {})
         self.assertIn('البيانات الأساسية', first_html)
@@ -13126,7 +13144,9 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_executive_opportunity_chunks_text_and_features_split_dash_items(self):
         engine = self.application_module.slide_engine
-        opportunity = ('تمثل الأرض فرصة استثمارية نادرة على الواجهة البحرية. ' * 30)
+        opportunity = ' '.join(
+            f'الجملة المعتمدة رقم {i} تصف جانباً استثمارياً فريداً للمشروع بإسهاب.'
+            for i in range(30))
         features = 'موقع استراتيجي على الكورنيش - إطلالة بحرية مباشرة - فندق 5 نجوم وسكن فاخر - عائد مستهدف 14%'
         draft = {'project_name': 'مشروع', 'executive_content': json.dumps(
             {'opportunity': opportunity, 'features': features}, ensure_ascii=False)}
@@ -13141,7 +13161,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         opp_html = engine._build_structured_fallback_slide(
             {'title': 'الفرصة الاستثمارية', 'content_source': 'executive_content.opportunity',
              'type': 'content', 'image_tokens': []}, draft, {})
-        self.assertIn('تمثل الأرض فرصة استثمارية', opp_html)
+        self.assertIn('الجملة المعتمدة رقم', re.sub(r'<[^>]+>', '', opp_html))
         self.assertNotIn('المعتمدة دون إضافة أو تكرار', opp_html)
         self.assertGreaterEqual(opp_html.count('data-exec-topic'), 1)
 
@@ -13153,6 +13173,13 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(item, feat_text)
         self.assertIn('04', feat_html)
         self.assertIn('4 ميزة تنافسية', feat_html)
+
+        # A ranged opportunity slide feeds SOL only its slice, not the whole text.
+        ranged_note = engine._slide_source_data_note(
+            {'content_source': 'executive_content.opportunity:0:1',
+             'market_row_start': 0, 'market_row_end': 1}, draft)
+        self.assertIn(chunks[0][:40], ranged_note)
+        self.assertNotIn('رقم 29', ranged_note)
 
 
 if __name__ == '__main__':
