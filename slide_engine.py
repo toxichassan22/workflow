@@ -1669,11 +1669,48 @@ def _market_source_chunks(market, rows=None):
     return [rows[:midpoint], rows[midpoint:]] if rows else []
 
 
+# Estimated rendered metrics for the editorial market-summary layout. The
+# paginator packs topics until their estimated block heights fill the usable
+# content band of a 1280x720 slide (56px chrome header + 36px footer), so the
+# number of slides follows the amount of text instead of a fixed topic count.
+_MARKET_PAGE_BUDGET_PX = 560
+_MARKET_DECISION_STRIP_PX = 46
+_MARKET_LEAD_CHARS_PER_LINE = 88
+_MARKET_ROW_CHARS_PER_LINE = 118
+_MARKET_MAX_TOPICS_PER_PAGE = 7
+
+
+def _market_summary_topic_height(label, value, lead=False):
+    """Rough rendered height (px) of one summary topic in the editorial layout."""
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    if lead:
+        columns = 2 if len(text) > 320 else 1
+        lines = max(1, math.ceil(len(text) / (_MARKET_LEAD_CHARS_PER_LINE * columns)))
+        return 86 + lines * 25
+    columns = 2 if len(text) > 420 else 1
+    lines = max(1, math.ceil(len(text) / (_MARKET_ROW_CHARS_PER_LINE * columns)))
+    return 54 + lines * 21
+
+
 def _market_summary_pages(market):
-    """Keep detailed analysis readable by limiting each page to 3-5 topics."""
+    """Pack detailed-analysis topics into pages by estimated rendered height."""
     rows = _market_summary_rows(market)
-    chunk_size = 3 if len(rows) <= 6 else 5
-    return _market_row_pages(rows, chunk_size)
+    budget_first = _MARKET_PAGE_BUDGET_PX - (
+        _MARKET_DECISION_STRIP_PX if str((market or {}).get('decision') or '').strip() else 0
+    )
+    pages = []
+    index = 0
+    while index < len(rows):
+        start = index
+        budget = budget_first if start == 0 else _MARKET_PAGE_BUDGET_PX
+        used = _market_summary_topic_height(rows[index][0], rows[index][1], lead=True)
+        index += 1
+        while (index < len(rows) and index - start < _MARKET_MAX_TOPICS_PER_PAGE
+               and used + _market_summary_topic_height(rows[index][0], rows[index][1]) <= budget):
+            used += _market_summary_topic_height(rows[index][0], rows[index][1])
+            index += 1
+        pages.append((start, rows[start:index]))
+    return pages
 
 
 def _market_source_pages(market):
@@ -1746,7 +1783,7 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
         result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
-        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=4, min_per_slide=2)
+        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=6, min_per_slide=3)
         total_comp_pages = len(comp_ranges)
         for chunk_idx, (start, end) in enumerate(comp_ranges):
             c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
@@ -2511,7 +2548,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
     named_competitors = [c for c in competitors if _competitor_name(c)]
     if named_competitors:
-        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=4, min_per_slide=2)
+        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=6, min_per_slide=3)
         total_comp_pages = len(comp_ranges)
         existing_market = groups.get('market', [])
         comp_slides = [s for s in existing_market if str(s.get('content_source') or '').startswith('market_study_data.competitors')
@@ -4460,25 +4497,28 @@ def _extract_competitor_chart_data(competitors, project_data=None):
             })
 
     # Never mix sale/rent, per-unit/per-square-metre, or range/point price
-    # types in one comparison. Choose the populated comparable group rather
-    # than silently combining incompatible rows.
+    # types on one axis. Every populated comparable group is kept as its own
+    # labelled chart section so no named competitor disappears silently.
     grouped = {}
     for item in candidates:
         grouped.setdefault(item.get('chart_group'), []).append(item)
-    items = max(grouped.values(), key=lambda group: (len(group), max(item['price_num'] for item in group))) if grouped else []
-    items = list(items)
-    items.sort(key=lambda x: x['price_num'], reverse=True)
+    groups = sorted(
+        grouped.items(),
+        key=lambda pair: (len(pair[1]), max(item['price_num'] for item in pair[1])),
+        reverse=True,
+    )
 
     proj_price_raw = project_data.get('proposed_price') or project_data.get('project_price')
     market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
     if not proj_price_raw and isinstance(market, dict):
         proj_price_raw = market.get('proposed_price') or market.get('project_price')
-    if proj_price_raw:
+    if proj_price_raw and groups:
         p_val = _clean_numeric_val(proj_price_raw)
         if p_val > 0:
             p_name = str(project_data.get('project_name') or project_data.get('projectName') or 'مشروعنا').strip()
-            unit_str = items[0]['display_price'].split()[-1] if items and ' ' in items[0]['display_price'] else 'ر.س/م²'
-            items.append({
+            first_items = groups[0][1]
+            unit_str = first_items[0]['display_price'].split()[-1] if first_items and ' ' in first_items[0]['display_price'] else 'ر.س/م²'
+            first_items.append({
                 'name': f"{p_name} (المشروع المقترح)",
                 'price_num': p_val,
                 'price_min_num': p_val,
@@ -4486,32 +4526,60 @@ def _extract_competitor_chart_data(competitors, project_data=None):
                 'is_range': False,
                 'display_price': f"{int(p_val):,} {unit_str}",
                 'price_type': 'سعر مقترح',
+                'chart_group': groups[0][0],
                 'is_project': True,
             })
-            items.sort(key=lambda x: x['price_num'], reverse=True)
 
-    if len(items) > 6:
+    items = []
+    for group_key, group_items in groups:
+        group_items = list(group_items)
+        group_items.sort(key=lambda x: x['price_num'], reverse=True)
+        has_range = any(item.get('is_range') for item in group_items)
+        max_p = max((x['price_max_num'] for x in group_items), default=1.0)
+        if has_range:
+            axis_min = min((x['price_min_num'] for x in group_items), default=0.0)
+            span = max(max_p - axis_min, 1.0)
+            for it in group_items:
+                it['bar_start_pct'] = max(round(((it['price_min_num'] - axis_min) / span) * 100, 1), 0.0)
+                it['bar_width_pct'] = max(round(((it['price_max_num'] - it['price_min_num']) / span) * 100, 1), 2.0)
+        else:
+            for it in group_items:
+                it['bar_start_pct'] = 0.0
+                it['bar_width_pct'] = max(round((it['price_max_num'] / max_p) * 100, 1), 15.0)
+        label = _competitor_group_label(group_key)
+        for position, it in enumerate(group_items):
+            it['group_key'] = group_key
+            it['group_label'] = label
+            it['group_first'] = position == 0
+            items.append(it)
+
+    if len(items) > 8:
         project_item = next((it for it in items if it.get('is_project')), None)
-        items = items[:6]
+        items = items[:8]
         if project_item and project_item not in items:
             items[-1] = project_item
-            items.sort(key=lambda x: x['price_num'], reverse=True)
-
-    has_range = any(item.get('is_range') for item in items)
-    max_p = max((x['price_max_num'] for x in items), default=1.0)
-    if has_range:
-        axis_min = min((x['price_min_num'] for x in items), default=0.0)
-        axis_max = max_p
-        span = max(axis_max - axis_min, 1.0)
-        for it in items:
-            it['bar_start_pct'] = max(round(((it['price_min_num'] - axis_min) / span) * 100, 1), 0.0)
-            it['bar_width_pct'] = max(round(((it['price_max_num'] - it['price_min_num']) / span) * 100, 1), 2.0)
-    else:
-        for it in items:
-            it['bar_start_pct'] = 0.0
-            it['bar_width_pct'] = max(round((it['price_max_num'] / max_p) * 100, 1), 15.0)
 
     return items
+
+
+def _competitor_group_label(group_key):
+    """Human label for one comparable chart section (operation + unit + price kind)."""
+    operation, unit_key, type_key = (group_key or (None, None, None))
+    op_label = {
+        'sale': 'مشاريع البيع',
+        'rent': 'مشاريع الإيجار',
+        'hotel': 'التشغيل الفندقي',
+    }.get(operation, '')
+    unit_label = {
+        'sqm': 'سعر المتر المربع',
+        'unit': 'سعر الوحدة',
+        'room_night': 'سعر الليلة',
+    }.get(unit_key, '')
+    if type_key == 'range':
+        unit_label = f'{unit_label} (نطاق)' if unit_label else 'نطاق سعري'
+    if op_label and unit_label:
+        return f'{op_label} — {unit_label}'
+    return op_label or unit_label or 'أسعار المنافسين'
 
 
 def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f', secondary='#0284c7', gold='#b89564'):
@@ -8288,6 +8356,10 @@ def _competitor_source_display(comp):
 
 def _render_competitor_table(competitors, primary):
     """Render every stored competitor field in one deterministic table."""
+    named = [c for c in (competitors or []) if isinstance(c, dict) and _competitor_name(c)]
+    roomy = len(named) <= 4
+    logo_height = '54px' if roomy else '42px'
+    cell_pad = '8px 4px' if roomy else '5px 4px'
     rows_html = []
     has_logo = False
     for index, comp in enumerate(competitors or [], 1):
@@ -8298,13 +8370,13 @@ def _render_competitor_table(competitors, primary):
         has_logo = has_logo or bool(logo_token)
         if logo_token:
             logo_html = (
-                f'<div style="height:42px;display:flex;align-items:center;justify-content:center;">'
+                f'<div style="height:{logo_height};display:flex;align-items:center;justify-content:center;">'
                 f'<img src="{logo_token}" alt="{html_lib.escape(name, quote=True)}" '
-                'style="width:76px;height:40px;object-fit:contain;background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:3px;box-sizing:border-box;">'
+                'style="width:76px;height:100%;object-fit:contain;background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:3px;box-sizing:border-box;">'
                 '</div>'
             )
         else:
-            logo_html = '<div style="height:42px;display:flex;align-items:center;justify-content:center;color:#64748b;">لا يوجد</div>'
+            logo_html = f'<div style="height:{logo_height};display:flex;align-items:center;justify-content:center;color:#64748b;">لا يوجد</div>'
         project_type = _competitor_value(comp, 'project_type', 'projectType', 'النوع')
         classification = _competitor_value(comp, 'classification', 'التصنيف')
         type_html = f'<div>{html_lib.escape(_competitor_display_text(project_type))}</div>'
@@ -8326,7 +8398,7 @@ def _render_competitor_table(competitors, primary):
         bg = '#f8fafc' if len(rows_html) % 2 else '#ffffff'
         rows_html.append(
             f'<tr style="background:{bg};">' + ''.join(
-                f'<td style="border-bottom:1px solid #e2e8f0;padding:5px 4px;font-size:{"8.5px" if col_idx in (0, 7) else "9px"};'
+                f'<td style="border-bottom:1px solid #e2e8f0;padding:{cell_pad};font-size:{"8.5px" if col_idx in (0, 7) else "9px"};'
                 f'text-align:center;direction:rtl;vertical-align:middle;line-height:1.25;word-break:break-word;">{value}</td>'
                 for col_idx, value in enumerate(cells)
             ) + '</tr>'
@@ -8351,8 +8423,20 @@ def _render_competitor_table(competitors, primary):
 def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9'):
     if not items:
         return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات منافسين كافية</div>'
+    grouped = len({it.get('group_key') for it in items if it.get('group_key')}) > 1
+    many = len(items) > 5
+    bar_height = '14px' if many else '20px'
+    row_gap = '8px' if many else '14px'
+    name_font = '11px' if many else '12px'
+    price_font = '11px' if many else '12.5px'
     rows_html = []
     for it in items:
+        if grouped and it.get('group_first') and it.get('group_label'):
+            rows_html.append(
+                f'<div style="margin-top:2px;padding-top:8px;border-top:1px dashed #cbd5e1;'
+                f'font-size:10.5px;font-weight:800;color:{primary};letter-spacing:.2px;">'
+                f'{html_lib.escape(str(it["group_label"]))}</div>'
+            )
         name = html_lib.escape(str(it.get('name') or ''))
         width = it.get('bar_width_pct', 50.0)
         start = it.get('bar_start_pct', 0.0)
@@ -8363,18 +8447,18 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
         border_box = f'border: 2px solid {primary}; background: rgba(0, 95, 120, 0.06); padding: 8px 10px; border-radius: 6px;' if is_project else 'padding: 4px 0;'
         badge = f'<span style="background:{primary};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;margin-right:6px;">مشروعنا</span>' if is_project else ''
         rows_html.append(f'''
-        <div style="display:flex;flex-direction:column;gap:4px;{border_box}">
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;">
+        <div style="display:flex;flex-direction:column;gap:5px;{border_box}">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:{name_font};">
                 <span style="font-weight:{font_weight};color:#1e293b;">{badge}{name}</span>
-                <span style="font-weight:700;color:{bar_color};">{display_price}</span>
+                <span style="font-weight:700;color:{bar_color};font-size:{price_font};white-space:nowrap;">{display_price}</span>
             </div>
-            <div style="width:100%;height:14px;background:#e2e8f0;border-radius:3px;overflow:hidden;position:relative;">
+            <div style="width:100%;height:{bar_height};background:#e2e8f0;border-radius:3px;overflow:hidden;position:relative;">
                 <div style="position:absolute;left:{start}%;width:{width}%;height:100%;background:{bar_color};border-radius:3px;"></div>
             </div>
         </div>
         ''')
     return (
-        f'<div style="display:flex;flex-direction:column;gap:10px;background:#f8fafc;padding:16px;border-radius:8px;border:1px solid #e2e8f0;">'
+        f'<div style="display:flex;flex-direction:column;gap:{row_gap};background:#f8fafc;padding:16px 18px;border-radius:8px;border:1px solid #e2e8f0;flex:1 1 auto;box-sizing:border-box;justify-content:center;">'
         f'<div style="font-size:13px;font-weight:700;color:{primary};border-bottom:1px solid #cbd5e1;padding-bottom:6px;">مقارنة أسعار المنافسين في السوق</div>'
         f'{"".join(rows_html)}'
         f'</div>'
@@ -9090,6 +9174,21 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
         f'<div style="margin-top:8px;color:#64748b;font-size:9px;text-align:right;line-height:1.35;">'
         f'{html_lib.escape(provenance_text)}</div>'
     ) if provenance_text else ''
+    stats_html = ''
+    if items:
+        first_key = items[0].get('group_key')
+        first_items = [it for it in items if it.get('group_key') == first_key]
+        lo = min((it['price_min_num'] for it in first_items), default=0.0)
+        hi = max((it['price_max_num'] for it in first_items), default=0.0)
+        unit_hint = first_items[0].get('display_price', '').split()[-1] if ' ' in first_items[0].get('display_price', '') else ''
+        group_caption = items[0].get('group_label') or unit_hint
+        stats_html = (
+            f'<div style="margin-top:auto;padding-top:10px;display:flex;align-items:center;gap:16px;'
+            f'font-size:10.5px;color:#475569;border-top:1px solid #e2e8f0;">'
+            f'<span style="font-weight:800;color:{primary};">{len(competitors)} منافسًا معروضًا</span>'
+            f'<span>نطاق {html_lib.escape(str(group_caption))}: من {lo:,.0f} إلى {hi:,.0f}</span>'
+            f'</div>'
+        )
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -9108,15 +9207,16 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
     </div>
   </header>
   <div style="padding:0 42px;margin-top:12px;">
-    <div style="background:#f3f6f8;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px 16px;box-sizing:border-box;">
+    <div style="background:#f3f6f8;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px 16px;box-sizing:border-box;min-height:560px;display:flex;flex-direction:column;">
       {scope_html}
-      <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;max-height:520px;overflow:visible;align-items:start;">
-      <div style="grid-area:table;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:8px;overflow:visible;">
+      <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;flex:1;overflow:visible;align-items:stretch;">
+      <div style="grid-area:table;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:10px;overflow:visible;">
         {table_html}
       </div>
-      <div style="grid-area:chart;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:8px;overflow:visible;">
+      <div style="grid-area:chart;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:12px;overflow:visible;display:flex;flex-direction:column;">
         {bar_chart_html}
         {provenance_html}
+        {stats_html}
       </div>
       </div>
     </div>
@@ -9249,7 +9349,7 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
 
 
 def _market_value_html(value):
-    return html_lib.escape(str(value or 'غير متوفر')).replace('\n', '<br>')
+    return html_lib.escape(html_lib.unescape(str(value or 'غير متوفر'))).replace('\n', '<br>')
 
 
 def _market_paragraph_blocks(value, count=3):
@@ -9358,6 +9458,17 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
 </div>'''
 
 
+_MARKET_NUMERAL_RE = re.compile(
+    r'\d[\d,]*(?:\.\d+)?(?:\s*(?:%|ر\.س|ريال|مليون|م²|كم|سنة|سنوات|شهرًا?|وحدة|شقة|غرفة|دقيقة))?')
+
+
+def _market_rich_text(value, accent, weight='700'):
+    """Escape approved text and bold the figures already inside it."""
+    text = html_lib.escape(html_lib.unescape(str(value or ''))).replace('\n', '<br>')
+    return _MARKET_NUMERAL_RE.sub(
+        rf'<strong style="color:{accent};font-weight:{weight};">\g<0></strong>', text)
+
+
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render one readable page of the detailed market analysis."""
     source = source if isinstance(source, dict) else {}
@@ -9371,64 +9482,73 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     is_prose = isinstance(market.get('summary'), str) and bool(str(market.get('summary') or '').strip())
     subtitle = 'قراءة تحليلية للعرض والطلب والمنافسة والفرصة الاستثمارية'
-    panel_style = (
-        'background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
-        'box-shadow:0 3px 10px rgba(15,23,42,.05);box-sizing:border-box;'
-    )
+    compact = len(rows) <= 2
+
+    def topic_text_html(value, accent_color, weight='700'):
+        return _market_rich_text(value, accent_color, weight)
+
     if is_prose:
         prose_blocks = _market_paragraph_blocks(rows[0][1] if rows else '', 3)
+        prose_rows = ''.join(
+            f'<div data-market-analysis-block="{index + 1}" style="display:flex;gap:16px;padding:14px 2px;'
+            f'border-bottom:1px solid #e2e8f0;align-items:flex-start;">'
+            f'<span style="font-size:22px;font-weight:800;color:{accent};line-height:1.1;min-width:34px;">{index + 1:02d}</span>'
+            f'<div style="flex:1;font-size:13.5px;line-height:1.9;color:#1f2937;text-align:justify;">'
+            f'{topic_text_html(block, accent)}</div></div>'
+            for index, block in enumerate(prose_blocks)
+        )
         body_content = (
-            f'<div data-market-analysis="1" style="{panel_style}padding:22px 28px;display:grid;'
-            f'grid-template-columns:0.72fr 1.8fr;grid-template-areas:"side main";gap:26px;direction:ltr;">'
-            f'<div style="grid-area:side;direction:rtl;border-right:5px solid {accent};padding:8px 18px 8px 8px;">'
-            f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:12px;">ماذا تعني القراءة؟</div>'
-            f'<div style="font-size:12px;line-height:1.85;color:#475569;text-align:justify;">تحليل منظم للبيانات المعتمدة يوضح اتجاه السوق والفجوة والفرصة.</div>'
-            f'</div>'
-            f'<div style="grid-area:main;direction:rtl;display:flex;flex-direction:column;gap:14px;">'
-            + ''.join(
-                f'<div data-market-analysis-block="{index + 1}" style="padding:0 0 13px;border-bottom:1px solid #e2e8f0;'
-                f'font-size:14px;line-height:1.9;color:#1f2937;text-align:justify;">{_market_value_html(block)}</div>'
-                for index, block in enumerate(prose_blocks)
-            )
-            + '</div></div>'
+            f'<div data-market-analysis="1" style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
+            f'padding:10px 26px;box-sizing:border-box;">{prose_rows}</div>'
         )
     else:
-        featured = rows[:1]
-        details = rows[1:]
-
-        def render_detail(label, value):
-            return (
-                f'<div data-market-analysis-card="1" style="background:#ffffff;border:1px solid #dbe4ee;'
-                f'border-right:4px solid {accent};border-radius:9px;padding:12px 15px;min-height:102px;'
-                f'box-sizing:border-box;">'
-                f'<div style="font-size:13px;font-weight:800;color:{primary};line-height:1.35;margin-bottom:7px;">{html_lib.escape(str(label))}</div>'
-                f'<div style="font-size:11.8px;line-height:1.62;color:#334155;font-weight:500;text-align:justify;">{_market_value_html(value)}</div>'
-                '</div>'
-            )
-
-        featured_html = ''.join(
-            f'<div style="background:{primary};color:#ffffff;border-radius:10px;padding:17px 20px;min-height:140px;box-sizing:border-box;">'
-            f'<div style="font-size:16px;font-weight:800;margin-bottom:8px;">{html_lib.escape(str(label))}</div>'
-            f'<div style="font-size:13px;line-height:1.8;text-align:justify;">{_market_value_html(value)}</div></div>'
-            for label, value in featured
-        )
-        detail_cards = ''.join(render_detail(label, value) for label, value in details)
         decision = str(market.get('decision') or '').strip()
         decision_html = (
-            f'<div style="background:#e8dcc0;border-radius:9px;padding:13px 16px;margin-top:14px;">'
-            f'<div style="font-size:11px;font-weight:800;color:#334155;margin-bottom:5px;">تصنيف الدراسة</div>'
-            f'<div style="font-size:16px;font-weight:800;color:#1f2937;">{html_lib.escape(decision)}</div></div>'
-        ) if decision else ''
+            f'<div style="display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid #e2e8f0;'
+            f'border-right:4px solid {accent};border-radius:8px;padding:8px 16px;margin-bottom:12px;">'
+            f'<span style="font-size:11px;font-weight:700;color:#64748b;white-space:nowrap;">تصنيف الدراسة</span>'
+            f'<span style="font-size:14px;font-weight:800;color:{primary};">{html_lib.escape(decision)}</span></div>'
+        ) if decision and _row_offset == 0 else ''
+
+        lead_label, lead_value = rows[0] if rows else ('تحليل السوق', '')
+        lead_columns = 'column-count:2;column-gap:34px;' if len(str(lead_value or '')) > 320 else ''
+        lead_font = '14.5px' if compact else '13.5px'
+        lead_html = (
+            f'<div style="background:{primary};border-radius:12px;padding:{26 if compact else 20}px 28px;'
+            f'box-sizing:border-box;position:relative;overflow:hidden;">'
+            f'<div style="display:flex;align-items:baseline;gap:14px;margin-bottom:{12 if compact else 8}px;">'
+            f'<span style="font-size:30px;font-weight:800;color:{accent};line-height:1;">{_row_offset + 1:02d}</span>'
+            f'<span style="font-size:{19 if compact else 17}px;font-weight:800;color:#ffffff;">{html_lib.escape(str(lead_label))}</span>'
+            f'<span style="flex:1;border-bottom:1px solid rgba(255,255,255,0.22);transform:translateY(-6px);"></span>'
+            f'</div>'
+            f'<div style="font-size:{lead_font};line-height:1.85;color:#eef2f7;text-align:justify;{lead_columns}">'
+            f'{topic_text_html(lead_value, accent)}</div>'
+            f'</div>'
+        )
+
+        def render_topic(index, label, value):
+            text_len = len(re.sub(r'\s+', ' ', str(value or '')).strip())
+            columns = 'column-count:2;column-gap:30px;' if text_len > 420 else ''
+            body_font = '13px' if compact else '12.5px'
+            return (
+                f'<div data-market-analysis-topic="{index}" style="padding:{14 if compact else 11}px 2px 0;">'
+                f'<div style="display:flex;align-items:baseline;gap:12px;">'
+                f'<span style="font-size:{24 if compact else 21}px;font-weight:800;color:{accent};line-height:1;min-width:34px;">{index:02d}</span>'
+                f'<span style="font-size:{15.5 if compact else 14}px;font-weight:800;color:{primary};white-space:nowrap;">{html_lib.escape(str(label))}</span>'
+                f'<span style="flex:1;border-bottom:1px solid #e2e8f0;transform:translateY(-5px);"></span>'
+                f'</div>'
+                f'<div style="margin-top:{8 if compact else 5}px;font-size:{body_font};line-height:{1.85 if compact else 1.72};'
+                f'color:#334155;text-align:justify;{columns}">{topic_text_html(value, accent)}</div>'
+                f'</div>'
+            )
+
+        topics_html = ''.join(
+            render_topic(_row_offset + idx + 1, label, value)
+            for idx, (label, value) in enumerate(rows[1:], 1)
+        )
         body_content = (
-            f'<div data-market-analysis="1" style="{panel_style}padding:18px 22px;display:grid;'
-            f'grid-template-columns:0.9fr 1.8fr;grid-template-areas:"side main";gap:20px;direction:ltr;">'
-            f'<div style="grid-area:side;direction:rtl;background:#f3f6f8;border-top:5px solid {primary};border-radius:9px;padding:13px;">'
-            f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:12px;">قراءة مركزة</div>'
-            f'<div style="font-size:11.5px;line-height:1.75;color:#475569;text-align:justify;">المحاور التالية تلخص البيانات الواردة في نطاق الدراسة دون تغيير قيمها.</div>'
-            f'{decision_html}</div>'
-            f'<div style="grid-area:main;direction:rtl;display:flex;flex-direction:column;gap:12px;">'
-            f'{featured_html}<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">{detail_cards}</div>'
-            '</div></div>'
+            f'<div data-market-analysis="1" style="display:flex;flex-direction:column;">'
+            f'{decision_html}{lead_html}{topics_html}</div>'
         )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
@@ -9447,7 +9567,7 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:12px;">
+  <div style="padding:0 40px;margin-top:12px;">
     {body_content}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -12243,8 +12363,8 @@ def _normalize_market_content_layout(html, slide_type='', slide_title='', conten
         )
     frame = (
         '<div data-market-auto-fit-content="1" style="flex:1 1 auto;min-height:0;'
-        'width:calc(100% - 72px);margin:0 auto;padding:12px 0 52px;box-sizing:border-box;'
-        'display:flex;flex-direction:column;justify-content:center;overflow:visible;">'
+        'width:calc(100% - 72px);margin:0 auto;padding:64px 0 52px;box-sizing:border-box;'
+        'display:flex;flex-direction:column;justify-content:safe center;overflow:visible;">'
         + body_html + '</div>'
     )
     replacement = root_open + ''.join(preserved) + repair_css + frame + html[root_close_start:root_end]

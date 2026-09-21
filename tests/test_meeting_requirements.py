@@ -2438,7 +2438,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary') for slide in content))
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.sources') for slide in content))
         self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.summary'), 1)
-        self.assertIn('market_study_data.summary:5:9', [slide.get('content_source') for slide in content])
+        summary_pages = [slide for slide in content
+                         if str(slide.get('content_source') or '').startswith('market_study_data.summary')]
+        covered = set()
+        for slide in summary_pages:
+            covered.update(range(int(slide.get('market_row_start') or 0),
+                                 int(slide.get('market_row_end') or 0)))
+        market_data = json.loads(project['market_study_data'])
+        self.assertEqual(covered, set(range(len(engine._market_summary_rows(market_data)))))
         self.assertLessEqual(sum(1 for slide in content if str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary')), 2)
         self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.sources'), 1)
         self.assertTrue(all(not slide.get('image_tokens') and not slide.get('requires_image') for slide in market))
@@ -2518,6 +2525,54 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-market-work-summary', long_work_html)
         self.assertIn('<p style=', long_work_html)
         self.assertNotIn('<article', long_work_html)
+
+    def test_five_competitors_share_one_slide_and_mixed_units_stay_in_chart(self):
+        engine = self.application_module.slide_engine
+        competitors = [
+            {'name': 'منافس أ', 'operation_type': 'بيع', 'price_type': 'سعر المتر المربع',
+             'price_value': '30000', 'status': 'قائم'},
+            {'name': 'منافس ب', 'operation_type': 'بيع', 'price_type': 'سعر المتر المربع',
+             'price_value': '28000', 'status': 'قائم'},
+            {'name': 'منافس ج', 'operation_type': 'بيع', 'price_type': 'سعر المتر المربع',
+             'price_value': '38000', 'status': 'قائم'},
+            {'name': 'منافس د', 'operation_type': 'بيع', 'price_type': 'سعر المتر المربع',
+             'price_value': '25000', 'status': 'تحت الإنشاء'},
+            {'name': 'منافس هـ', 'operation_type': 'إيجار', 'price_type': 'إيجار سنوي',
+             'price_value': '95000', 'status': 'قائم'},
+        ]
+        project = {'project_name': 'مشروع السوق', 'market_study_data': {'competitors': competitors}}
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        comp_slides = [slide for slide in plan['slides']
+                       if str(slide.get('content_source') or '').startswith('market_study_data.competitors')]
+        self.assertEqual(len(comp_slides), 1)
+        self.assertEqual((comp_slides[0].get('competitor_start'), comp_slides[0].get('competitor_end')), (0, 5))
+        html = engine._build_sol_horizontal_bar_slide(
+            comp_slides[0], project, {'primary_color': '#123456'}, slide_num=3, total_slides=8)
+        for name in ('منافس أ', 'منافس ب', 'منافس ج', 'منافس د', 'منافس هـ'):
+            self.assertIn(name, html)
+        # Mixed price units stay in the chart as separately labelled sections.
+        items = engine._extract_competitor_chart_data(competitors, project)
+        chart_names = {item.get('name') for item in items}
+        self.assertEqual(chart_names, {'منافس أ', 'منافس ب', 'منافس ج', 'منافس د', 'منافس هـ'})
+        self.assertIn('مشاريع البيع', html)
+        self.assertIn('مشاريع الإيجار', html)
+
+    def test_market_summary_pagination_follows_text_volume(self):
+        engine = self.application_module.slide_engine
+        long_text = 'نص تحليلي معتمد طويل يغطي المحور بالكامل مع أرقام ومؤشرات السوق. ' * 8
+        summary = {key: long_text for key in (
+            'market_definition', 'city_position', 'sector_performance', 'supply', 'demand',
+            'competition', 'market_gap', 'project_evaluation', 'recommendation', 'risks')}
+        project = {'project_name': 'مشروع السوق', 'market_study_data': {'summary': summary}}
+        market = engine._market_state(project)
+        pages = engine._market_summary_pages(market)
+        self.assertGreaterEqual(len(pages), 3)
+        self.assertEqual(sum(len(page_rows) for _start, page_rows in pages), 10)
+        starts = [start for start, _rows in pages]
+        self.assertEqual(starts[0], 0)
+        self.assertTrue(all(starts[i] < starts[i + 1] for i in range(len(starts) - 1)))
 
     def test_market_analysis_points_and_work_summary_paragraph_are_separate(self):
         engine = self.application_module.slide_engine
@@ -4882,7 +4937,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertIn('data-market-auto-fit="1"', normalized)
         self.assertIn('data-market-auto-fit-content="1"', normalized)
-        self.assertIn('justify-content:center', normalized)
+        self.assertIn('justify-content:safe center', normalized)
         self.assertIsNone(re.search(
             r'<[^>]+\bstyle\s*=\s*["\'][^"\']*position\s*:\s*(?:absolute|fixed)',
             normalized, flags=re.IGNORECASE,
@@ -12919,45 +12974,49 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertEqual(module._download_listing_image(url), (None, None, None))
 
     def test_market_competitors_chunked_into_balanced_slides(self):
-        """6 competitors must be chunked into 2 slides of 3 competitors each."""
+        """Up to 6 competitors share one slide; 8 split into 2 slides of 4."""
         engine = self.application_module.slide_engine
-        competitors = [
-            {'id': f'c{i}', 'name': f'منافس {i}', 'price': 1000 * i, 'price_type': 'سعر المتر', 'status': 'قائم'}
-            for i in range(1, 7)
-        ]
-        draft = {
-            'project_name': 'مشروع الاختبار',
-            'city': 'الرياض',
-            'market_study_data': json.dumps({'competitors': competitors}, ensure_ascii=False),
-        }
-        plan = engine.normalize_presentation_plan({}, project_data=draft, images={})
-        market_slides = [s for s in plan['slides'] if s.get('section_key') == 'market']
-        comp_slides = [s for s in market_slides if 'competitors' in str(s.get('content_source') or '')]
+
+        def plan_for(count):
+            competitors = [
+                {'id': f'c{i}', 'name': f'منافس {i}', 'price': 1000 * i, 'price_type': 'سعر المتر', 'status': 'قائم'}
+                for i in range(1, count + 1)
+            ]
+            draft = {
+                'project_name': 'مشروع الاختبار',
+                'city': 'الرياض',
+                'market_study_data': json.dumps({'competitors': competitors}, ensure_ascii=False),
+            }
+            plan = engine.normalize_presentation_plan({}, project_data=draft, images={})
+            market_slides = [s for s in plan['slides'] if s.get('section_key') == 'market']
+            return draft, [s for s in market_slides if 'competitors' in str(s.get('content_source') or '')]
+
+        _draft6, comp_slides6 = plan_for(6)
+        self.assertEqual(len(comp_slides6), 1)
+        self.assertEqual((comp_slides6[0]['competitor_start'], comp_slides6[0]['competitor_end']), (0, 6))
+
+        draft8, comp_slides = plan_for(8)
         self.assertEqual(len(comp_slides), 2)
         self.assertEqual(comp_slides[0]['competitor_start'], 0)
-        self.assertEqual(comp_slides[0]['competitor_end'], 3)
+        self.assertEqual(comp_slides[0]['competitor_end'], 4)
         self.assertIn('(1/2)', comp_slides[0]['title'])
-        self.assertEqual(comp_slides[1]['competitor_start'], 3)
-        self.assertEqual(comp_slides[1]['competitor_end'], 6)
+        self.assertEqual(comp_slides[1]['competitor_start'], 4)
+        self.assertEqual(comp_slides[1]['competitor_end'], 8)
         self.assertIn('(2/2)', comp_slides[1]['title'])
 
-        # Verify rendering of slide 1 contains only the first 3 competitors
-        html_1 = engine._build_structured_fallback_slide(comp_slides[0], draft, {})
-        self.assertIn('منافس 1', html_1)
-        self.assertIn('منافس 2', html_1)
-        self.assertIn('منافس 3', html_1)
-        self.assertNotIn('منافس 4', html_1)
-        self.assertNotIn('منافس 5', html_1)
-        self.assertNotIn('منافس 6', html_1)
+        # Verify rendering of slide 1 contains only the first 4 competitors
+        html_1 = engine._build_structured_fallback_slide(comp_slides[0], draft8, {})
+        for index in range(1, 5):
+            self.assertIn(f'منافس {index}', html_1)
+        for index in range(5, 9):
+            self.assertNotIn(f'منافس {index}', html_1)
 
-        # Verify rendering of slide 2 contains only the next 3 competitors
-        html_2 = engine._build_structured_fallback_slide(comp_slides[1], draft, {})
-        self.assertNotIn('منافس 1', html_2)
-        self.assertNotIn('منافس 2', html_2)
-        self.assertNotIn('منافس 3', html_2)
-        self.assertIn('منافس 4', html_2)
-        self.assertIn('منافس 5', html_2)
-        self.assertIn('منافس 6', html_2)
+        # Verify rendering of slide 2 contains only the next 4 competitors
+        html_2 = engine._build_structured_fallback_slide(comp_slides[1], draft8, {})
+        for index in range(1, 5):
+            self.assertNotIn(f'منافس {index}', html_2)
+        for index in range(5, 9):
+            self.assertIn(f'منافس {index}', html_2)
 
     def test_executive_content_multi_slide_planning_and_rendering(self):
         """Executive content with opportunity, features and summary must yield 3 slides."""
