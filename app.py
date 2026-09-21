@@ -29,9 +29,10 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import db_driver
 import concurrent.futures
+import contextlib
 import copy
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context, redirect
+from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context, has_app_context, redirect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -384,6 +385,20 @@ def _tenant_id_from_usage_ctx(usage_ctx):
         return None
 
 
+def _worker_app_context():
+    """App context for threads that lack one; passthrough inside a request.
+
+    Pool workers (competitor verification, slide generation) share no Flask
+    context, so db helpers built on ``g`` die with 'Working outside of
+    application context' — on staging that misread every keyed company as
+    «no key row» and made auto-provisioning delete each key it created.
+    Pushing only when absent keeps the caller's request-scoped ``g`` —
+    tenant attribution included — intact, and the context's own teardown
+    closes the connection it opened.
+    """
+    return contextlib.nullcontext() if has_app_context() else app.app_context()
+
+
 def _resolve_openrouter_key(usage_ctx=None, tenant_id=None):
     """Provider key for one call: the company key first, global fallback after.
 
@@ -395,12 +410,13 @@ def _resolve_openrouter_key(usage_ctx=None, tenant_id=None):
     if tid is None:
         tid = _tenant_id_from_usage_ctx(usage_ctx)
     if tid:
-        try:
-            raw = db.get_tenant_openrouter_key_raw(tid)
-            if raw:
-                return raw
-        except Exception as exc:
-            print(f"[OPENROUTER KEY] tenant lookup failed: {exc}")
+        with _worker_app_context():
+            try:
+                raw = db.get_tenant_openrouter_key_raw(tid)
+                if raw:
+                    return raw
+            except Exception as exc:
+                print(f"[OPENROUTER KEY] tenant lookup failed: {exc}")
     return OPENROUTER_KEY
 
 
@@ -433,60 +449,65 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
     own per-key limit remains the funding backstop. Never raises.
     """
     try:
-        if not REQUIRE_TENANT_OPENROUTER_KEY:
-            return None
-        tid = tenant_id
-        if tid is None:
-            tid = _tenant_id_from_usage_ctx(usage_ctx)
-        if not tid:
-            return None
-        try:
-            tenant = db.get_tenant_by_id(tid)
-        except Exception:
-            tenant = None
-        if tenant and tenant.get('is_admin'):
-            return None
-        try:
-            meta = db.get_tenant_openrouter_key_meta(tid)
-            raw = db.get_tenant_openrouter_key_raw(tid)
-        except Exception as exc:
-            print(f"[OPENROUTER KEY] gate lookup failed: {exc}")
-            # Strict mode exists to stop unkeyed companies spending on the
-            # platform key — a lookup error that opens the gate defeats it.
-            return {'message': 'تعذر التحقق من مفتاح AI للشركة الآن',
-                    'error_code': 'TENANT_KEY_CHECK_FAILED'}
-        if raw:
-            return None
-        # The refusal reason matters for support: no row, a deactivated row,
-        # or a row whose secret no longer decrypts all look identical to the
-        # caller but need different fixes.
-        refusal_reason = ('no key row' if not (meta or {}).get('has_key')
-                          else 'key row is inactive'
-                          if not meta.get('is_active')
-                          else 'stored key failed to decrypt')
-        print(f"[OPENROUTER KEY] gate refused tenant {tid}: {refusal_reason}")
-        # A management key is configured: try to provision one on the fly
-        # instead of blocking the call. Rate-limited per tenant — a company
-        # that cannot be provisioned would otherwise fire a create/delete pair
-        # at the Management API on every gated call in a job.
-        if _openrouter_management_key():
-            now = time.time()
-            if now - _PROVISION_ATTEMPT_AT.get(tid, 0) >= _PROVISION_RETRY_SECONDS:
-                _PROVISION_ATTEMPT_AT[tid] = now
-                print(f"[OPENROUTER KEY] auto-provisioning key for tenant {tid}")
-                try:
-                    _ensure_tenant_openrouter_key(tid)
-                except Exception as exc:
-                    print(f"[OPENROUTER KEY] auto-provision failed: {exc}")
-                try:
-                    raw = db.get_tenant_openrouter_key_raw(tid)
-                except Exception:
-                    raw = None
-                if raw:
-                    _PROVISION_ATTEMPT_AT.pop(tid, None)
-                    return None
-        return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
-                'error_code': 'NO_TENANT_KEY'}
+        with _worker_app_context():
+            if not REQUIRE_TENANT_OPENROUTER_KEY:
+                return None
+            tid = tenant_id
+            if tid is None:
+                tid = _tenant_id_from_usage_ctx(usage_ctx)
+            if not tid:
+                return None
+            try:
+                tenant = db.get_tenant_by_id(tid)
+            except Exception:
+                tenant = None
+            if tenant and tenant.get('is_admin'):
+                return None
+            try:
+                meta = db.get_tenant_openrouter_key_meta(tid)
+                raw = db.get_tenant_openrouter_key_raw(tid)
+            except Exception as exc:
+                print(f"[OPENROUTER KEY] gate lookup failed: {exc}")
+                # Strict mode exists to stop unkeyed companies spending on the
+                # platform key — a lookup error that opens the gate defeats it.
+                return {'message': 'تعذر التحقق من مفتاح AI للشركة الآن',
+                        'error_code': 'TENANT_KEY_CHECK_FAILED'}
+            if raw:
+                return None
+            # The refusal reason matters for support: no row, a deactivated row,
+            # or a row whose secret no longer decrypts all look identical to the
+            # caller but need different fixes.
+            refusal_reason = ('no key row' if not (meta or {}).get('has_key')
+                              else 'key row is inactive'
+                              if not meta.get('is_active')
+                              else 'stored key failed to decrypt')
+            print(f"[OPENROUTER KEY] gate refused tenant {tid}: {refusal_reason}")
+            # A management key is configured: try to provision one on the fly
+            # instead of blocking the call. Rate-limited per tenant — a company
+            # that cannot be provisioned would otherwise fire a create/delete pair
+            # at the Management API on every gated call in a job.
+            if _openrouter_management_key():
+                now = time.time()
+                if now - _PROVISION_ATTEMPT_AT.get(tid, 0) >= _PROVISION_RETRY_SECONDS:
+                    _PROVISION_ATTEMPT_AT[tid] = now
+                    print(f"[OPENROUTER KEY] auto-provisioning key for tenant {tid}")
+                    try:
+                        # Same cap as tenant creation: the wallet-derived
+                        # provider limit — a funded company gets a usable key,
+                        # not the static zero default that stays refused.
+                        _ensure_tenant_openrouter_key(
+                            tid, limit_usd=_tenant_provider_cap_usd(tid))
+                    except Exception as exc:
+                        print(f"[OPENROUTER KEY] auto-provision failed: {exc}")
+                    try:
+                        raw = db.get_tenant_openrouter_key_raw(tid)
+                    except Exception:
+                        raw = None
+                    if raw:
+                        _PROVISION_ATTEMPT_AT.pop(tid, None)
+                        return None
+            return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
+                    'error_code': 'NO_TENANT_KEY'}
     except Exception as exc:
         print(f"[OPENROUTER KEY] gate failed open: {exc}")
         return None
@@ -817,31 +838,32 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
     and never logged.
     """
     try:
-        if not tenant_id or not _openrouter_management_key():
-            return None
-        try:
-            tenant = db.get_tenant_by_id(tenant_id)
-        except Exception:
-            tenant = None
-        if tenant and tenant.get('is_admin'):
-            return None
-        try:
-            existing = db.get_tenant_openrouter_key_meta(tenant_id)
-        except Exception:
-            existing = {'has_key': False}
-        if existing.get('has_key') and existing.get('is_active'):
-            return existing
-        meta, _error = _provision_one_tenant_key(
-            tenant or {'id': tenant_id},
-            TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
-            limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
-        )
-        if not meta:
-            # The refusal is the visible symptom; this is the cause — without
-            # it the gate log only ever says «no key row» forever.
-            print(f"[OPENROUTER KEYS] auto-provision failed for tenant {tenant_id}: "
-                  f"{_error or 'unknown'}")
-        return meta
+        with _worker_app_context():
+            if not tenant_id or not _openrouter_management_key():
+                return None
+            try:
+                tenant = db.get_tenant_by_id(tenant_id)
+            except Exception:
+                tenant = None
+            if tenant and tenant.get('is_admin'):
+                return None
+            try:
+                existing = db.get_tenant_openrouter_key_meta(tenant_id)
+            except Exception:
+                existing = {'has_key': False}
+            if existing.get('has_key') and existing.get('is_active'):
+                return existing
+            meta, _error = _provision_one_tenant_key(
+                tenant or {'id': tenant_id},
+                TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
+                limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
+            )
+            if not meta:
+                # The refusal is the visible symptom; this is the cause — without
+                # it the gate log only ever says «no key row» forever.
+                print(f"[OPENROUTER KEYS] auto-provision failed for tenant {tenant_id}: "
+                      f"{_error or 'unknown'}")
+            return meta
     except Exception as exc:
         print(f"[OPENROUTER KEYS] auto-provision failed: {exc}")
         return None
@@ -21894,7 +21916,10 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
 
     def verify(row):
         try:
-            _verify_competitor_row(row, payload, data, tenant_id=tenant_id)
+            # Pool threads share no Flask context — without one the key gate
+            # misreads every company as unkeyed and db-backed helpers die.
+            with _worker_app_context():
+                _verify_competitor_row(row, payload, data, tenant_id=tenant_id)
         finally:
             done[0] += 1
             report(30 + int(28 * done[0] / total),

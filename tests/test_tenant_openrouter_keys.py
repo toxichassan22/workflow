@@ -714,6 +714,75 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertEqual(body['package']['name'], 'رصيد المحفظة')
 
 
+    def test_gate_and_key_resolution_work_on_contextless_worker_threads(self):
+        """Pool threads share no Flask context — the strict gate must still find
+        the tenant's key instead of misreading «no key row» and refusing, and
+        the provider key resolution must return the tenant key, not the global."""
+        module = self.application_module
+        import threading
+
+        tenant_id = self._fresh_tenant('Thread Co', 'thread-key@example.test', 'thread-key-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-thread-key-zzzzzzzzzzzzzzzz', provenance='manual')
+
+        results = {}
+
+        def _run():
+            with patch.object(module, 'REQUIRE_TENANT_OPENROUTER_KEY', True):
+                results['gate'] = module._tenant_key_gate(tenant_id=tenant_id)
+                results['resolved'] = module._resolve_openrouter_key(tenant_id=tenant_id)
+
+        worker = threading.Thread(target=_run)
+        worker.start()
+        worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+        self.assertIsNone(results.get('gate'))
+        self.assertEqual(results.get('resolved'), 'sk-or-v1-thread-key-zzzzzzzzzzzzzzzz')
+
+    def test_auto_provision_stores_key_from_contextless_thread(self):
+        """A worker thread must store the created key locally — staging used to
+        fail here with 'Working outside of application context' and delete each
+        upstream key it had just created."""
+        module = self.application_module
+        import threading
+
+        tenant_id = self._fresh_tenant('Pool Co', 'pool-key@example.test', 'pool-key-co')
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE tenants SET credit_balance = 50.0 WHERE id = ?',
+                         (tenant_id,))
+            conn.commit()
+        created_body = {'key': 'sk-or-v1-pool-key-yyyyyyyyyyyyyyyy',
+                        'label': 'landloom-pool', 'limit': 31.25,
+                        'limit_reset': 'monthly', 'hash': 'poolhash33'}
+        outcome = {}
+
+        def _provision():
+            # The real path: the strict gate auto-provisions inside the pool
+            # thread, then ensure() finds the now-active row.
+            with patch.object(module, 'REQUIRE_TENANT_OPENROUTER_KEY', True):
+                outcome['gate'] = module._tenant_key_gate(tenant_id=tenant_id)
+            outcome['meta'] = module._ensure_tenant_openrouter_key(tenant_id)
+
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            worker = threading.Thread(target=_provision)
+            worker.start()
+            worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+        self.assertIsNone(outcome.get('gate'))
+        self.assertTrue((outcome.get('meta') or {}).get('has_key'))
+        deleted.assert_not_called()
+        with self.app.app_context():
+            self.assertEqual(
+                db.get_tenant_openrouter_key_raw(tenant_id),
+                'sk-or-v1-pool-key-yyyyyyyyyyyyyyyy')
+
+
 if __name__ == '__main__':
     unittest.main()
 
