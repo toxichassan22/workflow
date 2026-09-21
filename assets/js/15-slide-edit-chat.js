@@ -1414,7 +1414,9 @@
               }
               throw new Error('العرض له نسخة أحدث محفوظة على الخادم. تعديلاتك ما زالت مفتوحة ولم تُستبدل النسخة المحفوظة.');
             }
-            throw new Error(response?.error || 'تعذر حفظ العرض');
+            const saveError = new Error(response?.error || 'تعذر حفظ العرض');
+            saveError.response = response || {};
+            throw saveError;
           }
           if (!presentationId || tenantPresentationId === presentationId) {
             tenantPresentationId = response.presentationId || presentationId;
@@ -1452,6 +1454,7 @@
         tenantProjectData.designerChat = designerChatPersistence(response.presentationId);
         return true;
       } catch (error) {
+        if (typeof options.onError === 'function') options.onError(error);
         setDraftDirty(true);
         toast(error.message || 'تعذر حفظ العرض');
         return false;
@@ -1487,7 +1490,21 @@
 
     async function preparePresentationGenerationTarget(scope) {
       if (tenantPresentationSavePromise) await tenantPresentationSavePromise;
-      if (tenantPresentationId && tenantSlidesData.length && !(await saveTenantPresentation())) return false;
+      const saveCurrentPresentation = async () => {
+        let saveError = null;
+        const saved = await saveTenantPresentation('', {
+          onError: error => { saveError = error; }
+        });
+        return saved ? true : ((saveError && saveError.response) || false);
+      };
+      if (tenantPresentationId && tenantSlidesData.length) {
+        let saved = await saveCurrentPresentation();
+        if (saved !== true && saved?.error_code === 'DRAFT_LOCKED' && saved?.status === 'generating'
+          && await cancelActiveTenantGenerationRun(tenantProjectData.draftId || tenantProjectData.draft_id)) {
+          saved = await saveCurrentPresentation();
+        }
+        if (saved !== true) return false;
+      }
       let target = null;
       const currentScope = tenantProjectData.presentation_scope;
       if (tenantPresentationId && (currentScope === scope || (!currentScope && scope === 'full')
@@ -1505,10 +1522,18 @@
         const response = await api('GET', '/api/presentations/' + encodeURIComponent(target.id));
         if (!response?.success) { toast(response?.error || 'تعذر تحميل النسخة الحالية'); return false; }
         const saved = response.presentation;
-        const checkpoint = await api('PUT', '/api/presentations/' + encodeURIComponent(target.id), {
+        let checkpoint = await api('PUT', '/api/presentations/' + encodeURIComponent(target.id), {
           title: saved.title, projectData: saved.projectData, slidesData: saved.slidesData,
           expectedRevision: Number(saved.revision) || 0
         });
+        if (!checkpoint?.success && checkpoint?.error_code === 'DRAFT_LOCKED'
+          && checkpoint?.status === 'generating'
+          && await cancelActiveTenantGenerationRun(saved.draftId || saved.projectData?.draftId || tenantProjectData.draftId)) {
+          checkpoint = await api('PUT', '/api/presentations/' + encodeURIComponent(target.id), {
+            title: saved.title, projectData: saved.projectData, slidesData: saved.slidesData,
+            expectedRevision: Number(saved.revision) || 0
+          });
+        }
         if (!checkpoint?.success) { toast(checkpoint?.error || 'تعذر حماية النسخة الحالية'); return false; }
         target.revision = checkpoint.revision;
         tenantSlidesData = saved.slidesData || [];

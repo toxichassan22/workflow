@@ -516,6 +516,86 @@
       }
     }
 
+    function releaseGenerationRunOnPageHide() {
+      const jobId = window.currentGenerationJobId;
+      const approvalId = window.currentGenerationApprovalId;
+      if (!jobId && !approvalId) return;
+      const headers = { 'Content-Type': 'application/json' };
+      const token = typeof getTenantToken === 'function' ? getTenantToken() : '';
+      if (token) headers.Authorization = 'Bearer ' + token;
+      const note = 'أُغلقت صفحة التوليد قبل اكتمالها';
+      const request = { method: 'POST', headers, keepalive: true };
+      if (jobId) {
+        fetch('/api/generation-jobs/' + encodeURIComponent(jobId) + '/finish', {
+          ...request,
+          body: JSON.stringify({ status: 'cancelled', slidesDone: (tenantSlidesData || []).length, note })
+        }).catch(() => {});
+      }
+      if (approvalId) {
+        fetch('/api/generation-approvals/' + encodeURIComponent(approvalId) + '/settle', {
+          ...request,
+          body: JSON.stringify({ consumed: false, jobId: jobId || undefined, note })
+        }).catch(() => {});
+      }
+      window.currentGenerationJobId = null;
+      window.currentGenerationApprovalId = null;
+    }
+
+    window.addEventListener('pagehide', releaseGenerationRunOnPageHide);
+    window.addEventListener('beforeunload', releaseGenerationRunOnPageHide);
+
+    async function cancelActiveTenantGenerationRun(draftId) {
+      if (!draftId) return false;
+      const [jobsResponse, approvalsResponse] = await Promise.all([
+        api('GET', '/api/generation-jobs?draftId=' + encodeURIComponent(draftId)),
+        api('GET', '/api/generation-approvals?status=approved'),
+      ]);
+      const jobs = jobsResponse?.jobs || [];
+      const latestJobByApproval = new Map();
+      for (const job of jobs) {
+        const approvalId = String(job.approval_id || '');
+        if (approvalId && !latestJobByApproval.has(approvalId)) latestJobByApproval.set(approvalId, job.id);
+      }
+      const activeJobs = jobs.filter(job => ['queued', 'running'].includes(job.status));
+      const activeApprovals = (approvalsResponse?.approvals || []).filter(approval =>
+        String(approval.draft_id || '') === String(draftId) && !approval.section_key);
+      if (!activeJobs.length && !activeApprovals.length) return false;
+      if (typeof confirm !== 'function' || !confirm(
+        'يوجد توليد قيد التنفيذ لهذا المشروع. هل تريد إيقافه وبدء توليد جديد؟')) return false;
+      let released = false;
+      const finishedApprovals = new Set();
+      const inactiveJobByApproval = new Map();
+      const unresolvedApprovals = new Set();
+      for (const job of activeJobs) {
+        const res = await api('POST', '/api/generation-jobs/' + encodeURIComponent(job.id) + '/finish', {
+          status: 'cancelled',
+          slidesDone: (tenantSlidesData || []).length,
+          note: 'أُلغيت مهمة التوليد لبدء توليد جديد'
+        });
+        if (res?.success) {
+          released = true;
+          if (job.approval_id) finishedApprovals.add(String(job.approval_id));
+        } else if (res?.error_code === 'job_not_active' || res?.error_code === 'settlement_failed') {
+          released = true;
+          if (job.approval_id) inactiveJobByApproval.set(String(job.approval_id), job.id);
+        } else if (job.approval_id) {
+          unresolvedApprovals.add(String(job.approval_id));
+        }
+      }
+      for (const approval of activeApprovals) {
+        if (finishedApprovals.has(String(approval.id))) continue;
+        if (unresolvedApprovals.has(String(approval.id))) continue;
+        const res = await api('POST', '/api/generation-approvals/' + encodeURIComponent(approval.id) + '/settle', {
+          consumed: false,
+          jobId: inactiveJobByApproval.get(String(approval.id))
+            || latestJobByApproval.get(String(approval.id)) || undefined,
+          note: 'أُلغي اعتماد التوليد لبدء توليد جديد'
+        });
+        if (res?.success || res?.error_code === 'approval_not_approved') released = true;
+      }
+      return released;
+    }
+
     async function generateTenantSlides(options = {}) {
       if (isGeneratingTenantSlides) return;
       if (!tenantSlidePlan || !tenantProjectData) return;

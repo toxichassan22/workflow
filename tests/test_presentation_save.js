@@ -61,10 +61,150 @@ vm.runInContext(source.slice(start, end), context);
   assert.equal(context.tenantPresentationRevision,8);
   assert.equal(requests.filter(x=>x.method==='POST').length,0);
   assert.equal(requests[2].body.expectedRevision,8);
+  await testGenerationLockRelease();
+  await testGenerationRunRelease();
   await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
 })().catch(error => { console.error(error); process.exitCode=1; });
+
+async function testGenerationLockRelease() {
+  const requests = [];
+  let cancelled = 0;
+  let checkpointWrites = 0;
+  context.tenantPresentationId = 'other';
+  context.tenantPresentationRevision = 4;
+  context.tenantSlidesData = [];
+  context.tenantProjectData = { draftId: 'draft', presentation_scope: 'section:location' };
+  context.cancelActiveTenantGenerationRun = async draftId => {
+    cancelled++;
+    assert.equal(draftId, 'draft');
+    return true;
+  };
+  context.api = async (method, path, body) => {
+    requests.push({ method, path, body });
+    if (method === 'GET' && path === '/api/presentations?draftId=draft') {
+      return { success: true, presentations: [{ id: 'locked-target', presentationScope: 'full', revision: 8 }] };
+    }
+    if (method === 'GET' && path === '/api/presentations/locked-target') {
+      return { success: true, presentation: { id: 'locked-target', title: 'Saved', revision: 8, draftId: 'draft', projectData: { draftId: 'draft' }, slidesData: [{ html: 'saved' }] } };
+    }
+    if (method === 'PUT' && path === '/api/presentations/locked-target') {
+      checkpointWrites++;
+      return checkpointWrites === 1
+        ? { success: false, error: 'locked', error_code: 'DRAFT_LOCKED', status: 'generating' }
+        : { success: true, presentationId: 'locked-target', revision: 9, changed: true };
+    }
+    return { success: true };
+  };
+  assert.equal(await context.preparePresentationGenerationTarget('full'), true);
+  assert.equal(cancelled, 1);
+  assert.equal(checkpointWrites, 2);
+  assert.equal(context.tenantPresentationId, 'locked-target');
+  assert.equal(context.tenantSlidesData[0].html, 'saved');
+
+  let saveWrites = 0;
+  context.tenantPresentationId = 'locked-current';
+  context.tenantPresentationRevision = 4;
+  context.tenantSlidesData = [{ html: 'open' }];
+  context.tenantProjectData = { draftId: 'draft', presentation_scope: 'full' };
+  context.api = async (method, path, body) => {
+    requests.push({ method, path, body });
+    if (method === 'PUT' && path === '/api/presentations/locked-current') {
+      saveWrites++;
+      return saveWrites === 1
+        ? { success: false, error: 'locked', error_code: 'DRAFT_LOCKED', status: 'generating' }
+        : { success: true, presentationId: 'locked-current', revision: 5, changed: true };
+    }
+    return { success: true };
+  };
+  assert.equal(await context.preparePresentationGenerationTarget('full'), true);
+  assert.equal(cancelled, 2);
+  assert.equal(saveWrites, 2);
+  assert.equal(context.tenantPresentationRevision, 5);
+}
+
+async function testGenerationRunRelease() {
+  const calls = [];
+  let allowCancel = false;
+  const state = {
+    console, JSON, Promise, Set,
+    window: { currentGenerationJobId: 'job-1', currentGenerationApprovalId: 'approval-1' },
+    tenantSlidesData: [{ html: 'saved' }],
+    getTenantToken: () => 'token',
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true };
+    },
+    confirm: () => allowCancel,
+    async api(method, path, body) {
+      calls.push({ method, path, body });
+      if (path === '/api/generation-jobs?draftId=draft') {
+        return { success: true, jobs: [
+          { id: 'job-run', status: 'running', approval_id: 'approval-run' },
+          { id: 'job-stale', status: 'queued', approval_id: 'approval-stale' },
+          { id: 'job-settle', status: 'running', approval_id: 'approval-settle' },
+          { id: 'job-old', status: 'failed', approval_id: 'approval-orphan' },
+        ] };
+      }
+      if (path === '/api/generation-approvals?status=approved') {
+        return { success: true, approvals: [
+          { id: 'approval-run', draft_id: 'draft' },
+          { id: 'approval-stale', draft_id: 'draft' },
+          { id: 'approval-settle', draft_id: 'draft' },
+          { id: 'approval-orphan', draft_id: 'draft' },
+          { id: 'approval-other', draft_id: 'other' },
+        ] };
+      }
+      if (path === '/api/generation-jobs/job-stale/finish') {
+        return { success: false, error_code: 'job_not_active' };
+      }
+      if (path === '/api/generation-jobs/job-settle/finish') {
+        return { success: false, error_code: 'settlement_failed' };
+      }
+      return { success: true };
+    },
+  };
+  vm.createContext(state);
+  for (const name of ['releaseGenerationRunOnPageHide', 'cancelActiveTenantGenerationRun']) {
+    const match = new RegExp('^    (?:async )?function ' + name + '\\(', 'm').exec(source);
+    assert(match, name);
+    vm.runInContext(source.slice(match.index, source.indexOf('\n    }', match.index) + 6), state);
+  }
+
+  state.releaseGenerationRunOnPageHide();
+  assert.equal(calls[0].url, '/api/generation-jobs/job-1/finish');
+  assert.equal(calls[0].options.keepalive, true);
+  assert.equal(JSON.parse(calls[0].options.body).status, 'cancelled');
+  assert.equal(calls[1].url, '/api/generation-approvals/approval-1/settle');
+  assert.equal(JSON.parse(calls[1].options.body).jobId, 'job-1');
+  assert.equal(JSON.parse(calls[1].options.body).consumed, false);
+  assert.equal(state.window.currentGenerationJobId, null);
+
+  state.window.currentGenerationApprovalId = 'approval-only';
+  state.releaseGenerationRunOnPageHide();
+  assert.equal(calls[2].url, '/api/generation-approvals/approval-only/settle');
+  assert.equal(JSON.parse(calls[2].options.body).consumed, false);
+
+  calls.length = 0;
+  assert.equal(await state.cancelActiveTenantGenerationRun('draft'), false);
+  assert.equal(calls.length, 2, 'A refused cancel only lists the active run');
+  allowCancel = true;
+  assert.equal(await state.cancelActiveTenantGenerationRun('draft'), true);
+  const posts = calls.slice(2).filter(call => call.method === 'POST');
+  assert.equal(posts[0].path, '/api/generation-jobs/job-run/finish');
+  assert.equal(posts[0].body.status, 'cancelled');
+  assert.equal(posts[1].path, '/api/generation-jobs/job-stale/finish');
+  assert.equal(posts[2].path, '/api/generation-jobs/job-settle/finish');
+  assert.equal(posts[3].path, '/api/generation-approvals/approval-stale/settle');
+  assert.equal(posts[3].body.jobId, 'job-stale');
+  assert.equal(posts[3].body.consumed, false);
+  assert.equal(posts[4].path, '/api/generation-approvals/approval-settle/settle');
+  assert.equal(posts[4].body.jobId, 'job-settle');
+  assert.equal(posts[5].path, '/api/generation-approvals/approval-orphan/settle');
+  assert.equal(posts[5].body.jobId, 'job-old');
+  assert.equal(posts.length, 6);
+}
 
 async function testCheckpointPreservesInputs() {
   const approved = {
