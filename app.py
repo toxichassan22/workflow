@@ -21687,6 +21687,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
         'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
         + price_shape + '}.\n' + price_rule +
+        'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
+        'إعلانًا تفصيليًا أو خبرًا، وليس شرطًا أن تكون رسمية. '
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )]
     tokens = _competitor_name_tokens(name)
@@ -21701,7 +21703,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         f'ابحث في الويب عن {" ".join(sorted(tokens))} — {city} السعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع '
         'الرسمي إن وُجدت", "summary": "سطر واحد", ' + price_shape + '}.\n'
-        + price_rule + 'إن لم تجد صفحة تذكر هذا الاسم أعد exists=false.'
+        + price_rule + 'أي صفحة تذكر الاسم تُحتسب دليلًا — إعلانًا أو خبرًا أو '
+        'موقع مطوّر. إن لم تجد صفحة تذكر هذا الاسم أعد exists=false.'
     )
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
     response = None
