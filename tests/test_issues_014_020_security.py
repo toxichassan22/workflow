@@ -5,12 +5,14 @@ chunks, export resource policy and image-reference ownership. Temporary
 database/media only; no provider calls.
 """
 import base64
+import html
 import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 import auth
 import db
@@ -432,6 +434,60 @@ class SignedMediaUrlTests(ScopeTestBase):
         self.assertEqual(self.client.get(data['cover']).status_code, 200)
         self.assertEqual(self.client.get(data['map']).status_code, 200)
 
+    def test_resigning_escaped_html_keeps_one_usable_signature(self):
+        creative = self._creative(self.tenant, 'escaped.png')
+        for separator in ('&amp;', '&#38;', '&#x26;'):
+            with self.subTest(separator=separator):
+                source = '<img src="' + creative + '?t=123' + separator + 's=old#preview">'
+                for _ in range(3):
+                    with self.app.test_request_context():
+                        source = self.module._sign_media_refs(source, self.tenant, {'maps': None})
+                    url = html.unescape(source.split('"')[1])
+                    query = parse_qs(urlsplit(url).query)
+                    self.assertEqual(query.get('t'), ['123'])
+                    self.assertEqual(len(query.get('s', [])), 1, source)
+                    self.assertEqual(urlsplit(url).fragment, 'preview')
+                    with self.client.get(url) as response:
+                        self.assertEqual(response.status_code, 200)
+                    source = '<img src="' + html.escape(url, quote=True) + '">'
+
+    def test_draft_reload_repairs_accumulated_signature_delimiters(self):
+        creative = self._creative(self.tenant, 'repair.png')
+        broken = creative + '?t=123&&s=old;&s=older;s=oldest'
+        with self.client.get(broken) as response:
+            self.assertEqual(response.status_code, 404)
+        with self.app.app_context():
+            draft_id = db.save_project_draft(
+                self.tenant, 'owner', {'project_name': 'توقيع', 'cover': broken},
+                {'basic': 'draft'}, 'draft', draft_id='signed-media-repair')
+        response = self.client.get(f'/api/project-draft/{draft_id}', headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200)
+        url = response.get_json()['draft']['draft_data']['cover']
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(query.get('t'), ['123'])
+        self.assertEqual(len(query.get('s', [])), 1)
+        self.assertNotIn(';', url)
+        self.assertNotIn('&&', url)
+        with self.client.get(url) as response:
+            self.assertEqual(response.status_code, 200)
+
+    def test_resigning_preserves_other_parameters_and_foreign_urls(self):
+        creative = self._creative(self.tenant, 'params.png')
+        foreign = self._creative(self.other, 'foreign-escaped.png')
+        values = {'owned': creative + '?maps=keep&amp;fileId=one%3Btwo&amp;s=old',
+                  'foreign': foreign + '?t=123&amp;s=old'}
+        with self.app.test_request_context():
+            signed = self.module._sign_media_refs(values, self.tenant, {'maps': None})
+        query = parse_qs(urlsplit(signed['owned']).query)
+        self.assertEqual(query.get('maps'), ['keep'])
+        self.assertEqual(query.get('fileId'), ['one;two'])
+        self.assertEqual(len(query.get('s', [])), 1)
+        self.assertEqual(signed['foreign'], values['foreign'])
+        with self.client.get(signed['owned']) as response:
+            self.assertEqual(response.status_code, 200)
+        with self.client.get(html.unescape(signed['foreign'])) as response:
+            self.assertEqual(response.status_code, 404)
+
 
 class GenerationGateTests(ScopeTestBase):
     """ISS-024: draft-scoped generation requires a live approved gate whose
@@ -577,6 +633,15 @@ class GenerationGateTests(ScopeTestBase):
                 response = self._queue_slide({'draftId': draft_id, 'cover': changed})
                 self.assertEqual(response.status_code, 409, response.get_json())
                 self.assertEqual(response.get_json()['error_code'], 'inputs_changed')
+
+    def test_repaired_media_links_preserve_generation_input_hash(self):
+        url = f'/uploads/creative/{self.tenant}/cover.png'
+        canonical = db.draft_generation_input_hash({'cover': url})
+        for query in ('?t=123&&s=old;&s=older;s=oldest',
+                      '?t=123&amp;s=old', '?t=123&#38;s=old', '?t=123&#x26;s=old',
+                      '?t=123;s=old', '?s=new&t=123&'):
+            with self.subTest(query=query):
+                self.assertEqual(db.draft_generation_input_hash({'cover': url + query}), canonical)
 
     def test_generation_hash_normalizes_only_local_media_fetch_parameters(self):
         url = f'/uploads/creative/{self.tenant}/cover.png'

@@ -1426,3 +1426,10 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
 - Regression coverage lives in `tests.test_issues_014_020_security.GenerationGateTests`:
   both slide routes accept re-signed inputs, checkpoint saves preserve a newly
   approved input hash, and real media replacements still fail closed.
+- Media signing must consume complete URLs, including semicolons in HTML ampersand
+  entities. Stopping at `;` in `&amp;` leaves old signature fragments attached to
+  the new signature and yields authorization 404s. Normalize ampersand entities,
+  remove old `s` parameters by exact key, and issue one signature only. Reloading
+  owned media repairs legacy duplicated signatures; foreign references remain
+  untouched. `SignedMediaUrlTests` covers repeated HTML round-trips and serving
+  the repaired URLs. Keep generation input normalization aligned with this repair.

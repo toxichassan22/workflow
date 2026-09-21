@@ -5638,12 +5638,13 @@ def normalize_generation_input(value):
     def normalize_url(match):
         if not match.group(0).startswith('/uploads/'):
             return match.group(0)
-        base, fragment_sep, fragment = match.group(0).partition('#')
+        url = re.sub(r'&(?:amp|#0*38|#x0*26);', '&', match.group(0), flags=re.IGNORECASE)
+        base, fragment_sep, fragment = url.partition('#')
         path, query_sep, query = base.partition('?')
         if not query_sep:
             return match.group(0)
-        kept = [part for part in re.split(r'&amp;|&', query)
-                if part.split('=', 1)[0] not in _GENERATION_MEDIA_FETCH_KEYS]
+        kept = [part for part in re.split(r'&|;(?=s=)', query)
+                if part and part.split('=', 1)[0] not in _GENERATION_MEDIA_FETCH_KEYS]
         return path + ('?' + '&'.join(kept) if kept else '') + fragment_sep + fragment
 
     return _GENERATION_MEDIA_URL_RE.sub(normalize_url, value)

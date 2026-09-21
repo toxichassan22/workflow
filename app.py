@@ -29643,7 +29643,7 @@ def static_assets(path):
     return resp
 
 MEDIA_URL_MAX_AGE = 7 * 86400
-_MEDIA_URL_RE = re.compile(r"/uploads/[^\s<>'\"`\\),;\]\[]+")
+_MEDIA_URL_RE = re.compile(r"/uploads/[^\s<>'\"`\\),\]\[]+")
 
 
 def _media_url_serializer():
@@ -29672,6 +29672,8 @@ def _media_map_basenames(tenant_id):
 
 
 def _sign_media_url(url, tenant_id, state):
+    original_url = url
+    url = re.sub(r'&(?:amp|#0*38|#x0*26);', '&', url, flags=re.IGNORECASE)
     path = url.split('?', 1)[0].split('#', 1)[0]
     pieces = path.lstrip('/').split('/')
     if getattr(g, 'is_admin', False):
@@ -29683,7 +29685,7 @@ def _sign_media_url(url, tenant_id, state):
             state['maps'] = _media_map_basenames(tenant_id)
         owned = _media_url_owned(path, tenant_id, state['maps'])
     if not owned:
-        return url
+        return original_url
     sig = _media_url_serializer().dumps({'p': path})
     if '#' in url:
         base, frag = url.split('#', 1)
@@ -29692,8 +29694,8 @@ def _sign_media_url(url, tenant_id, state):
         base, frag = url, ''
     if '?' in base:
         bare, query = base.split('?', 1)
-        kept = '&'.join(p for p in query.split('&')
-                        if p and not p.lstrip('amp;').startswith('s='))
+        kept = '&'.join(p for p in re.split(r'&|;(?=s=)', query)
+                        if p and not p.startswith('s='))
         return bare + '?' + (kept + '&' if kept else '') + 's=' + sig + frag
     return base + '?s=' + sig + frag
 
