@@ -6464,27 +6464,125 @@ def _inline_style_properties(style):
     return properties
 
 
+def _compile_slide_selector(selector):
+    """Compile a simple CSS selector into compounds of (tag, classes, id).
+
+    Only tag/.class/#id compounds joined by descendant or child combinators are
+    supported. Pseudo-classes, attribute selectors and anything else return
+    None so the rule is ignored rather than misapplied.
+    """
+    selector = str(selector or '').strip()
+    if not selector or re.search(r'[:*~\[\]|+@]', selector):
+        return None
+    compounds = []
+    for part in re.split(r'[\s>]+', selector):
+        if not part:
+            continue
+        if not re.fullmatch(r'(?:[a-zA-Z][\w-]*)?(?:[.#][\w-]+)*', part):
+            return None
+        tag_match = re.match(r'[a-zA-Z][\w-]*', part)
+        compounds.append((
+            tag_match.group(0).lower() if tag_match else '',
+            frozenset(re.findall(r'\.([\w-]+)', part)),
+            (re.findall(r'#([\w-]+)', part) or [''])[0],
+        ))
+    return compounds or None
+
+
+def _parse_slide_style_rules(html):
+    """Ordered (compounds, properties) rules collected from <style> blocks."""
+    rules = []
+    for block in re.findall(r'<style\b[^>]*>([\s\S]*?)</style\s*>', str(html or ''), flags=re.IGNORECASE):
+        body = re.sub(r'/\*[\s\S]*?\*/', '', block)
+        for match in re.finditer(r'([^{}]+)\{([^{}]*)\}', body):
+            properties = _inline_style_properties(match.group(2))
+            if not properties:
+                continue
+            for selector in str(match.group(1)).split(','):
+                compounds = _compile_slide_selector(selector)
+                if compounds:
+                    rules.append((compounds, properties))
+    return rules
+
+
+def _compound_matches(compound, element):
+    tag, classes, element_id = compound
+    if tag and element[0] != tag:
+        return False
+    if classes and not classes.issubset(element[1]):
+        return False
+    if element_id and element[2] != element_id:
+        return False
+    return True
+
+
+def _selector_matches(compounds, element, ancestors):
+    """Greedy descendant match: last compound is the element itself."""
+    if not compounds or not _compound_matches(compounds[-1], element):
+        return False
+    cursor = len(ancestors) - 1
+    for compound in reversed(compounds[:-1]):
+        while cursor >= 0 and not _compound_matches(compound, ancestors[cursor]):
+            cursor -= 1
+        if cursor < 0:
+            return False
+        cursor -= 1
+    return True
+
+
 class _SlideContrastAudit(HTMLParser):
     _VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    _MEDIA_TAGS = {'img', 'video', 'canvas', 'svg', 'picture'}
 
-    def __init__(self):
+    def __init__(self, rules=None, html=''):
         super().__init__(convert_charrefs=True)
+        self.rules = rules or []
         self.stack = []
         self.issues = []
+        self._line_offsets = [0]
+        for match in re.finditer('\n', str(html or '')):
+            self._line_offsets.append(match.end())
+
+    def _tag_span(self):
+        """Absolute (start, end) offsets of the current opening tag."""
+        line, column = self.getpos()
+        if line < 1 or line > len(self._line_offsets):
+            return (0, 0)
+        start = self._line_offsets[line - 1] + column
+        return (start, start + len(self.get_starttag_text() or ''))
 
     def handle_starttag(self, tag, attrs):
-        parent = self.stack[-1] if self.stack else ('', '#000000', '#ffffff')
-        foreground, background = parent[1], parent[2]
+        parent = self.stack[-1] if self.stack else None
+        foreground = parent['fg'] if parent else '#000000'
+        background = parent['bg'] if parent else '#ffffff'
         attributes = dict(attrs)
-        styles = _inline_style_properties(attributes.get('style'))
+        element = (
+            tag.lower(),
+            frozenset(str(attributes.get('class') or '').split()),
+            str(attributes.get('id') or ''),
+        )
+        ancestors = [frame['element'] for frame in self.stack]
+        styles = {}
+        for compounds, properties in self.rules:
+            if _selector_matches(compounds, element, ancestors):
+                styles.update(properties)
+        styles.update(_inline_style_properties(attributes.get('style')))
         if 'color' in styles:
             foreground = _css_solid_color(styles['color'])
         background_value = styles.get('background-color') or styles.get('background')
-        if background_value and background_value.lower() != 'transparent':
+        if background_value and background_value.lower().strip() != 'transparent':
             background = _css_solid_color(background_value)
-        state = (tag.lower(), foreground, background)
+        if element[0] in self._MEDIA_TAGS and self.stack:
+            self.stack[-1]['contains_media'] = True
         if tag.lower() not in self._VOID_TAGS:
-            self.stack.append(state)
+            self.stack.append({
+                'element': element,
+                'fg': foreground,
+                'bg': background,
+                'positioned': str(styles.get('position') or '').strip().lower() in ('absolute', 'fixed'),
+                'contains_media': False,
+                'span': self._tag_span(),
+            })
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -6494,28 +6592,97 @@ class _SlideContrastAudit(HTMLParser):
     def handle_endtag(self, tag):
         lowered = tag.lower()
         for index in range(len(self.stack) - 1, -1, -1):
-            if self.stack[index][0] == lowered:
+            if self.stack[index]['element'][0] == lowered:
+                popped = self.stack[index:]
                 del self.stack[index:]
+                if self.stack and any(frame['contains_media'] for frame in popped):
+                    self.stack[-1]['contains_media'] = True
                 break
+
+    def _over_media(self):
+        """Whether the current text sits in a positioned layer over an image.
+
+        The nearest absolutely/fixed-positioned ancestor (or self) defines the
+        local context; text there is indeterminate when that layer or its parent
+        holds an image, so it is neither flagged nor repaired.
+        """
+        for index in range(len(self.stack) - 1, -1, -1):
+            frame = self.stack[index]
+            if frame['positioned']:
+                parent = self.stack[index - 1] if index else None
+                return bool(frame['contains_media'] or (parent and parent['contains_media']))
+        return False
+
+    def _on_contrast_issue(self):
+        """Hook for subclasses; receives the flagged innermost frame on top of the stack."""
 
     def handle_data(self, data):
         text = re.sub(r'\s+', ' ', data).strip()
-        if not text or not self.stack or self.stack[-1][0] in ('style', 'script'):
+        if not text or not self.stack or self.stack[-1]['element'][0] in ('style', 'script'):
             return
-        foreground, background = self.stack[-1][1], self.stack[-1][2]
-        if foreground and background:
-            ratio = contrast_ratio(foreground, background)
-            if ratio < 4.5:
-                self.issues.append((text[:40], foreground, background, ratio))
+        foreground, background = self.stack[-1]['fg'], self.stack[-1]['bg']
+        if not foreground or not background or self._over_media():
+            return
+        ratio = contrast_ratio(foreground, background)
+        if ratio < 4.5:
+            self.issues.append((text[:40], foreground, background, ratio))
+            self._on_contrast_issue()
 
 
 def slide_contrast_issues(html):
-    parser = _SlideContrastAudit()
+    html = str(html or '')
+    parser = _SlideContrastAudit(rules=_parse_slide_style_rules(html), html=html)
     try:
-        parser.feed(str(html or ''))
+        parser.feed(html)
+        parser.close()
     except Exception:
         return []
     return parser.issues
+
+
+class _SlideContrastRepair(_SlideContrastAudit):
+    """Records opening-tag spans for elements whose effective text is unreadable."""
+
+    def __init__(self, html):
+        super().__init__(rules=_parse_slide_style_rules(html), html=html)
+        self.repairs = {}
+
+    def _on_contrast_issue(self):
+        frame = self.stack[-1]
+        start, end = frame['span']
+        if end <= start or start in self.repairs:
+            return
+        color = readable_text_color('#1e293b', frame['bg'], ('#0f172a', '#334155'))
+        self.repairs[start] = (start, end, color)
+
+
+def _repair_slide_text_contrast(html):
+    """Patch elements whose effective text color fails 4.5:1 against the surface below.
+
+    Effective color accounts for inherited inline styles and the simple
+    <style>-block selectors a model emits, so a rule like ``td{color:#fff}`` on
+    the white content canvas is repaired exactly like an inline declaration.
+    Text over images or gradients is left alone — the surface is indeterminate
+    there. Each patched element receives ``color:...!important`` so the fix wins
+    over the offending rule.
+    """
+    html = str(html or '')
+    if not html:
+        return html
+    parser = _SlideContrastRepair(html)
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return html
+    for start in sorted(parser.repairs, reverse=True):
+        start, end, color = parser.repairs[start]
+        tag = html[start:end]
+        if not tag.startswith('<'):
+            continue
+        patched = _set_tag_style(tag, ('color',), f'color:{color}!important;')
+        html = html[:start] + patched + html[end:]
+    return html
 
 
 def _nearby_landmark_table_rows(project_data, limit=7):
@@ -9175,6 +9342,19 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                     'أعد الشريحة كاملة وانقل كل صف مطلوب دون اختصار أو حذف.'
                 )
                 continue
+            html = postprocess_slide(
+                html, slide_type, slide_num=slide_num, slide_title=slide_title,
+                total_slides=total_slides, tenant_id=branding.get('tenant_id'),
+                branding=branding, project_data=project_data, content_source=content_source)
+            roots = extract_slide_elements(html)
+            if len(roots) != 1:
+                print(f"[SLIDE-{slide_num}] ERROR: expected one slide div, found {len(roots)} (attempt {attempt})")
+                retry_note = f'\n\nإعادة المحاولة: أخرج جذر شريحة واحدًا فقط؛ الاستجابة السابقة احتوت {len(roots)} جذور.'
+                continue
+            # The audit runs on the finalized HTML: post-processing has already
+            # repaired fixable contrast problems, so a failure here is a genuine
+            # layout issue worth one more model pass — not a billable redesign
+            # loop over a color the normalizer could have set deterministically.
             contrast_issues = slide_contrast_issues(html)
             if contrast_issues:
                 sample, foreground, surface, ratio = contrast_issues[0]
@@ -9184,17 +9364,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                     f'بنسبة {ratio:.2f}:1. أعد الشريحة كاملة واجعل كل نص 4.5:1 على الأقل، ولا تغيّر المحتوى.'
                 )
                 continue
-
-            html = postprocess_slide(
-                html, slide_type, slide_num=slide_num, slide_title=slide_title,
-                total_slides=total_slides, tenant_id=branding.get('tenant_id'),
-                branding=branding, project_data=project_data, content_source=content_source)
-            roots = extract_slide_elements(html)
-            if len(roots) == 1:
-                print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
-                return roots[0]
-            print(f"[SLIDE-{slide_num}] ERROR: expected one slide div, found {len(roots)} (attempt {attempt})")
-            retry_note = f'\n\nإعادة المحاولة: أخرج جذر شريحة واحدًا فقط؛ الاستجابة السابقة احتوت {len(roots)} جذور.'
+            print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
+            return roots[0]
         except Exception as e:
             print(f"[SLIDE-{slide_num}] Exception: {e}")
 
@@ -10991,6 +11162,13 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     # leaves the divider as a blank solid panel.
     if is_market_content:
         html = _strip_market_slide_media(html)
+
+    # Repair any remaining unreadable text on the light canvas in place — including
+    # colors coming from <style>-block rules — instead of paying for a model retry.
+    # Covers, closings, dividers and moodboards keep their image-led light-on-dark
+    # text untouched.
+    if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
+        html = _repair_slide_text_contrast(html)
 
     return html
 

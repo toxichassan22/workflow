@@ -968,10 +968,63 @@ class MeetingRequirementsTests(unittest.TestCase):
             'system', {'title': 'نبذة', 'type': 'content'}, 3, 8,
             {'primary_color': '#005f78'}, generated, project_data={})
         self.assertIn('background:#ffffff', re.search(r'<div class="slide"[^>]*>', html, flags=re.IGNORECASE).group(0))
-        self.assertEqual(len(prompts), 2)
-        self.assertIn('فشل التباين', prompts[1])
+        # Post-processing repairs unreadable text deterministically, so a dark
+        # page with dark text ships readable after a single call instead of
+        # paying for a redesign.
+        self.assertEqual(len(prompts), 1)
+        self.assertFalse(engine.slide_contrast_issues(html))
         self.assertTrue(engine.slide_contrast_issues(
             "<div class='slide' style='background:#005f78'><p>لون المتصفح الافتراضي</p></div>"))
+
+    def test_style_block_table_text_is_repaired_without_retry(self):
+        """A <style> rule like ``td{color:#fff}`` used to ship white-on-white:
+        the audit only read inline styles, so the slide passed as-is. The
+        cascade-aware repair now patches the effective color in place."""
+        engine = self.application_module.slide_engine
+        source = (
+            '<div class="slide" style="width:1280px;height:720px;background:#ffffff;color:#1e293b;">'
+            '<style>.tbl{width:100%}.tbl th{background:#005f78;color:#fff}.tbl td{color:#fff}</style>'
+            '<table class="tbl"><tr><th>البند</th></tr><tr><td>أرض</td></tr></table>'
+            '</div>'
+        )
+        repaired = engine.postprocess_slide(
+            source, 'content', slide_num=5, slide_title='جدول', total_slides=30)
+        self.assertFalse(engine.slide_contrast_issues(repaired))
+        self.assertIn('color:#1e293b!important', repaired)
+        # The dark header rule stays intact: white on #005f78 is correct.
+        self.assertIn('background:#005f78;color:#fff', repaired)
+
+        calls = []
+
+        def generated(_system, user_message, **_kwargs):
+            calls.append(user_message)
+            return {'choices': [{'message': {'content': source}}]}
+
+        html = engine.generate_single_slide(
+            'system', {'title': 'جدول', 'type': 'content'}, 5, 30,
+            {'primary_color': '#005f78'}, generated, project_data={})
+        self.assertEqual(len(calls), 1, 'a repairable contrast defect must not consume a paid retry')
+        self.assertFalse(engine.slide_contrast_issues(html))
+
+    def test_text_over_image_is_not_repaired(self):
+        """Captions positioned over a photo keep their authored color: the
+        surface under them is an image, so neither the audit nor the repair may
+        treat them as text on the white canvas."""
+        engine = self.application_module.slide_engine
+        source = (
+            '<div class="slide" style="width:1280px;height:720px;background:#ffffff;color:#1e293b;">'
+            '<div style="position:relative;height:300px;"><img src="/uploads/x.png">'
+            '<div style="position:absolute;bottom:10px;right:10px;color:#fff">تسمية على الصورة</div></div>'
+            '<p style="color:#fff">نص على الأبيض</p>'
+            '</div>'
+        )
+        repaired = engine.postprocess_slide(
+            source, 'content', slide_num=6, slide_title='صور', total_slides=30)
+        self.assertRegex(
+            repaired,
+            r'<div style="position:absolute[^"]*color:#fff[^"]*"[^>]*>تسمية على الصورة')
+        self.assertIn('color:#1e293b!important', repaired)
+        self.assertFalse(engine.slide_contrast_issues(repaired))
 
     def test_section_dividers_are_built_from_one_fixed_layout(self):
         """Every divider is the same layout over the approved main image with only the text

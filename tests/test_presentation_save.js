@@ -65,6 +65,7 @@ vm.runInContext(source.slice(start, end), context);
   await testGenerationRunRelease();
   await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
+  testSlidePartialGate();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
 })().catch(error => { console.error(error); process.exitCode=1; });
 
@@ -359,4 +360,19 @@ async function testSlideGenerationFailures() {
     assert.equal(checkpoints.at(-1).status, 'complete');
     assert.deepEqual(settlements, [false, true]);
   }
+}
+
+function testSlidePartialGate() {
+  const match = /^    function slidePartialComplete\(/m.exec(source);
+  assert(match, 'slidePartialComplete must exist at module scope');
+  const fnSource = source.slice(match.index, source.indexOf('\n    }', match.index) + 6);
+  const gate = { String };
+  vm.createContext(gate);
+  vm.runInContext(fnSource, gate);
+  assert.equal(gate.slidePartialComplete(''), false);
+  assert.equal(gate.slidePartialComplete('plain text without a slide'), false);
+  assert.equal(gate.slidePartialComplete('<div class="slide"><div>نص'), false);
+  assert.equal(gate.slidePartialComplete('<div class="slide"><div>نص</div>'), false);
+  assert.equal(gate.slidePartialComplete('<div class="slide"><div>نص</div></div>'), true);
+  assert.equal(gate.slidePartialComplete('```html\n<div class="slide rtl"><p>أ</p></div>\n```'), true);
 }

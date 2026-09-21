@@ -13689,7 +13689,7 @@ def api_generate_slide_single():
         stream_job = getattr(g, '_slide_stream_job', None)
         if isinstance(stream_job, dict) and stream_job.get('job_id'):
             return call_zai_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     # Apply the same ownership repair used by the full-plan normalizer before
     # rendering and before returning slide metadata. A single-slide retry can
@@ -13699,7 +13699,11 @@ def api_generate_slide_single():
         dict(slides[slide_index] or {}), project_data
     )
     total = total_slides
-    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
+    # One retry is the ceiling: postprocess_slide already repairs fixable output
+    # (contrast, surface, readability), so extra attempts mostly re-design the
+    # same slide while the meter runs. Exhausted attempts fall back to the
+    # deterministic renderer inside generate_single_slide.
+    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=1, project_data=project_data)
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.

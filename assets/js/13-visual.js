@@ -413,6 +413,19 @@
       return Boolean(new DOMParser().parseFromString(String(html), 'text/html').querySelector('.slide'));
     }
 
+    // A streamed preview is only worth painting once it holds a complete .slide
+    // root: mid-stream fragments are unclosed markup that morph on every poll
+    // and read as the slide being redesigned over and over.
+    function slidePartialComplete(partial) {
+      const text = String(partial || '');
+      const start = text.search(/<div\b[^>]*\bclass\s*=\s*["'](?:[^"']*\s)?slide(?:\s[^"']*)?["']/i);
+      if (start < 0) return false;
+      const tail = text.slice(start);
+      const opens = (tail.match(/<div\b/gi) || []).length;
+      const closes = (tail.match(/<\/div\s*>/gi) || []).length;
+      return opens > 0 && closes >= opens;
+    }
+
     let isGeneratingTenantSlides = false;
     let isRegeneratingTenantSlide = false;
 
@@ -835,9 +848,15 @@
           const stage = cardEl.querySelector('.tenant-slide-stage');
           if (!stage) return;
           // Preview only: the finalized slide still renders on completion below.
+          // Painting only complete roots keeps the card steady instead of
+          // flashing a different half-parsed design on every poll.
+          if (!slidePartialComplete(partial)) return;
           try {
             const preview = processSlideHtmlClient(String(partial));
-            if (preview) stage.innerHTML = preview;
+            if (preview) {
+              stage.innerHTML = preview;
+              autoFitSlideContent(stage);
+            }
           } catch (previewError) { /* preview-only */ }
         }
 
@@ -855,7 +874,14 @@
             bullets: plan.bullets || [],
             metrics: plan.metrics || []
           };
-          tenantSlidesData.push(slideObj);
+          // Commits arrive in plan order exactly once, but if a resume or a
+          // mid-run edit ever replays an index it must replace — never append a
+          // second copy of the same planned slide.
+          if (i < tenantSlidesData.length && tenantSlidesData[i]) {
+            tenantSlidesData[i] = slideObj;
+          } else {
+            tenantSlidesData.push(slideObj);
+          }
           tenantProjectData.tenantSlidesData = tenantSlidesData;
           if (window.currentGenerationJobId) {
             api('POST', '/api/generation-jobs/' + encodeURIComponent(window.currentGenerationJobId) + '/heartbeat', {
@@ -882,6 +908,7 @@
               const slideHtml = processSlideHtmlClient(generated.html, generated.type);
               stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slideObj.title || '') + '</div>';
               autoFitSlideContent(stage);
+              repairSlideTextContrast(stage);
               slideObj.html = stage.innerHTML;
               enableSlideInlineEditing(stage, i);
             }
@@ -905,7 +932,7 @@
             (lastError ? lastError + ' — ' : '') + (checkpointSaved
               ? 'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.'
               : 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.'), slidePct);
-          renderTenantSlidesSidebar();
+          renderTenantSlidesSidebar(true);
           toast(lastError || (checkpointSaved
             ? 'تم حفظ نقطة التوقف عند الشريحة ' + (i + 1)
             : 'تعذر حفظ نقطة التوقف على الخادم'));
@@ -1021,7 +1048,7 @@
 
         await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete', '', generationProjectData);
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
-        renderTenantSlidesSidebar();
+        renderTenantSlidesSidebar(true);
         renderTenantDesignerChat();
         // await saveTenantPresentation(options.presentationTitle)
         const presentationSaved = await saveTenantPresentation(options.presentationTitle, { operation: 'generation' });
@@ -1508,6 +1535,79 @@
         }
       });
       return canvas;
+    }
+
+    function slideParseCssColor(value) {
+      const match = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/.exec(String(value || '').trim());
+      if (!match) return null;
+      return { r: +match[1], g: +match[2], b: +match[3], a: match[4] === undefined ? 1 : +match[4] };
+    }
+
+    function slideColorContrast(fg, bg) {
+      const lum = c => {
+        const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+      };
+      const l1 = lum(fg), l2 = lum(bg);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+
+    const SLIDE_READABLE_COLORS = [
+      { css: '#1e293b', rgb: { r: 30, g: 41, b: 59 } },
+      { css: '#0f172a', rgb: { r: 15, g: 23, b: 42 } },
+      { css: '#334155', rgb: { r: 51, g: 65, b: 85 } },
+      { css: '#ffffff', rgb: { r: 255, g: 255, b: 255 } },
+    ];
+
+    // The solid surface under el, or null when the text sits on an image or a
+    // gradient — an indeterminate surface must never be "repaired".
+    function slideTextSurface(el, slideRoot) {
+      let node = el;
+      while (node && node.nodeType === 1) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage && style.backgroundImage !== 'none') return null;
+        const bg = slideParseCssColor(style.backgroundColor);
+        if (bg && bg.a > 0.05) return bg;
+        if (node === slideRoot) break;
+        node = node.parentElement;
+      }
+      return { r: 255, g: 255, b: 255, a: 1 };
+    }
+
+    function slideTextOverMedia(el, slideRoot) {
+      let node = el;
+      while (node && node !== slideRoot && node.nodeType === 1) {
+        const position = getComputedStyle(node).position;
+        if (position === 'absolute' || position === 'fixed') {
+          const scope = node.parentElement;
+          return Boolean(node.querySelector('img,video,canvas,svg,picture') ||
+            (scope && scope.querySelector('img,video,canvas,svg,picture')));
+        }
+        node = node.parentElement;
+      }
+      return false;
+    }
+
+    // Repair text that computed styles leave unreadable — e.g. a <style>-block
+    // rule painting white table cells on the white canvas, which the server-side
+    // audit cannot always see. The inline !important color wins over the rule.
+    function repairSlideTextContrast(stage) {
+      const slideRoot = stage && stage.querySelector ? stage.querySelector('.slide') : null;
+      if (!slideRoot || typeof getComputedStyle !== 'function') return;
+      [slideRoot, ...slideRoot.querySelectorAll('*')].forEach(el => {
+        let hasText = false;
+        for (const child of el.childNodes) {
+          if (child.nodeType === 3 && child.nodeValue.trim()) { hasText = true; break; }
+        }
+        if (!hasText) return;
+        const fg = slideParseCssColor(getComputedStyle(el).color);
+        if (!fg || fg.a <= 0.05) return;
+        const surface = slideTextSurface(el, slideRoot);
+        if (!surface || slideColorContrast(fg, surface) >= 4.5) return;
+        if (slideTextOverMedia(el, slideRoot)) return;
+        const readable = SLIDE_READABLE_COLORS.find(c => slideColorContrast(c.rgb, surface) >= 4.5);
+        el.style.setProperty('color', (readable || SLIDE_READABLE_COLORS[0]).css, 'important');
+      });
     }
 
     function collectSlideTextNodes(root) {

@@ -137,6 +137,11 @@
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
+      // A running generation owns the surface: its cards are skeletons, live
+      // partial previews and committed slides keyed by plan index, while
+      // tenantSlidesData only holds the committed prefix. Rebuilding here would
+      // wipe the in-flight cards and flash the deck away mid-run.
+      if (isGeneratingTenantSlides) return;
       // Manual edit flows (تعديل/اعتماد/تراجع/تقدم/الغاء) re-render the whole list.
       // Clearing the container resets scrollTop to 0, which looked like a 3-4 slide
       // jump. Preserve the exact pixel so the view stays fixed on the same slide.
@@ -227,6 +232,7 @@
             stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
           }
           autoFitSlideContent(stage);
+          repairSlideTextContrast(stage);
           enableSlideInlineEditing(stage, i);
           enableSlideElementDragging(stage, i);
           restoreSlideEditSelection(stage, i);
@@ -253,9 +259,12 @@
       toast('تم نقل الشريحة ' + (fromIdx + 1) + ' إلى الموقع ' + (toIdx + 1) + ' بنجاح');
     }
 
-    function renderTenantSlidesSidebar() {
+    function renderTenantSlidesSidebar(force) {
       const sidebar = document.getElementById('tenantSlidesSidebar');
       if (!sidebar) return;
+      // Mid-generation the sidebar holds plan thumbnails keyed thumb-slide-i;
+      // rebuilding it from the committed prefix would drop the in-flight ones.
+      if (isGeneratingTenantSlides && !force) return;
       sidebar.innerHTML = '';
 
       tenantSlidesData.forEach((s, i) => {
