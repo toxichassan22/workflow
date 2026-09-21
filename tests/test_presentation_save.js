@@ -61,9 +61,76 @@ vm.runInContext(source.slice(start, end), context);
   assert.equal(context.tenantPresentationRevision,8);
   assert.equal(requests.filter(x=>x.method==='POST').length,0);
   assert.equal(requests[2].body.expectedRevision,8);
+  await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
 })().catch(error => { console.error(error); process.exitCode=1; });
+
+async function testCheckpointPreservesInputs() {
+  const approved = {
+    draftId: 'draft', project_name: 'Approved project',
+    map_styles: { overview: 'aerial', landmarks: 'aerial', access: 'aerial', catchment: 'aerial' },
+    financial_study_model: { inputs: { projectCost: 1200 } },
+    nearby_landmarks_data: [{ name: 'Approved landmark' }],
+  };
+  const writes = [];
+  let collected = 0;
+  const state = {
+    console, JSON, Math, Number, String, Promise, crypto: require('node:crypto').webcrypto,
+    tenantProjectData: JSON.parse(JSON.stringify(approved)),
+    tenantSlidePlan: { slides: [{ title: 'Cover' }, { title: 'Content' }] },
+    tenantSlidesData: [{ html: '<div class="slide">saved</div>' }],
+    tenantSlideGenerationCheckpoint: null, tenantDraftRevision: 7,
+    tenantPresentationId: 'presentation', tenantPresentationTitle: 'Title',
+    tenantCreativeImages: {}, tenantVisualConceptState: null,
+    tempCoverImage: null, tempMoodboardImages: {}, tenantNearbyLandmarks: [],
+    tenantProjectSectionStatuses: { basic: 'approved' }, draftEditCounter: 0,
+    tenantDraftDirty: true, tenantArchiveCache: null,
+    LOCATION_TABLE_FIELDS: {}, VISUAL_CONCEPT_EXTERNAL_SLOTS: [],
+    document: { getElementById: () => null },
+    renumberTenantSlides() {}, serializeLocationTable() {}, designerChatPersistence: () => ({}), toast() {},
+    async collectTenantFormData() { collected++; return { project_name: 'Form edit' }; },
+    async api(method, route, body) {
+      assert.equal(route, '/api/project-draft');
+      writes.push(JSON.parse(JSON.stringify(body)));
+      await new Promise(resolve => setImmediate(resolve));
+      return { success: true, draftId: 'draft', revision: 8 };
+    },
+  };
+  vm.createContext(state);
+  for (const name of ['collectMapStylePanel', 'saveProjectAsDraftNow', 'tenantSlidePlanFingerprint',
+    'tenantSlideGenerationOptions', 'saveTenantSlideGenerationCheckpoint']) {
+    const match = new RegExp('^    (?:async )?function ' + name + '\\(', 'm').exec(source);
+    assert(match, name);
+    vm.runInContext(source.slice(match.index, source.indexOf('\n    }', match.index) + 6), state);
+  }
+  const pending = state.saveTenantSlideGenerationCheckpoint(1, 'running', '', approved);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(state.tenantProjectData.map_styles, approved.map_styles,
+    'Checkpoint must not replace approved map inputs with hidden panel defaults while saving');
+  assert.equal(await pending, true);
+  assert.equal(collected, 0, 'Checkpoint must not re-collect form inputs');
+  const saved = writes[0];
+  for (const key of Object.keys(approved)) assert.deepEqual(saved.draftData[key], approved[key], key);
+  assert.equal(saved.slideCheckpoint, true);
+  assert.equal(saved.expectedRevision, 7);
+  assert.equal(saved.draftData.tenantSlidesData.length, 1);
+  assert.equal(saved.draftData.slide_generation_checkpoint.nextIndex, 1);
+  assert.equal(state.tenantDraftRevision, 8);
+  assert.equal(state.tenantDraftDirty, true, 'Output-only saves must not clear unsaved input edits');
+
+  state.api = async () => ({ error: 'Revision conflict', error_code: 'DRAFT_REVISION_CONFLICT' });
+  assert.equal(await state.saveTenantSlideGenerationCheckpoint(1, 'paused', 'Rejected', approved), false);
+  assert.equal(state.tenantDraftRevision, 8);
+  assert.equal(collected, 0);
+  state.api = async (method, route, body) => { writes.push(body); return { success: true, revision: 9 }; };
+  assert.equal(await state.saveProjectAsDraftNow(true, false), true);
+  assert.equal(collected, 1, 'Normal saves must still collect user edits');
+  assert.equal(writes.at(-1).draftData.project_name, 'Form edit');
+  assert.equal(writes.at(-1).draftData.map_styles.overview, 'aerial',
+    'Missing map controls must not reset saved styles');
+  assert.equal(state.tenantDraftDirty, false);
+}
 
 async function testSlideGenerationFailures() {
   const match = /^    async function generateTenantSlides\(/m.exec(source);
@@ -135,8 +202,11 @@ async function testSlideGenerationFailures() {
     assert(banners.at(-1)[2].includes(message), 'The server refusal must remain visible');
 
     generation.tenantSlidesData = [];
+    const expectedName = generation.tenantProjectData.project_name;
     generation.requestTenantSlideGeneration = async payload => {
       requests.push({ index: payload._slideNum - 1 });
+      assert.equal(payload.projectData.project_name, expectedName, 'Every slide must use the same run inputs');
+      generation.tenantProjectData.project_name = 'Changed after launch';
       return slide;
     };
     generation.saveTenantPresentation = async () => true;

@@ -1076,81 +1076,93 @@
       return draftSaveChain;
     }
 
-    async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false) {
+    async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null) {
       try {
-        Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
-        if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
-          persistMarketStudyFromDom();
-        }
-        if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) {
-          persistExecutiveContentFromDom();
-        }
-        if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
-        if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
-        if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
-        renumberTenantSlides();
-        const formData = await collectTenantFormData();
-        const data = { ...tenantProjectData, ...formData };
-        if (!data.project_logo && tenantProjectData.project_logo) data.project_logo = tenantProjectData.project_logo;
-        if (!data.project_logo_file_id && tenantProjectData.project_logo_file_id) data.project_logo_file_id = tenantProjectData.project_logo_file_id;
-        if (!data.project_logo_file_meta && tenantProjectData.project_logo_file_meta) data.project_logo_file_meta = tenantProjectData.project_logo_file_meta;
-        if (!data.target_audience && tenantProjectData.target_audience) data.target_audience = tenantProjectData.target_audience;
-        if (!data.visual_concept && tenantProjectData.visual_concept) data.visual_concept = tenantProjectData.visual_concept;
-        if (typeof persistFinancialStudyDraftState === 'function') {
-          data.financial_study_model = persistFinancialStudyDraftState() || data.financial_study_model;
-        }
-        data.draftId = tenantProjectData.draftId || crypto.randomUUID();
-        tenantProjectData.draftId = data.draftId;
-        data.nearby_landmarks_data = Array.isArray(tenantNearbyLandmarks) ? tenantNearbyLandmarks : parseLocationFieldText('nearby_landmarks', data.nearby_landmarks);
-        if (tenantProjectData.calculate_landmark_driving !== undefined) {
-          data.calculate_landmark_driving = !!tenantProjectData.calculate_landmark_driving;
-        }
-        data.tenantSlidePlan = tenantSlidePlan;
-        if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
-        if (tenantVisualConceptState) {
-          data.visual_concept = tenantVisualConceptState;
-          tenantProjectData.visual_concept = tenantVisualConceptState;
-        }
-        data.tenantCreativeImages = tenantCreativeImages;
-        data.tenantSlidesData = tenantSlidesData;
-        // Keep the conversation with this presentation so reopening it does not lose the agent's
-        // context, while a newly generated presentation starts with a clean history.
-        data.designerChat = designerChatPersistence(syncPresentation ? tenantPresentationId : null);
-        data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
-        collectMapStylePanel();
-        data.map_styles = tenantProjectData.map_styles || {};
-        data.map_type = tenantProjectData.map_type || '';
-        data.pageDrafts = {
-          project: {
-            sectionStatuses: { ...tenantProjectSectionStatuses },
-            status: 'draft'
-          },
-          mainImage: {
-            prompt: tenantCreativeImages.cover_prompt || '',
-            image: tempCoverImage || tenantCreativeImages.cover || '',
-            approved: !!tenantCreativeImages.cover
-          },
-          moodboard: {
-            prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
-            images: VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).reduce((acc, item, index) => {
-              acc[index] = tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl
-                || tenantVisualConceptState?.slots?.[item.id]?.imageUrl
-                || tenantCreativeImages.moodboard?.[index]
-                || tempMoodboardImages[index]
-                || '';
-              return acc;
-            }, { ...tempMoodboardImages }),
-            approved: Array.isArray(tenantCreativeImages.moodboard)
-              ? tenantCreativeImages.moodboard.map(image => !!image)
-              : []
-          },
-          // tenantSlidesData already rides at the top level of this payload; the copy that
-          // used to live here doubled every draft's stored and transferred size.
-          slides: {
-            generated: tenantSlidesData.length > 0,
-            status: tenantSlidesData.length ? 'draft' : 'empty'
+        let data;
+        if (slideCheckpoint) {
+          renumberTenantSlides();
+          data = {
+            ...(checkpointProjectData || tenantProjectData),
+            tenantSlidePlan,
+            tenantSlidesData,
+            tenantCreativeImages,
+            slide_generation_checkpoint: tenantSlideGenerationCheckpoint,
+          };
+        } else {
+          Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
+          if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
+            persistMarketStudyFromDom();
           }
-        };
+          if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) {
+            persistExecutiveContentFromDom();
+          }
+          if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+          if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+          if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
+          renumberTenantSlides();
+          const formData = await collectTenantFormData();
+          data = { ...tenantProjectData, ...formData };
+          if (!data.project_logo && tenantProjectData.project_logo) data.project_logo = tenantProjectData.project_logo;
+          if (!data.project_logo_file_id && tenantProjectData.project_logo_file_id) data.project_logo_file_id = tenantProjectData.project_logo_file_id;
+          if (!data.project_logo_file_meta && tenantProjectData.project_logo_file_meta) data.project_logo_file_meta = tenantProjectData.project_logo_file_meta;
+          if (!data.target_audience && tenantProjectData.target_audience) data.target_audience = tenantProjectData.target_audience;
+          if (!data.visual_concept && tenantProjectData.visual_concept) data.visual_concept = tenantProjectData.visual_concept;
+          if (typeof persistFinancialStudyDraftState === 'function') {
+            data.financial_study_model = persistFinancialStudyDraftState() || data.financial_study_model;
+          }
+          data.draftId = tenantProjectData.draftId || crypto.randomUUID();
+          tenantProjectData.draftId = data.draftId;
+          data.nearby_landmarks_data = Array.isArray(tenantNearbyLandmarks) ? tenantNearbyLandmarks : parseLocationFieldText('nearby_landmarks', data.nearby_landmarks);
+          if (tenantProjectData.calculate_landmark_driving !== undefined) {
+            data.calculate_landmark_driving = !!tenantProjectData.calculate_landmark_driving;
+          }
+          data.tenantSlidePlan = tenantSlidePlan;
+          if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+          if (tenantVisualConceptState) {
+            data.visual_concept = tenantVisualConceptState;
+            tenantProjectData.visual_concept = tenantVisualConceptState;
+          }
+          data.tenantCreativeImages = tenantCreativeImages;
+          data.tenantSlidesData = tenantSlidesData;
+          // Keep the conversation with this presentation so reopening it does not lose the agent's
+          // context, while a newly generated presentation starts with a clean history.
+          data.designerChat = designerChatPersistence(syncPresentation ? tenantPresentationId : null);
+          data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
+          collectMapStylePanel();
+          data.map_styles = tenantProjectData.map_styles || {};
+          data.map_type = tenantProjectData.map_type || '';
+          data.pageDrafts = {
+            project: {
+              sectionStatuses: { ...tenantProjectSectionStatuses },
+              status: 'draft'
+            },
+            mainImage: {
+              prompt: tenantCreativeImages.cover_prompt || '',
+              image: tempCoverImage || tenantCreativeImages.cover || '',
+              approved: !!tenantCreativeImages.cover
+            },
+            moodboard: {
+              prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
+              images: VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).reduce((acc, item, index) => {
+                acc[index] = tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl
+                  || tenantVisualConceptState?.slots?.[item.id]?.imageUrl
+                  || tenantCreativeImages.moodboard?.[index]
+                  || tempMoodboardImages[index]
+                  || '';
+                return acc;
+              }, { ...tempMoodboardImages }),
+              approved: Array.isArray(tenantCreativeImages.moodboard)
+                ? tenantCreativeImages.moodboard.map(image => !!image)
+                : []
+            },
+            // tenantSlidesData already rides at the top level of this payload; the copy that
+            // used to live here doubled every draft's stored and transferred size.
+            slides: {
+              generated: tenantSlidesData.length > 0,
+              status: tenantSlidesData.length ? 'draft' : 'empty'
+            }
+          };
+        }
         // Saving can now be megabytes (slides + images), so it uses parallel chunked uploads.
         // Show progress in the badge so a large save does not look like nothing is happening.
         const badge = document.getElementById('draftSyncBadge');
@@ -1211,7 +1223,7 @@
             }
           }
           if (stillCurrent) {
-            tenantDraftDirty = false;
+            if (!slideCheckpoint) tenantDraftDirty = false;
             if (badge) {
               const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
               badge.style.background = '#dcfce7';

@@ -437,7 +437,7 @@
       };
     }
 
-    async function saveTenantSlideGenerationCheckpoint(nextIndex, status, lastError = '') {
+    async function saveTenantSlideGenerationCheckpoint(nextIndex, status, lastError = '', projectData = null) {
       const planSignature = tenantSlidePlanFingerprint(tenantSlidePlan);
       tenantSlideGenerationCheckpoint = {
         ...(tenantSlideGenerationCheckpoint || {}),
@@ -456,7 +456,7 @@
         // flag marks this as the job's own checkpoint write, not a user edit.
         // The boolean comes back so a caller can tell a persisted checkpoint
         // from one that silently failed.
-        return await saveProjectAsDraftNow(true, false, true);
+        return await saveProjectAsDraftNow(true, false, true, projectData);
       } catch (error) {
         console.error('[SLIDE CHECKPOINT]', error);
         return false;
@@ -655,6 +655,8 @@
 
         persistVisualConceptDraftState();
         const generationImages = buildPresentationGenerationImages();
+        const generationProjectData = JSON.parse(JSON.stringify(tenantProjectData));
+        const generationPayloadProjectData = JSON.parse(JSON.stringify(slimGenerationProjectData(generationProjectData)));
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
         if (!canResume) tenantSlidesData = [];
@@ -734,7 +736,7 @@
           const plan = tenantSlidePlan.slides[i] || {};
           const _snapSlide = tenantSlidePlan.slides[i];
           const genPayload = {
-            projectData: slimGenerationProjectData(tenantProjectData),
+            projectData: JSON.parse(JSON.stringify(generationPayloadProjectData)),
             slidePlan: { slides: [_snapSlide] },
             images: generationImages,
             slideIndex: 0,
@@ -782,7 +784,7 @@
               slidesTotal: totalSlides
             }).catch(() => {});
           }
-          await saveTenantSlideGenerationCheckpoint(i + 1, 'running');
+          await saveTenantSlideGenerationCheckpoint(i + 1, 'running', '', generationProjectData);
 
           // Live populate the slide card right in front of the user!
           const cardEl = document.getElementById('slide-card-' + i);
@@ -817,7 +819,7 @@
           generationStopped = true;
           generationFinished = true;
           generationFailure = { index: i, error: lastError || '' };
-          const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
+          const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError, generationProjectData);
           const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
           setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
             (lastError ? lastError + ' — ' : '') + (checkpointSaved
@@ -906,7 +908,9 @@
                 generated = data.slide;
               } else {
                 lastError = data.error || 'استجابة غير مكتملة من الخادم';
-                console.error('[SLIDE GENERATION]', { slideIndex: i, error_code: data.error_code, error: lastError });
+                console.error('[SLIDE GENERATION]', {
+                  slideIndex: i, error_code: data.error_code, input_key: data.input_key, error: lastError
+                });
               }
             } catch (err) {
               lastError = err.message || 'خطأ في الاتصال';
@@ -935,7 +939,7 @@
           return;
         }
 
-        await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete');
+        await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete', '', generationProjectData);
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
         renderTenantSlidesSidebar();
         renderTenantDesignerChat();

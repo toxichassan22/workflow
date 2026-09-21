@@ -550,9 +550,13 @@ class GenerationGateTests(ScopeTestBase):
                                    'land_area': '999'})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json().get('error_code'), 'inputs_changed')
+        self.assertEqual(response.get_json().get('input_key'), 'land_area')
+        self.assertNotIn('999', json.dumps(response.get_json()))
         response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
                                    'land_area': '500', 'injected': 'x'})
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json().get('error_code'), 'inputs_changed')
+        self.assertEqual(response.get_json().get('input_key'), 'injected')
         response = self._generate({'draftId': draft_id, 'project_name': 'مشروع البوابة',
                                    'land_area': '500'})
         self.assertEqual(response.status_code, 200, response.get_json())

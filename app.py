@@ -13569,7 +13569,7 @@ def _generation_inputs_guard(project_data, section_key=''):
             continue
         if not _generation_sent_input_matches(key, value, stored_data.get(key)):
             return jsonify({'error': 'مدخلات التوليد المرسلة لا تطابق المشروع المعتمد',
-                            'error_code': 'inputs_changed'}), 409
+                            'error_code': 'inputs_changed', 'input_key': key}), 409
     return None
 
 

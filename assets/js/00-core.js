@@ -375,11 +375,12 @@
     // Collect map style panel values into tenantProjectData.map_styles
     function collectMapStylePanel() {
       tenantProjectData = tenantProjectData || {};
+      const saved = tenantProjectData.map_styles || {};
       tenantProjectData.map_styles = {
-        overview: document.getElementById('mapStyleOverview')?.value || 'auto',
-        landmarks: document.getElementById('mapStyleLandmarks')?.value || 'auto',
-        access: document.getElementById('mapStyleAccess')?.value || 'auto',
-        catchment: document.getElementById('mapStyleCatchment')?.value || 'auto'
+        overview: document.getElementById('mapStyleOverview')?.value || saved.overview || 'auto',
+        landmarks: document.getElementById('mapStyleLandmarks')?.value || saved.landmarks || 'auto',
+        access: document.getElementById('mapStyleAccess')?.value || saved.access || 'auto',
+        catchment: document.getElementById('mapStyleCatchment')?.value || saved.catchment || 'auto'
       };
     }
 
