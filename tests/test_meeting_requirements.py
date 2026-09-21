@@ -10899,6 +10899,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(foreign.get('verify_state'), 'no_match')
         self.assertFalse(foreign.get('price_value'))
         self.assertFalse(foreign.get('logo_source_url'))
+        # A generic .com portal whose path names another Arab market is still
+        # foreign: the live run attached a dubai-silicon-oasis namesake page to
+        # a Saudi «أورا» row because only the host was inspected.
+        self.assertTrue(module._foreign_market_host(
+            'https://aigentsrealty.com/ar/areas/dubai-silicon-oasis/aura-prestige'))
+        self.assertFalse(module._foreign_market_host(
+            'https://nhc.sa/real-estate-development/projects/304/'))
+        row = {'name': 'مشروع أورا', 'row_source': 'ai',
+               'source_urls': [
+                   'https://aigentsrealty.com/ar/areas/dubai-silicon-oasis/aura-prestige',
+                   'https://sabq.org/article/4sxj0z4']}
+        module._drop_foreign_competitor_urls(row)
+        self.assertEqual(row.get('source_urls'), ['https://sabq.org/article/4sxj0z4'])
         # A provider that returns no citations is an infrastructure miss, not a
         # fabricated name — it must not be mislabeled as unverified.
         silent = {'choices': [{'message': {'content': '{"exists": true}'}}]}

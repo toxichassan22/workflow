@@ -21639,6 +21639,9 @@ def _attach_retrieved_citations(rows, pages):
         for page in pages:
             # The name often sits in the retrieved excerpt, not the page title
             # or URL — search results carry a generic title for listing pages.
+            # Same-name projects abroad are never evidence for a Saudi row.
+            if _foreign_market_host(page.get('url')):
+                continue
             haystack = market_study._fold_choice(
                 f"{page.get('title') or ''} {page.get('url') or ''} {page.get('content') or ''}")
             if sum(1 for token in tokens if token in haystack) >= needed:
@@ -22163,6 +22166,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id, progress=report)
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
+        _drop_foreign_competitor_urls(row)
     report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
     search_ran = _market_search_ran(res) or bool(citation_urls)
     if search_ran:
@@ -24169,12 +24173,44 @@ _FOREIGN_ARAB_HOST_TOKENS = (
 
 
 def _foreign_market_host(url):
-    """True when a URL's host points at another Arab market, not Saudi."""
+    """True when a URL points at another Arab market, not Saudi."""
     host = _normalized_web_host(url)
     if not host:
         return False
-    return host.endswith(_FOREIGN_ARAB_TLDS) or any(
-        token in host for token in _FOREIGN_ARAB_HOST_TOKENS)
+    if host.endswith(_FOREIGN_ARAB_TLDS) or any(
+            token in host for token in _FOREIGN_ARAB_HOST_TOKENS):
+        return True
+    # Namesakes abroad also hide in the path of generic .com portals
+    # (aigentsrealty.com/.../dubai-silicon-oasis/...) — a Saudi competitor's
+    # evidence never lives on a /dubai-/ style page.
+    path = urlsplit(str(url)).path.lower()
+    return any(
+        re.search(r'(?:^|[^a-z0-9])' + re.escape(token) + r'(?:[^a-z0-9]|$)', path)
+        for token in _FOREIGN_ARAB_HOST_TOKENS)
+
+
+def _drop_foreign_competitor_urls(row):
+    """Remove same-name foreign-market pages from a Saudi competitor row."""
+    if not isinstance(row, dict):
+        return row
+    urls = market_study.competitor_source_urls(row)
+    kept = [url for url in urls if not _foreign_market_host(url)]
+    if len(kept) != len(urls):
+        row['source_urls'] = kept
+        if not kept:
+            row.pop('source_urls', None)
+    field_sources = market_study.competitor_field_sources(row)
+    if field_sources:
+        cleaned = {
+            field: [url for url in urls if not _foreign_market_host(url)]
+            for field, urls in field_sources.items()
+        }
+        row['field_sources'] = {field: urls for field, urls in cleaned.items() if urls}
+        if not row['field_sources']:
+            row.pop('field_sources', None)
+    if _foreign_market_host(row.get('source_url')):
+        row.pop('source_url', None)
+    return row
 
 
 def _official_citation_pages(pages, name):
