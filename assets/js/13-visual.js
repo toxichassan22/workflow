@@ -1147,6 +1147,36 @@
       return matchers.find(([, pattern]) => pattern.test(text))?.[0] || current || 'overview';
     }
 
+    function buildTenantIndexSlideHtml(indexEntries, slideIndex, totalSlides) {
+      const entries = Array.isArray(indexEntries) ? indexEntries : [];
+      const midpoint = Math.ceil(entries.length / 2);
+      const col1 = entries.slice(0, midpoint);
+      const col2 = entries.slice(midpoint);
+      const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const makeRows = items => items.map(entry => {
+        const secKey = esc(String(entry.section_key || ''));
+        const title = esc(String(entry.title || ''));
+        const pageNum = String(entry.page || 0).padStart(2, '0');
+        return '<div data-index-section="' + secKey + '" style="min-height:48px;display:flex;align-items:center;gap:18px;border-bottom:1px solid rgba(30,41,59,0.30);padding:9px 2px;box-sizing:border-box;">' +
+          '<div style="font-size:16px;font-weight:600;flex:1;">' + title + '</div>' +
+          '<div data-index-page="' + secKey + '" dir="ltr" style="font-size:16px;font-weight:700;color:var(--accent,#d97706);min-width:34px;text-align:left;">' + pageNum + '</div></div>';
+      }).join('');
+      const counter = String(slideIndex || 2).padStart(2, '0') + ' — ' + String(totalSlides || 10).padStart(2, '0');
+      return '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;box-sizing:border-box;background:#f8fafc;color:#1e293b;">' +
+        '<div style="position:absolute;top:82px;right:52px;left:52px;bottom:58px;box-sizing:border-box;">' +
+        '<div style="font-size:30px;font-weight:700;color:var(--primary,#1a4d6f);margin-bottom:24px;">محتويات العرض</div>' +
+        '<div style="width:86px;height:3px;background:var(--accent,#d97706);margin-bottom:24px;"></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:26px 54px;align-items:start;">' +
+        '<div>' + makeRows(col1) + '</div>' +
+        '<div>' + makeRows(col2) + '</div>' +
+        '</div></div>' +
+        '<div data-slide-footer="1" style="position:absolute;bottom:20px;left:52px;right:52px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#64748b;">' +
+        '<div></div>' +
+        '<div data-slide-counter="1">' + counter + '</div>' +
+        '</div>' +
+        '</div>';
+    }
+
     function renumberTenantSlideHtml(slide, index, total, indexEntries) {
       if (!slide?.html) return slide?.html || '';
       const template = document.createElement('template');
@@ -1181,10 +1211,16 @@
         });
       }
       if (type === 'index') {
+        const existingRows = root.querySelectorAll('[data-index-section]');
+        if (existingRows.length === 0 && indexEntries && indexEntries.length > 0) {
+          return buildTenantIndexSlideHtml(indexEntries, index, total);
+        }
         const activeSections = new Set((indexEntries || []).map(entry => entry.section_key));
-        root.querySelectorAll('[data-index-section]').forEach(row => {
-          if (!activeSections.has(row.dataset.indexSection)) row.remove();
-        });
+        if (activeSections.size > 0) {
+          existingRows.forEach(row => {
+            if (!activeSections.has(row.dataset.indexSection)) row.remove();
+          });
+        }
         (indexEntries || []).forEach(entry => {
           let page = root.querySelector('[data-index-page="' + entry.section_key + '"]');
           if (!page) {
@@ -1233,12 +1269,15 @@
       const seen = new Set();
       const indexEntries = [];
       tenantSlidesData.forEach((slide, index) => {
-        if (slide.type !== 'section_divider' && slide.section_key !== 'closing') return;
-        if (!TENANT_PRESENTATION_SECTION_TITLES[slide.section_key] || seen.has(slide.section_key)) return;
-        seen.add(slide.section_key);
+        const type = String(slide.type || '').toLowerCase();
+        if (type === 'cover' || type === 'index') return;
+        const secKey = String(slide.section_key || '').trim();
+        if (!secKey || ['cover', 'index'].includes(secKey)) return;
+        if (!TENANT_PRESENTATION_SECTION_TITLES[secKey] || seen.has(secKey)) return;
+        seen.add(secKey);
         indexEntries.push({
-          section_key: slide.section_key,
-          title: TENANT_PRESENTATION_SECTION_TITLES[slide.section_key],
+          section_key: secKey,
+          title: TENANT_PRESENTATION_SECTION_TITLES[secKey],
           page: index + 1
         });
       });

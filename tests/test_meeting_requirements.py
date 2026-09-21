@@ -1706,7 +1706,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(diagram.get('section_key'), 'land')
         self.assertEqual(diagram.get('design_style'), 'diagram')
 
-    def test_location_only_generation_keeps_shared_boundary_diagram(self):
+    def test_location_only_generation_does_not_include_land_boundary_diagram(self):
         engine = self.application_module.slide_engine
         plan = {'slides': [
             {'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover'},
@@ -1722,12 +1722,130 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIsNotNone(filtered)
         diagrams = [slide for slide in filtered['slides']
                     if slide.get('content_source') == 'land_boundary_diagram']
-        self.assertEqual(len(diagrams), 1)
-        self.assertEqual(diagrams[0].get('section_key'), 'location')
-        location_divider = next(index for index, slide in enumerate(filtered['slides'])
-                                if slide.get('type') == 'section_divider'
-                                and slide.get('section_key') == 'location')
-        self.assertGreater(filtered['slides'].index(diagrams[0]), location_divider)
+        self.assertEqual(len(diagrams), 0)
+        filtered_land = engine.filter_presentation_plan_sections(plan, ['land'])
+        land_diagrams = [slide for slide in filtered_land['slides']
+                         if slide.get('content_source') == 'land_boundary_diagram']
+        self.assertEqual(len(land_diagrams), 1)
+        self.assertEqual(land_diagrams[0].get('section_key'), 'land')
+
+    def test_land_boundary_diagram_includes_direction_setbacks_and_streets(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع الواجهة',
+            'setbacks': 'أمامي 4م، خلفي 2م، جانبي 2م',
+            'surrounding_streets': 'شارع العليا شمالاً، جار جنوباً، شارع فرعي شرقاً، طريق رئيسي غرباً',
+            'land_documents_analysis_data': json.dumps({
+                'parcels': [{
+                    'directions': {
+                        'north': {'boundary_length_m': 100, 'street_name': 'شارع العليا', 'setback': '4م'},
+                        'south': {'boundary_length_m': 80, 'uses': 'جار', 'setback': '2م'},
+                        'east': {'boundary_length_m': 60, 'street_name': 'شارع فرعي', 'setback': '2.5م'},
+                        'west': {'boundary_length_m': 50, 'uses': 'طريق رئيسي', 'setback': '3م'},
+                    }
+                }]
+            }, ensure_ascii=False),
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'مخطط اتجاهي لحدود الأرض', 'type': 'content',
+                       'section_key': 'land', 'design_style': 'diagram',
+                       'content_source': 'land_boundary_diagram'},
+            4, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('boundary diagram must be deterministic'),
+            project_data=project)
+        self.assertIn('data-boundary-diagram="1"', html)
+        self.assertIn('الارتداد:', html)
+        self.assertIn('4م', html)
+        self.assertIn('شارع العليا', html)
+
+    def test_map_access_omits_empty_columns_when_roads_have_names_only(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع النخيل',
+            'main_roads': [
+                {'name': 'طريق الملك فهد'},
+                {'name': 'طريق الدائري الشمالي'},
+                {'name': 'طريق العليا العام'},
+            ],
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'خريطة الطرق ومحاور الوصول', 'type': 'map_access',
+                       'section_key': 'location', 'content_source': 'main_roads'},
+            5, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('map_access fallback must be deterministic'),
+            project_data=project)
+        self.assertIn('طريق الملك فهد', html)
+        self.assertIn('الطريق / المحور', html)
+        self.assertNotIn('العرض (م)', html)
+        self.assertNotIn('المسافة', html)
+
+    def test_map_catchment_extracts_duration_minutes_and_category(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع النخيل',
+            'catchment_areas': [
+                {'name': 'مستشفى الملك فيصل التخصصي', 'category': 'صحي', 'duration_minutes': 8, 'distance_km': 4.5},
+                {'name': 'جامعة الملك سعود', 'category': 'تعليمي', 'duration_minutes': 12, 'distance_km': 9.0},
+                {'name': 'الرياض بارك', 'category': 'تجاري / ترفيهي', 'duration_minutes': 15, 'distance_km': 14.2},
+            ],
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'خريطة المنطقة ونطاق التأثير', 'type': 'map_catchment',
+                       'section_key': 'location', 'content_source': 'catchment_areas'},
+            6, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('map_catchment fallback must be deterministic'),
+            project_data=project)
+        self.assertIn('مستشفى الملك فيصل التخصصي', html)
+        self.assertIn('صحي', html)
+        self.assertIn('8', html)
+        self.assertIn('12', html)
+        self.assertNotIn('>—<', html)
+
+    def test_site_analysis_chunks_into_two_slides_and_uses_side_by_side_layout(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع النخيل',
+            'site_analysis': (
+                'يتميز موقع المشروع بموقع استراتيجي في قلب المدينة بالقرب من أهم المحاور.\n\n'
+                'يتصل الموقع مباشرة بطرق شريانية سريعة تسهل حركة الدخول والخروج وانسيابية المرور.\n\n'
+                'تحيط بالمشروع كثافة سكانية عالية وقوة شرائية متميزة تدعم نجاح المشروع التجاري.\n\n'
+                'تتوافر في محيط الموقع كافة خدمات البنية التحتية والمرافق الحكومية والترفيهية.\n\n'
+                'يمثل الموقع فرصة استثمارية واعدة للتطوير العقاري المتعدد الاستخدامات.'
+            ),
+        }
+        plan = engine.normalize_presentation_plan(
+            {'slides': [
+                {'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover'},
+                {'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location', 'content_source': 'site_analysis'},
+                {'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing'},
+            ]},
+            project,
+            {},
+        )
+        site_slides = [s for s in plan['slides'] if str(s.get('content_source', '')).startswith('site_analysis')]
+        self.assertEqual(len(site_slides), 2)
+        self.assertIn('(1/2)', site_slides[0]['title'])
+        self.assertIn('(2/2)', site_slides[1]['title'])
+        self.assertTrue(site_slides[0].get('requires_image'))
+        self.assertIn('##MAP_OVERVIEW##', site_slides[0].get('image_tokens', []))
+        self.assertFalse(site_slides[1].get('requires_image'))
+        self.assertEqual(site_slides[1].get('image_tokens', []), [])
+
+        html1 = engine.generate_single_slide(
+            'system', site_slides[0], 2, 4,
+            {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('site_analysis must be deterministic fallback'),
+            project_data=project)
+        self.assertIn('##MAP_OVERVIEW##', html1)
+        self.assertNotIn('data-map-summary-card', html1)
+
+        html2 = engine.generate_single_slide(
+            'system', site_slides[1], 3, 4,
+            {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('site_analysis must be deterministic fallback'),
+            project_data=project)
+        self.assertNotIn('##MAP_OVERVIEW##', html2)
+        self.assertNotIn('data-map-summary-card', html2)
 
     def test_boundary_diagram_is_deterministic_and_does_not_call_model(self):
         engine = self.application_module.slide_engine
@@ -7408,6 +7526,32 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertLess(update_source.index('renumberTenantSlides();'), update_source.index("api('PUT', '/api/presentations/'"))
         self.assertLess(export_source.index('renumberTenantSlides();'), export_source.index('const payload = {'))
         self.assertIn('slidesData: tenantSlidesData', export_source)
+
+    def test_index_slide_rebuilds_and_renumbers_decks_without_dividers(self):
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#123B6D', 'secondary_color': '#0b1f33',
+            'accent_color': '#C4A35A', 'background_color': '#ffffff',
+            'text_color': '#111111', 'company_name': 'شركة الاختبار',
+        }
+        project = {'project_name': 'مشروع بدون فواصل'}
+        slides = [
+            {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+            {'title': 'محتويات العرض', 'type': 'index', 'html': '<div class="slide"></div>'},
+            {'title': 'نبذة عن المشروع', 'type': 'content', 'section_key': 'overview', 'html': '<div class="slide">محتوى 1</div>'},
+            {'title': 'بيانات الأرض', 'type': 'content', 'section_key': 'land', 'html': '<div class="slide">محتوى 2</div>'},
+            {'title': 'موقع المشروع', 'type': 'content', 'section_key': 'location', 'html': '<div class="slide">محتوى 3</div>'},
+            {'title': 'الخاتمة', 'type': 'closing', 'html': '<div class="slide">ختام</div>'},
+        ]
+        renumbered = engine.renumber_presentation_slides(slides, branding=branding, project_data=project)
+        self.assertEqual(len(renumbered), 6)
+        index_html = renumbered[1]['html']
+        self.assertIn('data-index-section="overview"', index_html)
+        self.assertIn('data-index-section="land"', index_html)
+        self.assertIn('data-index-section="location"', index_html)
+        self.assertRegex(index_html, r'data-index-page="overview"[^>]*>03')
+        self.assertRegex(index_html, r'data-index-page="land"[^>]*>04')
+        self.assertRegex(index_html, r'data-index-page="location"[^>]*>05')
 
     def test_presentation_save_update_and_export_enforce_slide_numbers(self):
         engine = self.application_module.slide_engine

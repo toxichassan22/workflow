@@ -205,6 +205,7 @@ _SECTION_KEY_ALIASES = {
     'finance': 'financial', 'financial_study': 'financial', 'swot': 'swot_risks',
     'risks': 'swot_risks', 'team_members': 'team', 'floorplans': 'plans',
     'moodboard': 'exterior', 'external': 'exterior', 'internal': 'interior',
+    'visual_concept': 'exterior',
     'executive': 'executive_summary', 'summary': 'executive_summary', 'conclusion': 'closing',
 }
 
@@ -243,8 +244,8 @@ def _normalize_land_boundary_slide(slide):
     item.update({
         'title': 'مخطط اتجاهي لحدود الأرض',
         'type': 'content',
-        'section_key': section if section in ('land', 'location') else 'land',
-        'sectionKey': section if section in ('land', 'location') else 'land',
+        'section_key': 'land',
+        'sectionKey': 'land',
         'design_style': 'diagram',
         'requires_image': False,
         'content_source': 'land_boundary_diagram',
@@ -462,6 +463,10 @@ def _slide_section_key(slide, current=''):
         return 'closing'
     if slide_type == 'moodboard':
         return 'exterior'
+    if slide_type == 'cover':
+        return 'cover'
+    if slide_type == 'index':
+        return 'index'
     # Older plans sometimes labelled market slides as map_* because the model
     # saw words such as "نطاق" or "منافسة" and chose a location map. Keep
     # those slides in the market section so the market-only media policy can
@@ -2629,10 +2634,49 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     for section_key, title, content_source, value in summaries:
         if not value:
             continue
-        existing = next((slide for slide in groups.get(section_key, [])
-                         if slide.get('content_source') == content_source or summary_match(str(slide.get('title') or ''))), None)
         summary_tokens = overview_map_tokens if section_key == 'location' else []
         summary_style = 'map' if summary_tokens else 'text'
+
+        if section_key == 'location' and content_source == 'site_analysis':
+            paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', value) if part.strip()]
+            if not paragraphs:
+                paragraphs = [p.strip() for p in value.splitlines() if p.strip()] or [value]
+            if len(paragraphs) >= 3 or len(value) > 600:
+                half = max(1, math.ceil(len(paragraphs) / 2))
+                title_1 = f'{title} (1/2)'
+                title_2 = f'{title} (2/2)'
+                slide_1 = {
+                    'title': title_1,
+                    'type': 'content',
+                    'design_style': summary_style,
+                    'content_density': 'medium',
+                    'requires_image': bool(summary_tokens),
+                    'content_source': f'site_analysis:0:{half}',
+                    'image_tokens': summary_tokens,
+                    'bullets': [],
+                    'section_key': 'location',
+                }
+                slide_2 = {
+                    'title': title_2,
+                    'type': 'content',
+                    'design_style': 'editorial',
+                    'content_density': 'medium',
+                    'requires_image': False,
+                    'content_source': f'site_analysis:{half}:',
+                    'image_tokens': [],
+                    'bullets': [],
+                    'section_key': 'location',
+                }
+                groups['location'] = [
+                    s for s in groups.get('location', [])
+                    if not str(s.get('content_source') or '').startswith('site_analysis')
+                    and not summary_match(str(s.get('title') or ''))
+                ]
+                groups['location'].extend([slide_1, slide_2])
+                continue
+
+        existing = next((slide for slide in groups.get(section_key, [])
+                         if slide.get('content_source') == content_source or summary_match(str(slide.get('title') or ''))), None)
         if existing:
             groups[section_key].remove(existing)
             existing.update({'title': title, 'content_source': content_source,
@@ -2700,18 +2744,29 @@ def refresh_index_entries(plan, offer_lang=None):
     lang = resolve_offer_lang(None, offer_lang if offer_lang is not None else (plan.get('offer_lang') if isinstance(plan, dict) else None))
     entries = []
     seen = set()
+    current_section = ''
     for page, slide in enumerate(plan['slides'], 1):
         if not isinstance(slide, dict):
             continue
-        section_key = _slide_section_key(slide)
-        if slide.get('type') == 'section_divider' or section_key == 'closing':
-            if section_key in seen:
-                continue
-            seen.add(section_key)
-            entries.append({'section_key': section_key,
-                            'title': section_title(section_key, lang), 'page': page})
+        slide_type = str(slide.get('type') or '').strip().lower()
+        if slide_type in ('cover', 'index'):
+            continue
+        section_key = str(slide.get('section_key') or slide.get('sectionKey') or '').strip().lower()
+        section_key = _SECTION_KEY_ALIASES.get(section_key, section_key)
+        if not section_key or section_key in ('cover', 'index'):
+            section_key = _slide_section_key(slide, current_section)
+        if not section_key or section_key in ('cover', 'index'):
+            continue
+        if section_key not in PRESENTATION_SECTION_ORDER:
+            continue
+        current_section = section_key
+        if section_key in seen:
+            continue
+        seen.add(section_key)
+        entries.append({'section_key': section_key,
+                        'title': section_title(section_key, lang), 'page': page})
     for slide in plan['slides']:
-        if isinstance(slide, dict) and slide.get('type') == 'index':
+        if isinstance(slide, dict) and str(slide.get('type') or '').strip().lower() == 'index':
             slide['title'] = offer_chrome('index_heading', lang)
             slide['design_style'] = 'text'
             slide['index_entries'] = entries
@@ -2741,22 +2796,6 @@ def filter_presentation_plan_sections(plan, section_keys):
         if slide.get('type') not in ('cover', 'index', 'closing')
         and _slide_section_key(slide) in requested
     ]
-    # The boundary diagram is a shared site fact rather than land-only artwork.
-    # A location-only generation must keep it, while a full/combined selection
-    # keeps the canonical land copy exactly once.
-    if 'location' in requested and 'land' not in requested:
-        boundary = next((slide for slide in slides
-                         if slide.get('content_source') == 'land_boundary_diagram'), None)
-        if boundary and not any(slide.get('content_source') == 'land_boundary_diagram' for slide in body):
-            location_copy = dict(boundary)
-            location_copy['section_key'] = 'location'
-            location_copy['sectionKey'] = 'location'
-            insert_at = next(
-                (index + 1 for index, slide in enumerate(body)
-                 if slide.get('type') == 'section_divider' and _slide_section_key(slide) == 'location'),
-                len(body),
-            )
-            body.insert(insert_at, location_copy)
     if not body and not ('closing' in requested and closing):
         return None
 
@@ -5511,8 +5550,19 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
             '- نطاق السعر يمثل كشريط من الأدنى للأعلى (وليس متوسطاً افتراضياً).\n'
             '- تنبيه المبرمج: يمنع منعاً باتاً اختراع قيم افتراضية أو متوسطات تقديرية.'
         )
-    if source == 'site_analysis':
+    if str(source or '').startswith('site_analysis'):
         value = str(project_data.get('site_analysis') or '').strip()
+        if not value:
+            return ''
+        paragraphs = [p.strip() for p in re.split(r'\r?\n\s*\r?\n', value) if p.strip()]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in value.splitlines() if p.strip()] or [value]
+        if ':' in str(source):
+            parts = str(source).split(':')
+            if len(parts) >= 3:
+                start = int(parts[1]) if parts[1].isdigit() else 0
+                end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
+                value = '\n\n'.join(paragraphs[start:end])
         return 'ملخص الموقع المعتمد دون إضافة أو تكرار:\n' + value if value else ''
     if source == 'executive_content.summary':
         executive = _decode_json_fact(project_data.get('executive_content'))
@@ -5730,10 +5780,10 @@ def _extract_land_boundary_diagram_data(project_data):
         facades_summary = f'عدد الواجهات: {facades_count}'
 
     directions = {
-        'north': {'label': 'الشمال', 'length': '', 'description': '', 'is_facade': False},
-        'south': {'label': 'الجنوب', 'length': '', 'description': '', 'is_facade': False},
-        'east': {'label': 'الشرق', 'length': '', 'description': '', 'is_facade': False},
-        'west': {'label': 'الغرب', 'length': '', 'description': '', 'is_facade': False},
+        'north': {'label': 'الشمال', 'length': '', 'description': '', 'is_facade': False, 'setback': ''},
+        'south': {'label': 'الجنوب', 'length': '', 'description': '', 'is_facade': False, 'setback': ''},
+        'east': {'label': 'الشرق', 'length': '', 'description': '', 'is_facade': False, 'setback': ''},
+        'west': {'label': 'الغرب', 'length': '', 'description': '', 'is_facade': False, 'setback': ''},
     }
     dir_aliases = {
         'north': ('north', 'شمال', 'الشمال'),
@@ -5759,6 +5809,7 @@ def _extract_land_boundary_diagram_data(project_data):
             neighbour_val = str(row.get('neighbour') or row.get('neighbor') or row.get('adjacent') or '').strip()
             width_val = str(row.get('street_width') or row.get('street_width_m') or row.get('width') or '').strip()
             uses_val = str(row.get('uses') or row.get('use') or '').strip()
+            setback_val = str(row.get('setback') or row.get('setbacks') or row.get('artidad') or '').strip()
             for std_key, aliases in dir_aliases.items():
                 if dir_key in aliases or any(a in dir_key for a in aliases):
                     if reg_text and not directions[std_key]['description']:
@@ -5773,6 +5824,8 @@ def _extract_land_boundary_diagram_data(project_data):
                         directions[std_key]['street_width'] = width_val if 'م' in width_val else f"{width_val} م"
                     if uses_val and not directions[std_key].get('uses'):
                         directions[std_key]['uses'] = uses_val
+                    if setback_val and not directions[std_key].get('setback'):
+                        directions[std_key]['setback'] = setback_val if 'م' in setback_val else f"{setback_val} م"
                     break
 
     land_analysis = _decode_json_fact(source.get('land_documents_analysis_data') or source.get('landDocumentsAnalysisData') or source.get('land_documents_analysis'))
@@ -5790,6 +5843,7 @@ def _extract_land_boundary_diagram_data(project_data):
                     width = p_info.get('street_width_m') or p_info.get('width')
                     street = str(p_info.get('street_name') or '').strip()
                     neighbour = str(p_info.get('neighbour') or p_info.get('neighbor') or p_info.get('adjacent') or '').strip()
+                    setback_p = str(p_info.get('setback') or p_info.get('setbacks') or p_info.get('artidad') or '').strip()
                     if desc and not directions[std_key]['description']:
                         directions[std_key]['description'] = desc
                     if length and not directions[std_key]['length']:
@@ -5800,6 +5854,8 @@ def _extract_land_boundary_diagram_data(project_data):
                         directions[std_key]['neighbour'] = neighbour
                     if width and not directions[std_key].get('street_width'):
                         directions[std_key]['street_width'] = f"{width} م"
+                    if setback_p and not directions[std_key].get('setback'):
+                        directions[std_key]['setback'] = setback_p if 'م' in setback_p else f"{setback_p} م"
                     break
 
     raw_lengths = str(source.get('boundary_lengths') or '').strip()
@@ -5814,6 +5870,48 @@ def _extract_land_boundary_diagram_data(project_data):
                     if val and not directions[std_key]['length']:
                         directions[std_key]['length'] = val if 'م' in val else f"{val} م"
                     break
+
+    raw_streets = str(source.get('surrounding_streets') or '').strip()
+    if raw_streets:
+        for part in re.split(r'[|,\n،]', raw_streets):
+            part = part.strip()
+            if not part:
+                continue
+            for std_key, aliases in dir_aliases.items():
+                if any(part.startswith(a) or f"{a}:" in part or f"{a} :" in part for a in aliases):
+                    val = re.sub(r'^(?:' + '|'.join(aliases) + r')\s*[:=\-—]\s*', '', part).strip()
+                    if val and not directions[std_key].get('street_name') and not directions[std_key].get('neighbour'):
+                        if re.search(r'(?:شارع|طريق|ممر|ميدان|نافذ|street|road)', val):
+                            directions[std_key]['street_name'] = val
+                        else:
+                            directions[std_key]['neighbour'] = val
+                    break
+
+    raw_setbacks = str(source.get('setbacks') or '').strip()
+    if raw_setbacks:
+        dir_setback_words = (
+            ('north', r'(?:الجهة\s+)?(?:ال)?شمالي?(?:ة)?'),
+            ('south', r'(?:الجهة\s+)?(?:ال)?جنوبي?(?:ة)?'),
+            ('east', r'(?:الجهة\s+)?(?:ال)?شرقي?(?:ة)?'),
+            ('west', r'(?:الجهة\s+)?(?:ال)?غربي?(?:ة)?'),
+        )
+        for std_key, word in dir_setback_words:
+            if not directions[std_key].get('setback'):
+                match = re.search(word + r'\s*[:=\-–—]?\s*([0-9٠-٩]+(?:[.,][0-9]+)?\s*(?:متر|م\.?))', raw_setbacks)
+                if match:
+                    val = match.group(1).strip()
+                    directions[std_key]['setback'] = val if 'م' in val else f"{val} م"
+        front_m = re.search(r'(?:أمامي|الواجهة|الشارع)\s*[:=\-–—]?\s*([0-9٠-٩]+(?:[.,][0-9]+)?\s*(?:متر|م\.?))', raw_setbacks)
+        rear_m = re.search(r'(?:خلفي|الخلف)\s*[:=\-–—]?\s*([0-9٠-٩]+(?:[.,][0-9]+)?\s*(?:متر|م\.?))', raw_setbacks)
+        side_m = re.search(r'(?:جانبي|الجانبين|الجانبيان|الجوانب)\s*[:=\-–—]?\s*([0-9٠-٩]+(?:[.,][0-9]+)?\s*(?:متر|م\.?))', raw_setbacks)
+        for std_key, d in directions.items():
+            if not d.get('setback'):
+                if d.get('is_facade') and front_m:
+                    d['setback'] = front_m.group(1).strip()
+                elif not d.get('is_facade') and rear_m:
+                    d['setback'] = rear_m.group(1).strip()
+                elif side_m:
+                    d['setback'] = side_m.group(1).strip()
 
     raw_streets = str(source.get('surrounding_streets') or '').strip()
     for std_key, d in directions.items():
@@ -5905,6 +6003,7 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
         neighbour = str(item.get('neighbour') or '').strip()
         width = safe(item.get('street_width')) if item.get('street_width') else ''
         uses = safe(item.get('uses')) if item.get('uses') else ''
+        setback = safe(item.get('setback')) if item.get('setback') else ''
 
         lines = []
         if street:
@@ -5915,6 +6014,8 @@ def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=
             lines.append(f'<div style="margin-top:3px;color:#475569;font-size:10.5px;">عرض الشارع: {width}</div>')
         if neighbour and street:
             lines.append(f'<div style="margin-top:3px;color:#475569;font-size:10.5px;">المجاور: {safe(neighbour)}</div>')
+        if setback:
+            lines.append(f'<div style="margin-top:3px;color:#047857;font-size:10.5px;font-weight:700;">الارتداد: {setback}</div>')
         if description and description != street and description != neighbour:
             lines.append(f'<div style="margin-top:4px;color:#64748b;font-size:10px;line-height:1.35;">{safe(description)}</div>')
         elif uses:
@@ -6992,9 +7093,11 @@ def _map_media_allowed(slide_type, content_source, slide_title='', allow_all_map
     slide_title = str(slide_title or '').strip().lower()
     if slide_type in ('map_overview', 'map_landmarks', 'map_access', 'map_catchment'):
         return True
+    if content_source == 'site_analysis' or (isinstance(content_source, str) and content_source.startswith('site_analysis:0')):
+        return True
     if content_source in {
         'location_polygon', 'main_roads', 'catchment_areas', 'nearby_landmarks',
-        'site_analysis', 'location_detail', 'executive_content.summary',
+        'location_detail', 'executive_content.summary',
     }:
         return True
     # Land analysis may deliberately show the approved overview map beside the
@@ -7705,9 +7808,18 @@ def _required_slide_texts(slide, project_data):
             ))
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return [item.strip() for item in re.split(r'[\n|]', value) if item.strip()]
-    if source == 'site_analysis':
+    if str(source or '').startswith('site_analysis'):
         value = str(project_data.get('site_analysis') or '').strip()
-        return [value] if value else []
+        paragraphs = [p.strip() for p in re.split(r'\r?\n\s*\r?\n', value) if p.strip()]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in value.splitlines() if p.strip()] or [value]
+        if ':' in str(source):
+            parts = str(source).split(':')
+            if len(parts) >= 3:
+                start = int(parts[1]) if parts[1].isdigit() else 0
+                end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
+                paragraphs = paragraphs[start:end]
+        return [p for p in paragraphs if len(p) > 15]
     if source == 'executive_content.opportunity':
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
@@ -8091,8 +8203,25 @@ def _format_table_num(val):
 
 
 def _render_fallback_table(headers, rows, primary):
+    n_rows = len(rows)
+    if n_rows >= 12:
+        th_pad = '5px 8px'
+        th_font = '11px'
+        td_pad = '4px 6px'
+        td_font = '10px'
+    elif n_rows >= 8:
+        th_pad = '6px 10px'
+        th_font = '11.5px'
+        td_pad = '5px 8px'
+        td_font = '10.5px'
+    else:
+        th_pad = '9px 12px'
+        th_font = '12px'
+        td_pad = '8px 12px'
+        td_font = '11.5px'
+
     header_html = ''.join(
-        f'<th style="background:{primary};color:#fff;padding:9px 12px;font-size:12px;text-align:center;vertical-align:middle;">{html_lib.escape(str(value))}</th>'
+        f'<th style="background:{primary};color:#fff;padding:{th_pad};font-size:{th_font};text-align:center;vertical-align:middle;">{html_lib.escape(str(value))}</th>'
         for value in headers)
     body = []
     for row_idx, row in enumerate(rows):
@@ -8103,7 +8232,7 @@ def _render_fallback_table(headers, rows, primary):
             fmt, is_num = _format_table_num(val)
             direction = 'ltr' if is_num else 'rtl'
             tds.append(
-                f'<td style="border-bottom:1px solid #e2e8f0;padding:8px 12px;font-size:11.5px;'
+                f'<td style="border-bottom:1px solid #e2e8f0;padding:{td_pad};font-size:{td_font};'
                 f'text-align:center;direction:{direction};vertical-align:middle;font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
             )
         body.append(f'<tr style="background:{bg};">{"".join(tds)}</tr>')
@@ -10003,27 +10132,59 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_timeline_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if _is_visual_concept_media_slide(slide):
         return _build_visual_concept_media_slide(slide, branding=branding)
-    if content_source == 'site_analysis':
-        analysis = str(source.get('site_analysis') or _slide_source_data_note(slide, source) or '').strip()
+    if str(content_source or '').startswith('site_analysis'):
+        analysis = _slide_source_data_note(slide, source)
+        if not analysis:
+            analysis = str(source.get('site_analysis') or '').strip()
         paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', analysis) if part.strip()]
         if not paragraphs and analysis:
-            paragraphs = [analysis]
-        split_at = max(1, math.ceil(len(paragraphs) / 2)) if paragraphs else 1
+            paragraphs = [p.strip() for p in analysis.splitlines() if p.strip()] or [analysis]
 
-        def paragraph_column(items):
-            return ''.join(
-                f'<p style="margin:0 0 12px;font-size:12px;line-height:1.65;">{html_lib.escape(item)}</p>'
-                for item in items
+        has_map = bool(tokens) or slide.get('requires_image') or '##MAP_OVERVIEW##' in str(slide.get('image_tokens') or [])
+        accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+        if has_map:
+            p_html = ''.join(
+                f'<div style="font-size:13.5px;line-height:1.8;color:#1e293b;border-right:3px solid {accent};padding-right:14px;text-align:justify;">'
+                f'{html_lib.escape(p)}</div>'
+                for p in paragraphs
             )
-
-        left_column = paragraph_column(paragraphs[:split_at])
-        right_column = paragraph_column(paragraphs[split_at:])
-        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
-                '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
-                f'<div data-map-summary-card data-site-analysis-full style="background:#ffffff;color:#172033;padding:24px;overflow:hidden;border:1px solid #d9e1ea;border-radius:10px;box-sizing:border-box;">'
-                f'<h2 style="font-size:28px;color:{primary};margin:0 0 14px;">{title}</h2>'
-                f'<div data-site-analysis-text style="display:grid;grid-template-columns:1fr 1fr;gap:24px;height:calc(100% - 52px);overflow:hidden;text-align:right;">'
-                f'<div>{left_column}</div><div>{right_column}</div></div></div></div>')
+            return (
+                f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;color:#172033;padding:68px 36px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
+                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
+                f'<h2 style="font-size:26px;color:{primary};font-weight:800;margin:0;">{title}</h2>'
+                f'<div style="height:3px;width:60px;background:{accent};border-radius:2px;"></div>'
+                f'</div>'
+                f'<div style="display:grid;grid-template-columns:1.15fr 1fr;gap:24px;flex:1;min-height:0;">'
+                f'<div style="display:flex;flex-direction:column;justify-content:center;gap:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;overflow:hidden;box-sizing:border-box;">'
+                f'{p_html}'
+                f'</div>'
+                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">'
+                f'<img src="##MAP_OVERVIEW##" style="width:100%;height:100%;object-fit:contain;object-position:center center;">'
+                f'</div>'
+                f'</div>'
+                f'</div>'
+            )
+        else:
+            cards = []
+            for i, p in enumerate(paragraphs, 1):
+                cards.append(
+                    f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid {accent};border-radius:12px;padding:22px;box-shadow:0 4px 12px rgba(0,0,0,0.03);display:flex;flex-direction:column;justify-content:flex-start;gap:10px;box-sizing:border-box;">'
+                    f'<div style="font-size:20px;font-weight:800;color:{primary};opacity:0.35;">{i:02d}</div>'
+                    f'<div style="font-size:13.5px;line-height:1.8;color:#1e293b;text-align:justify;">{html_lib.escape(p)}</div>'
+                    f'</div>'
+                )
+            grid_cols = '1fr 1fr' if len(cards) <= 2 else '1fr 1fr 1fr'
+            return (
+                f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;color:#172033;padding:68px 36px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
+                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
+                f'<h2 style="font-size:26px;color:{primary};font-weight:800;margin:0;">{title}</h2>'
+                f'<div style="height:3px;width:60px;background:{accent};border-radius:2px;"></div>'
+                f'</div>'
+                f'<div style="display:grid;grid-template-columns:{grid_cols};gap:20px;flex:1;min-height:0;align-items:stretch;">'
+                f'{"".join(cards)}'
+                f'</div>'
+                f'</div>'
+            )
     if content_source == 'executive_content.summary':
         summary_text = _slide_source_data_note(slide, source)
         note = html_lib.escape(summary_text).replace('\n', '<br>')
@@ -10073,27 +10234,81 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_market_risk_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if slide_type == 'map_access':
         roads = source.get('access_roads_data') if isinstance(source.get('access_roads_data'), list) else []
-        if lang == OFFER_LANG_ENGLISH:
-            headers = ['Road / Artery', 'Width (m)', 'Type', 'Distance']
-        else:
-            headers = ['الطريق / المحور', 'العرض (م)', 'النوع', 'المسافة']
-        rows = [[r.get('name', ''), r.get('width_m', ''), r.get('type', ''), r.get('distance', '')] for r in roads if isinstance(r, dict)]
+        if not roads:
+            m_data = source.get('main_roads_data')
+            if isinstance(m_data, list) and m_data:
+                roads = m_data
+            else:
+                raw_text = str(source.get('main_roads') or '').strip()
+                if raw_text:
+                    roads = [{'name': line.strip()} for line in raw_text.splitlines() if line.strip()]
+        roads = [r for r in roads if isinstance(r, dict) and str(r.get('name') or '').strip()]
+        has_width = any(str(r.get('width_m') or r.get('width') or '').strip() for r in roads)
+        has_type = any(str(r.get('type') or '').strip() for r in roads)
+        has_dist = any(str(r.get('distance') or r.get('distance_km') or '').strip() for r in roads)
+
+        headers = ['Road / Corridor'] if lang == OFFER_LANG_ENGLISH else ['الطريق / المحور']
+        if has_width:
+            headers.append('Width (m)' if lang == OFFER_LANG_ENGLISH else 'العرض (م)')
+        if has_type:
+            headers.append('Type' if lang == OFFER_LANG_ENGLISH else 'النوع')
+        if has_dist:
+            headers.append('Distance' if lang == OFFER_LANG_ENGLISH else 'المسافة')
+
+        rows = []
+        for r in roads:
+            row = [str(r.get('name') or '').strip()]
+            if has_width:
+                row.append(str(r.get('width_m') or r.get('width') or '—').strip())
+            if has_type:
+                row.append(str(r.get('type') or '—').strip())
+            if has_dist:
+                row.append(str(r.get('distance') or r.get('distance_km') or '—').strip())
+            rows.append(row)
+
         table = _render_fallback_table(headers, rows, primary) if rows else ''
         return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;color:{primary};font-weight:800;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f8fafc;display:flex;align-items:center;justify-content:center;">'
                 f'<img src="##MAP_ACCESS##" style="width:100%;height:100%;object-fit:contain;">'
+                f'</div>'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_catchment':
         city_marks = source.get('city_landmarks_data') if isinstance(source.get('city_landmarks_data'), list) else []
+        if not city_marks:
+            raw_cm = source.get('catchment_areas') or source.get('city_landmarks')
+            if isinstance(raw_cm, list):
+                city_marks = raw_cm
+        city_marks = [r for r in city_marks if isinstance(r, dict)]
+
+        def first_val(item, *keys):
+            for k in keys:
+                v = item.get(k)
+                if v not in (None, '', []):
+                    return v
+            return ''
+
         if lang == OFFER_LANG_ENGLISH:
             headers = ['Landmark / Destination', 'Distance (km)', 'Drive Time (min)', 'Category']
         else:
             headers = ['المعلم / الوجهة', 'المسافة (كم)', 'مدة الوصول (دقيقة)', 'التصنيف']
-        rows = [[r.get('name', ''), r.get('distance_km', ''), r.get('duration_min', ''), r.get('type', '')] for r in city_marks if isinstance(r, dict)]
+
+        rows = []
+        for r in city_marks:
+            name = first_val(r, 'name', 'title', 'landmark')
+            if not name:
+                continue
+            dist = first_val(r, 'distance_km', 'distance', 'distance_text')
+            dur = first_val(r, 'duration_minutes', 'duration_min', 'duration', 'minutes', 'duration_text')
+            cat = first_val(r, 'category', 'type', 'classification')
+            rows.append([name, dist or '—', dur or '—', cat or '—'])
+
         table = _render_fallback_table(headers, rows, primary) if rows else ''
         return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;color:{primary};font-weight:800;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f8fafc;display:flex;align-items:center;justify-content:center;">'
                 f'<img src="##MAP_CATCHMENT##" style="width:100%;height:100%;object-fit:contain;">'
+                f'</div>'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_landmarks':
         if lang == OFFER_LANG_ENGLISH:
@@ -10321,7 +10536,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
-                     or market_source in {'site_analysis', 'executive_content.summary',
+                     or market_source.startswith('site_analysis')
+                     or market_source in {'executive_content.summary',
                                            'executive_content.opportunity', 'executive_content.features',
                                            'land_and_building_summary'}
                      or _slide_section_key(slide) == 'financial'))):
@@ -12272,20 +12488,21 @@ def _refresh_preserved_index(html, entries, branding=None, project_data=None):
     """Synchronize managed rows, not the index canvas or surrounding custom content."""
     row_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-section\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>', re.IGNORECASE)
     rows = [(m, _slide_element_end(html, m)) for m in row_re.finditer(html)]
-    by_key = {m.group('key'): html[m.start():end] for m, end in rows}
     entries = [e for e in (entries or []) if isinstance(e, dict)]
-    if rows:
-        # New sections need new managed rows. Existing rows travel verbatim with
-        # their section when it moves; deleted sections leave no stale index row.
-        canonical = build_index_slide({'index_entries': entries}, 1, 1, branding, project_data)
-        fallback = {m.group('key'): canonical[m.start():_slide_element_end(canonical, m)]
-                    for m in row_re.finditer(canonical)}
-        ordered = [by_key.get(e['section_key'], fallback.get(e['section_key'], '')) for e in entries]
-        for i in range(len(rows) - 1, -1, -1):
-            match, end = rows[i]
-            replacement = (''.join(ordered[i:]) if i == len(rows) - 1
-                           else ordered[i] if i < len(ordered) else '')
-            html = html[:match.start()] + replacement + html[end:]
+    if not entries:
+        return html
+    if not rows:
+        return build_index_slide({'index_entries': entries}, 2, 2, branding, project_data)
+    by_key = {m.group('key'): html[m.start():end] for m, end in rows}
+    canonical = build_index_slide({'index_entries': entries}, 1, 1, branding, project_data)
+    fallback = {m.group('key'): canonical[m.start():_slide_element_end(canonical, m)]
+                for m in row_re.finditer(canonical)}
+    ordered = [by_key.get(e['section_key'], fallback.get(e['section_key'], '')) for e in entries]
+    for i in range(len(rows) - 1, -1, -1):
+        match, end = rows[i]
+        replacement = (''.join(ordered[i:]) if i == len(rows) - 1
+                       else ordered[i] if i < len(ordered) else '')
+        html = html[:match.start()] + replacement + html[end:]
     pages = {str(e.get('section_key')): e.get('page') for e in entries}
     page_re = re.compile(r'(<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-page\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>)(?P<body>[^<]*)(</(?P=tag)\s*>)', re.IGNORECASE)
 
@@ -12407,7 +12624,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             )
     html = _canonicalize_slide_root_class(html)
     is_map_summary = (
-        content_source in ('site_analysis', 'executive_content.summary')
+        content_source == 'executive_content.summary'
         and (
             '##MAP_' in str(html or '')
             or 'data-map-summary-background' in str(html or '')
@@ -12424,7 +12641,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     )
     if (not _is_market_slide(slide_type, slide_title, content_source)
             and isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
-            or content_source in ('site_analysis', 'location_detail')
+            or (isinstance(content_source, str) and (content_source.startswith('site_analysis') or content_source == 'location_detail'))
             or (content_source == 'executive_content.summary' and is_map_summary)):
         html = _inject_location_data_timestamp(html, project_data)
     html = _strip_unplanned_map_media(
@@ -12439,7 +12656,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
         html = _normalize_map_summary_layout(
             html,
             str((project_data or {}).get('_map_marker_side') or 'right'),
-            full_width=content_source == 'site_analysis',
+            full_width=False,
         )
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
     creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
@@ -12560,19 +12777,6 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     current_section = ''
     for index, raw in enumerate(source):
         item = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
-        if preserve_html or _designer_preserves_html(item):
-            item['_designer_keep_html'] = True
-            item['is_custom'] = True
-            item['html'] = _normalize_watermark_ink(str(item.get('html') or ''))
-            item.setdefault('type', 'content')
-            section_key = _slide_section_key(item, current_section)
-            item.setdefault('section_key', section_key)
-            if item.get('type') == 'section_divider':
-                current_section = section_key
-            normalized.append(item)
-            continue
-        if item.get('html'):
-            item['html'] = _normalize_watermark_ink(item['html'])
         slide_type = str(item.get('type') or '').strip().lower()
         title = str(item.get('title') or '').strip()
         html = str(item.get('html') or '')
@@ -12608,6 +12812,14 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = section_key
             if slide_type == 'section_divider' and section_key in PRESENTATION_SECTION_ORDER:
                 current_section = section_key
+        if preserve_html or _designer_preserves_html(item):
+            item['_designer_keep_html'] = True
+            item['is_custom'] = True
+            item['html'] = _normalize_watermark_ink(str(item.get('html') or ''))
+            normalized.append(item)
+            continue
+        if item.get('html'):
+            item['html'] = _normalize_watermark_ink(item['html'])
         normalized.append(item)
 
     refresh_index_entries({'slides': normalized}, offer_lang=lang)
@@ -12616,7 +12828,10 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         if _designer_preserves_html(item):
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
             if slide_type == 'index':
-                html = _refresh_preserved_index(html, item.get('index_entries'), branding, project_data)
+                if not re.search(r'data-index-(?:section|page)', html, re.IGNORECASE):
+                    html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
+                else:
+                    html = _refresh_preserved_index(html, item.get('index_entries'), branding, project_data)
             item['html'] = _strip_presentation_icons(html)
             continue
         # A designer-chat edit, user edit, or custom slide produced this HTML
@@ -12640,22 +12855,13 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['is_custom'] = True
         if slide_type == 'index':
             existing_html = item.get('html') or ''
-            if existing_html and 'data-index-page' in existing_html:
-                index_html = existing_html
-                for entry in (item.get('index_entries') or []):
-                    sec_k = str(entry.get('section_key') or '')
-                    pg_val = entry.get('page')
-                    if sec_k and pg_val is not None:
-                        index_html = re.sub(
-                            rf'(data-index-page=["\']{re.escape(sec_k)}["\'][^>]*>)\s*\d+\s*(</div>|</span>)',
-                            rf'\g<1>{int(pg_val):02d}\g<2>',
-                            index_html
-                        )
+            if existing_html and re.search(r'data-index-(?:section|page)', existing_html, re.IGNORECASE):
+                index_html = _refresh_preserved_index(existing_html, item.get('index_entries'), branding, project_data)
             else:
-                index_html = build_index_slide(item, index, total, branding, project_data)
+                index_html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
             item['html'] = finalize_slide_html(
                 index_html, slide_type, project_data, branding, tenant_id=tenant_id,
-                slide_num=index, slide_title=item.get('title') or 'محتويات العرض',
+                slide_num=index, slide_title=item.get('title') or offer_chrome('index_heading', lang),
                 total_slides=total, content_source=item.get('content_source'),
                 allow_all_maps=allow_all_maps,
             )
