@@ -22001,6 +22001,8 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         if isinstance(page, dict):
             page_content[str(page.get('url') or '').strip()] = str(page.get('content') or '')
     mentions = []
+    searched = 0
+    unreadable = 0
     for url in list(dict.fromkeys(urls or []))[:4]:
         if str(url).strip().casefold() in dead:
             continue
@@ -22009,12 +22011,18 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         html = page_content.get(url) or ''
         if not html:
             html, _err = _read_market_source_page(url)
+        if not html:
+            unreadable += 1
+            continue
+        searched += 1
         for item in _extract_listing_prices(html):
             item['url'] = url
             mentions.append(item)
         if len(mentions) >= 4:
             break
     if not mentions:
+        print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» no listing prices "
+              f"({searched} pages searched, {unreadable} unreadable)")
         return False
     print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» listing prices: "
           f"{len(mentions)} mentions from {len({m['url'] for m in mentions})} pages")
@@ -24807,16 +24815,21 @@ def _import_competitor_listing_photo(row, draft_id=None):
     through the same upload path and marked logo_listing_photo so it never
     pretends to be an official logo."""
     dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+    misses = []
     for page_url in list(dict.fromkeys(market_study.competitor_source_urls(row)))[:4]:
         if str(page_url).strip().casefold() in dead:
             continue
         html, _err = _read_market_source_page(page_url)
         if not html:
+            misses.append(f'{_normalized_web_host(page_url)}:unreadable')
             continue
+        found_meta = False
         for match in _LISTING_IMAGE_META_RE.finditer(html):
+            found_meta = True
             image_url = urljoin(page_url, match.group(1) or match.group(2) or '')
             content, mime_type, extension = _download_listing_image(image_url)
             if not content:
+                misses.append(f'{_normalized_web_host(page_url)}:image-rejected')
                 continue
             from werkzeug.datastructures import FileStorage
             upload = FileStorage(
@@ -24838,6 +24851,11 @@ def _import_competitor_listing_photo(row, draft_id=None):
                 urls.append(page_url)
             row['field_sources'] = field_sources
             return
+        if not found_meta:
+            misses.append(f'{_normalized_web_host(page_url)}:no-og-image')
+    if misses:
+        print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» no listing photo: "
+              + ', '.join(misses))
 
 
 def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=None):
