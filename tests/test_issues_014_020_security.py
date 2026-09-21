@@ -262,6 +262,11 @@ class ExportPolicyTests(ScopeTestBase):
         self.assertTrue(ok(f'/uploads/{self.tenant}/ok.png', self.tenant))
         self.assertTrue(ok('data:image/png;base64,AAA=', self.tenant))
         self.assertTrue(ok('https://fonts.googleapis.com/css2?family=X', self.tenant))
+        # The export resolvers rewrite tenant assets to file: URIs before the
+        # policy runs — a URI under the tenant root must survive, while a file:
+        # URI outside every allowed root stays blocked.
+        self.assertTrue(ok((self.tenant_dir / 'ok.png').as_uri(), self.tenant))
+        self.assertFalse(ok((self.other_dir / 'secret.png').as_uri(), self.tenant))
         self.assertFalse(ok(f'/uploads/{self.other}/secret.png', self.tenant))
         self.assertFalse(ok('file:///etc/passwd', self.tenant))
         self.assertFalse(ok('https://example.com/x.png', self.tenant))

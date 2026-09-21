@@ -828,6 +828,12 @@ def _export_url_allowed(url, tenant_id, extra_roots=()):
         except Exception:
             return False
         return host.lower() in _EXPORT_REMOTE_HOSTS
+    if low.startswith('file:'):
+        # The resolvers above legitimately emit file: URIs for tenant uploads,
+        # project files and bundled assets — the local-path policy still gates
+        # them by resolved location, so file:///etc/passwd keeps failing.
+        return _export_allowed_local_path(
+            _export_url_to_local_path(value), tenant_id, extra_roots)
     first = low.split('/', 1)[0]
     if ':' in first:
         return False  # javascript:, vbscript:, unknown schemes
@@ -920,6 +926,13 @@ def _install_export_request_guard(page):
         pass
 
 
+def _default_tenant_logo_uri():
+    """The logo /tenant-assets/<id>/logo serves when the tenant never uploaded
+    one — the export should render the same image the live route sends."""
+    p = BASE_DIR / 'assets' / 'logo.png'
+    return p.as_uri() if p.is_file() else None
+
+
 def _heal_section_divider_backgrounds(slides, cover_uri):
     if not cover_uri:
         return list(slides or [])
@@ -968,7 +981,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
                 return p.as_uri()
         return None
 
-    logo_uri = _local_tenant_image_uri(tenant_id, 'logo')
+    logo_uri = _local_tenant_image_uri(tenant_id, 'logo') or _default_tenant_logo_uri()
     if logo_uri:
         html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
     watermark_uri = _local_tenant_image_uri(tenant_id, 'watermark')
@@ -1299,7 +1312,7 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
                     return p.as_uri()
             return None
 
-        logo_uri = _local_tenant_image_uri(tenant_id, 'logo')
+        logo_uri = _local_tenant_image_uri(tenant_id, 'logo') or _default_tenant_logo_uri()
         if logo_uri and tenant_id:
             html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
         watermark_uri = _local_tenant_image_uri(tenant_id, 'watermark')
