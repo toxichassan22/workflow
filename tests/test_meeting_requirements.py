@@ -12774,7 +12774,91 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'http://portal.example/insecure.jpg'):
             self.assertEqual(module._download_listing_image(url), (None, None, None))
 
+    def test_market_competitors_chunked_into_balanced_slides(self):
+        """6 competitors must be chunked into 2 slides of 3 competitors each."""
+        engine = self.application_module.slide_engine
+        competitors = [
+            {'id': f'c{i}', 'name': f'منافس {i}', 'price': 1000 * i, 'price_type': 'سعر المتر', 'status': 'قائم'}
+            for i in range(1, 7)
+        ]
+        draft = {
+            'project_name': 'مشروع الاختبار',
+            'city': 'الرياض',
+            'market_study_data': json.dumps({'competitors': competitors}, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan({}, project_data=draft, images={})
+        market_slides = [s for s in plan['slides'] if s.get('section_key') == 'market']
+        comp_slides = [s for s in market_slides if 'competitors' in str(s.get('content_source') or '')]
+        self.assertEqual(len(comp_slides), 2)
+        self.assertEqual(comp_slides[0]['competitor_start'], 0)
+        self.assertEqual(comp_slides[0]['competitor_end'], 3)
+        self.assertIn('(1/2)', comp_slides[0]['title'])
+        self.assertEqual(comp_slides[1]['competitor_start'], 3)
+        self.assertEqual(comp_slides[1]['competitor_end'], 6)
+        self.assertIn('(2/2)', comp_slides[1]['title'])
+
+        # Verify rendering of slide 1 contains only the first 3 competitors
+        html_1 = engine._build_structured_fallback_slide(comp_slides[0], draft, {})
+        self.assertIn('منافس 1', html_1)
+        self.assertIn('منافس 2', html_1)
+        self.assertIn('منافس 3', html_1)
+        self.assertNotIn('منافس 4', html_1)
+        self.assertNotIn('منافس 5', html_1)
+        self.assertNotIn('منافس 6', html_1)
+
+        # Verify rendering of slide 2 contains only the next 3 competitors
+        html_2 = engine._build_structured_fallback_slide(comp_slides[1], draft, {})
+        self.assertNotIn('منافس 1', html_2)
+        self.assertNotIn('منافس 2', html_2)
+        self.assertNotIn('منافس 3', html_2)
+        self.assertIn('منافس 4', html_2)
+        self.assertIn('منافس 5', html_2)
+        self.assertIn('منافس 6', html_2)
+
+    def test_executive_content_multi_slide_planning_and_rendering(self):
+        """Executive content with opportunity, features and summary must yield 3 slides."""
+        engine = self.application_module.slide_engine
+        exec_content = {
+            'opportunity': 'تمثل هذه الأرض فرصة استثمارية نادرة بفضل موقعها المباشر على المحور الرئيسي.',
+            'features': ['موقع استراتيجي على طريق الملك فهد', 'كثافة مرورية وتدفقات تجارية عالية', 'عائد استثماري مستهدف يفوق 14%'],
+            'summary': 'ملخص تنفيذي شامل يوضح معالم المشروع وجدواه الاستثمارية ومحددات التطوير.',
+        }
+        draft = {
+            'project_name': 'مشروع الروابي',
+            'city': 'الرياض',
+            'district': 'الصحافة',
+            'project_type': 'تجاري مكتبي',
+            'executive_content': json.dumps(exec_content, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan({}, project_data=draft, images={})
+        exec_slides = [s for s in plan['slides'] if s.get('section_key') == 'executive_summary' and s.get('type') == 'content']
+        self.assertEqual(len(exec_slides), 3)
+
+        sources = [s.get('content_source') for s in exec_slides]
+        self.assertEqual(sources, [
+            'executive_content.opportunity',
+            'executive_content.features',
+            'executive_content.summary',
+        ])
+
+        # Render opportunity slide
+        opp_html = engine._build_structured_fallback_slide(exec_slides[0], draft, {})
+        self.assertIn('الفرصة الاستثمارية', opp_html)
+        self.assertIn('تمثل هذه الأرض فرصة استثمارية', opp_html)
+
+        # Render features slide
+        feat_html = engine._build_structured_fallback_slide(exec_slides[1], draft, {})
+        self.assertIn('المميزات وفرص الاستثمار', feat_html)
+        self.assertIn('01', feat_html)
+        self.assertIn('موقع استراتيجي', feat_html)
+
+        # Render summary slide
+        sum_html = engine._build_structured_fallback_slide(exec_slides[2], draft, {})
+        self.assertIn('الملخص التنفيذي', sum_html)
+        self.assertIn('ملخص تنفيذي شامل', sum_html)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 
