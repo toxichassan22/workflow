@@ -619,6 +619,18 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   operation. Without both, every price came back empty (or, before the search worked at all,
   invented). A row with an empty price and `غير متوفر من مصدر موثوق` is the correct output; a
   number without the page it came from is not.
+- Grounding details that must hold: `_call_market_study_model` rejects a parseable answer whose
+  provider finish reason is not clean (e.g. `MALFORMED_FUNCTION_CALL`) or whose payload carries an
+  `error` — accepting it shipped silent failures. Retrieved citations are collected across the main
+  call and every expansion round (`_collect_citations`), keep their `content` excerpt, and
+  `_attach_retrieved_citations` matches a competitor's name against title+url+content even when the
+  row already carries a generic portal link. `_verify_competitor_row` keeps running query angles
+  while the price is still empty — matching the name alone is not the finish line — and manual rows
+  are verified too (their values are never overwritten). The competitors result reports `partial`,
+  `providerError`, `noEvidenceCount`, `searchNotRunCount` and `missingPriceCount`; a table of
+  unsourced rows is a partial answer, never a clean success.
+- Official-page/logo fetches go through `_pinned_https_get`, which follows redirects only inside the
+  same registrable host — off-site redirect targets and downgrades to HTTP are refused.
 
 ## Presentation color and logo contrast
 

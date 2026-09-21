@@ -915,10 +915,15 @@
             (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة' : '') +
             ((res.outOfRadiusCount || 0) ? ' — ' + res.outOfRadiusCount + ' منافس خارج النطاق المحدد' : '') +
             ((res.noEvidenceCount || 0) ? ' — ' + res.noEvidenceCount + ' منافس لم تظهر أسماؤهم في نتائج البحث' : '') +
+            ((res.searchNotRunCount || 0) ? ' — تعذر تنفيذ البحث عن ' + res.searchNotRunCount + ' منافس' : '') +
+            ((res.missingPriceCount || 0) ? ' — ' + res.missingPriceCount + ' منافس بلا سعر موثق' : '') +
+            (res.providerError ? ' — خطأ مزود البحث: ' + res.providerError : '') +
             (extra ? ' — ' + extra : '');
         }
-        toast(mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة');
-        updateLoaderProgress(100, 'اكتمل تحديث المنافسين');
+        toast(res.partial
+          ? 'اكتمل التحديث بنتيجة جزئية — التفاصيل موضحة أسفل الجدول'
+          : (mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة'));
+        updateLoaderProgress(100, res.partial ? 'اكتمل التحديث بنتيجة جزئية' : 'اكتمل تحديث المنافسين');
       } catch (error) {
         toast(error.message || 'تعذر تحديث المنافسين');
       } finally {

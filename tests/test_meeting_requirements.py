@@ -10762,7 +10762,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertIn("market_study.apply_search_citations(merged, _market_citation_urls(res))", app_source)
+        self.assertIn("market_study.apply_search_citations(merged, citation_urls)", app_source)
 
     def test_portal_homepage_links_resolve_to_the_dataset_page(self):
         import market_study
@@ -11186,6 +11186,269 @@ class MeetingRequirementsTests(unittest.TestCase):
             response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
         self.assertEqual(error, '')
         self.assertIs(response, memory)
+
+    def test_market_study_model_rejects_malformed_function_call(self):
+        """JSON parseable out of reasoning is not an answer when the provider
+        aborted — it used to be accepted and surfaced as a silent success."""
+        module = self.application_module
+        malformed = {
+            'choices': [{
+                'native_finish_reason': 'MALFORMED_FUNCTION_CALL',
+                'message': {
+                    'content': '',
+                    'reasoning': '{"competitors": [{"name": "برج الوهم"}]}',
+                    'annotations': [{'url_citation': {
+                        'url': 'https://developer.example/x', 'title': 'صفحة'}}],
+                },
+            }],
+        }
+        with patch.object(module, 'call_openrouter_chat', return_value=malformed) as fake_call:
+            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+        self.assertTrue(error)
+        self.assertIn('MALFORMED_FUNCTION_CALL', error)
+        self.assertFalse(response.get('choices'))
+        self.assertGreaterEqual(fake_call.call_count, 2)
+
+    def test_attach_retrieved_citations_adds_match_beside_generic_portal(self):
+        """A row already carrying the generic REI link still gains the retrieved
+        page that actually names the competitor."""
+        module = self.application_module
+        row = {
+            'name': 'مشروع النخبة', 'row_source': 'ai',
+            'source_url': 'https://rei.rega.gov.sa/ar',
+            'source_urls': ['https://rei.rega.gov.sa/ar'],
+        }
+        pages = [
+            {'url': 'https://rei.rega.gov.sa/ar', 'title': 'المؤشرات العقارية', 'content': ''},
+            {'url': 'https://developer.example/al-nukhbah',
+             'title': 'مشروع النخبة — الموقع الرسمي', 'content': ''},
+        ]
+        module._attach_retrieved_citations([row], pages)
+        self.assertIn('https://developer.example/al-nukhbah', row['source_urls'])
+        self.assertIn('https://rei.rega.gov.sa/ar', row['source_urls'])
+        self.assertEqual(row['source_url'], 'https://developer.example/al-nukhbah')
+
+    def test_verify_competitor_matches_name_in_citation_content(self):
+        """A retrieved page whose excerpt names the competitor counts even when
+        its title and URL are generic."""
+        module = self.application_module
+        row = {'name': 'مجمع الفرسان', 'row_source': 'ai', 'id': 'r1'}
+        response = {
+            'choices': [{'message': {
+                'content': '{"exists": true, "price": {"value": "450000", '
+                           '"url": "https://developer.example/listing-77"}}',
+                'annotations': [{'url_citation': {
+                    'url': 'https://developer.example/listing-77',
+                    'title': 'عقارات للبيع',
+                    'content': 'مجمع الفرسان السكني — أسعار تبدأ من 450000'}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+            module._verify_competitor_row(row, {'city': 'الرياض'}, {})
+        self.assertEqual(row.get('verify_state'), 'verified')
+        self.assertIn('https://developer.example/listing-77', row.get('source_urls') or [])
+        self.assertIn('450000', str(row.get('price_value') or ''))
+
+    def test_verify_competitor_keeps_searching_until_price_found(self):
+        """Proving the name is not the finish line — while the price stays
+        empty the next query angle still runs."""
+        module = self.application_module
+        row = {'name': 'مجمع الفرسان', 'row_source': 'ai', 'id': 'r1'}
+        identity = {
+            'choices': [{'message': {
+                'content': '{"exists": true, "price": {}}',
+                'annotations': [{'url_citation': {
+                    'url': 'https://developer.example/fursan',
+                    'title': 'مجمع الفرسان', 'content': ''}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        priced = {
+            'choices': [{'message': {
+                'content': '{"exists": true, "price": {"value": "320000", '
+                           '"url": "https://developer.example/fursan-prices"}}',
+                'annotations': [{'url_citation': {
+                    'url': 'https://developer.example/fursan-prices',
+                    'title': 'أسعار مجمع الفرسان', 'content': ''}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        calls = []
+
+        def fake_model(*_args, **_kwargs):
+            calls.append(1)
+            return (identity, '') if len(calls) == 1 else (priced, '')
+
+        with patch.object(module, '_call_market_study_model', side_effect=fake_model):
+            module._verify_competitor_row(row, {'city': 'الرياض'}, {})
+        self.assertEqual(row.get('verify_state'), 'verified')
+        self.assertIn('320000', str(row.get('price_value') or ''))
+        self.assertGreaterEqual(len(calls), 2)
+
+    def test_verify_competitor_rows_includes_manual_rows(self):
+        """Fill mode completes cells the user left empty — manual rows get the
+        same per-name search; their values are never overwritten."""
+        module = self.application_module
+        rows = [
+            {'name': 'مجمع العميل اليدوي', 'row_source': 'manual',
+             'price_value': '900000'},
+            {'name': 'منافس مولد', 'row_source': 'ai'},
+        ]
+        searched = {
+            'choices': [{'message': {'content': '{"exists": true}', 'annotations': []}}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        prompts = []
+
+        def fake_model(*args, **_kwargs):
+            prompts.append(args[1] if len(args) > 1 else '')
+            return searched, ''
+
+        with patch.object(module, '_call_market_study_model', side_effect=fake_model):
+            module._verify_competitor_rows(rows, {'city': 'الرياض'}, {})
+        self.assertTrue(any('اليدوي' in str(prompt) for prompt in prompts),
+                        'manual row never received a verification search')
+        self.assertTrue(any('مولد' in str(prompt) for prompt in prompts))
+        self.assertEqual(rows[0].get('price_value'), '900000')
+
+    def test_market_competitors_single_generic_citation_is_partial(self):
+        """Six competitors sharing one portal citation is a partial result, not
+        a clean success — the response must say so."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        names = ['مجمع الفرسان', 'واحة الريان', 'برج السدرة', 'مشروع النخبة',
+                 'مجمع الياسمين', 'برج الوفرة']
+        fake = {'competitors': [
+            {'name': name, 'project_type': 'سكني',
+             'source_url': 'https://rei.rega.gov.sa/ar',
+             'source_urls': ['https://rei.rega.gov.sa/ar']}
+            for name in names
+        ]}
+        grounded = {
+            'choices': [{'message': {
+                'content': json.dumps(fake, ensure_ascii=False),
+                'annotations': [{'url_citation': {
+                    'url': 'https://rei.rega.gov.sa/ar', 'title': 'المؤشرات العقارية'}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 3}},
+        }
+        with patch.object(self.application_module, '_call_market_study_model',
+                          return_value=(grounded, '')), \
+                patch.object(self.application_module, '_verify_market_urls',
+                             return_value=set()), \
+                patch.object(self.application_module, '_public_host_addresses',
+                             return_value=()):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        self.assertEqual(res.status_code, 200, res.get_json())
+        payload = res.get_json()
+        self.assertTrue(payload.get('success'))
+        self.assertTrue(payload.get('searchVerified'))
+        self.assertTrue(payload.get('partial'))
+        self.assertEqual(payload.get('noEvidenceCount'), 6)
+        self.assertEqual(payload.get('missingPriceCount'), 6)
+
+    def test_market_competitors_combines_citations_across_rounds(self):
+        """Expansion rounds feed the same evidence pool — a page retrieved in
+        round two still reaches its competitor's source list."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        first = {
+            'choices': [{'message': {
+                'content': json.dumps({'competitors': [
+                    {'name': 'مجمع الفرسان', 'project_type': 'سكني'}]},
+                    ensure_ascii=False),
+                'annotations': [{'url_citation': {
+                    'url': 'https://developer.example/fursan',
+                    'title': 'مجمع الفرسان — المطور', 'content': ''}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        second = {
+            'choices': [{'message': {
+                'content': json.dumps({'competitors': [
+                    {'name': 'واحة الريان', 'project_type': 'سكني'},
+                    {'name': 'برج السدرة', 'project_type': 'سكني'},
+                    {'name': 'مشروع النخبة', 'project_type': 'سكني'},
+                    {'name': 'مجمع الياسمين', 'project_type': 'سكني'}]},
+                    ensure_ascii=False),
+                'annotations': [{'url_citation': {
+                    'url': 'https://developer.example/alrayan',
+                    'title': 'واحة الريان', 'content': ''}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        verify = {
+            'choices': [{'message': {'content': '{"exists": true}', 'annotations': []}}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        responses = [first, second]
+
+        def fake_model(*_args, **_kwargs):
+            return (responses.pop(0), '') if responses else (verify, '')
+
+        module = self.application_module
+        with patch.object(module, '_call_market_study_model', side_effect=fake_model), \
+                patch.object(module, '_verify_market_urls', return_value=set()), \
+                patch.object(module, '_public_host_addresses', return_value=()):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        self.assertEqual(res.status_code, 200, res.get_json())
+        payload = res.get_json()
+        rows = {row['name']: row for row in payload['competitors']}
+        self.assertIn('https://developer.example/fursan',
+                      rows['مجمع الفرسان'].get('source_urls') or [])
+        self.assertIn('https://developer.example/alrayan',
+                      rows['واحة الريان'].get('source_urls') or [])
+
+    def test_market_competitors_surfaces_provider_error(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        failed = ({'error': {'message': 'provider finished with MALFORMED_FUNCTION_CALL'}},
+                  'provider finished with MALFORMED_FUNCTION_CALL')
+        with patch.object(self.application_module, '_call_market_study_model',
+                          return_value=failed):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        payload = res.get_json()
+        self.assertFalse(payload.get('success'))
+        self.assertIn('MALFORMED_FUNCTION_CALL', payload.get('providerError') or '')
+
+    def test_pinned_https_get_follows_only_same_site_redirects(self):
+        module = self.application_module
+        redirect = Mock(status=301, headers={'Location': '/ar/home'})
+        landing = Mock(status=200, headers={})
+        opened = []
+
+        def fake_open(parsed, _addresses):
+            opened.append(parsed.geturl())
+            return Mock(), (redirect if len(opened) == 1 else landing)
+
+        with patch.object(module, '_public_host_addresses', return_value=('203.0.113.10',)), \
+                patch.object(module, '_open_pinned_https', side_effect=fake_open):
+            _pool, response, final_url = module._pinned_https_get('https://developer.example/')
+        self.assertIs(response, landing)
+        self.assertEqual(final_url, 'https://developer.example/ar/home')
+        redirect.release_conn.assert_called_once()
+
+        offsite = Mock(status=302, headers={'Location': 'https://evil.example/x'})
+        with patch.object(module, '_public_host_addresses', return_value=('203.0.113.10',)), \
+                patch.object(module, '_open_pinned_https', return_value=(Mock(), offsite)):
+            pool, _response, outcome = module._pinned_https_get('https://developer.example/')
+        self.assertIsNone(pool)
+        self.assertEqual(outcome, 'off_site_redirect')
+        offsite.release_conn.assert_called_once()
+
+        downgrade = Mock(status=301, headers={'Location': 'http://developer.example/x'})
+        with patch.object(module, '_public_host_addresses', return_value=('203.0.113.10',)), \
+                patch.object(module, '_open_pinned_https', return_value=(Mock(), downgrade)):
+            pool, _response, outcome = module._pinned_https_get('https://developer.example/')
+        self.assertIsNone(pool)
+        self.assertEqual(outcome, 'invalid_url')
 
     def test_market_source_priority_matches_owner_order(self):
         import market_study

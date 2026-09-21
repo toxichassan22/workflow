@@ -21535,6 +21535,20 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
             last_error = _chat_error_message(last_response)
             text = _get_chat_response_text(last_response)
             if _has_chat_choices(last_response) and parse_json_object(text):
+                finish = ''
+                first_choice = (last_response.get('choices') or [{}])[0]
+                if isinstance(first_choice, dict):
+                    finish = str(first_choice.get('native_finish_reason')
+                                 or first_choice.get('finish_reason') or '')
+                clean_finish = finish.lower() in ('', 'stop', 'end_turn', 'length')
+                if last_response.get('error') or not clean_finish:
+                    # The provider aborted the answer (e.g. MALFORMED_FUNCTION_CALL)
+                    # or attached an error to it: a parseable fragment is not a
+                    # usable result, and returning it with an empty error ships
+                    # the failure as a silent success.
+                    last_error = _chat_error_message(last_response)
+                    last_response = {'error': {'message': last_error}}
+                    continue
                 if attempt_tools and not _market_search_ran(last_response):
                     print('[MARKET STUDY] parseable JSON but zero searches ran — '
                           'keeping it as fallback and retrying with tools')
@@ -21571,7 +21585,11 @@ def _market_citation_pages(res):
             url = str(citation.get('url') or annotation.get('url') or '').strip()
             if url and url not in seen:
                 seen.add(url)
-                pages.append({'url': url, 'title': str(citation.get('title') or '').strip()})
+                pages.append({
+                    'url': url,
+                    'title': str(citation.get('title') or '').strip(),
+                    'content': str(citation.get('content') or '')[:8000],
+                })
     return pages
 
 
@@ -21593,8 +21611,11 @@ _CITATION_GENERIC_TOKENS = {
 
 def _competitor_name_tokens(name):
     folded = market_study._fold_choice(name)
+    # Three-letter tokens carry real names (نور، علو) — dropping them left
+    # short-named competitors with no tokens at all, which skipped their
+    # verification and price search entirely.
     return {token for token in re.findall(r'[\w]+', folded)
-            if len(token) >= 4 and token not in _CITATION_GENERIC_TOKENS}
+            if len(token) >= 3 and token not in _CITATION_GENERIC_TOKENS}
 
 
 def _attach_retrieved_citations(rows, pages):
@@ -21610,22 +21631,31 @@ def _attach_retrieved_citations(rows, pages):
     for row in rows or []:
         if not isinstance(row, dict) or (row.get('row_source') or 'ai') != 'ai':
             continue
-        if market_study.competitor_source_urls(row):
-            continue
         tokens = _competitor_name_tokens(row.get('name'))
         if not tokens:
             continue
         needed = 1 if len(tokens) == 1 else 2
         matched = []
         for page in pages:
+            # The name often sits in the retrieved excerpt, not the page title
+            # or URL — search results carry a generic title for listing pages.
             haystack = market_study._fold_choice(
-                f"{page.get('title') or ''} {page.get('url') or ''}")
+                f"{page.get('title') or ''} {page.get('url') or ''} {page.get('content') or ''}")
             if sum(1 for token in tokens if token in haystack) >= needed:
                 matched.append(page['url'])
         if matched:
-            row['source_urls'] = matched[:4]
-            if not str(row.get('source_url') or '').strip():
-                row['source_url'] = market_study.prefer_specific_source_url(*matched)
+            # Attach even when the row already has sources: a generic portal
+            # link is not proof the page that names this competitor made it
+            # into the row.
+            row['source_urls'] = list(dict.fromkeys(
+                market_study.competitor_source_urls(row) + matched))[:6]
+            existing_main = str(row.get('source_url') or '').strip()
+            portal_host = existing_main and market_study._source_host(existing_main) \
+                in market_study._PORTAL_DATASET_PAGES
+            if (not existing_main or market_study.is_generic_source_homepage(existing_main)
+                    or portal_host):
+                row['source_url'] = market_study.prefer_specific_source_url(
+                    *matched, existing_main)
 
 
 def _verify_competitor_row(row, payload, data, tenant_id=None):
@@ -21678,52 +21708,73 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     search_ran_any = False
     matched = []
     official = ''
+    last_error = ''
     for prompt in prompts:
+        prompt_response = None
         # Plugin-only first (Gemini can fumble tool calls), then the
         # openrouter:web_search tool — on deployments where the Exa plugin
         # returns no citations the tool is the only path that grounds.
         for tools_on in (False, True):
             try:
-                response, _err = _call_market_study_model(
+                prompt_response, err = _call_market_study_model(
                     market_study.build_consultant_system_prompt(), prompt,
                     max_tokens=1200, usage_ctx=usage_ctx, server_tools=tools_on)
             except Exception:
-                response = None
+                prompt_response = None
                 continue
-            if not _market_search_ran(response):
+            last_error = err or last_error
+            if not _market_search_ran(prompt_response):
                 continue
             search_ran_any = True
             break
-        if not search_ran_any:
+        if prompt_response is None or not _market_search_ran(prompt_response):
             continue
-        for page in _market_citation_pages(response):
+        response = prompt_response
+        prompt_matched = []
+        for page in _market_citation_pages(prompt_response):
             url = str(page.get('url') or '').strip()
             if url and _foreign_market_host(url):
                 continue
-            haystack = market_study._fold_choice(f"{page.get('title') or ''} {url}")
+            title_url = market_study._fold_choice(f"{page.get('title') or ''} {url}")
+            haystack = market_study._fold_choice(
+                f"{title_url} {page.get('content') or ''}")
             hits = sum(1 for token in tokens if token in haystack)
             if hits >= needed:
-                matched.append(url)
-            # An official page carries the whole distinctive name — a partial
-            # match is evidence the project exists, not that the host belongs
-            # to it.
-            if url and hits >= len(tokens) and not official:
-                if not any(token in _normalized_web_host(url) for token in _AGGREGATOR_HOST_TOKENS):
+                prompt_matched.append(url)
+            # An official page carries the whole distinctive name in its title
+            # or URL — a content-only mention is evidence the project exists,
+            # not that the host belongs to it.
+            if url and not official:
+                title_hits = sum(1 for token in tokens if token in title_url)
+                if title_hits >= len(tokens) and not any(
+                        token in _normalized_web_host(url)
+                        for token in _AGGREGATOR_HOST_TOKENS):
                     official = url
-        if matched:
+        matched.extend(prompt_matched)
+        parsed, _parse_error = _parse_market_model_json(prompt_response)
+        # A project price is only as good as the page naming this competitor —
+        # the figure must come from a page this search actually retrieved.
+        _apply_verified_competitor_price(row, parsed, set(prompt_matched))
+        price_filled = any(str(row.get(key) or '').strip()
+                           for key in ('price_value', 'price_from', 'price_to'))
+        # Identity proven is not the job done — keep searching while the price
+        # is still empty; the next query angle may surface a pricing page.
+        if prompt_matched and price_filled:
             break
     if not search_ran_any:
-        # The provider returned no citations at all — an infrastructure miss,
+        # The provider returned no citations at all — a search-provider miss,
         # not proof the name is fabricated. Say so instead of mislabeling it.
         row['verify_state'] = 'search_not_run'
-        if response:
-            row['verify_provider_error'] = _chat_error_message(response) or 'empty_response'
+        row['verify_provider_error'] = last_error or (
+            _chat_error_message(response) if response else '') or 'empty_response'
         return
     matched = list(dict.fromkeys(matched))
     if not matched:
         # The search ran and no retrieved page mentions this name — flag the row
-        # rather than silently trusting a memory-generated competitor.
-        row['no_search_evidence'] = True
+        # rather than silently trusting a memory-generated competitor. A manual
+        # name is the user's own entry, so it is never marked fabricated.
+        if (row.get('row_source') or 'ai') == 'ai':
+            row['no_search_evidence'] = True
         row['verify_state'] = 'no_match'
         return
     row.pop('no_search_evidence', None)
@@ -21735,10 +21786,6 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     if official and not str(row.get('logo_source_url') or '').strip():
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
-    parsed, _parse_error = _parse_market_model_json(response)
-    # A project price is only as good as the page naming this competitor —
-    # the figure must come from a matched page, not any retrieved one.
-    _apply_verified_competitor_price(row, parsed, set(matched))
 
 
 def _apply_verified_competitor_price(row, parsed, citation_urls):
@@ -21794,9 +21841,10 @@ def _apply_verified_competitor_price(row, parsed, citation_urls):
 
 def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
     report = progress if callable(progress) else (lambda *_args: None)
+    # Manual rows verify too: fill mode exists to complete the cells the user
+    # left empty, and the per-name search is the only priced lookup they get.
     targets = [row for row in (rows or [])
                if isinstance(row, dict)
-               and (row.get('row_source') or 'ai') == 'ai'
                and str(row.get('name') or '').strip()]
     if not targets:
         return
@@ -22003,6 +22051,21 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             'failureReason': reason,
             'providerError': provider_error,
         }
+    # Every grounded call's retrieved pages are evidence — collect them across
+    # the main call and all expansion rounds instead of keeping only the
+    # richest single answer, so later rounds keep feeding verification/logos.
+    citation_pages = []
+    citation_urls = []
+    _seen_citation_urls = set()
+
+    def _collect_citations(response):
+        for page in _market_citation_pages(response):
+            if page['url'] not in _seen_citation_urls:
+                _seen_citation_urls.add(page['url'])
+                citation_pages.append(page)
+                citation_urls.append(page['url'])
+
+    _collect_citations(res)
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     dropped_far = []
     try:
@@ -22065,6 +22128,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             system_prompt, expansion_prompt, max_tokens=14000, max_search_results=20,
             usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
             search_context={'city': payload.get('city'), 'country': 'SA'})
+        provider_error = provider_error or _err2
+        _collect_citations(res2)
         parsed2, _parse_err2 = _parse_market_model_json(res2)
         more = parsed2.get('competitors') if isinstance(parsed2, dict) else []
         added_this_round = 0
@@ -22083,23 +22148,20 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 generated.append(row)
                 named_generated.append(row)
                 added_this_round += 1
-            # Prefer the richer citation set for later logo/verification passes.
-            if _market_citation_urls(res2):
-                res = res2 if len(_market_citation_urls(res2)) > len(_market_citation_urls(res)) else res
         round_no += 1
         if not added_this_round and not _parse_err2:
             # A clean response with no new rows means retrieval is exhausted;
             # a malformed/empty response is a technical miss — try the next angle.
             break
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
-    market_study.apply_search_citations(merged, _market_citation_urls(res))
-    _attach_retrieved_citations(merged, _market_citation_pages(res))
+    market_study.apply_search_citations(merged, citation_urls)
+    _attach_retrieved_citations(merged, citation_pages)
     report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id, progress=report)
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
     report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
-    search_ran = _market_search_ran(res)
+    search_ran = _market_search_ran(res) or bool(citation_urls)
     if search_ran:
         # A grounded run that still leaves a row with zero source URLs means the
         # name came from the model's memory — flag it for the owner's review.
@@ -22121,7 +22183,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
     _auto_import_competitor_logos(
         merged, payload, data, tenant_id=tenant_id, progress=report,
-        citation_pages=_market_citation_pages(res))
+        citation_pages=citation_pages)
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
@@ -22134,15 +22196,31 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1
                        else f'أُجريت {round_no} جولات بحث إضافية عن مشاريع أخرى')
         expansion_note = f'{expansion_note} — {rounds_note}' if expansion_note else rounds_note
+    no_evidence = sum(1 for row in merged if row.get('no_search_evidence'))
+    search_not_run = sum(1 for row in merged if row.get('verify_state') == 'search_not_run')
+    missing_prices = sum(
+        1 for row in merged
+        if str(row.get('name') or '').strip()
+        and not any(str(row.get(key) or '').strip()
+                    for key in ('price_value', 'price_from', 'price_to')))
+    # The table is a partial answer — not a clean success — whenever the search
+    # layer failed to ground rows or fill their prices, or the provider
+    # reported an error we recovered from. The owner must see that instead of
+    # a silent «تم» over an unsourced, unpriced table.
+    partial = bool(provider_error) or not search_ran or no_evidence > 0 or missing_prices > 0
     return {
         'success': True,
         'competitors': merged,
         'sources': sources,
         'added': added,
         'updated': updated,
-        'searchVerified': _market_search_ran(res),
+        'searchVerified': search_ran,
+        'partial': partial,
+        'providerError': provider_error or None,
         'outOfRadiusCount': out_of_radius,
-        'noEvidenceCount': sum(1 for row in merged if row.get('no_search_evidence')),
+        'noEvidenceCount': no_evidence,
+        'searchNotRunCount': search_not_run,
+        'missingPriceCount': missing_prices,
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')) or round_no > 0,
         'expansionNote': expansion_note,
@@ -23731,6 +23809,8 @@ def _open_pinned_https(parsed, addresses):
 
 _OFFICIAL_CDN_PREFIXES = {'cdn', 'images', 'image', 'img', 'static', 'assets', 'media', 'files'}
 _TWO_LEVEL_PUBLIC_SUFFIXES = {'co.uk', 'com.sa', 'net.sa', 'org.sa', 'com.ae', 'co.za', 'com.eg'}
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_OFFICIAL_FETCH_MAX_REDIRECTS = 3
 
 
 def _normalized_web_host(url):
@@ -23743,6 +23823,58 @@ def _registrable_host(host):
         return str(host or '')
     suffix = '.'.join(parts[-2:])
     return '.'.join(parts[-3:]) if suffix in _TWO_LEVEL_PUBLIC_SUFFIXES and len(parts) >= 3 else suffix
+
+
+def _redirect_within_site(origin_url, target_url):
+    # Redirects may move inside the same registrable site — www shuffles,
+    # locale prefixes, CDN subdomains. A hand-off to another registrable
+    # domain is an open-redirect hop we refuse to follow.
+    origin = _normalized_web_host(origin_url)
+    target = _normalized_web_host(target_url)
+    return bool(origin and target
+                and _registrable_host(origin) == _registrable_host(target))
+
+
+def _pinned_https_get(url, redirects_left=_OFFICIAL_FETCH_MAX_REDIRECTS, origin_url=None):
+    """GET an HTTPS URL through the DNS-pinned pool, following redirects that
+    stay inside the original site's registrable host. Returns
+    (pool, response, final_url) — the caller owns pool/response cleanup — or
+    (None, None, error_key_or_text) on validation/transport failure."""
+    parsed = urlsplit(str(url or '').strip())
+    try:
+        invalid_port = parsed.port not in (None, 443)
+    except ValueError:
+        invalid_port = True
+    if (parsed.scheme.lower() != 'https' or not parsed.hostname
+            or parsed.username or invalid_port):
+        return None, None, 'invalid_url'
+    if origin_url and not _redirect_within_site(origin_url, url):
+        return None, None, 'off_site_redirect'
+    addresses = _public_host_addresses(parsed.hostname)
+    if not addresses:
+        return None, None, 'blocked_host'
+    try:
+        pool, response = _open_pinned_https(parsed, addresses)
+    except Exception as exc:
+        return None, None, str(exc)
+    location = str((response.headers or {}).get('Location') or '').strip()
+    if response.status in _REDIRECT_STATUSES and location:
+        response.release_conn()
+        pool.close()
+        if redirects_left <= 0:
+            return None, None, 'too_many_redirects'
+        return _pinned_https_get(urljoin(url, location), redirects_left - 1,
+                                 origin_url or url)
+    return pool, response, url
+
+
+def _official_fetch_error(kind):
+    return {
+        'invalid_url': 'صفحة الموقع الرسمي غير صالحة',
+        'blocked_host': 'عنوان الموقع الرسمي غير مسموح',
+        'off_site_redirect': 'تحويل الموقع الرسمي إلى نطاق مختلف',
+        'too_many_redirects': 'تعذر قراءة صفحة الموقع الرسمي: تحويلات كثيرة',
+    }.get(kind) or str(kind)
 
 
 def _related_official_hosts(first_url, second_url):
@@ -23839,31 +23971,23 @@ class _OfficialLogoHTMLParser(HTMLParser):
 
 
 def _safe_read_official_logo_page(official_url):
-    parsed = urlsplit(str(official_url or '').strip())
-    try:
-        invalid_port = parsed.port not in (None, 443)
-    except ValueError:
-        invalid_port = True
-    if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username or invalid_port):
-        return '', 'صفحة الموقع الرسمي غير صالحة'
-    addresses = _public_host_addresses(parsed.hostname)
-    if not addresses:
-        return '', 'عنوان الموقع الرسمي غير مسموح'
-    try:
-        pool, response = _open_pinned_https(parsed, addresses)
-    except Exception as exc:
-        return '', str(exc)
+    """(page_html, final_url, error) — redirects inside the same registrable
+    site are followed; final_url is the page actually read so relative logo
+    paths resolve against it."""
+    pool, response, outcome = _pinned_https_get(official_url)
+    if pool is None:
+        return '', '', _official_fetch_error(outcome)
     try:
         if response.status != 200:
-            return '', f'تعذر قراءة صفحة الموقع الرسمي: HTTP {response.status}'
+            return '', '', f'تعذر قراءة صفحة الموقع الرسمي: HTTP {response.status}'
         content = bytearray()
         for chunk in response.stream(64 * 1024):
             if not chunk:
                 continue
             content.extend(chunk)
             if len(content) > OFFICIAL_LOGO_PAGE_MAX_BYTES:
-                return '', 'صفحة الموقع الرسمي أكبر من الحد المسموح'
-        return bytes(content).decode('utf-8', errors='replace'), ''
+                return '', '', 'صفحة الموقع الرسمي أكبر من الحد المسموح'
+        return bytes(content).decode('utf-8', errors='replace'), outcome, ''
     finally:
         response.release_conn()
         pool.close()
@@ -23872,9 +23996,10 @@ def _safe_read_official_logo_page(official_url):
 def _official_logo_candidates(official_url):
     """(candidates, error) — the error explains why nothing was extractable so the
     row warning can say so instead of a generic failure."""
-    page, page_error = _safe_read_official_logo_page(official_url)
+    page, final_url, page_error = _safe_read_official_logo_page(official_url)
     if not page:
         return [], page_error or 'تعذر قراءة صفحة الموقع الرسمي'
+    base_url = final_url or official_url
     parser = _OfficialLogoHTMLParser()
     try:
         parser.feed(page)
@@ -23884,10 +24009,10 @@ def _official_logo_candidates(official_url):
     candidates = []
     seen = set()
     for _priority, raw_url in sorted(parser.candidates, key=lambda item: item[0]):
-        candidate = urljoin(official_url, raw_url)
+        candidate = urljoin(base_url, raw_url)
         parsed = urlsplit(candidate)
         if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username
-                or not _same_official_host(candidate, official_url)):
+                or not _same_official_host(candidate, base_url)):
             continue
         # Ad-license stamps (رواج / REGA) ship inside listing pages as images on
         # the same host — never a competitor's own logo.
@@ -23917,13 +24042,17 @@ def _safe_download_competitor_logo(logo_url, official_url):
         return None, None, None, 'شعار المنافس خارج الموقع الرسمي'
     if any(token in str(logo_url).casefold() for token in ('ruwaj', 'rawaj', 'rowaj', '/rwaj', 'rega')):
         return None, None, None, 'شعار منصة إعلانات وليس شعار المنافس'
-    addresses = _public_host_addresses(parsed.hostname)
-    if not addresses or not _public_host_addresses(official.hostname):
+    if not _public_host_addresses(official.hostname):
         return None, None, None, 'عنوان موقع الشعار غير مسموح'
-    try:
-        pool, response = _open_pinned_https(parsed, addresses)
-    except Exception as exc:
-        return None, None, None, str(exc)
+    pool, response, outcome = _pinned_https_get(logo_url)
+    if pool is None:
+        if outcome == 'off_site_redirect':
+            return None, None, None, 'تحويل الشعار إلى نطاق مختلف'
+        if outcome in ('invalid_url', 'blocked_host'):
+            return None, None, None, 'عنوان موقع الشعار غير مسموح'
+        if outcome == 'too_many_redirects':
+            return None, None, None, 'تعذر تنزيل الشعار: تحويلات كثيرة'
+        return None, None, None, str(outcome)
     try:
         if response.status != 200:
             return None, None, None, f'تعذر تنزيل الشعار: HTTP {response.status}'
@@ -23975,16 +24104,12 @@ def _download_official_favicon(official_url):
     host = _normalized_web_host(official_url)
     if not host:
         return None, None, None, ''
-    # The s2 endpoint 301-redirects to gstatic faviconV2 — call it directly.
+    # The s2 endpoint 301-redirects to gstatic faviconV2 — call it directly;
+    # same-site redirects are followed by the pinned fetch anyway.
     favicon_url = ('https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON'
                    f'&fallback_opts=TYPE,SIZE,URL&url=http://{host}&size=128')
-    parsed = urlsplit(favicon_url)
-    addresses = _public_host_addresses(parsed.hostname)
-    if not addresses:
-        return None, None, None, ''
-    try:
-        pool, response = _open_pinned_https(parsed, addresses)
-    except Exception:
+    pool, response, _outcome = _pinned_https_get(favicon_url)
+    if pool is None:
         return None, None, None, ''
     try:
         if response.status != 200:
