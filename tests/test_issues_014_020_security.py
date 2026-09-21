@@ -529,6 +529,76 @@ class GenerationGateTests(ScopeTestBase):
                                        'originalName': 'a.png', 'description': 'd'}]})
         self.assertEqual(response.status_code, 200, response.get_json())
 
+    def _queue_slide(self, project_data):
+        with patch.object(self.module.threading.Thread, 'start'), \
+                patch.object(self.module, '_write_job'):
+            return self.client.post('/api/generate-slide-single-job', headers=self.admin_headers,
+                                    json={'projectData': project_data,
+                                          'slidePlan': self.SLIDE_PLAN, 'slideIndex': 0})
+
+    def test_resigned_media_matches_on_both_generation_routes(self):
+        url = f'/uploads/creative/{self.tenant}/cover.png'
+        draft_id = self._draft('gate-resigned', {
+            'cover': url,
+            'visual_concept': {'slots': [{'approvedImageUrl': url}]},
+            'land_photos_file_meta': [{'id': 'p1', 'imageUrl': url}]})
+        self._approve(draft_id)
+        response = self.client.get(f'/api/project-draft/{draft_id}', headers=self.admin_headers)
+        live = response.get_json()['draft']['draft_data']
+        self.assertIn('?s=', live['cover'])
+        for generate, status in ((self._generate, 200), (self._queue_slide, 202)):
+            with self.subTest(route=generate.__name__):
+                response = generate(live)
+                self.assertEqual(response.status_code, status, response.get_json())
+
+    def test_checkpoint_with_rotated_media_preserves_approval(self):
+        url = f'/uploads/creative/{self.tenant}/checkpoint.png'
+        draft_id = self._draft('gate-checkpoint', {'cover': url + '?s=old&t=1'})
+        self._approve(draft_id)
+        live = {'draftId': draft_id, 'project_name': 'مشروع البوابة',
+                'cover': url + '?cb=2&s=new&v=3',
+                'tenantSlidesData': [{'html': '<div class="slide">ok</div>'}],
+                'tenantSlidePlan': self.SLIDE_PLAN,
+                'slide_generation_checkpoint': {'completed': [0]}}
+        response = self.client.post('/api/project-draft', headers=self.admin_headers,
+                                    json={'draftData': live, 'slideCheckpoint': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        response = self._queue_slide(live)
+        self.assertEqual(response.status_code, 202, response.get_json())
+
+    def test_media_identity_changes_are_still_refused(self):
+        url = f'/uploads/creative/{self.tenant}/cover.png'
+        draft_id = self._draft('gate-media-swap', {'cover': url + '?fileId=one&s=old'})
+        self._approve(draft_id)
+        for changed in (url.replace('cover.png', 'other.png') + '?fileId=one&s=new',
+                        url + '?fileId=two&s=new',
+                        url.replace(self.tenant, self.other) + '?fileId=one&s=new'):
+            with self.subTest(url=changed):
+                response = self._queue_slide({'draftId': draft_id, 'cover': changed})
+                self.assertEqual(response.status_code, 409, response.get_json())
+                self.assertEqual(response.get_json()['error_code'], 'inputs_changed')
+
+    def test_generation_hash_normalizes_only_local_media_fetch_parameters(self):
+        url = f'/uploads/creative/{self.tenant}/cover.png'
+        original = {'nested': [{'url': url + '?fileId=one#crop'}],
+                    'markup': '<img src="' + url + '?fileId=one">'}
+        rotated = {'nested': [{'url': url + '?s=new&fileId=one&cb=2#crop'}],
+                   'markup': '<img src="' + url + '?s=new&amp;fileId=one&amp;t=2">'}
+        self.assertEqual(db.draft_generation_input_hash(original),
+                         db.draft_generation_input_hash(rotated))
+        for before, after in ((url + '?fileId=one', url + '?fileId=two'),
+                              (url + '#one', url + '#two'),
+                              ('https://example.test' + url + '?s=one',
+                               'https://example.test' + url + '?s=two'),
+                              ('https://example.test/?ref=' + url + '?s=one',
+                               'https://example.test/?ref=' + url + '?s=two'),
+                              ('//example.test/?ref=' + url + '?s=one',
+                               '//example.test/?ref=' + url + '?s=two'),
+                              ('budget?s=one', 'budget?s=two')):
+            with self.subTest(before=before):
+                self.assertNotEqual(db.draft_generation_input_hash({'value': before}),
+                                    db.draft_generation_input_hash({'value': after}))
+
     def test_scoped_employee_cannot_generate_on_a_foreign_draft(self):
         draft_id = self._draft('gate-scope', {'project_name': 'مشروع ممنوع'})
         self._approve(draft_id)

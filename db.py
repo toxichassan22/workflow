@@ -5622,6 +5622,33 @@ GENERATION_INPUT_EXCLUDED_KEYS = {
 }
 
 
+_GENERATION_MEDIA_URL_RE = re.compile(
+    r"(?:[a-zA-Z][a-zA-Z0-9+.-]*://|//|(?<![\w/.:])/uploads/)[^\s<>'\"`\\),\]\[]+")
+_GENERATION_MEDIA_FETCH_KEYS = {'s', 't', 'v', 'cb'}
+
+
+def normalize_generation_input(value):
+    if isinstance(value, dict):
+        return {key: normalize_generation_input(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [normalize_generation_input(item) for item in value]
+    if not isinstance(value, str) or '/uploads/' not in value:
+        return value
+
+    def normalize_url(match):
+        if not match.group(0).startswith('/uploads/'):
+            return match.group(0)
+        base, fragment_sep, fragment = match.group(0).partition('#')
+        path, query_sep, query = base.partition('?')
+        if not query_sep:
+            return match.group(0)
+        kept = [part for part in re.split(r'&amp;|&', query)
+                if part.split('=', 1)[0] not in _GENERATION_MEDIA_FETCH_KEYS]
+        return path + ('?' + '&'.join(kept) if kept else '') + fragment_sep + fragment
+
+    return _GENERATION_MEDIA_URL_RE.sub(normalize_url, value)
+
+
 def draft_generation_input_hash(draft_data):
     """Stable hash over a draft's generation inputs — outputs excluded.
 
@@ -5632,7 +5659,7 @@ def draft_generation_input_hash(draft_data):
     data = draft_data if isinstance(draft_data, dict) else {}
     inputs = {key: value for key, value in data.items()
               if key not in GENERATION_INPUT_EXCLUDED_KEYS}
-    return section_snapshot_hash(inputs)
+    return section_snapshot_hash(normalize_generation_input(inputs))
 
 
 def _presentation_review_hash(presentation):

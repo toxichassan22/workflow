@@ -13465,7 +13465,8 @@ def _generation_sent_value_matches(sent, stored):
     if isinstance(sent, list) and isinstance(stored, list):
         return len(sent) == len(stored) and all(
             _generation_sent_value_matches(a, b) for a, b in zip(sent, stored))
-    return _draft_values_equal(sent, stored)
+    return _draft_values_equal(db.normalize_generation_input(sent),
+                               db.normalize_generation_input(stored))
 
 
 def _generation_sent_input_matches(key, sent_value, stored_value):
@@ -13492,7 +13493,8 @@ def _generation_sent_input_matches(key, sent_value, stored_value):
                 for photo in (items if isinstance(items, list) else [])
                 if isinstance(photo, dict)
             ]
-        return norm(sent_value) == norm(stored_value)
+        return db.normalize_generation_input(norm(sent_value)) == db.normalize_generation_input(
+            norm(stored_value))
     return _generation_sent_value_matches(sent_value, stored_value)
 
 

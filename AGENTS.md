@@ -1411,3 +1411,18 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
 - `tests/test_postgres_parity.py` only executes when `TEST_DATABASE_URL` points
   at a reachable disposable Postgres DSN; without it the suite skips. Run it
   before claiming Postgres parity for a change.
+
+## Generation input media identity
+
+- `db.normalize_generation_input()` removes only `s`, `t`, `v`, and `cb` fetch
+  parameters from root-relative `/uploads/` references, including nested input
+  values and embedded markup. Generation input hashing and sent-input comparison
+  must use the same normalization. External URLs, file paths, file IDs, other
+  query parameters, and fragments remain significant; media-serving authorization
+  is independent and must not be relaxed.
+- Old generation approvals that hashed signed URLs literally may need renewed
+  approval after deployment. Never rebase an unverified old approval onto current
+  data just to make its hash pass.
+- Regression coverage lives in `tests.test_issues_014_020_security.GenerationGateTests`:
+  both slide routes accept re-signed inputs, checkpoint saves preserve a newly
+  approved input hash, and real media replacements still fail closed.
