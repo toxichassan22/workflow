@@ -637,11 +637,14 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                               headers=self._admin_headers(),
                               json={'creditBalance': 75.5})
             self.assertEqual(resp.status_code, 200, resp.get_json())
-            patched_update.assert_called_once_with('synchash123', limit_usd=75.5, limit_reset='monthly')
+            # The provider cap is the wallet divided by BILLING_MULTIPLIER, and
+            # the reset policy is always re-pushed as the configured 'none'.
+            patched_update.assert_called_once_with(
+                'synchash123', limit_usd=75.5 / 1.6, limit_reset='none', disabled=False)
 
         with self.app.app_context():
             meta = db.get_tenant_openrouter_key_meta(tenant_id)
-            self.assertEqual(meta['limit_usd'], 75.5)
+            self.assertEqual(meta['limit_usd'], 75.5 / 1.6)
             balance = db.get_tenant_balance(tenant_id)
             self.assertEqual(balance, 75.5)
 
@@ -665,7 +668,8 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
             synced = module._sync_tenant_credit_to_openrouter(tenant_id, 200.0)
             self.assertIsNotNone(synced)
             self.assertEqual(synced['limit_usd'], 200.0)
-            patched_update.assert_called_once_with('discovered_hash_999', limit_usd=200.0, limit_reset='monthly')
+            patched_update.assert_called_once_with(
+                'discovered_hash_999', limit_usd=200.0, limit_reset='none', disabled=False)
 
         with self.app.app_context():
             meta = db.get_tenant_openrouter_key_meta(tenant_id)

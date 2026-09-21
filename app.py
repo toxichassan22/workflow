@@ -440,6 +440,7 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
         if tenant and tenant.get('is_admin'):
             return None
         try:
+            meta = db.get_tenant_openrouter_key_meta(tid)
             raw = db.get_tenant_openrouter_key_raw(tid)
         except Exception as exc:
             print(f"[OPENROUTER KEY] gate lookup failed: {exc}")
@@ -449,6 +450,14 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                     'error_code': 'TENANT_KEY_CHECK_FAILED'}
         if raw:
             return None
+        # The refusal reason matters for support: no row, a deactivated row,
+        # or a row whose secret no longer decrypts all look identical to the
+        # caller but need different fixes.
+        refusal_reason = ('no key row' if not (meta or {}).get('has_key')
+                          else 'key row is inactive'
+                          if not meta.get('is_active')
+                          else 'stored key failed to decrypt')
+        print(f"[OPENROUTER KEY] gate refused tenant {tid}: {refusal_reason}")
         # A management key is configured: try to provision one on the fly
         # instead of blocking the call. This keeps strict mode useful while
         # not requiring a manual key creation step for every new company.
