@@ -523,6 +523,7 @@
       if (approvalId) {
         const res = await api('POST', '/api/generation-approvals/' + encodeURIComponent(approvalId) + '/settle', {
           consumed: consumed,
+          jobId: jobId || undefined,
           note: note || ''
         });
         if (!res || !res.success) console.warn('Settlement error:', res);
@@ -765,7 +766,8 @@
               encodeURIComponent(window.currentGenerationApprovalId) + '/jobs', {
               slidesTotal: totalSlides,
               idempotencyKey: 'gen-' + (window.currentGenerationApprovalId || 'run') +
-                '-' + (tenantProjectData.draftId || tenantPresentationId || Date.now())
+                '-' + (tenantProjectData.draftId || tenantPresentationId || 'draft') +
+                '-' + Date.now()
             });
             if (jobRes && jobRes.success && jobRes.job) window.currentGenerationJobId = jobRes.job.id;
           } catch (jobErr) { console.warn('Generation job register:', jobErr); }

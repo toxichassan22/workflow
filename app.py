@@ -13469,13 +13469,15 @@ def _generation_sent_value_matches(sent, stored):
                                db.normalize_generation_input(stored))
 
 
-def _generation_sent_input_matches(key, sent_value, stored_value):
+def _generation_sent_input_matches(key, sent_value, stored_value, stored_data=None):
     """Whether one client-sent generation input agrees with the stored draft.
 
     Two fields reach the wire in a slimmed shape (slimGenerationProjectData):
     ``financial_study_model`` gains an injected ``report`` companion and
     ``land_photos_file_meta`` collapses each photo to {id, imageUrl,
     originalName, description} — they are compared in that normalized form.
+    ``landmarks_matrix`` may be mirrored client-side from map_landmarks or
+    nearby_landmarks_data; if absent at root in storage it falls back to those.
     """
     if key == 'financial_study_model':
         strip = lambda model: ({k: v for k, v in model.items() if k != 'report'}
@@ -13495,6 +13497,17 @@ def _generation_sent_input_matches(key, sent_value, stored_value):
             ]
         return db.normalize_generation_input(norm(sent_value)) == db.normalize_generation_input(
             norm(stored_value))
+    if key == 'landmarks_matrix':
+        target = stored_value
+        if target is None and isinstance(stored_data, dict):
+            creative = stored_data.get('tenantCreativeImages')
+            if isinstance(creative, dict) and creative.get('map_landmarks') is not None:
+                target = creative.get('map_landmarks')
+            elif stored_data.get('nearby_landmarks_data') is not None:
+                target = stored_data.get('nearby_landmarks_data')
+        if target is not None:
+            return _generation_sent_value_matches(sent_value, target)
+        return True
     return _generation_sent_value_matches(sent_value, stored_value)
 
 
@@ -13547,13 +13560,14 @@ def _generation_inputs_guard(project_data, section_key=''):
                         'error_code': 'generation_not_approved'}), 409
     snapshot = db._json_object(approval['input_snapshot'] if 'input_snapshot' in approval.keys() else None)
     stored_data = draft.get('draft_data') or {}
+    section_map = _draft_field_section_map(g.tenant_id) if section_key else None
     if section_key:
         # A section approval froze that section's inputs only — drift anywhere
         # else is none of this run's business.
         wanted = snapshot.get('section_hash')
         if wanted:
             live_hash = db.section_snapshot_hash(_section_snapshot_slice(
-                stored_data, section_key, _draft_field_section_map(g.tenant_id)))
+                stored_data, section_key, section_map))
             if live_hash != wanted:
                 return jsonify({'error': 'مدخلات هذا القسم تغيّرت عن النسخة المعتمدة — أعد طلب التوليد',
                                 'error_code': 'inputs_changed'}), 409
@@ -13567,7 +13581,11 @@ def _generation_inputs_guard(project_data, section_key=''):
             continue
         if key.endswith('_file_meta') and key != 'land_photos_file_meta':
             continue
-        if not _generation_sent_input_matches(key, value, stored_data.get(key)):
+        if section_key:
+            key_section = _draft_section_of_key(section_map, key)
+            if key_section and key_section != section_key and key_section != 'general':
+                continue
+        if not _generation_sent_input_matches(key, value, stored_data.get(key), stored_data=stored_data):
             return jsonify({'error': 'مدخلات التوليد المرسلة لا تطابق المشروع المعتمد',
                             'error_code': 'inputs_changed', 'input_key': key}), 409
     return None

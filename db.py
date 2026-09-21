@@ -5613,7 +5613,9 @@ def expired_approved_sections(tenant_id, draft_id):
 GENERATION_INPUT_EXCLUDED_KEYS = {
     # Generation outputs and run state — never part of the priced inputs.
     'tenantSlidesData', 'tenantSlidePlan', 'slide_generation_checkpoint',
-    'tenantCreativeImages', 'pageDrafts',
+    'tenantCreativeImages', 'pageDrafts', 'landmarks_matrix',
+    'landmark_map_items', 'landmark_label_positions', 'access_road_label_positions',
+    'access_road_label_sizes', 'catchment_label_positions',
     # Working/chat state that does not feed the generation prompts.
     'designerChat', 'designerChatSessions', 'chatHistory', 'draftHistory',
     'tenantArchiveCache',
