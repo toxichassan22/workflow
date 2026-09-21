@@ -5621,6 +5621,15 @@ GENERATION_INPUT_EXCLUDED_KEYS = {
     'tenantArchiveCache',
     # Identity/bookkeeping fields the client round-trips.
     'draftId', 'draft_id', 'schema_version', 'sectionStatuses',
+    # Transient UI state, view parameters and client-side mirrors.
+    'projectName', 'map_styles', 'map_type', 'main_roads_data',
+    'city_landmarks_data', 'nearby_landmarks_data',
+    'visual_style_reference_file_ids', 'visual_style_reference_file_id',
+    'site_analysis_approved', 'location_analysis_approved', 'croquis_approved',
+    'location_coordinates_confirmed', 'land_use_status',
+    'land_documents_analysis_status', 'calculate_landmark_driving',
+    'presentation_scope', 'presentationId', 'presentationTitle',
+    'location_coordinates_source', 'financial_calc_data',
 }
 
 

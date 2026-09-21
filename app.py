@@ -13459,6 +13459,16 @@ def _generation_sent_value_matches(sent, stored):
     """
     if isinstance(sent, str) and (sent == '[IMAGE_DATA_OMITTED]' or sent.startswith('blob:')):
         return True
+    if isinstance(sent, str) and isinstance(stored, (dict, list)):
+        try:
+            sent = json.loads(sent)
+        except (TypeError, ValueError):
+            pass
+    elif isinstance(stored, str) and isinstance(sent, (dict, list)):
+        try:
+            stored = json.loads(stored)
+        except (TypeError, ValueError):
+            pass
     if isinstance(sent, dict) and isinstance(stored, dict):
         return all(_generation_sent_value_matches(value, stored.get(key))
                    for key, value in sent.items())
@@ -13479,6 +13489,11 @@ def _generation_sent_input_matches(key, sent_value, stored_value, stored_data=No
     ``landmarks_matrix`` may be mirrored client-side from map_landmarks or
     nearby_landmarks_data; if absent at root in storage it falls back to those.
     """
+    if key == 'projectName':
+        target = stored_value
+        if target is None and isinstance(stored_data, dict):
+            target = stored_data.get('project_name')
+        return _generation_sent_value_matches(sent_value, target)
     if key == 'financial_study_model':
         strip = lambda model: ({k: v for k, v in model.items() if k != 'report'}
                                if isinstance(model, dict) else model)
@@ -13582,8 +13597,12 @@ def _generation_inputs_guard(project_data, section_key=''):
         if key.endswith('_file_meta') and key != 'land_photos_file_meta':
             continue
         if section_key:
-            key_section = _draft_section_of_key(section_map, key)
-            if key_section and key_section != section_key and key_section != 'general':
+            key_belongs = (
+                _draft_section_of_key(section_map, key) == section_key
+                or key in SECTION_SNAPSHOT_BLOBS.get(section_key, [])
+                or (section_key == 'location' and key in SECTION_SNAPSHOT_LOCATION_EXTRAS)
+            )
+            if not key_belongs:
                 continue
         if not _generation_sent_input_matches(key, value, stored_data.get(key), stored_data=stored_data):
             return jsonify({'error': 'مدخلات التوليد المرسلة لا تطابق المشروع المعتمد',

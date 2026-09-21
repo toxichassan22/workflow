@@ -413,10 +413,20 @@ def _normalize_legacy_single_slide(slide, project_data=None):
                          'requires_image': False, 'image_tokens': []})
 
     if not str(item.get('content_source') or '').strip() and (
-        section == 'executive_summary' or re.search(r'الملخص\s+التنفيذي|executive\s+summary', title, flags=re.IGNORECASE)
+        section == 'executive_summary' or re.search(r'الملخص\s+التنفيذي|الفرصة\s+الاستثمارية|المميزات|executive\s+summary|investment\s+opportunity', title, flags=re.IGNORECASE)
     ):
         executive = _decode_json_fact(project.get('executive_content'))
-        if isinstance(executive, dict) and str(executive.get('summary') or '').strip():
+        if not isinstance(executive, dict):
+            executive = {}
+        if re.search(r'فرصة|opportunity', title, flags=re.IGNORECASE) and str(executive.get('opportunity') or '').strip():
+            item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
+                         'content_source': 'executive_content.opportunity', 'design_style': 'cards',
+                         'requires_image': False, 'image_tokens': []})
+        elif re.search(r'ممي[زس]|feature', title, flags=re.IGNORECASE) and str(executive.get('features') or '').strip():
+            item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
+                         'content_source': 'executive_content.features', 'design_style': 'cards',
+                         'requires_image': False, 'image_tokens': []})
+        elif str(executive.get('summary') or '').strip() or str(project.get('executive_summary') or '').strip():
             item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
                          'content_source': 'executive_content.summary', 'design_style': 'text',
                          'requires_image': False, 'image_tokens': []})
@@ -425,7 +435,7 @@ def _normalize_legacy_single_slide(slide, project_data=None):
 
 _SECTION_MATCHERS = (
     ('closing', r'(?:الخاتمة|الختام|شكرا|شكراً|closing|conclusion|thanks)'),
-    ('executive_summary', r'(?:الملخص التنفيذي|executive summary)'),
+    ('executive_summary', r'(?:الملخص التنفيذي|الفرصة الاستثمارية|المميزات وفرص الاستثمار|مميزات المشروع|executive summary|investment opportunity)'),
     ('interior', r'(?:التصورات? الداخلية|التصميم الداخلي|interior)'),
     ('exterior', r'(?:التصورات? الخارجية|المود بورد|mood ?board|واجهات المشروع|exterior|التصور البصري)'),
     ('plans', r'(?:المخططات|المخطط|المساقط|مخطط معماري|2d|floor ?plans?)'),
@@ -1731,11 +1741,9 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
         result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
-        comp_chunks = [named_competitors[i:i+4] for i in range(0, len(named_competitors), 4)]
-        total_comp_pages = len(comp_chunks)
-        for chunk_idx, chunk in enumerate(comp_chunks):
-            start = chunk_idx * 4
-            end = start + len(chunk)
+        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=4, min_per_slide=2)
+        total_comp_pages = len(comp_ranges)
+        for chunk_idx, (start, end) in enumerate(comp_ranges):
             c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
             c_source = 'market_study_data.competitors'
             if total_comp_pages > 1:
@@ -2498,30 +2506,30 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
     named_competitors = [c for c in competitors if _competitor_name(c)]
     if named_competitors:
-        existing_comp = next((s for s in groups.get('market', [])
-                              if s.get('content_source') == 'market_study_data.competitors'
-                              or re.search(r'منافس|competitor', str(s.get('title') or ''), re.IGNORECASE)), None)
-        if existing_comp:
-            existing_comp.update({
-                'title': 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين',
-                'type': 'content',
-                'design_style': 'chart',
-                'chart_type': 'horizontal_bar',
-                'content_source': 'market_study_data.competitors',
-                'source_table': 'competitors',
-            })
-        else:
-            add('market', {
-                'title': 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين',
-                'type': 'content',
-                'design_style': 'chart',
-                'chart_type': 'horizontal_bar',
-                'content_density': 'high',
-                'requires_image': False,
-                'content_source': 'market_study_data.competitors',
-                'source_table': 'competitors',
-                'bullets': [],
-            })
+        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=4, min_per_slide=2)
+        total_comp_pages = len(comp_ranges)
+        existing_market = groups.get('market', [])
+        comp_slides = [s for s in existing_market if str(s.get('content_source') or '').startswith('market_study_data.competitors')
+                       or re.search(r'منافس|competitor', str(s.get('title') or ''), re.IGNORECASE)]
+        if not comp_slides:
+            for chunk_idx, (start, end) in enumerate(comp_ranges):
+                c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
+                c_source = 'market_study_data.competitors' if total_comp_pages == 1 else f'market_study_data.competitors:{start}:{end}'
+                if total_comp_pages > 1:
+                    c_title += f' ({chunk_idx + 1}/{total_comp_pages})'
+                add('market', {
+                    'title': c_title,
+                    'type': 'content',
+                    'design_style': 'chart',
+                    'chart_type': 'horizontal_bar',
+                    'content_density': 'high',
+                    'requires_image': False,
+                    'content_source': c_source,
+                    'source_table': 'competitors',
+                    'competitor_start': start,
+                    'competitor_end': end,
+                    'bullets': [],
+                })
     executive = _decode_json_fact(source.get('executive_content'))
     executive = executive if isinstance(executive, dict) else {}
     swot = _extract_project_swot(source)
@@ -2546,19 +2554,63 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'content_density': 'high', 'requires_image': False,
             'content_source': 'timeline_table_data', 'bullets': [],
         })
-    if str(executive.get('summary') or '').strip():
-        existing_summary = groups.get('executive_summary', [])[:1]
+    has_opp = bool(str(executive.get('opportunity') or '').strip())
+    has_feat = bool(str(executive.get('features') or '').strip())
+    has_sum = bool(str(executive.get('summary') or '').strip() or str(source.get('executive_summary') or '').strip())
+    if has_opp or has_feat or has_sum:
+        existing_exec = list(groups.get('executive_summary', []))
+        existing_by_source = {
+            str(s.get('content_source') or '').strip(): dict(s)
+            for s in existing_exec
+            if str(s.get('content_source') or '').strip()
+        }
         groups['executive_summary'] = []
-        summary_slide = dict(existing_summary[0]) if existing_summary else {}
-        summary_ext_token = '##MOODBOARD_1##' if moodboard_items else (overview_map_tokens[0] if overview_map_tokens else '')
-        summary_tokens = [summary_ext_token] if summary_ext_token else []
-        summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
-        summary_slide.update({
-            'title': section_title('executive_summary', lang), 'type': 'content', 'design_style': summary_style,
-            'content_density': 'high', 'requires_image': bool(summary_tokens),
-            'content_source': 'executive_content.summary', 'image_tokens': summary_tokens, 'bullets': [],
-        })
-        add('executive_summary', summary_slide)
+        if has_opp:
+            opp_slide = existing_by_source.get('executive_content.opportunity') or {}
+            opp_tokens = opp_slide.get('image_tokens') or []
+            opp_slide.update({
+                'title': 'Investment Opportunity' if lang == OFFER_LANG_ENGLISH else 'الفرصة الاستثمارية',
+                'type': 'content',
+                'section_key': 'executive_summary',
+                'design_style': 'cards',
+                'content_density': 'high',
+                'requires_image': bool(opp_tokens),
+                'content_source': 'executive_content.opportunity',
+                'image_tokens': opp_tokens,
+                'bullets': [],
+            })
+            add('executive_summary', opp_slide)
+        if has_feat:
+            feat_slide = existing_by_source.get('executive_content.features') or {}
+            feat_slide.update({
+                'title': 'Project Features & Opportunities' if lang == OFFER_LANG_ENGLISH else 'المميزات وفرص الاستثمار',
+                'type': 'content',
+                'section_key': 'executive_summary',
+                'design_style': 'cards',
+                'content_density': 'high',
+                'requires_image': False,
+                'content_source': 'executive_content.features',
+                'image_tokens': [],
+                'bullets': [],
+            })
+            add('executive_summary', feat_slide)
+        if has_sum or (not has_opp and not has_feat):
+            summary_slide = existing_by_source.get('executive_content.summary') or (existing_exec[0] if existing_exec and not has_opp and not has_feat else {})
+            summary_ext_token = '##MOODBOARD_1##' if moodboard_items else (overview_map_tokens[0] if overview_map_tokens else '')
+            summary_tokens = [summary_ext_token] if summary_ext_token else []
+            summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
+            summary_slide.update({
+                'title': section_title('executive_summary', lang),
+                'type': 'content',
+                'section_key': 'executive_summary',
+                'design_style': summary_style,
+                'content_density': 'high',
+                'requires_image': bool(summary_tokens),
+                'content_source': 'executive_content.summary',
+                'image_tokens': summary_tokens,
+                'bullets': [],
+            })
+            add('executive_summary', summary_slide)
 
     if lang == OFFER_LANG_ENGLISH:
         summaries = (
@@ -2630,7 +2682,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         'plans': bool(plans),
         'exterior': bool(moodboard_items),
         'interior': has_interior,
-        'executive_summary': bool(str(executive.get('summary') or '').strip()),
+        'executive_summary': bool(
+            str(executive.get('summary') or '').strip()
+            or str(executive.get('opportunity') or '').strip()
+            or str(executive.get('features') or '').strip()
+            or str(source.get('executive_summary') or '').strip()
+        ),
     }
     for section_key, available in availability.items():
         if not available:
@@ -5460,7 +5517,22 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
     if source == 'executive_content.summary':
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
+        if not value:
+            value = str(project_data.get('executive_summary') or '').strip()
         return 'الملخص التنفيذي المعتمد دون إضافة أو تكرار:\n' + value if value else ''
+    if source == 'executive_content.opportunity':
+        executive = _decode_json_fact(project_data.get('executive_content'))
+        value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
+        return 'الفرصة الاستثمارية المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
+    if source == 'executive_content.features':
+        executive = _decode_json_fact(project_data.get('executive_content'))
+        features_raw = executive.get('features') if isinstance(executive, dict) else []
+        if isinstance(features_raw, list):
+            items = [str(it).strip() for it in features_raw if str(it).strip()]
+            value = '\n'.join(f'- {it}' for it in items)
+        else:
+            value = str(features_raw or '').strip()
+        return 'المميزات وفرص الاستثمار المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
     if source == 'contact_closing':
         contact = _contact_facts(project_data)
         if contact:
@@ -6304,6 +6376,213 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
     <div class="footer-center">الملخص التنفيذي للمشروع</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render executive investment opportunity as a high-impact multi-card layout."""
+    source = source if isinstance(source, dict) else {}
+    executive = _decode_json_fact(source.get('executive_content'))
+    opp_text = str((executive.get('opportunity') if isinstance(executive, dict) else None) or '').strip()
+    if not opp_text:
+        opp_text = _slide_source_data_note(slide, source)
+
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الفرصة الاستثمارية'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
+    ext_token = next((token for token in tokens if not token.startswith('##')), '')
+    if not ext_token and tokens:
+        ext_token = tokens[0]
+
+    badges = []
+    city = str(source.get('city') or '').strip()
+    district = str(source.get('district') or '').strip()
+    loc = ' — '.join(p for p in (city, district) if p)
+    if loc:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
+    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
+    if prop_type:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
+    land_area = str(source.get('approved_financial_area') or source.get('land_area') or '').strip()
+    if land_area:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{accent};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">المساحة: {html_lib.escape(land_area)} م²</span>')
+
+    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
+
+    raw_paras = [p.strip() for p in re.split(r'\n{2,}|\r\n\r\n', opp_text) if p.strip()]
+    if len(raw_paras) == 1 and len(opp_text) > 250:
+        lines = [line.strip(' -•') for line in opp_text.split('\n') if line.strip(' -•')]
+        if len(lines) >= 2:
+            raw_paras = lines
+        else:
+            sentences = [s.strip() for s in re.split(r'(?<=[.!?؟])\s+', opp_text) if s.strip()]
+            if len(sentences) >= 4:
+                half = len(sentences) // 2
+                raw_paras = [' '.join(sentences[:half]), ' '.join(sentences[half:])]
+
+    if not raw_paras:
+        raw_paras = [opp_text or 'الفرصة الاستثمارية للمشروع']
+
+    if ext_token:
+        card_items = []
+        for i, para in enumerate(raw_paras[:3]):
+            head = 'أبعاد الفرصة الاستثمارية' if i == 0 else ('القيمة التنافسية والطلب' if i == 1 else 'الجدوى ومسار التطوير')
+            card_items.append(
+                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;border-right:4px solid {accent if i == 0 else primary};">'
+                f'<div style="font-size:13px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
+                f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
+            )
+        cards_html = f'''<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;height:480px;align-items:stretch;">
+          <div style="display:flex;flex-direction:column;gap:12px;justify-content:space-between;height:100%;">
+            {"".join(card_items)}
+          </div>
+          <div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;height:100%;">
+            <img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
+          </div>
+        </div>'''
+    else:
+        if len(raw_paras) == 1:
+            cards_html = (
+                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:26px 30px;border-right:6px solid {accent};height:460px;box-sizing:border-box;">'
+                f'<div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:12px;">أبعاد ومقومات الفرصة الاستثمارية</div>'
+                f'<div style="font-size:15.5px;line-height:1.8;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div></div>'
+            )
+        elif len(raw_paras) == 2:
+            cards_html = f'''<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:460px;">
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {primary};">
+                <div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:10px;">أبعاد الفرصة والميزة الاستراتيجية</div>
+                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div>
+              </div>
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {accent};">
+                <div style="font-size:16px;font-weight:800;color:{accent};margin-bottom:10px;">القيمة المضافة ومحركات العائد</div>
+                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[1])}</div>
+              </div>
+            </div>'''
+        else:
+            cards = []
+            for i, para in enumerate(raw_paras[:4]):
+                head = 'أبعاد الفرصة' if i == 0 else ('القيمة التنافسية' if i == 1 else ('الطلب والنمو' if i == 2 else 'الاستدامة والعائد'))
+                cards.append(
+                    f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;border-right:4px solid {accent if i % 2 == 1 else primary};">'
+                    f'<div style="font-size:14px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
+                    f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
+                )
+            cards_html = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;height:460px;">{"".join(cards)}</div>'
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">INVESTMENT OPPORTUNITY</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">الفرصة الاستثمارية ومحركات الجدوى والعوائد المتوقعة للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    {badge_strip}
+    {cards_html}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">الفرصة الاستثمارية</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_executive_features_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render executive features and opportunities as a structured card grid."""
+    source = source if isinstance(source, dict) else {}
+    executive = _decode_json_fact(source.get('executive_content'))
+    features_raw = executive.get('features') if isinstance(executive, dict) else []
+    if isinstance(features_raw, list):
+        items = [str(it).strip() for it in features_raw if str(it).strip()]
+    elif isinstance(features_raw, str) and features_raw.strip():
+        items = [line.strip(' -•*') for line in features_raw.split('\n') if line.strip(' -•*')]
+    else:
+        items = []
+
+    if not items:
+        bullets = (slide or {}).get('bullets') or []
+        items = [str(b).strip() for b in bullets if str(b).strip()]
+
+    if not items:
+        note = _slide_source_data_note(slide, source)
+        if note:
+            items = [line.strip(' -•*') for line in note.split('\n') if line.strip(' -•*')]
+
+    if not items:
+        items = ['مقومات تنافسية متميزة للمشروع', 'موقع استراتيجي وتدفقات مستهدفة', 'عوائد استثمارية مجدية ونمو مستدام']
+
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'المميزات وفرص الاستثمار'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    badges = []
+    city = str(source.get('city') or '').strip()
+    district = str(source.get('district') or '').strip()
+    loc = ' — '.join(p for p in (city, district) if p)
+    if loc:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
+    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
+    if prop_type:
+        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
+
+    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
+
+    display_items = items[:6]
+    num_cards = len(display_items)
+    grid_cols = '1fr 1fr' if num_cards <= 4 else '1fr 1fr 1fr'
+
+    card_elements = []
+    for idx, item_text in enumerate(display_items, 1):
+        accent_bar = accent if idx % 2 == 1 else primary
+        num_str = f'0{idx}' if idx < 10 else str(idx)
+        card_elements.append(
+            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;border-top:4px solid {accent_bar};display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;">'
+            f'<div style="font-size:18px;font-weight:900;color:{accent_bar};margin-bottom:8px;font-family:sans-serif;">{num_str}</div>'
+            f'<div style="font-size:14.5px;line-height:1.7;color:#1e293b;font-weight:600;">{html_lib.escape(item_text)}</div>'
+            f'</div>'
+        )
+
+    grid_html = f'<div style="display:grid;grid-template-columns:{grid_cols};gap:16px;min-height:360px;max-height:460px;">{"".join(card_elements)}</div>'
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">PROJECT FEATURES & ADVANTAGES</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">أبرز المقومات التنافسية وعناصر الجذب الاستثماري للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    {badge_strip}
+    {grid_html}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">المميزات وفرص الاستثمار</div>
     <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
   </footer>
 </div>'''
@@ -7429,6 +7708,22 @@ def _required_slide_texts(slide, project_data):
     if source == 'site_analysis':
         value = str(project_data.get('site_analysis') or '').strip()
         return [value] if value else []
+    if source == 'executive_content.opportunity':
+        executive = _decode_json_fact(project_data.get('executive_content'))
+        value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
+        return [value] if value else []
+    if source == 'executive_content.features':
+        executive = _decode_json_fact(project_data.get('executive_content'))
+        features_raw = executive.get('features') if isinstance(executive, dict) else []
+        if isinstance(features_raw, list):
+            return [str(it).strip() for it in features_raw if str(it).strip()]
+        return [line.strip(' -•*') for line in str(features_raw or '').split('\n') if line.strip(' -•*')]
+    if source == 'executive_content.summary':
+        executive = _decode_json_fact(project_data.get('executive_content'))
+        value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
+        if not value:
+            value = str(project_data.get('executive_summary') or '').strip()
+        return [value] if value else []
     if source in {
         'executive_content.risks', 'market_study_data.risk_analysis',
         'market_study_data.risk_register', 'market_study_data.risks',
@@ -7472,6 +7767,16 @@ def _required_slide_texts(slide, project_data):
     if source == 'market_study_data.competitors' or 'competitors' in source:
         market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
         competitors = market.get('competitors') if isinstance(market, dict) else []
+        competitors = [c for c in competitors if isinstance(c, dict) and _competitor_name(c)]
+        c_start = (slide or {}).get('competitor_start')
+        c_end = (slide or {}).get('competitor_end')
+        cs = str(source or '')
+        if c_start is not None and c_end is not None:
+            competitors = competitors[c_start:c_end]
+        elif ':' in cs:
+            parts = cs.split(':')
+            if len(parts) >= 3 and parts[-2].isdigit() and parts[-1].isdigit():
+                competitors = competitors[int(parts[-2]):int(parts[-1])]
         items = _extract_competitor_chart_data(competitors, project_data)
         return [str(it.get('name') or '').strip() for it in items if str(it.get('name') or '').strip()]
     if source == 'contact_closing':
@@ -7705,6 +8010,16 @@ def _fallback_table_data(slide, project_data):
     if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors' or 'competitors' in source:
         market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
         competitors = market.get('competitors') if isinstance(market, dict) else []
+        competitors = [c for c in competitors if isinstance(c, dict) and _competitor_name(c)]
+        c_start = (slide or {}).get('competitor_start')
+        c_end = (slide or {}).get('competitor_end')
+        cs = str(source or '')
+        if c_start is not None and c_end is not None:
+            competitors = competitors[c_start:c_end]
+        elif ':' in cs:
+            parts = cs.split(':')
+            if len(parts) >= 3 and parts[-2].isdigit() and parts[-1].isdigit():
+                competitors = competitors[int(parts[-2]):int(parts[-1])]
         chart_items = _extract_competitor_chart_data(competitors, project_data)
         if chart_items:
             headers = ['المنافس / المشروع', 'السعر', 'النوع']
@@ -8117,6 +8432,16 @@ def _render_fallback_chart(chart_type, slide, project_data, primary='#005f78', s
     if chart_type == 'horizontal_bar':
         market = _decode_json_fact((project_data or {}).get('market_study_data')) if isinstance((project_data or {}).get('market_study_data'), (str, dict)) else {}
         competitors = market.get('competitors') if isinstance(market, dict) else []
+        competitors = [c for c in competitors if isinstance(c, dict) and _competitor_name(c)]
+        c_start = (slide or {}).get('competitor_start')
+        c_end = (slide or {}).get('competitor_end')
+        cs = str((slide or {}).get('content_source') or '')
+        if c_start is not None and c_end is not None:
+            competitors = competitors[c_start:c_end]
+        elif ':' in cs:
+            parts = cs.split(':')
+            if len(parts) >= 3 and parts[-2].isdigit() and parts[-1].isdigit():
+                competitors = competitors[int(parts[-2]):int(parts[-1])]
         items = _extract_competitor_chart_data(competitors, project_data)
         return _render_fallback_horizontal_bar(items, primary, secondary)
     elif chart_type == 'waterfall':
@@ -8610,6 +8935,7 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
 
     market = _decode_json_fact(source.get('market_study_data')) if isinstance(source.get('market_study_data'), (str, dict)) else {}
     competitors = market.get('competitors') if isinstance(market, dict) else []
+    competitors = [c for c in competitors if isinstance(c, dict) and _competitor_name(c)]
     c_start = (slide or {}).get('competitor_start')
     c_end = (slide or {}).get('competitor_end')
     cs = str((slide or {}).get('content_source') or '')
@@ -9725,6 +10051,10 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 f'<div style="border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;padding:24px;overflow:hidden;font-size:{summary_font};line-height:{summary_line_height};color:#1e293b;">{note}</div>'
                 f'{image_panel}'
                 f'</div></div>')
+    if content_source == 'executive_content.opportunity':
+        return _build_executive_opportunity_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if content_source == 'executive_content.features':
+        return _build_executive_features_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.scope', content_source):
         return _build_market_scope_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.summary(?::\d+:\d+)?', content_source):
@@ -9912,15 +10242,18 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         title_text = str(slide.get('title') or '').strip()
         content_source = str(slide.get('content_source') or '').strip()
         if (
-            content_source == 'market_study_data.competitors'
+            content_source.startswith('market_study_data.competitors')
             or slide.get('source_table') == 'competitors'
             or re.search(r'(?:منافس|competitor)', title_text, flags=re.IGNORECASE)
         ):
+            default_title = 'Competitor Comparison' if resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
+            preserved_title = title_text if re.search(r'(?:منافس|competitor)', title_text, flags=re.IGNORECASE) else default_title
+            preserved_source = content_source if content_source.startswith('market_study_data.competitors') else 'market_study_data.competitors'
             slide.update({
-                'title': 'Competitor Comparison' if resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH else 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
+                'title': preserved_title, 'type': 'content', 'section_key': 'market',
                 'design_style': 'chart', 'chart_type': 'horizontal_bar',
                 'requires_image': False, 'image_tokens': [],
-                'content_source': 'market_study_data.competitors', 'source_table': 'competitors',
+                'content_source': preserved_source, 'source_table': 'competitors',
             })
         elif re.fullmatch(r'market_study_data\.(?:scope|summary|one_block_summary|sources)(?::\d+:\d+)?', content_source):
             slide.update({'type': 'content', 'section_key': 'market', 'requires_image': False, 'image_tokens': []})
@@ -9947,7 +10280,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     market_source = str((slide or {}).get('content_source') or '')
     fixed_market_comparison = (
         _slide_section_key(slide) == 'market'
-        and market_source == 'market_study_data.competitors'
+        and bool(re.fullmatch(r'market_study_data\.competitors(?::\d+:\d+)?', market_source))
         and chart_type == 'horizontal_bar'
     )
     fixed_land_boundary_diagram = market_source == 'land_boundary_diagram'
@@ -9956,8 +10289,9 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     }
     deterministic_market_source = bool(
         re.fullmatch(r'market_study_data\.(?:scope|summary|sources)(?::\d+:\d+)?', market_source)
+        or bool(re.fullmatch(r'market_study_data\.competitors(?::\d+:\d+)?', market_source))
         or market_source in {
-            'market_study_data.competitors', 'market_study_data.swot',
+            'market_study_data.swot',
             'executive_content.risks', 'market_study_data.risk_analysis',
             'market_study_data.risk_register', 'market_study_data.risks',
             'market_study_data.summary.risks',
@@ -9988,6 +10322,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
                      or market_source in {'site_analysis', 'executive_content.summary',
+                                           'executive_content.opportunity', 'executive_content.features',
                                            'land_and_building_summary'}
                      or _slide_section_key(slide) == 'financial'))):
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
@@ -11523,6 +11858,7 @@ def _is_fixed_competitor_comparison(content_source='', slide_title=''):
     text = ' '.join(str(value or '') for value in (content_source, slide_title)).lower()
     return bool(
         str(content_source or '').strip() == 'market_study_data.competitors'
+        or bool(re.fullmatch(r'market_study_data\.competitors(?::\d+:\d+)?', str(content_source or '').strip()))
         or re.search(r'(?:مقارنة\s+المنافسين|المنافسين|competitor)', text, flags=re.IGNORECASE)
     )
 
@@ -12061,7 +12397,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                     'section_key': 'market',
                     'design_style': 'chart',
                     'chart_type': 'horizontal_bar',
-                    'content_source': 'market_study_data.competitors',
+                    'content_source': content_source or 'market_study_data.competitors',
                     'source_table': 'competitors',
                 },
                 project_data if isinstance(project_data, dict) else {},

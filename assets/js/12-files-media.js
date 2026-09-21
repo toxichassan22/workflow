@@ -842,6 +842,7 @@
           if (window.currentGenerationApprovalId) {
             api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
               consumed: false,
+              jobId: window.currentGenerationJobId || undefined,
               note: 'تعذر إعداد خطة الشرائح'
             }).catch(err => console.warn('Settlement release error:', err));
             window.currentGenerationApprovalId = null;
