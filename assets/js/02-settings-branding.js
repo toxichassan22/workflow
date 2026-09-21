@@ -219,6 +219,10 @@
     };
 
     function openTenantPageById(pageId) {
+      if (pageId === 'tenantProjectPage' && tenantProjectMode === 'presentation') {
+        navigateTenantWorkflow('tenantProjectPage');
+        return;
+      }
       const name = TENANT_PAGE_OPENERS[pageId];
       const opener = name && window[name];
       if (typeof opener === 'function') {
@@ -238,6 +242,12 @@
     async function navigateTenantWorkflow(pageId) {
       if (pageId === 'tenantProjectPage') {
         showTenantPage(pageId);
+        if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') {
+          const draftId = tenantProjectData?.draftId || tenantProjectData?.draft_id;
+          if (draftId && typeof openProjectDraftById === 'function') {
+            await openProjectDraftById(draftId);
+          }
+        }
         return;
       }
       if (pageId === 'tenantSlidesPage') {
@@ -246,6 +256,13 @@
         return;
       }
       if (pageId === 'tenantVisualConceptPage') {
+        if (tenantProjectMode === 'presentation') {
+          const draftId = tenantProjectData?.draftId || tenantProjectData?.draft_id;
+          if (draftId && typeof openProjectDraftById === 'function') {
+            await openProjectDraftById(draftId);
+            return openTenantVisualConceptPage();
+          }
+        }
         return openTenantVisualConceptPage();
       }
     }
@@ -265,7 +282,7 @@
     }
 
     function closeProjectPresentationsTab() {
-      showTenantPage('tenantProjectPage');
+      navigateTenantWorkflow('tenantProjectPage');
     }
 
     async function loadProjectPresentationsPage(draftId = currentProjectPresentationsDraftId()) {

@@ -1078,6 +1078,12 @@
 
     async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null) {
       try {
+        if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation' && !slideCheckpoint) {
+          // When viewing or editing an existing presentation, the workspace is scoped
+          // to that presentation. Overwriting the live project draft with an older
+          // presentation snapshot would destroy live project data and void approved sections.
+          return true;
+        }
         let data;
         if (slideCheckpoint) {
           renumberTenantSlides();
