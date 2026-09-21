@@ -12166,9 +12166,11 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'project_name': 'مشروع الاختبار', 'executive_content': {'summary': summary}},
             {},
         )
-        self.assertIn('grid-template-columns:1fr;', html)
-        self.assertIn('font-size:11.5px;line-height:1.38;', html)
+        self.assertIn('data-exec-analysis', html)
+        self.assertIn('البيانات الأساسية', html)
+        self.assertNotIn('<img', html)
         self.assertNotIn('##MOODBOARD_1##', html)
+        self.assertNotIn('المعتمد دون إضافة أو تكرار', html)
 
     def test_revenue_table_linked_component_can_be_changed_and_cleared(self):
         """Selecting a linked component in table 4 (بنود الإيرادات) must remain editable:
@@ -13075,6 +13077,82 @@ class MeetingRequirementsTests(unittest.TestCase):
         sum_html = engine._build_structured_fallback_slide(exec_slides[2], draft, {})
         self.assertIn('الملخص التنفيذي', sum_html)
         self.assertIn('ملخص تنفيذي شامل', sum_html)
+
+    def test_executive_summary_parses_sections_and_paginates_by_volume(self):
+        """The long labelled executive summary splits into labelled sections and
+        content-height pages instead of one unreadable slide."""
+        engine = self.application_module.slide_engine
+        block = 'نص معتمد مفصل يغطي هذا القسم بالكامل مع أرقام ومؤشرات وإسقاطات مالية. ' * 14
+        summary = '\n\n'.join(
+            f'{label}\n\n{block}' for label in (
+                'البيانات الأساسية', 'الموقع', 'الأرض والاشتراطات', 'الجدول الزمني',
+                'الدراسة المالية', 'فريق العمل', 'دراسة السوق', 'الخلاصة'))
+        draft = {'project_name': 'مشروع', 'executive_content': json.dumps(
+            {'summary': summary}, ensure_ascii=False)}
+
+        sections = engine._executive_summary_sections(draft)
+        self.assertEqual(len(sections), 8)
+        self.assertEqual([label for label, _text in sections][0], 'البيانات الأساسية')
+        self.assertEqual(sections[-1][0], 'الخلاصة')
+
+        pages = engine._executive_summary_pages(draft)
+        self.assertGreaterEqual(len(pages), 2)
+        self.assertEqual(sum(len(rows) for _start, rows in pages), 8)
+        starts = [start for start, _rows in pages]
+        self.assertEqual(starts[0], 0)
+        self.assertTrue(all(starts[i] < starts[i + 1] for i in range(len(starts) - 1)))
+
+        plan = engine.normalize_presentation_plan({}, project_data=draft, images={})
+        summary_slides = [s for s in plan['slides']
+                          if str(s.get('content_source') or '').startswith('executive_content.summary')]
+        self.assertEqual(len(summary_slides), len(pages))
+        self.assertEqual(summary_slides[0].get('content_source'), 'executive_content.summary')
+        self.assertEqual(summary_slides[0].get('market_row_start'), pages[0][0])
+        self.assertEqual(summary_slides[0].get('market_row_end'), pages[0][0] + len(pages[0][1]))
+        for slide, (start, rows) in zip(summary_slides[1:], pages[1:]):
+            self.assertEqual(slide.get('content_source'),
+                             f'executive_content.summary:{start}:{start + len(rows)}')
+        self.assertIn('(1/', str(summary_slides[0].get('title') or ''))
+
+        first_html = engine._build_structured_fallback_slide(summary_slides[0], draft, {})
+        self.assertIn('البيانات الأساسية', first_html)
+        self.assertNotIn('المعتمد دون إضافة أو تكرار', first_html)
+        last_html = engine._build_structured_fallback_slide(summary_slides[-1], draft, {})
+        self.assertIn('الخلاصة', last_html)
+        self.assertNotIn('المعتمد دون إضافة أو تكرار', last_html)
+        # Section numbering continues across pages instead of restarting at 01.
+        last_start = pages[-1][0]
+        self.assertIn(f'{last_start + 1:02d}', last_html)
+
+    def test_executive_opportunity_chunks_text_and_features_split_dash_items(self):
+        engine = self.application_module.slide_engine
+        opportunity = ('تمثل الأرض فرصة استثمارية نادرة على الواجهة البحرية. ' * 30)
+        features = 'موقع استراتيجي على الكورنيش - إطلالة بحرية مباشرة - فندق 5 نجوم وسكن فاخر - عائد مستهدف 14%'
+        draft = {'project_name': 'مشروع', 'executive_content': json.dumps(
+            {'opportunity': opportunity, 'features': features}, ensure_ascii=False)}
+
+        items = engine._executive_feature_items(draft)
+        self.assertEqual(len(items), 4)
+        self.assertEqual(items[2], 'فندق 5 نجوم وسكن فاخر')
+
+        chunks = engine._exec_text_chunks(opportunity)
+        self.assertGreater(len(chunks), 1)
+
+        opp_html = engine._build_structured_fallback_slide(
+            {'title': 'الفرصة الاستثمارية', 'content_source': 'executive_content.opportunity',
+             'type': 'content', 'image_tokens': []}, draft, {})
+        self.assertIn('تمثل الأرض فرصة استثمارية', opp_html)
+        self.assertNotIn('المعتمدة دون إضافة أو تكرار', opp_html)
+        self.assertGreaterEqual(opp_html.count('data-exec-topic'), 1)
+
+        feat_html = engine._build_structured_fallback_slide(
+            {'title': 'المميزات وفرص الاستثمار', 'content_source': 'executive_content.features',
+             'type': 'content', 'image_tokens': []}, draft, {})
+        feat_text = re.sub(r'<[^>]+>', '', feat_html)
+        for item in items:
+            self.assertIn(item, feat_text)
+        self.assertIn('04', feat_html)
+        self.assertIn('4 ميزة تنافسية', feat_html)
 
 
 if __name__ == '__main__':

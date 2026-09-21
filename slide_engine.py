@@ -1705,25 +1705,89 @@ def _market_summary_topic_height(label, value, lead=False):
     return 54 + lines * 21
 
 
+def _budget_row_pages(rows, first_budget=None):
+    """Pack (label, text) rows into pages by estimated rendered height."""
+    rows = list(rows or [])
+    budget = _MARKET_PAGE_BUDGET_PX
+    first_budget = budget if first_budget is None else first_budget
+    pages = []
+    index = 0
+    while index < len(rows):
+        start = index
+        page_budget = first_budget if start == 0 else budget
+        used = _market_summary_topic_height(rows[index][0], rows[index][1], lead=True)
+        index += 1
+        while (index < len(rows) and index - start < _MARKET_MAX_TOPICS_PER_PAGE
+               and used + _market_summary_topic_height(rows[index][0], rows[index][1]) <= page_budget):
+            used += _market_summary_topic_height(rows[index][0], rows[index][1])
+            index += 1
+        pages.append((start, rows[start:index]))
+    return pages
+
+
 def _market_summary_pages(market):
     """Pack detailed-analysis topics into pages by estimated rendered height."""
     rows = _market_summary_rows(market)
     budget_first = _MARKET_PAGE_BUDGET_PX - (
         _MARKET_DECISION_STRIP_PX if str((market or {}).get('decision') or '').strip() else 0
     )
-    pages = []
-    index = 0
-    while index < len(rows):
-        start = index
-        budget = budget_first if start == 0 else _MARKET_PAGE_BUDGET_PX
-        used = _market_summary_topic_height(rows[index][0], rows[index][1], lead=True)
-        index += 1
-        while (index < len(rows) and index - start < _MARKET_MAX_TOPICS_PER_PAGE
-               and used + _market_summary_topic_height(rows[index][0], rows[index][1]) <= budget):
-            used += _market_summary_topic_height(rows[index][0], rows[index][1])
-            index += 1
-        pages.append((start, rows[start:index]))
-    return pages
+    return _budget_row_pages(rows, budget_first)
+
+
+_EXEC_LABEL_RE = re.compile(r'^[^.،,؛:؟!…\-]{2,60}$')
+
+
+def _executive_summary_sections(project_data):
+    """Split the approved executive summary into (label, text) blocks.
+
+    The stored document uses short unnumbered label lines (البيانات الأساسية،
+    الموقع، الجدول الزمني …) followed by paragraph blocks separated by blank
+    lines. Unlabelled documents collapse to a single summary block.
+    """
+    executive = _decode_json_fact((project_data or {}).get('executive_content'))
+    text = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
+    if not text:
+        text = str((project_data or {}).get('executive_summary') or '').strip()
+    if not text:
+        return []
+    blocks = []
+    current = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        current.append(line)
+    if current:
+        blocks.append(current)
+
+    def is_label(block):
+        joined = ' '.join(block)
+        return len(block) == 1 and len(joined.split()) <= 6 and bool(_EXEC_LABEL_RE.match(joined))
+
+    if not any(is_label(block) for block in blocks):
+        return [('', ' '.join(block)) for block in blocks]
+    sections = []
+    current_label = ''
+    current_paras = []
+    for block in blocks:
+        if is_label(block):
+            if current_paras or current_label:
+                sections.append((current_label, ' '.join(current_paras)))
+                current_paras = []
+            current_label = ' '.join(block)
+        else:
+            current_paras.append(' '.join(block))
+    if current_paras or current_label:
+        sections.append((current_label, ' '.join(current_paras)))
+    return sections
+
+
+def _executive_summary_pages(project_data):
+    """Pack executive-summary sections into pages by estimated rendered height."""
+    return _budget_row_pages(_executive_summary_sections(project_data))
 
 
 def _market_source_pages(market):
@@ -2652,20 +2716,31 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if has_sum or (not has_opp and not has_feat):
             summary_slide = existing_by_source.get('executive_content.summary') or (existing_exec[0] if existing_exec and not has_opp and not has_feat else {})
             summary_ext_token = '##MOODBOARD_1##' if moodboard_items else (overview_map_tokens[0] if overview_map_tokens else '')
-            summary_tokens = [summary_ext_token] if summary_ext_token else []
             summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
-            summary_slide.update({
-                'title': section_title('executive_summary', lang),
-                'type': 'content',
-                'section_key': 'executive_summary',
-                'design_style': summary_style,
-                'content_density': 'high',
-                'requires_image': bool(summary_tokens),
-                'content_source': 'executive_content.summary',
-                'image_tokens': summary_tokens,
-                'bullets': [],
-            })
-            add('executive_summary', summary_slide)
+            summary_pages = _executive_summary_pages(source) or [(0, [])]
+            for page_index, (start, page_rows) in enumerate(summary_pages, 1):
+                page_slide = dict(summary_slide)
+                summary_tokens = [summary_ext_token] if summary_ext_token and start == 0 else []
+                s_title = section_title('executive_summary', lang)
+                s_source = 'executive_content.summary'
+                if len(summary_pages) > 1:
+                    s_title += f' ({page_index}/{len(summary_pages)})'
+                    if start:
+                        s_source = f'executive_content.summary:{start}:{start + len(page_rows)}'
+                page_slide.update({
+                    'title': s_title,
+                    'type': 'content',
+                    'section_key': 'executive_summary',
+                    'design_style': summary_style,
+                    'content_density': 'high',
+                    'requires_image': bool(summary_tokens),
+                    'content_source': s_source,
+                    'image_tokens': summary_tokens,
+                    'market_row_start': start,
+                    'market_row_end': start + len(page_rows),
+                    'bullets': [],
+                })
+                add('executive_summary', page_slide)
 
     if lang == OFFER_LANG_ENGLISH:
         summaries = (
@@ -5645,11 +5720,20 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
                 end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
                 value = '\n\n'.join(paragraphs[start:end])
         return 'ملخص الموقع المعتمد دون إضافة أو تكرار:\n' + value if value else ''
-    if source == 'executive_content.summary':
-        executive = _decode_json_fact(project_data.get('executive_content'))
-        value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
-        if not value:
-            value = str(project_data.get('executive_summary') or '').strip()
+    summary_match = re.fullmatch(r'executive_content\.summary(?::(\d+):(\d+))?', str(source or ''))
+    if summary_match:
+        if summary_match.group(1) is not None:
+            sections = _executive_summary_sections(project_data)
+            start, end = int(summary_match.group(1)), int(summary_match.group(2))
+            value = '\n\n'.join(
+                (f'{label}\n{text}' if label else text)
+                for label, text in sections[start:end]
+            ).strip()
+        else:
+            executive = _decode_json_fact(project_data.get('executive_content'))
+            value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
+            if not value:
+                value = str(project_data.get('executive_summary') or '').strip()
         return 'الملخص التنفيذي المعتمد دون إضافة أو تكرار:\n' + value if value else ''
     if source == 'executive_content.opportunity':
         executive = _decode_json_fact(project_data.get('executive_content'))
@@ -6442,24 +6526,8 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
 </div>'''
 
 
-def _build_executive_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render executive summary as a multi-card high-impact investment layout."""
-    source = source if isinstance(source, dict) else {}
-    executive = _decode_json_fact(source.get('executive_content'))
-    summary_text = str((executive.get('summary') if isinstance(executive, dict) else None) or source.get('executive_summary') or '').strip()
-    if not summary_text:
-        summary_text = _slide_source_data_note(slide, source)
-
-    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
-    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-    title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي للمشروع'))
-    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
-
-    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
-    ext_token = next((token for token in tokens if not token.startswith('##')), '')
-    if not ext_token and tokens:
-        ext_token = tokens[0]
-
+def _exec_badges_strip(source, primary, accent):
+    """Location/type/area chips shown on the first executive page only."""
     badges = []
     city = str(source.get('city') or '').strip()
     district = str(source.get('district') or '').strip()
@@ -6472,68 +6540,116 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
     land_area = str(source.get('approved_financial_area') or source.get('land_area') or '').strip()
     if land_area:
         badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{accent};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">مساحة الأرض: {html_lib.escape(land_area)} م²</span>')
+    if not badges:
+        return ''
+    return f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>'
 
-    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
 
-    raw_paras = [p.strip() for p in re.split(r'\n{2,}|\r\n\r\n', summary_text) if p.strip()]
-    if len(raw_paras) == 1 and len(summary_text) > 250:
-        lines = [line.strip(' -•') for line in summary_text.split('\n') if line.strip(' -•')]
-        if len(lines) >= 2:
-            raw_paras = lines
+def _exec_text_chunks(text, target=620):
+    """Split a long approved text into readable chunks at sentence boundaries."""
+    text = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if not text:
+        return []
+    sentences = [s.strip() for s in re.split(r'(?<=[.!؟?])\s+', text) if s.strip()]
+    if len(sentences) <= 1:
+        return [text]
+    chunks = []
+    buf = ''
+    for sentence in sentences:
+        if buf and len(buf) + len(sentence) + 1 > target:
+            chunks.append(buf)
+            buf = sentence
         else:
-            sentences = [s.strip() for s in re.split(r'(?<=[.!?؟])\s+', summary_text) if s.strip()]
-            if len(sentences) >= 4:
-                half = len(sentences) // 2
-                raw_paras = [' '.join(sentences[:half]), ' '.join(sentences[half:])]
+            buf = f'{buf} {sentence}'.strip()
+    if buf:
+        chunks.append(buf)
+    return chunks
 
-    if not raw_paras:
-        raw_paras = [summary_text or 'الملخص التنفيذي للمشروع']
 
+def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
+    """Editorial block: dark lead section + numbered rows with highlighted figures."""
+    rows = list(rows or [])
+    if not rows:
+        rows = [('', '')]
+    compact = len(rows) <= 2
+
+    lead_label, lead_value = rows[0]
+    lead_columns = 'column-count:2;column-gap:34px;' if len(str(lead_value or '')) > 320 else ''
+    lead_label_html = (
+        f'<span style="font-size:{19 if compact else 17}px;font-weight:800;color:#ffffff;">{html_lib.escape(str(lead_label))}</span>'
+    ) if lead_label else ''
+    lead_html = (
+        f'<div style="background:{primary};border-radius:12px;padding:{24 if compact else 20}px 28px;'
+        f'box-sizing:border-box;position:relative;overflow:hidden;">'
+        f'<div style="display:flex;align-items:baseline;gap:14px;margin-bottom:{12 if compact else 8}px;">'
+        f'<span style="font-size:30px;font-weight:800;color:{accent};line-height:1;">{row_offset + 1:02d}</span>'
+        f'{lead_label_html}'
+        f'<span style="flex:1;border-bottom:1px solid rgba(255,255,255,0.22);transform:translateY(-6px);"></span>'
+        f'</div>'
+        f'<div style="font-size:{14 if compact else 13.5}px;line-height:1.85;color:#eef2f7;text-align:justify;{lead_columns}">'
+        f'{_market_rich_text(lead_value, accent)}</div>'
+        f'</div>'
+    )
     if ext_token:
-        card_items = []
-        for i, para in enumerate(raw_paras[:3]):
-            head = 'الرؤية والهدف الاستثماري' if i == 0 else ('المحركات التنافسية والقيمة المضافة' if i == 1 else 'الجدوى ومسار التنفيذ')
-            card_items.append(
-                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;border-right:4px solid {accent if i == 0 else primary};">'
-                f'<div style="font-size:13px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
-                f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
-            )
-        cards_html = f'''<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;height:480px;align-items:stretch;">
-          <div style="display:flex;flex-direction:column;gap:12px;justify-content:space-between;height:100%;">
-            {"".join(card_items)}
-          </div>
-          <div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;height:100%;">
-            <img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
-          </div>
-        </div>'''
-    else:
-        if len(raw_paras) == 1:
-            cards_html = (
-                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:26px 30px;border-right:6px solid {accent};height:460px;box-sizing:border-box;">'
-                f'<div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:12px;">الرؤية العامة والقيمة الاستثمارية للمشروع</div>'
-                f'<div style="font-size:15.5px;line-height:1.8;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div></div>'
-            )
-        elif len(raw_paras) == 2:
-            cards_html = f'''<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:460px;">
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {primary};">
-                <div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:10px;">الرؤية والركائز الاستثمارية</div>
-                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div>
-              </div>
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {accent};">
-                <div style="font-size:16px;font-weight:800;color:{accent};margin-bottom:10px;">المحددات السوقية والتنفيذية</div>
-                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[1])}</div>
-              </div>
-            </div>'''
-        else:
-            cards = []
-            for i, para in enumerate(raw_paras[:4]):
-                head = 'الرؤية الاستثمارية' if i == 0 else ('المكانة السوقية' if i == 1 else ('النموذج المالي' if i == 2 else 'الجاهزية والتنفيذ'))
-                cards.append(
-                    f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;border-right:4px solid {accent if i % 2 == 1 else primary};">'
-                    f'<div style="font-size:14px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
-                    f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
-                )
-            cards_html = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;height:460px;">{"".join(cards)}</div>'
+        lead_html = (
+            f'<div style="display:grid;grid-template-columns:1.45fr 1fr;gap:18px;align-items:stretch;">'
+            f'{lead_html}'
+            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;min-height:220px;">'
+            f'<img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
+            f'</div>'
+        )
+
+    def render_topic(index, label, value):
+        label_html = (
+            f'<span style="font-size:{15.5 if compact else 14}px;font-weight:800;color:{primary};white-space:nowrap;">{html_lib.escape(str(label))}</span>'
+        ) if label else ''
+        text_len = len(re.sub(r'\s+', ' ', str(value or '')).strip())
+        columns = 'column-count:2;column-gap:30px;' if text_len > 420 else ''
+        return (
+            f'<div data-exec-topic="{index}" style="padding:{14 if compact else 11}px 2px 0;">'
+            f'<div style="display:flex;align-items:baseline;gap:12px;">'
+            f'<span style="font-size:{24 if compact else 21}px;font-weight:800;color:{accent};line-height:1;min-width:34px;">{index:02d}</span>'
+            f'{label_html}'
+            f'<span style="flex:1;border-bottom:1px solid #e2e8f0;transform:translateY(-5px);"></span>'
+            f'</div>'
+            f'<div style="margin-top:{8 if compact else 5}px;font-size:{13 if compact else 12.5}px;line-height:{1.85 if compact else 1.72};'
+            f'color:#334155;text-align:justify;{columns}">{_market_rich_text(value, accent)}</div>'
+            f'</div>'
+        )
+
+    topics_html = ''.join(
+        render_topic(row_offset + idx + 1, label, value)
+        for idx, (label, value) in enumerate(rows[1:], 1)
+    )
+    return f'<div data-exec-analysis="1" style="display:flex;flex-direction:column;gap:{14 if compact else 10}px;">{lead_html}{topics_html}</div>'
+
+
+def _build_executive_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render one page of the approved executive summary as editorial sections."""
+    source = source if isinstance(source, dict) else {}
+    sections = _executive_summary_sections(source)
+    rows, row_offset = _market_rows_for_slide(slide, 'executive_content.summary', sections)
+    if row_offset == 0 and (slide or {}).get('market_row_start') is None:
+        content_source = str((slide or {}).get('content_source') or '')
+        if ':' not in content_source:
+            pages = _executive_summary_pages(source)
+            if pages:
+                rows = pages[0][1]
+
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
+    ext_token = next((token for token in tokens if not token.startswith('##')), '')
+    if not ext_token and tokens:
+        ext_token = tokens[0]
+    if row_offset != 0:
+        ext_token = ''
+
+    badge_strip = _exec_badges_strip(source, primary, accent) if row_offset == 0 else ''
+    body_content = _exec_editorial_body(rows, row_offset, primary, accent, ext_token)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6551,9 +6667,9 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 40px;margin-top:12px;">
     {badge_strip}
-    {cards_html}
+    {body_content}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
@@ -6564,12 +6680,10 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
 
 
 def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render executive investment opportunity as a high-impact multi-card layout."""
+    """Render the investment opportunity as one editorial page."""
     source = source if isinstance(source, dict) else {}
     executive = _decode_json_fact(source.get('executive_content'))
     opp_text = str((executive.get('opportunity') if isinstance(executive, dict) else None) or '').strip()
-    if not opp_text:
-        opp_text = _slide_source_data_note(slide, source)
 
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
@@ -6581,80 +6695,11 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
     if not ext_token and tokens:
         ext_token = tokens[0]
 
-    badges = []
-    city = str(source.get('city') or '').strip()
-    district = str(source.get('district') or '').strip()
-    loc = ' — '.join(p for p in (city, district) if p)
-    if loc:
-        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
-    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
-    if prop_type:
-        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
-    land_area = str(source.get('approved_financial_area') or source.get('land_area') or '').strip()
-    if land_area:
-        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{accent};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">المساحة: {html_lib.escape(land_area)} م²</span>')
+    badge_strip = _exec_badges_strip(source, primary, accent)
 
-    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
-
-    raw_paras = [p.strip() for p in re.split(r'\n{2,}|\r\n\r\n', opp_text) if p.strip()]
-    if len(raw_paras) == 1 and len(opp_text) > 250:
-        lines = [line.strip(' -•') for line in opp_text.split('\n') if line.strip(' -•')]
-        if len(lines) >= 2:
-            raw_paras = lines
-        else:
-            sentences = [s.strip() for s in re.split(r'(?<=[.!?؟])\s+', opp_text) if s.strip()]
-            if len(sentences) >= 4:
-                half = len(sentences) // 2
-                raw_paras = [' '.join(sentences[:half]), ' '.join(sentences[half:])]
-
-    if not raw_paras:
-        raw_paras = [opp_text or 'الفرصة الاستثمارية للمشروع']
-
-    if ext_token:
-        card_items = []
-        for i, para in enumerate(raw_paras[:3]):
-            head = 'أبعاد الفرصة الاستثمارية' if i == 0 else ('القيمة التنافسية والطلب' if i == 1 else 'الجدوى ومسار التطوير')
-            card_items.append(
-                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;border-right:4px solid {accent if i == 0 else primary};">'
-                f'<div style="font-size:13px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
-                f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
-            )
-        cards_html = f'''<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;height:480px;align-items:stretch;">
-          <div style="display:flex;flex-direction:column;gap:12px;justify-content:space-between;height:100%;">
-            {"".join(card_items)}
-          </div>
-          <div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;height:100%;">
-            <img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">
-          </div>
-        </div>'''
-    else:
-        if len(raw_paras) == 1:
-            cards_html = (
-                f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:26px 30px;border-right:6px solid {accent};height:460px;box-sizing:border-box;">'
-                f'<div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:12px;">أبعاد ومقومات الفرصة الاستثمارية</div>'
-                f'<div style="font-size:15.5px;line-height:1.8;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div></div>'
-            )
-        elif len(raw_paras) == 2:
-            cards_html = f'''<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:460px;">
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {primary};">
-                <div style="font-size:16px;font-weight:800;color:{primary};margin-bottom:10px;">أبعاد الفرصة والميزة الاستراتيجية</div>
-                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[0])}</div>
-              </div>
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 26px;border-top:5px solid {accent};">
-                <div style="font-size:16px;font-weight:800;color:{accent};margin-bottom:10px;">القيمة المضافة ومحركات العائد</div>
-                <div style="font-size:14.5px;line-height:1.75;color:#1e293b;">{html_lib.escape(raw_paras[1])}</div>
-              </div>
-            </div>'''
-        else:
-            cards = []
-            for i, para in enumerate(raw_paras[:4]):
-                head = 'أبعاد الفرصة' if i == 0 else ('القيمة التنافسية' if i == 1 else ('الطلب والنمو' if i == 2 else 'الاستدامة والعائد'))
-                cards.append(
-                    f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;border-right:4px solid {accent if i % 2 == 1 else primary};">'
-                    f'<div style="font-size:14px;font-weight:800;color:{primary};margin-bottom:6px;">{head}</div>'
-                    f'<div style="font-size:13.5px;line-height:1.65;color:#334155;">{html_lib.escape(para)}</div></div>'
-                )
-            cards_html = f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;height:460px;">{"".join(cards)}</div>'
+    chunks = _exec_text_chunks(opp_text)
+    rows = [('', chunk) for chunk in chunks] or [('', 'الفرصة الاستثمارية للمشروع')]
+    body_content = _exec_editorial_body(rows, 0, primary, accent, ext_token)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6672,9 +6717,9 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 40px;margin-top:12px;">
     {badge_strip}
-    {cards_html}
+    {body_content}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
@@ -6684,27 +6729,33 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
 </div>'''
 
 
-def _build_executive_features_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render executive features and opportunities as a structured card grid."""
-    source = source if isinstance(source, dict) else {}
-    executive = _decode_json_fact(source.get('executive_content'))
+def _executive_feature_items(source, slide=None):
+    """Feature bullets from executive_content.features (list, newline, bullet or ' - ' separated)."""
+    executive = _decode_json_fact((source or {}).get('executive_content'))
     features_raw = executive.get('features') if isinstance(executive, dict) else []
+    items = []
     if isinstance(features_raw, list):
         items = [str(it).strip() for it in features_raw if str(it).strip()]
     elif isinstance(features_raw, str) and features_raw.strip():
-        items = [line.strip(' -•*') for line in features_raw.split('\n') if line.strip(' -•*')]
-    else:
-        items = []
-
+        for line in re.split(r'[\r\n]+', features_raw):
+            for part in re.split(r'\s+-\s+|\s+—\s+|•', line):
+                cleaned = str(part).strip(' -–—•*').strip()
+                if cleaned:
+                    items.append(cleaned)
     if not items:
         bullets = (slide or {}).get('bullets') or []
         items = [str(b).strip() for b in bullets if str(b).strip()]
+    deduped = []
+    for item in items:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
 
-    if not items:
-        note = _slide_source_data_note(slide, source)
-        if note:
-            items = [line.strip(' -•*') for line in note.split('\n') if line.strip(' -•*')]
 
+def _build_executive_features_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render executive differentiators as a numbered editorial list."""
+    source = source if isinstance(source, dict) else {}
+    items = _executive_feature_items(source, slide)
     if not items:
         items = ['مقومات تنافسية متميزة للمشروع', 'موقع استراتيجي وتدفقات مستهدفة', 'عوائد استثمارية مجدية ونمو مستدام']
 
@@ -6713,34 +6764,37 @@ def _build_executive_features_slide(slide, source, branding=None, slide_num=None
     title = html_lib.escape(str((slide or {}).get('title') or 'المميزات وفرص الاستثمار'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
-    badges = []
-    city = str(source.get('city') or '').strip()
-    district = str(source.get('district') or '').strip()
-    loc = ' — '.join(p for p in (city, district) if p)
-    if loc:
-        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
-    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
-    if prop_type:
-        badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
+    badge_strip = _exec_badges_strip(source, primary, accent)
 
-    badge_strip = f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">{"".join(badges)}</div>' if badges else ''
+    cols = 2 if len(items) > 5 else 1
+    col_size = (len(items) + cols - 1) // cols
+    item_font = 12.5 if len(items) > 12 else (13.5 if cols == 2 else 14.5)
 
-    display_items = items[:6]
-    num_cards = len(display_items)
-    grid_cols = '1fr 1fr' if num_cards <= 4 else '1fr 1fr 1fr'
-
-    card_elements = []
-    for idx, item_text in enumerate(display_items, 1):
-        accent_bar = accent if idx % 2 == 1 else primary
-        num_str = f'0{idx}' if idx < 10 else str(idx)
-        card_elements.append(
-            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;border-top:4px solid {accent_bar};display:flex;flex-direction:column;justify-content:flex-start;box-sizing:border-box;">'
-            f'<div style="font-size:18px;font-weight:900;color:{accent_bar};margin-bottom:8px;font-family:sans-serif;">{num_str}</div>'
-            f'<div style="font-size:14.5px;line-height:1.7;color:#1e293b;font-weight:600;">{html_lib.escape(item_text)}</div>'
+    def render_item(index, item_text):
+        return (
+            f'<div style="display:flex;align-items:baseline;gap:12px;padding:{12 if cols == 2 else 15}px 4px;'
+            f'border-bottom:1px solid #e2e8f0;">'
+            f'<span style="font-size:20px;font-weight:800;color:{accent};line-height:1;min-width:32px;">{index:02d}</span>'
+            f'<span style="font-size:{item_font}px;line-height:1.7;color:#334155;font-weight:600;">{_market_rich_text(item_text, accent)}</span>'
             f'</div>'
         )
 
-    grid_html = f'<div style="display:grid;grid-template-columns:{grid_cols};gap:16px;min-height:360px;max-height:460px;">{"".join(card_elements)}</div>'
+    col_blocks = []
+    for col in range(cols):
+        block = items[col * col_size:(col + 1) * col_size]
+        if not block:
+            continue
+        inner = ''.join(render_item(col * col_size + i + 1, item) for i, item in enumerate(block))
+        col_blocks.append(
+            f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:6px 20px;box-sizing:border-box;">{inner}</div>'
+        )
+
+    count_badge = (
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;direction:rtl;">'
+        f'<span style="background:{primary};color:#ffffff;padding:5px 14px;border-radius:6px;font-size:12.5px;font-weight:800;">{len(items)} ميزة تنافسية</span>'
+        f'</div>'
+    )
+    grid_html = f'<div style="display:grid;grid-template-columns:{"1fr 1fr" if cols == 2 else "1fr"};gap:18px;align-items:start;">{"".join(col_blocks)}</div>'
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6758,8 +6812,9 @@ def _build_executive_features_slide(slide, source, branding=None, slide_num=None
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 40px;margin-top:12px;">
     {badge_strip}
+    {count_badge}
     {grid_html}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -7911,7 +7966,12 @@ def _required_slide_texts(slide, project_data):
         if isinstance(features_raw, list):
             return [str(it).strip() for it in features_raw if str(it).strip()]
         return [line.strip(' -•*') for line in str(features_raw or '').split('\n') if line.strip(' -•*')]
-    if source == 'executive_content.summary':
+    summary_match = re.fullmatch(r'executive_content\.summary(?::(\d+):(\d+))?', str(source or ''))
+    if summary_match:
+        if summary_match.group(1) is not None:
+            sections = _executive_summary_sections(project_data)
+            start, end = int(summary_match.group(1)), int(summary_match.group(2))
+            return [f'{label}\n{text}' if label else text for label, text in sections[start:end]]
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
         if not value:
@@ -10309,33 +10369,8 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 f'</div>'
                 f'</div>'
             )
-    if content_source == 'executive_content.summary':
-        summary_text = _slide_source_data_note(slide, source)
-        note = html_lib.escape(summary_text).replace('\n', '<br>')
-        ext_token = next((token for token in tokens if not token.startswith('##')), '')
-        summary_length = len(re.sub(r'\s+', ' ', summary_text).strip())
-        if summary_length > 950:
-            summary_font = '11.5px'
-            summary_line_height = '1.38'
-        elif summary_length > 650:
-            summary_font = '12.5px'
-            summary_line_height = '1.5'
-        else:
-            summary_font = '15px'
-            summary_line_height = '1.75'
-        summary_columns = '1.2fr 1fr' if ext_token else '1fr'
-        image_panel = (
-            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;">'
-            f'<img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block;"></div>'
-            if ext_token else ''
-        )
-        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;box-sizing:border-box;padding:68px 36px 44px;">'
-                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
-                f'<h2 style="font-size:28px;font-weight:800;color:{primary};margin:0;">{title}</h2></div>'
-                f'<div style="display:grid;grid-template-columns:{summary_columns};gap:24px;height:520px;align-items:stretch;">'
-                f'<div style="border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;padding:24px;overflow:hidden;font-size:{summary_font};line-height:{summary_line_height};color:#1e293b;">{note}</div>'
-                f'{image_panel}'
-                f'</div></div>')
+    if re.fullmatch(r'executive_content\.summary(?::\d+:\d+)?', content_source):
+        return _build_executive_summary_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source == 'executive_content.opportunity':
         return _build_executive_opportunity_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source == 'executive_content.features':
@@ -10660,9 +10695,10 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
-                     or market_source in {'executive_content.summary',
-                                           'executive_content.opportunity', 'executive_content.features',
-                                           'land_and_building_summary'}
+                     or re.fullmatch(
+                           r'executive_content\.(?:summary(?::\d+:\d+)?|opportunity|features)',
+                           str(market_source or ''))
+                     or market_source == 'land_and_building_summary'
                      or _slide_section_key(slide) == 'financial'))):
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
@@ -12747,7 +12783,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             )
     html = _canonicalize_slide_root_class(html)
     is_map_summary = (
-        (isinstance(content_source, str) and (content_source.startswith('site_analysis') or content_source == 'executive_content.summary'))
+        (isinstance(content_source, str) and (content_source.startswith('site_analysis') or content_source.startswith('executive_content.summary')))
         and (
             'data-map-summary-background' in str(html or '')
             or 'data-map-summary-card' in str(html or '')
@@ -12765,7 +12801,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     if (not _is_market_slide(slide_type, slide_title, content_source)
             and isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
             or (isinstance(content_source, str) and (content_source.startswith('site_analysis') or content_source == 'location_detail'))
-            or (content_source == 'executive_content.summary' and is_map_summary)):
+            or (isinstance(content_source, str) and content_source.startswith('executive_content.summary') and is_map_summary)):
         html = _inject_location_data_timestamp(html, project_data)
     html = _strip_unplanned_map_media(
         html, slide_type, content_source=content_source, slide_title=slide_title,
