@@ -12575,6 +12575,99 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertGreater(save_body.index('tenantDraftDirty = false;'),
                            save_body.index("if (!presResp?.success)"))
 
+    def test_extract_listing_prices_reads_arabic_english_and_jsonld(self):
+        """The fetched page's own markup carries the figure the search excerpt
+        dropped — Arabic ريال, SAR, and JSON-LD prices all count."""
+        module = self.application_module
+        html = (
+            '<html><body>إيجار سنوي 18,000 ريال سنوياً للمحل '
+            + ('x' * 220) +
+            '<span>SAR 45,000</span> شهريا '
+            '<script type="application/ld+json">{"offers":{"price":95000}}</script>'
+            '</body></html>')
+        prices = module._extract_listing_prices(html)
+        values = {item['value'] for item in prices}
+        self.assertIn(18000.0, values)
+        self.assertIn(45000.0, values)
+        self.assertIn(95000.0, values)
+        annual = [item for item in prices if item['value'] == 18000.0]
+        self.assertEqual(annual[0]['period'], 'سنوي')
+        monthly = [item for item in prices if item['value'] == 45000.0]
+        self.assertEqual(monthly[0]['period'], 'شهري')
+
+    def test_fill_competitor_price_from_listings_sets_median_and_marks_estimated(self):
+        """Empty price fields get the median of grounded listing mentions, a
+        «متوسط» type, source attribution and the estimated marker."""
+        module = self.application_module
+        pages = {
+            'https://bayut.sa/listing-a': 'مكاتب إدارية 18,000 ريال سنوياً',
+            'https://bayut.sa/listing-b': 'محل تجاري بإيجار 24,000 ريال سنوياً',
+            'https://bayut.sa/listing-c': 'مساحات 36,000 ريال سنوياً',
+        }
+        row = {'name': 'مجمع تجريبي', 'operation_type': 'إيجار',
+               'source_urls': list(pages)}
+        with patch.object(module, '_read_market_source_page',
+                          side_effect=lambda url, **kw: (pages.get(url, ''), '')):
+            filled = module._fill_competitor_price_from_listings(row, list(pages))
+        self.assertTrue(filled)
+        self.assertEqual(row['price_value'], '24000')
+        self.assertEqual(row['price_type'], 'متوسط إيجار الوحدة')
+        self.assertTrue(row['price_listed'])
+        self.assertIn('متوسط إعلانات', row['note'])
+        field_sources = row['field_sources']['price_value']
+        self.assertEqual(set(field_sources), set(pages))
+
+    def test_fill_competitor_price_skips_dead_urls_and_single_mention_typing(self):
+        module = self.application_module
+        row = {'name': 'مشروع', 'operation_type': 'إيجار',
+               'dead_source_urls': ['https://dead.example/x'],
+               'source_urls': ['https://dead.example/x', 'https://bayut.sa/only']}
+        pages = {'https://bayut.sa/only': 'إيجار 30,000 ريال شهرياً'}
+        fetched = []
+        with patch.object(module, '_read_market_source_page',
+                          side_effect=lambda url, **kw: (fetched.append(url), (pages.get(url, ''), ''))[1]):
+            filled = module._fill_competitor_price_from_listings(row, row['source_urls'])
+        self.assertTrue(filled)
+        self.assertEqual(fetched, ['https://bayut.sa/only'])
+        self.assertEqual(row['price_type'], 'إيجار الوحدة الشهري')
+        self.assertEqual(row['price_value'], '30000')
+
+    def test_import_competitor_listing_photo_stores_og_image(self):
+        """A portal-only competitor with no official site gets the listing
+        page's own og:image — marked as a listing photo, never a portal logo."""
+        module = self.application_module
+        html = ('<html><head>'
+                '<meta property="og:image" content="https://images.bayut.com/thumb/prop-123.jpg">'
+                '<meta property="og:image" content="https://portal.example/logo-share.png">'
+                '</head></html>')
+        row = {'id': 'c1', 'name': 'مجمع', 'source_urls': ['https://bayut.sa/listing-1']}
+        downloaded = []
+        with patch.object(module, '_read_market_source_page',
+                          return_value=(html, '')), \
+                patch.object(module, '_download_listing_image',
+                             side_effect=lambda url: (downloaded.append(url),
+                                                      (b'PNGDATA', 'image/jpeg', '.jpg')
+                                                      if 'prop-123' in url else (None, None, None))[1]), \
+                patch.object(module, '_store_project_upload',
+                             return_value={'id': 'stored-photo-1'}), \
+                patch.object(module, '_publish_project_file_as_creative_image',
+                             return_value='/api/project-files/stored-photo-1'):
+            module._import_competitor_listing_photo(row, draft_id='d1')
+        self.assertEqual(row['logo_file_id'], 'stored-photo-1')
+        self.assertTrue(row['logo_listing_photo'])
+        self.assertEqual(row['logo_source_url'], 'https://bayut.sa/listing-1')
+        self.assertEqual(downloaded, ['https://images.bayut.com/thumb/prop-123.jpg'])
+        self.assertIn('https://bayut.sa/listing-1', row['field_sources']['logo_url'])
+
+    def test_download_listing_image_rejects_portal_brand_assets(self):
+        """logo/brand/share asset URLs must never become the competitor image."""
+        module = self.application_module
+        for url in ('https://portal.example/assets/logo.png',
+                    'https://portal.example/img/brand-mark.jpg',
+                    'https://portal.example/share-banner.webp',
+                    'http://portal.example/insecure.jpg'):
+            self.assertEqual(module._download_listing_image(url), (None, None, None))
+
 
 if __name__ == '__main__':
     unittest.main()

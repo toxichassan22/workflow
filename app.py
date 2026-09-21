@@ -21841,6 +21841,12 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         row['verify_state'] = 'no_match'
         return
     row.pop('no_search_evidence', None)
+    if not any(str(row.get(key) or '').strip()
+               for key in ('price_value', 'price_from', 'price_to')):
+        # The citation excerpt rarely carries the figure — the fetched page
+        # does. Read the grounded pages directly and take the median.
+        _fill_competitor_price_from_listings(
+            row, matched + market_study.competitor_source_urls(row))
     row['verify_state'] = 'verified'
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + matched))[:6]
@@ -21900,6 +21906,163 @@ def _apply_verified_competitor_price(row, parsed, citation_urls):
     row['field_sources'] = field_sources
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + [url]))
+
+
+def _read_market_source_page(url, max_bytes=2 * 1024 * 1024):
+    """(html, error) — fetch a retrieved source page through the DNS-pinned pool.
+
+    Model-supplied URLs stay on _pinned_https_get so redirects can never leave
+    the original site and private hosts remain blocked. Returns raw markup:
+    JSON-LD prices live inside <script> tags that visible-text stripping
+    would discard."""
+    pool, response, outcome = _pinned_https_get(url)
+    if pool is None:
+        return '', _official_fetch_error(outcome)
+    try:
+        if response.status != 200:
+            return '', f'HTTP {response.status}'
+        content = bytearray()
+        for chunk in response.stream(64 * 1024):
+            if not chunk:
+                continue
+            content.extend(chunk)
+            if len(content) > max_bytes:
+                break
+        return bytes(content).decode('utf-8', errors='replace'), ''
+    except Exception as exc:
+        return '', str(exc)
+    finally:
+        response.release_conn()
+        pool.close()
+
+
+_ARABIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+_LISTING_PRICE_PATTERNS = (
+    re.compile(r'(?:ريال|ر\.?\s?س|SAR|SR)\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})', re.IGNORECASE),
+    re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*(?:ريال|ر\.?\s?س|SAR|SR)\b', re.IGNORECASE),
+    re.compile(r'"price"\s*:\s*"?([0-9][0-9,.]{2,})"?'),
+)
+_LISTING_PRICE_MIN = 300.0
+_LISTING_PRICE_MAX = 2_000_000_000.0
+
+
+def _extract_listing_prices(html):
+    """[{value, period, per_sqm}] — price mentions inside a fetched listing page."""
+    if not html:
+        return []
+    found = {}
+    for pattern in _LISTING_PRICE_PATTERNS:
+        for match in pattern.finditer(html):
+            raw = (match.group(1) or '').translate(_ARABIC_DIGITS)
+            raw = raw.replace(',', '').replace(' ', '')
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if not (_LISTING_PRICE_MIN <= value <= _LISTING_PRICE_MAX):
+                continue
+            window = html[max(0, match.start() - 100):match.end() + 100]
+            if re.search(r'سنوي|سنة|annual|yearly|per\s*year|/yr', window, re.IGNORECASE):
+                period = 'سنوي'
+            elif re.search(r'شهري|شهر|monthly|per\s*month|/mo', window, re.IGNORECASE):
+                period = 'شهري'
+            elif re.search(r'ليلة|per\s*night|nightly', window, re.IGNORECASE):
+                period = 'ليلة'
+            else:
+                period = ''
+            per_sqm = bool(re.search(r'متر|sqm|م²|per\s*sq', window, re.IGNORECASE))
+            found[(value, period, per_sqm)] = {'value': value, 'period': period, 'per_sqm': per_sqm}
+    return list(found.values())
+
+
+def _fill_competitor_price_from_listings(row, urls):
+    """Derive a grounded price from the retrieved pages themselves.
+
+    The verify searches leave the price fields empty when the citation
+    excerpt omits the figure — but the page renders it in markup. The median
+    of the mentions becomes a «متوسط» price; a single mention keeps its own
+    type. price_listed flags it as evidence from real fetched pages, not an
+    officially documented tariff.
+    """
+    dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+    mentions = []
+    for url in list(dict.fromkeys(urls or []))[:4]:
+        if str(url).strip().casefold() in dead:
+            continue
+        html, _err = _read_market_source_page(url)
+        for item in _extract_listing_prices(html):
+            item['url'] = url
+            mentions.append(item)
+        if len(mentions) >= 4:
+            break
+    if not mentions:
+        return False
+    operation = str(row.get('operation_type') or '').strip() or 'أخرى'
+    options = market_study.PRICE_TYPE_BY_OPERATION.get(
+        operation, market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
+
+    def _option(*names):
+        for name in names:
+            if name in options:
+                return name
+        return 'أخرى' if 'أخرى' in options else options[0]
+
+    if operation == 'إيجار':
+        pool = [m for m in mentions if m['period'] in ('سنوي', 'شهري')] or mentions
+    elif operation == 'تشغيل فندقي':
+        pool = [m for m in mentions if m['period'] == 'ليلة'] or mentions
+    else:
+        pool = [m for m in mentions if not m['period']] or mentions
+    values = sorted({m['value'] for m in pool})
+    per_sqm = any(m['per_sqm'] for m in pool)
+    used_urls = list(dict.fromkeys(m['url'] for m in pool))
+    median = int(round(values[len(values) // 2] if len(values) % 2
+                       else (values[len(values) // 2 - 1] + values[len(values) // 2]) / 2))
+    if len(values) > 1:
+        if operation == 'إيجار':
+            price_type = _option('متوسط إيجار المتر' if per_sqm else 'متوسط إيجار الوحدة')
+        elif operation == 'بيع':
+            price_type = _option('متوسط سعر المتر' if per_sqm else 'متوسط سعر الوحدة')
+        elif operation == 'تشغيل فندقي':
+            price_type = _option('متوسط سعر الغرفة ADR')
+        else:
+            price_type = _option('نطاق سعري')
+    else:
+        period = (pool[0] if pool else {}).get('period') or ''
+        if operation == 'إيجار':
+            if per_sqm:
+                price_type = _option('إيجار المتر الشهري' if period == 'شهري' else 'إيجار المتر السنوي')
+            else:
+                price_type = _option('إيجار الوحدة الشهري' if period == 'شهري' else 'إيجار الوحدة السنوي')
+        elif operation == 'بيع':
+            price_type = _option('سعر المتر المربع' if per_sqm else 'سعر الوحدة')
+        elif operation == 'تشغيل فندقي':
+            price_type = _option('سعر الليلة')
+        else:
+            price_type = _option('قيمة واحدة')
+    if price_type in market_study.RANGE_PRICE_TYPES and len(values) > 1:
+        row['price_from'], row['price_to'] = str(int(values[0])), str(int(values[-1]))
+        row['price_cache'] = {'price_from': row['price_from'], 'price_to': row['price_to']}
+        field_key = 'price_from'
+    else:
+        row['price_value'] = str(median)
+        row['price_cache'] = {'price_value': row['price_value']}
+        field_key = 'price_value'
+    row['price_type'] = price_type
+    row['price_listed'] = True
+    field_sources = market_study.competitor_field_sources(row)
+    bucket = field_sources.setdefault(field_key, [])
+    for url in used_urls:
+        if url not in bucket:
+            bucket.append(url)
+    row['field_sources'] = field_sources
+    row['source_urls'] = list(dict.fromkeys(
+        market_study.competitor_source_urls(row) + used_urls))[:6]
+    marker = 'السعر متوسط إعلانات مسترجعة — غير موثق رسميًا'
+    note = str(row.get('note') or '').strip()
+    if marker not in note:
+        row['note'] = f'{note} — {marker}' if note else marker
+    return True
 
 
 def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
@@ -24483,6 +24646,15 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     for row in batch:
         if not row.get('logo_file_id') and not row.get('logo_path'):
             row.setdefault('logo_import_warning', 'لم يُعثر على موقع رسمي موثق للشعار')
+    # Portal-only competitors have no official site to brand from, but their
+    # retrieved listing pages carry the property's own photo in og:image.
+    for row in rows:
+        if row.get('logo_file_id') or row.get('logo_path'):
+            continue
+        try:
+            _import_competitor_listing_photo(row, draft_id=draft_id)
+        except Exception as exc:
+            row.setdefault('logo_import_warning', str(exc))
 
 
 def _store_imported_competitor_logo(row, draft_id=None):
@@ -24548,6 +24720,103 @@ def _store_imported_competitor_logo(row, draft_id=None):
     row['logo_source_url'] = official_url
     row.pop('logo_import_warning', None)
     return row
+
+
+_LISTING_IMAGE_META_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::url)?|og:image:secure_url'
+    r'|twitter:image(?::src)?)["\'][^>]*?content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]*?(?:property|name)=["\']'
+    r'(?:og:image(?::url)?|og:image:secure_url|twitter:image(?::src)?)["\']',
+    re.IGNORECASE)
+_LISTING_IMAGE_SKIP_TOKENS = (
+    'logo', 'brand', 'icon', 'sprite', 'favicon', 'placeholder', 'default',
+    'share', 'watermark', 'ruwaj', 'rawaj', 'rowaj', '/rwaj', 'rega',
+)
+
+
+def _download_listing_image(image_url):
+    """(content, mime, ext) — fetch a listing photo from any public HTTPS host.
+
+    Unlike _safe_download_competitor_logo there is no same-host rule: portal
+    CDNs (images.bayut.com) are intentionally different hosts — the file is
+    the competitor's own property photo, not the portal's branding."""
+    parsed = urlsplit(str(image_url or '').strip())
+    try:
+        invalid_port = parsed.port not in (None, 443)
+    except ValueError:
+        invalid_port = True
+    if (parsed.scheme.lower() != 'https' or not parsed.hostname
+            or parsed.username or invalid_port):
+        return None, None, None
+    lowered = str(image_url).casefold()
+    if any(token in lowered for token in _LISTING_IMAGE_SKIP_TOKENS):
+        return None, None, None
+    if not _public_host_addresses(parsed.hostname):
+        return None, None, None
+    pool, response, _outcome = _pinned_https_get(image_url)
+    if pool is None:
+        return None, None, None
+    try:
+        if response.status != 200:
+            return None, None, None
+        mime_type = str(response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+        extension = COMPETITOR_LOGO_MIMES.get(mime_type)
+        if not extension:
+            return None, None, None
+        content = bytearray()
+        for chunk in response.stream(64 * 1024):
+            if not chunk:
+                continue
+            content.extend(chunk)
+            if len(content) > COMPETITOR_LOGO_MAX_BYTES:
+                return None, None, None
+        return bytes(content), mime_type, extension
+    except Exception:
+        return None, None, None
+    finally:
+        response.release_conn()
+        pool.close()
+
+
+def _import_competitor_listing_photo(row, draft_id=None):
+    """Last-resort competitor image: the retrieved listing page's own photo.
+
+    Portal-only competitors have no official site to brand from, but their
+    retrieved listing pages carry the property's photo in og:image. Stored
+    through the same upload path and marked logo_listing_photo so it never
+    pretends to be an official logo."""
+    dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
+    for page_url in list(dict.fromkeys(market_study.competitor_source_urls(row)))[:4]:
+        if str(page_url).strip().casefold() in dead:
+            continue
+        html, _err = _read_market_source_page(page_url)
+        if not html:
+            continue
+        for match in _LISTING_IMAGE_META_RE.finditer(html):
+            image_url = urljoin(page_url, match.group(1) or match.group(2) or '')
+            content, mime_type, extension = _download_listing_image(image_url)
+            if not content:
+                continue
+            from werkzeug.datastructures import FileStorage
+            upload = FileStorage(
+                stream=BytesIO(content), filename='competitor-photo' + extension,
+                content_type=mime_type)
+            stored = _store_project_upload(
+                upload, 'competitor_logo', draft_id=draft_id,
+                project_id=str(row.get('id') or '') or None)
+            published = _publish_project_file_as_creative_image(stored['id'])
+            row['logo_file_id'] = stored['id']
+            row['logo_path'] = published or ('/api/project-files/' + stored['id'])
+            row['logo_url'] = image_url
+            row['logo_source_url'] = page_url
+            row['logo_listing_photo'] = True
+            row.pop('logo_import_warning', None)
+            field_sources = market_study.competitor_field_sources(row)
+            urls = field_sources.setdefault('logo_url', [])
+            if page_url not in urls:
+                urls.append(page_url)
+            row['field_sources'] = field_sources
+            return
 
 
 def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=None):
