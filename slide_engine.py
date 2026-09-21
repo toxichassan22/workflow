@@ -1678,6 +1678,17 @@ _MARKET_DECISION_STRIP_PX = 46
 _MARKET_LEAD_CHARS_PER_LINE = 88
 _MARKET_ROW_CHARS_PER_LINE = 118
 _MARKET_MAX_TOPICS_PER_PAGE = 7
+# The comparison table plus its bar chart cannot fit more than four
+# competitors in the 1280x720 content band, so pages fill sequentially.
+_MARKET_COMPETITORS_PER_SLIDE = 4
+
+
+def _market_competitor_ranges(count):
+    """Slice competitors into slides of at most _MARKET_COMPETITORS_PER_SLIDE."""
+    return [
+        (start, min(start + _MARKET_COMPETITORS_PER_SLIDE, count))
+        for start in range(0, count, _MARKET_COMPETITORS_PER_SLIDE)
+    ]
 
 
 def _market_summary_topic_height(label, value, lead=False):
@@ -1783,7 +1794,7 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
         result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
-        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=6, min_per_slide=3)
+        comp_ranges = _market_competitor_ranges(len(named_competitors))
         total_comp_pages = len(comp_ranges)
         for chunk_idx, (start, end) in enumerate(comp_ranges):
             c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
@@ -2548,7 +2559,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
     named_competitors = [c for c in competitors if _competitor_name(c)]
     if named_competitors:
-        comp_ranges = _balanced_row_ranges(len(named_competitors), max_per_slide=6, min_per_slide=3)
+        comp_ranges = _market_competitor_ranges(len(named_competitors))
         total_comp_pages = len(comp_ranges)
         existing_market = groups.get('market', [])
         comp_slides = [s for s in existing_market if str(s.get('content_source') or '').startswith('market_study_data.competitors')
@@ -9182,11 +9193,12 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
         hi = max((it['price_max_num'] for it in first_items), default=0.0)
         unit_hint = first_items[0].get('display_price', '').split()[-1] if ' ' in first_items[0].get('display_price', '') else ''
         group_caption = items[0].get('group_label') or unit_hint
+        range_text = f'من {lo:,.0f} إلى {hi:,.0f}' if hi > lo else f'{lo:,.0f}'
         stats_html = (
             f'<div style="margin-top:auto;padding-top:10px;display:flex;align-items:center;gap:16px;'
             f'font-size:10.5px;color:#475569;border-top:1px solid #e2e8f0;">'
             f'<span style="font-weight:800;color:{primary};">{len(competitors)} منافسًا معروضًا</span>'
-            f'<span>نطاق {html_lib.escape(str(group_caption))}: من {lo:,.0f} إلى {hi:,.0f}</span>'
+            f'<span>نطاق {html_lib.escape(str(group_caption))}: {range_text}</span>'
             f'</div>'
         )
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
