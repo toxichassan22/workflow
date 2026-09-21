@@ -21734,6 +21734,12 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
             search_ran_any = True
             break
         if prompt_response is None or not _market_search_ran(prompt_response):
+            # A tenant-key gate refusal is deterministic — every remaining
+            # angle fails identically, so stop instead of burning them all.
+            gate_error = (prompt_response or {}).get('error')
+            if isinstance(gate_error, dict) and gate_error.get('error_code') in (
+                    'NO_TENANT_KEY', 'TENANT_KEY_CHECK_FAILED'):
+                break
             continue
         response = prompt_response
         prompt_matched = []
@@ -22215,6 +22221,15 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     # reported an error we recovered from. The owner must see that instead of
     # a silent «تم» over an unsourced, unpriced table.
     partial = bool(provider_error) or not search_ran or no_evidence > 0 or missing_prices > 0
+    if not provider_error:
+        # The main call can succeed while every per-competitor verify hits a
+        # deterministic refusal (e.g. the tenant-key gate). Surface the row
+        # error at job level so the UI shows the real reason, not just counts.
+        verify_errors = [str(row.get('verify_provider_error') or '').strip()
+                         for row in merged if row.get('verify_provider_error')]
+        verify_errors = [err for err in verify_errors if err and err != 'empty_response']
+        if verify_errors:
+            provider_error = verify_errors[0]
     return {
         'success': True,
         'competitors': merged,

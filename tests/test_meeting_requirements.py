@@ -11431,6 +11431,50 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(payload.get('success'))
         self.assertIn('MALFORMED_FUNCTION_CALL', payload.get('providerError') or '')
 
+    def test_market_competitors_tenant_key_gate_surfaces_at_job_level(self):
+        """A strict-mode refusal in the per-competitor verify calls must reach
+        the job's providerError — and a deterministic gate error must stop the
+        remaining query angles instead of burning every retry."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        names = ['مجمع الفرسان', 'واحة الريان', 'برج السدرة', 'مشروع النخبة',
+                 'مجمع الياسمين']
+        grounded = {
+            'choices': [{'message': {
+                'content': json.dumps({'competitors': [
+                    {'name': name, 'project_type': 'سكني'} for name in names]},
+                    ensure_ascii=False),
+                'annotations': [{'url_citation': {
+                    'url': 'https://sabq.org/article/x', 'title': 'سوق جدة',
+                    'content': ''}}],
+            }}],
+            'usage': {'server_tool_use': {'web_search_requests': 1}},
+        }
+        gate = ({'error': {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
+                           'error_code': 'NO_TENANT_KEY'}},
+                'لا يوجد مفتاح AI مفعل لهذه الشركة')
+        calls = []
+
+        def fake_model(*_args, **_kwargs):
+            calls.append(1)
+            return (grounded, '') if not calls[1:] else gate
+
+        module = self.application_module
+        with patch.object(module, '_call_market_study_model', side_effect=fake_model), \
+                patch.object(module, '_verify_market_urls', return_value=set()), \
+                patch.object(module, '_public_host_addresses', return_value=()):
+            res = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
+            })
+        payload = res.get_json()
+        self.assertTrue(payload.get('success'))
+        self.assertIn('مفتاح', payload.get('providerError') or '')
+        rows = payload.get('competitors') or []
+        self.assertTrue(all(row.get('verify_state') == 'search_not_run' for row in rows))
+        # 1 main call + 2 attempts per row (the gate break skips the second
+        # query angle) + the logo-discovery batch — not 4+ per row.
+        self.assertLessEqual(len(calls), 13)
+
     def test_pinned_https_get_follows_only_same_site_redirects(self):
         module = self.application_module
         redirect = Mock(status=301, headers={'Location': '/ar/home'})
