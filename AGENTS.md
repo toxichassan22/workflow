@@ -68,6 +68,26 @@ glyph — do not relax the check.
 `emoji_icons.py` exists but is deliberately unused: it turned emojis into inline SVG icons, which
 the very next line then stripped. Do not wire it back in.
 
+## No file over 1,000 lines — split early
+
+This is a hard codebase rule, not a preference. **No file may exceed ~1,000 lines** except for
+genuine last-resort necessity — and «the file was already like that» is not a necessity. The repo
+is being restructured away from monoliths (`app.py` ballooned past 30k lines and became effectively
+uneditable); never grow a giant file again.
+
+- Before adding code to any file near the limit, split it instead. A cohesive block — a route
+  group, a subsystem, a family of helpers — moves into its own module that `app.py` imports or
+  registers; it is not appended to a file already at the wall.
+- Any opportunity to carve a separate file out of a big one is an improvement by default. When the
+  change you are making touches a large file, take the split if it makes that change easier or
+  safer — do not wait for a dedicated refactor task.
+- New code is born small: a new feature starts in a new module, never inside a file already over
+  the limit.
+- The frontend already follows this discipline (`assets/js/` parts of ~1–1.5k lines concatenated
+  in `FRONTEND_*_ORDER`); hold the Python side to the same standard — one concern per module.
+- If a file genuinely cannot fit under ~1,000 lines (e.g. a generated schema or a single-pass data
+  blob), say why in the commit message and keep it as close to the limit as the structure allows.
+
 ## Stack
 
 - Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
