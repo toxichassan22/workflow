@@ -26,12 +26,24 @@ const fail = (msg) => failures.push(msg);
 
 const shell = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 
-// 1. i18n runtime loads first (absolute path: client routes would 404 a relative one).
+// 1. i18n runtime loads first (absolute path: client routes would 404 a relative one),
+// preceded by its dictionary part files under assets/i18n/.
 if (!shell.includes('src="/assets/i18n.js"')) fail('shell must include <script src="/assets/i18n.js">');
 const i18nPos = shell.indexOf('/assets/i18n.js');
 const bundleJsPos = shell.indexOf('/assets/app.bundle.js');
 if (bundleJsPos < 0) fail('shell must include <script src="/assets/app.bundle.js">');
 if (i18nPos > bundleJsPos && bundleJsPos >= 0) fail('assets/i18n.js must load BEFORE the application bundle');
+const i18nDictDir = path.join(ROOT, 'assets', 'i18n');
+const i18nDictFiles = fs.existsSync(i18nDictDir)
+  ? fs.readdirSync(i18nDictDir).filter((f) => f.endsWith('.js')).sort() : [];
+let prevDictPos = -1;
+for (const name of i18nDictFiles) {
+  const pos = shell.indexOf(`src="/assets/i18n/${name}"`);
+  if (pos < 0) fail(`shell must load dictionary part /assets/i18n/${name} before i18n.js`);
+  else if (pos > i18nPos) fail(`assets/i18n/${name} must load BEFORE i18n.js`);
+  else if (pos < prevDictPos) fail('assets/i18n dictionary order must match the sorted names');
+  prevDictPos = pos;
+}
 
 // 2. The shell references bundles, never part files.
 for (const m of shell.matchAll(/<script src="\/assets\/js\/([^"]+)"><\/script>/g)) {
@@ -75,7 +87,10 @@ for (const [order, dir, ext] of [[jsOrder || [], 'js', '.js'], [cssOrder || [], 
     seen.add(name);
     if (!fs.existsSync(path.join(ROOT, 'assets', dir, name))) fail(`assets/${dir}/${name} is missing`);
   }
-  const onDisk = fs.readdirSync(path.join(ROOT, 'assets', dir)).filter((f) => f.endsWith(ext)).sort();
+  const walk = (d, base) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(path.join(d, e.name), base ? base + '/' + e.name : e.name)
+                    : (base ? base + '/' : '') + e.name);
+  const onDisk = walk(path.join(ROOT, 'assets', dir), '').filter((f) => f.endsWith(ext)).sort();
   const missing = onDisk.filter((f) => !order.includes(f));
   if (missing.length) fail(`assets/${dir} files not in the bundle order: ${missing.join(', ')}`);
 }
@@ -88,6 +103,9 @@ const checkJs = (target, label) => {
   if (proc.status !== 0) fail(`node --check ${label} failed:\n${proc.stderr}`);
 };
 checkJs(path.join(ROOT, 'assets', 'i18n.js'), 'assets/i18n.js');
+for (const name of i18nDictFiles) {
+  checkJs(path.join(i18nDictDir, name), `assets/i18n/${name}`);
+}
 for (const name of jsOrder || []) {
   checkJs(path.join(ROOT, 'assets', 'js', name), `assets/js/${name}`);
 }

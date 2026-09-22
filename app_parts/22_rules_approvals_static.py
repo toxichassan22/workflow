@@ -307,13 +307,21 @@ FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
     '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
-    '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '06-team.js', '07-project-form/01_form_sections.js',
+    '07-project-form/02_section_versions.js', '08-location-maps/01_tables_approvals.js',
+    '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
+    '09-financial/02_formulas_calc.js',
+    '10-financial-report-timeline/01_report_collect.js',
+    '10-financial-report-timeline/02_timeline_sidebar.js', '11-land-croquis/01_croquis_survey.js',
+    '11-land-croquis/02_map_edits.js', '12-files-media/01_files_media.js',
     '12-files-media/02_visual_concept.js',
     '13-visual/01_visual_concept_page.js',
-    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen/01_undo.js',
+    '14-slides-gen/02_element_editing.js', '15-slide-edit-chat/01_render_inline_edit.js',
+    '15-slide-edit-chat/02_designer_chat.js',
     '16-presentations-export/01_presentations.js',
-    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot/01_training_rules.js',
+    '17-admin-boot/02_users_roles.js', '18-landloom-ops.js',
     '19-notifications.js',
 )
 
@@ -605,14 +613,14 @@ BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'slide_engine.py', 'design_te
                            'assets/js/02-settings-branding',
                            'assets/js/03-executive-classification.js',
                            'assets/js/04-market.js', 'assets/js/05-market-competitors.js',
-                           'assets/js/06-team.js', 'assets/js/07-project-form.js',
-                           'assets/js/08-location-maps.js', 'assets/js/09-financial.js',
-                           'assets/js/10-financial-report-timeline.js',
-                           'assets/js/11-land-croquis.js', 'assets/js/12-files-media',
-                           'assets/js/13-visual', 'assets/js/14-slides-gen.js',
-                           'assets/js/15-slide-edit-chat.js',
+                           'assets/js/06-team.js', 'assets/js/07-project-form',
+                           'assets/js/08-location-maps', 'assets/js/09-financial',
+                           'assets/js/10-financial-report-timeline',
+                           'assets/js/11-land-croquis', 'assets/js/12-files-media',
+                           'assets/js/13-visual', 'assets/js/14-slides-gen',
+                           'assets/js/15-slide-edit-chat',
                            'assets/js/16-presentations-export',
-                           'assets/js/17-admin-boot.js')
+                           'assets/js/17-admin-boot')
 
 
 def _build_fingerprint():

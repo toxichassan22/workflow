@@ -126,24 +126,38 @@ uneditable); never grow a giant file again.
   namespace**: cross-part calls need no imports, `patch.object(module, 'name')`
   in tests keeps working, and `compile()` is given the real part path so
   tracebacks point at the part file. The same split applies to `db.py` +
-  `db_parts/` (13 parts), `slide_engine.py` + `slide_engine_parts/` (9 parts)
-  and `maps_service.py` + `maps_service_parts/` (3 parts). **Edit the part
+  `db_parts/` (13 parts), `slide_engine.py` + `slide_engine_parts/` (9 parts),
+  `maps_service.py` + `maps_service_parts/` (3 parts), and the mid-size modules
+  `market_study.py`, `designer_chat_reliability.py`, `generate_pdf_from_preview.py`,
+  `pdf_generator_html.py`, `design_templates.py`, `change_tracking.py`,
+  `pdf_generator.py` and `exports/pptx_export.py` (2–3 parts each under
+  `<stem>_parts/`). **Edit the part
   file**, never re-inline code into the loader. Splitting keeps exec order
   identical to the old file order — when adding a new part, name it so it sorts
   into the right position (`NN_name.py`), and keep top-level statements ordered
   the way they must run. Literal-source assertions in tests must read the
   combined text via `read_module_source('x.py')` (defined in the suites that
   need it) — never `app.py` alone. `gunicorn app:app` is unchanged.
-- Frontend: one single-page app. `index.html` is a slim shell (~1.2k lines: markup plus
-  resource references). Styles live in `assets/css/` (`base.css`, `project-form.css`) and code in
-  `assets/js/` (`00-core.js` … `17-admin-boot.js`, ~1–1.5k lines each, ordered classic
+  The giant test suites split the same way: `tests/test_meeting_requirements.py`,
+  `tests/test_identity_security.py` and `tests/test_issues_014_020_security.py`
+  are loaders whose `tests/<stem>_parts/` files define a base class plus
+  `XxxTestsPartNN` subclasses — each subclass re-runs `setUpClass`, so the
+  fixture creates the schema itself (`db.init_db()`), never relying on the
+  first import.
+- Frontend: one single-page app. `index.html` is a slim shell (~1.7k lines: markup plus
+  resource references). Styles live in `assets/css/` (`base/01_…` … `base/05_…`,
+  `project-form/01_…` `project-form/02_…`) and code in
+  `assets/js/` (`00-core.js` … `19-notifications.js`; files that grew past ~1.5k
+  are split further into `<stem>/NN_name.js` part dirs, ordered classic
   scripts so every function still shares one global scope — no `async`, no
-  `type=module`). The shell loads them as two server-built bundles
+  `type=module`). `assets/i18n.js` is the runtime; its three dictionaries live
+  in `assets/i18n/01_dict_ar.js`, `02_dict_en.js`, `03_dict_en_auto.js`, loaded
+  by the shell before it (they set `window.__WFI18N_*`). The shell loads them as two server-built bundles
   (`/assets/app.bundle.js`, `/assets/app.bundle.css`, concatenated in `FRONTEND_*_ORDER`
   in `app.py` with an ETag and no build step). Edit the part file, never re-inline the code
   and never reference a part file from the shell. `node scripts/verify-frontend.js`
-  guards the shell wiring (bundles, order, no orphans, no inline blocks, `node --check`
-  per file and on the concatenated bundle).
+  guards the shell wiring (bundles, order, no orphans, i18n dict ordering, no
+  inline blocks, `node --check` per file and on the concatenated bundle).
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter for all text/image generation — see `.env`.
 - Spend metering: every OpenRouter call lands in `ai_usage_events` (tokens verbatim, dollars via
   `/generation`), every billable Maps call in `map_usage_events` (units × `MAPS_SKU_UNIT_PRICES`,
@@ -352,7 +366,7 @@ D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_admin_agent
 
 Python syntax check (loaders + every part file):
 ```powershell
-D:\workflow\.venv\Scripts\python.exe -c "import ast, glob; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py') + tuple(glob.glob('*_parts/*.py'))]"
+D:\workflow\.venv\Scripts\python.exe -c "import ast, glob; [ast.parse(open(f,encoding='utf-8').read(), f) for f in tuple(glob.glob('*.py')) + tuple(glob.glob('*_parts/*.py')) + tuple(glob.glob('exports/*_parts/*.py')) + tuple(glob.glob('tests/*_parts/*.py'))]"
 ```
 
 Frontend JS check (shell wiring + `node --check` per file):

@@ -240,9 +240,9 @@ class PackagesFxTests(unittest.TestCase):
 
     def test_frontend_has_no_dollar_strings(self):
         parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
-        for name in ('assets/css/base.css', 'assets/css/project-form.css'):
-            parts.append((ROOT / name).read_text(encoding='utf-8'))
-        for name in sorted((ROOT / 'assets' / 'js').glob('*.js')):
+        for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
+            parts.append(_css.read_text(encoding='utf-8'))
+        for name in sorted((ROOT / 'assets' / 'js').rglob('*.js')):
             parts.append(name.read_text(encoding='utf-8'))
         frontend = '\n'.join(parts)
         self.assertNotIn('دولار', frontend)

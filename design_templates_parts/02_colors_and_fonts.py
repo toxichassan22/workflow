@@ -1,0 +1,634 @@
+
+
+def _relative_luminance(value):
+    color = normalize_hex_color(value)
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+              for channel in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast_ratio(foreground, background):
+    lighter, darker = sorted((_relative_luminance(foreground), _relative_luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def readable_text_color(preferred, background, alternatives=(), minimum=4.5):
+    surface = normalize_hex_color(background, '#ffffff')
+    candidates = []
+    for value in (preferred, *alternatives, '#ffffff', '#0f172a'):
+        color = normalize_hex_color(value, '')
+        if color and color not in candidates:
+            candidates.append(color)
+    for color in candidates:
+        if contrast_ratio(color, surface) >= minimum:
+            return color
+    return max(candidates, key=lambda color: contrast_ratio(color, surface))
+
+
+def dark_surface_color(*colors):
+    for value in (*colors, '#0b1f33'):
+        color = normalize_hex_color(value, '')
+        if color and contrast_ratio('#ffffff', color) >= 4.5:
+            return color
+    return '#0b1f33'
+
+
+def build_design_rules(branding):
+    """
+    Build DESIGN_RULES string dynamically from tenant's branding settings.
+    This replaces the hardcoded DESIGN_RULES in app.py.
+    """
+    template = DESIGN_TEMPLATES.get(branding.get('design_template', 'modern'), DESIGN_TEMPLATES['modern'])
+    company_name = branding.get('company_name', '')
+    primary = normalize_hex_color(branding.get('primary_color'), '#0b1f33')
+    secondary = normalize_hex_color(branding.get('secondary_color'), '#1e293b')
+    accent = normalize_hex_color(branding.get('accent_color'), '#0ea5e9')
+    configured_bg = normalize_hex_color(branding.get('background_color'), '#f8fafc')
+    # Content slides are report pages, not dark application shells. A tenant may
+    # still use a dark brand colour for chrome and dividers, but a dark configured
+    # background must not turn the ordinary slide canvas dark.
+    bg = configured_bg if contrast_ratio('#1e293b', configured_bg) >= 4.5 else '#ffffff'
+    text_color = normalize_hex_color(branding.get('text_color'), '#1e293b')
+    body_on_bg = readable_text_color(text_color, bg)
+    heading_on_bg = readable_text_color(primary, bg, (body_on_bg,))
+    accent_on_bg = readable_text_color(accent, bg, (heading_on_bg, body_on_bg))
+    body_on_white = readable_text_color(text_color, '#ffffff')
+    heading_on_white = readable_text_color(primary, '#ffffff', (body_on_white,))
+    dark_surface = dark_surface_color(primary, secondary)
+    cover_rgb = _hex_to_rgb(primary)
+    text_on_primary = readable_text_color('#ffffff', primary, ('#0f172a',))
+    text_on_secondary = readable_text_color('#ffffff', secondary, ('#0f172a',))
+    footer_text = readable_text_color('#ffffff', dark_surface, ('#0f172a',))
+    footer_accent = readable_text_color(accent, dark_surface, (footer_text,))
+    logo_tone = str(branding.get('_logo_tone') or '').strip().lower()
+    company_logo_rule = {
+        'light': f'- نتيجة التحليل الفعلي: شعار الشركة فاتح؛ خلفيته الإلزامية {dark_surface} في كل موضع، ولا يوضع على الأبيض مباشرة.',
+        'dark': '- نتيجة التحليل الفعلي: شعار الشركة داكن؛ خلفيته الإلزامية #ffffff في كل موضع، ولا يوضع على مساحة داكنة مباشرة.',
+    }.get(logo_tone, '- لم تتوفر نتيجة تحليل شعار الشركة؛ لا تفترض لونه ولا تضعه على خلفية مساوية لألوانه.')
+    # The prompt no longer states a font name: the slide used to be told to write
+    # `font-family:'The Sans Arabic'` inline, while the face actually loaded is a per-tenant alias
+    # (`tenant-managed-<id>`) that carries the uploaded file. The two never matched, and any surface
+    # that renders a slide without the injected stylesheet showed the wrong font.
+    header_enabled = branding.get('header_enabled', 1)
+    footer_enabled = branding.get('footer_enabled', 1)
+    header_h = branding.get('header_height', 56)
+    footer_h = branding.get('footer_height', 36)
+    card_style = branding.get('card_style', template['card_style'])
+    logo_path = branding.get('logo_path', '')
+    slide_ratio = branding.get('slide_ratio', '16:9')
+
+    # Slide dimensions based on ratio
+    if slide_ratio == '4:3':
+        slide_w, slide_h = 1280, 960
+    else:
+        slide_w, slide_h = 1280, 720
+
+    rules = f"""أنت مصمم عروض تقديمية استثمارية فاخرة ورفيعة المستوى لشركة "{company_name}".
+صمم كل شريحة كتحفة تصميمية تنفيذية راقية بأسلوب مسطح أنيق (Flat Crisp Luxury).
+
+## أبعاد الشريحة وقواعد الاحتواء الصارمة (ممنوع التداخل أو التجاوز إطلاقاً)
+- الأبعاد الكلية: {slide_w}px عرض × {slide_h}px ارتفاع.
+- أقصى ارتفاع للمحتوى داخل الشريحة: {slide_h - header_h - footer_h - 20}px صافي بين الهيدر والفوتر.
+- قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
+
+## هوية الألوان المؤسسية الصارمة
+- اللون الأساسي: {primary} للعناوين ورؤوس الجداول والمساحات الداكنة المحدودة.
+- اللون الثانوي: {secondary} للعناوين الفرعية أو خلفية واحدة مساندة عند الحاجة.
+- لون التمييز: {accent} للنسب والعناصر المهمة وخطوط الرسوم البيانية فقط.
+- الخلفية: {bg}، مع الأبيض #ffffff لمساحات القراءة والجداول.
+- لون النص المسجل في الهوية: {text_color}. لا تستخدمه آليًا قبل فحص الخلفية.
+- ألوان القراءة المحسوبة والملزمة: النص فوق {bg} هو {body_on_bg}، والعنوان فوقها {heading_on_bg}، والتمييز المقروء فوقها {accent_on_bg}. فوق الأبيض استخدم {body_on_white} للنص و{heading_on_white} للعناوين. فوق {primary} استخدم {text_on_primary}، وفوق {secondary} استخدم {text_on_secondary}.
+- افحص كل زوج لون نص وخلفية قبل إخراج HTML، والحد الأدنى لنسبة التباين هو 4.5:1. ممنوع نص أسود أو داكن فوق خلفية داكنة، وممنوع نص أبيض أو فاتح فوق خلفية فاتحة، حتى لو كان اللونان موجودين في الهوية.
+- اجعل 70-80% من الصفحة مساحة قراءة موحدة، و15-20% من اللون الأساسي، وبحد أقصى 10% من لون التمييز. لا توزع الألوان بالتساوي ولا تجعل كل مربع بلون مختلف.
+- الرسوم البيانية تستخدم درجات اللون الأساسي والثانوي ولون التمييز فقط، مع الرمادي المحايد عند الحاجة. لا تستخدم أخضر أو أحمر أو برتقالي تلقائياً.
+- ممنوع إدخال أي لون خارج لوحة الهوية والمحايدات المذكورة، وممنوع الألوان الفاقعة أو النيون.
+
+## معالجة التدرجات والخلفيات لأجهزة Apple وWebKit
+- قاعدة أمان متصفحات Apple (Safari و iOS): في أي CSS linear-gradient أو radial-gradient، لا تستخدم كلمة transparent إطلاقاً، لأن محرك WebKit يحولها إلى أسود شفاف مما يسبب هالات رمادية متسخة.
+- استخدم دائماً اللون الأبيض الشفاف الصريح: rgba(255, 255, 255, 0) أو لون الخلفية بشفافية صفرية.
+- تجنب الخلفيات شبه الشفافة الغائمة مثل rgba(255,255,255,0.7) على شاشات Retina لأنها تبدو رمادية باهتة؛ استخدم #ffffff صريح.
+
+## الظلال والحدود (Flat Crisp Luxury - بدون ظلال ثقيلة)
+- ممنوع استخدام الظلال السوداء الثقيلة أو المعتمة (Heavy Drop Shadows) إطلاقاً.
+- اعتمد التصميم المسطح الراقي (Flat Luxury) باستخدام حدود ناعمة ودقيقة جداً: border: 1px solid #e2e8f0 أو border: 1px solid #edf2f7 مع border-radius: 10px إلى 14px.
+- الظل الوحيد المسموح (إذا لزم الأمر) هو فائق النعومة والخفة: box-shadow: 0 1px 3px rgba(0,0,0,0.02) أو box-shadow: none.
+
+## الخطوط والأحجام المحددة للتناسب (Bold Executive Hierarchy)
+**ممنوع كتابة font-family في أي عنصر أو في أي style.** خط الشركة يُطبَّق تلقائيًا على الشريحة كلها من
+إعدادات الشركة (قد يكون خطًا مرفوعًا لا يعرفه أي جهاز)، فأي font-family تكتبه يخالف الخط المعتمد.
+حدّد الأحجام والوزن لخدمة التسلسل البصري الواضح مع استخدام خط عريض وبارز للعناوين والمؤشرات:
+- عنوان الشريحة الرئيسي: 24px-28px وfont-weight:800 (Bold قوي وبارز) باللون {heading_on_bg} فوق الخلفية المعتمدة، أو {heading_on_white} فوق الأبيض.
+- عنوان القسم أو الجدول: 16px-18px وfont-weight:700 باللون المقروء نفسه حسب خلفيته.
+- تسمية الحقل أو المؤشر: 12px-14px وfont-weight:600 باللون {body_on_bg} فوق الخلفية المعتمدة، أو {body_on_white} فوق الأبيض.
+- الفقرات والقيم والوصف وخلايا الجدول: 11px-13px وfont-weight:400 بلون يحقق 4.5:1 مع الخلفية، مع تمييز الكلمات المفتاحية بوزن 700.
+- الأرقام المالية الرئيسية والمؤشرات الكبرى: 24px-30px وfont-weight:800 باللون {heading_on_bg} أو {accent_on_bg} فوق الخلفية المعتمدة.
+- ممنوع خلط أكثر من عائلة خط واحدة.
+
+## شريحة الغلاف (Cover Slide - Full Bleed Background)
+- صورة الغلاف (##IMAGE_COVER##) يجب أن تمتد كخلفية كاملة على كامل الشريحة (Full Bleed Background):
+  `position:absolute; inset:0; background-image:url('##IMAGE_COVER##'); background-size:cover; background-position:center; z-index:0;`
+- وضع عنصر يحمل `data-cover-overlay` كتدرج من اللون الأساسي للهوية فوق الصورة لضمان وضوح النصوص والشعارات:
+  `position:absolute; inset:0; background:linear-gradient(135deg, rgba({cover_rgb},0.88) 0%, rgba({cover_rgb},0.55) 50%, rgba({cover_rgb},0.92) 100%); z-index:1;`
+- وضع المحتوى النصي والعناوين والشعارات فوق التدرج (`z-index:2`) بلون أبيض ناصع وتباين فخم.
+- **ممنوع منعاً باتاً إضافة أي صورة أو بطاقة صورة صغيرة أو داخلية (<img> أو بطاقة صورة) داخل شريحة الغلاف:** صورة المشروع تُستخدم كخلفية كاملة للشريحة فقط (Full Bleed Background)، وفوقها التدرج الداكن data-cover-overlay والنصوص والشعارات، ولا تضع أي وسم <img> إضافي لصورة المشروع أو صورة الغلاف داخل محتوى الغلاف إطلاقاً (فقط ##LOGO## و ##PROJECT_LOGO## هما المسموحان كوسوم شعارات).
+
+## معالجة تباين وخلفيات الشعارات الذكية (Adaptive Independent Logo Containers)
+{company_logo_rule}
+- **مبدأ تباين الشعارات المستقل:** يجب أن يظهر كل شعار (سواء شعار الشركة ##LOGO## أو شعار المشروع ##PROJECT_LOGO##) بوضوح تام وتباين عالٍ ومقروء 100%. نتيجة التحليل المرفقة لكل شعار هي القرار النهائي، ولا يجوز عكسها أو توحيد خلفية الشعارين:
+  - **في هيدر شرائح المحتوى (الخلفية فاتحة/بيضاء #ffffff):**
+    - **الشعار الداكن أو الملون** (مثل الأخضر، الكحلي، الأسود، الذهبي الداكن): يوضع مباشرة وبشكل طبيعي على الهيدر الأبيض دون أي حاوية أو شارة داكنة إطلاقاً (خلفية شفافة `background: transparent;`).
+    - **الشعار ذو النصوص أو العناصر البيضاء/الفاتحة جداً** (التي لا تُقرأ على الأبيض): يُوضع **هذا الشعار الفاتح فقط** داخل شارة داكنة أنيقة ناعمة (`background:{primary}; padding:4px 10px; border-radius:6px; display:inline-flex; align-items:center;`).
+    - **ممنوع منعاً باتاً وضع الشعار الداكن داخل شارة داكنة**، وممنوع دمج الشعارين معاً في شارة واحدة عشوائية إذا اختلف لونهما.
+  - **في الشرائح الداكنة (الغلاف، الختام، فواصل الأقسام الداكنة):**
+    - **الشعار الأبيض أو الفاتح:** يوضع مباشرة على الخلفية الداكنة بأناقة وتباين كامل.
+    - **الشعار الداكن** (الذي لا يظهر على الخلفية الداكنة): يُوضع **هذا الشعار الداكن فقط** داخل حاوية بيضاء أو فاتحة ناعمة (`background:#ffffff; padding:6px 14px; border-radius:8px; display:inline-flex; align-items:center;`).
+
+## توسيط صور الخرائط والموقع (Centered Maps - No Crop Shift)
+- صور الخرائط (##MAP_OVERVIEW##, ##MAP_LANDMARKS##, ##MAP_ACCESS##, ##MAP_CATCHMENT##) يجب أن تُضبط دائماً في المنتصف تماماً:
+  `background-position: center center !important; background-size: contain !important; background-repeat:no-repeat;` أو عند استخدام وسم img: `object-fit: contain !important; object-position: center center !important;`
+- ممنوع قص صورة الخريطة أو استخدام cover؛ يجب أن تظهر الصورة كاملة بحيث تبقى علامة الموقع في موضعها الحقيقي.
+
+## مواصفات الرسومات البيانية المعتمدة (4 أنواع لـ 4 مواقع محددة فقط)
+الرسوم البيانية في العرض محصورة حصراً في 4 أنواع معتمدة فقط في 4 مواقع محددة، ويُمنع منعاً باتاً إنشاء أي رسم بياني خارج هذه المواقع الأربعة أو بهذه الأنواع غير المعتمدة (ممنوع نهائياً Pie أو Donut أو Scatter أو Histogram أو Candlestick أو Treemap أو أي رسم لبيانات الإيرادات أو المصروفات):
+
+1. **مقارنة المنافسين — دراسة السوق (`horizontal_bar`):**
+   - **اسم الشارت:** مخطط الأعمدة الأفقية (Horizontal Bar Chart)
+   - **الموقع والجدول المصدر:** شريحة «مقارنة المنافسين» في قسم دراسة السوق، مبنية على جدول المنافسين الرئيسيين (`market_study_data.competitors`).
+   - **البيانات المطلوبة:** اسم المنافس، القيمة الرقمية، العملة، الوحدة، نوع السعر (بيع، إيجار، سعر متر، سعر يومي)، والمصدر وتاريخ البيانات.
+   - **قواعد التنفيذ البرمجية:**
+     * استخدام أعمدة أفقية مرتبة تنازلياً من الأعلى إلى الأقل.
+     * مقارنة القيم التي تستخدم الوحدة ونوع السعر نفسيهما فقط.
+     * إظهار المشروع بلون مختلف ومميز عند توفر قيمة مقترحة للمشروع.
+     * استبعاد أي منافس لا يملك قيمة رقمية موثقة.
+     * عرض النطاق السعري كشريط من الحد الأدنى إلى الأعلى، وليس كمتوسط مفترض.
+     * **ملاحظة للمبرمج:** لا ينشئ النظام قيمة بديلة أو متوسطاً للمنافس عند غياب الرقم من الجدول.
+
+2. **تكوين إجمالي تكلفة الاستثمار — الدراسة المالية (`waterfall`):**
+   - **اسم الشارت:** المخطط الشلالي (Waterfall Chart)
+   - **الموقع والجدول المصدر:** شريحة «تكوين إجمالي تكلفة الاستثمار» في قسم الدراسة المالية، مبنية على جدول بنود التكلفة وجدول الإيضاحات المالية (`costTable` / `report`).
+   - **البيانات المطلوبة:** اسم بند التكلفة وقيمته، تصنيف البند (تطوير، أرض، أتعاب، تمويل، صندوق)، إجمالي تكلفة المشروع وإجمالي تكلفة الاستثمار.
+   - **قواعد التنفيذ البرمجية:**
+     * استخدام مخطط شلالي يوضح مساهمة كل بند تكلفة في الإجمالي.
+     * إظهار إجمالي تكلفة المشروع وإجمالي الاستثمار كأعمدة إجمالية كاملة الارتفاع.
+     * عدم تكرار البنود أو المجاميع الوسيطة داخل الإجمالي.
+     * عدم إدخال قيمة التسهيل التمويلي ضمن التكلفة.
+     * إدخال رسوم ترتيب التمويل والفوائد فقط ضمن تكلفة التمويل.
+     * **ملاحظة للمبرمج:** قيمة التمويل مصدر للأموال وليست تكلفة، لذلك لا تدخل ضمن أعمدة التكلفة.
+
+3. **التدفقات النقدية السنوية والتراكمية — الدراسة المالية (`combo`):**
+   - **اسم الشارت:** المخطط المركب: أعمدة وخط (Combo Chart: Column + Line)
+   - **الموقع والجدول المصدر:** شريحة «التدفقات النقدية السنوية والتراكمية» في قسم الدراسة المالية، مبنية على جدول التدفقات النقدية السنوية (`cashflowTable` / `report`).
+   - **البيانات المطلوبة:** السنة أو الفترة المالية، صافي التدفق النقدي السنوي، الرصيد النقدي التراكمي، سنة الاسترداد وسنة التخارج عند توفرهما.
+   - **قواعد التنفيذ البرمجية:**
+     * استخدام أعمدة رأسية لصافي التدفق وخط بياني متصل للرصيد التراكمي.
+     * عرض سنوات الدراسة كاملة في رسم واحد.
+     * تمييز التدفقات الموجبة والسالبة بألوان مختلفة واضحة.
+     * إظهار خط الصفر وتحديد نقطة تحول الرصيد التراكمي إلى موجب (سنة الاسترداد).
+     * عدم إضافة السيولة كسلسلة مستقلة إذا كانت تكرر الرصيد التراكمي.
+     * **ملاحظة للمبرمج:** يتم احتساب خط الرصيد التراكمي من صافي التدفقات إذا لم يكن محفوظاً في الجدول.
+
+4. **مقارنة السيناريوهات المالية — الدراسة المالية (`heatmap`):**
+   - **اسم الشارت:** الخريطة الحرارية (Heatmap)
+   - **الموقع والجدول المصدر:** شريحة «مقارنة السيناريوهات المالية» في قسم الدراسة المالية، مبنية على جدول نتائج السيناريوهات المالية (`sensitivityTable` / `report`).
+   - **البيانات المطلوبة:** السيناريو المتحفظ والأساسي والمتفائل، إجمالي الاستثمار والإيرادات وصافي الربح، العائد على الاستثمار ROI، والعائد الداخلي للمشروع Project IRR، والعائد الداخلي لحقوق الملكية Equity IRR، وفترة الاسترداد.
+   - **قواعد التنفيذ البرمجية والتلوين الاتجاهي:**
+     * استخدام خريطة حرارية واضحة للمقارنة بين السيناريوهات في المؤشرات الأساسية.
+     * تلوين اتجاهي ذكي: الأخضر للأفضل دائماً (الأعلى أفضل للإيرادات وصافي الربح ومعدلات العائد ROI وIRR، بينما الأقل أفضل لإجمالي التكلفة وفترة الاسترداد).
+     * توحيد الوحدات والتقريب العشري داخل كل مؤشر.
+     * مطابقة أرقام السيناريو الأساسي مع الملخص المالي قبل الرسم.
+     * التحقق من منطق الافتراضات قبل اعتماد ألوان النتائج.
+     * **ملاحظة للمبرمج:** الألوان تعتمد على اتجاه المؤشر، وليس على كون الرقم أكبر دائماً.
+
+- تنفيذ الرسوم الأربعة بـ HTML وCSS نقي بألوان الهوية فقط، ويبقى جدول البيانات الأصلي كاملاً ومقروءاً بجانب الرسم دون تكرار الأرقام أو حجبها.
+- أضف الرسم فقط إذا حملت خطة الشريحة `chart_type` معتمداً صريحاً؛ وإلا اعرض جدول التقرير وحده.
+- اعرض جميع أقسام وجداول ومؤشرات الدراسة الموجودة في البيانات، بالترتيب والمسميات نفسها المستخدمة في تقرير الدراسة المالية، ولا تختصرها في لوحة مؤشرات واحدة.
+- انقل كل قيمة ووحدة وعدد خانات عشرية كما هو. أضف فواصل الآلاف بصرياً لكل مبلغ ومساحة وكمية، من دون تقريب أو تحويل، واستثن السنوات والهواتف وأرقام الوثائق والمعرفات والإحداثيات.
+- لا تغيّر أسماء المؤشرات: تبقى ROI وProject IRR وEquity IRR وNOI وبقية المسميات كما وردت في الدراسة.
+- الجداول تستخدم رأسًا واضحًا وفواصل دقيقة وتباعدًا مريحًا، ويمكن أن تمتد على صفحات إضافية؛ ممنوع حذف صف أو عمود لتناسب صفحة واحدة.
+
+## تجنب التقطيع المفرط والشارات المكررة
+- عدم اختصار الكلام أو تفتيت المحتوى إلى شبكة مربعات وبطاقات صغيرة كثيرة مفتعلة؛ اجعل المحتوى متماسكاً وفقرات متكاملة وجداول منسقة.
+- ممنوع وضع شارات أو كبسولات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية.
+
+## الشريحة الأساسية
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;background:{bg};color:{body_on_bg};">
+CSS inline فقط، وبدون font-family. ممنوع box-shadow الثقيل أو filter أو backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
+
+## سطح شرائح المحتوى
+- شرائح المحتوى والفهرس والتحليلات العادية لها canvas أبيض أو فاتح متصل (`background:#ffffff` أو `{bg}`) مع نص داكن مقروء. لا تنشئ إطارًا داكنًا حول صفحة بيضاء ولا تستخدم خلفية داكنة لجذر شريحة محتوى.
+- اللون الأساسي واللون الثانوي يُستخدمان للعناوين ورؤوس الجداول والمساحات المحدودة فقط. الخلفيات الداكنة الكاملة محجوزة للغلاف والخاتمة وفواصل الأقسام ذات الصورة.
+- عند تعديل شريحة محتوى موجودة، حافظ على هندستها ومحتواها داخل canvas فاتح، ولا تعِد بناءها كواجهة تطبيق داكنة.
+"""
+
+    if header_enabled:
+        rules += f"""
+## هيدر إلزامي — يجب أن يوجد في كل شريحة محتوى
+position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;box-sizing:border-box;
+المحتوى:
+- في أحد الجانبين: شعار الشركة ##LOGO## (height:48px) مع شعار المشروع ##PROJECT_LOGO## إن وُجد كصورة متناسقة وواضحة بالحجم نفسه بجانبه.
+- في الجانب المقابل: خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:700 color:{heading_on_white}.
+- **قاعدة وضوح وتباين الشعارات في الهيدر:**
+  - إذا كان الشعار داكناً أو ملوناً: يوضع مباشرة على الهيدر الأبيض دون أي خلفية داكنة.
+  - إذا كان الشعار أبيض أو فاتح جداً: يوضع هذا الشعار الفاتح فقط داخل شارة داكنة (`background:{primary}; padding:4px 10px; border-radius:6px; display:inline-flex; align-items:center;`).
+"""
+
+    if footer_enabled:
+        rules += f"""
+## فوتر إلزامي — يجب أن يوجد في كل شريحة محتوى
+position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{dark_surface};display:flex;align-items:center;padding:0 16px;
+المحتوى: اسم المشروع 13px بلون {footer_text} + '{company_name}' باللون نفسه مع opacity:0.7 + رقم الصفحة كنص واضح بلون {footer_accent} من دون دائرة أو شارة
+"""
+
+    content_top = header_h if header_enabled else 0
+    content_bottom = footer_h if footer_enabled else 0
+    rules += f"""
+## منطقة المحتوى والتخطيط
+top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
+- النبذة والملخص: فقرة أو عمود نصي واضح مع صورة كبيرة عند توفرها.
+- البيانات المنظمة: جدول واحد واضح، ويمكن تقسيمه على صفحات إضافية.
+- الأرقام القابلة للمقارنة: جدول منظم؛ ولا يضاف رسم إلا في شريحة تحمل `chart_type` معتمدًا من الأنواع الأربعة المعتمدة فقط (مقارنة المنافسين، تكلفة الاستثمار، التدفقات النقدية، مقارنة السيناريوهات).
+- الصور والمخططات: استخدم جميع الرموز المحددة في خطة الشريحة، من صورة واحدة إلى ثلاث صور بتوزيع متوازن، مع عنوان ووصف كل صورة دون تكرار.
+- لا تستخدم شبكة مربعات لمجرد ملء الصفحة، ولا تكرر العنصر نفسه كنص وبطاقة ومؤشر.
+
+## البطاقات (Cards)
+تستخدم فقط لعنصرين أو ثلاثة مستقلين وقصيرين. استخدم `background:#ffffff; color:{body_on_white}; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; box-sizing:border-box; box-shadow:none;`. لا تستخدم بطاقة بيضاء كبيرة كحامل لكل محتوى الشريحة؛ اجعل الجذر نفسه فاتحًا.
+بدون أيقونات وبدون إيموجي نهائياً. إذا تجاوز المحتوى ثلاثة عناصر أو احتوى فقرات مترابطة فاستخدم نصاً أو جدولاً بدلاً من البطاقات.
+
+## تصميم جداول الدراسة المالية (مستوحى من تقرير PDF المالي المنظم)
+- **التصميم الأساسي الإلزامي**: تصميم جداول تقرير PDF المالي هو التصميم المعتمد والأساسي لجميع شرائح الدراسة المالية دون استثناء، وممنوع منعاً باتاً تحويل جداول الدراسة المالية إلى كروت عائمة أو مربعات إحصائية متفرقة.
+- **تطبيق ألوان الهوية والتناسب المضغوط (Compact & Fitted Tables)**:
+  - **منع التمدد الرأسي والصفوف العملاقة (No Vertical Overstretch)**: ممنوع تمديد الجدول رأسياً ليملأ كامل ارتفاع الشريحة (ممنوع وضع height: 100% أو height: 480px أو height: 500px على الجدول لتفادي الصفوف الضخمة والفراغات المفرطة). يجب أن يكون ارتفاع كل صف طبيعياً ومضغوطاً وأنيقاً (padding: 7px 12px; font-size: 11.5px-12px; line-height: 1.35;).
+  - **جداول العمودين والمؤشرات (2-Column Key-Value Tables)**:
+    * عند احتواء الشريحة على جدول من عمودين فقط (مثل «البند» و«القيمة»): لا تمد الجدول بعرض 100% مفرط يباعد بين البند وقيمته؛ ضعه داخل حاوية أنيقة بعرض متناسب ومريح (max-width: 820px; margin: 0 auto; أو بعرض 65%-75% مريح) داخل بطاقة بيضاء بحدود ناعمة border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;.
+    * في الشرائح المالية العادية غير الرسومية، عند وجود أكثر من جدول مالي (مثل «التكاليف والاستثمار» و«مؤشرات العائد»): اعرض كل جدول مستقلاً ورص الجداول كلها رأسياً تحت بعضها بترتيبها داخل الشريحة، ولا تضع جدولين بجانب بعضهما. إذا لم تتسع المساحة، أكمل الجداول في الشريحة التالية دون تصغير أو قص أو حذف. شرائح الرسوم المعتمدة فقط تستثنى وتضع جدول بياناتها بجانب الرسم.
+  - **جداول البيانات المتعددة الأعمدة (Data Tables)**:
+    * استخدم table داخل حاوية خلفيتها بيضاء مع ترويسة أنيقة بلون الهوية الأساسي ({primary}) بلون نص أبيض ناصع، وصفوف متبادلة ناعمة، وفواصل آلاف دقيقة للأرقام.
+    * لا تجعل خلايا الجدول متباعدة بشكل مبالغ فيه؛ اجعل الجدول متماسكاً وأنيقاً يبرز الأرقام بوضوح تنفيذي فخم.
+- **توزيع الرسوم البيانية المعتمدة**:
+  - عند وجود رسم بياني معتمد (من الأنواع الثلاثة المالية: waterfall, combo, heatmap): يُعرض في عمود بجانب جدول بياناته الأصلي الكامل في تخطيط متوازن (عمودان متجاوران)، دون تصغير أو قص للجدول.
+"""
+
+    if template['use_gradients']:
+        rules += f"تدرجات: استخدم linear-gradient(135deg,{primary},{secondary}) في الخلفيات والبطاقات المميزة مع استخدام rgba(255,255,255,0) للتلاشي الشفاف.\n"
+
+    rules += f"""
+## الصور Placeholder
+- صورة الغلاف: ##IMAGE_COVER## (background-image فقط كخلفية كاملة Full Bleed مع تدرج داكن)
+- التصورات الخارجية: ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_N##. استخدم كل الرموز المحددة للشريحة، حتى ثلاث صور عند اعتماد التخطيط المتوازن، وضعها في قسم التصورات الخارجية فقط.
+- نبذة عن المشروع لا تستخدم هذه الصور؛ كل صورة خارجية تظهر مرة واحدة داخل قسم التصورات الخارجية فقط.
+- صور الأرض: ##LAND_PHOTO_1## إلى ##LAND_PHOTO_N##، كل صورة بحجم واضح مع وصفها المحفوظ داخل قسم تحليل الأرض، ثم الملخص النهائي للأرض.
+- التصورات الداخلية: ##INTERIOR_COMP_1_IMG_1## وما يماثلها. استخدم كل الرموز المحددة للشريحة، حتى ثلاث صور عند اعتماد التخطيط المتوازن، ووزع صور المكون دون تكرار.
+- المخططات المعمارية 2D: ##PLAN_IMAGE_1## إلى ##PLAN_IMAGE_N## (أو ##2D_PLAN_N##)، وكل مخطط في صفحة مستقلة أو مساحة كبيرة مع عنوانه ووصفه الصحيحين.
+- شعارات فريق العمل: ##TEAM_LOGO_1## إلى ##TEAM_LOGO_N##. عند ذكر جهة لها شعار متوفر يجب أن يظهر شعارها بوضوح بجانب اسمها، ولا يُستبدل بشعار الشركة.
+- خريطة الموقع العام: ##MAP_OVERVIEW## (background-image مضبوطة في المنتصف center center)
+- خريطة المعالم: ##MAP_LANDMARKS## (background-image مضبوطة في المنتصف center center)
+- خريطة الوصول: ##MAP_ACCESS## (background-image مضبوطة في المنتصف center center)
+- خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image مضبوطة في المنتصف center center)
+- لا توجد صور فوتوغرافية للشوارع أو لمحيط الموقع، ولا تُولَّد من الخرائط ولا من التصور البصري: ممنوع كتابة ##STREET_VIEW_1## أو أي رمز مشابه، وممنوع إنشاء شريحة صور موقع أو بطاقات صور للمحيط. الموقع يُعرض بالخرائط والبيانات.
+- شعار الشركة: ##LOGO## (height:48px في الهيدر، height:80px في الغلاف والختام؛ يوضع مباشرة على الخلفية الفاتحة إذا كان داكناً، أو داخل شارة داكنة إذا كانت نصوصه بيضاء)
+- شعار المشروع ##PROJECT_LOGO##: إذا ذُكر في «الصور المتوفرة» أنه متوفر فوضعه **إلزامي** — في هيدر كل شريحة محتوى بجانب شعار الشركة، وفي الغلاف والختام كذلك. الشعاران جنبًا إلى جنب بفاصل رأسي رقيق (1px solid #e2e8f0) وبارتفاع واحد متساوٍ (48px في الهيدر، 72px-80px في الغلاف والختام). يُعامل كل شعار باستقلالية تامة حسب تباين ألوانه (الشعار الفاتح على الأبيض يُوضع في شارة داكنة، والشعار الداكن على الداكن يُوضع في شارة بيضاء، والشعار المتناسق مع الخلفية يوضع مباشرة بدون شارة). إذا ذُكر أنه غير متوفر فلا تكتب ##PROJECT_LOGO## إطلاقًا.
+- ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
+- ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
+
+## صفحات بداية الأقسام (section_divider)
+- قبل كل قسم موجود صفحة تحمل اسم القسم العربي المعتمد وحده، وخلفيتها الصورة الرئيسية المعتمدة مع حجاب من اللون الأساسي.
+- التخطيط ثابت ويُبنى تلقائيًا: شعارا الشركة والمشروع بارتفاع 80px مثل الغلاف والختام، واسم القسم كبيرًا، وخط تمييز قصير، ورقم الصفحة واسم المشروع فقط.
+- ممنوع إضافة ترجمة أو وصف أو سطر فرعي أو نقاط أو بطاقات أو جداول إلى صفحة بداية القسم.
+
+## الالتزام بمحتوى المشروع (قاعدة قاطعة)
+- كل رقم واسم وتاريخ ونسبة ومساحة في الشرائح يجب أن يكون موجودًا في «بيانات المشروع» أو في جداول الدراسة المالية والجدول الزمني المرفقة. ممنوع اختراع أي معلومة أو استكمالها بتقدير أو بمعرفة عامة عن السوق.
+- إذا كانت معلومة غير متوفرة فلا تذكرها ولا تضع مكانها قيمة تقريبية أو نصًا إنشائيًا يوحي بوجودها؛ اكتفِ بالمتاح أو اجعل الشريحة أصغر.
+- إعادة الصياغة والترتيب والتصميم مسموحة. تغيير المعنى أو الأرقام غير مسموح.
+
+## المخططات المعمارية 2D (ممنوع الرسم)
+- ممنوع منعًا باتًا رسم أو تركيب أي مخطط معماري أو مسقط أفقي بنفسك — لا بـ HTML/CSS ولا بجداول ولا بمربعات divs ولا بـ SVG.
+- المخططات تُعرض **فقط** كصور مرفوعة من العميل عبر ##PLAN_IMAGE_1## إلى ##PLAN_IMAGE_N##، ووجودها إلزامي في الشرائح إن كانت متوفرة في «الصور المتوفرة».
+- إذا لم تكن هناك مخططات مرفوعة فلا تُنشئ شريحة مخططات إطلاقًا.
+
+## المخطط الاتجاهي لحدود الأرض والواجهات (Directional Boundary Diagram)
+- عند وجود شريحة «مخطط اتجاهي لحدود الأرض» بنمط `diagram`: صمّم مخططاً اتجاهياً هندسياً متناسقاً وراقياً بـ HTML و CSS النقي بألوان الهوية فقط ودون أيقونات أو إيموجي.
+- الهيكل المعتمد للشريحة:
+  1. عنوان الشريحة «مخطط اتجاهي لحدود الأرض» مع عبارة «الأبعاد بالمتر» في الزاوية العلوية المقابلة.
+  2. صندوق مركزي عريض وأنيق يمثل «أرض المشروع» بألوان الهوية وخلفية مميزة، يكتب في وسطه اسم «أرض المشروع» مع خط تمييز وملخص الواجهات (مثل «واجهتان شرقية وغربية»)، وتوضع على حوافه الأربع أطوال الأضلاع للحدود الأربعة بوضوح («حد شمالي ... م»، «حد جنوبي ... م»، «حد شرقي ... م»، «حد غربي ... م»).
+  3. بطاقات خارجية للجهات الأربع المحيطة (شمال، جنوب، شرق، غرب) مبيناً في كل منها تفاصيل الشارع أو الجار وطول الضلع وعرض الشارع، مع تمييز الشوارع والواجهات بلون التمييز (مثل الذهبي).
+  4. بطاقة بارزة ومميزة بألوان الهوية لجهة الإطلالة أو الطريق الرئيسي إن وجدت (مثل «جهة الإطلالة البحرية» أو «طريق الكورنيش»).
+  5. ملاحظة توضيحية أسفل الشريحة بخط ناعم: «تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.»
+
+## الرسوم البيانية المعتمدة (4 رسوم لـ 4 مواقع فقط)
+- الرسوم البيانية في العرض محصورة حصراً بالأنواع الأربعة المعتمدة (horizontal_bar لمقارنة المنافسين في دراسة السوق، وwaterfall لتكلفة الاستثمار، وcombo للتدفقات النقدية السنوية والتراكمية، وheatmap لمقارنة السيناريوهات المالية في الدراسة المالية).
+- يُمنع منعاً باتاً أي نوع شارت خارج هذه الأنواع الأربعة، ويُمنع وجود رسم في أي شريحة لا تحمل chart_type صريحاً معتمداً.
+- كل رسم مبني على القيم الموجودة حرفيًا، ويعرض جدول المصدر الكامل والمقروء بجانبه. لا تكرر الرسم ولا تنشئ قيماً افتراضية أو متوسطات بديلة.
+
+## الملخصات ومنع التكرار
+- أقسام الأرض والموقع والسوق والدراسة المالية تنتهي بملخصها المعتمد بعد الجداول، مرة واحدة فقط.
+- لا تعيد مكونات المشروع أو بيانات الموقع في أكثر من قسم. عند الحاجة استخدم إحالة نصية قصيرة بلا إعادة القائمة أو الجدول.
+- التحسينات التحريرية قصيرة ومبنية على قيمة واضحة في البيانات؛ ممنوع الحشو والاسترسال أو إضافة استنتاج غير مسند.
+
+## الخاتمة
+- تستخدم ##IMAGE_COVER## بوضوح كخلفية كاملة أو صورة جانبية، مع شعاري الشركة والمشروع بارتفاع 80px.
+- تعرض كل حقول التواصل المدخلة فقط كما هي مع عبارة شكر موجزة. إذا لم يوجد أي حقل تواصل فتعرض الشكر واسم المشروع فقط.
+- ممنوع كتابة بيانات تواصل افتراضية أو «فرصة واعدة بشروط» أو أي تقييم أو توصية استثمارية عامة.
+
+## اسم الشركة في الفوتر
+{company_name}
+"""
+
+    # Rules the company wrote for itself through the admin agent. They ride with every slide prompt
+    # and every design edit, because that is the only way to change the generation prompt without a
+    # code change. They add to the rules above; they never license inventing a fact, an icon or an
+    # emoji, nor rewriting a stated number.
+    company_rules = str(branding.get('generation_rules') or '').strip()
+    if company_rules:
+        rules += (
+            "\n\n## قواعد التوليد الملزمة لهذه الشركة (كتبها الأدمن — التزم بها فوق ما سبق)\n"
+            f"{company_rules[:8000]}\n"
+            "إن تعارضت هذه القواعد مع منع اختراع المعلومات أو منع الأيقونات والإيموجي أو نقل الأرقام"
+            " كما هي، فالقواعد الأساسية أعلاه هي التي تُطبَّق.\n"
+        )
+
+    return rules
+
+
+def resolve_font_path(path):
+    """Resolve a stored font path to an absolute path.
+
+    font_file_path is stored relative to the project root, so relying on the
+    process CWD (which differs under gunicorn) would silently fail.
+    """
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path if os.path.exists(path) else None
+    candidate = os.path.join(BASE_DIR, path.lstrip('/\\'))
+    return candidate if os.path.exists(candidate) else None
+
+
+def _managed_font_face(font_data, family, weight):
+    if not font_data:
+        return ''
+    try:
+        parsed = json.loads(font_data) if isinstance(font_data, str) and font_data.strip().startswith('{') else {'data': font_data, 'format': 'truetype'}
+        data = parsed.get('data')
+        fmt = parsed.get('format', 'truetype')
+        if not data:
+            return ''
+        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        fallback_weight = {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
+        css_weight = _font_weight_descriptor(base64.b64decode(data), fallback_weight)
+        return f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{css_weight};font-style:normal;font-display:swap;}}"
+    except Exception:
+        return ''
+
+
+_MANAGED_FONT_WEIGHTS = {
+    'light': 300,
+    'regular': 400,
+    'medium': 500,
+    'bold': 700,
+    'black': 900,
+}
+_SCRIPT_UNICODE_RANGES = {
+    'arabic': 'U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+1EE00-1EEFF',
+    'latin': 'U+0000-024F,U+1E00-1EFF,U+2000-206F',
+}
+
+
+def _managed_face_rule(font_data, family, weight, script):
+    """Build one embedded face under a shared export family alias."""
+    rule = _managed_font_face(font_data, family, weight)
+    if not rule:
+        return ''
+    return rule[:-1] + f"unicode-range:{_SCRIPT_UNICODE_RANGES[script]};}}"
+
+
+def _managed_face_rule_from_path(path, family, weight, script):
+    abs_path = resolve_font_path(path)
+    if not abs_path or _is_lfs_pointer(abs_path):
+        return ''
+    ext = os.path.splitext(abs_path)[1].lower()
+    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+    with open(abs_path, 'rb') as font_file:
+        payload = json.dumps({'data': base64.b64encode(font_file.read()).decode('ascii'), 'format': fmt})
+    return _managed_face_rule(payload, family, weight, script)
+
+
+def _managed_local_face_rule(local_family, family, weight, script):
+    css_weight = '100 900' if weight == 'all' else _MANAGED_FONT_WEIGHTS.get(weight, 400)
+    unicode_range = _SCRIPT_UNICODE_RANGES[script]
+    return (
+        f"@font-face{{font-family:'{family}';src:local('{local_family}');"
+        f"font-weight:{css_weight};font-style:normal;unicode-range:{unicode_range};}}"
+    )
+
+
+def _managed_font_css(branding, tenant_id, fallback):
+    try:
+        from db import get_sag_font, get_sag_fonts, get_tenant_font_selections
+    except Exception:
+        return None
+
+    def _path_payload(path):
+        abs_path = resolve_font_path(path)
+        if not abs_path or _is_lfs_pointer(abs_path):
+            return None
+        ext = os.path.splitext(abs_path)[1].lower()
+        fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+        with open(abs_path, 'rb') as font_file:
+            return json.dumps({'data': base64.b64encode(font_file.read()).decode('ascii'), 'format': fmt})
+
+    def _resolve_face(selection, font, script):
+        if selection and selection.get('custom_font_data'):
+            return 'data', selection['custom_font_data']
+        if selection and selection.get('custom_font_path'):
+            try:
+                payload = _path_payload(selection['custom_font_path'])
+            except OSError:
+                payload = None
+            return ('data', payload) if payload else None
+        if not font:
+            return None
+        selected_family = font.get('font_family') or ('Arial' if script == 'latin' else 'The Sans Arabic')
+        if font.get('file_data'):
+            return 'data', font['file_data']
+        source_name = font.get('source_data') or selected_family
+        if selected_family == 'The Sans Arabic' and font.get('weight') in {'bold', 'black'}:
+            source_name = font.get('font_name') or source_name
+        source = _resolve_preset_font_source(source_name)
+        if source and source.get('type') == 'bundled':
+            payload = json.dumps({'data': source['data'], 'format': source.get('format', 'truetype')})
+            return 'data', payload
+        if source and source.get('type') in {'google', 'system'}:
+            return source['type'], source
+        if font.get('source_type') == 'system':
+            return 'system', {'family': selected_family}
+        return None
+
+    def _build_rule(face, family, weight, script):
+        if not face:
+            return ''
+        kind, source = face
+        if kind == 'data':
+            return _managed_face_rule(source, family, weight, script)
+        if kind == 'system':
+            return _managed_local_face_rule(source['family'], family, weight, script)
+        if kind == 'google':
+            return "@import url('https://fonts.googleapis.com/css2?family=" + source['encoded'] + ":wght@300;400;500;700;900&display=swap');"
+        return ''
+
+    def kind_of_face(face):
+        return face[0] if face else ''
+
+    rules = []
+    import_rules = []
+    imported_google_families = []
+    # Which scripts got a face whose file travels with the deck, rather than a name the reading
+    # machine must already have.
+    shipped_scripts = set()
+    tenant_selections = get_tenant_font_selections(tenant_id) if tenant_id else []
+    legacy_family = branding.get('font_family') or ''
+    if not tenant_selections and (branding.get('font_file_path') or branding.get('font_file_data')):
+        return None
+    if not tenant_selections and legacy_family and legacy_family not in {'The Sans Arabic'}:
+        return None
+    export_family = f"tenant-managed-{tenant_id or 'default'}"
+    weights = tuple(_MANAGED_FONT_WEIGHTS)
+    script_families = {
+        'arabic': export_family,
+        'latin': f'{export_family}-latin',
+    }
+    for script in ('arabic', 'latin'):
+        script_selections = {item['weight']: item for item in tenant_selections if item.get('script') == script}
+        # Once a company selects any face for a script, its available faces form
+        # one family. Missing weights are synthesized from the nearest face.
+        use_defaults = not script_selections
+        available_faces = {}
+        for weight in weights:
+            selection = script_selections.get(weight)
+            font = get_sag_font(selection.get('font_id')) if selection and selection.get('font_id') else None
+            if use_defaults and not selection:
+                font = next((item for item in get_sag_fonts(script=script, weight=weight) if item.get('is_default')), None)
+            face = _resolve_face(selection, font, script)
+            if face:
+                available_faces[weight] = face
+        if not available_faces:
+            continue
+        generated_rules = list(available_faces.items())
+        for weight, face in generated_rules:
+            rule = _build_rule(face, script_families[script], weight, script)
+            if not rule:
+                continue
+            if rule.startswith('@import'):
+                if rule not in import_rules:
+                    import_rules.append(rule)
+                source = face[1]
+                if source['family'] not in imported_google_families:
+                    imported_google_families.append(source['family'])
+            else:
+                rules.append(rule)
+                if kind_of_face(face) == 'data':
+                    shipped_scripts.add(script)
+
+    if not rules and not import_rules:
+        return None
+    families = [f"'{script_families['arabic']}'", f"'{script_families['latin']}'"]
+    families.extend(f"'{family}'" for family in imported_google_families)
+    # A company can legitimately choose a system font such as Arial for the whole deck. It renders
+    # wherever it is installed, but the PDF is rendered on the server, which has no Arial and no
+    # Tahoma — Arabic then landed on whatever Chromium had, usually DejaVu. So a shipped Arabic face
+    # is appended last: the choice still wins where it exists, and the export stays readable.
+    if 'arabic' not in shipped_scripts:
+        bundled = _load_bundled_fonts().get('TheSansArabic-Light') or _load_bundled_fonts().get('TheSansArabic-Bold')
+        if bundled:
+            data, fmt = bundled
+            mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+            weight = _font_weight_descriptor(base64.b64decode(data))
+            rules.append(
+                f"@font-face{{font-family:'platform-fallback-arabic';src:url(data:{mime};base64,{data})"
+                f" format('{fmt}');font-weight:{weight};font-display:swap;}}"
+            )
+            families.append("'platform-fallback-arabic'")
+    family_list = ', '.join(families) + ', ' + fallback
+    rules.append(f'.slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}')
+    return '\n'.join(import_rules + rules), family_list
+
+
+def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
+    """@font-face isolated inside .slide only — does not affect site UI.
+
+    family_only=True skips all disk I/O and returns just the font-family value,
+    for callers that only need the name (e.g. prompt building).
+    """
+    branding = branding or {}
+    chosen = branding.get('font_family') or 'IBM Plex Sans Arabic'
+    fallback = FALLBACK_FONTS
+
+    if family_only:
+        family_list = _font_family_list(chosen)
+        return f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}", family_list
+
+    # Managed per-weight selections take precedence over the legacy one-file setting.
+    managed = _managed_font_css(branding, tenant_id, fallback)
+    if managed:
+        return managed
+
+    # 1) Custom font file on disk (uploaded by tenant)
+    path = branding.get('font_file_path')
+    abs_path = resolve_font_path(path)
+    if abs_path and not _is_lfs_pointer(abs_path):
+        family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
+        return _build_font_face_from_file(abs_path, family, fallback, embed, tenant_id)
+    if path:
+        print(f"[FONT] ERROR: uploaded font file missing or LFS pointer: {path}")
+
+    # 2) Persisted base64 font data in DB (fallback when uploads/ is ephemeral)
+    font_file_data = branding.get('font_file_data')
+    if font_file_data:
+        try:
+            family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
+            return _build_font_face_from_data(font_file_data, family, fallback)
+        except Exception as e:
+            print(f"[FONT] ERROR: failed to use font_file_data: {e}")
+
+    # 3) Built-in presets: bundled faces or Google Fonts
+    source = _resolve_preset_font_source(chosen)
+    if source:
+        css, family_list = _build_preset_css(source, fallback)
+        print(f"[FONT DEBUG] preset source for '{chosen}': {source['type']}, family={source['family']}")
+        return css, family_list
+
+    # 4) The stored name has no loadable source anywhere. Emitting the bare name meant the slide fell
+    # back to whatever the reading machine happened to have — usually Tahoma — with nothing to show
+    # why. This is not a rare corner: any name saved without a matching file or selection lands here,
+    # including one the admin agent typed. Ship the bundled platform face behind the requested name
+    # so the slides and the PDF always carry a real Arabic font.
+    print(f"[FONT] no bundled or Google source for '{chosen}'; falling back to the bundled platform face")
+    bundled = _load_bundled_fonts().get('TheSansArabic-Light') or _load_bundled_fonts().get('TheSansArabic-Bold')
+    if bundled:
+        data, fmt = bundled
+        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        weight = _font_weight_descriptor(base64.b64decode(data))
+        family = 'platform-fallback-arabic'
+        family_list = f"{_font_family_list(chosen).rsplit(', ' + FALLBACK_FONTS, 1)[0]}, '{family}', {fallback}"
+        css = (
+            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');"
+            f"font-weight:{weight};font-display:swap;}}\n"
+            f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}"
+        )
+        return css, family_list
+    family_list = _font_family_list(chosen)
+    return f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}", family_list
+
+
+def _hex_to_rgb(hex_color):
+    """Convert hex color to 'r,g,b' string for rgba()."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 3:
+        hex_color = ''.join(c * 2 for c in hex_color)
+    try:
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        return f"{r},{g},{b}"
+    except Exception:
+        return "196,163,90"
