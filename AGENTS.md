@@ -90,7 +90,23 @@ uneditable); never grow a giant file again.
 
 ## Stack
 
-- Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
+- Backend: Flask. `app.py` (~380 lines) is only the loader: imports, the `Flask`
+  app object, middleware and config constants — its ~350 routes and ~900 helpers
+  live in ordered part files under `app_parts/` (`01_openrouter_text.py` …
+  `23_omran_apis.py`, ~600–2600 lines each). Each loader ends with a loop that
+  `exec`s its `*_parts/*.py` files (sorted by name) into the module's own
+  globals — the same trick as the frontend bundle, so **all parts share one
+  namespace**: cross-part calls need no imports, `patch.object(module, 'name')`
+  in tests keeps working, and `compile()` is given the real part path so
+  tracebacks point at the part file. The same split applies to `db.py` +
+  `db_parts/` (13 parts), `slide_engine.py` + `slide_engine_parts/` (9 parts)
+  and `maps_service.py` + `maps_service_parts/` (3 parts). **Edit the part
+  file**, never re-inline code into the loader. Splitting keeps exec order
+  identical to the old file order — when adding a new part, name it so it sorts
+  into the right position (`NN_name.py`), and keep top-level statements ordered
+  the way they must run. Literal-source assertions in tests must read the
+  combined text via `read_module_source('x.py')` (defined in the suites that
+  need it) — never `app.py` alone. `gunicorn app:app` is unchanged.
 - Frontend: one single-page app. `index.html` is a slim shell (~1.2k lines: markup plus
   resource references). Styles live in `assets/css/` (`base.css`, `project-form.css`) and code in
   `assets/js/` (`00-core.js` … `17-admin-boot.js`, ~1–1.5k lines each, ordered classic
@@ -307,9 +323,9 @@ D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_admin_agent
 
 `tests.test_full_flow` contains no unittest cases (reports "Ran 0 tests") — that is expected.
 
-Python syntax check:
+Python syntax check (loaders + every part file):
 ```powershell
-D:\workflow\.venv\Scripts\python.exe -c "import ast; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py')]"
+D:\workflow\.venv\Scripts\python.exe -c "import ast, glob; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py') + tuple(glob.glob('*_parts/*.py'))]"
 ```
 
 Frontend JS check (shell wiring + `node --check` per file):
@@ -1346,6 +1362,11 @@ two to three tokens per word, and the coordinates table can add dozens of rows.
   bare roots (`ارتداد`, `تغطية`) instead.
 - Index / list-of-figures pages match many keywords but contain no rules; `_is_regulation_index_page`
   filters them out.
+- **The `clean_*.md` / `clean*.txt` / `extracted_*.txt` / `اشتراطات1_text.txt` / `mostaqel.txt` files
+  in the repo root are NOT junk.** They are the owner's manual page-by-page visual transcription of
+  the regulation PDFs (the PDF text layer is broken — reversed tables, dropped letters — so the md
+  files are the reliable source; `regulation_digest.py` consumes them). They are untracked on
+  purpose, so never delete them in cleanups — losing them means redoing the transcription by hand.
 
 ## Progress feedback for long operations
 
