@@ -8121,7 +8121,61 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
     return ''
 
 
-def _replace_slide_with_approved_map(html, map_type, map_url):
+def _persisted_map_source_marks(tenant_id, presentation_id=None, draft_id=None):
+    """Index each persisted map file by every marker a stored slide may carry.
+
+    Saving a presentation freezes /uploads/maps/ sources into
+    /uploads/creative/<tenant>/revisions/<sha256>.<ext>, so a stored slide can
+    reference a map through a URL with nothing map-like in it. Each file is
+    indexed by its public basename and by its content digest (the frozen
+    filename), letting a chat map update find the existing slot even inside a
+    frozen revision URL.
+    """
+    marks = {}
+    if not tenant_id:
+        return marks
+    try:
+        rows = db.get_map_images(
+            tenant_id, presentation_id=presentation_id,
+            draft_id=None if presentation_id else draft_id)
+    except Exception:
+        rows = []
+    for row in rows:
+        image_type = str(row.get('image_type') or '').strip().lower()
+        map_type = next(
+            (name for name in _CANONICAL_MAP_TOKENS
+             if image_type == name or image_type.startswith(name + '_')),
+            '')
+        path = str(row.get('file_path') or '')
+        if not map_type or not os.path.isfile(path):
+            continue
+        info = {'type': map_type, 'image_type': image_type, 'path': path, 'digest': ''}
+        basename = os.path.basename(path)
+        if basename:
+            marks.setdefault(basename, info)
+            marks.setdefault(basename.lower(), info)
+        try:
+            with open(path, 'rb') as handle:
+                info['digest'] = hashlib.sha256(handle.read()).hexdigest()
+        except OSError:
+            continue
+        marks.setdefault(info['digest'], info)
+    return marks
+
+
+def _tag_map_source_info(tag, map_marks):
+    """Return the persisted-map record an HTML tag references, if any."""
+    if not map_marks:
+        return None
+    for segment in re.findall(r'([\w.-]+\.(?:png|jpe?g|webp|gif|avif|svg))',
+                              tag, flags=re.IGNORECASE):
+        info = map_marks.get(segment) or map_marks.get(segment.rsplit('.', 1)[0])
+        if info:
+            return info
+    return None
+
+
+def _replace_slide_with_approved_map(html, map_type, map_url, map_marks=None):
     """Replace a slide's map media with one approved image and remove duplicate map tags."""
     if not html or not map_url:
         return html, False
@@ -8137,17 +8191,38 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
 
     map_ref = re.compile(r'(?:/uploads/maps/|/api/map-images/|maps/|##map_)', re.IGNORECASE)
     map_url_ref = str(map_url).lower()
+    attr_re = re.compile(r'data-canonical-map\s*=\s*["\']([\w-]+)', re.IGNORECASE)
     media_tags = []
-    tag_pattern = re.compile(r'<[a-z][^>]*>', re.IGNORECASE)
+    tag_pattern = re.compile(r'<[a-z][^>]*>|</(?:div|section|figure|main)\s*>', re.IGNORECASE)
+    # The saved slide can carry the map through a frozen revision URL that no
+    # map-looking path survives in, so the canonical container attribute and the
+    # persisted-file marks decide what counts as this map type's media.
+    canonical_depth = 0
     for match in tag_pattern.finditer(output):
         tag = match.group(0)
         lowered = tag.lower()
+        if lowered.startswith('</'):
+            if canonical_depth:
+                canonical_depth -= 1
+            continue
+        attr = attr_re.search(tag)
+        opens_canonical = bool(attr) and attr.group(1).lower() == map_type
+        in_canonical = canonical_depth > 0
+        if lowered.startswith(('<div', '<section', '<figure', '<main')):
+            if in_canonical:
+                canonical_depth += 1
+            elif opens_canonical:
+                canonical_depth = 1
         is_image = lowered.startswith('<img')
+        marked_info = _tag_map_source_info(lowered, map_marks)
+        marked = bool(marked_info) and marked_info['type'] == map_type
+        own_slot = in_canonical or opens_canonical or marked
         is_map_background = (
             'data-map-summary-background' in lowered
-            or bool(re.search(r'background(?:-image)?\s*:', lowered) and map_ref.search(lowered))
+            or bool(re.search(r'background(?:-image)?\s*:\s*url\(', lowered)
+                    and (map_ref.search(lowered) or own_slot))
         )
-        if is_image and (map_ref.search(lowered) or map_url_ref in lowered):
+        if is_image and (map_ref.search(lowered) or map_url_ref in lowered or own_slot):
             media_tags.append(('image', match))
         elif is_map_background:
             media_tags.append(('background', match))
@@ -8237,6 +8312,93 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
             changed = True
 
     return output, changed
+
+
+def _refresh_slide_map_sources(html, project_data, tenant_id, presentation_id=None,
+                               creative_images=None):
+    """Point persisted-map sources in a rebuilt slide at the current map files.
+
+    A stored slide freezes map sources into /uploads/creative/<tenant>/
+    revisions/<digest>.<ext>, so a slide the model rebuilds while keeping its
+    old <img> keeps the old map even after the project map changed. Any source
+    that resolves to a persisted map file of a canonical type is rewritten to
+    that type's current image — the same target an explicit chat refresh or a
+    ##MAP_*## token resolves to — and the rewritten tag is stamped with
+    data-canonical-map so later updates keep finding the slot.
+    """
+    if not html or not tenant_id:
+        return html
+    if not re.search(r'data-canonical-map|/revisions/|/uploads/maps/|/api/map-images/',
+                     html, re.IGNORECASE):
+        return html
+    draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id') \
+        if isinstance(project_data, dict) else None
+    marks = _persisted_map_source_marks(
+        tenant_id, presentation_id=presentation_id,
+        draft_id=None if presentation_id else draft_id)
+    if not marks:
+        return html
+
+    targets = {}
+
+    def current_for(map_type):
+        if map_type not in targets:
+            targets[map_type] = _latest_canonical_map_url(
+                map_type, project_data, creative_images,
+                tenant_id=tenant_id, presentation_id=presentation_id) or ''
+        return targets[map_type]
+
+    def source_info(url):
+        segment = urlsplit(str(url or '').strip()).path.rsplit('/', 1)[-1]
+        if not segment:
+            return None
+        return marks.get(segment) or marks.get(segment.rsplit('.', 1)[0])
+
+    def target_same_file(info, target):
+        """True when the current target is the same file the slide already has."""
+        if not target or target.startswith('data:'):
+            return True
+        target_info = source_info(target)
+        return bool(target_info and info['digest'] and target_info['digest'] == info['digest'])
+
+    src_re = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
+    bg_re = re.compile(r'(background(?:-image)?\s*:\s*url\(\s*["\']?)([^)"\']+)(["\']?\s*\))',
+                       re.IGNORECASE)
+
+    def refresh_tag(match):
+        tag = match.group(0)
+        if 'src' not in tag and 'url(' not in tag:
+            return tag
+        swapped_type = ['']
+
+        def sub_src(m):
+            info = source_info(m.group(3))
+            if not info:
+                return m.group(0)
+            target = current_for(info['type'])
+            if not target or target_same_file(info, target):
+                return m.group(0)
+            swapped_type[0] = info['type']
+            return m.group(1) + m.group(2) + target + m.group(4)
+
+        def sub_bg(m):
+            info = source_info(m.group(2))
+            if not info:
+                return m.group(0)
+            target = current_for(info['type'])
+            if not target or target_same_file(info, target):
+                return m.group(0)
+            return m.group(1) + target + m.group(3)
+
+        out = src_re.sub(sub_src, tag)
+        out = bg_re.sub(sub_bg, out)
+        if swapped_type[0] and out.startswith('<img') \
+                and 'data-canonical-map' not in out.lower():
+            stamp = f' data-canonical-map="{swapped_type[0]}"'
+            out = out[:-2] + stamp + '/>' if out.endswith('/>') else out[:-1] + stamp + '>'
+        return out
+
+    return re.sub(r'<[a-z][^>]*>', refresh_tag, html, flags=re.IGNORECASE)
 
 
 def is_watermark_request(message):
@@ -9843,6 +10005,13 @@ HTML الحالي:
 
                 output = resolve_designer_chat_placeholders(output, project_data, presentation_id,
                                                            tenant_id, creative_images)
+                # A rebuilt slide that kept its old map <img> kept the old map:
+                # stored sources are frozen revision URLs the model preserves
+                # verbatim, so any persisted-map source is repointed at the
+                # current file for its canonical type before it is kept.
+                output = _refresh_slide_map_sources(
+                    output, project_data, tenant_id, presentation_id=presentation_id,
+                    creative_images=creative_images)
                 output = slide_engine.finalize_designer_slide_html(
                     output, slide_type or 'content', project_data, branding,
                     creative_images=creative_images, tenant_id=tenant_id,
@@ -11179,11 +11348,19 @@ def api_designer_chat():
                     executed.append({'tool': tool, 'status': 'failed', 'indexes': targets,
                                      'map_type': map_type, 'reason': 'approved_map_missing'})
                     continue
+                # Saved slides freeze map sources into revision URLs that no
+                # longer look like map paths, so the existing slot is found by
+                # the canonical attribute and persisted-file marks, not by URL.
+                map_marks = _persisted_map_source_marks(
+                    tenant_id, presentation_id=presentation_id,
+                    draft_id=None if presentation_id else (
+                        project_data.get('draftId') or project_data.get('draft_id')
+                        if isinstance(project_data, dict) else None))
                 successful_targets = []
                 for idx in targets:
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     updated_html, replaced = _replace_slide_with_approved_map(
-                        slide.get('html', ''), map_type, map_url
+                        slide.get('html', ''), map_type, map_url, map_marks=map_marks
                     )
                     if not replaced:
                         assistant_messages.append(f'تعذر العثور على موضع خريطة {label} في الشريحة رقم {idx + 1}؛ لم يتم تغيير الشريحة.')

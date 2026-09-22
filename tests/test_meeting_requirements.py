@@ -5,6 +5,7 @@ The suite uses a temporary SQLite database and never calls Google or an AI API.
 
 import base64
 import gzip
+import hashlib
 import math
 import os
 import re
@@ -9142,6 +9143,86 @@ class MeetingRequirementsTests(unittest.TestCase):
             )
 
         self.assertEqual(latest, '/uploads/maps/' + os.path.basename(latest_path))
+
+    def _persisted_map_fixture(self, module, presentation_id, image_type='landmarks',
+                               content=b'map-bytes'):
+        maps_dir = Path(module.maps_service.MAPS_DIR)
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            dir=maps_dir, suffix='_%s.png' % image_type, delete=False)
+        handle.write(content)
+        handle.close()
+        self.addCleanup(lambda: os.path.exists(handle.name) and os.unlink(handle.name))
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, image_type, handle.name, '##MAP_%s##' % image_type.upper(),
+                presentation_id=presentation_id, metadata={})
+            marks = module._persisted_map_source_marks(
+                self.tenant_a, presentation_id=presentation_id)
+        return handle.name, marks
+
+    def test_map_refresh_replaces_frozen_revision_source_instead_of_appending(self):
+        """A saved slide's map src is a frozen /uploads/creative/.../revisions/<sha>.png."""
+        module = self.application_module
+        old_path, marks = self._persisted_map_fixture(
+            module, 'pres-frozen-map', image_type='landmarks', content=b'old-landmarks-map')
+        digest = hashlib.sha256(b'old-landmarks-map').hexdigest()
+        frozen_src = f'/uploads/creative/{self.tenant_a}/revisions/{digest}.png'
+        html = ('<div class="slide"><div class="map-wrap">'
+                f'<img src="{frozen_src}" alt=""></div></div>')
+        replaced, changed = module._replace_slide_with_approved_map(
+            html, 'landmarks', '/uploads/maps/landmarks_new.png', map_marks=marks)
+        self.assertTrue(changed)
+        self.assertEqual(replaced.count('/uploads/maps/landmarks_new.png'), 1)
+        self.assertNotIn(frozen_src, replaced)
+        # The old element was swapped in place — no extra overlay was appended.
+        self.assertEqual(replaced.count('<img'), 1)
+        self.assertIn('data-canonical-map="landmarks"', replaced)
+
+    def test_map_refresh_replaces_non_map_src_inside_canonical_container(self):
+        module = self.application_module
+        _old_path, marks = self._persisted_map_fixture(
+            module, 'pres-canonical-container', image_type='catchment')
+        html = ('<div class="slide"><div data-canonical-map="catchment" '
+                'style="position:absolute;inset:0;">'
+                '<img src="/api/project-files/some-file-id"></div></div>')
+        replaced, changed = module._replace_slide_with_approved_map(
+            html, 'catchment', '/uploads/maps/catchment_new.png', map_marks=marks)
+        self.assertTrue(changed)
+        self.assertIn('/uploads/maps/catchment_new.png', replaced)
+        self.assertNotIn('/api/project-files/some-file-id', replaced)
+        self.assertEqual(replaced.count('<img'), 1)
+
+    def test_refresh_slide_map_sources_repoints_stale_frozen_url(self):
+        module = self.application_module
+        old_path, _marks = self._persisted_map_fixture(
+            module, 'pres-refresh-sources', image_type='landmarks', content=b'stale-map')
+        new_path, _marks = self._persisted_map_fixture(
+            module, 'pres-refresh-sources', image_type='landmarks', content=b'current-map')
+        stale_digest = hashlib.sha256(b'stale-map').hexdigest()
+        stale_src = f'/uploads/creative/{self.tenant_a}/revisions/{stale_digest}.png'
+        html = (f'<div class="slide"><img src="{stale_src}">'
+                '<img src="/uploads/creative/other/revisions/notamap.png"></div>')
+        with self.app.app_context():
+            refreshed = module._refresh_slide_map_sources(
+                html, {}, self.tenant_a, presentation_id='pres-refresh-sources')
+        expected = '/uploads/maps/' + os.path.basename(new_path)
+        self.assertIn(expected, refreshed)
+        self.assertNotIn(stale_src, refreshed)
+        self.assertIn('notamap.png', refreshed)
+        self.assertIn('data-canonical-map="landmarks"', refreshed)
+
+    def test_refresh_slide_map_sources_keeps_current_frozen_copy(self):
+        module = self.application_module
+        path, _marks = self._persisted_map_fixture(
+            module, 'pres-refresh-current', image_type='overview', content=b'current-overview')
+        digest = hashlib.sha256(b'current-overview').hexdigest()
+        frozen_src = f'/uploads/creative/{self.tenant_a}/revisions/{digest}.png'
+        html = f'<div class="slide"><img src="{frozen_src}"></div>'
+        with self.app.app_context():
+            refreshed = module._refresh_slide_map_sources(
+                html, {}, self.tenant_a, presentation_id='pres-refresh-current')
+        self.assertEqual(refreshed, html)
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""

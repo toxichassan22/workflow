@@ -1766,7 +1766,7 @@
         const box = source.closest('[data-slide-textbox], [data-slide-imagebox]');
         if (box && slide.contains(box)) return box;
       }
-      if (source.closest && source.closest('.presentation-chrome-logo, [data-canonical-map]')) return null;
+      if (source.closest && source.closest('.presentation-chrome-logo')) return null;
       /* Watermark layer: selectable in edit mode so it can be dragged,
          restacked or deleted per slide. In normal view it stays
          click-through via pointer-events:none. */
@@ -1785,7 +1785,9 @@
         if (node.matches('[data-company-logo-placement], [data-team-logo-placement], img:not(.presentation-chrome-logo)')
           || style.position === 'absolute') {
           if (node.tagName === 'IMG' && node.parentElement && node.parentElement !== slide
-            && node.parentElement.hasAttribute && node.parentElement.hasAttribute('data-slide-imagebox')) {
+            && node.parentElement.hasAttribute
+            && (node.parentElement.hasAttribute('data-slide-imagebox')
+              || node.parentElement.hasAttribute('data-canonical-map'))) {
             return node.parentElement;
           }
           return node;
