@@ -24,32 +24,45 @@
 
 ### الباكند (Python / Flask)
 
+كل وحدة كبيرة هي **ملف loader نحيف + مجلد `*_parts/` مرتّب**: الـ loader يمسك
+الاستيرادات والثوابت وكائن التطبيق ثم `exec` ملفات المجلد كلها (مرتبة بالاسم
+`NN_name.py`) داخل namespace الوحدة نفسها — نفس فكرة حزمة الواجهة، فالأجزاء كلها
+تتشارك scope واحداً بلا imports متقاطعة، و`compile()` يأخذ مسار الجزء الحقيقي
+فتشير الـ tracebacks للملف الصحيح. القاعدة: جزء واحد = دومين واحد متماسك، لا
+تقسيم بمجرد كبر الحجم.
+
 | الملف | الحجم التقريبي | الدور |
 |---|---|---|
-| `app.py` | ~31,300 سطر | التطبيق الرئيسي: كل الـ API endpoints، استدعاءات النماذج، الوظائف الخلفية، الفوترة |
-| `db.py` | ~14,600 سطر | طبقة قاعدة البيانات كاملة: إنشاء الجداول، migrations، كل الاستعلامات |
-| `db_driver.py` | ~400 سطر | shim يجعل نفس الكود يعمل على SQLite أو Postgres حسب `DATABASE_URL` |
-| `slide_engine.py` | ~11,600 سطر | محرك الشرائح: بناء "حقائق المشروع" للبرومبت، تطبيع الخطة، إعادة الترقيم، تنظيف HTML |
-| `maps_service.py` | ~4,600 سطر | كل خدمات Google Maps: صور الخرائط، الطرق، المعالم، تراكب الحدود والأسماء العربية (Pillow) |
-| `market_study.py` | ~2,100 سطر | منطق دراسة السوق: أولويات المصادر، الجداول، البحث الموجّه |
-| `change_tracking.py` | ~1,100 سطر | توليد سطور سجل التغييرات «من غيّر ماذا» بالعربي |
-| `design_templates.py` | ~1,100 سطر | قوالب التصميم وتباين الألوان (4.5:1) |
-| `executive_content.py` | ~600 سطر | توليد كتل المحتوى التنفيذي من حقائق الأقسام السابقة |
-| `regulation_digest.py` | ~400 سطر | خلاصة اشتراطات البناء الجاهزة (`rules/`) بدون إعادة قراءة الـ PDFs |
-| `auth.py` | ~430 سطر | JWT (HMAC) + PBKDF2 لتجزئة كلمات المرور، الصلاحيات، signed download tokens |
-| `designer_chat_*.py` | ~4 ملفات | موثوقية/أمان/سياق/ألوان شات المصمم |
-| `exports/pptx_export.py` | ~2,900 سطر | تصدير PPTX أصلي بـ python-pptx بدون متصفح |
-| `generate_pdf_from_preview.py`, `pdf_generator*.py` | — | مسارات تصدير PDF (Chromium أساسي + PyMuPDF احتياطي) |
+| `app.py` + `app_parts/` | loader ~380 سطر + 40 ملفاً (~32,300 سطر) | كل الـ API endpoints واستدعاءات النماذج والوظائف الخلفية والفوترة — مقسمة بالدومين: نصوص/صور OpenRouter، المصمم (07–09)، الشرائح والموقع (11–11b)، المسودات، التصور البصري (05a/06)، السوق والكروكي (18–18b)، التدريب (21)، الإدارة (20–20b)، ومنصة Landloom (23–30: اعتمادات، إشعارات، أدوار، فوترة، دعم، عمليات، لوحات) |
+| `db.py` + `db_parts/` | loader ~40 سطر + 26 ملفاً (~14,700 سطر) | إنشاء الجداول وmigrations وكل الاستعلامات — مقسمة: schema (01–01b)، شركات وهوية وخطوط (02–02a)، عروض ومستخدمون (03–03a)، فريق وتاريخ ورموز وتدريب واعتمادات (04–04d)، مسودات، قياس استهلاك (06)، تخزين ملفات وخرائط (08)، اعتمادات وأرشيف (09–09b)، إشعارات وشحن وتذاكر ولوحات (10–10c)، اشتراكات ووظائف (12)، طابور وسجل أنواع الملفات (13) |
+| `db_driver.py` | ~350 سطر | shim يجعل نفس الكود يعمل على SQLite أو Postgres حسب `DATABASE_URL` |
+| `slide_engine.py` + `slide_engine_parts/` | ~150 سطر + 9 ملفات (~13,250 سطر) | محرك الشرائح: بناء "حقائق المشروع" للبرومبت، تطبيع الخطة، قواعد المحتوى، extractors، البناء الاحتياطي، تنظيف HTML |
+| `maps_service.py` + `maps_service_parts/` | ~65 سطر + 3 ملفات (~4,600 سطر) | كل خدمات Google Maps: صور الخرائط، الطرق، المعالم، تراكب الحدود والأسماء العربية (Pillow) |
+| `market_study.py` + `market_study_parts/` | ~230 سطر + ملفان (~2,050 سطر) | منطق دراسة السوق: أولويات المصادر، الجداول، البحث الموجّه |
+| `designer_chat_reliability.py` + parts | ~55 سطر + ملفان (~1,950 سطر) | موثوقية/أمان/سياق/ألوان شات المصمم |
+| `change_tracking.py` + parts | ~50 سطر + ملفان (~1,050 سطر) | توليد سطور سجل التغييرات «من غيّر ماذا» بالعربي |
+| `design_templates.py` + parts | ~40 سطر + ملفان (~1,060 سطر) | قوالب التصميم وتباين الألوان (4.5:1) |
+| `executive_content.py` | ~525 سطر | توليد كتل المحتوى التنفيذي من حقائق الأقسام السابقة |
+| `regulation_digest.py` | ~410 سطر | خلاصة اشتراطات البناء الجاهزة (`rules/`) بدون إعادة قراءة الـ PDFs |
+| `auth.py` | ~425 سطر | JWT (HMAC) + PBKDF2 لتجزئة كلمات المرور، الصلاحيات، signed download tokens |
+| `exports/pptx_export.py` + `pptx_export_parts/` | ~65 سطر + 3 ملفات (~2,875 سطر) | تصدير PPTX أصلي بـ python-pptx بدون متصفح |
+| `generate_pdf_from_preview.py`, `pdf_generator*.py` | loaders + `*_parts/` (~3,700 سطر إجمالاً) | مسارات تصدير PDF (Chromium أساسي + PyMuPDF احتياطي) |
 | `sitecustomize.py` | — | startup hook يُحقن في site-packages داخل Docker |
 
 ### الواجهة الأمامية (SPA)
 
 - `index.html` — شِل نحيف (~1,680 سطر): markup + مراجع الموارد فقط، لا كود مضمّن.
-- `assets/js/00-core.js` … `19-notifications.js` — 20 ملفاً مرتباً، كلاسيكية (بدون
-  modules)، تشترك في scope واحد. `assets/i18n.js` يُحمّل قبلها (عربي/إنجليزي).
-- `assets/css/base.css` + `project-form.css`.
+- `assets/js/` — 37 ملفاً مرتباً (`00-core.js` … `19-notifications.js`)، كلاسيكية
+  (بدون modules) تشترك في scope واحد؛ كل ملف يكبر أو يخلط دومينين يُقسم لمجلد
+  `<stem>/NN_name.js` (`07-project-form/`, `08-location-maps/`, `09-financial/`,
+  `10-financial-report-timeline/`, `11-land-croquis/`, `12-files-media/`,
+  `13-visual/`, `14-slides-gen/`, `15-slide-edit-chat/`, `16-presentations-export/`,
+  `17-admin-boot/`). `assets/i18n.js` يُحمّل قبلها وقواميسه الثلاثة في
+  `assets/i18n/01_dict_ar.js` و`02_dict_en.js` و`03_dict_en_auto.js`.
+- `assets/css/` — 7 ملفات مرتبة في `base/` و`project-form/`.
 - الخادم يقدّمها كحزمتين (`/assets/app.bundle.js` و`.css`) بدمج الملفات حسب
-  `FRONTEND_*_ORDER` في `app.py` مع ETag — لا يوجد build step.
+  `FRONTEND_*_ORDER` في `app_parts/22_rules_approvals_static.py` مع ETag —
+  لا يوجد build step.
 - `node scripts/verify-frontend.js` يحرس التوصيل (الترتيب، لا ملفات يتيمة،
   `node --check` لكل ملف وللحزمة المدموجة).
 
@@ -73,7 +86,7 @@ Management API ويُزامَن مع رصيد المحفظة؛ وعند غياب
 | النموذج | الثابت في الكود | الدور |
 |---|---|---|
 | `google/gemini-3.8-flash` | `GEMINI_TEXT_MODEL` (والأسماء القديمة `LUNA_TEXT_MODEL`/`GLM_MODEL`) | **النموذج النصي السريع الافتراضي** لكل ما لا يحتاج النموذج الكبير |
-| `openai/gpt-5.6-sol` | `SLIDE_TEXT_MODEL` (env) | توليد شرائح HTML، شات المصمم، وكيل الإدارة |
+| `openai/gpt-6-sol` | `SLIDE_TEXT_MODEL` (env) | توليد شرائح HTML، شات المصمم، وكيل الإدارة |
 | `openai/gpt-image-2.5-sunburst` | `IMAGE_MODEL` / `VISUAL_CONCEPT_IMAGE_MODEL` (env) | توليد الصور: الغلاف، الزوايا الخارجية، الداخلية |
 | `google/gemini-3.1-flash-image-preview` | `reference_analyzer.VISION_MODEL` | تحليل صور المرجع البصري التي يرفعها العميل |
 | `openrouter:web_search` (محرك `exa`) | أداة server-side | بحث ويب حي باستشهادات لدراسة السوق |
@@ -91,7 +104,7 @@ Management API ويُزامَن مع رصيد المحفظة؛ وعند غياب
   - كتل المحتوى التنفيذي (brief/opportunity/features/risks/summary) بـ
     `reasoning_effort='low'` وJSON mode.
   - تخطيط برومبتات صور التصور البصري.
-- **`gpt-5.6-sol` — الإنشاء الدقيق:**
+- **`gpt-6-sol` — الإنشاء الدقيق:**
   - توليد كل شريحة HTML على حدة (`/api/generate-slide-single`)، مع streaming
     وتنسيق أرقام وتحقق تباين.
   - شات المصمم `/api/designer-chat`: مخطط + محرر بذاكرة محادثة (10 أدوار حرفية
@@ -223,7 +236,10 @@ presentation وتُقدَّم عبر `GET /api/ai-usage`.
 
 - ~45 suite بـ `unittest` في `tests/` — تُشغَّل **كوحدات منفصلة** من الجذر:
   `python -m unittest tests.test_meeting_requirements` إلخ (كل suite تعيد توجيه
-  `db.DB_PATH` قبل استيراد `app`).
+  `db.DB_PATH` قبل استيراد `app`). السويتات الضخمة مقسمة بنفس أسلوب الـ parts:
+  ملف loader + مجلد `tests/<stem>_parts/` فيه كلاسات `XxxTestsPartNN` ترث قاعدة
+  مشتركة (حالياً `test_meeting_requirements`، `test_identity_security`،
+  `test_issues_014_020_security`).
 - `node scripts/verify-frontend.js` يفحص توصيل الواجهة و`node --check` لكل ملف.
 - فحص صياغة بايثون بـ `ast.parse` على الملفات الكبرى.
 - `tests/test_postgres_parity.py` لا يعمل إلا بـ `TEST_DATABASE_URL` حقيقي.
