@@ -1,17 +1,17 @@
 #!/bin/bash
 # Lightweight watchdog / (re)start script for cPanel shared hosting.
 # Safe to run from cron every minute.
-# Usage: /home/demos/proposal-generator/start_server.sh
+# Usage: /home/landloom/proposal-generator/start_server.sh
 
 set -e
 
 export PATH="$HOME/bin:$PATH"
 
-APP_DIR="/home/demos/proposal-generator"
-REPO_DIR="/home/demos/workflow.git"
-WEB_ROOT="/home/demos/public_html"
-# New hosting (landloom.ai) uses a different cPanel user: point these at the new
-# paths via PROD_APP_DIR / PROD_REPO_DIR / PROD_WEB_ROOT without editing above.
+APP_DIR="/home/landloom/proposal-generator"
+REPO_DIR="/home/landloom/workflow.git"
+WEB_ROOT="/home/landloom/public_html"
+# Production lives on the landloom.ai account (root DocumentRoot). If a path
+# ever moves, override via PROD_APP_DIR / PROD_REPO_DIR / PROD_WEB_ROOT.
 APP_DIR="${PROD_APP_DIR:-$APP_DIR}"
 REPO_DIR="${PROD_REPO_DIR:-$REPO_DIR}"
 WEB_ROOT="${PROD_WEB_ROOT:-$WEB_ROOT}"

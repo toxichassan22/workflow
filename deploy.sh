@@ -1,17 +1,17 @@
 #!/bin/bash
 # One-command deployment script for cPanel shared hosting.
-# Run this from /home/demos/proposal-generator after pushing code to GitHub.
+# Run this from /home/landloom/proposal-generator after pushing code to GitHub.
 
 set -e
 
 export PATH="$HOME/bin:$PATH"
 export GIT_LFS_SKIP_SMUDGE=1
 
-REPO_DIR="/home/demos/workflow.git"
-APP_DIR="/home/demos/proposal-generator"
-WEB_ROOT="/home/demos/public_html"
-# New hosting (landloom.ai) uses a different cPanel user: point these at the new
-# paths via PROD_REPO_DIR / PROD_APP_DIR / PROD_WEB_ROOT without editing above.
+REPO_DIR="/home/landloom/workflow.git"
+APP_DIR="/home/landloom/proposal-generator"
+WEB_ROOT="/home/landloom/public_html"
+# Production lives on the landloom.ai account (root DocumentRoot). If a path
+# ever moves, override via PROD_REPO_DIR / PROD_APP_DIR / PROD_WEB_ROOT.
 REPO_DIR="${PROD_REPO_DIR:-$REPO_DIR}"
 APP_DIR="${PROD_APP_DIR:-$APP_DIR}"
 WEB_ROOT="${PROD_WEB_ROOT:-$WEB_ROOT}"

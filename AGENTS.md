@@ -25,19 +25,46 @@ Remote: `github` → `https://github.com/toxichassan22/workflow.git`.
 
 ## Hosting autodeploy
 
-Hosting moved from `sagdemos.store` (dead) to `landloom.ai`. The `landloom.ai`
-root serves a static coming-soon page — never deploy the app to the root
-DocumentRoot. Lab work runs on a subdomain (e.g. `test.landloom.ai`) via
-`.github/workflows/deploy-staging.yml`, which POSTs to
-`$STAGING_BASE_URL/api/deploy-webhook-staging` on every `lab` push into the
-separate `proposal-generator-staging` app dir (own port, `.env` and DB).
-Production (`.github/workflows/deploy.yml`) is manual-only (`workflow_dispatch`)
-until the client app gets its own home; then set the `PROD_BASE_URL` secret.
-Server paths differ per cPanel user: `deploy.sh` / `start_server.sh` keep their
-old `/home/demos/...` defaults with `PROD_*` env overrides, the staging scripts
-use `STAGING_*` overrides. Do not put the cPanel password,
-`DEPLOY_WEBHOOK_SECRET` or any base URL in the repo. Keep secrets in GitHub
-Actions secrets and in the server `.env` only.
+Hosting is the `landloom.ai` cPanel account (`/home/landloom`). The account was
+wiped once by a cPanel reinstall — domains had to be re-added and every file was
+lost — so every path default in the deploy scripts now points straight at
+`/home/landloom/...`, and rebuilding the server is the bootstrap list below,
+not archaeology.
+
+- **Staging** lives at `lab.landloom.ai`: app dir
+  `/home/landloom/proposal-generator-staging`, DocumentRoot
+  `/home/landloom/lab.landloom.ai`, own port, `.env` and DB. Every `lab` push
+  runs `.github/workflows/deploy-staging.yml`, which POSTs
+  `$STAGING_BASE_URL/api/deploy-webhook-staging` → `deploy-staging.sh`.
+- **Production** is the `landloom.ai` root: app dir
+  `/home/landloom/proposal-generator`, DocumentRoot
+  `/home/landloom/public_html`. `.github/workflows/deploy.yml` stays
+  `workflow_dispatch`-only and nothing is deployed there yet; flip it on by
+  setting the `PROD_BASE_URL` secret to `https://landloom.ai`.
+- `PROD_*`/`STAGING_*` env overrides still exist for any future path move; the
+  staging scripts also read `STAGING_WEB_ROOT` from the staging `.env`.
+- Do not put the cPanel password, `DEPLOY_WEBHOOK_SECRET` or any base URL in
+  the repo. Keep secrets in GitHub Actions secrets and in the server `.env`.
+
+### Rebuilding a wiped server (bootstrap)
+
+The webhook endpoint lives inside the running app, so it cannot perform the
+first deploy — bootstrap is manual, once, from cPanel Terminal or SSH:
+
+1. cPanel → create the `lab.landloom.ai` subdomain; its DocumentRoot is the
+   `STAGING_WEB_ROOT` target (default `/home/landloom/lab.landloom.ai`).
+2. `git clone https://github.com/toxichassan22/workflow.git ~/workflow.git`
+   (a normal clone — `git reset --hard` needs a worktree; add a PAT or deploy
+   key if the repo is private, and install git-lfs or `fonts/*.ttf` stay
+   pointers).
+3. Create `~/proposal-generator-staging/.env` from `.env.example` — it must
+   carry `DEPLOY_WEBHOOK_SECRET` plus the app keys, and can pin
+   `STAGING_WEB_ROOT` if cPanel chose a different DocumentRoot.
+4. `bash ~/workflow.git/deploy-staging.sh` — syncs `origin/lab` into the app
+   dir, builds the venv, starts gunicorn, writes the DocumentRoot `.htaccess`.
+5. Cron watchdog: `* * * * * ~/proposal-generator-staging/start_server-staging.sh`.
+6. GitHub repo secret `STAGING_BASE_URL=https://lab.landloom.ai` — from then on
+   every `lab` push self-deploys and the workflow verifies `/health`.
 
 ## No how-to text on screen
 

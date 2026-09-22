@@ -661,7 +661,7 @@ def deploy_webhook():
     if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
         return jsonify({'error': 'Invalid deployment commit'}), 400
     
-    deploy_script = '/home/demos/proposal-generator/deploy.sh'
+    deploy_script = '/home/landloom/proposal-generator/deploy.sh'
     if not os.path.exists(deploy_script):
         deploy_script = os.path.join(os.path.dirname(__file__), 'deploy.sh')
 
@@ -672,7 +672,7 @@ def deploy_webhook():
             if requested_commit:
                 command.append(str(requested_commit))
             
-            deploy_log_path = '/home/demos/proposal-generator/deploy.log'
+            deploy_log_path = '/home/landloom/proposal-generator/deploy.log'
             if not os.path.exists(os.path.dirname(deploy_log_path)):
                 deploy_log_path = os.path.join(os.path.dirname(__file__), 'deploy.log')
             
@@ -721,7 +721,7 @@ def deploy_webhook_staging():
     if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
         return jsonify({'error': 'Invalid deployment commit'}), 400
 
-    deploy_script = '/home/demos/proposal-generator-staging/deploy-staging.sh'
+    deploy_script = '/home/landloom/proposal-generator-staging/deploy-staging.sh'
     if not os.path.exists(deploy_script):
         deploy_script = os.path.join(os.path.dirname(__file__), 'deploy-staging.sh')
 
@@ -732,7 +732,7 @@ def deploy_webhook_staging():
             if requested_commit:
                 command.append(str(requested_commit))
 
-            deploy_log_path = '/home/demos/proposal-generator-staging/deploy.log'
+            deploy_log_path = '/home/landloom/proposal-generator-staging/deploy.log'
             if not os.path.exists(os.path.dirname(deploy_log_path)):
                 deploy_log_path = os.path.join(os.path.dirname(__file__), 'deploy-staging.log')
 
@@ -813,7 +813,7 @@ def _read_deployment_metadata():
 
 def _deployed_vision_status():
     """What the deployment recorded about the slide renderer, including the install log tail."""
-    for directory in ('/home/demos/proposal-generator', os.path.dirname(__file__)):
+    for directory in ('/home/landloom/proposal-generator', os.path.dirname(__file__)):
         path = os.path.join(directory, '.vision_status')
         if not os.path.isfile(path):
             continue

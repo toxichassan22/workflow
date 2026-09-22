@@ -1,14 +1,15 @@
 #!/bin/bash
 # Staging deployment script for cPanel shared hosting (lab copy next to production).
-# Production deploy.sh stays manual-only while landloom.ai root serves coming-soon.
+# Production deploy.sh stays manual-only: landloom.ai root is the production
+# home but nothing is deployed there yet.
 # This script never touches production paths: it syncs origin/lab into a
 # separate APP_DIR and restarts a separate gunicorn + .htaccess pair.
 #
 # Server setup (one time, on the host):
-#   STAGING_WEB_ROOT must point at the staging subdomain DocumentRoot created in
-#   cPanel on the landloom.ai hosting (for example /home/<user>/test.landloom.ai).
-#   Set it by exporting STAGING_WEB_ROOT on the server before running, or by
-#   editing the default below once the DocumentRoot is known.
+#   STAGING_WEB_ROOT must point at the lab.landloom.ai subdomain DocumentRoot
+#   created in cPanel (default below: /home/landloom/lab.landloom.ai).
+#   Override it by exporting STAGING_WEB_ROOT on the server or in the staging
+#   .env if cPanel created a different DocumentRoot.
 # Optional overrides: STAGING_REPO_DIR, STAGING_APP_DIR, STAGING_BRANCH.
 
 set -e
@@ -65,9 +66,9 @@ elif [ -f "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env" ]
   load_env_file "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
 fi
 
-REPO_DIR="${STAGING_REPO_DIR:-/home/demos/workflow.git}"
-APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
-WEB_ROOT="${STAGING_WEB_ROOT:-/home/demos/staging_html}"
+REPO_DIR="${STAGING_REPO_DIR:-/home/landloom/workflow.git}"
+APP_DIR="${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}"
+WEB_ROOT="${STAGING_WEB_ROOT:-/home/landloom/lab.landloom.ai}"
 BRANCH="${STAGING_BRANCH:-lab}"
 PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"

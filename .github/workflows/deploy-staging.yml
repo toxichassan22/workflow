@@ -1,10 +1,11 @@
 name: Auto Deploy to Staging Hosting
 
 # Lab copy next to production. Pushes to lab deploy origin/lab into
-# proposal-generator-staging; production (deploy.yml, manual only) is untouched.
+# proposal-generator-staging on the landloom.ai cPanel account; production
+# (deploy.yml, manual only) is untouched.
 # Required repository secrets:
-#   STAGING_BASE_URL       e.g. https://test.example.com (no trailing slash needed)
-#   DEPLOY_WEBHOOK_SECRET  same webhook secret the server expects
+#   STAGING_BASE_URL       https://lab.landloom.ai (no trailing slash needed)
+#   DEPLOY_WEBHOOK_SECRET  same webhook secret the server .env expects
 
 on:
   push:

@@ -202,13 +202,15 @@ presentation وتُقدَّم عبر `GET /api/ai-usage`.
 
 ## 8. الاستضافة والنشر
 
-- **الإنتاج الحالي:** استضافة cPanel/Passenger على `landloom.ai` (الجذر صفحة
-  ثابتة — التطبيق على subdomain). مكتبات Chromium الناقصة تُحمَّل جانبياً في
-  `~/chromium-libs` عبر `scripts/rootless_rpm_extract.py` وتُكشف بـ `LD_LIBRARY_PATH`.
-- **Staging:** `test.landloom.ai` — كل push على `lab` يشغّل
+- **الاستضافة:** حساب cPanel على `landloom.ai` (`/home/landloom`). أُعيد تثبيت
+  cPanel مرة فتُعاد تهيئة الخادم من الصفر بخطوات bootstrap الموثقة في AGENTS.md.
+  مكتبات Chromium الناقصة تُحمَّل جانبياً في `~/chromium-libs` عبر
+  `scripts/rootless_rpm_extract.py` وتُكشف بـ `LD_LIBRARY_PATH`.
+- **Staging:** `lab.landloom.ai` — كل push على `lab` يشغّل
   `.github/workflows/deploy-staging.yml` الذي ينادي webhook على الخادم
-  (`deploy-staging.sh` → clone + `.env` + restart).
-- **Production:** `deploy.yml` يدوي فقط (`workflow_dispatch`).
+  (`deploy-staging.sh` → sync + `.env` + restart).
+- **Production:** جذر `landloom.ai` هو بيت الإنتاج لكنه فارغ حالياً —
+  `deploy.yml` يدوي فقط (`workflow_dispatch`) ولا يعمل قبل ضبط `PROD_BASE_URL`.
 - **بدائل جاهزة:** `Dockerfile` (python:3.11-slim + gunicorn) و`render.yaml`
   Blueprint لمنصة Render مع Postgres.
 - **الأسرار:** في GitHub Actions secrets و`.env` على الخادم فقط — لا شيء في المستودع.

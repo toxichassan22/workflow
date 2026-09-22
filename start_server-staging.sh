@@ -3,7 +3,7 @@
 # Mirrors start_server.sh but scoped to the staging copy only, so a staging
 # restart can never kill the production gunicorn next to it.
 # Safe to run from cron every minute alongside the production entry.
-# Usage: /home/demos/proposal-generator-staging/start_server-staging.sh
+# Usage: /home/landloom/proposal-generator-staging/start_server-staging.sh
 
 set -e
 
@@ -58,9 +58,9 @@ elif [ -f "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env" ]
   load_env_file "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
 fi
 
-APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
-REPO_DIR="${STAGING_REPO_DIR:-/home/demos/workflow.git}"
-WEB_ROOT="${STAGING_WEB_ROOT:-/home/demos/staging_html}"
+APP_DIR="${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}"
+REPO_DIR="${STAGING_REPO_DIR:-/home/landloom/workflow.git}"
+WEB_ROOT="${STAGING_WEB_ROOT:-/home/landloom/lab.landloom.ai}"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
 DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
