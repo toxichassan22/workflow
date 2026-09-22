@@ -1400,7 +1400,99 @@
     }
 
     /* Manual layer order: move the selected element (including the watermark
-       overlay) forward or backward without touching anything else. */
+       overlay) forward or backward. DOM order decides paint order between
+       same-level siblings — a z-index bump alone can never cross a parent
+       stacking context, and a z-index clamped at zero can never go behind
+       auto-stacked siblings — so the element is physically reordered first
+       and z-index only pressurizes the case with no sibling left to pass. */
+    function isSlideEditorChrome(el) {
+      return !!(el && el.classList && (
+        el.classList.contains('slide-resize-handle')
+        || el.classList.contains('slide-move-handle')
+        || el.classList.contains('slide-element-delete-btn')));
+    }
+
+    function siblingContent(el, step) {
+      let node = step > 0 ? el.nextElementSibling : el.previousElementSibling;
+      while (node && isSlideEditorChrome(node)) {
+        node = step > 0 ? node.nextElementSibling : node.previousElementSibling;
+      }
+      return node;
+    }
+
+    function restackElement(el, direction) {
+      /* direction>0 paints above one more sibling (later in DOM), direction<0
+         below one (earlier). Returns the sibling that was passed, or null. */
+      const parent = el.parentElement;
+      if (!parent) return null;
+      if (direction > 0) {
+        const over = siblingContent(el, 1);
+        if (!over) return null;
+        parent.insertBefore(el, over.nextElementSibling);
+        return over;
+      }
+      const under = siblingContent(el, -1);
+      if (!under) return null;
+      parent.insertBefore(el, under);
+      return under;
+    }
+
+    function outrankZ(el, sibling, direction) {
+      /* DOM order alone cannot pass a sibling carrying an explicit z-index
+         (z:50 beats last-in-DOM z:auto), so the moved element also takes one
+         step beyond the sibling's stack level. */
+      let base = NaN;
+      const inline = parseInt(sibling.style && sibling.style.zIndex, 10);
+      if (isFinite(inline)) base = inline;
+      else {
+        try {
+          const computed = parseInt(window.getComputedStyle(sibling).zIndex, 10);
+          if (isFinite(computed)) base = computed;
+        } catch (err) {}
+      }
+      if (!isFinite(base)) base = 0;
+      const next = Math.max(-50, Math.min(200, base + (direction > 0 ? 1 : -1)));
+      if (!el.style.position || el.style.position === 'static') el.style.position = 'relative';
+      el.style.zIndex = String(next);
+    }
+
+    function effectiveZ(el) {
+      const inline = parseInt(el.style && el.style.zIndex, 10);
+      if (isFinite(inline)) return inline;
+      try {
+        const computed = parseInt(window.getComputedStyle(el).zIndex, 10);
+        if (isFinite(computed)) return computed;
+      } catch (err) {}
+      return 0;
+    }
+
+    function pressurizeZ(el, direction) {
+      /* Fallback when no sibling is left to pass: jump one step beyond the
+         sibling stack extreme — a fixed +10 could never clear a z:50 sibling,
+         and a negative z is the only way "back" drops below auto-stacked
+         siblings. */
+      const parent = el.parentElement;
+      if (!parent) return false;
+      let hasSibling = false;
+      let extreme = direction > 0 ? -Infinity : Infinity;
+      for (const sib of parent.children) {
+        if (sib === el || isSlideEditorChrome(sib)) continue;
+        hasSibling = true;
+        const z = effectiveZ(sib);
+        extreme = direction > 0 ? Math.max(extreme, z) : Math.min(extreme, z);
+      }
+      if (!hasSibling) return false;
+      if (!isFinite(extreme)) extreme = 0;
+      const current = effectiveZ(el);
+      let next = Math.max(-50, Math.min(200, extreme + (direction > 0 ? 1 : -1)));
+      if (direction > 0 && next <= current) next = Math.min(200, current + 10);
+      if (direction < 0 && next >= current) next = Math.max(-50, current - 10);
+      if (next === current) return false;
+      if (!el.style.position || el.style.position === 'static') el.style.position = 'relative';
+      el.style.zIndex = String(next);
+      return true;
+    }
+
     function adjustSlideElementLayer(index, direction) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
@@ -1411,16 +1503,6 @@
       // Layer order belongs to the watermark overlay itself: re-stacking the
       // logo img alone would do nothing visible inside its own layer.
       const layerTarget = watermarkOverlayOf(target) || target;
-      let current = 0;
-      try {
-        const inline = parseInt(layerTarget.style.zIndex, 10);
-        if (isFinite(inline)) current = inline;
-        else {
-          const computed = parseInt(window.getComputedStyle(layerTarget).zIndex, 10);
-          if (isFinite(computed)) current = computed;
-        }
-      } catch (err) {}
-      const next = Math.max(0, Math.min(200, current + (direction > 0 ? 10 : -10)));
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
@@ -1429,15 +1511,24 @@
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
       const rawLayerTarget = watermarkOverlayOf(rawTarget) || rawTarget;
-      if (!layerTarget.style.position || layerTarget.style.position === 'static') layerTarget.style.position = 'relative';
-      layerTarget.style.zIndex = String(next);
-      if (!rawLayerTarget.style.position || rawLayerTarget.style.position === 'static') rawLayerTarget.style.position = 'relative';
-      rawLayerTarget.style.zIndex = String(next);
+      const passed = restackElement(layerTarget, direction);
+      const rawPassed = restackElement(rawLayerTarget, direction);
+      let pressured = false;
+      if (passed) outrankZ(layerTarget, passed, direction);
+      else pressured = pressurizeZ(layerTarget, direction);
+      if (rawPassed) outrankZ(rawLayerTarget, rawPassed, direction);
+      else pressurizeZ(rawLayerTarget, direction);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
-      selectSlideElement(stage, index, target, session.sel.path);
+      // Reordering changed the DOM indexes the selection path was built on.
+      const freshPath = slideElementPath(slide, target) || session.sel.path;
+      selectSlideElement(stage, index, target, freshPath);
+      if (!passed && !pressured) {
+        toast(direction > 0 ? 'العنصر بالفعل في المقدمة' : 'العنصر بالفعل في الخلف');
+        return;
+      }
       toast(direction > 0 ? 'تم تقديم العنصر للأمام' : 'تم إرجاع العنصر للخلف');
     }
 
