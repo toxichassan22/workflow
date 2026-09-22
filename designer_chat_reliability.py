@@ -456,6 +456,181 @@ def split_cards_or_blocks(html: str, title: str, num_parts: int = 2) -> List[Dic
     return output
 
 
+_PROSE_MIN_CHARS = 350
+_PROSE_UNIT_TAGS = {
+    "p", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+    "div", "section", "article", "span", "strong", "em", "b",
+}
+_PROSE_SKIP_TAGS = {
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+    "script", "style", "template", "svg", "select", "option",
+}
+_PROSE_UNSAFE_INNER = re.compile(
+    r"<(?:img|svg|canvas|iframe|object|embed|video|audio|a)\b|url\(|data-", re.IGNORECASE
+)
+_VOID_TAGS = set("area base br col embed hr img input link meta param source track wbr".split())
+
+
+class _ProseMap(HTMLParser):
+    """Locate visible elements carrying enough direct text to split verbatim."""
+
+    def __init__(self, html: str):
+        super().__init__(convert_charrefs=True)
+        self.html = html
+        self._lines = [0] + [m.end() for m in re.finditer(r"\n", html)]
+        self.stack: List[Dict[str, Any]] = []
+        self.units: List[Dict[str, Any]] = []
+        try:
+            self.feed(html)
+            self.close()
+        except Exception:
+            pass
+        self.stack = []
+        kept: List[Dict[str, Any]] = []
+        for unit in sorted(self.units, key=lambda u: (u["start"], -u["end"])):
+            if kept and unit["start"] < kept[-1]["end"]:
+                continue
+            kept.append(unit)
+        self.units = kept
+
+    def _abs(self) -> int:
+        line, col = self.getpos()
+        return self._lines[line - 1] + col if 0 < line <= len(self._lines) else 0
+
+    def handle_starttag(self, tag, attrs):
+        start = self._abs()
+        attr_map = dict(attrs)
+        parent = self.stack[-1] if self.stack else None
+        style = re.sub(r"\s+", "", attr_map.get("style") or "").lower()
+        hidden = (
+            bool(parent and parent["hidden"])
+            or tag in ("script", "style", "template")
+            or "hidden" in attr_map
+            or attr_map.get("aria-hidden") == "true"
+            or any(rule in style for rule in ("display:none", "visibility:hidden", "opacity:0;", "font-size:0"))
+            or style.endswith("opacity:0")
+        )
+        classes = (attr_map.get("class") or "").split()
+        hidden = hidden or any(key in attr_map for key in ("data-slide-footer", "data-slide-counter")) \
+            or bool({"slide-footer", "slide-counter"} & set(classes))
+        frame = {
+            "tag": tag,
+            "start": start,
+            "inner_start": start + len(self.get_starttag_text() or ""),
+            "hidden": hidden,
+            "skipped": bool(parent and parent["skipped"]) or tag in _PROSE_SKIP_TAGS,
+            "direct": 0,
+            "texts": [],
+        }
+        if tag not in _VOID_TAGS:
+            self.stack.append(frame)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in _VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        pos = self._abs()
+        index = next((i for i in range(len(self.stack) - 1, -1, -1) if self.stack[i]["tag"] == tag), None)
+        if index is None:
+            return
+        while len(self.stack) > index + 1:
+            self.stack.pop()
+        frame = self.stack.pop()
+        gt = self.html.find(">", pos)
+        end = gt + 1 if gt >= 0 else pos + len(tag) + 3
+        if (
+            not frame["hidden"]
+            and not frame["skipped"]
+            and frame["tag"] in _PROSE_UNIT_TAGS
+            and frame["direct"] >= _PROSE_MIN_CHARS
+        ):
+            inner = self.html[frame["inner_start"]:pos]
+            if not _PROSE_UNSAFE_INNER.search(inner):
+                text = " ".join("".join(frame["texts"]).split())
+                if text:
+                    self.units.append({**frame, "inner_end": pos, "end": end, "text": text})
+
+    def handle_data(self, data):
+        for frame in self.stack:
+            frame["texts"].append(data)
+        if self.stack:
+            self.stack[-1]["direct"] += len(data.strip())
+
+
+def _sentence_split_points(text: str, num_parts: int) -> List[int]:
+    """Balanced cut positions, snapped to sentence ends then word boundaries."""
+    total = len(text)
+    if total < num_parts * 40:
+        return []
+    sentence_bounds = [m.end() for m in re.finditer(r"[.!؟?؛…]+[)\]]*\s+|\n+", text)]
+    word_bounds = [m.end() for m in re.finditer(r"\s+", text)]
+    cuts = []
+    prev = 0
+    for i in range(1, num_parts):
+        target = total * i // num_parts
+        window = total // (num_parts * 4)
+        near = [b for b in sentence_bounds if prev < b < total and abs(b - target) <= window]
+        if near:
+            cut = min(near, key=lambda b: abs(b - target))
+        else:
+            ahead = [b for b in word_bounds if prev < b < total]
+            if not ahead:
+                return []
+            cut = min(ahead, key=lambda b: abs(b - target))
+        if cut <= prev or cut >= total:
+            return []
+        cuts.append(cut)
+        prev = cut
+    return cuts if len(cuts) == num_parts - 1 else []
+
+
+def split_prose_slide(html: str, title: str, num_parts: int = 2) -> List[Dict[str, str]]:
+    """Deterministically partition large prose text across slides at sentence
+    boundaries, for dense slides whose block count is too small for
+    split_cards_or_blocks (e.g. one giant paragraph card)."""
+    if not html or num_parts <= 1:
+        return []
+    units = _ProseMap(html).units
+    if not units:
+        return []
+    stream = " ".join(unit["text"] for unit in units)
+    if len(stream) < _PROSE_MIN_CHARS:
+        return []
+    cuts = _sentence_split_points(stream, num_parts)
+    if len(cuts) != num_parts - 1:
+        return []
+    spans = []
+    prev = 0
+    for cut in cuts:
+        spans.append((prev, cut))
+        prev = cut
+    spans.append((prev, len(stream)))
+    offsets = []
+    cursor = 0
+    for unit in units:
+        offsets.append((cursor, cursor + len(unit["text"])))
+        cursor += len(unit["text"]) + 1
+    clean_title = re.sub(r"\s*[-–—]\s*الجزء\s+\S+(?:\s+من\s+\S+)?\s*$", "", str(title or "")).strip() or "شريحة"
+    output: List[Dict[str, str]] = []
+    for part_index, (span_start, span_end) in enumerate(spans, start=1):
+        edits = []
+        for unit, (unit_start, unit_end) in zip(units, offsets):
+            share_start = max(span_start, unit_start)
+            share_end = min(span_end, unit_end)
+            if share_start >= share_end:
+                edits.append((unit["start"], unit["end"], ""))
+            elif share_start > unit_start or share_end < unit_end:
+                share = stream[share_start:share_end].strip()
+                edits.append((unit["inner_start"], unit["inner_end"], html_lib.escape(share)))
+        part_html = html
+        for start, end, replacement in sorted(edits, key=lambda item: item[0], reverse=True):
+            part_html = part_html[:start] + replacement + part_html[end:]
+        output.append({"title": f"{clean_title} - الجزء {part_index} من {num_parts}", "html": part_html})
+    return output
+
+
 def estimate_semantic_parts(html: str, requested_parts: SplitParts = "auto") -> int:
     if requested_parts != "auto":
         try:

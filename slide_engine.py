@@ -26,7 +26,7 @@ _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 # builders or plan normalization change: every normalized plan carries it, the
 # client folds it into the generation-checkpoint fingerprint, and stored slides
 # produced by older code can no longer be resumed into a new presentation.
-SLIDE_ENGINE_VERSION = '2026-09-22.1'
+SLIDE_ENGINE_VERSION = '2026-09-22.2'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Content Distribution Rules
@@ -2697,6 +2697,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     has_feat = bool(str(executive.get('features') or '').strip())
     has_sum = bool(str(executive.get('summary') or '').strip() or str(source.get('executive_summary') or '').strip())
     if has_opp or has_feat or has_sum:
+        exec_source_re = re.compile(r'^executive_content\.(?:summary|opportunity|features)(?::\d*:\d*)?$')
+        for key in list(groups):
+            kept = [s for s in groups[key]
+                    if not exec_source_re.match(str(s.get('content_source') or '').strip())]
+            if len(kept) != len(groups[key]):
+                groups[key] = kept
         existing_exec = list(groups.get('executive_summary', []))
         existing_by_source = {
             str(s.get('content_source') or '').strip(): dict(s)
@@ -2740,9 +2746,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if has_feat:
             feat_slide = existing_by_source.get('executive_content.features') or {}
             feat_items = _executive_feature_items(source)
-            mean_len = (sum(len(item) for item in feat_items) / len(feat_items)) if feat_items else 0
-            feat_per_page = 14 if mean_len <= 140 else (10 if mean_len <= 260 else 8)
-            feat_ranges = _balanced_row_ranges(len(feat_items), feat_per_page) or [(0, 0)]
+            feat_ranges = _balanced_row_ranges(len(feat_items), _executive_feature_page_size(feat_items)) or [(0, 0)]
             for index, (start, end) in enumerate(feat_ranges, 1):
                 add('executive_summary', exec_page_slide(
                     feat_slide, 'executive_content.features',
@@ -5755,20 +5759,28 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
                 for label, text in sections[start:end]
             ).strip()
         else:
-            executive = _decode_json_fact(project_data.get('executive_content'))
-            value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
-            if not value:
-                value = str(project_data.get('executive_summary') or '').strip()
+            sections = _executive_summary_sections(project_data)
+            pages = _executive_summary_pages(project_data)
+            first = pages[0][1] if pages else sections
+            value = '\n\n'.join(
+                (f'{label}\n{text}' if label else text)
+                for label, text in first
+            ).strip()
         return 'الملخص التنفيذي المعتمد دون إضافة أو تكرار:\n' + value if value else ''
     opp_match = re.fullmatch(r'executive_content\.opportunity(?::(\d+):(\d+))?', str(source or ''))
     if opp_match:
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
         explicit = _explicit_row_range()
-        if value and (explicit is not None or opp_match.group(1) is not None):
+        if value:
             chunks = _exec_text_chunks(value)
-            start, end = explicit or (int(opp_match.group(1)), int(opp_match.group(2)))
-            value = '\n\n'.join(chunks[start:end])
+            if explicit is not None or opp_match.group(1) is not None:
+                start, end = explicit or (int(opp_match.group(1)), int(opp_match.group(2)))
+                value = '\n\n'.join(chunks[start:end])
+            else:
+                pages = _budget_row_pages([('', chunk) for chunk in chunks])
+                if pages:
+                    value = '\n\n'.join(chunk for _, chunk in pages[0][1])
         return 'الفرصة الاستثمارية المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
     feat_match = re.fullmatch(r'executive_content\.features(?::(\d+):(\d+))?', str(source or ''))
     if feat_match:
@@ -5777,6 +5789,10 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
         if explicit is not None or feat_match.group(1) is not None:
             start, end = explicit or (int(feat_match.group(1)), int(feat_match.group(2)))
             items = items[start:end]
+        else:
+            ranges = _balanced_row_ranges(len(items), _executive_feature_page_size(items))
+            if ranges:
+                items = items[ranges[0][0]:ranges[0][1]]
         value = '\n'.join(f'- {it}' for it in items)
         return 'المميزات وفرص الاستثمار المعتمدة دون إضافة أو تكرار:\n' + value if value else ''
     if source == 'contact_closing':
@@ -6716,6 +6732,12 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
     chunks = _exec_text_chunks(opp_text)
     all_rows = [('', chunk) for chunk in chunks] or [('', 'الفرصة الاستثمارية للمشروع')]
     rows, row_offset = _market_rows_for_slide(slide, 'executive_content.opportunity', all_rows)
+    if row_offset == 0 and (slide or {}).get('market_row_start') is None:
+        content_source = str((slide or {}).get('content_source') or '')
+        if ':' not in content_source:
+            pages = _budget_row_pages(all_rows)
+            if pages:
+                rows = pages[0][1]
     body_content = _exec_editorial_body(rows, row_offset, primary, accent)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
@@ -6769,11 +6791,24 @@ def _executive_feature_items(source, slide=None):
     return deduped
 
 
+def _executive_feature_page_size(items):
+    """Balanced per-page capacity for numbered feature lists."""
+    items = list(items or [])
+    mean_len = (sum(len(item) for item in items) / len(items)) if items else 0
+    return 14 if mean_len <= 140 else (10 if mean_len <= 260 else 8)
+
+
 def _build_executive_features_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render executive differentiators as a numbered editorial list."""
     source = source if isinstance(source, dict) else {}
     all_items = _executive_feature_items(source, slide)
     item_rows, row_offset = _market_rows_for_slide(slide, 'executive_content.features', all_items)
+    if row_offset == 0 and (slide or {}).get('market_row_start') is None:
+        content_source = str((slide or {}).get('content_source') or '')
+        if ':' not in content_source:
+            ranges = _balanced_row_ranges(len(all_items), _executive_feature_page_size(all_items))
+            if ranges:
+                item_rows = all_items[ranges[0][0]:ranges[0][1]]
     items = list(item_rows)
     if not items:
         items = all_items or ['مقومات تنافسية متميزة للمشروع', 'موقع استراتيجي وتدفقات مستهدفة', 'عوائد استثمارية مجدية ونمو مستدام']
@@ -7998,11 +8033,14 @@ def _required_slide_texts(slide, project_data):
         executive = _decode_json_fact(project_data.get('executive_content'))
         value = str(executive.get('opportunity') or '').strip() if isinstance(executive, dict) else ''
         explicit = _req_row_range()
-        if value and (explicit is not None or opp_match.group(1) is not None):
-            chunks = _exec_text_chunks(value)
+        if not value:
+            return []
+        chunks = _exec_text_chunks(value)
+        if explicit is not None or opp_match.group(1) is not None:
             start, end = explicit or (int(opp_match.group(1)), int(opp_match.group(2)))
             return chunks[start:end]
-        return [value] if value else []
+        pages = _budget_row_pages([('', chunk) for chunk in chunks])
+        return [chunk for _, chunk in (pages[0][1] if pages else [('', value)])]
     feat_match = re.fullmatch(r'executive_content\.features(?::(\d+):(\d+))?', str(source or ''))
     if feat_match:
         items = _executive_feature_items(project_data)
@@ -8010,6 +8048,10 @@ def _required_slide_texts(slide, project_data):
         if explicit is not None or feat_match.group(1) is not None:
             start, end = explicit or (int(feat_match.group(1)), int(feat_match.group(2)))
             items = items[start:end]
+        else:
+            ranges = _balanced_row_ranges(len(items), _executive_feature_page_size(items))
+            if ranges:
+                items = items[ranges[0][0]:ranges[0][1]]
         return items
     summary_match = re.fullmatch(r'executive_content\.summary(?::(\d+):(\d+))?', str(source or ''))
     if summary_match:
@@ -8018,11 +8060,9 @@ def _required_slide_texts(slide, project_data):
             sections = _executive_summary_sections(project_data)
             start, end = explicit or (int(summary_match.group(1)), int(summary_match.group(2)))
             return [f'{label}\n{text}' if label else text for label, text in sections[start:end]]
-        executive = _decode_json_fact(project_data.get('executive_content'))
-        value = str(executive.get('summary') or '').strip() if isinstance(executive, dict) else ''
-        if not value:
-            value = str(project_data.get('executive_summary') or '').strip()
-        return [value] if value else []
+        pages = _executive_summary_pages(project_data)
+        first = pages[0][1] if pages else _executive_summary_sections(project_data)
+        return [f'{label}\n{text}' if label else text for label, text in first]
     if source in {
         'executive_content.risks', 'market_study_data.risk_analysis',
         'market_study_data.risk_register', 'market_study_data.risks',

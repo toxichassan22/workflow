@@ -26,9 +26,12 @@ def one_based_index(value, count):
 
 def split_index(params, count):
     keys = [key for key in ('slide_number', 'slide_index', 'index') if key in params]
-    if len(keys) != 1:
+    if not keys:
         raise StructureSafetyError('invalid_indexes')
-    return one_based_index(params[keys[0]], count)
+    resolved = {one_based_index(params[key], count) for key in keys}
+    if len(resolved) != 1:
+        raise StructureSafetyError('invalid_indexes')
+    return resolved.pop()
 
 
 def merge_indexes(params, count):
@@ -60,10 +63,37 @@ def insertion_index(params, count):
         raise StructureSafetyError('invalid_position') from exc
 
 
+_PART_WORDS = (
+    ('عشر', 10), ('تسع', 9), ('ثمان', 8), ('تماني', 8), ('سبع', 7), ('ست', 6),
+    ('خمس', 5), ('اربع', 4), ('أربع', 4), ('تلات', 3), ('ثلاث', 3),
+    ('اتنين', 2), ('اثنين', 2), ('شريحتين', 2), ('شريحتان', 2),
+    ('جزأين', 2), ('جزئين', 2), ('نصفين', 2), ('قسمين', 2),
+)
+
+
+def _coerce_part_count(value):
+    """parts accepts an int, a digit string, 'auto', or an Arabic count word."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value or '').strip().translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    if re.fullmatch(r'\d+', text):
+        return int(text)
+    if text == 'auto':
+        return 'auto'
+    for word, number in _PART_WORDS:
+        if re.search(rf'(?<!\w){re.escape(word)}(?!\w)', text):
+            return number
+    return None
+
+
 def requested_parts(params, message, infer_parts):
     """Return an exact requested count or auto, never silently cap the request."""
     if 'parts' in params:
-        value = params['parts']
+        value = _coerce_part_count(params['parts'])
+        if value is None:
+            raise StructureSafetyError('invalid_parts')
     else:
         text = str(params.get('instruction') or message or '')
         match = re.search(r'(?:إلى|الى|على)\s*(\d+)\s*(?:شرائح|شرايح|أجزاء|اجزاء|سلايد)|(?:\b)(\d+)\s*(?:شرائح|شرايح|أجزاء|اجزاء|سلايد)', text)
@@ -90,6 +120,7 @@ class _Inventory(HTMLParser):
     def __init__(self, html):
         super().__init__(convert_charrefs=True)
         self.items = Counter()
+        self.text_items = []
         self.stack = []
         self.text = []
         self.roots = 0
@@ -106,6 +137,7 @@ class _Inventory(HTMLParser):
         text = ' '.join(''.join(self.text).split())
         if text:
             self.items[('text', text)] += 1
+            self.text_items.append(text)
         self.text = []
 
     def handle_starttag(self, tag, attrs):
@@ -190,25 +222,83 @@ def validate_single_slide(html):
     return _Inventory(html).items
 
 
+def _longest_prefix_length(item, text):
+    """Length of the longest prefix of item found as a substring of text."""
+    lo, hi, best = 1, len(item), 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if item[:mid] in text:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _text_covered_across(item, part_texts):
+    """item's characters survive, in order, across the ordered part texts.
+
+    A part may hold the whole item or a contiguous slice of it; slices must
+    appear in document order so a split paragraph can span page boundaries.
+    """
+    remaining = item
+    for joined in part_texts:
+        remaining = remaining.lstrip()
+        if not remaining:
+            return True
+        remaining = remaining[_longest_prefix_length(remaining, joined):]
+    return not remaining.lstrip()
+
+
 def require_preserved(source_htmls, result_htmls, expected_parts):
     """Reject missing text occurrences, row associations, data attributes or media.
 
-    Repeated headings/media on split pages are allowed. Unverifiable markup is rejected,
-    not interpreted as evidence of preservation. This is not a visual layout audit.
+    Non-text items keep exact multiset matching. A text item counts as preserved
+    when it appears inside result items at least as many times as required, or
+    when it is split into contiguous slices that reappear in order across
+    consecutive result slides. Repeated headings/media on split pages are
+    allowed. Unverifiable markup is rejected, not interpreted as evidence of
+    preservation. This is not a visual layout audit.
     """
     if len(result_htmls) != expected_parts:
         raise StructureSafetyError('incomplete_result')
     required = Counter()
     actual = Counter()
+    required_texts = []
+    inventories = []
+    part_texts = []
     for html in source_htmls:
-        required.update(validate_single_slide(html))
-    inventories = [validate_single_slide(html) for html in result_htmls]
-    for inventory in inventories:
-        actual.update(inventory)
-    if required - actual:
+        inventory = _Inventory(html)
+        required.update(inventory.items)
+        required_texts.extend(inventory.text_items)
+    for html in result_htmls:
+        inventory = _Inventory(html)
+        inventories.append(inventory)
+        actual.update(inventory.items)
+        part_texts.append(inventory.text_items)
+    required_nontext = Counter({key: count for key, count in required.items() if key[0] != 'text'})
+    actual_nontext = Counter({key: count for key, count in actual.items() if key[0] != 'text'})
+    if required_nontext - actual_nontext:
         raise StructureSafetyError('content_not_preserved')
+    for item, needed in Counter(required_texts).items():
+        supply = sum(
+            count
+            for inventory in inventories
+            for key, count in inventory.items.items()
+            if key[0] == 'text' and item in key[1]
+        )
+        if needed - supply <= 0:
+            continue
+        # Result items already containing the item were counted in supply; only
+        # slices in the remaining text can prove a split preserved it.
+        filtered_parts = [
+            ' '.join(text for text in texts if item not in text)
+            for texts in part_texts
+        ]
+        if not _text_covered_across(item, filtered_parts):
+            raise StructureSafetyError('content_not_preserved')
     if expected_parts > 1:
-        if any(inventory == required for inventory in inventories) or len({frozenset(value.items()) for value in inventories}) != expected_parts:
+        if any(inventory.items == required for inventory in inventories) or len({frozenset(inventory.items.items()) for inventory in inventories}) != expected_parts:
             raise StructureSafetyError('split_not_partitioned')
     return True
 
@@ -230,8 +320,10 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
             validate_single_slide(source_html)
             progress(25, f'جاري تقسيم الشريحة {index + 1} والتحقق من اكتمال المحتوى...')
             tables = reliability.split_table_slide(source_html, title, requested)
-            count = requested if isinstance(requested, int) else (len(tables) or 2)
-            candidates = [tables, reliability.split_cards_or_blocks(source_html, title, count)]
+            count = requested if isinstance(requested, int) else (
+                len(tables) or reliability.estimate_semantic_parts(source_html))
+            candidates = [tables, reliability.split_cards_or_blocks(source_html, title, count),
+                          reliability.split_prose_slide(source_html, title, count)]
             generated = None
             for candidate in candidates:
                 try:
@@ -320,5 +412,22 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
         raise StructureSafetyError('unknown_structure_tool')
     except Exception as exc:
         reason = str(exc) if isinstance(exc, StructureSafetyError) else 'generation_failed'
+        hint = _FAILURE_HINTS.get(reason, '')
+        message = 'تعذر تنفيذ العملية بالموضع والعدد المحددين مع التحقق من اكتمال المحتوى'
+        if hint:
+            message += f' ({hint})'
         return ({'tool': tool, 'status': 'failed', 'reason': reason},
-                'تعذر تنفيذ العملية بالموضع والعدد المحددين مع التحقق من اكتمال المحتوى؛ لم تتغير أي شريحة.')
+                message + '؛ لم تتغير أي شريحة.')
+
+
+_FAILURE_HINTS = {
+    'invalid_indexes': 'رقم الشريحة المحدد خارج العرض أو غير واضح',
+    'invalid_position': 'موضع الإدراج المحدد غير صالح',
+    'invalid_parts': 'عدد الأجزاء المطلوب غير صالح',
+    'invalid_slide_html': 'بنية الشريحة لا تسمح بالتحقق الآمن من المحتوى',
+    'content_not_preserved': 'النتيجة لم تحتفظ بكامل محتوى الشريحة الأصلية',
+    'split_not_partitioned': 'الأجزاء الناتجة مكررة أو غير منفصلة',
+    'incomplete_result': 'النتيجة غير مكتملة أو لم تتغير',
+    'generation_failed': 'تعذر توليد التعديل',
+    'unknown_structure_tool': 'الأداة المطلوبة غير معروفة',
+}

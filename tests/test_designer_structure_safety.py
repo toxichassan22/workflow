@@ -133,6 +133,65 @@ class StructureSafetyTests(unittest.TestCase):
         for outputs in ([(a, 'done'), (a, 'done')], [(a, 'done'), (b, 'done')]):
             self.assert_failed_unchanged('split_slide', {'slide_number': 1, 'parts': 2}, [copy.deepcopy(source)], outputs)
 
+    def test_split_single_dense_paragraph_partitions_verbatim_without_provider(self):
+        sentences = [f'الجملة التجريبية رقم {index} تحمل محتوى مختلفا تماما عن باقي الجمل.'
+                     for index in range(40)]
+        source = slide('<p>' + ' '.join(sentences) + '</p>')
+        workspace = [slide('<p>Before</p>'), source, slide('<p>After</p>')]
+        result, _, before, editor = self.run_action(
+            'split_slide', {'slide_number': 2, 'parts': 3}, workspace)
+        self.assertEqual(result['status'], 'success', result)
+        self.assertEqual(result['parts'], 3)
+        self.assertEqual(len(workspace), 5)
+        self.assertEqual([workspace[0], workspace[-1]], [before[0], before[-1]])
+        editor.assert_not_called()
+        safety.require_preserved([before[1]['html']], [item['html'] for item in workspace[1:4]], 3)
+        flat = ' '.join(
+            text for item in workspace[1:4]
+            for text in safety._Inventory(item['html']).text_items)
+        for sentence in sentences:
+            self.assertEqual(flat.count(sentence), 1, sentence)
+
+    def test_prose_split_rejects_identical_parts_and_dropped_sentences(self):
+        sentences = [f'الجملة التجريبية رقم {index} تحمل محتوى مختلفا تماما عن باقي الجمل.'
+                     for index in range(40)]
+        source = slide('<p>' + ' '.join(sentences) + '</p>')['html']
+        parts = reliability.split_prose_slide(source, 'كثيفة', 3)
+        self.assertEqual(len(parts), 3)
+        broken = parts[1]['html'].replace(sentences[20], '', 1)
+        with self.assertRaises(safety.StructureSafetyError) as missing:
+            safety.require_preserved([source], [parts[0]['html'], broken, parts[2]['html']], 3)
+        self.assertEqual(str(missing.exception), 'content_not_preserved')
+
+        repeated = 'نفس الجملة المكررة هنا مرات كثيرة جدا. ' * 60
+        duplicate = slide('<p>' + repeated + '</p>')['html']
+        identical = reliability.split_prose_slide(duplicate, 'مكررة', 3)
+        self.assertEqual(len(identical), 3)
+        with self.assertRaises(safety.StructureSafetyError) as dup:
+            safety.require_preserved([duplicate], [part['html'] for part in identical], 3)
+        self.assertEqual(str(dup.exception), 'split_not_partitioned')
+
+    def test_split_index_accepts_duplicate_same_value_and_rejects_conflicts(self):
+        self.assertEqual(
+            safety.split_index({'slide_number': 2, 'index': 2, 'slide_index': 2}, 5), 1)
+        for params in ({'slide_number': 1, 'index': 2},
+                       {'slide_number': 1, 'slide_index': 3, 'index': 1},
+                       {}, {'slide_number': True, 'index': True}):
+            with self.subTest(params=params):
+                with self.assertRaises(safety.StructureSafetyError):
+                    safety.split_index(params, 5)
+
+    def test_requested_parts_accepts_digit_strings_arabic_words_and_auto(self):
+        for value, expected in (('3', 3), ('شريحتين', 2), ('auto', 'auto'), (4, 4), (20, 20)):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    safety.requested_parts({'parts': value}, '', reliability.split_request_parts),
+                    expected)
+        for value in ('غامض', True, 0, 21, None, 2.5, ''):
+            with self.subTest(value=value):
+                with self.assertRaises(safety.StructureSafetyError):
+                    safety.requested_parts({'parts': value}, '', reliability.split_request_parts)
+
     def test_split_invalid_parts_or_missing_target_never_calls_provider(self):
         for params in ({'parts': 2}, {'slide_number': 0}, {'slide_number': True},
                        *({'slide_number': 1, 'parts': value} for value in (0, 1, 21, 100, True, 2.5, '', None))):

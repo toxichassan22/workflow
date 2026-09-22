@@ -13194,6 +13194,92 @@ class MeetingRequirementsTests(unittest.TestCase):
         filtered = engine.filter_presentation_plan_sections(plan, ('executive_summary',))
         self.assertEqual(filtered.get('engine_version'), engine.SLIDE_ENGINE_VERSION)
 
+    def _multi_page_executive_draft(self):
+        block = 'نص معتمد مفصل يغطي هذا القسم بالكامل مع أرقام ومؤشرات وإسقاطات مالية. ' * 14
+        summary = '\n\n'.join(
+            f'{label}\n\n{block}' for label in (
+                'البيانات الأساسية', 'الموقع', 'الأرض والاشتراطات', 'الجدول الزمني',
+                'الدراسة المالية', 'فريق العمل', 'دراسة السوق', 'الخلاصة'))
+        opportunity = ' '.join(
+            f'الجملة المعتمدة رقم {i} تصف جانباً استثمارياً فريداً للمشروع بإسهاب '
+            'مع تفاصيل مالية وتشغيلية ممتدة تجعل كل جملة طويلة بما يكفي لملء الصفحة.'
+            for i in range(80))
+        features = ' - '.join(f'ميزة تنافسية مرقمة {i} للمشروع' for i in range(20))
+        return {'project_name': 'مشروع', 'executive_content': json.dumps(
+            {'summary': summary, 'opportunity': opportunity, 'features': features},
+            ensure_ascii=False)}
+
+    def test_stray_executive_source_slides_are_removed_from_other_groups(self):
+        """A stray slide carrying executive_content.* outside the executive
+        section used to be planned whole-document and rendered as one dense
+        slide. Plan normalization now removes it and rebuilds canonical paged
+        executive slides instead."""
+        engine = self.application_module.slide_engine
+        draft = self._multi_page_executive_draft()
+        raw = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'شريحة ضالة بالملخص كله', 'type': 'content', 'section_key': 'closing',
+             'content_source': 'executive_content.summary'},
+            {'title': 'شريحة ضالة بالفرصة', 'type': 'content', 'section_key': 'market',
+             'content_source': 'executive_content.opportunity'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        plan = engine.normalize_presentation_plan(raw, draft, {})
+        exec_slides = [s for s in plan['slides']
+                       if str(s.get('content_source') or '').startswith('executive_content.')]
+        self.assertTrue(exec_slides)
+        for slide in exec_slides:
+            self.assertEqual(slide.get('section_key'), 'executive_summary', slide.get('title'))
+            self.assertIsNotNone(slide.get('market_row_start'), slide.get('title'))
+            self.assertIsNotNone(slide.get('market_row_end'), slide.get('title'))
+        titles = [s.get('title') for s in exec_slides]
+        self.assertNotIn('شريحة ضالة بالملخص كله', titles)
+        self.assertNotIn('شريحة ضالة بالفرصة', titles)
+
+    def test_unscoped_executive_sources_fall_back_to_first_page(self):
+        """executive_content.* without a page range or row metadata must scope
+        to the first page only — never the entire document on one slide."""
+        engine = self.application_module.slide_engine
+        draft = self._multi_page_executive_draft()
+        summary_pages = engine._executive_summary_pages(draft)
+        self.assertGreaterEqual(len(summary_pages), 2)
+
+        stray = {'content_source': 'executive_content.summary', 'type': 'content'}
+        note = engine._slide_source_data_note(stray, draft)
+        first_labels = [label or text[:20] for label, text in summary_pages[0][1]]
+        self.assertIn(first_labels[0], note)
+        last_label = summary_pages[-1][1][-1][0]
+        if last_label:
+            self.assertNotIn(last_label, note)
+        texts = engine._required_slide_texts(stray, draft)
+        self.assertEqual(len(texts), len(summary_pages[0][1]))
+
+        opp_slide = {'content_source': 'executive_content.opportunity', 'type': 'content'}
+        chunks = engine._exec_text_chunks(
+            json.loads(draft['executive_content'])['opportunity'])
+        opp_pages = engine._budget_row_pages([('', c) for c in chunks])
+        self.assertGreaterEqual(len(opp_pages), 2)
+        last_page_head = opp_pages[-1][1][0][1][:40]
+        opp_note = engine._slide_source_data_note(opp_slide, draft)
+        self.assertIn(chunks[0][:40], opp_note)
+        self.assertNotIn(last_page_head, opp_note)
+        opp_texts = engine._required_slide_texts(opp_slide, draft)
+        self.assertEqual(opp_texts, [c for _l, c in opp_pages[0][1]])
+
+        feat_slide = {'content_source': 'executive_content.features', 'type': 'content'}
+        feat_texts = engine._required_slide_texts(feat_slide, draft)
+        items = engine._executive_feature_items(draft)
+        self.assertLess(len(feat_texts), len(items))
+        self.assertEqual(feat_texts, items[:len(feat_texts)])
+
+        opp_html = engine._build_structured_fallback_slide(opp_slide, draft, {})
+        self.assertIn('الجملة المعتمدة رقم 0', re.sub(r'<[^>]+>', '', opp_html))
+        self.assertNotIn(last_page_head, re.sub(r'<[^>]+>', '', opp_html))
+        feat_html = engine._build_structured_fallback_slide(feat_slide, draft, {})
+        feat_text = re.sub(r'<[^>]+>', '', feat_html)
+        self.assertIn(items[0], feat_text)
+        self.assertNotIn(items[-1], feat_text)
+
 
 if __name__ == '__main__':
     unittest.main()
