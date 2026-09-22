@@ -9,6 +9,7 @@ EDIT_TOOLS = {
     'remove_watermark', 'apply_image_descriptions', 'insert_team_logo',
     'insert_company_logo_panel', 'insert_canonical_map', 'insert_map',
     'insert_financial_chart', 'update_financial_chart', 'insert_attached_image',
+    'update_slide_image',
 }
 SINGLE_TOOLS = {
     'duplicate_slide', 'clone_slide', 'split_slide', 'split_dense_slide',

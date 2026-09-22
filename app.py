@@ -8401,6 +8401,227 @@ def _refresh_slide_map_sources(html, project_data, tenant_id, presentation_id=No
     return re.sub(r'<[a-z][^>]*>', refresh_tag, html, flags=re.IGNORECASE)
 
 
+def _designer_image_assets(creative_images):
+    """Enumerate the project's visual assets as token/url/label/family rows.
+
+    The chat planner sees creative_images as raw JSON, so it guesses token
+    names and invents ones that do not exist (##AERIAL_IMAGE_3##). The rows
+    here are the same assets the slide generator enumerates, so a refresh
+    request can name an exact token and resolve it deterministically.
+    """
+    assets = []
+    if not isinstance(creative_images, dict) or not creative_images:
+        return assets
+    cover, moodboard = slide_engine._creative_image_values(creative_images)
+    if cover:
+        assets.append({'token': '##IMAGE_COVER##', 'url': cover,
+                       'label': 'الصورة الرئيسية المعتمدة', 'family': 'cover'})
+    moodboard_meta = creative_images.get('moodboard_meta')
+    moodboard_meta = moodboard_meta if isinstance(moodboard_meta, list) else []
+    for index, url in enumerate(moodboard, 1):
+        if not url:
+            continue
+        meta = moodboard_meta[index - 1] if index - 1 < len(moodboard_meta) \
+            and isinstance(moodboard_meta[index - 1], dict) else {}
+        label = str(meta.get('label') or f'التصور الخارجي {index}').strip()
+        caption = str(meta.get('caption') or '').strip()
+        assets.append({'token': f'##MOODBOARD_IMAGE_{index}##', 'url': url,
+                       'label': label + (f' — {caption}' if caption else ''),
+                       'family': 'moodboard'})
+    components = creative_images.get('interior_components') or []
+    for c_idx, comp in enumerate(components if isinstance(components, list) else [], 1):
+        if not isinstance(comp, dict):
+            continue
+        comp_name = str(comp.get('name') or f'المكون {c_idx}').strip()
+        for i_idx, item in enumerate(comp.get('images') or [], 1):
+            url = item.get('url', '') if isinstance(item, dict) else str(item or '')
+            if not url:
+                continue
+            label = str(item.get('label') or comp_name).strip() if isinstance(item, dict) else comp_name
+            assets.append({'token': f'##INTERIOR_COMP_{c_idx}_IMG_{i_idx}##', 'url': url,
+                           'label': f'{comp_name} — {label}', 'family': 'interior'})
+    interiors = creative_images.get('interior') or creative_images.get('interior_images') or []
+    if not isinstance(interiors, list):
+        interiors = [interiors]
+    for index, url in enumerate(interiors, 1):
+        if url:
+            assets.append({'token': f'##INTERIOR_IMAGE_{index}##', 'url': str(url),
+                           'label': f'التصور الداخلي {index}', 'family': 'interior'})
+    plans = creative_images.get('plans') or creative_images.get('plans2d') or []
+    if not isinstance(plans, list):
+        plans = [plans]
+    plan_meta = creative_images.get('plan_meta')
+    plan_meta = plan_meta if isinstance(plan_meta, list) else []
+    for index, item in enumerate(plans, 1):
+        url = (item.get('url') or item.get('imageUrl') or item.get('image_url')
+               or item.get('path') or '') if isinstance(item, dict) else str(item or '')
+        if not url:
+            continue
+        meta = plan_meta[index - 1] if index - 1 < len(plan_meta) \
+            and isinstance(plan_meta[index - 1], dict) else {}
+        label = str(meta.get('title') or meta.get('name') or f'المخطط {index}').strip()
+        assets.append({'token': f'##PLAN_IMAGE_{index}##', 'url': str(url),
+                       'label': label, 'family': 'plan'})
+    land_photos = creative_images.get('land_photos') or []
+    for index, item in enumerate(land_photos if isinstance(land_photos, list) else [], 1):
+        source = item if isinstance(item, dict) else {'url': item}
+        url = str(source.get('url') or source.get('imageUrl') or '').strip()
+        if not url:
+            continue
+        label = str(source.get('name') or f'صورة الأرض {index}').strip()
+        assets.append({'token': f'##LAND_PHOTO_{index}##', 'url': url,
+                       'label': label, 'family': 'land'})
+    return assets
+
+
+def _designer_image_asset_url(token, assets):
+    """Resolve a planner-supplied asset reference to its current URL."""
+    normalized = re.sub(r'#+', '', str(token or '')).strip().upper().replace('-', '_').replace(' ', '_')
+    if not normalized:
+        return '', None
+    for asset in assets:
+        if normalized == asset['token'].strip('#').upper():
+            return asset['url'], asset
+    return '', None
+
+
+def _set_tag_asset_token(tag, asset_token):
+    """Set or replace the data-asset-token attribute on an HTML tag."""
+    attr = f'data-asset-token="{asset_token}"'
+    if re.search(r'\bdata-asset-token\s*=', tag, re.IGNORECASE):
+        return re.sub(r'\bdata-asset-token\s*=\s*["\'][^"\']*["\']', attr, tag,
+                      count=1, flags=re.IGNORECASE)
+    if tag.endswith('/>'):
+        return tag[:-2] + ' ' + attr + '/>'
+    return tag[:-1] + ' ' + attr + '>'
+
+
+def _replace_slide_image_with_asset(html, asset_url, asset_token='', image_index=None):
+    """Swap one of a slide's images for a project asset, in place.
+
+    Chat image refresh used to go through the model, which invented token
+    names that resolved to nothing. The swap is deterministic: chrome, logos,
+    watermarks and canonical maps are skipped; an explicit image_index (1-based
+    document order) wins, then a tag stamped by an earlier asset update, then
+    the first image whose source already points at a stored project asset,
+    then simply the first image. With no <img> at all, a background-image tag
+    is swapped, and failing both an image box is appended before </div>.
+    """
+    if not html or not asset_url:
+        return html, False
+    output = str(html)
+    skip = re.compile(
+        r'presentation-chrome-logo|slide-watermark|data-slide-watermark|'
+        r'data-team-logo|data-company-logo|data-designer-managed-logos|\blogo\b',
+        re.IGNORECASE)
+    tag_pattern = re.compile(r'<[a-z][^>]*>|</(?:div|section|figure|main)\s*>', re.IGNORECASE)
+    images = []
+    backgrounds = []
+    canonical_depth = 0
+    for match in tag_pattern.finditer(output):
+        tag = match.group(0)
+        lowered = tag.lower()
+        if lowered.startswith('</'):
+            if canonical_depth:
+                canonical_depth -= 1
+            continue
+        if lowered.startswith(('<div', '<section', '<figure', '<main')):
+            if canonical_depth:
+                canonical_depth += 1
+            elif 'data-canonical-map' in lowered:
+                canonical_depth = 1
+        if canonical_depth or skip.search(lowered):
+            continue
+        if lowered.startswith('<img'):
+            images.append(match)
+        elif re.search(r'background(?:-image)?\s*:\s*url\(', lowered):
+            backgrounds.append(match)
+
+    target = None
+    kind = ''
+    if images:
+        if isinstance(image_index, int) and 1 <= image_index <= len(images):
+            target, kind = images[image_index - 1], 'image'
+        else:
+            stamped = [m for m in images if 'data-asset-token' in m.group(0).lower()]
+            if stamped:
+                target, kind = stamped[0], 'image'
+            elif len(images) == 1:
+                target, kind = images[0], 'image'
+            else:
+                assetish = [m for m in images if re.search(
+                    r'/uploads/|/api/project-files/|data:image', m.group(0), re.IGNORECASE)]
+                target, kind = (assetish or images)[0], 'image'
+    elif backgrounds:
+        index = image_index if isinstance(image_index, int) else 1
+        if 1 <= index <= len(backgrounds):
+            target, kind = backgrounds[index - 1], 'background'
+
+    if target is not None:
+        tag = target.group(0)
+        if kind == 'image':
+            src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
+            if src_pattern.search(tag):
+                tag = src_pattern.sub(
+                    lambda m: f'{m.group(1)}{m.group(2)}{asset_url}{m.group(4)}', tag, count=1)
+            else:
+                tag = re.sub(r'\s*/>$', '>', tag)
+                tag = tag[:-1] + f' src="{asset_url}">'
+        else:
+            tag = re.sub(
+                r'(background(?:-image)?\s*:\s*url\(\s*["\']?)([^)"\']+)(["\']?\s*\))',
+                lambda m: f'{m.group(1)}{asset_url}{m.group(3)}', tag, count=1,
+                flags=re.IGNORECASE)
+        if asset_token:
+            tag = _set_tag_asset_token(tag, asset_token)
+        return output[:target.start()] + tag + output[target.end():], True
+
+    closing = re.search(r'</div>\s*$', output, re.IGNORECASE)
+    if not closing:
+        return output, False
+    stamp = f' data-asset-token="{asset_token}"' if asset_token else ''
+    box = (
+        f'<div data-slide-imagebox="1"{stamp} style="position:absolute;left:60px;right:60px;'
+        f'top:120px;bottom:90px;z-index:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">'
+        f'<img src="{asset_url}" alt="" style="width:100%;height:100%;object-fit:contain;object-position:center center;"></div>'
+    )
+    return output[:closing.start()] + box + output[closing.start():], True
+
+
+def _refresh_slide_asset_sources(html, assets):
+    """Repoint data-asset-token-tagged media at the asset's current URL.
+
+    A model rebuild keeps the stamped tag but preserves its stored src — which
+    is a frozen revision URL once the presentation was saved — so the tag's
+    own token decides which current file the element must show.
+    """
+    if not html or 'data-asset-token' not in html or not assets:
+        return html
+    urls = {asset['token'].upper(): asset['url'] for asset in assets if asset.get('url')}
+    if not urls:
+        return html
+
+    def fix_tag(match):
+        tag = match.group(0)
+        token_match = re.search(r'data-asset-token\s*=\s*["\'](#+[\w\s-]+#+)["\']',
+                                tag, re.IGNORECASE)
+        if not token_match:
+            return tag
+        normalized = '##' + token_match.group(1).strip('#').strip().upper() + '##'
+        url = urls.get(normalized)
+        if not url:
+            return tag
+        tag = re.sub(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)',
+                     lambda m: f'{m.group(1)}{m.group(2)}{url}{m.group(4)}',
+                     tag, count=1, flags=re.IGNORECASE | re.DOTALL)
+        tag = re.sub(
+            r'(background(?:-image)?\s*:\s*url\(\s*["\']?)([^)"\']+)(["\']?\s*\))',
+            lambda m: f'{m.group(1)}{url}{m.group(3)}', tag, count=1, flags=re.IGNORECASE)
+        return tag
+
+    return re.sub(r'<[a-z][^>]*\bdata-asset-token\b[^>]*>', fix_tag, html, flags=re.IGNORECASE)
+
+
 def is_watermark_request(message):
     """Detect requests to add or remove slide watermarks or subtle background logos."""
     if not message:
@@ -10012,6 +10233,12 @@ HTML الحالي:
                 output = _refresh_slide_map_sources(
                     output, project_data, tenant_id, presentation_id=presentation_id,
                     creative_images=creative_images)
+                # Same staleness problem for chat-placed asset images: the
+                # stamped tag's token is authoritative, its stored src is not.
+                output = _refresh_slide_asset_sources(
+                    output,
+                    _designer_image_assets(
+                        _designer_creative_images(project_data, creative_images)))
                 output = slide_engine.finalize_designer_slide_html(
                     output, slide_type or 'content', project_data, branding,
                     creative_images=creative_images, tenant_id=tenant_id,
@@ -10611,6 +10838,19 @@ def api_designer_chat():
         attached_note = ""
     # Legacy single-image alias kept for older executors that read the first attachment.
     attached_image = chat_attached_uris[0] if chat_attached_uris else ''
+    # The planner sees creative_images as raw JSON and guesses token names;
+    # enumerating the real assets with their exact tokens stops invented
+    # placeholders like ##AERIAL_IMAGE_3## that resolve to nothing.
+    designer_image_assets = _designer_image_assets(creative_images)
+    if designer_image_assets:
+        assets_note = (
+            "\n\n## الأصول البصرية المتاحة في المشروع\n"
+            "هذه صور المشروع الوحيدة المسموح سحبها لتحديث صور الشرائح. استخدم التوكن حرفياً كما هو؛ "
+            "ممنوع اختراع أو تخمين أي توكن صورة غير مدرج هنا:\n"
+            + '\n'.join(f"- {asset['token']} — {asset['label']}" for asset in designer_image_assets)
+        )
+    else:
+        assets_note = ''
     if deterministic_plan is not None:
         pass
     elif slim_planner_only:
@@ -10658,7 +10898,7 @@ def api_designer_chat():
 - نفّذ الطلب الواضح، واسأل سؤالاً محدداً عندما يؤثر الغموض على الإجراء أو النطاق أو القيمة. لا تخمّن تعديلاً لم يطلبه المستخدم، ولا تعتبر مجرد ذكر رقم إذناً بالتعديل.
 - الرد على سؤال سابق يكمل ذلك الطلب فقط. رسالة التصحيح أو الإلغاء تلغي الاستنتاج السابق. عند اختيار edit_slides اكتب instruction مكتملة تحمل التعديل والقيمة والقيود المفهومة من المحادثة، لا تنسخ الرد القصير وحده إلى المحرر.
 {all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_attached_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_attached_image|insert_canonical_map|update_slide_image|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 أرقام الشرائح في كل الأدوات تشير إلى ترتيب العرض في بداية هذا الطلب، حتى عند نقل أو حذف شرائح في عملية سابقة ضمن الطلب نفسه.
@@ -10671,6 +10911,7 @@ def api_designer_chat():
 - insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
 - insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1, "refresh":true عند طلب تحديث خريطة موجودة}}
+- update_slide_image: params={{"asset":"##MOODBOARD_IMAGE_3##", "image_index":1, "target":"current|indexes", "indexes":[1-based]}} لاستبدال صورة داخل الشريحة بأصل بصري من المشروع دون إعادة تصميم — asset هو التوكن الدقيق من قائمة «الأصول البصرية المتاحة» فقط، وimage_index اختياري يحدد الصورة داخل الشريحة بترتيب ظهورها (يبدأ من 1) عندما تحتوي الشريحة على أكثر من صورة.
 - insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
 - delete_slide: params={{"slide_number":1-based, "slide_numbers":[1-based]}}
 - duplicate_slide: params={{"slide_number":1-based}}
@@ -10711,8 +10952,9 @@ def api_designer_chat():
 - احرص دائماً على الحفاظ التام على كامل الأرقام والبيانات والمؤشرات دون حذف أي تفصيل، وتوزيعها في كروت فاخرة وأقسام متوازنة مريحة بصرياً وخالية من أي إيموجي أو أيقونات.
 18. حذف صف أو عمود أو سطر من جدول داخل شريحة (مثل: «احذف الصف الثالث من الجدول» أو «شيل عمود السعر») هو تعديل داخل الشريحة عبر tool="edit_slides" فقط — وليس delete_slide ولا split_slide ولا create_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف (مثل: «احذف الشريحة 5»). قواعد الحفاظ على البيانات لا تمنع هذا الحذف: هو حذف عرضي من الشريحة فقط وبيانات المشروع الأصلية تبقى كما هي. عند اختيار edit_slides لطلب صف/عمود اكتب instruction مكتملة تحمل نوع الحذف (صف أم عمود) ورقمه أو محتواه أو اسم العمود، ولا تنسخ الرد القصير وحده.
 19. الصورة المرفقة في هذه الرسالة هي أصل لا يُستبدل: طلب وضعها في شريحة منفصلة أو داخل شريحة أو كخلفية أو كعلامة مائية أو كشعار إضافي يعني حصراً tool="insert_attached_image" مع الموضع المناسب. ممنوع توليد صورة بديلة لها بـ generate_image، وممنوع استخدام apply_watermark أو insert_team_logo لها. عند غياب صور مرفقة في هذه الرسالة لا تختر insert_attached_image أبداً.
+20. طلب تحديث أو استبدال أو سحب صورة موجودة في شريحة إلى صورة من أصول المشروع (تصور خارجي أو داخلي أو مخطط معماري أو صورة أرض أو الصورة الرئيسية) يعني حصراً tool="update_slide_image" مع asset التوكن الدقيق من قائمة «الأصول البصرية المتاحة». ممنوع كتابة توكنات صور من عندك داخل HTML — أي توكن غير مدرج في القائمة يُحذف وتبقى الشريحة بلا صورة.
 
-{audit_note}{attached_note}
+{audit_note}{attached_note}{assets_note}
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
@@ -11383,6 +11625,48 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success' if successful_targets else 'failed',
                                  'indexes': successful_targets, 'map_type': map_type,
                                  'source': 'latest_persisted_map' if refresh_requested else 'approved_persisted_map'})
+            elif tool == 'update_slide_image':
+                # Deterministic project-asset swap: the planner names an exact
+                # token from the enumerated asset list, the URL resolves from
+                # the current creative state, and the slide's image slot is
+                # rewritten in place without a model rebuild.
+                raw_asset = str(params.get('asset') or params.get('token')
+                                or params.get('placeholder') or params.get('image_token') or '').strip()
+                asset_url, asset = _designer_image_asset_url(raw_asset, designer_image_assets)
+                targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                if not asset_url:
+                    assistant_messages.append(
+                        f'لا توجد صورة مشروع بالرمز {raw_asset or "المطلوب"} ضمن الأصول المتاحة؛ لم يتغير العرض.')
+                    executed.append({'tool': tool, 'status': 'failed', 'indexes': targets,
+                                     'asset': raw_asset, 'reason': 'asset_missing'})
+                    continue
+                raw_index = params.get('image_index', params.get('imageIndex'))
+                try:
+                    image_index = int(raw_index) if raw_index not in (None, '') else None
+                except (TypeError, ValueError):
+                    image_index = None
+                asset_label = str(asset.get('label') or raw_asset).strip() if isinstance(asset, dict) else raw_asset
+                successful_targets = []
+                for idx in targets:
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    updated_html, replaced = _replace_slide_image_with_asset(
+                        slide.get('html', ''), asset_url,
+                        asset_token=asset['token'], image_index=image_index)
+                    if not replaced:
+                        assistant_messages.append(
+                            f'تعذر العثور على موضع صورة في الشريحة رقم {idx + 1}؛ لم يتم تغيير الشريحة.')
+                        continue
+                    updated_html = resolve_designer_chat_placeholders(
+                        updated_html, project_data, presentation_id, tenant_id, creative_images)
+                    slide['html'] = updated_html
+                    slides[idx] = slide
+                    successful_targets.append(idx)
+                if successful_targets:
+                    assistant_messages.append(
+                        f'تم تحديث الصورة في الشرائح المحددة إلى «{asset_label}» من أصول المشروع دون إعادة تصميم.')
+                executed.append({'tool': tool, 'status': 'success' if successful_targets else 'failed',
+                                 'indexes': successful_targets, 'asset': asset['token'],
+                                 'source': 'project_asset'})
             elif tool in ('insert_financial_chart', 'update_financial_chart'):
                 chart_type = str(params.get('chart_type') or 'waterfall').lower()
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)

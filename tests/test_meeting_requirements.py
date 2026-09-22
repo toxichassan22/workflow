@@ -9224,6 +9224,109 @@ class MeetingRequirementsTests(unittest.TestCase):
                 html, {}, self.tenant_a, presentation_id='pres-refresh-current')
         self.assertEqual(refreshed, html)
 
+    def test_update_slide_image_replaces_single_image_in_place(self):
+        module = self.application_module
+        html = ('<div class="slide"><h2>المنظور الكلي</h2>'
+                '<img src="/uploads/creative/t/revisions/olddigest.png" alt=""></div>')
+        updated, changed = module._replace_slide_image_with_asset(
+            html, '/uploads/creative/t/aerial-new.png', asset_token='##MOODBOARD_IMAGE_2##')
+        self.assertTrue(changed)
+        self.assertIn('/uploads/creative/t/aerial-new.png', updated)
+        self.assertNotIn('olddigest.png', updated)
+        self.assertIn('data-asset-token="##MOODBOARD_IMAGE_2##"', updated)
+        self.assertEqual(updated.count('<img'), 1)
+        self.assertIn('<h2>المنظور الكلي</h2>', updated)
+
+    def test_update_slide_image_index_and_chrome_skip(self):
+        module = self.application_module
+        html = ('<div class="slide">'
+                '<img src="/assets/logo.png" class="presentation-chrome-logo">'
+                '<img src="/uploads/creative/t/first.png">'
+                '<img src="/uploads/creative/t/second.png"></div>')
+        updated, changed = module._replace_slide_image_with_asset(
+            html, '/uploads/creative/t/new.png', asset_token='##MOODBOARD_IMAGE_1##',
+            image_index=2)
+        self.assertTrue(changed)
+        self.assertIn('/assets/logo.png', updated)
+        self.assertIn('/uploads/creative/t/first.png', updated)
+        self.assertNotIn('/uploads/creative/t/second.png', updated)
+        self.assertIn('/uploads/creative/t/new.png', updated)
+        # Without an index the stamped tag is the next update's target.
+        updated_again, changed_again = module._replace_slide_image_with_asset(
+            updated, '/uploads/creative/t/newer.png', asset_token='##MOODBOARD_IMAGE_1##')
+        self.assertTrue(changed_again)
+        self.assertIn('/uploads/creative/t/newer.png', updated_again)
+        self.assertIn('/uploads/creative/t/first.png', updated_again)
+
+    def test_update_slide_image_appends_box_when_slide_has_none(self):
+        module = self.application_module
+        html = '<div class="slide"><h2>نص فقط</h2></div>'
+        updated, changed = module._replace_slide_image_with_asset(
+            html, '/uploads/creative/t/plan.png', asset_token='##PLAN_IMAGE_1##')
+        self.assertTrue(changed)
+        self.assertIn('data-slide-imagebox', updated)
+        self.assertIn('data-asset-token="##PLAN_IMAGE_1##"', updated)
+        self.assertIn('/uploads/creative/t/plan.png', updated)
+
+    def test_designer_image_assets_enumerate_every_family(self):
+        module = self.application_module
+        creative = {
+            'cover': '/uploads/creative/t/cover.png',
+            'moodboard': ['/uploads/creative/t/mb1.png', '/uploads/creative/t/mb2.png'],
+            'moodboard_meta': [{'label': 'الواجهة', 'caption': 'نهاري'},
+                               {'label': 'المنظور الكلي ثلاثي الأبعاد'}],
+            'interior_components': [{'name': 'اللوبي', 'images': [{'url': '/uploads/creative/t/lobby.png', 'label': 'مدخل'}]}],
+            'plans': ['/uploads/creative/t/plan1.png'],
+            'plan_meta': [{'title': 'مخطط الدور الأرضي'}],
+            'land_photos': [{'url': '/api/project-files/land1', 'name': 'صورة الأرض من الشارع'}],
+        }
+        assets = module._designer_image_assets(creative)
+        tokens = [a['token'] for a in assets]
+        self.assertEqual(tokens, ['##IMAGE_COVER##', '##MOODBOARD_IMAGE_1##',
+                                  '##MOODBOARD_IMAGE_2##', '##INTERIOR_COMP_1_IMG_1##',
+                                  '##PLAN_IMAGE_1##', '##LAND_PHOTO_1##'])
+        url, asset = module._designer_image_asset_url('moodboard_image_2', assets)
+        self.assertEqual(url, '/uploads/creative/t/mb2.png')
+        self.assertIn('المنظور الكلي', asset['label'])
+        url, _asset = module._designer_image_asset_url('##AERIAL_IMAGE_3##', assets)
+        self.assertEqual(url, '')
+
+    def test_invented_image_token_rescued_to_family_asset(self):
+        module = self.application_module
+        creative = {'moodboard': ['/u/mb1.png', '/u/mb2.png', '/u/mb3.png']}
+        html = '<div class="slide"><img src="##AERIAL_IMAGE_3##"></div>'
+        resolved = module.slide_engine._replace_creative_image_placeholders(
+            html, creative, 'content')
+        self.assertIn('src="/u/mb3.png"', resolved)
+        self.assertNotIn('##AERIAL_IMAGE_3##', resolved)
+        # Interior wording routes to interior assets.
+        creative['interior'] = ['/u/lobby.png']
+        resolved = module.slide_engine._replace_creative_image_placeholders(
+            '<div class="slide"><img src="##LOBBY_INTERIOR_1##"></div>', creative, 'content')
+        self.assertIn('src="/u/lobby.png"', resolved)
+
+    def test_invented_image_token_never_rewrites_text_context(self):
+        module = self.application_module
+        creative = {'moodboard': ['/u/mb1.png']}
+        html = '<div class="slide"><h2>##VIEW_NAME##</h2><img src="##AERIAL_IMAGE_9##"></div>'
+        resolved = module.slide_engine._replace_creative_image_placeholders(
+            html, creative, 'content')
+        self.assertIn('<h2>##VIEW_NAME##</h2>', resolved)
+        # An out-of-range invented index stays a token for the dropper.
+        self.assertIn('##AERIAL_IMAGE_9##', resolved)
+
+    def test_refresh_slide_asset_sources_repoints_stale_tag(self):
+        module = self.application_module
+        assets = [{'token': '##MOODBOARD_IMAGE_2##', 'url': '/uploads/creative/t/mb2-new.png',
+                   'label': 'x', 'family': 'moodboard'}]
+        html = ('<div class="slide"><img src="/uploads/creative/t/revisions/frozen.png" '
+                'data-asset-token="##MOODBOARD_IMAGE_2##">'
+                '<img src="/uploads/creative/t/other.png"></div>')
+        refreshed = module._refresh_slide_asset_sources(html, assets)
+        self.assertIn('mb2-new.png', refreshed)
+        self.assertNotIn('frozen.png', refreshed)
+        self.assertIn('/uploads/creative/t/other.png', refreshed)
+
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
         import slide_engine as engine

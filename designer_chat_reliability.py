@@ -1709,6 +1709,7 @@ def _verify_original_result(result, payload, namespace):
         "edit_slides", "edit_design_slide", "edit_design_slides", "generate_image",
         "generate_design_image", "insert_image_into_slide", "insert_canonical_map",
         "insert_map", "insert_financial_chart", "update_financial_chart", "insert_team_logo",
+        "update_slide_image",
         "insert_company_logo_panel", "delete_slide", "remove_slide", "duplicate_slide",
         "clone_slide", "reorder_slides", "move_slide", "split_slide", "split_dense_slide",
         "create_slide", "create_design_slide", "merge_slides", "combine_slides",

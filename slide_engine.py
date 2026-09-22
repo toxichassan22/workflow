@@ -11374,7 +11374,7 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
         url = str(source.get('logo') or source.get('url') or '').strip()
         if url:
             html = re.sub(rf'#*COMPETITOR_LOGO_{index}#*', _css_url(url), html, flags=re.IGNORECASE)
-    html = re.sub(r'#*COMPETITOR_LOGO_\d+#*', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'(?<![A-Za-z0-9_])#*COMPETITOR_LOGO_\d+#*', '', html, flags=re.IGNORECASE)
 
     # Replace component-specific interior tokens
     interior_comps = []
@@ -11400,7 +11400,7 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
         num = idx + 1
         if url:
             html = re.sub(rf'#*INTERIOR_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
-    html = re.sub(r'#*INTERIOR_(?:COMP_\d+_(?:IMG|IMAGE)_\d+|C\d+_(?:IMG|IMAGE)_\d+|\d+_\d+|IMAGE_\d+|\d+)#*', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'(?<![A-Za-z0-9_])#*INTERIOR_(?:COMP_\d+_(?:IMG|IMAGE)_\d+|C\d+_(?:IMG|IMAGE)_\d+|\d+_\d+|IMAGE_\d+|\d+)#*', '', html, flags=re.IGNORECASE)
 
     # Replace 2D plan tokens
     plans = []
@@ -11415,7 +11415,7 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
         if url:
             html = re.sub(rf'#*PLAN_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
             html = re.sub(rf'#*2D_PLAN_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
-    html = re.sub(r'#*(?:PLAN_IMAGE|2D_PLAN)_\d+#*', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'(?<![A-Za-z0-9_])#*(?:PLAN_IMAGE|2D_PLAN)_\d+#*', '', html, flags=re.IGNORECASE)
 
     # Do not leave the cover blank simply because the model forgot its token.
     if slide_type == 'cover' and cover and cover not in html:
@@ -11447,6 +11447,74 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
         strip = ('<div data-competitor-logos="1" style="position:absolute;left:50px;bottom:58px;z-index:20;'
                  'display:flex;gap:8px;align-items:center;">' + logos + '</div>')
         html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1' + strip, html, count=1)
+
+    # Rescue image-source tokens the model invented (##AERIAL_IMAGE_3##,
+    # ##LOBBY_INTERIOR_1##): the family keyword plus the trailing index pick a
+    # real project image, so the frame is not left for the placeholder dropper.
+    # Scoped to src=/url() contexts so a field token like ##VIEW_NAME## in text
+    # is never rewritten into an image URL.
+    def _loose_image_token_url(token_text):
+        body = token_text.strip('#').upper().replace('-', '_').replace(' ', '_')
+        index_match = re.search(r'_(\d+)$', body)
+        index = int(index_match.group(1)) - 1 if index_match else 0
+        if 'INTERIOR' in body or 'INDOOR' in body:
+            family = 'interior'
+        elif 'PLAN' in body or 'LAYOUT' in body or 'BLUEPRINT' in body:
+            family = 'plan'
+        elif 'LAND' in body or 'PLOT' in body or 'SITE_PHOTO' in body:
+            family = 'land'
+        elif 'COVER' in body or 'HERO' in body or body.startswith('MAIN'):
+            family = 'cover'
+        else:
+            family = 'moodboard'
+        src = creative_images if isinstance(creative_images, dict) else {}
+        urls = []
+        if family == 'cover':
+            urls = [cover] if cover else []
+        elif family == 'moodboard':
+            urls = [u for u in moodboard if u]
+        elif family == 'interior':
+            raw = src.get('interior') or src.get('interior_images') or []
+            urls = [str(u) for u in (raw if isinstance(raw, list) else [raw]) if u]
+            for comp in src.get('interior_components') or []:
+                comp_images = comp.get('images', []) if isinstance(comp, dict) else []
+                for img_item in comp_images:
+                    u = img_item.get('url', '') if isinstance(img_item, dict) else str(img_item or '')
+                    if u:
+                        urls.append(u)
+        elif family == 'plan':
+            raw = src.get('plans') or src.get('plans2d') or []
+            for item in (raw if isinstance(raw, list) else [raw]):
+                u = (item.get('url') or item.get('imageUrl') or item.get('image_url')
+                     or item.get('path') or '') if isinstance(item, dict) else str(item or '')
+                if u:
+                    urls.append(str(u))
+        elif family == 'land':
+            for item in src.get('land_photos') or []:
+                source = item if isinstance(item, dict) else {'url': item}
+                u = str(source.get('url') or source.get('imageUrl') or '').strip()
+                if u:
+                    urls.append(u)
+        if 0 <= index < len(urls):
+            return _css_url(urls[index])
+        return token_text
+
+    loose_token = (r'#+[A-Za-z0-9_\s-]*(?:IMAGE|IMG|PHOTO|VIEW|RENDER|AERIAL|EXTERIOR|MOODBOARD|'
+                   r'INTERIOR|PLAN|LAND|COVER|SCENE|FACADE|PERSPECTIVE|VISUAL)[A-Za-z0-9_\s-]*#+')
+    # A token prefix glued to an already-resolved URL (##AERIAL_/uploads/x.png)
+    # is an invented wrapper around a real token — drop the wrapper, keep the URL.
+    html = re.sub(r'(\bsrc\s*=\s*["\'])#+[A-Za-z0-9_]+_(?=(?:/|data:|https?:))',
+                  r'\1', html, flags=re.IGNORECASE)
+    html = re.sub(r'(url\(\s*["\']?)#+[A-Za-z0-9_]+_(?=(?:/|data:|https?:))',
+                  r'\1', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'(\bsrc\s*=\s*["\'])(' + loose_token + r')(["\'])',
+        lambda m: m.group(1) + _loose_image_token_url(m.group(2)) + m.group(3),
+        html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'(url\(\s*["\']?)(' + loose_token + r')(["\']?\s*\))',
+        lambda m: m.group(1) + _loose_image_token_url(m.group(2)) + m.group(3),
+        html, flags=re.IGNORECASE)
     return html
 
 
