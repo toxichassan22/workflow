@@ -26,7 +26,7 @@ _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 # builders or plan normalization change: every normalized plan carries it, the
 # client folds it into the generation-checkpoint fingerprint, and stored slides
 # produced by older code can no longer be resumed into a new presentation.
-SLIDE_ENGINE_VERSION = '2026-09-22.2'
+SLIDE_ENGINE_VERSION = '2026-09-22.3'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Content Distribution Rules
@@ -4696,16 +4696,26 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     if total_val_m <= 0:
         total_val_m = sum(it.get('value_millions', 0.0) for it in items) or 1.0
 
-    max_tick = 100.0
-    for t in [100, 200, 300, 500, 750, 1000, 1500, 2000, 5000]:
-        if total_val_m <= t:
-            max_tick = float(t)
+    # Axis: smallest nice step that covers the total with headroom in 4-6
+    # gridlines, so a 11M project no longer flattens under a 0-100 axis.
+    import math as _math
+    target = total_val_m * 1.12 if total_val_m > 0 else 1.0
+    mag = 10.0 ** _math.floor(_math.log10(target))
+    tick_step = target / 4.0
+    ticks = None
+    for m in (0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0):
+        step = m * mag
+        n = target / step
+        if 4 <= n <= 6:
+            n_ticks = _math.ceil(n)
+            max_tick = step * n_ticks
+            tick_step = step
+            ticks = [round(step * i, 6) for i in range(n_ticks + 1)]
             break
-    else:
-        max_tick = total_val_m * 1.15
-
-    tick_step = max_tick / 4.0
-    ticks = [0.0, tick_step, tick_step * 2, tick_step * 3, max_tick]
+    if ticks is None:
+        max_tick = target
+        tick_step = max_tick / 4.0
+        ticks = [0.0, tick_step, tick_step * 2, tick_step * 3, max_tick]
 
     n_cols = len(items) + 1
     use_stagger = n_cols >= 7
@@ -4726,7 +4736,8 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     for t in ticks:
         ty = y_for(t)
         grid_lines.append(f'<line x1="{pad_left}" y1="{ty}" x2="{width - pad_right}" y2="{ty}" stroke="#e2e8f0" stroke-width="1" />')
-        val_str = f"{t:,.0f}" if t == int(t) else f"{t:,.1f}"
+        val_str = (f"{t:,.0f}" if t == int(t)
+                   else (f"{t:,.2f}".rstrip('0').rstrip('.') if abs(t) < 10 else f"{t:,.1f}"))
         tick_texts.append(f'<text x="{pad_left - 8}" y="{ty + 4}" font-size="10" fill="#94a3b8" text-anchor="end">{val_str}</text>')
 
     col_slot = chart_w / max(n_cols, 1)
