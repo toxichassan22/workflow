@@ -662,10 +662,24 @@
       return node.closest('[data-slide-watermark="true"], .slide-watermark');
     }
 
+    /* Managed chrome (header/footer bars) is a direct child of the slide root.
+       Element edits treat the bar as one element: a click on its logo, accent
+       strip, inner wrappers or gaps selects the bar, and layer ops applied to
+       a text selection inside it hoist to the bar. Nested <header>/<footer>
+       (e.g. inside a card) are not chrome — their parent is not the slide. */
+    function slideChromeOf(slideRoot, node) {
+      const chrome = node && node.closest
+        ? node.closest('[data-slide-header], [data-slide-footer], header, footer')
+        : null;
+      return (chrome && slideRoot && chrome.parentElement === slideRoot) ? chrome : null;
+    }
+
     function slideDragTarget(slide, source) {
       if (!slide || !source || source === slide) return null;
       if (source.closest && source.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return null;
       if (source.closest && source.closest('[contenteditable]')) return null;
+      const chrome = slideChromeOf(slide, source);
+      if (chrome) return chrome;
       if (source.closest && source.closest('[data-slide-textbox], [data-slide-imagebox]')) {
         const box = source.closest('[data-slide-textbox], [data-slide-imagebox]');
         if (box && slide.contains(box)) return box;

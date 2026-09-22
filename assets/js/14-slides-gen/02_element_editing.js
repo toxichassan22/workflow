@@ -725,8 +725,10 @@
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
       // Layer order belongs to the watermark overlay itself: re-stacking the
-      // logo img alone would do nothing visible inside its own layer.
-      const layerTarget = watermarkOverlayOf(target) || target;
+      // logo img alone would do nothing visible inside its own layer. Chrome
+      // works the same way: a text node selected inside the header/footer
+      // restacks the whole bar.
+      const layerTarget = watermarkOverlayOf(target) || slideChromeOf(slide, target) || target;
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
@@ -734,7 +736,7 @@
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
-      const rawLayerTarget = watermarkOverlayOf(rawTarget) || rawTarget;
+      const rawLayerTarget = watermarkOverlayOf(rawTarget) || slideChromeOf(rawRoot, rawTarget) || rawTarget;
       const passed = restackElement(layerTarget, direction);
       const rawPassed = restackElement(rawLayerTarget, direction);
       let pressured = false;

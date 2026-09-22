@@ -46,8 +46,10 @@
       if (!Number.isInteger(index)) return;
       if (!getSlideEditSession(index)) return;
       const root = stage.querySelector('.slide');
-      const path = root ? slideElementPath(root, el) : null;
-      if (path) selectSlideElement(stage, index, el, path);
+      // Chrome (header/footer) edits select the bar, not the focused text node.
+      const target = slideChromeOf(root, el) || el;
+      const path = root ? slideElementPath(root, target) : null;
+      if (path) selectSlideElement(stage, index, target, path);
     }
 
     function toggleSlideInlineEditing(index) {

@@ -4,12 +4,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding.js',
-  '03-executive-classification.js', '04-market.js', '05-market-competitors.js', '06-team.js',
-  '07-project-form.js', '08-location-maps.js', '09-financial.js', '10-financial-report-timeline.js',
-  '11-land-croquis.js', '12-files-media.js', '13-visual.js', '14-slides-gen.js',
-  '15-slide-edit-chat.js', '16-presentations-export.js', '17-admin-boot.js'];
-const source = ['index.html', 'assets/css/base.css', 'assets/css/project-form.css',
+// Mirrors FRONTEND_JS_ORDER in app_parts/22_rules_approvals_static.py — the part
+// files are the source of truth; there are no flat bundle files on disk.
+const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+  '02-settings-branding/02_auth_boot.js',
+  '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+  '06-team.js', '07-project-form/01_form_sections.js',
+  '07-project-form/02_section_versions.js', '08-location-maps/01_tables_approvals.js',
+  '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
+  '09-financial/02_formulas_calc.js',
+  '10-financial-report-timeline/01_report_collect.js',
+  '10-financial-report-timeline/02_timeline_sidebar.js', '11-land-croquis/01_croquis_survey.js',
+  '11-land-croquis/02_map_edits.js', '12-files-media/01_files_media.js',
+  '12-files-media/02_visual_concept.js',
+  '13-visual/01_visual_concept_page.js',
+  '13-visual/02_slides_progress.js',
+  '13-visual/03_tenant_slide_generation.js', '14-slides-gen/01_undo.js',
+  '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
+  '15-slide-edit-chat/01_render_inline_edit.js',
+  '15-slide-edit-chat/02_designer_chat.js',
+  '16-presentations-export/01_presentations.js',
+  '16-presentations-export/02_admin_dashboard.js',
+  '16-presentations-export/03_export_delivery.js',
+  '16-presentations-export/04_sag_company_create.js',
+  '17-admin-boot/01_training_rules.js',
+  '17-admin-boot/02_users_roles.js',
+  '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
+  '19-notifications.js'];
+const source = ['index.html',
   ...FRONTEND_JS_ORDER.map(n => 'assets/js/' + n)]
   .map(f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')).join('\n');
 const extract = name => {
@@ -163,6 +185,7 @@ vm.runInContext(`
   ${extract('slideElementPath')}
   ${extract('elementAtSlidePath')}
   ${extract('watermarkOverlayOf')}
+  ${extract('slideChromeOf')}
   ${extract('findSlideRawTarget')}
   ${extract('isSlideEditorChrome')}
   ${extract('siblingContent')}
@@ -255,5 +278,25 @@ const t = context.__t;
   t.setup('<div class="slide"><div id="a"></div><div id="top" style="z-index:200"></div></div>', 'top');
   t.adjustSlideElementLayer(0, 1);
   assert(t.toasts.includes('العنصر بالفعل في المقدمة'));
+}
+
+/* Managed chrome: a selection inside the header/footer (title text, counter)
+   layers the whole bar, not the inner node — otherwise أمام/خلف looks dead on
+   chrome. The bar is the direct slide child carrying data-slide-header. */
+{
+  t.setup('<div class="slide"><header data-slide-header="1" style="position:absolute;z-index:10"><div><span id="ttl">t</span></div></header><div id="card"></div><footer data-slide-footer="1" style="position:absolute;z-index:10"><span id="cnt">1</span></footer></div>', 'ttl');
+  t.adjustSlideElementLayer(0, 1);
+  let html = t.tenantSlidesData[0].html;
+  assert(html.indexOf('id="card"') < html.indexOf('data-slide-header'), 'header bar moved after card, not the span');
+  const headerTag = html.slice(html.indexOf('<header'), html.indexOf('>', html.indexOf('<header')));
+  assert(/z-index:1(?![\d.])/.test(headerTag), 'bar took the z step above the passed sibling');
+  t.adjustSlideElementLayer(0, -1);
+  t.adjustSlideElementLayer(0, -1);
+  html = t.tenantSlidesData[0].html;
+  assert(html.indexOf('data-slide-header') < html.indexOf('id="card"'), 'bar restacked back before card');
+  // Footer span selection hoists to the footer bar too.
+  t.setup('<div class="slide"><div id="card"></div><footer data-slide-footer="1" style="position:absolute;z-index:10"><span id="cnt">1</span></footer></div>', 'cnt');
+  t.adjustSlideElementLayer(0, -1);
+  assert(t.tenantSlidesData[0].html.indexOf('data-slide-footer') < t.tenantSlidesData[0].html.indexOf('id="card"'), 'footer bar moved before card');
 }
 console.log('test_slide_layer_order: OK');

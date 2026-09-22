@@ -4,13 +4,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-// index.html is a slim shell now; the code under test lives in ordered classic scripts.
-const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding.js',
-  '03-executive-classification.js', '04-market.js', '05-market-competitors.js', '06-team.js',
-  '07-project-form.js', '08-location-maps.js', '09-financial.js', '10-financial-report-timeline.js',
-  '11-land-croquis.js', '12-files-media.js', '13-visual.js', '14-slides-gen.js',
-  '15-slide-edit-chat.js', '16-presentations-export.js', '17-admin-boot.js'];
-const source = ['index.html', 'assets/css/base.css', 'assets/css/project-form.css',
+// index.html is a slim shell now; the code under test lives in ordered classic
+// scripts. Mirrors FRONTEND_JS_ORDER in app_parts/22_rules_approvals_static.py.
+const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+  '02-settings-branding/02_auth_boot.js',
+  '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+  '06-team.js', '07-project-form/01_form_sections.js',
+  '07-project-form/02_section_versions.js', '08-location-maps/01_tables_approvals.js',
+  '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
+  '09-financial/02_formulas_calc.js',
+  '10-financial-report-timeline/01_report_collect.js',
+  '10-financial-report-timeline/02_timeline_sidebar.js', '11-land-croquis/01_croquis_survey.js',
+  '11-land-croquis/02_map_edits.js', '12-files-media/01_files_media.js',
+  '12-files-media/02_visual_concept.js',
+  '13-visual/01_visual_concept_page.js',
+  '13-visual/02_slides_progress.js',
+  '13-visual/03_tenant_slide_generation.js', '14-slides-gen/01_undo.js',
+  '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
+  '15-slide-edit-chat/01_render_inline_edit.js',
+  '15-slide-edit-chat/02_designer_chat.js',
+  '16-presentations-export/01_presentations.js',
+  '16-presentations-export/02_admin_dashboard.js',
+  '16-presentations-export/03_export_delivery.js',
+  '16-presentations-export/04_sag_company_create.js',
+  '17-admin-boot/01_training_rules.js',
+  '17-admin-boot/02_users_roles.js',
+  '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
+  '19-notifications.js'];
+const source = ['index.html',
   ...FRONTEND_JS_ORDER.map(n => 'assets/js/' + n)]
   .map(f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')).join('\n');
 const helperStart = source.indexOf('    // In-session deck history only.');
