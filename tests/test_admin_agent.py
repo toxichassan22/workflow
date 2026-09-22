@@ -31,11 +31,22 @@ FRONTEND_JS_ORDER = (
 )
 
 
+def read_module_source(name):
+    """Full source of a backend module: the slim <name> file plus every ordered
+    part under <stem>_parts/ concatenated in exec order."""
+    text = (ROOT / name).read_text(encoding='utf-8')
+    parts_dir = ROOT / (name[:-3] + '_parts')
+    if parts_dir.is_dir():
+        for part in sorted(parts_dir.glob('*.py')):
+            text += part.read_text(encoding='utf-8')
+    return text
+
+
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order."""
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
     for name in ('assets/css/base.css', 'assets/css/project-form.css'):
-        parts.append((ROOT / name).read_text(encoding='utf-8'))
+        parts.append(read_module_source(name))
     for name in FRONTEND_JS_ORDER:
         parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
     return '\n'.join(parts)
@@ -296,7 +307,7 @@ class AdminAgentTests(unittest.TestCase):
             self.assertTrue(auth.verify_password('AgentPass123', user['password_hash']))
 
     def test_agent_prompt_documents_the_add_user_contract(self):
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('"tool": "add_user"', app_source)
         # The contract must rule out invented defaults and echoed secrets.
         self.assertNotIn("or '123456'", app_source)
@@ -400,7 +411,7 @@ class AdminAgentTests(unittest.TestCase):
         self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-5.6-sol')
 
     def test_agent_prompt_states_every_new_capability(self):
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         for marker in ('"tool": "list_team"', '"tool": "add_team_entity"',
                        '"tool": "update_team_entity"', '"tool": "delete_team_entity"',
                        '"tool": "get_generation_rules"', '"tool": "set_generation_rules"',

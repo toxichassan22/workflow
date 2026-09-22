@@ -50,6 +50,17 @@ FRONTEND_JS_ORDER = (
 )
 
 
+def read_module_source(name):
+    """Full source of a backend module: the slim <name> file plus every ordered
+    part under <stem>_parts/ concatenated in exec order."""
+    text = (ROOT / name).read_text(encoding='utf-8')
+    parts_dir = ROOT / (name[:-3] + '_parts')
+    if parts_dir.is_dir():
+        for part in sorted(parts_dir.glob('*.py')):
+            text += part.read_text(encoding='utf-8')
+    return text
+
+
 def read_shell():
     return INDEX.read_text(encoding='utf-8')
 
@@ -182,7 +193,7 @@ class I18nFoundationTests(unittest.TestCase):
         self.assertNotIn(
             '/assets/js/', html,
             'index.html must not reference part JS files directly')
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
 
         def _order(name):
             match = re.search(name + r'\s*=\s*\((.*?)\)', app_source, re.S)

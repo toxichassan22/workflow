@@ -37,6 +37,17 @@ FRONTEND_JS_ORDER = (
 )
 
 
+def read_module_source(name):
+    """Full source of a backend module: the slim <name> file plus every ordered
+    part under <stem>_parts/ concatenated in exec order."""
+    text = (ROOT / name).read_text(encoding='utf-8')
+    parts_dir = ROOT / (name[:-3] + '_parts')
+    if parts_dir.is_dir():
+        for part in sorted(parts_dir.glob('*.py')):
+            text += part.read_text(encoding='utf-8')
+    return text
+
+
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order.
 
@@ -45,7 +56,7 @@ def read_frontend_text():
     """
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
     for name in ('assets/css/base.css', 'assets/css/project-form.css'):
-        parts.append((ROOT / name).read_text(encoding='utf-8'))
+        parts.append(read_module_source(name))
     for name in FRONTEND_JS_ORDER:
         parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
     return '\n'.join(parts)
@@ -168,7 +179,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(mode, 'pdf_rendered')
         self.assertTrue(any(part.get('type') == 'image_url' for part in parts))
         self.assertFalse(any(part.get('type') == 'file' for part in parts))
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
         self.assertIn('finish_reason == \'length\'', app_source)
         self.assertIn('_detect_scan_rotation', app_source)
@@ -500,7 +511,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('APP_DIR="/home/demos/proposal-generator"', deploy_script)
         start_script = (ROOT / 'start_server.sh').read_text(encoding='utf-8')
         self.assertIn('WEB_ROOT="/home/demos/public_html"', start_script)
-        self.assertIn("deploy_script = '/home/demos/proposal-generator/deploy.sh'", (ROOT / 'app.py').read_text(encoding='utf-8'))
+        self.assertIn("deploy_script = '/home/demos/proposal-generator/deploy.sh'", read_module_source('app.py'))
 
     def test_fresh_database_has_meeting_columns(self):
         """Fresh initialization no longer executes multiple DDL statements incorrectly."""
@@ -681,8 +692,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         # A complete project fits without being cut at all.
         self.assertNotIn('[تم اختصار البيانات]', facts)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        engine_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
+        engine_source = read_module_source('slide_engine.py')
         self.assertNotIn('project_json[:4000]', app_source)
         self.assertNotIn('project_json[:6000]', engine_source)
         self.assertIn('slide_engine.build_project_facts(project_data, g.tenant_id)', app_source)
@@ -1995,7 +2006,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('left:24px!important', finished)
         self.assertIn('width:40%!important', finished)
         self.assertIn('object-fit:contain!important', finished)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertEqual(app_source.count("project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)"), 2)
 
     def test_map_summary_structure_is_repaired_without_rejecting_the_slide(self):
@@ -3141,7 +3152,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('من صورة واحدة إلى ثلاث صور', rules)
         self.assertIn('ممنوع إضافة ترجمة أو وصف', rules)
         # The batch path had its own copy of the 4,000-character cut.
-        engine_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        engine_source = read_module_source('slide_engine.py')
         self.assertNotIn("project_json[:4000]", engine_source)
         self.assertEqual(engine_source.count('build_project_facts(project_data'), 3)
 
@@ -3317,7 +3328,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('اشتراطات المواقف', restrictions)
         self.assertIn('اشتراطات المداخل والمخارج', restrictions)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         index_source = read_frontend_text()
         self.assertIn("resp_json.pop('approved_floor_count', None)", app_source)
         self.assertIn("resp_json.pop('approved_coverage_ratio', None)", app_source)
@@ -3390,7 +3401,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('escapeHtml(JSON.stringify(parcel.confidence', index_source)
         # Conflicts are still requested so the model records disagreements instead of
         # silently picking a value, and they surface through the narrative summary.
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('"conflicts": [{"field": "", "description": ""}]', app_source)
         self.assertIn('_build_land_extraction_diagnostics', app_source)
         self.assertIn('إحداثيات التنظيم', app_source)
@@ -3407,7 +3418,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('<th>الارتداد</th>', index_source)
         self.assertIn('setback: row.setback ?? row.setback_m', index_source)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('"setback": ""', app_source)
 
         module = self.application_module
@@ -3862,7 +3873,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("استخدام نوع المشروع غير مسموح حسب الاشتراطات", index_source)
         self.assertIn('function resolveLandUseStatus(projectType, allowedUses)', index_source)
         self.assertIn('function refreshAllowedUsesStatusNote()', index_source)
-        self.assertIn("قائمة الاستخدامات المسموحة تنظيميًا", (ROOT / 'db.py').read_text(encoding='utf-8'))
+        self.assertIn("قائمة الاستخدامات المسموحة تنظيميًا", read_module_source('db.py'))
         self.assertIn('function slimLandAnalysisSiteContext(context)', index_source)
         self.assertIn('siteContext: slimLandAnalysisSiteContext(projectContext)', index_source)
         self.assertNotIn('siteContext: projectContext', index_source)
@@ -3924,7 +3935,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         # The extraction prompt, the alias map, the summary row and the parcel mapping are clean,
         # so no tokens are spent on it and no orphan value is stored.
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertNotIn('croquis_expiry_date', app_source)
         self.assertNotIn('expiry_date', app_source)
         self.assertNotIn("'croquis_validity_dates'", app_source)
@@ -3948,7 +3959,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(retired & keys)
 
         module = self.application_module
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertFalse(retired & set(module.LAND_ANALYSIS_SITE_CONTEXT_KEYS))
         # The four retired scalars left the site-analysis whitelist entirely; land_area
         # survives only as a stored-value fallback inside the visual-concept readers.
@@ -4425,7 +4436,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             ['index.html', 'assets/css/base.css', 'assets/css/project-form.css']
             + [f'assets/js/{name}' for name in FRONTEND_JS_ORDER])
         for name in frontend_names + ['slide_engine.py', 'design_templates.py', 'app.py']:
-            source = (ROOT / name).read_text(encoding='utf-8')
+            source = read_module_source(name)
             found = sorted({match.group() for match in pictographs.finditer(source)})
             self.assertEqual(found, [], f'{name} still contains icon glyphs: {found}')
 
@@ -4446,7 +4457,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function teamMonogramHtml(name, size)', index_source)
 
         # The emoji-to-SVG converter is gone: it created icons the next line deleted.
-        slide_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        slide_source = read_module_source('slide_engine.py')
         self.assertNotIn('_replace_emojis_with_svg', slide_source)
         self.assertNotIn('import emoji_icons', slide_source)
         self.assertIn('def _strip_presentation_icons(html)', slide_source)
@@ -4562,7 +4573,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         Exception: DESIGNER_INVALID_PLAN uses 502 deliberately — the planner returned no valid
         actions, which is an upstream AI failure, not a proxy failure. The error_code field
         distinguishes it from a proxy-fabricated 502."""
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         # The only allowed 502 is DESIGNER_INVALID_PLAN (upstream AI returned no valid plan).
         # Strip that one occurrence before checking the rest of the file.
         app_without_designer_502 = app_source.replace(
@@ -4612,7 +4623,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_prebuilt_field_sync_writes_only_on_change(self):
         """It ran one UPDATE per prebuilt field on every /api/fields call — 39 writes and a commit
         per project-form load, none of which changed anything in the normal case."""
-        source = (ROOT / 'db.py').read_text(encoding='utf-8')
+        source = read_module_source('db.py')
         self.assertIn('if unchanged:', source)
         self.assertIn('if dirty:', source)
 
@@ -4647,7 +4658,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        source = (ROOT / 'db.py').read_text(encoding='utf-8')
+        source = read_module_source('db.py')
         self.assertNotIn("if cur and cur.fetchone():\n            return", source)
 
         path = os.path.join(tempfile.mkdtemp(), 'existing.db')
@@ -4804,7 +4815,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Logos import automatically inside the competitors job — no per-row button.
         self.assertNotIn('استيراد رسمي', index_source)
         self.assertNotIn('data-import-competitor-logo', index_source)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('_auto_import_competitor_logos(', app_source)
         self.assertIn('def _auto_import_competitor_logos', app_source)
         self.assertIn('citation_pages=', app_source)
@@ -5096,7 +5107,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Deleting a draft addressed a route that does not exist, so it silently failed.
         self.assertNotIn("api('DELETE', '/api/project-draft');", index_source)
         self.assertIn("api('DELETE', '/api/project-draft/' + encodeURIComponent(draftId))", index_source)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertNotIn("@app.route('/api/project-draft', methods=['DELETE'])", app_source)
 
     def test_project_form_action_bar_stays_visible_while_scrolling_every_section(self):
@@ -5148,7 +5159,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                       'resolveTenantRoutePath', 'enforceTenantRouteGuard',
                       'canonicalizeTenantUrl', '/superadmin', "'/c/' + slug"):
             self.assertIn(token, index_source)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("'/superadmin", app_source)
         self.assertIn("'/c/<slug>'", app_source)
 
@@ -5448,7 +5459,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('الدراسة المالية المبسطة', index_source)
 
         # The backend still reports on the financial components table.
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("('3', 'مكونات المشروع', 'componentsTable')", app_source)
 
     def test_financial_validation_requires_only_enabled_optional_inputs(self):
@@ -5524,7 +5535,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertTrue(response.get_json()['success'])
         generate_pdf.assert_called_once()
-        export_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        export_source = read_module_source('app.py')
         export_at = export_source.index('def api_export_financial_study()')
         self.assertIn('@require_auth', export_source[export_at - 80:export_at])
         self.assertNotIn('@require_permission(\'export_files\')', export_source[export_at - 80:export_at])
@@ -5533,7 +5544,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('def _financial_pdf_plain_html(html):', export_source)
         self.assertIn('def generate_financial_pdf_from_model(project_name, model, output_path):', export_source)
         self.assertIn("generate_financial_pdf(report_html, output_path, model=model, project_name=project_name)", export_source)
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn('def bundled_arabic_font_path():', maps_source)
         self.assertIn("os.path.join(FONTS_DIR, 'arabic-text.bin')", maps_source)
         font_path = ROOT / 'fonts' / 'arabic-text.bin'
@@ -5621,7 +5632,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.application_module.maps_service.normalize_access_road_names(
                 'شارع الشمس\nشارع الشاطئ و الشمس\nشارع الشمس'),
             ['شارع الشمس', 'شارع الشاطئ'])
-        self.assertIn("'location_data_fetched_at'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+        self.assertIn("'location_data_fetched_at'", read_module_source('db.py'))
         stamped = self.application_module.slide_engine.finalize_slide_html(
             '<div class="slide"><img src="##MAP_OVERVIEW##"></div>', 'map_overview',
             {'location_data_fetched_at': '2026-01-02T10:30:00Z'}, {'primary_color': '#123456'},
@@ -5735,7 +5746,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("const setbacksText = String(parcel.setbacks || '').trim() || directionSetbacksText;", index_source)
         self.assertIn('directionSetbacksText', index_source)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('"coverage_ratio": ""', app_source)
         self.assertIn('"floor_area_ratio": ""', app_source)
         self.assertIn('لا تكتب «60%» وحدها', app_source)
@@ -5875,7 +5886,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_truncated_analysis_is_rejected_with_an_explicit_reason(self):
         """A rejected extraction changes no field, so it must not look like a silent no-op."""
         module = self.application_module
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         self.assertIn('_call_land_analysis_model(', source)
         for reason in ('truncated', 'invalid_json', 'insufficient_credit'):
             self.assertIn(f"'failureReason': '{reason}'", source)
@@ -5918,7 +5929,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(once.call_count, 1)
         self.assertIn('model not found', error)
 
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         self.assertIn('رصيد OpenRouter لا يكفي', source)
         self.assertIn("'providerError': model_error", source)
 
@@ -6069,7 +6080,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('res.jobId', index_source)
 
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         self.assertNotIn('"approved_financial_area_sqm": null', source)
         self.assertIn('"subdivision_number": ""', source)
         self.assertIn('"deed_date": ""', source)
@@ -6107,7 +6118,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(warnings, 'a missing regulation file must surface a warning')
         self.assertIn('اشتراطات1.pdf', warnings[0])
 
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         # The stale hardcoded filenames are gone, along with the first-two-pages-then-break scan.
         self.assertNotIn('Document_LocalPlan_1447.pdf', source)
         self.assertNotIn('ExecutiveRegulations-1447-2025-2.pdf', source)
@@ -6552,11 +6563,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('({ ...row, name })', source)
         self.assertIn('tenantProjectData.manual_road_paths', source)
         self.assertIn('show_on_map', source)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         designer_body = app_source.split('def api_designer_chat():', 1)[1].split("@app.route('/api/files'", 1)[0]
         self.assertNotIn('generate_all_map_images(', designer_body)
         self.assertEqual(app_source.count('generate_all_map_images('), 1)
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn('overview_markers = _build_markers(marker_lat, marker_lng)', maps_source)
         self.assertIn('_draw_catchment_markers(', maps_source)
         self.assertNotIn('marker_lat, marker_lng = map_center_lat, map_center_lng', maps_source)
@@ -6599,7 +6610,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("tenantSelectedMapType === 'overview' && tenantMapPinMode", index_source)
         self.assertIn("editableKeys: ['##MAP_OVERVIEW_EDITABLE##'", index_source)
         self.assertNotIn('function applyTenantPolygonZoom()', index_source)
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn("'##MAP_OVERVIEW_EDITABLE##'", maps_source)
         self.assertIn('shutil.copyfile(overview_path, editable_path)', maps_source)
 
@@ -6783,7 +6794,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('.filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)))', source)
         self.assertIn('function invalidateAccessMapApproval()', source)
 
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn('def recompose_access_map(', maps_source)
         self.assertIn('allow_discovery=False', maps_source)
         self.assertIn("(project_data or {}).get('access_roads_data')", maps_source)
@@ -6876,7 +6887,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('tenantCatchmentEditDraft.landmarks', source)
         self.assertIn('tenantProjectData.city_landmarks_data =', confirm_body)
 
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn('def _draw_catchment_markers(', maps_source)
         self.assertIn('def recompose_catchment_map(', maps_source)
         self.assertIn("project_data.get('catchment_label_positions')", maps_source)
@@ -6995,7 +7006,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function mergeResolvedMapLandmark(row, resolved)', source)
         self.assertIn('mergeResolvedMapLandmark(item, storedByName.get', source)
 
-        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertIn('def recompose_landmarks_map(', maps_source)
         self.assertIn("project_data.get('landmark_label_positions')", maps_source)
 
@@ -7033,7 +7044,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("const showRoads = tenantSelectedMapType === 'access' &&", overlay_body)
 
     def test_access_road_names_are_drawn_above_highlights(self):
-        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        source = read_module_source('maps_service.py')
         index_source = read_frontend_text()
         self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
@@ -7089,7 +7100,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_client_entered_land_fields_validation_and_placeholders(self):
         index_source = read_frontend_text()
-        db_source = (ROOT / 'db.py').read_text(encoding='utf-8')
+        db_source = read_module_source('db.py')
 
         # DB prebuilt field placeholders
         self.assertIn("'placeholder': 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.'", db_source)
@@ -7168,7 +7179,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             blank.close()
             self.assertFalse(self.application_module._financial_pdf_has_text(empty))
 
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         # A textless PDF must never be accepted, and the font-embedding writer must be
         # tried before the MuPDF HTML engine, which needs system fonts we do not have.
         self.assertNotIn('os.path.getsize(output_path) > 0', source)
@@ -7249,7 +7260,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # server-side — a section nobody opened cannot slip through unapproved.
         self.assertIn("sectionStatuses: tenantProjectSectionStatuses", index_source)
         self.assertIn("'/api/project-draft/request-approval', { draftId", index_source)
-        self.assertIn('def update_draft_section_statuses(', (ROOT / 'db.py').read_text(encoding='utf-8'))
+        self.assertIn('def update_draft_section_statuses(', read_module_source('db.py'))
 
     def test_components_block_shows_the_regulated_uses(self):
         index_source = read_frontend_text()
@@ -7267,7 +7278,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # names on every regeneration of the same site.
         self.assertEqual(maps_service.access_probe_points(*site), maps_service.access_probe_points(*site))
         self.assertEqual(len(maps_service.access_probe_points(*site)), 8)
-        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        source = read_module_source('maps_service.py')
         access_at = source.index('def _draw_access_roads(')
         body = source[access_at:source.index('def _get_cached_map_images(')]
         self.assertIn('probe_points = access_probe_points(route_origin_lat, route_origin_lng)', body)
@@ -7342,7 +7353,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             ])}, site_lat, site_lng
         ))
 
-        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        source = read_module_source('maps_service.py')
         index_source = read_frontend_text()
         self.assertIn('def survey_polygon_from_project(', source)
         self.assertIn('Using croquis survey polygon with', source)
@@ -7358,7 +7369,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_map_preview_uses_the_rendered_centre_and_fits_its_content(self):
         import maps_service
 
-        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        source = read_module_source('maps_service.py')
         index_source = read_frontend_text()
         # Clicks were converted against the site pin while the image is centred on the plot,
         # which put every manually drawn boundary off by that distance.
@@ -7528,7 +7539,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(result['plan']['source'], 'model')
         self.assertNotIn('Too many slides', ' '.join(result['validation']['issues']))
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('max_tokens=12000', app_source)
         self.assertIn('timeout=75', app_source)
         self.assertIn('model=LUNA_TEXT_MODEL', app_source)
@@ -8334,7 +8345,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('/uploads/creative/mb1.png', from_draft)
         self.assertNotIn('##IMAGE_COVER##', from_draft)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         # Every edit path must carry the images, and a blind edit must say it was blind.
         self.assertIn('creative_images=creative_images', app_source)
         self.assertIn('التعديل جرى على الكود بدون معاينة بصرية للشريحة.', app_source)
@@ -8345,7 +8356,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         import slide_engine as engine
         self.assertIn('لا تكتب ##STREET_VIEW_1##', engine.NO_STREET_VIEW_RULE)
         for source in ('slide_engine.py', 'app.py', 'design_templates.py'):
-            text = (ROOT / source).read_text(encoding='utf-8')
+            text = read_module_source(source)
             # No line may still offer the token to the model.
             for line in text.splitlines():
                 if 'STREET_VIEW' not in line:
@@ -8447,7 +8458,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('[شرائح: 3]', compressed)
         self.assertEqual(len(kept), module.DESIGNER_CHAT_VERBATIM_TURNS)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn('## ذاكرة المحادثة (ملخص ما سبق)', app_source)
         self.assertIn('## آخر رسائل المحادثة بالترتيب', app_source)
         self.assertIn('## نطاق الحديث السابق', app_source)
@@ -8488,7 +8499,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('attachedImages', index_source)
         # The conversation is restored with the file instead of being wiped on open.
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
-        self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+        self.assertIn("'designerChat'", read_module_source('db.py'))
 
     def test_designer_chat_boundary_slide_receives_documented_facts_and_rejects_false_success(self):
         """The boundary diagram is built by the system, so the designer model used to answer
@@ -8683,7 +8694,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('workspaceSignature: String(', index_source)
         self.assertIn('await new Promise(resolve => setTimeout(resolve, 80));', index_source)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("temp_path = f'{path}.tmp-", app_source)
         self.assertIn('os.fsync(fh.fileno())', app_source)
         self.assertIn('os.replace(temp_path, path)', app_source)
@@ -8824,7 +8835,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             [*stored, {'role': 'user', 'content': 'طلب 3', 'slides': [3]}],
         )
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         index_source = read_frontend_text()
         self.assertIn("_merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)", app_source)
         self.assertIn("'chatHistory': persisted_project_data['designerChat']['messages']", app_source)
@@ -9711,7 +9722,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('class="icon"', rendered.lower())
         self.assertNotIn('🏗', rendered)
 
-        maps_source = Path('maps_service.py').read_text(encoding='utf-8')
+        maps_source = read_module_source('maps_service.py')
         self.assertNotIn('router.project-osrm.org', maps_source)
         self.assertIn('maps.googleapis.com/maps/api/directions/json', maps_source)
 
@@ -9763,7 +9774,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantFloorDesignPage', index_source)
         self.assertNotIn('floor_visual_design', index_source)
         self.assertNotIn('/api/floor-design/', index_source)
-        self.assertNotIn('/api/floor-design/', (ROOT / 'app.py').read_text(encoding='utf-8'))
+        self.assertNotIn('/api/floor-design/', read_module_source('app.py'))
         self.assertIn('data-visual-concept-target="plans2d"', index_source)
         self.assertNotIn('data-visual-concept-target="isometric"', index_source)
         self.assertIn('id="visualConceptPlansView"', index_source)
@@ -9928,7 +9939,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
         client = self.app.test_client()
-        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        source = read_module_source('app.py')
         self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')", source)
         self.assertIn("VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')", source)
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
@@ -10746,7 +10757,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(summary_missing, [])
 
         index_source = read_frontend_text()
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         module_source = (ROOT / 'executive_content.py').read_text(encoding='utf-8')
         self.assertIn("function addExecutiveContentSection(form, before)", index_source)
         self.assertIn("addExecutiveContentSection(form);", index_source)
@@ -10893,7 +10904,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('otherHost.hidden = !isOther;', index_source)
         self.assertNotIn('🎯', index_source)
 
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
         self.assertIn("'type': 'openrouter:web_search',", app_source)
@@ -11212,7 +11223,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(multi[0]['source_url'], citations[1])
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("market_study.apply_search_citations(merged, citation_urls)", app_source)
 
     def test_portal_homepage_links_resolve_to_the_dataset_page(self):
@@ -11389,7 +11400,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('سعر الليلة', prompt)
         self.assertIn('متوسط سعر الغرفة ADR', prompt)
         self.assertIn('إيجار المتر السنوي', prompt)
-        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        app_source = read_module_source('app.py')
         self.assertIn("'max_uses': 10", app_source)
         self.assertIn("MARKET_SEARCH_ENGINE", app_source)
         # The `web` plugin grounds every market call once — the server tool

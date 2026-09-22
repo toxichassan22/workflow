@@ -56,7 +56,14 @@ function readOrderTuple(source, name) {
   if (!m) return null;
   return [...m[1].matchAll(/'([^']+)'/g)].map((part) => part[1]);
 }
-const appSource = fs.readFileSync(path.join(ROOT, 'app.py'), 'utf8');
+const appPartsDir = path.join(ROOT, 'app_parts');
+const appSourceFiles = ['app.py'];
+if (fs.existsSync(appPartsDir)) {
+  for (const part of fs.readdirSync(appPartsDir).filter((f) => f.endsWith('.py')).sort()) {
+    appSourceFiles.push(path.join('app_parts', part));
+  }
+}
+const appSource = appSourceFiles.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
 const jsOrder = readOrderTuple(appSource, 'FRONTEND_JS_ORDER');
 const cssOrder = readOrderTuple(appSource, 'FRONTEND_CSS_ORDER');
 if (!jsOrder || !jsOrder.length) fail('app.py must define FRONTEND_JS_ORDER');
