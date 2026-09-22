@@ -50,3 +50,7 @@ userfiles/
 # Local tooling data. Never commit: Freebuff's workspace database and Playwright logs.
 .freebuff/
 .playwright-mcp/
+
+# Local scratch/tool state. Never commit: agent scratch space and mimosa hook state.
+sandbox/
+.mimosa/
