@@ -91,7 +91,7 @@ def main():
     backup_dir = Path(os.environ.get('BACKUP_DIR', str(ROOT / 'backups')))
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    out_path = backup_dir / f'manafe-{args.kind}-{stamp}.enc'
+    out_path = backup_dir / f'landloom-{args.kind}-{stamp}.enc'
 
     with tempfile.TemporaryDirectory() as work_dir:
         dump_path = _dump_database(work_dir)

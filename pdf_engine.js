@@ -198,7 +198,7 @@ if (require.main === module) {
   const testHtml = `
 <div class="slide" style="background:#FBFAF8;padding:0;">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 30px;border-bottom:1px solid rgba(122,12,12,0.1)">
-    <span style="font-size:13px;font-weight:700;color:#7A0C0C">شركة منافع الاقتصادية للعقار</span>
+    <span style="font-size:13px;font-weight:700;color:#7A0C0C">Landloom</span>
     <span style="font-size:11px;color:#888">دراسة جدوى</span>
   </div>
   <div style="padding:30px">

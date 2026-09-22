@@ -345,7 +345,7 @@ def _header_footer_html(slide, d, num, total, show_header=True):
 
     header = f"""
 <div style="position:absolute;top:0;left:0;right:0;height:32pt;padding:8pt 30pt;display:flex;justify-content:space-between;align-items:center;z-index:10;">
-    <span style="font-size:9pt;font-weight:700;color:{primary};">شركة منافع الاقتصادية للعقار</span>
+    <span style="font-size:9pt;font-weight:700;color:{primary};">Landloom</span>
     <span style="font-size:8pt;color:#888;">دراسة جدوى |Brainscape| اقتصادية العقار</span>
 </div>
 <div style="position:absolute;top:32pt;left:30pt;right:30pt;height:1px;background:{primary};opacity:0.15;z-index:10;"></div>
@@ -353,7 +353,7 @@ def _header_footer_html(slide, d, num, total, show_header=True):
     footer = f"""
 <div style="position:absolute;bottom:0;left:0;right:0;height:22pt;padding:0 30pt;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #EEE;z-index:10;">
     <span style="font-size:7pt;color:#AAA;">{project_name}</span>
-    <span style="font-size:7pt;color:#AAA;">منافع الاقتصادية للعقار | مشاريع الأقتصادية العقار</span>
+    <span style="font-size:7pt;color:#AAA;">Landloom | مشاريع الأقتصادية العقار</span>
     <span style="display:inline-flex;align-items:center;justify-content:center;width:16pt;height:16pt;border-radius:50%;background:{primary};color:#FFF;font-size:8pt;font-weight:700;">{num}</span>
 </div>
 """
@@ -429,7 +429,7 @@ def _render_closing(slide, d, num, total):
         <div style="width:70pt;height:1.5pt;background:{accent};margin:12pt auto;"></div>
         {'<p style="font-size:15pt;color:' + _lighten(text_c, 0.3) + ';margin-top:8pt;">' + subtitle + '</p>' if subtitle else ''}
         {'<p style="font-size:12pt;color:' + accent + ';margin-top:30pt;">' + contact + '</p>' if contact else ''}
-        <p style="font-size:9pt;color:' + _lighten(text_c, 0.5) + ';margin-top:30pt;">شركة منافع الاقتصادية</p>
+        <p style="font-size:9pt;color:' + _lighten(text_c, 0.5) + ';margin-top:30pt;">Landloom</p>
     </div>
 </div>"""
 
@@ -1132,10 +1132,10 @@ def _resolve_glm_html(slide, html, num, total):
                         img_class = ' '.join(img_class)
                     img_id = img.get('id', '') or ''
                     tag_hint = (str(img_class) + ' ' + str(img_id) + ' ' + str(alt)).lower()
-                    if any(w in tag_hint for w in ['logo', 'manafe', 'منافع']):
+                    if any(w in tag_hint for w in ['logo', 'landloom', 'Landloom']):
                         is_logo = bool(logo_data_uri and logo_data_uri[:40] in src)
                 else:
-                    is_logo = (logo_data_uri and logo_data_uri[:40] in src) or any(w in (src + ' ' + alt).lower() for w in ['logo', 'manafe', 'منافع'])
+                    is_logo = (logo_data_uri and logo_data_uri[:40] in src) or any(w in (src + ' ' + alt).lower() for w in ['logo', 'landloom', 'Landloom'])
                 is_proj = not is_index and is_project_image(src)
                 if not is_logo and not is_proj:
                     img.decompose()
@@ -1165,7 +1165,7 @@ def _resolve_glm_html(slide, html, num, total):
                 if isinstance(svg_class, list):
                     svg_class = ' '.join(svg_class)
                 svg_text = (svg_class + ' ' + svg_id + ' ' + str(svg)).lower()
-                if not any(w in svg_text for w in ['logo', 'manafe', 'منافع']):
+                if not any(w in svg_text for w in ['logo', 'landloom', 'Landloom']):
                     svg.decompose()
             
             # 3. Remove background/background-image containing url() (except logo and, for non-index slides, valid project images)
@@ -1177,9 +1177,9 @@ def _resolve_glm_html(slide, html, num, total):
                         bg_url = url_match.group(1).replace('"', '').replace("'", "").strip()
                         if bg_url.lower().startswith('data:') or bg_url.lower().startswith('blob:'):
                             style_without_urls = re.sub(r'url\s*\([^)]*\)', '', style, flags=re.IGNORECASE).lower()
-                            is_logo = any(w in style_without_urls for w in ['logo', 'manafe', 'منافع'])
+                            is_logo = any(w in style_without_urls for w in ['logo', 'landloom', 'Landloom'])
                         else:
-                            is_logo = any(w in style.lower() for w in ['logo', 'manafe', 'منافع'])
+                            is_logo = any(w in style.lower() for w in ['logo', 'landloom', 'Landloom'])
                         is_proj = not is_index and is_project_image(bg_url)
                         if not is_logo and not is_proj:
                             new_style = re.sub(r'background(-image)?\s*:\s*url\([^)]*\);?', '', style, flags=re.IGNORECASE)
@@ -1298,7 +1298,7 @@ if __name__ == '__main__':
          'design': {'mood': 'modern', 'background_style': 'solid', 'primary_color': '#7A0C0C',
                     'secondary_color': '#C4A35A', 'accent_color': '#F5F0EE', 'bg_color': '#FBFAF8',
                     'text_color': '#2D2D2D', 'layout': 'dashboard', 'title_style': 'side_accent'}},
-        {'type': 'closing', 'title': 'شكراً لثقتكم', 'subtitle': 'منافع الاقتصادية', 'contact': 'info@manafe.com',
+        {'type': 'closing', 'title': 'شكراً لثقتكم', 'subtitle': 'Landloom', 'contact': 'info@landloom.ai',
          'design': {'mood': 'dramatic', 'background_style': 'gradient_v', 'primary_color': '#7A0C0C',
                     'secondary_color': '#5A0808', 'accent_color': '#C4A35A', 'bg_color': '#5A0808',
                     'text_color': '#FFFFFF', 'layout': 'centered'}}

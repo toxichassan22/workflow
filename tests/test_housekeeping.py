@@ -173,7 +173,7 @@ class HousekeepingApiTests(unittest.TestCase):
         self.app.config.update(TESTING=True)
         self.context = self.app.app_context()
         self.context.push()
-        self.tenant_id = db.create_tenant('شركة العمق', 'omran@x.test', 'hash', 'omran')
+        self.tenant_id = db.create_tenant('شركة العمق', 'landloom@x.test', 'hash', 'landloom')
         self.user_id = db.create_user(
             self.tenant_id, 'مدير', 'boss@x.test', 'hash', role='employee')
         # The primary link is what makes this the company admin session.

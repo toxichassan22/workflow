@@ -392,7 +392,7 @@ claim يثبت `sending` ويعمل commit قبل SMTP. لا يحمل السجل
 
 **الموضع:** `db.py:795-798,1265,8194-8214`؛ `db_driver.py:177-189,206-243`.
 
-توجد ثلاثة عوائق مستقلة: استعلام `sqlite_master` غير المشروط في `_create_tables` لا يترجمه الـdriver إلى PostgreSQL؛ `update_branding` يكرر cursor مباشرة بينما `PostgresCursor` لا ينفذ iteration؛ و`_ensure_omran_columns` يقرأ `row[1]` من rows تكون dicts على PostgreSQL، فيبتلع الخطأ ولا يضيف الأعمدة المطلوبة. لذلك اجتياز اختبارات SQLite لا يثبت تشغيل التهيئة أو تسجيل الدخول والإعدادات على PostgreSQL.
+توجد ثلاثة عوائق مستقلة: استعلام `sqlite_master` غير المشروط في `_create_tables` لا يترجمه الـdriver إلى PostgreSQL؛ `update_branding` يكرر cursor مباشرة بينما `PostgresCursor` لا ينفذ iteration؛ و`_ensure_landloom_columns` يقرأ `row[1]` من rows تكون dicts على PostgreSQL، فيبتلع الخطأ ولا يضيف الأعمدة المطلوبة. لذلك اجتياز اختبارات SQLite لا يثبت تشغيل التهيئة أو تسجيل الدخول والإعدادات على PostgreSQL.
 
 ### ISS-064 — فشل schema/migration يمكن ابتلاعه ويكمل التطبيق بحالة قاعدة ناقصة
 
@@ -464,7 +464,7 @@ production وstaging يشتركان افتراضيًا في REPO_DIR، ويغي�
 
 **P1 | مؤكدة من الكود.**
 
-**الموضع:** `app.py` (`api_update_support_ticket_status`، `_omran_can`)؛ `db.py` (`add_support_message`).
+**الموضع:** `app.py` (`api_update_support_ticket_status`، `_landloom_can`)؛ `db.py` (`add_support_message`).
 
 مسار تغيير حالة التذكرة يقبل أي قيمة من `SUPPORT_TICKET_STATUSES` (`open, in_progress, waiting_customer, escalated, resolved, closed, reopened`) لأي حامل صلاحية `support_tickets`، وجلسة الأدمن/الشركة تتخطى فحص الصلاحيات دائمًا — فالعميل يستطيع تعليم تذكرته «تم الحل» أو «قيد المعالجة» أو «مُصعّدة» رغم أن هذه قرارات مكتب دعم المنصة. الاستثناء المقصود كان إغلاق صاحب التذكرة فقط. كذلك رد الأدمن على تذكرته يُسجَّل بـ`author_role='company_admin'` فيُحسب «أول رد من الدعم» (`first_response_at`) ويفسد قياس زمن الاستجابة. النمط العام: صلاحية واحدة تخلط «استخدام قناة الدعم» مع «العمل على مكتب الدعم».
 

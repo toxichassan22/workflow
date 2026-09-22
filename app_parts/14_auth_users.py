@@ -413,7 +413,7 @@ def api_register():
     if subdomain and not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', subdomain):
         return jsonify({'error': 'Invalid subdomain'}), 400
     if domain and not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}', domain):
-        return jsonify({'error': 'Invalid domain (e.g. manafe.com)'}), 400
+        return jsonify({'error': 'Invalid domain (e.g. landloom.ai)'}), 400
 
     if db.get_tenant_by_email(email):
         return jsonify({'error': 'Email already registered'}), 409
@@ -838,7 +838,7 @@ def api_set_user_project_scope(user_id):
     if not isinstance(draft_ids, list):
         return jsonify({'error': 'draftIds must be a list'}), 400
     result = db.set_user_project_scope(g.tenant_id, user_id, [str(d) for d in draft_ids])
-    failure = _omran_error(result)
+    failure = _landloom_error(result)
     if failure:
         return failure
     _record_audit_event('user.project_scope_set', 'user', user_id,

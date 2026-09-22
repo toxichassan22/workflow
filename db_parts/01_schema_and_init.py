@@ -47,13 +47,13 @@ def init_db():
         _migrate_project_file_table(conn)
         _migrate_location_fields(conn)
         _migrate_font_system(conn)
-        _create_omran_tables(conn)
-        _create_omran_role_tables(conn)
+        _create_landloom_tables(conn)
+        _create_landloom_role_tables(conn)
         _create_identity_tables(conn)
-        _create_omran_event_tables(conn)
+        _create_landloom_event_tables(conn)
         _create_platform_tables(conn)
         _seed_file_type_registry(conn)
-        _ensure_omran_columns(conn)
+        _ensure_landloom_columns(conn)
         _ensure_platform_columns(conn)
         _dedupe_open_workflow_rows(conn)
         _platform_unique_indexes(conn)
@@ -435,7 +435,7 @@ def _create_tables(conn):
     CREATE UNIQUE INDEX IF NOT EXISTS idx_section_versions_number ON section_versions(draft_id, section_key, version_number);
     CREATE INDEX IF NOT EXISTS idx_section_versions_lookup ON section_versions(tenant_id, draft_id, section_key, created_at DESC);
 
-    -- AuditEvent: Unified immutable audit log (Omran spec sections 6, 15, 18).
+    -- AuditEvent: Unified immutable audit log (Landloom spec sections 6, 15, 18).
     -- Captures user, time, action, entity, old_value, new_value, and metadata.
     -- Append-only ledger: modifications and deletions are strictly forbidden.
     -- Keep every comment here free of the statement separator.

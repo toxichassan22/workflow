@@ -34,19 +34,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / 'index.html'
 I18N_JS = ROOT / 'assets' / 'i18n.js'
+I18N_DICT_DIR = ROOT / 'assets' / 'i18n'
 BASELINE = Path(__file__).resolve().parent / 'i18n_hardcoded_baseline.txt'
 
 # index.html is a slim shell: styles live in assets/css and code in these
 # classic scripts, loaded in order so they keep one shared global scope.
-FRONTEND_CSS_ORDER = ('base.css', 'project-form.css')
+FRONTEND_CSS_ORDER = (
+    'base/01_preview_chat.css', 'base/02_tenant_pages.css',
+    'base/03_the_view_model.css', 'base/04_export_responsive.css',
+    'base/05_dashboard_viz.css',
+    'project-form/01_sections_changelog.css',
+    'project-form/02_fields_tables_rail.css',
+)
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
-    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
-    '19-notifications.js', '20-finlab.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '12-files-media/02_visual_concept.js',
+    '13-visual/01_visual_concept_page.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export/01_presentations.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
+    '19-notifications.js',
 )
 
 
@@ -133,9 +144,16 @@ def extract_hardcoded_ui_strings(html):
     return sorted(found)
 
 
+def read_dict_source():
+    """The dictionary part files concatenated: assets/i18n/*.js in order."""
+    return '\n'.join(
+        p.read_text(encoding='utf-8')
+        for p in sorted(I18N_DICT_DIR.glob('*.js')))
+
+
 def read_dicts():
-    """Parse the two JSON-compatible dict blocks out of assets/i18n.js."""
-    src = I18N_JS.read_text(encoding='utf-8')
+    """Parse the JSON-compatible dict blocks out of assets/i18n/*.js."""
+    src = read_dict_source()
     dicts = {}
     for lang in ('AR', 'EN'):
         match = re.search(
@@ -167,6 +185,19 @@ class I18nFoundationTests(unittest.TestCase):
         # Absolute path: client routes (/app/..., /c/<slug>) would resolve a
         # relative assets/... URL against the deep link and 404.
         self.assertIn('src="/assets/i18n.js"', html)
+        # The dictionaries ship as assets/i18n/*.js and must load before the
+        # runtime that reads window.__WFI18N_*.
+        dict_files = sorted(p.name for p in I18N_DICT_DIR.glob('*.js'))
+        self.assertTrue(dict_files, 'assets/i18n/ dictionary files are missing')
+        prev = -1
+        for name in dict_files:
+            pos = html.find('src="/assets/i18n/%s"' % name)
+            self.assertNotEqual(
+                pos, -1, 'index.html must load /assets/i18n/%s' % name)
+            self.assertLess(
+                pos, tag, 'assets/i18n/%s must load before i18n.js' % name)
+            self.assertGreater(pos, prev, 'dictionary order must match the sorted names')
+            prev = pos
         # The old single inline <script> block is gone: code ships as ordered
         # classic scripts sharing one global scope (no async, no modules).
         bare_scripts = [
@@ -286,7 +317,7 @@ class I18nFoundationTests(unittest.TestCase):
             + '\n'.join(fresh))
 
     def test_auto_map_is_real_and_safe(self):
-        src = I18N_JS.read_text(encoding='utf-8')
+        src = read_dict_source()
         match = re.search(
             r'/\*I18N_EN_AUTO_BEGIN\*/(.*?)/\*I18N_EN_AUTO_END\*/', src, re.S)
         self.assertIsNotNone(
@@ -319,7 +350,8 @@ class I18nFoundationTests(unittest.TestCase):
         node = shutil.which('node')
         if not node:
             self.skipTest('node is not installed')
-        targets = [I18N_JS] + [ROOT / 'assets' / 'js' / name for name in FRONTEND_JS_ORDER]
+        targets = [I18N_JS] + sorted(I18N_DICT_DIR.glob('*.js')) + [
+            ROOT / 'assets' / 'js' / name for name in FRONTEND_JS_ORDER]
         for target in targets:
             proc = subprocess.run(
                 [node, '--check', str(target)],

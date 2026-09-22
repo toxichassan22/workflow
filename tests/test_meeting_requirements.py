@@ -33,7 +33,7 @@ FRONTEND_JS_ORDER = (
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
     '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
     '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '16-presentations-export.js', '17-admin-boot.js', '18-landloom-ops.js',
 )
 
 
@@ -747,7 +747,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('لا يوجد', without_logo)
 
         # 2. A content slide with no header of its own gets both logos.
-        branding = {'primary_color': '#0b1f33', 'accent_color': '#0ea5e9', 'company_name': 'منافع'}
+        branding = {'primary_color': '#0b1f33', 'accent_color': '#0ea5e9', 'company_name': 'Landloom'}
         finished = engine.finalize_slide_html(
             '<div class="slide" style="width:1280px;height:720px"><p>محتوى</p></div>',
             'content', project, branding, slide_num=3, slide_title='الموقع', total_slides=8,
@@ -1042,7 +1042,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         """Every divider is the same layout over the approved main image with only the text
         changing, so it is rendered in code: identical on every divider and no model call."""
         engine = self.application_module.slide_engine
-        branding = {'primary_color': '#0b1f33', 'accent_color': '#22b6e8', 'company_name': 'منافع'}
+        branding = {'primary_color': '#0b1f33', 'accent_color': '#22b6e8', 'company_name': 'Landloom'}
         project = {'project_name': 'THE VIEW', 'project_logo': '/api/project-files/logo-1'}
         slide = {
             'title': 'فريق التطوير والتصميم', 'type': 'section_divider',
@@ -1120,7 +1120,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         engine = self.application_module.slide_engine
         branding = {
             'primary_color': '#0b1f33', 'accent_color': '#22b6e8',
-            'company_name': 'منافع',
+            'company_name': 'Landloom',
         }
         project = {
             'project_name': 'THE VIEW',
@@ -3140,7 +3140,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
         """Every number has to come from the project, and plans are uploaded images only."""
         rules = self.application_module.build_design_rules(
-            {'primary_color': '#0b1f33', 'company_name': 'منافع'})
+            {'primary_color': '#0b1f33', 'company_name': 'Landloom'})
         self.assertIn('ممنوع اختراع أي معلومة', rules)
         self.assertIn('ممنوع منعًا باتًا رسم أو تركيب أي مخطط معماري', rules)
         self.assertIn('##PLAN_IMAGE_1##', rules)
@@ -4481,7 +4481,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                                      json={'label': 'x'}).status_code, 404)
 
         created = client.post('/api/team-entities', headers=headers, json={
-            'name': 'منافع الاقتصادية للعقار', 'experienceYears': '15',
+            'name': 'Landloom', 'experienceYears': '15',
             'role': 'مطور المشروع', 'brief': 'مطور عقاري سعودي',
             'notableProjects': 'برج الأمير\nمجمع الواحة'})
         self.assertEqual(created.status_code, 201, created.get_json())
@@ -4506,7 +4506,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(client.get('/api/team-entities', headers=self._headers(self.token_b)).get_json()['entities'], [])
 
         updated = client.put('/api/team-entities/' + entity['id'], headers=headers,
-                             json={'name': 'منافع', 'role': 'المطور والمشغل'})
+                             json={'name': 'Landloom', 'role': 'المطور والمشغل'})
         self.assertEqual(updated.status_code, 200, updated.get_json())
         self.assertEqual(updated.get_json()['entity']['role'], 'المطور والمشغل')
 

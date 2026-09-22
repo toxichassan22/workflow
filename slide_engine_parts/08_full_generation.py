@@ -1347,7 +1347,7 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         title = html_lib.escape(f'شريحة {slide_num}' if slide_num else 'العنوان')
     primary = '#7A0C0C'
     accent = '#C4A35A'
-    company_name = 'منافع الاقتصادية للعقار'
+    company_name = 'Landloom'
 
     if branding is None and tenant_id:
         branding = db.get_branding(tenant_id) or {}
@@ -1357,7 +1357,7 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         company_name = branding.get('company_name') or company_name
         if not company_name:
             tenant = db.get_tenant(tenant_id) if tenant_id else None
-            company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
+            company_name = tenant.get('company_name') if tenant else 'Landloom'
 
     primary = normalize_hex_color(primary, '#7a0c0c')
     accent = normalize_hex_color(accent, '#c4a35a')

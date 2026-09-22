@@ -951,7 +951,7 @@
             ? (overrides.draftId || currentProjectPresentationsDraftId() || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
         visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
-        opsTab: pageId === 'tenantOmranOpsPage' ? ((typeof omActiveTab !== 'undefined' && omActiveTab) || 'tasks') : null,
+        opsTab: pageId === 'tenantLandloomOpsPage' ? ((typeof llActiveTab !== 'undefined' && llActiveTab) || 'tasks') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
         ...overrides
       };
@@ -1009,7 +1009,7 @@
       tenantTrainingPage: '/app/settings/training',
       tenantAIRulesPage: '/app/settings/ai-rules',
       tenantApprovalsPage: '/app/approvals',
-      tenantOmranOpsPage: '/app/operations',
+      tenantLandloomOpsPage: '/app/operations',
       tenantNotificationsPage: '/app/notifications',
       tenantAdminPage: '/app/admin',
       tenantCompaniesPage: '/app/admin/companies',

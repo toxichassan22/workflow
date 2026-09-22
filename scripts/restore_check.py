@@ -6,7 +6,7 @@ for Postgres custom-format dumps. Marks the backup row as restore-tested so the
 ops dashboard can show the last verified restore.
 
 Usage:
-    python scripts/restore_check.py backups/manafe-full-20250101-120000.enc \
+    python scripts/restore_check.py backups/landloom-full-20250101-120000.enc \
         [--backup-id <row id>]
 
 Environment:

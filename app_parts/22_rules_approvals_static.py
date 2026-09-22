@@ -187,7 +187,7 @@ def api_review_approval(approval_id):
     if not _presentation_in_scope(pres):
         return jsonify({'error': 'Approval not found'}), 404
     result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin',
-                                note, allow_self=_omran_actor_is_admin())
+                                note, allow_self=_landloom_actor_is_admin())
     if not result or result.get('error'):
         code = (result or {}).get('error')
         if code == 'approval_not_found':
@@ -296,14 +296,24 @@ def spa_fallback(error):
 # never the bundle, and never reference a part file from the shell. This tuple
 # is the single order authority shared with scripts/verify-frontend.js and the
 # test suites that pin FRONTEND_JS_ORDER.
-FRONTEND_CSS_ORDER = ('base.css', 'project-form.css')
+FRONTEND_CSS_ORDER = (
+    'base/01_preview_chat.css', 'base/02_tenant_pages.css',
+    'base/03_the_view_model.css', 'base/04_export_responsive.css',
+    'base/05_dashboard_viz.css',
+    'project-form/01_sections_changelog.css',
+    'project-form/02_fields_tables_rail.css',
+)
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
-    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '12-files-media/02_visual_concept.js',
+    '13-visual/01_visual_concept_page.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export/01_presentations.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
     '19-notifications.js',
 )
 
@@ -589,19 +599,19 @@ def _build_commit():
 
 BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'slide_engine.py', 'design_templates.py',
                            'generate_pdf_from_preview.py', 'db.py',
-                           'assets/i18n.js',
-                           'assets/css/base.css', 'assets/css/project-form.css',
+                           'assets/i18n.js', 'assets/i18n',
+                           'assets/css/base', 'assets/css/project-form',
                            'assets/js/00-core.js', 'assets/js/01-nav-auth.js',
-                           'assets/js/02-settings-branding.js',
+                           'assets/js/02-settings-branding',
                            'assets/js/03-executive-classification.js',
                            'assets/js/04-market.js', 'assets/js/05-market-competitors.js',
                            'assets/js/06-team.js', 'assets/js/07-project-form.js',
                            'assets/js/08-location-maps.js', 'assets/js/09-financial.js',
                            'assets/js/10-financial-report-timeline.js',
-                           'assets/js/11-land-croquis.js', 'assets/js/12-files-media.js',
-                           'assets/js/13-visual.js', 'assets/js/14-slides-gen.js',
+                           'assets/js/11-land-croquis.js', 'assets/js/12-files-media',
+                           'assets/js/13-visual', 'assets/js/14-slides-gen.js',
                            'assets/js/15-slide-edit-chat.js',
-                           'assets/js/16-presentations-export.js',
+                           'assets/js/16-presentations-export',
                            'assets/js/17-admin-boot.js')
 
 
@@ -616,17 +626,25 @@ def _build_fingerprint():
     for name in BUILD_FINGERPRINT_FILES:
         path = os.path.join(root, name)
         try:
-            with open(path, 'rb') as source:
-                # Line endings are normalised: a Windows checkout is CRLF and the server is LF, so
-                # the raw hash reported a difference where the code was identical.
-                data = source.read().replace(b'\r\n', b'\n')
-            # Split modules: the top-level file is only a loader, so fold every
-            # ordered part into the same key — a part edit must move the fingerprint.
-            parts_dir = os.path.join(root, name[:-3] + '_parts')
-            if name.endswith('.py') and os.path.isdir(parts_dir):
-                for part in sorted(p for p in os.listdir(parts_dir) if p.endswith('.py')):
-                    with open(os.path.join(parts_dir, part), 'rb') as part_source:
-                        data += part_source.read().replace(b'\r\n', b'\n')
+            data = b''
+            if os.path.isdir(path):
+                for dirpath, dirnames, filenames in os.walk(path):
+                    dirnames.sort()
+                    for part in sorted(filenames):
+                        with open(os.path.join(dirpath, part), 'rb') as part_source:
+                            data += part_source.read().replace(b'\r\n', b'\n')
+            else:
+                with open(path, 'rb') as source:
+                    # Line endings are normalised: a Windows checkout is CRLF and the server is LF, so
+                    # the raw hash reported a difference where the code was identical.
+                    data = source.read().replace(b'\r\n', b'\n')
+                # Split modules: the top-level file is only a loader, so fold every
+                # ordered part into the same key — a part edit must move the fingerprint.
+                parts_dir = os.path.join(root, name[:-3] + '_parts')
+                if name.endswith('.py') and os.path.isdir(parts_dir):
+                    for part in sorted(p for p in os.listdir(parts_dir) if p.endswith('.py')):
+                        with open(os.path.join(parts_dir, part), 'rb') as part_source:
+                            data += part_source.read().replace(b'\r\n', b'\n')
             fingerprint[name] = hashlib.sha256(data).hexdigest()[:12]
         except OSError:
             fingerprint[name] = 'missing'

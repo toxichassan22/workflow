@@ -8,7 +8,7 @@ app_port: 7860
 pinned: false
 ---
 
-# Real Estate Proposal Generator (Manafe)
+# Real Estate Proposal Generator (Landloom)
 AI-powered Presentation and Investment Proposal Generator platform.
 
 ## Google Maps Setup
@@ -54,7 +54,7 @@ The repo includes a `render.yaml` Blueprint that deploys the Flask backend and t
    git push origin main
    ```
 2. In the Render Dashboard, create a **New Blueprint** and select your `toxichassan22/workflow` repo.
-3. Render will detect `render.yaml`. Open the new `manafe` Web Service and set the environment variables:
+3. Render will detect `render.yaml`. Open the new `landloom` Web Service and set the environment variables:
    - `DATABASE_URL` — copy the **Internal Connection String** from your existing Render Postgres (`dpg-d9fmm13rjlhs73alaau0-a`)
    - `ADMIN_EMAIL` — super-admin email address (e.g. `admin@yourdomain.com`)
    - `ADMIN_PASSWORD` — strong password (12+ characters)

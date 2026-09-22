@@ -1,6 +1,6 @@
 """Proposal 11-State Lifecycle Suite (t12).
 
-Tests the full 11-state state machine from Omran AI System Analysis Section 7:
+Tests the full 11-state state machine from Landloom AI System Analysis Section 7:
 1. draft (مسودة)
 2. sections_in_progress (قيد إعداد الأقسام)
 3. section_approval_pending (بانتظار اعتماد قسم)

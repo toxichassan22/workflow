@@ -346,7 +346,7 @@ def get_ai_reconcile_by_scope(tenant_id, draft_ids=(), presentation_ids=()):
     return {'by_draft': by_draft, 'by_presentation': by_presentation}
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Omran platform tasks (t14-t63): generation approvals, final approvals,
+# Landloom platform tasks (t14-t63): generation approvals, final approvals,
 # downloads, proposal copies, notification tasks, invites, users report,
 # approval tasks, points reservations, recharge requests, support tickets,
 # and the file-type registry. Money stays USD in tenant_ledger;
@@ -364,8 +364,8 @@ SUPPORT_TICKET_PRIORITIES = ('low', 'normal', 'high', 'urgent')
 RECHARGE_REQUEST_STATUSES = ('pending', 'approved', 'rejected')
 
 
-def _create_omran_tables(conn):
-    """Tables added by the Omran platform tasks. Every statement is IF NOT EXISTS."""
+def _create_landloom_tables(conn):
+    """Tables added by the Landloom platform tasks. Every statement is IF NOT EXISTS."""
     # t14: one explicit approval to start generation, carrying the cost
     # estimate and the reserved points the job will consume.
     conn.execute('''CREATE TABLE IF NOT EXISTS generation_approvals (
@@ -574,7 +574,7 @@ def _create_omran_tables(conn):
     )''')
 
 
-def _ensure_omran_columns(conn):
+def _ensure_landloom_columns(conn):
     """Additive migrations on existing installs: last_login on users/tenants."""
     def _columns(table):
         return {row[1] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}

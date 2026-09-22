@@ -5,7 +5,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Proposal Lifecycle: 11 official states (Omran spec section 7 & 8)
+# Proposal Lifecycle: 11 official states (Landloom spec section 7 & 8)
 #
 #  1. draft: مسودة (المدخلات قابلة للتعديل ولم ترسل للاعتماد)
 #  2. sections_in_progress: قيد إعداد الأقسام (يعمل المحررون على الأقسام بشكل متوازٍ)
@@ -844,7 +844,7 @@ def update_draft_section_status_by_id(tenant_id, draft_id, updates):
 # ─────────────────────────────────────────────────────────────────────────────
 # Section versions: immutable per-section snapshots tied to approval.
 #
-# Spec (Omran analysis sections 6, 8.1, 19): every send for approval stores an
+# Spec (Landloom analysis sections 6, 8.1, 19): every send for approval stores an
 # independent copy of that section inputs under the next version number, and
 # the approval decision names that number instead of the live values. Sections
 # without any version keep the legacy toggle path, while a section that has a

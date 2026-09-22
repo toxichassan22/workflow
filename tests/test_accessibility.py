@@ -17,14 +17,25 @@ if str(ROOT) not in sys.path:
 
 INDEX = ROOT / 'index.html'
 
-FRONTEND_CSS_ORDER = ('base.css', 'project-form.css')
+FRONTEND_CSS_ORDER = (
+    'base/01_preview_chat.css', 'base/02_tenant_pages.css',
+    'base/03_the_view_model.css', 'base/04_export_responsive.css',
+    'base/05_dashboard_viz.css',
+    'project-form/01_sections_changelog.css',
+    'project-form/02_fields_tables_rail.css',
+)
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
-    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '12-files-media/02_visual_concept.js',
+    '13-visual/01_visual_concept_page.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export/01_presentations.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
+    '19-notifications.js',
 )
 
 
@@ -50,7 +61,7 @@ def _modal_chunks(shell):
     """(id, markup) for each overlay-level div that wraps a dialog."""
     chunks = []
     for match in re.finditer(
-            r'<div id="(om\w+Modal|sagTenantModal|sagCompanyCreateModal|presentationFontSettingsPanel)"[^>]*>',
+            r'<div id="(ll\w+Modal|sagTenantModal|sagCompanyCreateModal|presentationFontSettingsPanel)"[^>]*>',
             shell):
         chunks.append((match.group(1), match.group(0)))
     return chunks
@@ -125,7 +136,7 @@ class KeyboardActivationTests(unittest.TestCase):
 
     def test_modal_openers_drive_focus_into_the_dialog(self):
         src = read_frontend_text()
-        # openOmModal, openSagCompanyCreate, openPresentationFontSettings and
+        # openLlModal, openSagCompanyCreate, openPresentationFontSettings and
         # the tenant-details modal all funnel through a11yModalDidOpen.
         self.assertGreaterEqual(src.count('a11yModalDidOpen('), 4)
 

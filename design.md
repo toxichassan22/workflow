@@ -65,7 +65,7 @@ index.html → glm-designer.js → عرض الشرائح
 
 | الحقل | الوصف | مثال |
 |-------|-------|-------|
-| `company_name` | اسم الشركة | "منافع الاقتصادية للعقار" |
+| `company_name` | اسم الشركة | "Landloom" |
 | `primary_color` | اللون الرئيسي | `#7A0C0C` |
 | `secondary_color` | اللون الثانوي | `#5A0808` |
 | `accent_color` | اللون المميز | `#C4A35A` |

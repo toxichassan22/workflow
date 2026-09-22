@@ -216,8 +216,8 @@ def api_admin_update_tenant(tenant_id):
             target_active = bool(activation_request)
             if target_active != bool(tenant.get('is_active')):
                 result = db.set_tenant_active(
-                    tenant_id, target_active, actor_id=_omran_actor_id(),
-                    actor_name=_omran_actor_name(), reason=data.get('deactivatedReason'),
+                    tenant_id, target_active, actor_id=_landloom_actor_id(),
+                    actor_name=_landloom_actor_name(), reason=data.get('deactivatedReason'),
                 )
                 if result.get('error') == 'activation_incomplete':
                     return jsonify({'error': 'activation_incomplete',
@@ -1264,7 +1264,7 @@ def api_admin_create_access_request(tenant_id):
         data.get('reason'), int(data.get('hours') or 24),
         g.tenant.get('company_name') or 'مدير النظام',
     )
-    failure = _omran_error(row)
+    failure = _landloom_error(row)
     if failure:
         return failure
     tenant = db.get_tenant_by_id(tenant_id)
@@ -1288,8 +1288,8 @@ def api_admin_list_access_requests():
 @require_auth
 def api_client_list_access_requests():
     """The client sees every platform-admin access request targeting it (d07)."""
-    if not _omran_actor_is_admin() and not _omran_can('manage_users'):
-        return _omran_forbidden('عرض طلبات الوصول يتطلب صلاحية إدارة المستخدمين')
+    if not _landloom_actor_is_admin() and not _landloom_can('manage_users'):
+        return _landloom_forbidden('عرض طلبات الوصول يتطلب صلاحية إدارة المستخدمين')
     rows = db.list_admin_access_requests(tenant_id=g.tenant_id,
                                          status=request.args.get('status'))
     return jsonify({'success': True, 'requests': rows})
@@ -1299,15 +1299,15 @@ def api_client_list_access_requests():
 @require_auth
 def api_client_decide_access_request(request_id):
     """The client's company admin approves or denies the request (d07)."""
-    if not _omran_actor_is_admin():
-        return _omran_forbidden('قرار طلب الوصول لمدير الشركة فقط')
+    if not _landloom_actor_is_admin():
+        return _landloom_forbidden('قرار طلب الوصول لمدير الشركة فقط')
     data = request.json or {}
     row = db.decide_admin_access_request(
         request_id, g.tenant_id, data.get('decision'),
-        _omran_actor_id(), _omran_actor_name(),
+        _landloom_actor_id(), _landloom_actor_name(),
         note=data.get('note'), hours=data.get('hours'),
     )
-    failure = _omran_error(row)
+    failure = _landloom_error(row)
     if failure:
         return failure
     _record_audit_event('admin_access.' + str(data.get('decision')),
@@ -1321,10 +1321,10 @@ def api_client_decide_access_request(request_id):
 @require_auth
 def api_client_revoke_access_request(request_id):
     """The client closes an active grant before its expiry."""
-    if not _omran_actor_is_admin():
-        return _omran_forbidden('إلغاء الوصول لمدير الشركة فقط')
-    row = db.revoke_admin_access_request(request_id, g.tenant_id, _omran_actor_name())
-    failure = _omran_error(row)
+    if not _landloom_actor_is_admin():
+        return _landloom_forbidden('إلغاء الوصول لمدير الشركة فقط')
+    row = db.revoke_admin_access_request(request_id, g.tenant_id, _landloom_actor_name())
+    failure = _landloom_error(row)
     if failure:
         return failure
     _record_audit_event('admin_access.revoked', 'admin_access_request', request_id,

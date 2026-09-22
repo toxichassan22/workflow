@@ -6,7 +6,7 @@
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def _create_omran_role_tables(conn):
+def _create_landloom_role_tables(conn):
     conn.execute('''CREATE TABLE IF NOT EXISTS tenant_roles (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -807,7 +807,7 @@ def mark_admin_access_used(grant_id):
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def _create_omran_event_tables(conn):
+def _create_landloom_event_tables(conn):
     conn.execute('''CREATE TABLE IF NOT EXISTS event_tasks (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -913,8 +913,8 @@ def update_event_task_status(tenant_id, task_id, new_status, actor_name=None):
     return get_event_task(tenant_id, task_id)
 
 
-def _omran_ready():
-    """True once the t14+ Omran tables exist in the current database."""
+def _landloom_ready():
+    """True once the t14+ Landloom tables exist in the current database."""
     conn = get_db()
     names = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_approvals'"
@@ -930,8 +930,8 @@ def _omran_ready():
 RESERVED_SLUGS = frozenset({
     'api', 'admin', 'app', 'assets', 'auth', 'billing', 'c', 'dashboard',
     'docs', 'download', 'downloads', 'exports', 'files', 'fonts', 'healthz',
-    'index', 'landloom', 'login', 'logout', 'mail', 'manafe', 'maps', 'null',
-    'omran', 'outputs', 'platform', 'preview', 'register', 'root', 'sag',
+    'index', 'landloom', 'login', 'logout', 'mail', 'maps', 'null',
+    'outputs', 'platform', 'preview', 'register', 'root', 'sag',
     'settings', 'static', 'support', 'system', 'tenant-assets', 'undefined',
     'uploads', 'www',
 })

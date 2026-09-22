@@ -2112,7 +2112,7 @@ def api_delete_presentation(pres_id):
     presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'error': 'Presentation not found'}), 404
-    if not _omran_actor_is_admin():
+    if not _landloom_actor_is_admin():
         return jsonify({'error': 'الحذف النهائي يتطلب صلاحية مدير الشركة — أو استخدم الأرشفة',
                         'error_code': 'admin_required'}), 403
     if _presentation_has_workflow_history(pres_id):
@@ -2466,7 +2466,7 @@ def api_update_presentation(pres_id):
     # the permission plus a written reason, both recorded with the edit.
     post_approval_reason = ''
     if pres.get('status') == 'approved' and ('projectData' in data or 'slidesData' in data):
-        if not _omran_can('post_approval_edit'):
+        if not _landloom_can('post_approval_edit'):
             return jsonify({'error': 'تعديل ملف معتمد يتطلب صلاحية التعديل بعد الاعتماد',
                             'error_code': 'post_approval_edit_required'}), 403
         post_approval_reason = str(data.get('editReason') or '').strip()

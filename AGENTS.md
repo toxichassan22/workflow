@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Project notes for automated agents working on this repo (Manafe — real-estate proposal generator).
+Project notes for automated agents working on this repo (Landloom — real-estate proposal generator).
 
 ## Always push to GitHub
 
@@ -120,7 +120,7 @@ uneditable); never grow a giant file again.
 - Backend: Flask. `app.py` (~380 lines) is only the loader: imports, the `Flask`
   app object, middleware and config constants — its ~350 routes and ~900 helpers
   live in ordered part files under `app_parts/` (`01_openrouter_text.py` …
-  `23_omran_apis.py`, ~600–2600 lines each). Each loader ends with a loop that
+  `23_landloom_apis.py`, ~600–2600 lines each). Each loader ends with a loop that
   `exec`s its `*_parts/*.py` files (sorted by name) into the module's own
   globals — the same trick as the frontend bundle, so **all parts share one
   namespace**: cross-part calls need no imports, `patch.object(module, 'name')`
@@ -1438,7 +1438,7 @@ instead of adding more literals:
   touching that operation. Full-site English and per-tenant offer language are separate staged
   work built on this foundation, not part of it.
 
-## Omran task pick-and-track workflow (`tasks/task.html`)
+## Landloom task pick-and-track workflow (`tasks/task.html`)
 
 When the owner asks the agent to look at `task.html`, follow this fixed sequence with no shortcuts
 (actual paths live under `tasks/`, there is no repo-root `agent.md` or `task.html`):
@@ -1447,7 +1447,7 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
    their `data-state` (`todo` / `doing` / `done`). Consider only `todo` and `doing` as unfinished.
    Choose one task the agent will work on, and announce its `data-id` plus its Arabic title before
    doing anything else. Never start two tasks at once and never silently switch tasks mid-turn.
-2. **Read `tasks/Omran_AI_System_Analysis_AR.pdf` to understand the chosen task.** The one line in
+2. **Read `tasks/Landloom_AI_System_Analysis_AR.pdf` to understand the chosen task.** The one line in
    `tasks/task.html` is only the title; the PDF is the binding spec (requirements, roles, states,
    acceptance criteria). Quote the PDF section the task maps to when announcing the plan.
 3. **Create a folder named after the task inside `tasks/`.** Form: `tasks/<data-id>-<short-slug>/`
@@ -1458,7 +1458,7 @@ When the owner asks the agent to look at `task.html`, follow this fixed sequence
    sub-steps in execution order, each with a state (`لم تبدأ` / `تحت العمل` / `مكتملة`), plus what
    counts as done and how the owner tests/verifies each step — so the owner can follow along what
    was accomplished and test it. Update the step states in that file as work progresses.
-5. **Tracking files stay local-only.** `tasks/task.html`, `tasks/Omran_AI_System_Analysis_AR.pdf`
+5. **Tracking files stay local-only.** `tasks/task.html`, `tasks/Landloom_AI_System_Analysis_AR.pdf`
    and every `tasks/<task>/...html` breakdown are owner trackers like the root `task.html` rule
    above: never commit them and never push them to any branch, even as part of another change.
 

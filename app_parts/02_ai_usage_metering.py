@@ -828,7 +828,7 @@ def api_billing_topup():
                         'error_code': 'tenant_not_found'}), 404
     if target.get('is_admin'):
         return jsonify({'success': False,
-                        'error': _OMRAN_ERROR_MESSAGES_AR['platform_tenant_recharge_forbidden'],
+                        'error': _LANDLOOM_ERROR_MESSAGES_AR['platform_tenant_recharge_forbidden'],
                         'error_code': 'platform_tenant_recharge_forbidden'}), 403
     # The wallet books in USD internally, but the desk keys amounts in riyals —
     # a SAR figure is converted at the active rate before it lands.

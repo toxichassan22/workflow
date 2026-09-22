@@ -505,7 +505,7 @@ def _draw_universal_header(c, slide, d):
     primary = d.get('primary_color', '#7A0C0C')
     title = slide.get('title', '')
     c.setFillColor(hex_to_color(primary)); c.setFont(ARABIC_FONT, 8)
-    shaped = reshape_arabic("منافع الاقتصادية")
+    shaped = reshape_arabic("Landloom")
     w = pdfmetrics.stringWidth(shaped, ARABIC_FONT, 8)
     c.drawString(PAGE_W - MARGIN - w, PAGE_H - 8*mm, shaped)
     if title:
@@ -523,7 +523,7 @@ def _draw_universal_footer(c, slide, d, num, total):
     c.line(MARGIN, 10*mm, PAGE_W-MARGIN, 10*mm)
     draw_text(c, project_name or '', MARGIN+2*mm, 6*mm, ARABIC_FONT, 6, '#999999', 'left',
               max_width=PAGE_W*0.4)
-    draw_text(c, 'منافع الاقتصادية للعقار', PAGE_W-MARGIN-2*mm, 6*mm, ARABIC_FONT, 6, '#999999', 'right')
+    draw_text(c, 'Landloom', PAGE_W-MARGIN-2*mm, 6*mm, ARABIC_FONT, 6, '#999999', 'right')
     c.setFillColor(hex_to_color(primary))
     c.circle(PAGE_W-14*mm, 6*mm, 4*mm, fill=1, stroke=0)
     c.setFillColor(white); c.setFont(ARABIC_FONT, 7)
@@ -693,7 +693,7 @@ def _render_closing(c, slide, d, num, total, resolved_image=None):
     if contact:
         draw_text(c, contact, PAGE_W/2, PAGE_H/2-35*mm, ARABIC_FONT, 12, accent, 'center',
                   max_width=max_tw)
-    draw_text(c, 'شركة منافع الاقتصادية', PAGE_W/2, 18*mm, ARABIC_FONT, 9,
+    draw_text(c, 'Landloom', PAGE_W/2, 18*mm, ARABIC_FONT, 9,
               _color_to_hex(lighten(text_c,0.5)), 'center')
 
 def _render_content(c, slide, d, num, total, resolved_image=None):
@@ -1012,7 +1012,7 @@ def _render_image_focus(c, slide, d, num, total, resolved_image=None):
 def generate_pdf(slides, project_name='project', output_path='output.pdf'):
     register_fonts()
     c = canvas.Canvas(output_path, pagesize=(PAGE_W, PAGE_H))
-    c.setTitle(project_name); c.setAuthor('منافع الاقتصادية')
+    c.setTitle(project_name); c.setAuthor('Landloom')
     total = len(slides)
     for i, slide in enumerate(slides):
         render_slide(c, slide, i+1, total)
@@ -1051,7 +1051,7 @@ if __name__ == '__main__':
          'design':{'mood':'bold','background_style':'split','primary_color':'#c4382a',
                    'secondary_color':'#f5f0ee','accent_color':'#e8a838','bg_color':'#c4382a',
                    'text_color':'#FFFFFF','split_direction':'horizontal','split_position_pct':0.5}},
-        {'type':'closing','title':'شكراً لثقتكم','subtitle':'منافع الاقتصادية','contact':'info@manafe.com',
+        {'type':'closing','title':'شكراً لثقتكم','subtitle':'Landloom','contact':'info@landloom.ai',
          'design':{'mood':'dramatic','background_style':'gradient_v','primary_color':'#1a3a52',
                    'secondary_color':'#0d1f2d','accent_color':'#d4a84b','bg_color':'#1a3a52',
                    'text_color':'#FFFFFF','layout':'centered',

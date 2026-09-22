@@ -95,7 +95,7 @@ def api_restore_version(pres_id, version_id):
         return _draft_locked_response(locked_status)
     restore_reason = ''
     if pres.get('status') == 'approved':
-        if not _omran_can('post_approval_edit'):
+        if not _landloom_can('post_approval_edit'):
             return jsonify({'error': 'استرجاع ملف معتمد يتطلب صلاحية التعديل بعد الاعتماد',
                             'error_code': 'post_approval_edit_required'}), 403
         restore_reason = str(data.get('editReason') or '').strip()

@@ -63,12 +63,12 @@
       if (!list) return;
       const data = await api('GET', '/api/notifications?limit=5').catch(() => null);
       if (!data || !data.success) {
-        list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
+        list.innerHTML = '<p class="tenant-hint">' + llEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
         return;
       }
       notifLastItems = data.notifications || [];
       if (!notifLastItems.length) {
-        list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
+        list.innerHTML = '<p class="tenant-hint">' + llEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
         return;
       }
       list.innerHTML = notifLastItems.map(n => notifItemHtml(n)).join('');
@@ -78,26 +78,26 @@
       const unread = !n.read_at;
       const when = (n.created_at || '').slice(0, 16).replace('T', ' ');
       const cat = n.category && n.category !== 'general'
-        ? '<span class="tenant-notif-cat">' + omEscape(notifCategoryLabel(n.category)) + '</span>' : '';
+        ? '<span class="tenant-notif-cat">' + llEscape(notifCategoryLabel(n.category)) + '</span>' : '';
       return '<div class="tenant-notif-item' + (unread ? ' unread' : '') + '" role="button" tabindex="0"' +
-        ' onclick="notificationOpen(\'' + omEscape(n.id) + '\')"' +
-        ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + omEscape(n.id) + '\')">' +
-        '<div class="tenant-notif-item-head"><strong>' + omEscape(n.title) + '</strong>' +
+        ' onclick="notificationOpen(\'' + llEscape(n.id) + '\')"' +
+        ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + llEscape(n.id) + '\')">' +
+        '<div class="tenant-notif-item-head"><strong>' + llEscape(n.title) + '</strong>' +
         '<span class="tenant-notif-head-side">' +
-        (unread ? '<span class="tenant-notif-dot" title="' + omEscape(WFT('notif.new', 'جديد')) + '"></span>' : '') +
+        (unread ? '<span class="tenant-notif-dot" title="' + llEscape(WFT('notif.new', 'جديد')) + '"></span>' : '') +
         '<button type="button" class="tenant-notif-del"' +
-        ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')"' +
-        ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
+        ' onclick="notificationDelete(event,\'' + llEscape(n.id) + '\')"' +
+        ' onkeydown="event.stopPropagation()">' + llEscape(WFT('common.delete', 'حذف')) + '</button>' +
         '</span></div>' +
-        (n.body ? '<p>' + omEscape(n.body) + '</p>' : '') +
-        '<div class="tenant-notif-meta">' + cat + '<bdi>' + omEscape(when) + '</bdi></div></div>';
+        (n.body ? '<p>' + llEscape(n.body) + '</p>' : '') +
+        '<div class="tenant-notif-meta">' + cat + '<bdi>' + llEscape(when) + '</bdi></div></div>';
     }
 
     // ── Click-through: entity type → its screen ─────────────────────────
     function notificationTargetOpener(n) {
       if (!n) return null;
       const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
-      const opsTab = (tab) => () => openOmranOpsPage().then(() => showOmranOpsTab(tab));
+      const opsTab = (tab) => () => openLandloomOpsPage().then(() => showLandloomOpsTab(tab));
       const map = isAdmin ? {
         recharge_request: () => openAdminRechargePage(),
         support_ticket: () => openAdminTicketsPage(),
@@ -139,7 +139,7 @@
           && document.getElementById('tenantNotificationsPage').classList.contains('active')) {
         renderNotificationsPage();
       }
-      if (document.getElementById('omNotificationsList')) omLoadNotifications();
+      if (document.getElementById('llNotificationsList')) llLoadNotifications();
     }
 
     // One delete per row, on every surface the feed renders on. The server
@@ -158,8 +158,8 @@
           && document.getElementById('tenantNotificationsPage').classList.contains('active')) {
         renderNotificationsPage();
       }
-      if (document.getElementById('omNotificationsList')) omLoadNotifications();
-      if (document.getElementById('adminNotificationsList')) omLoadNotifications('adminNotificationsList');
+      if (document.getElementById('llNotificationsList')) llLoadNotifications();
+      if (document.getElementById('adminNotificationsList')) llLoadNotifications('adminNotificationsList');
     }
 
     // ── Full notifications page ──────────────────────────────────────────
@@ -192,8 +192,8 @@
       const sel = document.getElementById('notifCategoryFilter');
       if (!sel || sel.dataset.filled) return;
       const cats = (categories && categories.length ? categories : NOTIF_CATEGORY_KEYS);
-      sel.innerHTML = '<option value="">' + omEscape(WFT('notif.category_all', 'كل التصنيفات')) + '</option>' +
-        cats.map(c => '<option value="' + omEscape(c) + '">' + omEscape(notifCategoryLabel(c)) + '</option>').join('');
+      sel.innerHTML = '<option value="">' + llEscape(WFT('notif.category_all', 'كل التصنيفات')) + '</option>' +
+        cats.map(c => '<option value="' + llEscape(c) + '">' + llEscape(notifCategoryLabel(c)) + '</option>').join('');
       sel.dataset.filled = '1';
     }
 
@@ -206,7 +206,7 @@
       if (notifStatusState !== 'all') params.push('status=' + encodeURIComponent(notifStatusState));
       const data = await api('GET', '/api/notifications?' + params.join('&')).catch(() => null);
       if (!data || !data.success) {
-        list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
+        list.innerHTML = '<p class="tenant-hint">' + llEscape(WFT('notif.load_failed', 'تعذر تحميل الإشعارات')) + '</p>';
         return;
       }
       notifLastCategories = data.categories || null;
@@ -220,7 +220,7 @@
           ? WFT('notif.unread_count', '{count} غير مقروءة', { count: unread }) : '';
       }
       if (!notifLastItems.length) {
-        list.innerHTML = '<p class="tenant-hint">' + omEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
+        list.innerHTML = '<p class="tenant-hint">' + llEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
         return;
       }
       list.innerHTML = notifLastItems.map(n => notifCardHtml(n)).join('');
@@ -231,21 +231,21 @@
     function notifCardHtml(n) {
       const unread = !n.read_at;
       return '<div class="tenant-presentation-card tenant-notif-card' + (unread ? ' unread' : '') + '"' +
-        ' role="button" tabindex="0" onclick="notificationOpen(\'' + omEscape(n.id) + '\')"' +
-        ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + omEscape(n.id) + '\')">' +
+        ' role="button" tabindex="0" onclick="notificationOpen(\'' + llEscape(n.id) + '\')"' +
+        ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + llEscape(n.id) + '\')">' +
         '<div class="tenant-notif-main">' +
         '<h3>' + (unread ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
-        omEscape(n.title) +
-        (unread ? ' <span class="tenant-notif-new">(' + omEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
-        (n.body ? '<p class="tenant-notif-body">' + omEscape(n.body) + '</p>' : '') +
+        llEscape(n.title) +
+        (unread ? ' <span class="tenant-notif-new">(' + llEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
+        (n.body ? '<p class="tenant-notif-body">' + llEscape(n.body) + '</p>' : '') +
         '<div class="meta">' +
-        '<span class="tenant-notif-cat">' + omEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
-        '<bdi class="tenant-notif-time">' + omEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) + '</bdi>' +
+        '<span class="tenant-notif-cat">' + llEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
+        '<bdi class="tenant-notif-time">' + llEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) + '</bdi>' +
         '</div></div>' +
         '<div class="tenant-actions">' +
         '<button type="button" class="btn small ghost"' +
-        ' onclick="notificationDelete(event,\'' + omEscape(n.id) + '\')"' +
-        ' onkeydown="event.stopPropagation()">' + omEscape(WFT('common.delete', 'حذف')) + '</button>' +
+        ' onclick="notificationDelete(event,\'' + llEscape(n.id) + '\')"' +
+        ' onkeydown="event.stopPropagation()">' + llEscape(WFT('common.delete', 'حذف')) + '</button>' +
         '</div></div>';
     }
 
@@ -271,8 +271,8 @@
         const on = prefs[c] !== false;
         return '<label class="tenant-notif-pref' + (on ? ' on' : '') + '">' +
           '<input type="checkbox" ' + (on ? 'checked ' : '') +
-          'onchange="setNotificationPreference(\'' + omEscape(c) + '\', this.checked)">' +
-          '<span>' + omEscape(notifCategoryLabel(c)) + '</span></label>';
+          'onchange="setNotificationPreference(\'' + llEscape(c) + '\', this.checked)">' +
+          '<span>' + llEscape(notifCategoryLabel(c)) + '</span></label>';
       }).join('');
     }
 

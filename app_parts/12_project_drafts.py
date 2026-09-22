@@ -865,7 +865,7 @@ def api_delete_project_draft_by_id(draft_id):
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if not draft:
         return jsonify({'error': 'Draft not found'}), 404
-    if not _omran_actor_is_admin():
+    if not _landloom_actor_is_admin():
         return jsonify({'error': 'الحذف النهائي يتطلب صلاحية مدير الشركة — أو استخدم الأرشفة',
                         'error_code': 'admin_required'}), 403
     if _draft_has_workflow_history(draft_id):
@@ -1221,7 +1221,7 @@ def api_decide_section_version():
     # t13-02: a non-admin approver decides only inside their granted field
     # sections; keys outside the field map stay governed by the approvals
     # permission that already let this caller reach the decision.
-    if not _omran_actor_is_admin() and str(draft.get('user_id')) != str(actor_id):
+    if not _landloom_actor_is_admin() and str(draft.get('user_id')) != str(actor_id):
         section_key = version['section_key']
         if section_key in db.DEFAULT_FIELD_SECTIONS:
             try:

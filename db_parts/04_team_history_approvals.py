@@ -297,7 +297,7 @@ def _json_list(value):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AuditEvent: Immutable unified audit log (Omran spec sections 6, 15, 18).
+# AuditEvent: Immutable unified audit log (Landloom spec sections 6, 15, 18).
 #
 # Captures user, timestamp, action/operation, affected entity, old_value,
 # new_value, and contextual metadata. Strictly append-only.

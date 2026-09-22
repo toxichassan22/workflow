@@ -1,6 +1,6 @@
 # Platform architecture (t61)
 
-Manafe runs as a single Flask application (`app.py`) with a SQLite or
+Landloom runs as a single Flask application (`app.py`) with a SQLite or
 PostgreSQL database behind the `db.py`/`db_driver.py` seam. This document
 records the operational architecture decisions made for the multi-tenant SaaS
 rollout.
@@ -27,8 +27,8 @@ rollout.
   `PRAGMA table_info` read. The same code path creates a fresh install and
   upgrades an existing one.
 - The relational graph is described by the schema functions
-  `_create_tables`, `_create_omran_tables`, `_create_omran_role_tables`,
-  `_create_omran_event_tables` and `_create_platform_tables`. Cross-tenant
+  `_create_tables`, `_create_landloom_tables`, `_create_landloom_role_tables`,
+  `_create_landloom_event_tables` and `_create_platform_tables`. Cross-tenant
   isolation is enforced by `tenant_id` on every tenant-owned row plus
   tenant-scoped queries in `db.py`.
 - Append-only stores: `audit_events` (UPDATE/DELETE rejected by triggers on

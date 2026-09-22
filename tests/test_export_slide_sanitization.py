@@ -9,23 +9,39 @@ import slide_engine
 ROOT = Path(__file__).resolve().parents[1]
 
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
-    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '12-files-media/02_visual_concept.js',
+    '13-visual/01_visual_concept_page.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export/01_presentations.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
+    '19-notifications.js',
 )
 
 
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order."""
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
-    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
-        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
+        parts.append(_css.read_text(encoding='utf-8'))
     for name in FRONTEND_JS_ORDER:
         parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
     return '\n'.join(parts)
+
+
+def read_module_source(name):
+    """Full source of a backend module: the slim <name> file plus every ordered
+    part under <stem>_parts/ concatenated in exec order."""
+    text = (ROOT / name).read_text(encoding='utf-8')
+    parts_dir = ROOT / (name[:-3] + '_parts')
+    if parts_dir.is_dir():
+        for part in sorted(parts_dir.glob('*.py')):
+            text += part.read_text(encoding='utf-8')
+    return text
 
 
 class ExportSlideSanitizationTests(unittest.TestCase):
@@ -132,7 +148,7 @@ class ExportSlideSanitizationTests(unittest.TestCase):
     def test_print_css_puts_every_slide_back_in_flow(self):
         """An out-of-flow slide gets no page of its own: measured 5 pages for 6 slides with one
         `position:absolute` slide, and 1 page for 6 when all of them had it."""
-        source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
+        source = read_module_source('generate_pdf_from_preview.py')
         print_block = source[source.index('@media print {'):source.index('.pdf-export-page:last-of-type')]
         for rule in ('position:relative !important', 'float:none !important',
                      'display:block !important', 'break-after:page !important',
@@ -140,7 +156,7 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             self.assertIn(rule, print_block, rule)
 
     def test_export_keeps_media_contained_and_charts_within_the_page(self):
-        source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
+        source = read_module_source('generate_pdf_from_preview.py')
         self.assertGreaterEqual(source.count('object-fit:contain'), 2)
         self.assertGreaterEqual(source.count('svg[data-chart], svg.combo-chart'), 2)
 

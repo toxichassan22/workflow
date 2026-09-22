@@ -21,20 +21,25 @@ import db
 from design_templates import build_font_css
 
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding.js',
+    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form.js', '08-location-maps.js', '09-financial.js',
-    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media.js',
-    '13-visual.js', '14-slides-gen.js', '15-slide-edit-chat.js',
-    '16-presentations-export.js', '17-admin-boot.js', '18-omran-ops.js',
+    '10-financial-report-timeline.js', '11-land-croquis.js', '12-files-media/01_files_media.js',
+    '12-files-media/02_visual_concept.js',
+    '13-visual/01_visual_concept_page.js',
+    '13-visual/02_slides_progress.js', '14-slides-gen.js', '15-slide-edit-chat.js',
+    '16-presentations-export/01_presentations.js',
+    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot.js', '18-landloom-ops.js',
+    '19-notifications.js',
 )
 
 
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order."""
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
-    for name in ('assets/css/base.css', 'assets/css/project-form.css'):
-        parts.append((ROOT / name).read_text(encoding='utf-8'))
+    for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
+        parts.append(_css.read_text(encoding='utf-8'))
     for name in FRONTEND_JS_ORDER:
         parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
     return '\n'.join(parts)

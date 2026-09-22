@@ -1,10 +1,10 @@
-# Render Blueprint for the Real Estate Proposal Generator (Manafe)
+# Render Blueprint for the Real Estate Proposal Generator (Landloom)
 # This deploys the Flask backend + frontend as a single Docker web service
 # and connects it to your existing Render PostgreSQL database via DATABASE_URL.
 
 services:
   - type: web
-    name: manafe
+    name: landloom
     runtime: docker
     plan: free
     healthCheckPath: /health

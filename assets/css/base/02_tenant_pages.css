@@ -1,0 +1,968 @@
+    /* Scoped under the page id on purpose: the generic `.tenant-page h2`
+       rule below carries the same specificity and comes later in the file,
+       so the bare selector lost and the toolbar title rendered in the brand
+       color on the brand background (invisible) with a dead 18px margin,
+       sinking the whole topbar content. */
+    #tenantSlidesPage .slide-toolbar-title h2 {
+      margin: 0;
+      font-size: 18px;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .slide-toolbar-title span {
+      display: block;
+      margin-top: 2px;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Translatable fragments stay inline: a nested span must never become a
+       block of its own, or one info line stacks into several lines. */
+    .slide-toolbar-title span span {
+      display: inline;
+      margin-top: 0;
+    }
+
+    /* The pill owns its own display: `.slide-toolbar-title span` above is
+       more specific than the pill class and silently blockified it. */
+    .slide-toolbar-title > .slide-toolbar-chat-context {
+      display: inline-flex;
+    }
+
+    .slide-toolbar-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      margin: 0;
+      flex-wrap: wrap;
+    }
+
+    .slide-toolbar-btn {
+      min-height: 36px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .slide-toolbar-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.55);
+      color: #fff;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-primary {
+      background: #fff;
+      border-color: #fff;
+      color: var(--p);
+    }
+
+    .slide-toolbar-btn.slide-toolbar-primary:hover {
+      background: #f0f7ff;
+      color: var(--pd);
+    }
+
+    .slide-toolbar-btn.slide-toolbar-approve {
+      background: #2e7d32;
+      border-color: #2e7d32;
+      color: #fff;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-approve:hover {
+      background: #256b29;
+      border-color: #256b29;
+    }
+
+    .slide-toolbar-dropdown .tenant-dropdown-menu {
+      min-width: 230px;
+      top: calc(100% + 8px);
+      padding: 8px;
+      z-index: 1000;
+    }
+
+    .slide-toolbar-dropdown .tenant-dropdown-menu .btn {
+      min-height: 34px;
+      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    .slide-toolbar-menu-divider {
+      height: 1px;
+      margin: 4px 0;
+      background: var(--line);
+    }
+
+    .slide-toolbar-back {
+      border: 0;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.88);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      padding: 6px 0;
+    }
+
+    .slide-toolbar-back:hover {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    .presentation-font-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .presentation-font-card {
+      width: min(460px, 100%);
+      background: #fff;
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.2);
+    }
+
+    .presentation-font-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .presentation-font-head h3 {
+      margin: 0;
+      color: var(--p);
+      font-size: 18px;
+    }
+
+    .presentation-font-close {
+      border: 0;
+      background: transparent;
+      color: #777;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+
+    .presentation-font-card label {
+      display: block;
+      margin-bottom: 6px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .presentation-font-card select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d7e0e7;
+      border-radius: 9px;
+      background: #fff;
+      color: #1f2937;
+      font: inherit;
+    }
+
+    .presentation-font-card .tenant-hint {
+      margin: 8px 0 0;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 700px) {
+      .slide-toolbar {
+        align-items: stretch;
+      }
+
+      .slide-toolbar-chat-context {
+        order: 3;
+      }
+
+      .slide-toolbar-title,
+      .slide-toolbar-actions {
+        width: 100%;
+      }
+
+      .slide-toolbar-actions>.btn,
+      .slide-toolbar-actions>.tenant-dropdown {
+        flex: 1 1 auto;
+      }
+
+      .slide-toolbar-actions>.tenant-dropdown>.btn {
+        width: 100%;
+      }
+    }
+
+    .tenant-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tenant-brand img {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+
+    .tenant-brand h1 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--p);
+    }
+
+    .tenant-brand span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .tenant-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .tenant-page {
+      display: none;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin: 0 auto 22px;
+      width: 100%;
+    }
+
+    .tenant-page.active {
+      display: block;
+    }
+
+    #tenantGenerationPage.active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 480px;
+      padding: 48px 24px;
+    }
+
+    .tenant-live-gen-banner {
+      background: linear-gradient(135deg, var(--p) 0%, var(--pd) 100%);
+      color: #fff;
+      padding: 12px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      animation: slideDownBanner 0.3s ease-out;
+      z-index: 10;
+      position: sticky;
+      top: 0;
+    }
+
+    @keyframes slideDownBanner {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .tenant-live-gen-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .tenant-live-gen-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tenant-live-gen-tag {
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #f1f5f9;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.3px;
+    }
+
+    .tenant-live-gen-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .tenant-live-gen-details {
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+
+    .tenant-live-gen-progress {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 240px;
+    }
+
+    .tenant-live-gen-bar {
+      flex: 1;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .tenant-live-gen-fill {
+      height: 100%;
+      background: var(--g);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    .tenant-live-gen-pct {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      min-width: 40px;
+      text-align: left;
+    }
+
+    .ge-slide-card.generating-live {
+      border: 2px solid var(--p) !important;
+      box-shadow: 0 0 0 4px var(--soft) !important;
+    }
+
+    .ge-thumb.generating-live {
+      border-color: var(--p) !important;
+      background: var(--soft) !important;
+    }
+
+    .ge-thumb.generating-live .ge-thumb-num {
+      background: var(--p) !important;
+      color: #fff !important;
+    }
+
+    .live-gen-skeleton-stage {
+      padding: 48px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      text-align: center;
+      height: 100%;
+      min-height: 400px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+
+    .live-gen-skeleton-pulse {
+      background: var(--soft);
+      border: 2px dashed var(--p);
+    }
+
+    @keyframes pulseDot {
+      from {
+        opacity: 0.3;
+        transform: scale(0.8);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1.2);
+      }
+    }
+
+    .tenant-page h2 {
+      margin: 0 0 18px;
+      color: var(--p);
+      font-size: 24px;
+    }
+
+    .tenant-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .tenant-grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .tenant-grid.full {
+      grid-template-columns: 1fr;
+    }
+
+    .tenant-form-section {
+      grid-column: 1 / -1;
+      display: none;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      padding: 20px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .02);
+      margin-bottom: 16px;
+    }
+
+    .tenant-section-title {
+      grid-column: 1 / -1;
+      margin: 0 0 8px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--p);
+      color: var(--p);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .tenant-field {
+      margin-bottom: 0;
+      padding: 14px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .02);
+      transition: box-shadow .2s, border-color .2s;
+    }
+
+    .tenant-field:hover {
+      border-color: var(--p);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .08);
+    }
+
+    .tenant-field.full {
+      grid-column: 1 / -1;
+    }
+
+    .tenant-field label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .tenant-field input,
+    .tenant-field textarea,
+    .tenant-field select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    #section-market-study.tenant-form-section.active,
+    #section-market-study,
+    #section-visual-concept.tenant-form-section.active,
+    #section-visual-concept,
+    #section-executive-content.tenant-form-section.active,
+    #section-executive-content {
+      display: block !important;
+      width: 100%;
+    }
+
+    .project-form-content #section-market-study.tenant-form-section:not(.active),
+    .project-form-content #section-visual-concept.tenant-form-section:not(.active),
+    .project-form-content #section-executive-content.tenant-form-section:not(.active) {
+      display: none !important;
+    }
+
+    #section-market-study .market-study-body,
+    #section-visual-concept .visual-concept-body,
+    #section-executive-content .executive-content-body {
+      grid-column: 1 / -1;
+    }
+
+    #section-market-study .market-block {
+      margin: 0 0 22px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    #section-market-study .market-block h4 {
+      margin: 0 0 10px;
+      color: var(--p);
+      font-size: 15px;
+    }
+
+    #section-market-study .market-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    #section-market-study label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #section-market-study select,
+    #section-market-study input,
+    #section-market-study textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    #section-market-study .market-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+
+    #section-market-study .table-wrap {
+      overflow-x: auto;
+    }
+
+    #section-market-study .market-source-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+    }
+
+    #section-market-study .market-source-tab {
+      width: auto;
+      min-width: 150px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 14px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    #section-market-study .market-source-tab.active {
+      background: var(--p);
+      border-color: var(--p);
+      color: #fff;
+    }
+
+    #section-market-study .market-source-panel[hidden] {
+      display: none;
+    }
+
+    #section-market-study .market-source-panel {
+      min-width: 0;
+    }
+
+    #marketStudyOneBlockSummary {
+      min-height: 360px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
+
+    #section-market-study table {
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
+      table-layout: fixed;
+      border-collapse: collapse;
+    }
+
+    #marketCompetitorsTable,
+    .market-sources-table {
+      min-width: 1450px;
+    }
+
+    #marketCompetitorsTable {
+      min-width: 2300px;
+    }
+
+    .market-sources-table {
+      min-width: 2100px;
+    }
+
+    .market-sources-table th:nth-child(1),
+    .market-sources-table td:nth-child(1) {
+      min-width: 190px;
+    }
+
+    .market-sources-table th:nth-child(2),
+    .market-sources-table td:nth-child(2) {
+      min-width: 250px;
+    }
+
+    .market-sources-table th:nth-child(3),
+    .market-sources-table td:nth-child(3) {
+      min-width: 320px;
+    }
+
+    .market-sources-table th:nth-child(6),
+    .market-sources-table td:nth-child(6) {
+      min-width: 220px;
+    }
+
+    .market-sources-table th:nth-child(7),
+    .market-sources-table td:nth-child(7) {
+      min-width: 300px;
+    }
+
+    #marketCompetitorsTable th:nth-child(1), #marketCompetitorsTable td:nth-child(1) { width:280px;min-width:280px; }
+    #marketCompetitorsTable th:nth-child(2), #marketCompetitorsTable td:nth-child(2) { width:120px;min-width:120px;text-align:center; }
+    #marketCompetitorsTable th:nth-child(3), #marketCompetitorsTable td:nth-child(3) { width:180px;min-width:180px; }
+    #marketCompetitorsTable th:nth-child(4), #marketCompetitorsTable td:nth-child(4) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(5), #marketCompetitorsTable td:nth-child(5) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(6), #marketCompetitorsTable td:nth-child(6) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(7), #marketCompetitorsTable td:nth-child(7) { width:520px;min-width:520px; }
+    #marketCompetitorsTable th:nth-child(8), #marketCompetitorsTable td:nth-child(8) { width:180px;min-width:180px; }
+    #marketCompetitorsTable th:nth-child(9), #marketCompetitorsTable td:nth-child(9) { width:220px;min-width:220px; }
+    #marketCompetitorsTable th:nth-child(10), #marketCompetitorsTable td:nth-child(10) { width:220px;min-width:220px; }
+    #marketCompetitorsTable th:nth-child(11), #marketCompetitorsTable td:nth-child(11) { width:100px;min-width:100px; }
+
+    #section-market-study th,
+    #section-market-study td {
+      border: 1px solid var(--line);
+      padding: 6px;
+      vertical-align: top;
+      white-space: normal;
+    }
+
+    #section-market-study td textarea {
+      min-height: 46px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    #marketCompetitorsTable td:nth-child(1) textarea,
+    #marketCompetitorsTable td:nth-child(7) textarea {
+      min-height: 84px;
+    }
+
+    #section-market-study td [data-field="url"],
+    #section-market-study td [data-field="source_url"],
+    #section-market-study td [data-field="source_urls"] {
+      direction: ltr;
+      text-align: left;
+    }
+
+    #section-market-study .market-source-links {
+      direction: ltr;
+      text-align: left;
+      word-break: break-all;
+      line-height: 1.45;
+      margin-top: 4px;
+    }
+
+    #section-market-study .market-source-url-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    #section-market-study .market-source-url-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      direction: ltr;
+    }
+
+    #section-market-study .market-source-url-row input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #section-market-study .market-source-url-row button {
+      flex: none;
+      width: auto;
+      white-space: nowrap;
+    }
+
+    #section-market-study .market-source-url-add {
+      align-self: flex-start;
+      width: auto;
+    }
+
+    #section-market-study .market-logo-actions {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      margin-top: 5px;
+    }
+
+    #section-market-study .market-logo-actions button {
+      width: auto;
+      min-width: 0;
+      padding: 3px 7px;
+      font-size: 11px;
+    }
+
+    #section-market-study .market-logo-progress {
+      margin-top: 6px;
+      direction: rtl;
+    }
+
+    #section-market-study .market-logo-progress-track {
+      height: 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+
+    #section-market-study .market-logo-progress-bar {
+      height: 100%;
+      width: 8%;
+      border-radius: inherit;
+      background: var(--p);
+      transition: width .35s ease;
+    }
+
+    #section-market-study .market-logo-progress-label {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    #section-market-study th {
+      background: #f7fafc;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    #section-market-study .choice-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+    }
+
+    #section-market-study .choice-grid label,
+    .project-choice-grid label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      font-weight: 500;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .project-choice-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 8px;
+    }
+
+    /* The grouped classification fields wrap each dropdown in its own div. A flex item shrinks to
+       fit, and the dropdown's own width:100% then resolved against that shrunken box, so
+       «الأنواع الفرعية للمشروع» and «الفئة المستهدفة» rendered as a narrow box whose menu broke
+       every option onto two lines. */
+    .project-choice-grid>div {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+
+    #marketCityMirror,
+    #marketDistrictMirror {
+      background: #f4f7fa !important;
+      cursor: not-allowed;
+    }
+
+    .project-multi-select {
+      position: relative;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    .project-multi-select>summary {
+      display: flex;
+      align-items: center;
+      min-height: 48px;
+      box-sizing: border-box;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      text-align: right;
+      list-style: none;
+    }
+
+    .project-multi-select>summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .project-multi-select[open]>summary {
+      border-color: var(--p);
+      box-shadow: 0 0 0 3px rgba(0, 0, 0, .08);
+    }
+
+    .project-multi-select-menu {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 5px);
+      right: 0;
+      left: 0;
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+    }
+
+    .project-multi-select-option {
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      text-align: right;
+    }
+
+    .project-multi-select-option:hover {
+      background: #f3f7fb;
+    }
+
+    .project-multi-select-option.selected {
+      background: var(--p);
+      color: #fff;
+    }
+
+    #section-market-study .summary-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    #marketSummaryFailure,
+    #marketCompetitorsNote {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    #section-executive-content .executive-content-body {
+      grid-column: 1 / -1;
+    }
+
+    #section-executive-content .executive-block {
+      margin: 0 0 18px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    #section-executive-content .executive-block h4 {
+      margin: 0 0 10px;
+      color: var(--p);
+      font-size: 15px;
+    }
+
+    #section-executive-content .executive-facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    #section-executive-content .executive-fact {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--soft);
+    }
+
+    #section-executive-content .executive-fact strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    #section-executive-content .executive-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+
+    #section-executive-content .executive-note {
+      min-height: 18px;
+      margin: 0 0 8px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    #section-executive-content textarea {
+      width: 100%;
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    #section-executive-content textarea#executiveText_risks,
+    #section-executive-content textarea#executiveText_summary {
+      min-height: 220px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
+
+    #section-executive-content textarea#executiveText_summary {
+      min-height: 360px;
+    }
+
+    .visual-concept-card textarea[data-visual-caption] {
+      width: 100%;
+      min-height: 72px;
+      resize: vertical;
+      margin-bottom: 8px;
+    }
+
