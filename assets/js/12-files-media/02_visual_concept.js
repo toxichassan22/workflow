@@ -1,3 +1,422 @@
+    /* ── Visual concept slot model: constants, normalizers and state
+       helpers shared by every visual-concept panel. ── */
+
+
+    const VISUAL_CONCEPT_SLOTS = [
+      { id: 'cover', label: 'الصورة الرئيسية', group: 'external' },
+      { id: 'right', label: 'يمين', group: 'external' },
+      { id: 'left', label: 'شمال', group: 'external' },
+      { id: 'top', label: 'فوق', group: 'external' },
+      { id: 'back', label: 'خلف', group: 'external' },
+      { id: 'interior', label: 'التصميم الداخلي', group: 'internal' }
+    ];
+    const VISUAL_CONCEPT_EXTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'external');
+    const VISUAL_CONCEPT_INTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'internal');
+    const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
+    const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;
+    const VISUAL_CONCEPT_MAX_PLANS = 30;
+    const VISUAL_CONCEPT_PLAN_KINDS = [
+      { kind: 'site', id: 'plan_site', label: 'الموقع العام المبسط' },
+      { kind: 'uses', id: 'plan_uses', label: 'توزيع الاستخدامات على الأدوار' },
+      { kind: 'massing', id: 'plan_massing', label: 'المنظور الكتلي ثلاثي الأبعاد' }
+    ];
+    const VISUAL_CONCEPT_SLOT_ALIASES = {
+      cover: ['cover', 'main', 'hero'],
+      right: ['right', 'east', 'east_facade'],
+      left: ['left', 'west', 'west_facade'],
+      top: ['top', 'aerial', 'above'],
+      back: ['back', 'rear', 'behind'],
+      interior: ['interior', 'inside', 'internal']
+    };
+
+    function emptyVisualConceptSlot(id) {
+      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+    }
+
+    function visualConceptDefaultSlotLabel(slotId) {
+      return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
+        || visualConceptPlanDefinition(slotId)?.label
+        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : (isVisualConceptPlanSlot(slotId) ? 'مخطط' : 'الصورة'));
+    }
+
+    function visualConceptCanRenameSlot(slotId) {
+      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId)
+        || (isVisualConceptPlanSlot(slotId) && !isVisualConceptWorkflowPlan(slotId));
+    }
+
+    function isVisualConceptPlanSlot(slotId) {
+      return String(slotId || '').startsWith('plan_');
+    }
+
+    function visualConceptPlanDefinition(value) {
+      const raw = value && typeof value === 'object' ? value : { id: value };
+      const kind = String(raw.kind || '').trim().toLowerCase();
+      const id = String(raw.id || '').trim();
+      return VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === kind || item.id === id) || null;
+    }
+
+    function isVisualConceptWorkflowPlan(value) {
+      return Boolean(visualConceptPlanDefinition(value));
+    }
+
+    function visualConceptPlanKind(value) {
+      return visualConceptPlanDefinition(value)?.kind || '';
+    }
+
+    function visualConceptBoundaryPoints(value) {
+      let parsed = value;
+      if (typeof value === 'string') {
+        try { parsed = JSON.parse(value); } catch (error) { parsed = []; }
+      }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        parsed = parsed.points || parsed.survey_coordinates || parsed.coordinates || [];
+      }
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item, index) => {
+        const source = Array.isArray(item)
+          ? { eastings: item[0], northings: item[1], point: index + 1 }
+          : (item && typeof item === 'object' ? item : {});
+        const eastings = Number(String(source.eastings ?? source.easting ?? source.x ?? '').replace(/,/g, ''));
+        const northings = Number(String(source.northings ?? source.northing ?? source.y ?? '').replace(/,/g, ''));
+        return {
+          parcel_id: String(source.parcel_id || source.parcelId || '').trim(),
+          point: String(source.point || source.point_number || index + 1).trim(),
+          eastings,
+          northings
+        };
+      }).filter(item => Number.isFinite(item.eastings) && Number.isFinite(item.northings)).slice(0, 60);
+    }
+
+    function emptyVisualConceptPlansWorkflow() {
+      return {
+        status: 'idle',
+        verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
+        boundary: { points: [], referenceUrl: '', instruction: '', approved: false },
+        distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false },
+        prompts: { site: '', uses: '', massing: '' },
+        planContext: null,
+        viewStage: 'verify',
+        promptReady: false,
+        promptsError: ''
+      };
+    }
+
+    function normalizeVisualConceptPlansWorkflow(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const source = value && typeof value === 'object' ? value : {};
+      const empty = emptyVisualConceptPlansWorkflow();
+      const verification = source.verification && typeof source.verification === 'object' ? source.verification : {};
+      const boundary = source.boundary && typeof source.boundary === 'object' ? source.boundary : {};
+      const distribution = source.distribution && typeof source.distribution === 'object' ? source.distribution : {};
+      const prompts = source.prompts && typeof source.prompts === 'object' ? source.prompts : {};
+      return {
+        ...empty,
+        status: ['idle', 'verified', 'boundary', 'ready'].includes(source.status) ? source.status : 'idle',
+        verification: {
+          checks: Array.isArray(verification.checks) ? verification.checks.slice(0, 40) : [],
+          issues: Array.isArray(verification.issues) ? verification.issues.slice(0, 30) : [],
+          summary: String(verification.summary || '').slice(0, 1600),
+          canProceed: Boolean(verification.canProceed),
+          approved: Boolean(verification.approved)
+        },
+        boundary: {
+          points: visualConceptBoundaryPoints(boundary.points || boundary.survey_coordinates),
+          referenceUrl: durableImageUrl(boundary.referenceUrl || boundary.reference_url),
+          instruction: String(boundary.instruction || '').slice(0, 2000),
+          approved: Boolean(boundary.approved)
+        },
+        distribution: {
+          rows: (Array.isArray(distribution.rows) ? distribution.rows.slice(0, 60) : []).map((row, index) => ({
+            id: String((row && row.id) || 'row_' + (index + 1)).slice(0, 40),
+            building: String((row && row.building) || '').slice(0, 160),
+            floor_range: String((row && (row.floor_range || row.floorRange)) || '').slice(0, 80),
+            component: String((row && row.component) || '').slice(0, 160),
+            units_per_floor: (row && row.units_per_floor) ?? '',
+            floor_area_sqm: (row && row.floor_area_sqm) ?? '',
+            circulation: String((row && row.circulation) || '').slice(0, 400)
+          })),
+          totals: Array.isArray(distribution.totals) ? distribution.totals.slice(0, 60) : [],
+          notes: Array.isArray(distribution.notes) ? distribution.notes.slice(0, 12) : [],
+          checks: Array.isArray(distribution.checks) ? distribution.checks.slice(0, 40) : [],
+          issues: Array.isArray(distribution.issues) ? distribution.issues.slice(0, 30) : [],
+          approved: Boolean(distribution.approved)
+        },
+        prompts: {
+          site: String(prompts.site || '').slice(0, 12000),
+          uses: String(prompts.uses || '').slice(0, 12000),
+          massing: String(prompts.massing || '').slice(0, 12000)
+        },
+        planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
+        viewStage: ['verify', 'boundary', 'generate'].includes(source.viewStage) ? source.viewStage : 'verify',
+        promptReady: Boolean(source.promptReady || (prompts.site && prompts.uses && prompts.massing)),
+        promptsError: String(source.promptsError || '').slice(0, 400)
+      };
+    }
+
+    function visualConceptWorkflowPlanSeed(definition, workflow) {
+      const prompt = workflow?.prompts?.[definition.kind] || '';
+      return {
+        mode: 'ai',
+        label: definition.label,
+        caption: definition.label,
+        prompt,
+        imageUrl: '',
+        approvedImageUrl: '',
+        status: 'pending',
+        chat: [],
+        styleReferenceFileIds: [],
+        styleReferenceNames: [],
+        sourceFileId: '',
+        sourceFileName: ''
+      };
+    }
+
+    function visualConceptPlansWorkflowState() {
+      tenantVisualConceptState = tenantVisualConceptState || normalizeVisualConceptState({});
+      tenantVisualConceptState.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      return tenantVisualConceptState.plansWorkflow;
+    }
+
+    function visualConceptInteriorSlotId(componentId, viewIndex = 1) {
+      const index = Math.max(1, Math.min(VISUAL_CONCEPT_MAX_INTERIOR_IMAGES, Number(viewIndex) || 1));
+      return VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + String(componentId || '').trim() + '::' + index;
+    }
+
+    function visualConceptInteriorComponentIdFromSlot(slotId) {
+      const value = String(slotId || '');
+      const prefix = VISUAL_CONCEPT_INTERNAL_PREFIX + '_';
+      if (!value.startsWith(prefix)) return '';
+      const rest = value.slice(prefix.length);
+      return rest.includes('::') ? rest.split('::')[0] : rest;
+    }
+
+    function visualConceptInteriorViewIndexFromSlot(slotId) {
+      const value = String(slotId || '');
+      if (!value.includes('::')) return 1;
+      const index = Number(value.split('::').pop());
+      return Number.isFinite(index) && index > 0 ? index : 1;
+    }
+
+    function isVisualConceptInteriorSlot(slotId) {
+      const value = String(slotId || '');
+      return value === VISUAL_CONCEPT_INTERNAL_PREFIX || value.startsWith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_');
+    }
+
+    function visualConceptInteriorComponents() {
+      const rows = typeof getComponentRowsData === 'function' ? getComponentRowsData() : [];
+      const fallback = Array.isArray(tenantProjectData?.financial_study_model?.dynamicRows?.components)
+        ? tenantProjectData.financial_study_model.dynamicRows.components
+        : [];
+      const source = rows.length ? rows : fallback;
+      const seen = new Set();
+      return source.map((item, index) => {
+        const id = String(item.id || item.componentId || ('component_' + (index + 1))).trim();
+        const name = String(item.name || item.component || item.title || '').trim();
+        if (!id || !name || seen.has(id)) return null;
+        seen.add(id);
+        return {
+          id,
+          name,
+          useType: item.useType || item.type || '',
+          units: item.units,
+          unitArea: item.unitArea,
+          builtArea: item.builtArea || item.totalArea
+        };
+      }).filter(Boolean).slice(0, 40);
+    }
+
+    function visualConceptSlotSource(sourceSlots, itemId) {
+      const slots = sourceSlots && typeof sourceSlots === 'object' ? sourceSlots : {};
+      const aliases = VISUAL_CONCEPT_SLOT_ALIASES[itemId] || [itemId];
+      for (const key of aliases) {
+        if (slots[key] && typeof slots[key] === 'object') return slots[key];
+      }
+      return null;
+    }
+
+    function visualConceptReferenceList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(item => String(item || '').trim()).filter(Boolean) : [value.trim()];
+      } catch (error) {
+        return [value.trim()];
+      }
+    }
+
+    // A plan is a slot too: plans2d keeps the durable record the slides and exports read
+    // (title, description, file, published image), while slots[plan.id] carries the working
+    // state (mode, prompt, chat, approval) so plans run through the same prompt-edit-
+    // generate-approve flow as every other visual card.
+    function normalizeVisualConceptPlans(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const list = Array.isArray(value) ? value : [];
+      const seen = new Set();
+      return list.map((item, index) => {
+        const source = item && typeof item === 'object' ? item : {};
+        let id = String(source.id || '').trim() || ('plan_' + (index + 1));
+        if (!id.startsWith('plan_')) id = 'plan_' + id;
+        while (seen.has(id)) id = id + '_' + (index + 1);
+        seen.add(id);
+        const fileId = String(source.fileId || source.file_id || '');
+        const imageUrl = durableImageUrl(source.imageUrl || source.image_url);
+        const mode = ['ai', 'upload'].includes(source.mode) ? source.mode : (fileId ? 'upload' : 'ai');
+        return {
+          id,
+          mode,
+          title: String(source.title || '').slice(0, 120),
+          description: String(source.description || '').slice(0, 2000),
+          fileId,
+          fileName: String(source.fileName || source.file_name || ''),
+          imageUrl
+        };
+      }).filter(item => item.fileId || item.imageUrl || item.mode === 'ai').slice(0, VISUAL_CONCEPT_MAX_PLANS);
+    }
+
+    function visualConceptPlanSeed(plan) {
+      if (!plan) return null;
+      return {
+        mode: plan.mode === 'upload' ? 'upload' : 'ai',
+        label: plan.title || '',
+        caption: plan.description || '',
+        sourceFileId: plan.fileId || '',
+        sourceFileName: plan.fileName || '',
+        imageUrl: plan.imageUrl || '',
+        status: plan.imageUrl ? 'review' : 'pending'
+      };
+    }
+
+    function normalizeVisualConceptState(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const source = value && typeof value === 'object' ? value : {};
+      const deletedInteriorSlots = new Set(visualConceptReferenceList(
+        source.deletedInteriorSlots || source.deleted_interior_slots));
+      const hasStateReferenceIds = ['styleReferenceFileIds', 'style_reference_file_ids', 'styleReferenceFileId', 'style_reference_file_id']
+        .some(key => Object.prototype.hasOwnProperty.call(source, key));
+      const savedReferenceIds = visualConceptReferenceList(source.styleReferenceFileIds || source.style_reference_file_ids);
+      const legacyReferenceId = String(source.styleReferenceFileId || source.style_reference_file_id || '').trim();
+      if (legacyReferenceId && !savedReferenceIds.includes(legacyReferenceId)) savedReferenceIds.unshift(legacyReferenceId);
+      if (!hasStateReferenceIds && typeof tenantProjectData !== 'undefined') {
+        visualConceptReferenceList(tenantProjectData.visual_style_reference_file_ids).forEach(fileId => {
+          if (!savedReferenceIds.includes(fileId)) savedReferenceIds.push(fileId);
+        });
+      }
+      const plans = normalizeVisualConceptPlans(source.plans2d);
+      const plansWorkflow = normalizeVisualConceptPlansWorkflow(source.plansWorkflow || source.plans_workflow);
+      const styleReferenceFileIds = savedReferenceIds.slice(0, 5);
+      const styleReferenceNames = visualConceptReferenceList(source.styleReferenceNames || source.style_reference_names);
+      const legacyReferenceName = String(source.styleReferenceName || '').trim();
+      if (legacyReferenceName && !styleReferenceNames.includes(legacyReferenceName)) styleReferenceNames.unshift(legacyReferenceName);
+      styleReferenceNames.splice(5);
+      const slots = {};
+      // A slot that already carries its own state must never be rebuilt from the legacy
+      // tenantCreativeImages mirrors: those hold previews too, so they used to re-approve
+      // an image the user had just unapproved, or never approved at all.
+      const stated = {};
+      const slotIds = new Set(VISUAL_CONCEPT_SLOTS.map(item => item.id));
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => slotIds.add(definition.id));
+      Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
+        if (isVisualConceptInteriorSlot(id) && !deletedInteriorSlots.has(id)) slotIds.add(id);
+        if (isVisualConceptPlanSlot(id) && plans.some(plan => plan.id === id)) slotIds.add(id);
+      });
+      plans.forEach(plan => slotIds.add(plan.id));
+      visualConceptInteriorComponents().forEach(item => {
+        const firstId = visualConceptInteriorSlotId(item.id, 1);
+        if (!deletedInteriorSlots.has(firstId)) slotIds.add(firstId);
+        const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + item.id;
+        if (source.slots && source.slots[legacyId]) slotIds.add(visualConceptInteriorSlotId(item.id, 1));
+        for (let view = 2; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
+          const viewId = visualConceptInteriorSlotId(item.id, view);
+          if (source.slots && source.slots[viewId] && !deletedInteriorSlots.has(viewId)) slotIds.add(viewId);
+        }
+      });
+      slotIds.forEach(id => {
+        let sourceId = id;
+        if (isVisualConceptInteriorSlot(id) && id.includes('::') && visualConceptInteriorViewIndexFromSlot(id) === 1) {
+          const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + visualConceptInteriorComponentIdFromSlot(id);
+          if ((!source.slots || !source.slots[id]) && source.slots && source.slots[legacyId]) sourceId = legacyId;
+        }
+        const workflowDefinition = visualConceptPlanDefinition(id);
+        const slot = visualConceptSlotSource(source.slots, sourceId) || visualConceptSlotSource(source.slots, id)
+          || visualConceptPlanSeed(plans.find(plan => plan.id === id))
+          || (workflowDefinition ? visualConceptWorkflowPlanSeed(workflowDefinition, plansWorkflow) : null)
+          || emptyVisualConceptSlot(id);
+        const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
+          role: entry.role === 'assistant' ? 'assistant' : 'user',
+          text: String(entry.text).slice(0, 4000)
+        })) : [];
+        // A blob: URL is a handle into the tab that created it, so a stored one is dead and is
+        // dropped here; repairVisualConceptStoredImages republishes it from the file id.
+        const approved = durableImageUrl(slot.approvedImageUrl);
+        const imageUrl = durableImageUrl(slot.imageUrl);
+        const mode = ['ai', 'upload'].includes(slot.mode)
+          ? slot.mode
+          : (slot.sourceFileId && !slot.prompt && !(slot.chat && slot.chat.length) ? 'upload' : 'ai');
+        const rawStatus = slot.status;
+        const safeStatus = (rawStatus === 'generating')
+          ? (approved ? 'approved' : imageUrl ? 'review' : 'pending')
+          : (['approved', 'review', 'pending'].includes(rawStatus)
+            ? rawStatus
+            : (approved ? 'approved' : imageUrl ? 'review' : 'pending'));
+        stated[id] = Boolean(slot.status || approved || imageUrl);
+        slots[id] = {
+          id,
+          mode,
+          prompt: String(slot.prompt || '').slice(0, 12000),
+          imageUrl,
+          approvedImageUrl: approved,
+          status: safeStatus,
+          chat,
+          styleReferenceFileIds: visualConceptReferenceList(slot.styleReferenceFileIds).slice(0, 5),
+          styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
+          sourceFileId: String(slot.sourceFileId || ''),
+          sourceFileName: String(slot.sourceFileName || ''),
+          label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80),
+          caption: String(slot.caption || '').slice(0, 400)
+        };
+      });
+      if (!stated.cover && tenantCreativeImages.cover) {
+        slots.cover.approvedImageUrl = tenantCreativeImages.cover;
+        slots.cover.imageUrl = slots.cover.imageUrl || tenantCreativeImages.cover;
+        slots.cover.prompt = slots.cover.prompt || tenantCreativeImages.cover_prompt || '';
+        slots.cover.status = 'approved';
+      }
+      const moodboardImages = Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard : [];
+      const moodboardPrompts = Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : [];
+      VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).forEach((item, index) => {
+        const slot = slots[item.id];
+        if (!stated[item.id] && moodboardImages[index]) {
+          slot.approvedImageUrl = moodboardImages[index];
+          slot.imageUrl = slot.imageUrl || moodboardImages[index];
+          slot.status = 'approved';
+        }
+        if (!slot.prompt && moodboardPrompts[index]) slot.prompt = String(moodboardPrompts[index] || '').slice(0, 12000);
+      });
+      return {
+        version: 1,
+        slots,
+        plans2d: plans,
+        plansWorkflow,
+        styleReferenceFileIds,
+        styleReferenceFileId: styleReferenceFileIds[0] || '',
+        styleReferenceNames,
+        styleReferenceName: styleReferenceNames[0] || '',
+        deletedInteriorSlots: Array.from(deletedInteriorSlots),
+        selectedInteriorComponentId: String(source.selectedInteriorComponentId || '').trim()
+      };
+    }
+
+
     function persistVisualConceptDraftState() {
       const previousImages = tenantCreativeImages || {};
       const previousMoodboard = Array.isArray(previousImages.moodboard) ? previousImages.moodboard : [];

@@ -670,3 +670,56 @@ def job_queue_stats():
     except Exception:
         pass
     return stats
+
+
+def get_file_type_registry(active_only=True):
+    """t62: the versioned registry of allowed file types."""
+    conn = get_db()
+    query = ('SELECT key, label_ar, label_en, kind, max_size_mb, allowed_extensions, '
+             'version, is_active, updated_at FROM file_type_registry')
+    if active_only:
+        query += ' WHERE is_active = 1'
+    query += ' ORDER BY key'
+    rows = conn.execute(query).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item['allowed_extensions'] = _json_or(item.get('allowed_extensions'), [])
+        result.append(item)
+    return result
+
+
+def upsert_file_type(key, label_ar, kind='document', max_size_mb=25,
+                     allowed_extensions=None, label_en=None, is_active=True):
+    """Create or evolve one registry entry; a content-affecting change bumps version."""
+    if not key or not label_ar:
+        return {'error': 'key_and_label_required'}
+    conn = get_db()
+    existing = conn.execute('SELECT * FROM file_type_registry WHERE key = ?', (key,)).fetchone()
+    extensions_json = json.dumps(list(allowed_extensions or []))
+    now = _utcnow().isoformat()
+    if existing:
+        changed = (
+            existing['label_ar'] != label_ar or existing['kind'] != kind
+            or int(existing['max_size_mb'] or 0) != int(max_size_mb)
+            or existing['allowed_extensions'] != extensions_json
+        )
+        version = int(existing['version'] or 1) + (1 if changed else 0)
+        conn.execute(
+            '''UPDATE file_type_registry SET label_ar = ?, label_en = ?, kind = ?, max_size_mb = ?,
+               allowed_extensions = ?, version = ?, is_active = ?, updated_at = ? WHERE key = ?''',
+            (label_ar, label_en, kind, int(max_size_mb), extensions_json,
+             version, 1 if is_active else 0, now, key),
+        )
+    else:
+        conn.execute(
+            '''INSERT INTO file_type_registry (key, label_ar, label_en, kind, max_size_mb, allowed_extensions, version, is_active, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)''',
+            (key, label_ar, label_en, kind, int(max_size_mb), extensions_json,
+             1 if is_active else 0, now),
+        )
+    conn.commit()
+    row = conn.execute('SELECT * FROM file_type_registry WHERE key = ?', (key,)).fetchone()
+    item = dict(row)
+    item['allowed_extensions'] = _json_or(item.get('allowed_extensions'), [])
+    return item

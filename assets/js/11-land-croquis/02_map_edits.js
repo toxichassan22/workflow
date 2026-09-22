@@ -1,3 +1,94 @@
+    /* ── Tenant map-edit state: polygon/road/catchment/landmark drafts,
+       edit-mode flags and the asset invalidation used by every map panel. ── */
+
+
+    let tenantMapPreviewState = null;
+    let tenantMapPolygonPoints = [];
+    let tenantMapDraftPolygonPoints = [];
+    let tenantMapPolygonMode = false;
+    let tenantMapPinMode = false;
+    let tenantMapDraftPinHistory = [];
+    let tenantRoadDrawingTarget = null;
+    let tenantRoadEditMode = false;
+    let tenantRoadEditDraft = null;
+    let tenantRoadEditHistory = [];
+    let tenantRoadEditSelectedIndex = -1;
+    let tenantCatchmentEditMode = false;
+    let tenantCatchmentEditDraft = null;
+    let tenantCatchmentEditHistory = [];
+    let tenantLandmarksEditMode = false;
+    let tenantLandmarksEditDraft = null;
+    let tenantLandmarksEditHistory = [];
+    let tenantLandmarkPlacementTarget = null;
+    let mapPlaceLinked = null;
+    let tenantNearbyLandmarks = [];
+    let tenantSelectedMapType = 'overview';
+
+    function parseTenantPolygonPoints(value) {
+      if (Array.isArray(value)) {
+        return value.map(point => Array.isArray(point) ? point.map(Number) : [])
+          .filter(point => point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]))
+          .map(point => [point[0], point[1]]);
+      }
+      if (typeof value !== 'string') return [];
+      return value.split(';').map(point => point.split(',').map(Number))
+        .filter(point => point.length === 2 && point.every(Number.isFinite));
+    }
+
+    function resetTenantRoadModes() {
+      tenantRoadDrawingTarget = null;
+      tenantRoadEditMode = false;
+      tenantRoadEditDraft = null;
+      tenantRoadEditHistory = [];
+      tenantRoadEditSelectedIndex = -1;
+      mapPlaceLinked = null;
+    }
+
+    function resetTenantCatchmentMode() {
+      tenantCatchmentEditMode = false;
+      tenantCatchmentEditDraft = null;
+      tenantCatchmentEditHistory = [];
+      mapPlaceLinked = null;
+    }
+
+    function resetTenantLandmarksEditMode() {
+      tenantLandmarksEditMode = false;
+      tenantLandmarksEditDraft = null;
+      tenantLandmarksEditHistory = [];
+      mapPlaceLinked = null;
+    }
+
+    function invalidateTenantMapAssets() {
+      tenantCreativeImages = {
+        ...(tenantCreativeImages || {}),
+        map_placeholders: {},
+        map_zooms: {},
+        map_centers: {},
+        map_landmarks: [],
+        map_lat: null,
+        map_lng: null,
+        maps_signature: null,
+        maps_persisted: false,
+        map_approvals: {}
+      };
+      tenantProjectData.location_polygon_source = 'auto';
+      tenantMapPreviewState = null;
+      tenantMapPolygonPoints = [];
+      tenantMapDraftPolygonPoints = [];
+      tenantMapPolygonMode = false;
+      tenantMapPinMode = false;
+      tenantMapDraftPinHistory = [];
+      resetTenantRoadModes();
+      resetTenantCatchmentMode();
+      resetTenantLandmarksEditMode();
+      tenantProjectData.location_polygon = '';
+      syncTenantLocationPolygon();
+      renderTenantMapPolygonOverlay();
+      renderMapPreviewGallery();
+      triggerAutoSaveDraft();
+    }
+
+
     function tenantMapCoordinatesFromClient(clientX, clientY, img) {
       if (!tenantMapPreviewState || !img) return null;
       const rect = img.getBoundingClientRect();

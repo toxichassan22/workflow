@@ -1271,3 +1271,211 @@
       if (changed || planChanged) checkpointPresentationUndo();
       return changed || planChanged || dataChanged;
     }
+
+
+    async function openTenantAdmin() {
+      showTenantPage('tenantAdminPage');
+      await loadAdminDashboard();
+    }
+
+    async function loadAdminDashboard() {
+      const statsEl = document.getElementById('sagAdminStats');
+      const pendingEl = document.getElementById('sagPendingActions');
+      if (statsEl) statsEl.innerHTML = '';
+      if (pendingEl) showInlineLoader(pendingEl, WFT('common.loading', 'جاري التحميل...'));
+      const [overviewData, tenantsData] = await Promise.all([
+        api('GET', '/api/admin/operational-overview').catch(() => null),
+        api('GET', '/api/admin/tenants').catch(() => null)
+      ]);
+      const overview = (overviewData && overviewData.overview) || {};
+      sagAllTenants = (tenantsData && tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
+      sagLastOverview = overview;
+      renderAdminDashboard(overview);
+      if (sagChartRange.preset !== '12') sagApplyChartRange();
+      if (typeof llLoadNotifications === 'function') llLoadNotifications('adminNotificationsList');
+    }
+
+    // Re-render on language toggle: every dashboard label is built through
+    // WFT at render time, so switching ar/en redraws KPIs, legends, month
+    // ticks, status bars and pending actions instead of leaving stale Arabic.
+    document.addEventListener('wf:lang', function () {
+      const page = document.getElementById('tenantAdminPage');
+      if (!page || !sagLastOverview) return;
+      const visible = page.classList.contains('active') || (page.style.display !== 'none' && page.style.display !== '');
+      if (visible) renderAdminDashboard(sagLastOverview);
+    });
+
+    // ── Super-admin dashboard: SVG data-viz helpers (no icon glyphs; charts
+    //    are genuine data rendering and keep the no-icons rule intact) ──
+
+    const SAG_MONTHS = {
+      ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+      en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+    };
+
+    function sagMonthLabel(iso) {
+      const lang = (window.WFI18n && WFI18n.getLang && WFI18n.getLang()) || 'ar';
+      const names = SAG_MONTHS[lang === 'en' ? 'en' : 'ar'];
+      const s = String(iso);
+      const parts = s.split('-');
+      const m = parseInt(parts[1], 10);
+      const name = names[(m || 1) - 1] || s;
+      if (parts.length >= 3) {
+        const day = parseInt(parts[2], 10);
+        const time = s.includes(' ') ? s.split(' ')[1] : (s.includes('T') ? s.split('T')[1] : '');
+        const base = day + ' ' + name + ' ' + parts[0];
+        return time ? base + ' ' + time.slice(0, 5) : base;
+      }
+      return name + ' ' + (parts[0] || '');
+    }
+
+    function sagFmtNum(v) {
+      return Number(v || 0).toLocaleString('en-US');
+    }
+
+    function sagFmtMoney(v) {
+      const n = Number(v || 0);
+      const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
+      return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال';
+    }
+
+    function sagDeltaChip(d) {
+      if (d === null || d === undefined || isNaN(d)) {
+        return '<span class="admin-delta flat">' + WFT('admin.delta_na', '—') + '</span>';
+      }
+      const cls = d > 0 ? 'up' : (d < 0 ? 'down' : 'flat');
+      const txt = (d > 0 ? '+' : '') + d + '%';
+      return '<span class="admin-delta ' + cls + '">' + txt + '</span>';
+    }
+
+    function sagSmoothPath(pts) {
+      if (pts.length < 3) {
+        return 'M' + pts.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L');
+      }
+      let d = 'M' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+      }
+      return d;
+    }
+
+    function sagSparkline(values, color) {
+      const w = 140, h = 40, pad = 3;
+      const vals = (values && values.length ? values : [0, 0]);
+      const max = Math.max(1, ...vals);
+      const pts = vals.map((v, i) => [pad + i * (w - 2 * pad) / (vals.length - 1), h - pad - (v / max) * (h - 2 * pad)]);
+      const line = sagSmoothPath(pts);
+      const area = line + ' L' + pts[pts.length - 1][0].toFixed(1) + ' ' + h + ' L' + pts[0][0].toFixed(1) + ' ' + h + ' Z';
+      return '<svg class="admin-spark-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path d="' + area + '" fill="' + color + '" opacity="0.14"/>' +
+        '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round"/></svg>';
+    }
+
+    function sagNiceScale(maxV) {
+      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000];
+      const step = steps.find(s => maxV <= s * 3) || 50000;
+      return { top: step * 3, step: step };
+    }
+
+    function sagTickText(v, top) {
+      return top < 10 ? String(Math.round(v * 10) / 10) : sagFmtNum(Math.round(v));
+    }
+
+    function sagLineChart(labels, series) {
+      const W = 660, H = 240, padL = 34, padR = 10, padT = 16, padB = 28;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const maxV = Math.max(0.01, ...series.flatMap(s => s.values));
+      const sc = sagNiceScale(maxV), top = sc.top;
+      const n = labels.length;
+      const x = i => padL + (n === 1 ? innerW / 2 : i * innerW / (n - 1));
+      const y = v => padT + innerH - (v / top) * innerH;
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+      for (let g = 0; g <= 3; g++) {
+        const gv = sc.step * g, gy = y(gv);
+        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
+          '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
+      }
+      const tickStep = Math.max(1, Math.ceil(n / 7));
+      labels.forEach((lb, i) => {
+        if (i % tickStep !== 0 && i !== n - 1) return;
+        svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="middle">' + sagMonthLabel(lb) + '</text>';
+      });
+      series.forEach(s => {
+        const fmt = s.fmt || sagFmtNum;
+        const pts = s.values.map((v, i) => [x(i), y(v)]);
+        const line = sagSmoothPath(pts);
+        const area = line + ' L' + x(n - 1) + ' ' + (padT + innerH) + ' L' + x(0) + ' ' + (padT + innerH) + ' Z';
+        svg += '<path d="' + area + '" fill="' + s.color + '" opacity="0.10"/>' +
+          '<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2.4" stroke-linecap="round"/>';
+        pts.forEach((p, i) => {
+          svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2" fill="' + s.color + '">' +
+            '<title>' + s.name + ': ' + fmt(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
+        });
+      });
+      return { svg: svg + '</svg>', geom: { W, H, padL, padR, padT, padB, top, n } };
+    }
+
+    function sagBindChartTooltip(container, labels, series, geom) {
+      const svg = container.querySelector('svg');
+      if (!svg || !geom.n) return;
+      const NS = 'http://www.w3.org/2000/svg';
+      const innerW = geom.W - geom.padL - geom.padR;
+      const innerH = geom.H - geom.padT - geom.padB;
+      const xFor = i => geom.padL + (geom.n === 1 ? innerW / 2 : i * innerW / (geom.n - 1));
+      const yFor = v => geom.padT + innerH - (v / geom.top) * innerH;
+      const guide = document.createElementNS(NS, 'line');
+      guide.setAttribute('class', 'admin-chart-guide');
+      guide.setAttribute('x1', '0');
+      guide.setAttribute('x2', '0');
+      guide.setAttribute('y1', String(geom.padT));
+      guide.setAttribute('y2', String(geom.H - geom.padB));
+      guide.style.display = 'none';
+      svg.appendChild(guide);
+      const dots = series.map(s => {
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('r', '4.5');
+        c.setAttribute('fill', s.color);
+        c.setAttribute('class', 'admin-chart-hover-dot');
+        c.style.display = 'none';
+        svg.appendChild(c);
+        return c;
+      });
+      const tip = document.createElement('div');
+      tip.className = 'admin-chart-tip';
+      tip.style.display = 'none';
+      container.appendChild(tip);
+      svg.addEventListener('mousemove', (ev) => {
+        const rect = svg.getBoundingClientRect();
+        if (!rect.width) return;
+        const vbX = (ev.clientX - rect.left) * (geom.W / rect.width);
+        const span = innerW / Math.max(1, geom.n - 1);
+        let i = Math.round((vbX - geom.padL) / span);
+        i = Math.max(0, Math.min(geom.n - 1, i));
+        const px = xFor(i);
+        guide.setAttribute('x1', px.toFixed(1));
+        guide.setAttribute('x2', px.toFixed(1));
+        guide.style.display = '';
+        series.forEach((s, si) => {
+          dots[si].setAttribute('cx', px.toFixed(1));
+          dots[si].setAttribute('cy', yFor(s.values[i] || 0).toFixed(1));
+          dots[si].style.display = '';
+        });
+        tip.innerHTML = '<div class="tip-title">' + escapeHtml(sagMonthLabel(labels[i])) + '</div>' +
+          series.map(s =>
+            '<div class="tip-row"><span class="admin-legend-dot" style="background:' + s.color + '"></span>' +
+            '<span>' + s.name + '</span><strong>' + escapeHtml(String((s.fmt || sagFmtNum)(s.values[i] || 0))) + '</strong></div>'
+          ).join('');
+        tip.style.display = 'block';
+        const cRect = container.getBoundingClientRect();
+        const half = tip.offsetWidth / 2;
+        tip.style.left = Math.max(half + 4, Math.min(cRect.width - half - 4, ev.clientX - cRect.left)) + 'px';
+      });
+      svg.addEventListener('mouseleave', () => {
+        guide.style.display = 'none';
+        dots.forEach(c => { c.style.display = 'none'; });
+        tip.style.display = 'none';
+      });
+    }

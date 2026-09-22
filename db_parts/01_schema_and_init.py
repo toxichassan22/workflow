@@ -950,3 +950,11 @@ def _seed_admin(conn):
         (admin_id, admin_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC', 0)
     )
     print(f"[DB] Seeded super admin: {admin_email}")
+
+
+def _json_or(value, fallback):
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed is not None else fallback

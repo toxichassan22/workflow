@@ -1,117 +1,13 @@
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Project team library (فريق العمل)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _team_entity_payload(data):
-    """Normalise a team-entity request body; returns (fields, error)."""
-    name = str(data.get('name') or '').strip()
-    if not name:
-        return None, 'اسم الجهة مطلوب'
-    logo_file_id = str(data.get('logoFileId') or '').strip()
-    if logo_file_id and not db.get_project_file(g.tenant_id, logo_file_id):
-        return None, 'شعار الجهة غير موجود'
-    return {
-        'name': name,
-        'logo_file_id': logo_file_id,
-        'brief': str(data.get('brief') or '').strip(),
-        'experience_years': str(data.get('experienceYears') or '').strip(),
-        'notable_projects': str(data.get('notableProjects') or '').strip(),
-        'role': str(data.get('role') or '').strip(),
-    }, None
-
-
-@app.route('/api/team-entities', methods=['GET'])
-@require_auth
-def api_list_team_entities():
-    """Company-wide team library; every project file starts from this list."""
-    return jsonify({'success': True, 'entities': db.get_team_entities(g.tenant_id)})
-
-
-@app.route('/api/team-entities', methods=['POST'])
-@require_permission('company_settings')
-def api_create_team_entity():
-    fields, error = _team_entity_payload(request.json or {})
-    if error:
-        return jsonify({'success': False, 'error': error}), 400
-    entity_id = db.create_team_entity(g.tenant_id, fields.pop('name'), **fields)
-    return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)}), 201
-
-
-@app.route('/api/team-entities/<entity_id>', methods=['PUT'])
-@require_permission('company_settings')
-def api_update_team_entity(entity_id):
-    if not db.get_team_entity(g.tenant_id, entity_id):
-        return jsonify({'success': False, 'error': 'الجهة غير موجودة'}), 404
-    fields, error = _team_entity_payload(request.json or {})
-    if error:
-        return jsonify({'success': False, 'error': error}), 400
-    db.update_team_entity(g.tenant_id, entity_id, **fields)
-    return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)})
-
-
-@app.route('/api/team-entities/<entity_id>', methods=['DELETE'])
-@require_permission('company_settings')
-def api_delete_team_entity(entity_id):
-    if not db.delete_team_entity(g.tenant_id, entity_id):
-        return jsonify({'success': False, 'error': 'الجهة غير موجودة'}), 404
-    return jsonify({'success': True})
-
-
-@app.route('/api/field-sections/custom', methods=['POST'])
-@require_permission('custom_fields')
-def api_add_custom_section():
-    """Create a custom field section."""
-    data = request.json or {}
-    label = (data.get('label') or '').strip()
-    if not label:
-        return jsonify({'error': 'اسم القسم مطلوب'}), 400
-    # Generate key from label if not provided
-    key = (data.get('key') or '').strip().lower().replace(' ', '_').replace('-', '_')
-    if not key:
-        import re as _re
-        # Transliterate Arabic to approximate key
-        ar_map = {'أ': 'a', 'إ': 'a', 'آ': 'a', 'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ة': 'a', 'ء': '', 'ئ': 'y', 'ؤ': 'w'}
-        key = ''.join(ar_map.get(c, c) for c in label)
-        key = _re.sub(r'[^a-zA-Z0-9_]', '', key)
-        if not key:
-            key = 'section_' + str(_uuid.uuid4())[:8]
-    # Prevent collision with built-in keys
-    builtin_keys = {s['key'] for s in db.FIELD_SECTIONS}
-    if key in builtin_keys:
-        return jsonify({'error': 'لا يمكن استخدام اسم قسم موجود مسبقاً'}), 400
-    sort_order = int(data.get('sortOrder', 100))
-    section_id = db.add_custom_section(g.tenant_id, key, label, sort_order)
-    if not section_id:
-        return jsonify({'error': 'قسم بهذا الاسم موجود مسبقاً'}), 409
-    return jsonify({'success': True, 'sectionId': section_id, 'key': key}), 201
-
-
-@app.route('/api/field-sections/custom/<section_key>', methods=['PUT'])
-@require_permission('custom_fields')
-def api_update_custom_section(section_key):
-    """Update a custom field section."""
-    # The route is deliberately custom-only: built-in section labels and
-    # structure stay stable, while each company can rename its own additions.
-    if not db.get_custom_section(g.tenant_id, section_key):
-        return jsonify({'error': 'Custom section not found'}), 404
-
-    data = request.json or {}
-    updates = {}
-    if 'label' in data:
-        label = (data.get('label') or '').strip()
-        if not label:
-            return jsonify({'error': 'اسم القسم لا يمكن أن يكون فارغاً'}), 400
-        updates['section_label'] = label
-    if 'sortOrder' in data:
-        updates['sort_order'] = int(data.get('sortOrder', 100))
-    if 'isActive' in data:
-        updates['is_active'] = 1 if data.get('isActive') else 0
-    if not updates:
-        return jsonify({'error': 'لا توجد تغييرات'}), 400
-    db.update_custom_section(g.tenant_id, section_key, **updates)
-    return jsonify({'success': True})
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Regulation evidence and land-field normalization: chat/JSON
+# response helpers, placeholder stripping, facade/land-use/croquis field
+# normalizers, and the official-regulation + SBC PDF search machinery
+# (page indexes, scoring, transcription pages, table batching, full
+# evidence extraction and rendering).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 def _stringify_chat_part(value):

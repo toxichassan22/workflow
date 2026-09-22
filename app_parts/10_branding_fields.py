@@ -660,3 +660,72 @@ def api_ai_build_fields():
     except Exception as e:
         print(f"[AI-BUILD-FIELDS ERROR] {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/field-sections/custom/<section_key>', methods=['DELETE'])
+@require_permission('custom_fields')
+def api_delete_custom_section(section_key):
+    """Delete a custom field section. Fields move to 'general'."""
+    # Prevent deleting built-in sections
+    builtin_keys = {s['key'] for s in db.FIELD_SECTIONS}
+    if section_key in builtin_keys:
+        return jsonify({'error': 'لا يمكن حذف قسم أساسي'}), 400
+    if not db.get_custom_section(g.tenant_id, section_key):
+        return jsonify({'error': 'Custom section not found'}), 404
+    db.delete_custom_section(g.tenant_id, section_key)
+    return jsonify({'success': True})
+
+
+@app.route('/api/field-sections/custom', methods=['POST'])
+@require_permission('custom_fields')
+def api_add_custom_section():
+    """Create a custom field section."""
+    data = request.json or {}
+    label = (data.get('label') or '').strip()
+    if not label:
+        return jsonify({'error': 'اسم القسم مطلوب'}), 400
+    # Generate key from label if not provided
+    key = (data.get('key') or '').strip().lower().replace(' ', '_').replace('-', '_')
+    if not key:
+        import re as _re
+        # Transliterate Arabic to approximate key
+        ar_map = {'أ': 'a', 'إ': 'a', 'آ': 'a', 'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ة': 'a', 'ء': '', 'ئ': 'y', 'ؤ': 'w'}
+        key = ''.join(ar_map.get(c, c) for c in label)
+        key = _re.sub(r'[^a-zA-Z0-9_]', '', key)
+        if not key:
+            key = 'section_' + str(_uuid.uuid4())[:8]
+    # Prevent collision with built-in keys
+    builtin_keys = {s['key'] for s in db.FIELD_SECTIONS}
+    if key in builtin_keys:
+        return jsonify({'error': 'لا يمكن استخدام اسم قسم موجود مسبقاً'}), 400
+    sort_order = int(data.get('sortOrder', 100))
+    section_id = db.add_custom_section(g.tenant_id, key, label, sort_order)
+    if not section_id:
+        return jsonify({'error': 'قسم بهذا الاسم موجود مسبقاً'}), 409
+    return jsonify({'success': True, 'sectionId': section_id, 'key': key}), 201
+
+
+@app.route('/api/field-sections/custom/<section_key>', methods=['PUT'])
+@require_permission('custom_fields')
+def api_update_custom_section(section_key):
+    """Update a custom field section."""
+    # The route is deliberately custom-only: built-in section labels and
+    # structure stay stable, while each company can rename its own additions.
+    if not db.get_custom_section(g.tenant_id, section_key):
+        return jsonify({'error': 'Custom section not found'}), 404
+
+    data = request.json or {}
+    updates = {}
+    if 'label' in data:
+        label = (data.get('label') or '').strip()
+        if not label:
+            return jsonify({'error': 'اسم القسم لا يمكن أن يكون فارغاً'}), 400
+        updates['section_label'] = label
+    if 'sortOrder' in data:
+        updates['sort_order'] = int(data.get('sortOrder', 100))
+    if 'isActive' in data:
+        updates['is_active'] = 1 if data.get('isActive') else 0
+    if not updates:
+        return jsonify({'error': 'لا توجد تغييرات'}), 400
+    db.update_custom_section(g.tenant_id, section_key, **updates)
+    return jsonify({'success': True})

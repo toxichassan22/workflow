@@ -897,3 +897,171 @@ def api_get_field_sections():
     available = db.get_all_sections(g.tenant_id)
     allowed = db.get_user_field_sections(g.user_id, g.tenant_id) if g.user_id else {s['key']: True for s in available}
     return jsonify({'success': True, 'available': available, 'allowed': allowed})
+
+
+@app.route('/api/users/<user_id>/field-sections', methods=['GET'])
+@require_permission('manage_users')
+def api_get_user_field_sections(user_id):
+    """Get effective field section visibility for a user."""
+    user = db.get_user_by_id(user_id)
+    if not user or user['tenant_id'] != g.tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+    sections = db.get_user_field_sections(user_id, g.tenant_id)
+    return jsonify({'success': True, 'sections': sections, 'available': db.get_all_sections(g.tenant_id)})
+
+
+@app.route('/api/users/<user_id>/field-sections', methods=['PUT'])
+@require_permission('manage_users')
+def api_set_user_field_sections(user_id):
+    """Set field section visibility for a user."""
+    user = db.get_user_by_id(user_id)
+    if not user or user['tenant_id'] != g.tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+
+    data = request.json or {}
+    sections = data.get('sections', {})
+    all_keys = {s['key'] for s in db.get_all_sections(g.tenant_id)}
+    for key, granted in sections.items():
+        db.set_user_field_section(user_id, key, bool(granted))
+
+    sections = db.get_user_field_sections(user_id)
+    return jsonify({'success': True, 'sections': sections})
+
+
+def _send_invite_email(invite, tenant, email=None):
+    """Deliver one invite email and record the outcome on the row (t21)."""
+    recipient = email or invite.get('email')
+    company_name = (tenant and tenant.get('company_name')) or 'الشركة'
+    base_url = _current_base_url().rstrip('/')
+    full_invite_url = f"{base_url}/invite/{invite['token']}"
+    ok = send_platform_email(
+        recipient,
+        f'دعوة للانضمام إلى {company_name}',
+        f'مرحبًا،\n\nتمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
+        f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
+        'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
+    )
+    db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
+                         None if ok else 'smtp_send_failed')
+    return ok
+
+
+@app.route('/api/invites', methods=['POST'])
+@require_permission('manage_users')
+def api_create_invite():
+    """Create an invite carrying the pre-assigned role and scope (t21)."""
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        return jsonify({'error': 'Valid email required'}), 400
+    role = data.get('role') or 'employee'
+    if role not in db.USER_ROLES:
+        return jsonify({'error': 'Invalid role'}), 400
+    invite = db.create_invite(
+        g.tenant_id, email,
+        role=role,
+        name=data.get('name'), phone=data.get('phone'),
+        sections=data.get('sections') if isinstance(data.get('sections'), list) else None,
+        projects=data.get('projects') if isinstance(data.get('projects'), list) else None,
+    )
+    tenant = db.get_tenant_by_id(g.tenant_id)
+    email_sent = _send_invite_email(invite, tenant, email)
+    invite_url = f"/invite/{invite['token']}"
+    _record_audit_event('invite.created', 'invite_link', invite['id'], entity_name=email,
+                        metadata={'role': role, 'email_sent': email_sent})
+    return jsonify({'success': True, 'inviteUrl': invite_url, 'token': invite['token'],
+                    'inviteId': invite['id'], 'emailSent': email_sent})
+
+
+@app.route('/api/invite/<token>', methods=['GET'])
+def api_get_invite(token):
+    """Get invite info (public, no auth needed)."""
+    limited = _rate_limit_attempt('invite:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
+    invite = db.get_invite_by_token(token)
+    if not invite:
+        return jsonify({'error': 'Invalid or expired invite'}), 404
+    tenant = db.get_tenant_by_id(invite['tenant_id'])
+    return jsonify({
+        'success': True,
+        'email': invite['email'],
+        'companyName': tenant['company_name'] if tenant else '',
+    })
+
+
+@app.route('/api/invite/<token>/register', methods=['POST'])
+def api_accept_invite(token):
+    """Register a user via invite link."""
+    limited = _rate_limit_attempt('invite:ip', _rate_limit_client_ip())
+    if limited:
+        return limited
+    invite = db.get_invite_by_token(token)
+    if not invite:
+        return jsonify({'error': 'Invalid or expired invite'}), 404
+
+    data = request.json or {}
+    name = (data.get('name') or invite.get('name') or '').strip()
+    password = data.get('password', '')
+    if not password:
+        return jsonify({'error': 'password is required'}), 400
+    password_error = _password_validation_error(password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
+
+    existing = db.get_user_by_email(invite['email'])
+    if existing:
+        return jsonify({'error': 'Email already registered'}), 409
+
+    # The invite fixes the role and scope; the registrant only picks a name and
+    # password (t21). The name defaults to the one the admin typed on the invite.
+    invite_role = invite.get('role') if invite.get('role') in db.USER_ROLES else 'employee'
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+    user_id = db.create_user(
+        invite['tenant_id'], name, invite['email'], hash_password(password),
+        role=invite_role, phone=invite.get('phone'),
+    )
+    try:
+        db.apply_invite_scope(user_id, invite)
+    except Exception:
+        pass
+    db.mark_invite_used(token)
+    db.record_login(invite['tenant_id'], user_id)
+
+    tenant = db.get_tenant_by_id(invite['tenant_id'])
+    jwt_token = create_token(tenant['id'], invite['email'], is_admin=False,
+                             user_id=user_id, user_name=name, user_role=invite_role)
+    return jsonify({
+        'success': True,
+        'token': jwt_token,
+        'tenant': {
+            'id': tenant['id'],
+            'companyName': tenant['company_name'],
+            'email': tenant['email'],
+        },
+        'user': {'id': user_id, 'name': name, 'email': invite['email'], 'role': invite_role}
+    }), 201
+
+
+@app.route('/api/invites/<invite_id>/resend', methods=['POST'])
+@require_permission('manage_users')
+def api_resend_invite(invite_id):
+    """Retry the invite email for a still-pending invite (t21)."""
+    invite = db.get_invite(g.tenant_id, invite_id)
+    if not invite:
+        return jsonify({'error': 'Invite not found'}), 404
+    if invite.get('used_at'):
+        return jsonify({'error': 'Invite already used'}), 409
+    try:
+        expired = invite.get('expires_at') and datetime.fromisoformat(invite['expires_at']) < datetime.now(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        expired = False
+    if expired:
+        return jsonify({'error': 'Invite already expired'}), 409
+    tenant = db.get_tenant_by_id(g.tenant_id)
+    sent = _send_invite_email(invite, tenant)
+    _record_audit_event('invite.resent', 'invite_link', invite_id,
+                        entity_name=invite.get('email'), metadata={'email_sent': sent})
+    return jsonify({'success': True, 'emailSent': sent,
+                    'emailAttempts': int(invite.get('email_attempts') or 0) + 1})

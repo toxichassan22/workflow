@@ -34,12 +34,18 @@ FRONTEND_JS_ORDER = (
     '11-land-croquis/02_map_edits.js', '12-files-media/01_files_media.js',
     '12-files-media/02_visual_concept.js',
     '13-visual/01_visual_concept_page.js',
-    '13-visual/02_slides_progress.js', '14-slides-gen/01_undo.js',
-    '14-slides-gen/02_element_editing.js', '15-slide-edit-chat/01_render_inline_edit.js',
+    '13-visual/02_slides_progress.js',
+    '13-visual/03_tenant_slide_generation.js', '14-slides-gen/01_undo.js',
+    '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
+    '15-slide-edit-chat/01_render_inline_edit.js',
     '15-slide-edit-chat/02_designer_chat.js',
     '16-presentations-export/01_presentations.js',
-    '16-presentations-export/02_admin_dashboard.js', '17-admin-boot/01_training_rules.js',
-    '17-admin-boot/02_users_roles.js', '18-landloom-ops.js',
+    '16-presentations-export/02_admin_dashboard.js',
+    '16-presentations-export/03_export_delivery.js',
+    '16-presentations-export/04_sag_company_create.js',
+    '17-admin-boot/01_training_rules.js',
+    '17-admin-boot/02_users_roles.js',
+    '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
     '19-notifications.js',
 )
 
@@ -421,7 +427,7 @@ class AdminAgentTests(unittest.TestCase):
         # This agent changes company settings, so it runs on the reasoning model.
         self.assertEqual(captured['kwargs']['model'], self.application_module.SLIDE_TEXT_MODEL)
         self.assertEqual(captured['kwargs']['reasoning_effort'], 'medium')
-        self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-5.6-sol')
+        self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-6-sol')
 
     def test_agent_prompt_states_every_new_capability(self):
         app_source = read_module_source('app.py')

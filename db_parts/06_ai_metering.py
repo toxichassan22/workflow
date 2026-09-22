@@ -730,3 +730,221 @@ def set_maps_discovery_cache(tenant_id, cache_key, payload, ttl_days=30):
     except Exception as exc:
         print(f"[MAPS CACHE] store failed: {exc}")
         return False
+
+
+def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
+    """Bulk spend per project and per presentation for list screens.
+
+    A project total covers its own draft rows plus every presentation linked
+    to it through presentations.draft_id. A presentation total covers only
+    its own rows. AI and Maps costs are summed separately and combined.
+    """
+    draft_ids = [str(d) for d in (draft_ids or []) if d][:200]
+    presentation_ids = [str(p) for p in (presentation_ids or []) if p][:200]
+
+    def _zero():
+        return {'cost_usd': 0.0, 'ai_cost_usd': 0.0, 'maps_cost_usd': 0.0, 'calls': 0, 'total_tokens': 0}
+
+    projects = {d: _zero() for d in draft_ids}
+    presentations = {p: _zero() for p in presentation_ids}
+    if not draft_ids and not presentation_ids:
+        return {'projects': projects, 'presentations': presentations}
+    conn = get_db()
+
+    pres_of_draft = {}
+    if draft_ids:
+        marks = ', '.join(['?'] * len(draft_ids))
+        for row in conn.execute(
+            'SELECT id, draft_id FROM presentations '
+            f'WHERE tenant_id = ? AND draft_id IN ({marks})',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            if row.get('draft_id') and row.get('id'):
+                pres_of_draft.setdefault(str(row['draft_id']), []).append(str(row['id']))
+
+    all_pres = set(presentation_ids)
+    for pres_list in pres_of_draft.values():
+        all_pres.update(pres_list)
+
+    if draft_ids:
+        marks = ', '.join(['?'] * len(draft_ids))
+        for row in conn.execute(
+            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, '
+            'COALESCE(SUM(total_tokens), 0) AS tokens '
+            'FROM ai_usage_events WHERE tenant_id = ? AND draft_id IN '
+            f'({marks}) AND presentation_id IS NULL GROUP BY draft_id',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            target = projects.get(str(row.get('draft_id')))
+            if target is not None:
+                target['calls'] += int(row['calls'] or 0)
+                target['ai_cost_usd'] += float(row['cost'] or 0.0)
+                target['total_tokens'] += int(row['tokens'] or 0)
+        for row in conn.execute(
+            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            'FROM map_usage_events WHERE tenant_id = ? AND draft_id IN '
+            f'({marks}) AND presentation_id IS NULL GROUP BY draft_id',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            target = projects.get(str(row.get('draft_id')))
+            if target is not None:
+                target['calls'] += int(row['calls'] or 0)
+                target['maps_cost_usd'] += float(row['cost'] or 0.0)
+
+    if all_pres:
+        pres_list = sorted(all_pres)
+        marks = ', '.join(['?'] * len(pres_list))
+        for row in conn.execute(
+            'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, '
+            'COALESCE(SUM(total_tokens), 0) AS tokens '
+            'FROM ai_usage_events WHERE tenant_id = ? AND presentation_id IN '
+            f'({marks}) GROUP BY presentation_id',
+            [tenant_id] + pres_list,
+        ).fetchall():
+            row = dict(row)
+            pres_id = str(row.get('presentation_id'))
+            calls = int(row['calls'] or 0)
+            cost = float(row['cost'] or 0.0)
+            tokens = int(row['tokens'] or 0)
+            if pres_id in presentations:
+                presentations[pres_id]['calls'] += calls
+                presentations[pres_id]['ai_cost_usd'] += cost
+                presentations[pres_id]['total_tokens'] += tokens
+            for draft_id, linked in pres_of_draft.items():
+                if pres_id in linked:
+                    projects[draft_id]['calls'] += calls
+                    projects[draft_id]['ai_cost_usd'] += cost
+                    projects[draft_id]['total_tokens'] += tokens
+        marks = ', '.join(['?'] * len(pres_list))
+        for row in conn.execute(
+            'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            f'FROM map_usage_events WHERE tenant_id = ? AND presentation_id IN ({marks}) GROUP BY presentation_id',
+            [tenant_id] + pres_list,
+        ).fetchall():
+            row = dict(row)
+            pres_id = str(row.get('presentation_id'))
+            calls = int(row['calls'] or 0)
+            cost = float(row['cost'] or 0.0)
+            if pres_id in presentations:
+                presentations[pres_id]['calls'] += calls
+                presentations[pres_id]['maps_cost_usd'] += cost
+            for draft_id, linked in pres_of_draft.items():
+                if pres_id in linked:
+                    projects[draft_id]['calls'] += calls
+                    projects[draft_id]['maps_cost_usd'] += cost
+
+    for entry in list(projects.values()) + list(presentations.values()):
+        entry['cost_usd'] = entry['ai_cost_usd'] + entry['maps_cost_usd']
+    return with_sar_fields({'projects': projects, 'presentations': presentations})
+
+
+def link_draft_usage_to_presentation(tenant_id, draft_id, presentation_id):
+    """Attribute unattributed draft spend to a newly saved presentation.
+
+    Slide generation runs before the presentation exists, so its rows carry
+    the draft id but no presentation id. Linking them at save time is what
+    puts a cost on the presentation row. Rows already linked to an earlier
+    presentation are never stolen: only unattributed rows move.
+    """
+    if not tenant_id or not draft_id or not presentation_id:
+        return 0
+    conn = get_db()
+    linked = 0
+    for table in ('ai_usage_events', 'map_usage_events'):
+        cursor = conn.execute(
+            f'UPDATE {table} SET presentation_id = ? '
+            'WHERE tenant_id = ? AND draft_id = ? AND presentation_id IS NULL',
+            (str(presentation_id), tenant_id, str(draft_id)),
+        )
+        linked += cursor.rowcount or 0
+    conn.commit()
+    return linked
+
+
+def get_ai_reconcile_by_scope(tenant_id, draft_ids=(), presentation_ids=()):
+    """Uncapped pending and unresolved counts per project and presentation.
+
+    Used so list screens never show a capped number as a complete total.
+    Tenant isolation is enforced and Maps grouping is untouched.
+    """
+    draft_ids = [str(d) for d in (draft_ids or []) if d][:200]
+    presentation_ids = [str(p) for p in (presentation_ids or []) if p][:200]
+    by_draft = {d: {'pending': 0, 'unresolved': 0, 'needs_review': 0, 'in_flight': 0,
+                    'state': 'settled', 'state_label': 'التكلفة المسجلة'} for d in draft_ids}
+    by_presentation = {p: {'pending': 0, 'unresolved': 0, 'needs_review': 0, 'in_flight': 0,
+                           'state': 'settled', 'state_label': 'التكلفة المسجلة'} for p in presentation_ids}
+    if not draft_ids and not presentation_ids:
+        return {'by_draft': by_draft, 'by_presentation': by_presentation}
+    conn = get_db()
+    cols = _ai_usage_columns(conn)
+
+    def _state_for(entry):
+        if entry.get('in_flight') or entry.get('pending'):
+            return 'pending', 'قيد الاستكمال'
+        if entry.get('unresolved') or entry.get('needs_review'):
+            return 'needs_review', 'تحتاج مطابقة'
+        return 'settled', 'التكلفة المسجلة'
+
+    def _status_expr():
+        if 'attempt_status' in cols:
+            return ("COALESCE(attempt_status, CASE WHEN cost_usd IS NOT NULL THEN 'settled' "
+                    "WHEN generation_id IS NOT NULL THEN 'pending' ELSE 'unresolved' END)")
+        return ("CASE WHEN cost_usd IS NOT NULL THEN 'settled' "
+                "WHEN generation_id IS NOT NULL THEN 'pending' ELSE 'unresolved' END")
+    expr = _status_expr()
+    if draft_ids:
+        marks = ', '.join(['?'] * len(draft_ids))
+        for row in conn.execute(
+            f'SELECT draft_id, {expr} AS st, COUNT(*) AS n FROM ai_usage_events '
+            f'WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id, st',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            target = by_draft.get(str(row.get('draft_id')))
+            if target is None:
+                continue
+            key = str(row.get('st') or '')
+            if key == 'pending':
+                target['pending'] += int(row.get('n') or 0)
+            elif key == 'unresolved':
+                target['unresolved'] += int(row.get('n') or 0)
+            elif key == 'needs_review':
+                target['needs_review'] += int(row.get('n') or 0)
+            elif key == 'in_flight':
+                target['in_flight'] += int(row.get('n') or 0)
+    if presentation_ids:
+        marks = ', '.join(['?'] * len(presentation_ids))
+        for row in conn.execute(
+            f'SELECT presentation_id, {expr} AS st, COUNT(*) AS n FROM ai_usage_events '
+            f'WHERE tenant_id = ? AND presentation_id IN ({marks}) GROUP BY presentation_id, st',
+            [tenant_id] + presentation_ids,
+        ).fetchall():
+            row = dict(row)
+            target = by_presentation.get(str(row.get('presentation_id')))
+            if target is None:
+                continue
+            key = str(row.get('st') or '')
+            if key == 'pending':
+                target['pending'] += int(row.get('n') or 0)
+            elif key == 'unresolved':
+                target['unresolved'] += int(row.get('n') or 0)
+            elif key == 'needs_review':
+                target['needs_review'] += int(row.get('n') or 0)
+            elif key == 'in_flight':
+                target['in_flight'] += int(row.get('n') or 0)
+    for entry in list(by_draft.values()) + list(by_presentation.values()):
+        state, label = _state_for(entry)
+        entry['state'] = state
+        entry['state_label'] = label
+    return {'by_draft': by_draft, 'by_presentation': by_presentation}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Landloom platform tasks (t14-t63): generation approvals, final approvals,
+# downloads, proposal copies, notification tasks, invites, users report,
+# approval tasks, points reservations, recharge requests, support tickets,
+# and the file-type registry. Money stays USD in tenant_ledger;
+# these tables track workflow state, not money.
+# ═════════════════════════════════════════════════════════════════════════════
