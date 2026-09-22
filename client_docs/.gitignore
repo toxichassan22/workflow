@@ -1,0 +1,4 @@
+# generated outputs — rebuilt by build_client_pdfs.py + print_pdfs.js
+*.pdf
+*.html
+*.png
