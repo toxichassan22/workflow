@@ -37,22 +37,13 @@ def api_create_recharge_request():
         return failure
     _record_audit_event('recharge.requested', 'recharge_request', row['id'],
                         entity_name=row.get('package_name'),
-                        metadata={'amount_usd': row.get('amount_usd')})
-    # t33: the platform desk gets a task and a notification for the 24h review window.
-    db.create_approval_task(
-        g.tenant_id, 'recharge',
-        f'طلب شحن رصيد — {row.get("package_name") or "باقة"}',
-        entity_type='recharge_request', entity_id=row['id'],
-        payload={'amount_usd': row.get('amount_usd'), 'price_sar': row.get('price_sar')},
-        due_hours=24)
-    db.create_notification(
-        g.tenant_id, 'طلب شحن جديد بانتظار المراجعة',
-        body=f'{row.get("package_name") or ""} — {row.get("price_sar") or row.get("amount_usd") or ""}',
-        category='recharge', entity_type='recharge_request', entity_id=row['id'])
+                        metadata={'amount_sar': row.get('amount_sar')})
+    # Recharge requests live in the billing queue — no approval task is
+    # opened; the desk gets a single notification pointing at the record.
     _notify_super_admins(
         'طلب شحن جديد',
         f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("package_name") or ""}'
-        f' — {row.get("price_sar") or row.get("amount_usd") or ""}',
+        f' — {row.get("price_sar") or row.get("amount_sar") or ""} ريال',
         entity_type='recharge_request', entity_id=row['id'])
     return jsonify({'success': True, 'request': row})
 
@@ -69,6 +60,29 @@ def api_list_recharge_requests():
 def api_admin_list_recharge_requests():
     rows = db.list_recharge_requests(status=request.args.get('status'))
     return jsonify({'success': True, 'requests': rows})
+
+
+@app.route('/api/recharge-requests/<request_id>/attachment/<slot>', methods=['GET'])
+@require_auth
+def api_recharge_request_attachment(request_id, slot):
+    """Stream the transfer receipt or the platform invoice attached to a
+    recharge request. The request row is the scope: a company sees only its
+    own attachments, the review desk sees the receipts it must verify and the
+    invoices it issued. Files live under the uploader's tenant folder, so the
+    lookup is by id and the response stays confined to that tenant's root.
+    """
+    if slot not in ('receipt', 'invoice'):
+        return jsonify({'success': False, 'error': 'المرفق غير معروف'}), 404
+    row = db.get_recharge_request(request_id)
+    if not row:
+        return jsonify({'success': False, 'error': 'الطلب غير موجود'}), 404
+    if not getattr(g, 'is_admin', False) and str(row['tenant_id']) != str(g.tenant_id):
+        return jsonify({'success': False, 'error': 'الطلب غير موجود'}), 404
+    file_id = row.get('receipt_file_id') if slot == 'receipt' else row.get('invoice_file_id')
+    stored = db.get_project_file_by_id(str(file_id)) if file_id else None
+    if not stored or not stored.get('storage_path'):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    return _send_project_file_response(stored, stored.get('tenant_id') or g.tenant_id)
 
 
 @app.route('/api/billing/packages', methods=['GET'])
@@ -115,17 +129,20 @@ def api_admin_ledger_adjust():
     tenant_id = data.get('tenantId')
     if not tenant_id:
         return jsonify({'error': 'الشركة مطلوبة', 'error_code': 'tenant_required'}), 400
-    # The desk keys adjustments in riyals; the ledger books them in USD.
-    amount_usd = data.get('amountUsd')
-    amount_sar = data.get('amountSar', data.get('amount_sar'))
-    if amount_sar is not None:
+    # The desk keys adjustments in riyals — the wallet books in SAR directly.
+    amount = data.get('amountSar', data.get('amount_sar'))
+    if amount is None:
+        # Legacy callers sent USD; convert at the active rate.
         try:
-            fx_rate = float((db.get_fx_rate() or {}).get('rate') or db.FX_DEFAULT_USD_SAR)
-            amount_usd = float(amount_sar) / fx_rate
+            amount = db.usd_to_sar(data.get('amountUsd'))
         except (TypeError, ValueError):
             return jsonify({'error': 'مبلغ الحركة غير صالح', 'error_code': 'invalid_amount'}), 400
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'مبلغ الحركة غير صالح', 'error_code': 'invalid_amount'}), 400
     result = db.record_ledger_adjustment(
-        tenant_id, amount_usd, kind, note=data.get('note'),
+        tenant_id, amount, kind, note=data.get('note'),
         actor=_landloom_actor_id() or 'platform_admin', reversal_of=data.get('reversalOf'),
         idempotency_key=data.get('idempotencyKey'))
     failure = _landloom_error(result)
@@ -133,7 +150,7 @@ def api_admin_ledger_adjust():
         return failure
     _record_audit_event('ledger.adjusted', 'tenant_ledger',
                         (result.get('entry') or {}).get('id') or '', entity_name=kind,
-                        metadata={'tenant_id': tenant_id, 'amount_usd': data.get('amountUsd'),
+                        metadata={'tenant_id': tenant_id, 'amount_sar': amount,
                                   'reversal_of': data.get('reversalOf')})
     return jsonify({'success': True, 'result': result})
 
@@ -146,21 +163,45 @@ def api_admin_decide_recharge_request(request_id):
     row = db.decide_recharge_request(
         None, request_id, decision, _landloom_actor_id(), _landloom_actor_name(),
         note=data.get('note'), reference_number=data.get('transactionReference'),
+        invoice_file_id=data.get('invoiceFileId') or data.get('invoice_file_id'),
     )
     failure = _landloom_error(row)
     if failure:
         return failure
     try:
         approved = row.get('status') == 'approved'
+        amount = row.get('amount_sar') or row.get('price_sar') or ''
         _notify_tenant_billing(
             row['tenant_id'],
-            'اعتُمد طلب الشحن' if approved else 'رُفض طلب الشحن',
-            f'{row.get("package_name") or ""} — {row.get("amount_usd") or ""}'
-            + (f' — {data.get("note")}' if data.get('note') else ''),
+            'تم شحن الرصيد' if approved else 'رُفض طلب الشحن',
+            f'{row.get("package_name") or ""} — {amount} ريال'
+            + (f' — {row.get("decision_note")}' if row.get('decision_note') else ''),
             entity_type='recharge_request', entity_id=row['id'])
     except Exception:
         pass
     return jsonify({'success': True, 'request': row})
+
+
+# ── Recharge rejection reasons (platform settings) ────────────────────────
+
+@app.route('/api/admin/settings/rejection-reasons', methods=['GET'])
+@require_admin
+def api_admin_rejection_reasons():
+    return jsonify({'success': True, 'reasons': db.get_rejection_reasons()})
+
+
+@app.route('/api/admin/settings/rejection-reasons', methods=['PUT'])
+@require_admin
+def api_admin_save_rejection_reasons():
+    data = request.json or {}
+    reasons = data.get('reasons')
+    if not isinstance(reasons, list):
+        return jsonify({'error': 'قائمة الأسباب مطلوبة', 'error_code': 'reasons_required'}), 400
+    saved = db.save_rejection_reasons(reasons)
+    _record_audit_event('settings.rejection_reasons', 'platform_settings',
+                        'recharge_rejection_reasons',
+                        metadata={'count': len(saved)})
+    return jsonify({'success': True, 'reasons': saved})
 
 
 @app.route('/api/client/overview', methods=['GET'])
@@ -168,52 +209,50 @@ def api_admin_decide_recharge_request(request_id):
 def api_client_overview():
     """Client card: totals, current package with remaining, lifetime spend.
 
-    Money travels in raw USD with a riyal rendering beside it at the live
-    rate. A package reads expired exactly when its remaining hits zero.
+    Wallet figures are riyal-native; *_usd twins stay as provider-cost audit.
+    A package reads expired exactly when its remaining hits zero.
     """
     try:
         _refresh_fx_rate_async()
         view = db.get_client_overview(g.tenant_id)
         fx = db.get_fx_rate()
         package = view.get('package')
-        balance_usd = db.get_tenant_balance(g.tenant_id)
-        if package is not None:
-            package = dict(package)
-            package['credit_sar'] = db.usd_to_sar(package.get('credit_usd'), fx.get('rate'))
-            package['consumed_sar'] = db.usd_to_sar(package.get('consumed_usd'), fx.get('rate'))
-            package['remaining_sar'] = db.usd_to_sar(package.get('remaining_usd'), fx.get('rate'))
-        else:
+        balance_sar = db.get_tenant_balance(g.tenant_id)
+        if package is None:
             # A bare wallet has no package cap; its limit is everything the
-            # platform ever credited, and what left since is the consumed share.
-            credited_usd = db.get_tenant_wallet_credited(g.tenant_id)
-            if balance_usd > 0 or credited_usd > 0:
-                consumed_usd = max(0.0, round(credited_usd - balance_usd, 2))
+            # platform ever credited, and what left since is the consumed
+            # share. The latest approved recharge names the cycle the client
+            # is spending through.
+            credited_sar = db.get_tenant_wallet_credited(g.tenant_id)
+            if balance_sar > 0 or credited_sar > 0:
+                cycle = db.get_latest_approved_recharge(g.tenant_id)
+                cycle_start = (cycle or {}).get('reviewed_at')
+                consumed_sar = db.get_wallet_consumed_since(g.tenant_id, cycle_start)
                 package = {
                     'id': 'wallet',
-                    'name': 'رصيد المحفظة',
-                    'credit_usd': credited_usd,
-                    'consumed_usd': consumed_usd,
-                    'remaining_usd': balance_usd,
-                    'status': 'active',
-                    'assigned_at': None,
-                    'credit_sar': db.usd_to_sar(credited_usd, fx.get('rate')),
-                    'consumed_sar': db.usd_to_sar(consumed_usd, fx.get('rate')),
-                    'remaining_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+                    'name': (cycle or {}).get('package_name') or 'رصيد المحفظة',
+                    'credit_sar': (cycle or {}).get('amount_sar') or credited_sar,
+                    'consumed_sar': round(consumed_sar, 2),
+                    'remaining_sar': round(balance_sar, 2),
+                    'status': 'active' if balance_sar > 0 else 'expired',
+                    'assigned_at': cycle_start,
                 }
+        reserved_sar = db.get_active_hold_total_sar(g.tenant_id)
         return jsonify({
             'success': True,
             'totals': {
                 'projects': view.get('projects'),
                 'presentations': view.get('presentations'),
                 'consumption_usd': view.get('consumption_usd'),
-                'consumption_sar': db.usd_to_sar(view.get('consumption_usd'), fx.get('rate')),
+                'consumption_sar': view.get('consumption_sar'),
             },
             'package': package,
-            'balance_usd': balance_usd,
-            'balance_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+            'balance_sar': balance_sar,
+            'balance_usd': db.sar_to_usd(balance_sar, fx.get('rate')),
+            'reserved_sar': round(reserved_sar, 2),
             'lifetime': {
                 'consumed_usd': view.get('lifetime_consumed_usd'),
-                'consumed_sar': db.usd_to_sar(view.get('lifetime_consumed_usd'), fx.get('rate')),
+                'consumed_sar': view.get('lifetime_consumed_sar'),
             },
             'fx': {'rate': fx.get('rate'), 'source': fx.get('source'),
                    'updatedAt': fx.get('updated_at')},

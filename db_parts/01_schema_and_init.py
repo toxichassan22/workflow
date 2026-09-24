@@ -584,6 +584,7 @@ def _create_tables(conn):
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         credit_usd REAL NOT NULL DEFAULT 0,
+        credit_sar REAL,
         price_sar REAL,
         is_active INTEGER DEFAULT 1,
         is_custom INTEGER DEFAULT 0,
@@ -608,15 +609,24 @@ def _create_tables(conn):
         package_id TEXT,
         package_name TEXT,
         credit_usd REAL NOT NULL DEFAULT 0,
+        credit_sar REAL,
         assigned_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_package_history_tenant ON tenant_package_history(tenant_id, assigned_at);
+
+    CREATE TABLE IF NOT EXISTS platform_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
 
     CREATE TABLE IF NOT EXISTS tenant_ledger (
         id TEXT PRIMARY KEY,
         tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
         kind TEXT NOT NULL DEFAULT 'debit',
         amount_usd REAL NOT NULL DEFAULT 0,
+        amount_sar REAL,
+        fx_rate REAL,
         raw_cost_usd REAL NOT NULL DEFAULT 0,
         multiplier REAL NOT NULL DEFAULT 1,
         maps_cost_usd REAL NOT NULL DEFAULT 0,

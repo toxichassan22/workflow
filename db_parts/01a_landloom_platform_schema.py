@@ -144,6 +144,7 @@ def _create_landloom_tables(conn):
         draft_id TEXT,
         points INTEGER NOT NULL DEFAULT 0,
         cost_usd REAL NOT NULL DEFAULT 0,
+        cost_sar REAL,
         status TEXT NOT NULL DEFAULT 'reserved',
         reserved_by TEXT,
         reserved_by_name TEXT,
@@ -168,9 +169,11 @@ def _create_landloom_tables(conn):
         package_id TEXT,
         package_name TEXT NOT NULL,
         amount_usd REAL NOT NULL DEFAULT 0,
+        amount_sar REAL,
         price_sar REAL,
         transfer_reference TEXT,
         receipt_file_id TEXT,
+        invoice_file_id TEXT,
         requested_by TEXT,
         requested_by_name TEXT,
         requested_at TEXT DEFAULT (datetime('now')),
@@ -331,6 +334,7 @@ def _create_platform_tables(conn):
         version INTEGER NOT NULL DEFAULT 1,
         name TEXT NOT NULL,
         credit_usd REAL NOT NULL DEFAULT 0,
+        credit_sar REAL,
         price_sar REAL,
         duration_days INTEGER,
         limits_json TEXT,
@@ -365,7 +369,9 @@ def _create_platform_tables(conn):
         transfer_reference TEXT,
         invoice_number TEXT,
         amount_usd REAL NOT NULL DEFAULT 0,
+        amount_sar REAL,
         price_sar REAL,
+        invoice_file_id TEXT,
         status TEXT NOT NULL DEFAULT 'issued',
         issued_by TEXT,
         issued_by_name TEXT,
@@ -642,6 +648,9 @@ def _ensure_platform_columns(conn):
     _add('topup_receipts', 'tax_rate', 'REAL')
     _add('topup_receipts', 'tax_amount_sar', 'REAL')
     _add('topup_receipts', 'total_sar', 'REAL')
+    # Wallet SAR denomination plus the platform-issued invoice upload.
+    _add('topup_receipts', 'amount_sar', 'REAL')
+    _add('topup_receipts', 'invoice_file_id', 'TEXT')
     # t33: one bank transfer may only ever back one request.
     try:
         conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS ux_recharge_transfer_ref
@@ -655,6 +664,55 @@ def _ensure_platform_columns(conn):
 
     # t62: drafts record the input-schema version they were captured with.
     _add('project_drafts', 'schema_version', 'TEXT')
+
+    # Wallet SAR denomination: the wallet and every package/ledger movement is
+    # a riyal figure while the *_usd columns stay as the provider-cost audit.
+    _add('tenant_ledger', 'amount_sar', 'REAL')
+    _add('tenant_ledger', 'fx_rate', 'REAL')
+    _add('billing_packages', 'credit_sar', 'REAL')
+    _add('billing_package_versions', 'credit_sar', 'REAL')
+    _add('tenant_package_history', 'credit_sar', 'REAL')
+    _add('point_reservations', 'cost_sar', 'REAL')
+    _add('recharge_requests', 'amount_sar', 'REAL')
+    _add('recharge_requests', 'invoice_file_id', 'TEXT')
+    _migrate_wallet_to_sar(conn)
+
+
+def _migrate_wallet_to_sar(conn):
+    """One-time conversion of wallet money columns from USD to SAR.
+
+    Guarded by platform_settings.wallet_currency: installs that already ran it
+    (or were born on the SAR schema) skip it. Existing USD figures convert at
+    the stored exchange rate, and the whole pass commits as one transaction
+    so a failure cannot leave half-converted balances.
+    """
+    try:
+        flag = conn.execute(
+            "SELECT value FROM platform_settings WHERE key = 'wallet_currency'").fetchone()
+    except Exception:
+        flag = None
+    if flag and str(flag[0]) == 'sar':
+        return
+    try:
+        rate = float((get_fx_rate() or {}).get('rate') or FX_DEFAULT_USD_SAR)
+    except Exception:
+        rate = FX_DEFAULT_USD_SAR
+    if rate <= 0:
+        rate = FX_DEFAULT_USD_SAR
+    try:
+        conn.execute('UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) * ?', (rate,))
+        conn.execute('UPDATE tenant_ledger SET amount_sar = amount_usd * ? WHERE amount_sar IS NULL', (rate,))
+        conn.execute('UPDATE billing_packages SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE billing_package_versions SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE tenant_package_history SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE point_reservations SET cost_sar = cost_usd * ? WHERE cost_sar IS NULL', (rate,))
+        conn.execute('UPDATE recharge_requests SET amount_sar = amount_usd * ? WHERE amount_sar IS NULL', (rate,))
+        conn.execute(
+            "INSERT INTO platform_settings (key, value, updated_at) VALUES ('wallet_currency', 'sar', datetime('now')) "
+            "ON CONFLICT(key) DO UPDATE SET value = 'sar', updated_at = datetime('now')")
+        conn.commit()
+    except Exception as exc:
+        print(f'[DB] Migration notice: wallet SAR conversion: {exc}')
 
 
 def _dedupe_open_workflow_rows(conn):
@@ -706,6 +764,8 @@ FILE_TYPE_REGISTRY_DEFAULTS = [
     {'key': 'competitor_logo', 'label_ar': 'شعار المنافس', 'label_en': 'Competitor logo', 'kind': 'image',
      'max_size_mb': 5, 'allowed_extensions': ['.png', '.jpg', '.jpeg', '.webp']},
     {'key': 'recharge_receipt', 'label_ar': 'إيصال تحويل شحن الرصيد', 'label_en': 'Recharge transfer receipt',
+     'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
+    {'key': 'recharge_invoice', 'label_ar': 'فاتورة شحن الرصيد', 'label_en': 'Recharge invoice',
      'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
 ]
 

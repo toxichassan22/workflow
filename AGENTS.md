@@ -168,8 +168,10 @@ uneditable); never grow a giant file again.
 ## Billing ledger (tenant wallet)
 
 - `tenant_ledger` records wallet movements: `debit` rows from checkout, `credit`
-  rows from top-ups. Amounts are USD; the billed amount is raw provider cost
-  (`ai_cost_usd` + `maps_cost_usd`) times `BILLING_MULTIPLIER` (default 1.6).
+  rows from recharge approvals. Amounts are SAR (`amount_sar`) — the wallet is
+  riyal-denominated; `*_usd` fields survive as audit/provider-cost twins. The
+  billed amount is raw provider cost (`ai_cost_usd` + `maps_cost_usd`) converted
+  at the stored `fx_rates` USD→SAR rate times `BILLING_MULTIPLIER` (default 1.6).
 - `ai_usage_events` / `map_usage_events` carry `billed_ledger_id`. Checkout
   (`db.bill_unbilled_usage`) claims unbilled rows with one UPDATE per table, so
   a retry or parallel request bills nothing twice; the debit is a conditional
@@ -180,18 +182,25 @@ uneditable); never grow a giant file again.
   `_bill_all_unbilled_usage()` (over `db.list_tenants_with_billable_usage()`),
   and each generation-approval/job settlement fires
   `_bill_tenant_unbilled_usage_async`. `POST /api/billing/checkout` (idempotent
-  via `X-Idempotency-Key`) stays as the manual path; top-up is
-  `POST /api/billing/topup` — **super-admin only**, with a required `tenantId`
-  naming the company to credit — history is `GET /api/billing/ledger`.
+  via `X-Idempotency-Key`) stays as the manual path; `POST /api/billing/topup`
+  is disabled — it rejects with `package_only_funding` because client funding
+  is package-only — history is `GET /api/billing/ledger`.
 - Client funding is package-only: `POST /api/recharge-requests` requires a
-  `packageId` pointing at an active `billing_packages` row, and the catalog
-  row owns `amount_usd`/`price_sar`/`package_name` — client-supplied numbers
+  `packageId` pointing at an active `billing_packages` row plus proof of
+  transfer (`referenceNumber` or `receiptFileId`), and the catalog
+  row owns `credit_sar`/`price_sar`/`package_name` — client-supplied numbers
   are ignored. A company can never mint its own credit. The super admin owns
   the catalog under platform settings (`/api/admin/packages` CRUD): name,
-  `price_sar` (what the client pays) and `credit_usd` (wallet dollars it
+  `price_sar` (what the client pays) and `credit_sar` (wallet riyals it
   lands). `GET /api/admin/packages` returns `est_cost_usd`/`est_margin_*`
-  (cost = credit ÷ `BILLING_MULTIPLIER`) so the price can be tuned to the
-  margin — those figures are admin-only, never on the client catalog feed.
+  (cost = credit ÷ `BILLING_MULTIPLIER` ÷ FX rate) so the price can be tuned
+  to the margin — those figures are admin-only, never on the client catalog feed.
+- Recharge decisions (`db.decide_recharge_request`) are atomic and idempotent:
+  approval flips the row, credits `credit_sar` to the wallet, writes the ledger
+  credit and a `topup_receipts` invoice row — optionally attaching an uploaded
+  invoice file — in one transaction; a repeat approval credits nothing twice.
+  Rejection keeps a `decision_note` reason the client can see; the reusable
+  reason list lives in platform settings (`GET/PUT /api/admin/rejection-reasons`).
 - Only settled rows bill: the claim requires `package_id IS NULL` (package
   usage is consumed from package credit, not the wallet) and, for AI rows, a
   billable `attempt_status` — legacy rows with a recorded cost count as
@@ -202,11 +211,11 @@ uneditable); never grow a giant file again.
 - `db.BALANCE_CHANGE_HOOK` fires after every wallet mutation (credits,
   debits, reservations, releases, adjustments). `app.py` registers
   `_schedule_tenant_limit_sync` on it, which re-syncs the tenant's OpenRouter
-  key limit off the request path. The provider cap is
-  (balance + active holds + package remaining) / `BILLING_MULTIPLIER` — holds
-  count because an approved run already paid, and dividing by the multiplier
-  keeps every future checkout affordable by construction. A drained wallet
-  disables the key; a funded one re-enables it.
+  key limit off the request path (skipped entirely when `TESTING`). The provider
+  cap is (balance + active holds) / FX rate / `BILLING_MULTIPLIER` +
+  package remaining / FX rate — holds count because an approved run already
+  paid, and dividing by the multiplier keeps every future checkout affordable
+  by construction. A drained wallet disables the key; a funded one re-enables it.
 - `TENANT_OPENROUTER_DEFAULT_RESET` controls the provider `limit_reset`:
   `daily`/`weekly`/`monthly` pass through, `none` (the default) sends `null` —
   a lifetime cap tied to the wallet. Never default to `monthly`: a top-up must

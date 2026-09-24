@@ -93,7 +93,7 @@
         '<div class="tenant-notif-meta">' + cat + '<bdi>' + llEscape(when) + '</bdi></div></div>';
     }
 
-    // ── Click-through: entity type → its screen ─────────────────────────
+    // ── Click-through: entity type to its screen ────────────────────────
     function notificationTargetOpener(n) {
       if (!n) return null;
       const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);

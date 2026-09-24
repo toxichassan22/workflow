@@ -8,15 +8,31 @@ BILLING_MULTIPLIER_DEFAULT = 1.6
 
 
 class InsufficientBalance(Exception):
-    """Raised when a tenant wallet cannot cover a billing amount."""
+    """Raised when a tenant wallet cannot cover a billing amount.
 
-    def __init__(self, required_usd=0.0, available_usd=0.0):
-        self.required_usd = float(required_usd or 0.0)
-        self.available_usd = float(available_usd or 0.0)
+    Amounts are wallet riyals — the wallet is SAR-denominated; provider
+    dollars only exist upstream of the conversion at billing time.
+    """
+
+    def __init__(self, required_sar=0.0, available_sar=0.0):
+        self.required_sar = float(required_sar or 0.0)
+        self.available_sar = float(available_sar or 0.0)
+        # Legacy attribute names kept for older catch sites — same SAR figures.
+        self.required_usd = self.required_sar
+        self.available_usd = self.available_sar
         super().__init__(
-            f'Insufficient balance: required ${self.required_usd:.2f}, '
-            f'available ${self.available_usd:.2f}'
+            f'Insufficient balance: required {self.required_sar:.2f} SAR, '
+            f'available {self.available_sar:.2f} SAR'
         )
+
+
+def _active_fx_rate():
+    """Stored USD→SAR rate for wallet conversions. Never raises."""
+    try:
+        rate = float((get_fx_rate() or {}).get('rate') or 0.0)
+        return rate if rate > 0 else FX_DEFAULT_USD_SAR
+    except Exception:
+        return FX_DEFAULT_USD_SAR
 
 
 # The app layer registers a callable here that re-syncs the tenant's
@@ -82,7 +98,9 @@ def get_billing_flow_estimates():
 
 # Product price per generation unit in USD. This is what the client is charged
 # (converted to points at POINTS_PER_USD), independent of the provider cost that
-# usage events record — env-overridable as the effective pricing policy.
+# usage events record — env-overridable as the effective pricing policy. The
+# wallet itself is SAR-denominated, so wallet conversions run through the
+# configured fx rate.
 POINTS_PER_USD = 1000
 GENERATION_UNIT_PRICES_DEFAULT = {
     'slide': 0.05,
@@ -110,7 +128,8 @@ def get_generation_unit_prices():
 
 
 def get_tenant_balance(tenant_id):
-    """Current wallet balance in USD. Never raises for a missing tenant."""
+    """Current wallet balance in SAR — the wallet is riyal-denominated.
+    Never raises for a missing tenant."""
     try:
         conn = get_db()
         row = conn.execute(
@@ -127,7 +146,7 @@ def get_tenant_balance(tenant_id):
 
 
 def get_tenant_wallet_credited(tenant_id):
-    """Total USD ever placed in the wallet: top-ups plus positive adjustments.
+    """Total SAR ever placed in the wallet: top-ups plus positive adjustments.
 
     A release is excluded — it is held money coming back, not new credit —
     while holds and debits carry positive amounts but move money out, so the
@@ -137,8 +156,8 @@ def get_tenant_wallet_credited(tenant_id):
     try:
         conn = get_db()
         row = conn.execute(
-            'SELECT COALESCE(SUM(amount_usd), 0) AS total FROM tenant_ledger '
-            "WHERE tenant_id = ? AND amount_usd > 0 "
+            'SELECT COALESCE(SUM(COALESCE(amount_sar, amount_usd)), 0) AS total '
+            "FROM tenant_ledger WHERE tenant_id = ? AND COALESCE(amount_sar, amount_usd) > 0 "
             "AND kind IN ('credit', 'refund', 'correction', 'expiry')",
             (str(tenant_id),)
         ).fetchone()
@@ -280,11 +299,17 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
             (ledger_id,)
         ).fetchone()).get('total') or 0.0)
         raw_cost = ai_cost + maps_cost
-        billed_amount = round(raw_cost * active_multiplier + 1e-9, 2)
+        # Provider cost arrives in USD; the wallet is SAR, so the billed
+        # amount converts at the active rate before the multiplier applies.
+        try:
+            fx_rate = float((get_fx_rate() or {}).get('rate') or FX_DEFAULT_USD_SAR)
+        except (TypeError, ValueError):
+            fx_rate = FX_DEFAULT_USD_SAR
+        billed_amount = round(raw_cost * fx_rate * active_multiplier + 1e-9, 2)
         if raw_cost > 0 and billed_amount <= 0:
             # A sub-cent claim must not close: rolling the claim back keeps the
             # rows unbilled so the cents carry into the next invoice instead of
-            # being marked paid at $0 forever.
+            # being marked paid at 0 forever.
             conn.rollback()
             return {'billed': False, 'reason': 'below_minimum_charge'}
         debit = conn.execute(
@@ -297,11 +322,12 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
             raise InsufficientBalance(billed_amount, get_tenant_balance(tenant_id))
         conn.execute(
             '''INSERT INTO tenant_ledger
-               (id, tenant_id, kind, amount_usd, raw_cost_usd, multiplier,
+               (id, tenant_id, kind, amount_usd, amount_sar, fx_rate, raw_cost_usd, multiplier,
                 maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count,
                 draft_id, presentation_id, idempotency_key, note)
-               VALUES (?, ?, 'debit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (ledger_id, tenant_id, billed_amount, raw_cost, active_multiplier,
+               VALUES (?, ?, 'debit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (ledger_id, tenant_id, round(raw_cost * active_multiplier + 1e-9, 2),
+             billed_amount, fx_rate, raw_cost, active_multiplier,
              maps_cost, ai_cost, max(0, int(maps_count)), max(0, int(ai_count)),
              draft_id, presentation_id, idempotency_key, note)
         )
@@ -319,17 +345,19 @@ def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
         'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
     ).fetchone()
     return {'billed': True, 'entry': dict(entry),
-            'balance_usd': get_tenant_balance(tenant_id)}
+            'balance_sar': get_tenant_balance(tenant_id)}
 
 
-def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None, actor=None):
+def record_ledger_credit(tenant_id, amount_sar, note=None, idempotency_key=None, actor=None):
     """Top up a tenant wallet. Records a credit entry and adds the balance.
 
+    ``amount_sar`` is wallet riyals — the wallet is SAR-denominated; the
+    amount_usd column keeps the dollar equivalent for provider-side audit.
     ``actor`` names who created the movement — 'platform_admin' for the
     recharge-decision path, 'client_admin' for a client-side top-up — so the
     separation-of-duties matrix can flag credits from the wrong side (t23).
     """
-    amount = round(float(amount_usd or 0.0) + 1e-9, 2)
+    amount = round(float(amount_sar or 0.0) + 1e-9, 2)
     if amount <= 0:
         raise ValueError('Credit amount must be positive')
     conn = get_db()
@@ -349,11 +377,12 @@ def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None,
         )
         conn.execute(
             '''INSERT INTO tenant_ledger
-               (id, tenant_id, kind, amount_usd, raw_cost_usd, multiplier,
+               (id, tenant_id, kind, amount_usd, amount_sar, fx_rate, raw_cost_usd, multiplier,
                 maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count,
                 draft_id, presentation_id, idempotency_key, note, actor)
-               VALUES (?, ?, 'credit', ?, 0, 1, 0, 0, 0, 0, NULL, NULL, ?, ?, ?)''',
-            (ledger_id, tenant_id, amount, idempotency_key, note, actor)
+               VALUES (?, ?, 'credit', ?, ?, ?, 0, 1, 0, 0, 0, 0, NULL, NULL, ?, ?, ?)''',
+            (ledger_id, tenant_id, sar_to_usd(amount), amount, _active_fx_rate(),
+             idempotency_key, note, actor)
         )
         conn.commit()
     except Exception:
@@ -367,7 +396,7 @@ def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None,
         'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
     ).fetchone()
     return {'credited': True, 'entry': dict(entry),
-            'balance_usd': get_tenant_balance(tenant_id)}
+            'balance_sar': get_tenant_balance(tenant_id)}
 
 
 def reset_all_company_balances(clear_usage=True):
@@ -442,8 +471,8 @@ def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=N
         clauses.append('actor = ?')
         params.append(str(actor))
     rows = conn.execute(
-        'SELECT id, kind, amount_usd, raw_cost_usd, multiplier, maps_cost_usd, '
-        'ai_cost_usd, maps_events_count, ai_events_count, draft_id, '
+        'SELECT id, kind, amount_usd, amount_sar, fx_rate, raw_cost_usd, multiplier, '
+        'maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count, draft_id, '
         'presentation_id, idempotency_key, note, actor, reversal_of, created_at '
         'FROM tenant_ledger WHERE ' + ' AND '.join(clauses) +
         ' ORDER BY created_at DESC LIMIT ?',
@@ -453,51 +482,53 @@ def get_ledger_entries(tenant_id, limit=50, kind=None, from_date=None, to_date=N
 
 
 def points_overview(tenant_id):
-    """t30: one read of the wallet — current balance, live holds, expired and
-    consumed totals, all in USD with the points conversion alongside."""
+    """One read of the wallet — current balance, live holds, expired and
+    consumed totals. Wallet figures are SAR; *_usd twins are the provider-side
+    audit equivalent."""
     release_stale_reservations(tenant_id)
     conn = get_db()
     balance = get_tenant_balance(tenant_id)
     rows = conn.execute(
-        '''SELECT status, COALESCE(SUM(cost_usd), 0) AS total, COUNT(*) AS n
+        '''SELECT status, COALESCE(SUM(COALESCE(cost_sar, cost_usd)), 0) AS total, COUNT(*) AS n
            FROM point_reservations WHERE tenant_id = ? GROUP BY status''',
         (str(tenant_id),),
     ).fetchall()
-    buckets = {row['status']: {'usd': float(row['total'] or 0), 'count': int(row['n'])}
+    buckets = {row['status']: {'sar': float(row['total'] or 0), 'count': int(row['n'])}
                for row in rows}
-    reserved_usd = buckets.get('reserved', {}).get('usd', 0.0)
-    expired_usd = buckets.get('expired', {}).get('usd', 0.0)
-    total_usd = balance + reserved_usd
-    return with_sar_fields({
-        'balance_usd': round(total_usd, 2),
-        'balance_points': int(round(total_usd * POINTS_PER_USD)),
-        'current_points': int(round(total_usd * POINTS_PER_USD)),
-        'reserved_usd': round(reserved_usd, 2),
-        'reserved_points': int(round(reserved_usd * POINTS_PER_USD)),
-        'available_usd': round(balance, 2),
+    reserved_sar = buckets.get('reserved', {}).get('sar', 0.0)
+    expired_sar = buckets.get('expired', {}).get('sar', 0.0)
+    total_sar = balance + reserved_sar
+    return {
+        'balance_sar': round(total_sar, 2),
+        'balance_points': int(round(total_sar * POINTS_PER_USD)),
+        'current_points': int(round(total_sar * POINTS_PER_USD)),
+        'reserved_sar': round(reserved_sar, 2),
+        'reserved_points': int(round(reserved_sar * POINTS_PER_USD)),
+        'available_sar': round(balance, 2),
         'available_points': int(round(balance * POINTS_PER_USD)),
-        'expired_usd': round(expired_usd, 2),
-        'expired_points': int(round(expired_usd * POINTS_PER_USD)),
-        'consumed_usd': round(buckets.get('consumed', {}).get('usd', 0.0), 2),
-        'released_usd': round(buckets.get('released', {}).get('usd', 0.0), 2),
+        'expired_sar': round(expired_sar, 2),
+        'expired_points': int(round(expired_sar * POINTS_PER_USD)),
+        'consumed_sar': round(buckets.get('consumed', {}).get('sar', 0.0), 2),
+        'released_sar': round(buckets.get('released', {}).get('sar', 0.0), 2),
         'reservations': buckets,
-    })
+    }
 
 
 LEDGER_ADJUSTMENT_KINDS = ('refund', 'correction', 'expiry')
 
 
-def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
+def record_ledger_adjustment(tenant_id, amount_sar, kind, note=None, actor=None,
                              reversal_of=None, idempotency_key=None):
     """t32: refund, correction and expiry movements on the wallet.
 
     A positive amount credits the wallet, a negative amount debits it
-    (conditional — never overdrawn). ``reversal_of`` links the movement back
-    to the original ledger entry it reverses. Admin-only at the route level.
+    (conditional — never overdrawn). Amounts are wallet riyals.
+    ``reversal_of`` links the movement back to the original ledger entry it
+    reverses. Admin-only at the route level.
     """
     if kind not in LEDGER_ADJUSTMENT_KINDS:
         return {'error': 'invalid_kind'}
-    amount = round(float(amount_usd or 0.0) + 1e-9, 2)
+    amount = round(float(amount_sar or 0.0) + 1e-9, 2)
     if amount == 0:
         return {'error': 'amount_required'}
     conn = get_db()
@@ -524,7 +555,7 @@ def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
         )
         if (debit.rowcount or 0) <= 0:
             return {'error': 'insufficient_balance',
-                    'available_usd': get_tenant_balance(tenant_id)}
+                    'available_sar': get_tenant_balance(tenant_id)}
     else:
         conn.execute(
             'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? WHERE id = ?',
@@ -533,17 +564,18 @@ def record_ledger_adjustment(tenant_id, amount_usd, kind, note=None, actor=None,
     ledger_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO tenant_ledger
-           (id, tenant_id, kind, amount_usd, idempotency_key, note, actor, reversal_of)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-        (ledger_id, tenant_id, kind, amount, idempotency_key,
-         str(note or '').strip() or None, actor, reversal_of),
+           (id, tenant_id, kind, amount_usd, amount_sar, fx_rate,
+            idempotency_key, note, actor, reversal_of)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (ledger_id, tenant_id, kind, sar_to_usd(amount), amount, _active_fx_rate(),
+         idempotency_key, str(note or '').strip() or None, actor, reversal_of),
     )
     conn.commit()
     _fire_balance_change(tenant_id)
     return {'adjusted': True,
             'entry': dict(conn.execute(
                 'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)).fetchone()),
-            'balance_usd': get_tenant_balance(tenant_id)}
+            'balance_sar': get_tenant_balance(tenant_id)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -845,17 +877,21 @@ def get_billing_package(package_id):
         return None
 
 
-def create_billing_package(name, credit_usd=0.0, price_sar=None, is_custom=True):
-    """Create a package. credit_usd may be zero (prepaid, topped up later)."""
+def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True):
+    """Create a package. credit_sar may be zero (prepaid, topped up later).
+
+    The wallet credit is riyal-denominated; ``credit_usd`` on the row keeps
+    the dollar equivalent for provider-side audit only.
+    """
     label = str(name or '').strip()
     if not label or len(label) > 120:
         raise ValueError('Invalid package name')
     try:
-        credit = float(credit_usd or 0.0)
+        credit = float(credit_sar or 0.0)
     except (TypeError, ValueError):
-        raise ValueError('Invalid credit_usd')
+        raise ValueError('Invalid credit_sar')
     if credit < 0:
-        raise ValueError('Invalid credit_usd')
+        raise ValueError('Invalid credit_sar')
     price = None
     if price_sar is not None:
         try:
@@ -867,15 +903,15 @@ def create_billing_package(name, credit_usd=0.0, price_sar=None, is_custom=True)
     conn = get_db()
     package_id = str(uuid.uuid4())
     conn.execute(
-        'INSERT INTO billing_packages (id, name, credit_usd, price_sar, is_active, is_custom) '
-        'VALUES (?, ?, ?, ?, 1, ?)',
-        (package_id, label, credit, price, 1 if is_custom else 0)
+        'INSERT INTO billing_packages (id, name, credit_usd, credit_sar, price_sar, is_active, is_custom) '
+        'VALUES (?, ?, ?, ?, ?, 1, ?)',
+        (package_id, label, sar_to_usd(credit), credit, price, 1 if is_custom else 0)
     )
     conn.commit()
     return get_billing_package(package_id)
 
 
-def update_billing_package(package_id, name=None, credit_usd=None, price_sar=None,
+def update_billing_package(package_id, name=None, credit_sar=None, price_sar=None,
                            is_active=None):
     conn = get_db()
     row = conn.execute(
@@ -890,15 +926,17 @@ def update_billing_package(package_id, name=None, credit_usd=None, price_sar=Non
             raise ValueError('Invalid package name')
         assignments.append('name = ?')
         params.append(label)
-    if credit_usd is not None:
+    if credit_sar is not None:
         try:
-            credit = float(credit_usd)
+            credit = float(credit_sar)
         except (TypeError, ValueError):
-            raise ValueError('Invalid credit_usd')
+            raise ValueError('Invalid credit_sar')
         if credit < 0:
-            raise ValueError('Invalid credit_usd')
-        assignments.append('credit_usd = ?')
+            raise ValueError('Invalid credit_sar')
+        assignments.append('credit_sar = ?')
         params.append(credit)
+        assignments.append('credit_usd = ?')
+        params.append(sar_to_usd(credit))
     if price_sar is not None:
         try:
             price = float(price_sar)
@@ -964,10 +1002,11 @@ def assign_tenant_package(tenant_id, package_id):
         try:
             conn.execute(
                 'INSERT INTO tenant_package_history '
-                '(id, tenant_id, package_id, package_name, credit_usd) '
-                'VALUES (?, ?, ?, ?, ?)',
+                '(id, tenant_id, package_id, package_name, credit_usd, credit_sar) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
                 (str(uuid.uuid4()), str(tenant_id), str(package.get('id')),
-                 package.get('name'), float(package.get('credit_usd') or 0.0))
+                 package.get('name'), float(package.get('credit_usd') or 0.0),
+                 float(package.get('credit_sar') or 0.0))
             )
             conn.commit()
         except Exception as exc:
@@ -1012,6 +1051,8 @@ def get_client_overview(tenant_id):
             return 0.0
 
     lifetime = _lifetime_sum('ai_usage_events') + _lifetime_sum('map_usage_events')
+    fx = _active_fx_rate()
+    lifetime_sar = usd_to_sar(lifetime, fx)
     tenant = conn.execute(
         'SELECT package_id FROM tenants WHERE id = ?', (tenant_id,)).fetchone()
     package_id = dict(tenant).get('package_id') if tenant else None
@@ -1021,7 +1062,8 @@ def get_client_overview(tenant_id):
     block = None
     if package is not None:
         try:
-            credit = float(package.get('credit_usd') or 0.0)
+            credit = float(package.get('credit_sar') if package.get('credit_sar') is not None
+                           else usd_to_sar(package.get('credit_usd'), fx))
         except (TypeError, ValueError):
             credit = 0.0
         if cycle:
@@ -1029,23 +1071,23 @@ def get_client_overview(tenant_id):
             # counts only this cycle — a re-assignment starts clean and a
             # catalog edit never rewrites what was already granted.
             credit = cycle[1]
-            consumed = _package_cycle_consumed(conn, tenant_id, cycle[0], cycle[2])
+            consumed = usd_to_sar(_package_cycle_consumed(conn, tenant_id, cycle[0], cycle[2]), fx)
         else:
             ai_tagged = _tagged_sum('ai_usage_events', package.get('id'))
             maps_tagged = _tagged_sum('map_usage_events', package.get('id'))
             if ai_tagged is None or maps_tagged is None:
-                consumed = lifetime
+                consumed = lifetime_sar
             else:
-                consumed = ai_tagged + maps_tagged
+                consumed = usd_to_sar(ai_tagged + maps_tagged, fx)
             if not package.get('is_active'):
                 consumed = max(consumed, credit)
         remaining = max(0.0, credit - consumed)
         block = {
             'id': package.get('id'),
             'name': package.get('name'),
-            'credit_usd': credit,
-            'consumed_usd': consumed,
-            'remaining_usd': remaining,
+            'credit_sar': credit,
+            'consumed_sar': consumed,
+            'remaining_sar': remaining,
             'status': 'expired' if remaining <= 0 else 'active',
             'assigned_at': assigned_at,
         }
@@ -1053,8 +1095,10 @@ def get_client_overview(tenant_id):
         'projects': int(counts.get('projects') or 0),
         'presentations': int(counts.get('presentations') or 0),
         'consumption_usd': lifetime,
+        'consumption_sar': lifetime_sar,
         'package': block,
         'lifetime_consumed_usd': lifetime,
+        'lifetime_consumed_sar': lifetime_sar,
     }
 
 
@@ -1128,8 +1172,9 @@ def sar_to_usd(amount_sar, rate=None):
 def with_sar_fields(payload, rate=None):
     """Return a copy of ``payload`` where every ``*_usd`` numeric leaf gains a
     ``*_sar`` sibling converted at the active rate — nested dicts and lists
-    included. The wallet books in dollars internally, but nothing that leaves
-    the server should require the client to know that.
+    included. Wallet figures are SAR-native; the *_usd twins that remain are
+    provider-cost audit fields, so a *_sar sibling is never generated where
+    one already exists.
     """
     try:
         active = float(rate) if rate else float(get_fx_rate().get('rate') or FX_DEFAULT_USD_SAR)
@@ -1150,8 +1195,62 @@ def with_sar_fields(payload, rate=None):
         out = {}
         for key, value in node.items():
             out[key] = _walk(value)
-            if isinstance(key, str) and key.endswith('_usd') and isinstance(value, (int, float)):
+            if (isinstance(key, str) and key.endswith('_usd')
+                    and isinstance(value, (int, float))
+                    and (key[:-4] + '_sar') not in node):
                 out[key[:-4] + '_sar'] = _convert(value)
         return out
 
     return _walk(payload)
+
+
+# ── Platform settings (super-admin keyed configuration) ────────────────────
+
+def get_platform_setting(key, default=None):
+    """Read a platform-wide setting value (JSON-decoded when possible)."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT value FROM platform_settings WHERE key = ?', (str(key),)
+        ).fetchone()
+    except Exception:
+        return default
+    if not row:
+        return default
+    raw = dict(row).get('value')
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return raw if raw is not None else default
+
+
+def set_platform_setting(key, value):
+    """Store a platform-wide setting. Returns the stored value."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+        (str(key), json.dumps(value, ensure_ascii=False)),
+    )
+    conn.commit()
+    return get_platform_setting(key)
+
+
+def get_rejection_reasons():
+    """Pre-written recharge rejection reasons the super admin maintains."""
+    value = get_platform_setting('recharge_rejection_reasons', [])
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or '').strip()]
+
+
+def save_rejection_reasons(reasons):
+    """Replace the preset rejection-reason list (max 30 entries, 300 chars)."""
+    clean = []
+    for item in reasons or []:
+        text = str(item or '').strip()[:300]
+        if text and text not in clean:
+            clean.append(text)
+        if len(clean) >= 30:
+            break
+    return set_platform_setting('recharge_rejection_reasons', clean)

@@ -574,24 +574,25 @@ def _find_managed_key_hash_for_tenant(tenant_id, tenant=None, existing_meta=None
 def _tenant_provider_cap_usd(tenant_id):
     """Raw provider dollars the tenant may still burn on its own key.
 
-    The wallet is billed in client dollars (raw cost x BILLING_MULTIPLIER at
-    checkout, or flat reservation fees), so the provider-side cap converts
-    the remaining entitlement back: (free balance + live holds) / multiplier.
-    Holds count because an approved run already paid for its spend. Package
-    credit adds verbatim: it is consumed in raw provider dollars with no
-    multiplier. This keeps every future checkout bill affordable by
-    construction.
+    The wallet is billed in riyals (raw provider cost x rate x
+    BILLING_MULTIPLIER at checkout, or flat reservation fees), so the
+    provider-side cap converts the remaining entitlement back:
+    (free balance + live holds) / rate / multiplier. Holds count because an
+    approved run already paid for its spend. Package credit adds after the
+    multiplier: it is consumed at raw provider cost, so its riyal figure maps
+    back through the rate alone. This keeps every future checkout bill
+    affordable by construction.
     """
     try:
         balance = db.get_tenant_balance(tenant_id)
     except Exception:
         balance = 0.0
     try:
-        holds = db.get_active_hold_total_usd(tenant_id)
+        holds = db.get_active_hold_total_sar(tenant_id)
     except Exception:
         holds = 0.0
     try:
-        package_remaining = db.get_package_remaining_usd(tenant_id)
+        package_remaining = db.get_package_remaining_sar(tenant_id)
     except Exception:
         package_remaining = 0.0
     try:
@@ -600,8 +601,14 @@ def _tenant_provider_cap_usd(tenant_id):
         multiplier = 0.0
     if multiplier <= 0:
         multiplier = 1.0
-    wallet_raw = (float(balance or 0.0) + float(holds or 0.0)) / multiplier
-    return max(0.0, wallet_raw + float(package_remaining or 0.0))
+    try:
+        fx_rate = float((db.get_fx_rate() or {}).get('rate') or db.FX_DEFAULT_USD_SAR)
+    except (TypeError, ValueError):
+        fx_rate = db.FX_DEFAULT_USD_SAR
+    if fx_rate <= 0:
+        fx_rate = db.FX_DEFAULT_USD_SAR
+    wallet_raw = (float(balance or 0.0) + float(holds or 0.0)) / fx_rate / multiplier
+    return max(0.0, wallet_raw + float(package_remaining or 0.0) / fx_rate)
 
 
 def _openrouter_key_usage_usd(tenant_id):
@@ -701,6 +708,8 @@ def _schedule_tenant_limit_sync(tenant_id):
     racing stale PATCHes upstream."""
     if not tenant_id or not _openrouter_management_key():
         return
+    if app.config.get('TESTING'):
+        return
     tenant_key = str(tenant_id)
 
     def _run():
@@ -718,7 +727,8 @@ def _schedule_tenant_limit_sync(tenant_id):
         print(f"[BILLING] provider-cap sync spawn failed: {exc}")
 
 
-LOW_BALANCE_NOTIFY_USD = float(os.environ.get('LOW_BALANCE_NOTIFY_USD') or 10.0)
+# Wallet figures are riyals — the spend floor is a SAR amount (≈$10).
+LOW_BALANCE_NOTIFY_SAR = float(os.environ.get('LOW_BALANCE_NOTIFY_SAR') or 37.5)
 
 
 def _maybe_notify_low_balance(tenant_id):
@@ -727,13 +737,13 @@ def _maybe_notify_low_balance(tenant_id):
     this catches automatic and manual spend alike without spamming."""
     try:
         balance = db.get_tenant_balance(tenant_id)
-        if balance is None or float(balance) >= LOW_BALANCE_NOTIFY_USD:
+        if balance is None or float(balance) >= LOW_BALANCE_NOTIFY_SAR:
             return
         if db.recent_notification_exists(tenant_id, 'wallet', 'low-balance', since_hours=24):
             return
         _notify_tenant_billing(
             tenant_id, 'رصيد المحفظة منخفض',
-            f'الرصيد الحالي {db.usd_to_sar(balance):.2f} ريال',
+            f'الرصيد الحالي {float(balance):.2f} ريال',
             entity_type='wallet', entity_id='low-balance')
     except Exception as exc:
         print(f'[NOTIFY] low-balance check failed for {tenant_id}: {exc}')

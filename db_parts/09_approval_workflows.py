@@ -251,9 +251,11 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
         return {'error': 'approval_not_pending'}
     if decision == 'approved' and int(row['estimated_points'] or 0) > 0:
         # One commit covers the decision and the escrow: an approval that
-        # cannot hold its points rolls the decision back with it.
+        # cannot hold its points rolls the decision back with it. The
+        # estimate is priced in USD product units; the wallet hold is riyals.
         reservation = _hold_points_tx(
-            conn, tenant_id, row['estimated_points'], row['estimated_cost_usd'],
+            conn, tenant_id, row['estimated_points'],
+            usd_to_sar(row['estimated_cost_usd']),
             reserved_by=decided_by, reserved_by_name=decided_by_name,
             generation_approval_id=approval_id, draft_id=row['draft_id'],
             presentation_id=(row['presentation_id'] if 'presentation_id' in row.keys() else None),
@@ -367,17 +369,18 @@ def _reservation_hold_key(reservation_id):
     return f'hold:{reservation_id}'
 
 
-def _hold_points_tx(conn, tenant_id, points, cost_usd, reserved_by=None, reserved_by_name=None,
+def _hold_points_tx(conn, tenant_id, points, cost_sar, reserved_by=None, reserved_by_name=None,
                     generation_approval_id=None, draft_id=None, presentation_id=None, note=None):
     """Escrow the hold inside an open transaction — never commits.
 
-    The wallet debit is a conditional UPDATE, so two parallel holds cannot
-    spend the same balance: the loser sees rowcount 0 and reports
-    ``insufficient_balance``. A live hold on the same approval is returned
-    as-is (the unique index makes a second row impossible anyway).
+    ``cost_sar`` is wallet riyals. The wallet debit is a conditional UPDATE,
+    so two parallel holds cannot spend the same balance: the loser sees
+    rowcount 0 and reports ``insufficient_balance``. A live hold on the same
+    approval is returned as-is (the unique index makes a second row
+    impossible anyway).
     """
     points = int(points or 0)
-    cost = round(float(cost_usd or 0.0) + 1e-9, 2)
+    cost = round(float(cost_sar or 0.0) + 1e-9, 2)
     if points <= 0 or cost <= 0:
         return {'error': 'nothing_to_reserve'}
     if generation_approval_id:
@@ -394,24 +397,26 @@ def _hold_points_tx(conn, tenant_id, points, cost_usd, reserved_by=None, reserve
     )
     if (debit.rowcount or 0) <= 0:
         return {'error': 'insufficient_balance',
-                'available_usd': get_tenant_balance(tenant_id),
-                'required_usd': cost}
+                'available_sar': get_tenant_balance(tenant_id),
+                'required_sar': cost}
     reservation_id = str(uuid.uuid4())
     now = _utcnow()
     expires = (now + timedelta(hours=RESERVATION_TTL_HOURS)).isoformat()
     conn.execute(
         '''INSERT INTO point_reservations
-           (id, tenant_id, generation_approval_id, draft_id, points, cost_usd,
+           (id, tenant_id, generation_approval_id, draft_id, points, cost_usd, cost_sar,
             status, reserved_by, reserved_by_name, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?)''',
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?)''',
         (reservation_id, tenant_id, generation_approval_id, draft_id, points,
-         cost, reserved_by, reserved_by_name, expires),
+         sar_to_usd(cost), cost, reserved_by, reserved_by_name, expires),
     )
     conn.execute(
         '''INSERT INTO tenant_ledger
-           (id, tenant_id, kind, amount_usd, draft_id, presentation_id, idempotency_key, note)
-           VALUES (?, ?, 'hold', ?, ?, ?, ?, ?)''',
-        (str(uuid.uuid4()), tenant_id, cost, draft_id, presentation_id,
+           (id, tenant_id, kind, amount_usd, amount_sar, fx_rate, draft_id, presentation_id,
+            idempotency_key, note)
+           VALUES (?, ?, 'hold', ?, ?, ?, ?, ?, ?, ?)''',
+        (str(uuid.uuid4()), tenant_id, sar_to_usd(cost), cost, _active_fx_rate(),
+         draft_id, presentation_id,
          _reservation_hold_key(reservation_id),
          str(note or '').strip() or 'حجز نقاط التوليد'),
     )
@@ -519,7 +524,7 @@ def _settle_reservation_tx(conn, tenant_id, row, new_status, settled_by=None, no
         else:
             # A legacy hold with no escrow: debit the wallet directly so the
             # consumption still lands on the real ledger.
-            amount = float(row['cost_usd'] or 0.0)
+            amount = _reservation_cost_sar(row)
             if amount > 0:
                 debit = conn.execute(
                     'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) - ? '
@@ -530,9 +535,11 @@ def _settle_reservation_tx(conn, tenant_id, row, new_status, settled_by=None, no
                     raise InsufficientBalance(amount, get_tenant_balance(tenant_id))
                 conn.execute(
                     '''INSERT INTO tenant_ledger
-                       (id, tenant_id, kind, amount_usd, draft_id, idempotency_key, note)
-                       VALUES (?, ?, 'debit', ?, ?, ?, ?)''',
-                    (str(uuid.uuid4()), tenant_id, amount, row['draft_id'],
+                       (id, tenant_id, kind, amount_usd, amount_sar, fx_rate, draft_id,
+                        idempotency_key, note)
+                       VALUES (?, ?, 'debit', ?, ?, ?, ?, ?, ?)''',
+                    (str(uuid.uuid4()), tenant_id, sar_to_usd(amount), amount,
+                     _active_fx_rate(), row['draft_id'],
                      f'consume:{reservation_id}', str(note or '').strip() or 'تسوية حجز التوليد'),
                 )
     elif new_status == 'released':
@@ -545,23 +552,39 @@ def _settle_reservation_tx(conn, tenant_id, row, new_status, settled_by=None, no
             )
             conn.execute(
                 'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? WHERE id = ?',
-                (float(row['cost_usd'] or 0.0), tenant_id),
+                (_reservation_cost_sar(row), tenant_id),
             )
     return dict(conn.execute('SELECT * FROM point_reservations WHERE id = ?', (reservation_id,)).fetchone())
 
 
-def reserve_points(tenant_id, points, cost_usd=0, reserved_by=None, reserved_by_name=None,
+def _reservation_cost_sar(row):
+    """SAR amount a reservation holds — ``cost_sar`` natively, legacy USD
+    rows converted at the active rate."""
+    try:
+        value = row['cost_sar']
+    except (KeyError, IndexError):
+        value = None
+    if value is None:
+        try:
+            value = usd_to_sar(row['cost_usd'])
+        except (KeyError, IndexError, TypeError):
+            value = 0.0
+    return float(value or 0.0)
+
+
+def reserve_points(tenant_id, points, cost_sar=0, reserved_by=None, reserved_by_name=None,
                    generation_approval_id=None, draft_id=None, presentation_id=None, note=None):
     """t31: escrow points against the wallet before a generation run.
 
-    Atomic with the balance: stale holds are swept first, the conditional
-    debit and the reservation row commit together, and a live hold on the
-    same approval is returned instead of duplicated.
+    ``cost_sar`` is wallet riyals. Atomic with the balance: stale holds are
+    swept first, the conditional debit and the reservation row commit
+    together, and a live hold on the same approval is returned instead of
+    duplicated.
     """
     release_stale_reservations(tenant_id)
     conn = get_db()
     result = _hold_points_tx(
-        conn, tenant_id, points, cost_usd,
+        conn, tenant_id, points, cost_sar,
         reserved_by=reserved_by, reserved_by_name=reserved_by_name,
         generation_approval_id=generation_approval_id, draft_id=draft_id,
         presentation_id=presentation_id, note=note)
@@ -589,10 +612,9 @@ def consume_points(tenant_id, reservation_id, settled_by=None, note=None):
                                         settled_by=settled_by, note=note)
     except InsufficientBalance as short:
         conn.rollback()
-        return {'error': 'insufficient_balance', 'required_usd': short.required_usd,
-                'available_usd': short.available_usd,
-                'required_sar': usd_to_sar(short.required_usd),
-                'available_sar': usd_to_sar(short.available_usd)}
+        return {'error': 'insufficient_balance',
+                'required_sar': short.required_sar,
+                'available_sar': short.available_sar}
     if result.get('error'):
         conn.rollback()
         return result
@@ -699,8 +721,8 @@ def list_point_reservations(tenant_id, status=None, limit=100):
     return [dict(row) for row in rows]
 
 
-def get_active_hold_total_usd(tenant_id):
-    """Wallet amount currently escrowed in live generation holds.
+def get_active_hold_total_sar(tenant_id):
+    """Wallet riyals currently escrowed in live generation holds.
 
     Held money is already spent from the wallet but still entitles the run
     to provider spend, so the key-limit sync adds it back on top of the
@@ -709,20 +731,23 @@ def get_active_hold_total_usd(tenant_id):
     try:
         conn = get_db()
         row = conn.execute(
-            "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM point_reservations "
-            "WHERE tenant_id = ? AND status = 'reserved'", (str(tenant_id),),
+            "SELECT COALESCE(SUM(COALESCE(cost_sar, cost_usd * ?)), 0) AS total "
+            "FROM point_reservations "
+            "WHERE tenant_id = ? AND status = 'reserved'",
+            (_active_fx_rate(), str(tenant_id)),
         ).fetchone()
         return float(dict(row).get('total') or 0.0)
     except Exception:
         return 0.0
 
 
-def get_package_remaining_usd(tenant_id):
-    """Unburned credit of the tenant's assigned package, in raw USD.
+def get_package_remaining_sar(tenant_id):
+    """Unburned credit of the tenant's assigned package, in wallet riyals.
 
     Package consumption is implicit — usage rows tagged with the package id
-    at write time — so remaining = package credit minus tagged spend. No
-    assigned package means no package credit, never an error.
+    at write time — so remaining = package credit minus tagged spend
+    converted at the active rate. No assigned package means no package
+    credit, never an error.
     """
     try:
         conn = get_db()
@@ -730,7 +755,7 @@ def get_package_remaining_usd(tenant_id):
         if not cycle:
             return 0.0
         package_id, credit, assigned_at = cycle
-        consumed = _package_cycle_consumed(conn, tenant_id, package_id, assigned_at)
+        consumed = _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at)
         return max(0.0, credit - consumed)
     except Exception:
         return 0.0

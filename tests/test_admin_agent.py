@@ -92,6 +92,9 @@ class AdminAgentTests(unittest.TestCase):
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
 
         with cls.app.app_context():
+            # `import app` is a no-op when another suite already imported it —
+            # build the schema on this suite's DB_PATH explicitly.
+            db.init_db()
             cls.tenant = db.create_tenant('Agent Co', 'agent@example.test', 'hash', 'agent-co')
 
         cls.token = auth.create_token(

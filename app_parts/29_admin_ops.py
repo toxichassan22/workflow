@@ -155,7 +155,7 @@ def api_admin_package_versions(package_id):
                         'versions': db.list_package_versions(package_id)})
     data = request.json or {}
     row = db.create_package_version(
-        package_id, name=data.get('name'), credit_usd=data.get('creditUsd'),
+        package_id, name=data.get('name'), credit_sar=data.get('creditSar', data.get('credit_sar')),
         price_sar=data.get('priceSar'), duration_days=data.get('durationDays'),
         limits=data.get('limits'), features=data.get('features'),
         actor_id=_landloom_actor_id(), actor_name=_landloom_actor_name(),

@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import uuid
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -50,10 +51,30 @@ def make_json(resp):
 
 
 def test_flow():
+    # Pin the flow to its own database: in a combined run a prior suite may
+    # leave db.DB_PATH pointing at a temp directory that no longer exists.
+    temp_dir = tempfile.TemporaryDirectory()
+    original_db_path = db.DB_PATH
+    db.DB_PATH = os.path.join(temp_dir.name, 'full-flow.db')
+    try:
+        with flask_app.app_context():
+            db.init_db()
+        _run_flow()
+    finally:
+        with flask_app.app_context():
+            db.close_db()
+        db.DB_PATH = original_db_path
+        temp_dir.cleanup()
+
+
+def _run_flow():
     app.call_zai_chat = mock_call_zai_chat
     # /api/slide-plan queues a background job outside TESTING; the script asserts
     # on the synchronous plan payload.
     flask_app.config['TESTING'] = True
+    # The flow registers a zero-balance tenant and expects generation to run;
+    # billing enforcement stays opt-in via BILLING_ENFORCE.
+    os.environ.pop('BILLING_ENFORCE', None)
 
     client = flask_app.test_client()
 

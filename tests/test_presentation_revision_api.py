@@ -33,6 +33,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
         for item in cls.patches:
             item.start()
         with cls.app.app_context():
+            # `import app` is a no-op when another suite already imported it —
+            # build the schema on this suite's DB_PATH explicitly.
+            db.init_db()
             cls.tenant = db.create_tenant('Revision Tenant', 'revision@example.test', 'hash', 'revision-tenant')
             cls.other = db.create_tenant('Other Tenant', 'other-revision@example.test', 'hash', 'other-revision')
         cls.headers = {'Authorization': 'Bearer ' + auth.create_token(

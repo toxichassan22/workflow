@@ -818,7 +818,7 @@ class IdentityApiTests(unittest.TestCase):
                                   json={'packageName': 'باقة', 'amountUsd': 10})
         self.assertEqual(denied.status_code, 403)
         db.set_user_permission(uid, 'billing', True)
-        package = db.create_billing_package('باقة نمو', credit_usd=100, price_sar=375)
+        package = db.create_billing_package('باقة نمو', credit_sar=375, price_sar=375)
         allowed = self.client.post('/api/recharge-requests', headers=self.headers(emp_token),
                                    json={'packageId': package['id'],
                                          'referenceNumber': 'TRX-SEC-1'})

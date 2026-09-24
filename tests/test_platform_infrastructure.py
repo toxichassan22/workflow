@@ -109,12 +109,12 @@ class Mission5DbTests(unittest.TestCase):
 
     def test_package_versions_are_immutable_and_numbered(self):
         v1 = db.create_package_version('pkg-1')
-        v2 = db.create_package_version('pkg-1', credit_usd=300)
+        v2 = db.create_package_version('pkg-1', credit_sar=1125)
         self.assertEqual(v1['version'], 1)
         self.assertEqual(v2['version'], 2)
         versions = db.list_package_versions('pkg-1')
         self.assertEqual([v['version'] for v in versions], [2, 1])
-        self.assertEqual(versions[0]['credit_usd'], 300)
+        self.assertEqual(versions[0]['credit_sar'], 1125)
 
     def test_document_versions_number_per_document(self):
         a = db.create_document_version('tenant-1', 'presentation', 'pres-1')
@@ -371,6 +371,9 @@ class Mission5ApiTests(unittest.TestCase):
         cls.app.config.update(TESTING=True)
 
         with cls.app.app_context():
+            # When another suite already imported `app`, its module-level
+            # init_db() ran against the old DB_PATH — build the schema here.
+            db.init_db()
             cls.admin_id = db.create_tenant(
                 'System Admin', 'sysadmin@example.test',
                 auth.hash_password('AdminPass12345'), plan='enterprise')

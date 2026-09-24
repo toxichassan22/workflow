@@ -631,20 +631,22 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                 tenant_id, 'sk-or-v1-sync-key-qqqqqqqqqqqqqqqq', provenance='auto',
                 openrouter_key_hash='synchash123', limit_usd=10.0)
 
+        with self.app.app_context():
+            # The wallet is riyals; the provider cap converts it back:
+            # balance / FX rate / BILLING_MULTIPLIER, with 'none' re-pushed.
+            expected_cap = 75.5 / float(db.get_fx_rate()['rate']) / float(db.get_billing_multiplier())
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_update_managed_key', return_value={'ok': True}) as patched_update:
             resp = client.put(f'/api/admin/tenants/{tenant_id}',
                               headers=self._admin_headers(),
-                              json={'creditBalance': 75.5})
+                              json={'creditBalanceSar': 75.5})
             self.assertEqual(resp.status_code, 200, resp.get_json())
-            # The provider cap is the wallet divided by BILLING_MULTIPLIER, and
-            # the reset policy is always re-pushed as the configured 'none'.
             patched_update.assert_called_once_with(
-                'synchash123', limit_usd=75.5 / 1.6, limit_reset='none', disabled=False)
+                'synchash123', limit_usd=expected_cap, limit_reset='none', disabled=False)
 
         with self.app.app_context():
             meta = db.get_tenant_openrouter_key_meta(tenant_id)
-            self.assertEqual(meta['limit_usd'], 75.5 / 1.6)
+            self.assertEqual(meta['limit_usd'], expected_cap)
             balance = db.get_tenant_balance(tenant_id)
             self.assertEqual(balance, 75.5)
 
@@ -708,9 +710,11 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         resp = client.get('/api/client/overview', headers={'Authorization': f'Bearer {token}'})
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
-        self.assertEqual(body['balance_usd'], 50.0)
+        self.assertEqual(body['balance_sar'], 50.0)
+        with self.app.app_context():
+            self.assertEqual(body['balance_usd'], db.sar_to_usd(50.0))
         self.assertIsNotNone(body['package'])
-        self.assertEqual(body['package']['remaining_usd'], 50.0)
+        self.assertEqual(body['package']['remaining_sar'], 50.0)
         self.assertEqual(body['package']['name'], 'رصيد المحفظة')
 
 

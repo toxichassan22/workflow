@@ -8,6 +8,7 @@ SQLite database, no provider calls.
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class ClientOverviewTests(unittest.TestCase):
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
+        cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
 
         with cls.app.app_context():
             db.init_db()
@@ -44,6 +46,12 @@ class ClientOverviewTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # Daemon `usage-bill-*`/`cap-sync-*` threads open their own SQLite
+        # handles — on Windows the temp file cannot be deleted while one
+        # lives, so wait for them before cleanup.
+        for thread in threading.enumerate():
+            if thread.name.startswith(('usage-bill-', 'cap-sync-')):
+                thread.join(timeout=10)
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 
@@ -78,7 +86,8 @@ class ClientOverviewTests(unittest.TestCase):
     def test_package_active_then_expired(self):
         tenant_id, token = self._fresh_client('Expiry Co', 'expiry-ov@example.test', 'expiry-ov')
         with self.app.app_context():
-            package = db.create_billing_package('باقة اختبار', credit_usd=1.0, price_sar=10.0)
+            # 3.75 SAR of entitlement covers exactly 1.00 USD of raw spend.
+            package = db.create_billing_package('باقة اختبار', credit_sar=3.75, price_sar=10.0)
             db.assign_tenant_package(tenant_id, package['id'])
             db.record_ai_usage_event(
                 tenant_id, 'model-o', flow='slide', total_tokens=10,
@@ -87,19 +96,20 @@ class ClientOverviewTests(unittest.TestCase):
                 tenant_id, 'geocode', 2, 0.005, flow='site')
         body = self._overview(token)
         self.assertEqual(body['package']['name'], 'باقة اختبار')
-        self.assertAlmostEqual(body['package']['credit_usd'], 1.0)
-        self.assertAlmostEqual(body['package']['consumed_usd'], 0.41)
-        self.assertAlmostEqual(body['package']['remaining_usd'], 0.59)
+        self.assertAlmostEqual(body['package']['credit_sar'], 3.75)
+        self.assertAlmostEqual(body['package']['consumed_sar'], 1.54)
+        self.assertAlmostEqual(body['package']['remaining_sar'], 2.21)
         self.assertEqual(body['package']['status'], 'active')
         self.assertAlmostEqual(body['lifetime']['consumed_usd'], 0.41)
+        self.assertAlmostEqual(body['lifetime']['consumed_sar'], 1.54)
 
         with self.app.app_context():
             db.record_ai_usage_event(
                 tenant_id, 'model-o', flow='slide', total_tokens=10,
                 cost_usd=0.70, generation_id='gen-ov-2')
         body = self._overview(token)
-        self.assertAlmostEqual(body['package']['consumed_usd'], 1.11)
-        self.assertEqual(body['package']['remaining_usd'], 0)
+        self.assertAlmostEqual(body['package']['consumed_sar'], 4.16)
+        self.assertEqual(body['package']['remaining_sar'], 0)
         self.assertEqual(body['package']['status'], 'expired')
         self.assertAlmostEqual(body['lifetime']['consumed_usd'], 1.11)
 
@@ -108,22 +118,23 @@ class ClientOverviewTests(unittest.TestCase):
     def test_lifetime_covers_every_package(self):
         tenant_id, token = self._fresh_client('Life Co', 'life-ov@example.test', 'life-ov')
         with self.app.app_context():
-            first = db.create_billing_package('الأولى', credit_usd=5.0)
+            first = db.create_billing_package('الأولى', credit_sar=18.75)
             db.assign_tenant_package(tenant_id, first['id'])
             db.record_ai_usage_event(
                 tenant_id, 'model-o', flow='slide', total_tokens=10,
                 cost_usd=2.0, generation_id='gen-ov-3')
-            second = db.create_billing_package('الثانية', credit_usd=5.0)
+            second = db.create_billing_package('الثانية', credit_sar=18.75)
             db.assign_tenant_package(tenant_id, second['id'])
             db.record_ai_usage_event(
                 tenant_id, 'model-o', flow='slide', total_tokens=10,
                 cost_usd=1.0, generation_id='gen-ov-4')
         body = self._overview(token)
         self.assertEqual(body['package']['name'], 'الثانية')
-        self.assertAlmostEqual(body['package']['consumed_usd'], 1.0)
-        self.assertAlmostEqual(body['package']['remaining_usd'], 4.0)
+        self.assertAlmostEqual(body['package']['consumed_sar'], 3.75)
+        self.assertAlmostEqual(body['package']['remaining_sar'], 15.0)
         self.assertEqual(body['package']['status'], 'active')
         self.assertAlmostEqual(body['lifetime']['consumed_usd'], 3.0)
+        self.assertAlmostEqual(body['lifetime']['consumed_sar'], 11.25)
 
     # ── Totals count work ──────────────────────────────────────────────
 

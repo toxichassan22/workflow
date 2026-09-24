@@ -10,6 +10,7 @@ touches a real SMTP server.
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -48,6 +49,12 @@ class HousekeepingDbTests(unittest.TestCase):
             'tenant-1', 'المعتمد', 'approver@x.test', 'hash', role='employee')
 
     def tearDown(self):
+        # Daemon `usage-bill-*`/`cap-sync-*` threads open their own SQLite
+        # handles — on Windows the temp file cannot be deleted while one
+        # lives, so wait for them before cleanup.
+        for thread in threading.enumerate():
+            if thread.name.startswith(('usage-bill-', 'cap-sync-')):
+                thread.join(timeout=10)
         db.close_db()
         self.context.pop()
         db.DB_PATH = self.original_db_path
@@ -146,16 +153,16 @@ class HousekeepingDbTests(unittest.TestCase):
     # ── t33: package catalog carries validity and terms ──────────────────
 
     def test_packages_expose_version_validity_and_features(self):
-        pkg = db.create_billing_package('باقة اختبار', credit_usd=100, price_sar=375)
+        pkg = db.create_billing_package('باقة اختبار', credit_sar=100, price_sar=375)
         db.create_package_version(
-            pkg['id'], name='باقة اختبار', credit_usd=100,
+            pkg['id'], name='باقة اختبار', credit_sar=100,
             price_sar=375, duration_days=90, features=['دعم فني', 'خمسة مشاريع'])
         listed = {p['id']: p for p in db.list_billing_packages(active_only=True)}
         self.assertEqual(listed[pkg['id']]['duration_days'], 90)
         self.assertEqual(listed[pkg['id']]['features'], ['دعم فني', 'خمسة مشاريع'])
 
     def test_packages_without_version_report_no_validity(self):
-        pkg = db.create_billing_package('باقة بلا إصدار', credit_usd=10)
+        pkg = db.create_billing_package('باقة بلا إصدار', credit_sar=10)
         listed = {p['id']: p for p in db.list_billing_packages(active_only=True)}
         self.assertIsNone(listed[pkg['id']]['duration_days'])
         self.assertEqual(listed[pkg['id']]['features'], [])
@@ -171,6 +178,7 @@ class HousekeepingApiTests(unittest.TestCase):
         self.application_module = application_module
         self.app = application_module.app
         self.app.config.update(TESTING=True)
+        application_module.OPENROUTER_MANAGEMENT_KEY = None
         self.context = self.app.app_context()
         self.context.push()
         self.tenant_id = db.create_tenant('شركة العمق', 'landloom@x.test', 'hash', 'landloom')
@@ -192,6 +200,12 @@ class HousekeepingApiTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        # Daemon `usage-bill-*`/`cap-sync-*` threads open their own SQLite
+        # handles — on Windows the temp file cannot be deleted while one
+        # lives, so wait for them before cleanup.
+        for thread in threading.enumerate():
+            if thread.name.startswith(('usage-bill-', 'cap-sync-')):
+                thread.join(timeout=10)
         db.close_db()
         self.context.pop()
         db.DB_PATH = self.original_db_path

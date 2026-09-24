@@ -7,6 +7,7 @@ every assertion is about this repository's own behaviour.
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -29,6 +30,7 @@ class BillingLedgerTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
 
         with cls.app.app_context():
             db.init_db()
@@ -52,6 +54,12 @@ class BillingLedgerTests(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        # Wallet moves fire `cap-sync-*` provider-cap threads that open their
+        # own SQLite handle — on Windows the temp file cannot be deleted while
+        # that handle lives, so wait for them before cleanup.
+        for thread in threading.enumerate():
+            if thread.name.startswith(('usage-bill-', 'cap-sync-')):
+                thread.join(timeout=10)
         cls.temp_dir.cleanup()
 
     def setUp(self):
@@ -109,8 +117,10 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertEqual(entry['maps_events_count'], 1)
         self.assertAlmostEqual(entry['ai_cost_usd'], 1.0)
         self.assertAlmostEqual(entry['maps_cost_usd'], 0.02)
+        # Wallet money is riyals: raw USD x rate (3.75) x multiplier.
         self.assertAlmostEqual(entry['amount_usd'], round(1.02 * 2.0, 2))
-        self.assertAlmostEqual(result['balance_usd'], 10.0 - round(1.02 * 2.0, 2))
+        self.assertAlmostEqual(entry['amount_sar'], round(1.02 * 3.75 * 2.0, 2))
+        self.assertAlmostEqual(result['balance_sar'], 10.0 - round(1.02 * 3.75 * 2.0, 2))
         with self.app.app_context():
             unbilled = db.get_unbilled_usage(tenant_id, draft_id='draft-bill')
         self.assertEqual(unbilled['ai_calls'], 0)
@@ -235,7 +245,7 @@ class BillingLedgerTests(unittest.TestCase):
     def test_hold_total_and_billable_tenant_feed(self):
         tenant_id = self._fresh_tenant('sweep-feed', balance=10.0)
         with self.app.app_context():
-            self.assertEqual(db.get_active_hold_total_usd(tenant_id), 0.0)
+            self.assertEqual(db.get_active_hold_total_sar(tenant_id), 0.0)
             self.assertNotIn(tenant_id, db.list_tenants_with_billable_usage())
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=10,
@@ -250,18 +260,20 @@ class BillingLedgerTests(unittest.TestCase):
             result = db.record_ledger_credit(tenant_id, 5.0, note='manual top-up')
         self.assertTrue(result['credited'])
         self.assertEqual(result['entry']['kind'], 'credit')
-        self.assertAlmostEqual(result['balance_usd'], 6.0)
+        self.assertAlmostEqual(result['entry']['amount_sar'], 5.0)
+        self.assertAlmostEqual(result['balance_sar'], 6.0)
 
     # ── Sub-cent carry (ISS-038) ───────────────────────────────────────
 
     def test_subcent_claim_carries_instead_of_closing_at_zero(self):
-        """ISS-038: a claim whose billed total rounds to $0.00 must leave the
-        rows unbilled so the cents accumulate into the next invoice."""
+        """ISS-038: a claim whose billed total rounds to 0.00 SAR must leave
+        the rows unbilled so the cents accumulate into the next invoice."""
         tenant_id = self._fresh_tenant('subcent', balance=10.0)
         with self.app.app_context():
+            # 0.0001 raw x 3.75 x 1.6 = 0.0006 SAR — below a single halala.
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=3,
-                cost_usd=0.001, draft_id='draft-subcent')
+                cost_usd=0.0001, draft_id='draft-subcent')
             result = db.bill_unbilled_usage(tenant_id, draft_id='draft-subcent')
         self.assertFalse(result['billed'])
         self.assertEqual(result['reason'], 'below_minimum_charge')
@@ -278,23 +290,23 @@ class BillingLedgerTests(unittest.TestCase):
             self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 10.0)
 
     def test_carried_subcent_claim_bills_once_threshold_is_crossed(self):
-        """ISS-038: after the carried cents push the aggregate past a cent,
+        """ISS-038: after the carried cents push the aggregate past a halala,
         the next checkout claims the earlier rows under the new debit."""
         tenant_id = self._fresh_tenant('subcent-carry', balance=10.0)
         with self.app.app_context():
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=3,
-                cost_usd=0.001, draft_id='draft-carry')
+                cost_usd=0.0001, draft_id='draft-carry')
             first = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
             self.assertFalse(first['billed'])
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=900,
-                cost_usd=0.02, draft_id='draft-carry')
+                cost_usd=0.002, draft_id='draft-carry')
             second = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
         self.assertTrue(second['billed'])
         entry = second['entry']
-        # 0.021 raw * 1.6 = 0.0336 -> $0.03 collected once, not $0.00 twice.
-        self.assertAlmostEqual(entry['amount_usd'], 0.03, places=2)
+        # 0.0021 raw x 3.75 x 1.6 = 0.0126 -> 0.01 SAR collected once.
+        self.assertAlmostEqual(entry['amount_sar'], 0.01, places=2)
         self.assertEqual(entry['ai_events_count'], 2)
         with self.app.app_context():
             conn = db.get_db()
@@ -314,7 +326,7 @@ class BillingLedgerTests(unittest.TestCase):
                 cost_usd=0.0, draft_id='draft-free')
             result = db.bill_unbilled_usage(tenant_id, draft_id='draft-free')
         self.assertTrue(result['billed'])
-        self.assertAlmostEqual(result['entry']['amount_usd'], 0.0)
+        self.assertAlmostEqual(result['entry']['amount_sar'], 0.0)
 
     # ── Package fallback (ISS-039) ─────────────────────────────────────
 
@@ -324,9 +336,11 @@ class BillingLedgerTests(unittest.TestCase):
         unbillable forever."""
         tenant_id = self._fresh_tenant('pkg-exhaust', balance=10.0)
         with self.app.app_context():
-            package = db.create_billing_package('pkg-mini', credit_usd=0.01)
+            # 0.01 SAR of entitlement burns after 0.0027 USD of raw spend.
+            package = db.create_billing_package('pkg-mini', credit_sar=0.01)
             db.assign_tenant_package(tenant_id, package['id'])
-            # First event burns the package credit exactly under it.
+            # First event burns the package credit exactly under it
+            # (0.01 USD raw = 0.0375 SAR > the 0.01 SAR grant).
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=10,
                 cost_usd=0.01, draft_id='draft-pkg')
@@ -346,13 +360,13 @@ class BillingLedgerTests(unittest.TestCase):
             # And the wallet actually bills the overflow row.
             result = db.bill_unbilled_usage(tenant_id, draft_id='draft-pkg')
             self.assertTrue(result['billed'])
-            self.assertAlmostEqual(result['entry']['amount_usd'], 0.03, places=2)
+            self.assertAlmostEqual(result['entry']['amount_sar'], 0.12, places=2)
 
     def test_deactivated_package_stops_owning_new_usage(self):
         """ISS-039: an is_active=0 package is not a valid spend owner either."""
         tenant_id = self._fresh_tenant('pkg-off', balance=10.0)
         with self.app.app_context():
-            package = db.create_billing_package('pkg-off', credit_usd=5.0)
+            package = db.create_billing_package('pkg-off', credit_sar=5.0)
             db.assign_tenant_package(tenant_id, package['id'])
             conn = db.get_db()
             conn.execute('UPDATE billing_packages SET is_active = 0 WHERE id = ?',
@@ -371,37 +385,38 @@ class BillingLedgerTests(unittest.TestCase):
         window — the old cycle's burn must not eat the new grant."""
         tenant_id = self._fresh_tenant('pkg-cycle', balance=10.0)
         with self.app.app_context():
-            package = db.create_billing_package('pkg-renew', credit_usd=0.01)
+            # 3.75 SAR of entitlement = 1.00 USD of raw provider spend.
+            package = db.create_billing_package('pkg-renew', credit_sar=3.75)
             db.assign_tenant_package(tenant_id, package['id'])
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=10,
-                cost_usd=0.01, draft_id='draft-cycle')
-            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.0)
+                cost_usd=1.0, draft_id='draft-cycle')
+            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 0.0)
             import time
             time.sleep(1.1)  # cycle bound is second-precision
             db.assign_tenant_package(tenant_id, package['id'])
             # New cycle: full snapshot credit again, old usage out of scope.
-            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.01)
+            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 3.75)
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=10,
-                cost_usd=0.005, draft_id='draft-cycle')
+                cost_usd=0.5, draft_id='draft-cycle')
             row = db.get_db().execute(
                 'SELECT package_id FROM ai_usage_events WHERE tenant_id = ? '
                 'ORDER BY created_at DESC, rowid DESC LIMIT 1',
                 (tenant_id,)).fetchone()
             self.assertEqual(row['package_id'], package['id'])
-            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.005)
+            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 1.87)
 
     def test_catalog_edit_does_not_rewrite_existing_entitlement(self):
-        """ISS-040: changing the catalog credit_usd must not change what an
+        """ISS-040: changing the catalog credit must not change what an
         already-assigned company was granted."""
         tenant_id = self._fresh_tenant('pkg-snapshot', balance=10.0)
         with self.app.app_context():
-            package = db.create_billing_package('pkg-snap', credit_usd=0.05)
+            package = db.create_billing_package('pkg-snap', credit_sar=0.5)
             db.assign_tenant_package(tenant_id, package['id'])
-            db.update_billing_package(package['id'], credit_usd=0.01)
-            # The assignment snapshot keeps the original 0.05 grant.
-            self.assertAlmostEqual(db.get_package_remaining_usd(tenant_id), 0.05)
+            db.update_billing_package(package['id'], credit_sar=0.1)
+            # The assignment snapshot keeps the original 0.5 SAR grant.
+            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 0.5)
 
     # ── Pre-flight guard ───────────────────────────────────────────────
 
@@ -549,7 +564,7 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertEqual(response.get_json()['error_code'], 'INSUFFICIENT_BALANCE')
 
     def test_ledger_endpoint_reports_balance_and_history(self):
-        tenant_id = self._fresh_tenant('ledger-http', balance=3.0)
+        tenant_id = self._fresh_tenant('ledger-http', balance=10.0)
         token = auth.create_token(
             tenant_id, 'ledger-http@example.test', user_id=None,
             user_name='Ledger Admin', user_role='company_admin')
@@ -558,7 +573,7 @@ class BillingLedgerTests(unittest.TestCase):
         headers = {'Authorization': f'Bearer {token}'}
         before = client.get('/api/billing/ledger', headers=headers).get_json()
         self.assertTrue(before['success'])
-        self.assertAlmostEqual(before['balance_usd'], 3.0)
+        self.assertAlmostEqual(before['balance_sar'], 10.0)
         self.assertEqual(before['unbilled']['ai_calls'], 1)
         checkout = client.post(
             '/api/billing/checkout', json={'draftId': 'draft-ledger'},
@@ -581,7 +596,9 @@ class BillingLedgerTests(unittest.TestCase):
             headers=self._headers())
         self.assertEqual(denied_client.status_code, 403)
 
-    def test_topup_endpoint_credits_named_tenant_as_admin(self):
+    def test_topup_endpoint_is_retired_package_only_funding(self):
+        """Manual wallet credit is gone: funding is package-only, so even a
+        platform admin gets a clear refusal instead of a minted balance."""
         tenant_id = self._fresh_tenant('topup-target', balance=1.0)
         with self.app.app_context():
             conn = db.get_db()
@@ -592,17 +609,13 @@ class BillingLedgerTests(unittest.TestCase):
         admin_token = auth.create_token(
             'platform-admin', 'root@x.test', is_admin=True, user_name='مدير المنصة')
         client = self.app.test_client()
-        missing_target = client.post(
-            '/api/billing/topup', json={'amount_usd': 5.0},
-            headers={'Authorization': f'Bearer {admin_token}'})
-        self.assertEqual(missing_target.status_code, 400)
         response = client.post(
             '/api/billing/topup', json={'tenantId': tenant_id, 'amount_usd': 7.5},
             headers={'Authorization': f'Bearer {admin_token}'})
-        self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertTrue(response.get_json()['credited'])
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()['error_code'], 'package_only_funding')
         with self.app.app_context():
-            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 8.5)
+            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 1.0)
 
 
 if __name__ == '__main__':

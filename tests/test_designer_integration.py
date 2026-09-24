@@ -19,6 +19,9 @@ class DesignerIntegrationTests(unittest.TestCase):
         cls.module = app
         app.app.config.update(TESTING=True)
         with app.app.app_context():
+            # `import app` is a no-op when another suite already imported it —
+            # build the schema on this suite's DB_PATH explicitly.
+            db.init_db()
             cls.tenant = db.create_tenant('Designer', 'designer@example.test', 'hash', 'designer')
         cls.token = auth.create_token(cls.tenant, 'designer@example.test', user_role='company_admin')
 

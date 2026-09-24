@@ -5,10 +5,11 @@
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def create_package_version(package_id, name=None, credit_usd=None, price_sar=None,
+def create_package_version(package_id, name=None, credit_sar=None, price_sar=None,
                            duration_days=None, limits=None, features=None,
                            actor_id=None, actor_name=None):
-    """Snapshot a package into an immutable version row (next version number)."""
+    """Snapshot a package into an immutable version row (next version number).
+    The credit figure is wallet riyals; the row also keeps the USD audit twin."""
     conn = get_db()
     package = conn.execute(
         'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),),
@@ -16,6 +17,11 @@ def create_package_version(package_id, name=None, credit_usd=None, price_sar=Non
     if package is None:
         return {'error': 'package_not_found'}
     package = dict(package)
+    if credit_sar is None:
+        credit_sar = package.get('credit_sar')
+        if credit_sar is None:
+            credit_sar = usd_to_sar(package.get('credit_usd'))
+    credit_sar = float(credit_sar or 0.0)
     row = conn.execute(
         'SELECT COALESCE(MAX(version), 0) + 1 AS next FROM billing_package_versions WHERE package_id = ?',
         (str(package_id),),
@@ -24,12 +30,12 @@ def create_package_version(package_id, name=None, credit_usd=None, price_sar=Non
     version_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO billing_package_versions
-           (id, package_id, version, name, credit_usd, price_sar, duration_days,
+           (id, package_id, version, name, credit_usd, credit_sar, price_sar, duration_days,
             limits_json, features_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (version_id, str(package_id), version,
          name if name is not None else package.get('name'),
-         float(credit_usd) if credit_usd is not None else float(package.get('credit_usd') or 0.0),
+         sar_to_usd(credit_sar), credit_sar,
          price_sar if price_sar is not None else package.get('price_sar'),
          duration_days,
          json.dumps(limits or {}, ensure_ascii=False),
@@ -142,9 +148,12 @@ TAX_RATE_SAR = float(os.environ.get('TOPUP_TAX_RATE', '0.15'))
 
 def _create_topup_receipt_tx(conn, tenant_id, recharge_request_id=None, receipt_file_id=None,
                              receipt_sha256=None, transfer_reference=None, amount_usd=0,
-                             price_sar=None, issued_by=None, issued_by_name=None):
+                             amount_sar=None, price_sar=None, invoice_file_id=None,
+                             issued_by=None, issued_by_name=None):
     """d09: one financial document per approved top-up, inside the caller's
-    transaction — never commits. Carries the VAT breakdown on the SAR price."""
+    transaction — never commits. Carries the VAT breakdown on the SAR price.
+    ``amount_sar`` is the wallet riyals credited; ``invoice_file_id`` is the
+    optional platform-issued invoice upload the client can download."""
     if recharge_request_id:
         existing = conn.execute(
             'SELECT * FROM topup_receipts WHERE recharge_request_id = ?',
@@ -154,21 +163,24 @@ def _create_topup_receipt_tx(conn, tenant_id, recharge_request_id=None, receipt_
             return dict(existing)
     receipt_id = str(uuid.uuid4())
     invoice_number = _next_invoice_number_tx(conn)
+    if amount_sar is None:
+        amount_sar = usd_to_sar(amount_usd)
     subtotal = float(price_sar) if price_sar is not None else None
     tax_amount = round(subtotal * TAX_RATE_SAR, 2) if subtotal is not None else None
     total_sar = round(subtotal + tax_amount, 2) if subtotal is not None else None
     conn.execute(
         '''INSERT INTO topup_receipts
            (id, tenant_id, recharge_request_id, receipt_file_id, receipt_sha256,
-            transfer_reference, invoice_number, amount_usd, price_sar,
-            tax_rate, tax_amount_sar, total_sar, status,
+            transfer_reference, invoice_number, amount_usd, amount_sar, price_sar,
+            invoice_file_id, tax_rate, tax_amount_sar, total_sar, status,
             issued_by, issued_by_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)''',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)''',
         (receipt_id, str(tenant_id),
          str(recharge_request_id) if recharge_request_id else None,
          str(receipt_file_id) if receipt_file_id else None,
          receipt_sha256, transfer_reference, invoice_number,
-         float(amount_usd or 0.0), subtotal,
+         float(amount_usd or 0.0), float(amount_sar or 0.0), subtotal,
+         str(invoice_file_id) if invoice_file_id else None,
          TAX_RATE_SAR if subtotal is not None else None,
          tax_amount, total_sar,
          issued_by, issued_by_name),
@@ -179,7 +191,8 @@ def _create_topup_receipt_tx(conn, tenant_id, recharge_request_id=None, receipt_
 
 def create_topup_receipt(tenant_id, recharge_request_id=None, receipt_file_id=None,
                          receipt_sha256=None, transfer_reference=None, amount_usd=0,
-                         price_sar=None, issued_by=None, issued_by_name=None):
+                         amount_sar=None, price_sar=None, invoice_file_id=None,
+                         issued_by=None, issued_by_name=None):
     """Issue the financial document for an approved top-up (d09/t60-04).
 
     The receipt is created once per recharge request — a repeat call returns
@@ -192,7 +205,8 @@ def create_topup_receipt(tenant_id, recharge_request_id=None, receipt_file_id=No
         conn, tenant_id, recharge_request_id=recharge_request_id,
         receipt_file_id=receipt_file_id, receipt_sha256=receipt_sha256,
         transfer_reference=transfer_reference, amount_usd=amount_usd,
-        price_sar=price_sar, issued_by=issued_by, issued_by_name=issued_by_name)
+        amount_sar=amount_sar, price_sar=price_sar, invoice_file_id=invoice_file_id,
+        issued_by=issued_by, issued_by_name=issued_by_name)
     conn.commit()
     return row
 

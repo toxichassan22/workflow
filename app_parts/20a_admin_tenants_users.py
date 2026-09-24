@@ -29,9 +29,12 @@ def api_admin_tenants():
         send_welcome = bool(data.get('sendWelcomeEmail', True))
         try:
             if data.get('creditBalanceSar') is not None:
-                credit_balance = db.sar_to_usd(data.get('creditBalanceSar'))
+                credit_balance = float(data.get('creditBalanceSar'))
+            elif data.get('creditBalance') is not None:
+                # Legacy callers keyed dollars; the wallet books riyals.
+                credit_balance = db.usd_to_sar(data.get('creditBalance'))
             else:
-                credit_balance = float(data.get('creditBalance') or 0)
+                credit_balance = 0.0
         except (TypeError, ValueError):
             return jsonify({'error': 'Credit balance must be a valid number'}), 400
 
@@ -159,10 +162,15 @@ def api_admin_update_tenant(tenant_id):
             company_fields[db_key] = str(data[db_key] or '').strip()
     if 'trialEndsAt' in data:
         company_fields['trial_ends_at'] = data['trialEndsAt']
-    # The desk keys balances in riyals; the wallet stores dollars.
+    # The desk keys balances in riyals; the wallet stores riyals.
     if data.get('creditBalanceSar') is not None:
         try:
-            company_fields['credit_balance'] = db.sar_to_usd(data.get('creditBalanceSar'))
+            company_fields['credit_balance'] = float(data.get('creditBalanceSar'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Credit balance must be a valid number'}), 400
+    elif data.get('creditBalance') is not None:
+        try:
+            company_fields['credit_balance'] = db.usd_to_sar(data.get('creditBalance'))
         except (TypeError, ValueError):
             return jsonify({'error': 'Credit balance must be a valid number'}), 400
 

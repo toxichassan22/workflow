@@ -236,7 +236,7 @@ class LandloomDbTests(unittest.TestCase):
             "SELECT * FROM tenant_ledger WHERE idempotency_key = ?",
             (f'hold:{reservation["id"]}',)).fetchone()
         self.assertEqual(entry['kind'], 'debit')
-        self.assertEqual(entry['amount_usd'], 25.0)
+        self.assertEqual(entry['amount_sar'], 25.0)
         self.assertEqual(entry['raw_cost_usd'], 1.25)
         claimed = conn.execute(
             'SELECT billed_ledger_id FROM ai_usage_events WHERE id = ?', ('ev-1',)).fetchone()
@@ -274,7 +274,8 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(decided.get('status'), 'approved')
         draft = db.get_project_draft_by_id('tenant-1', self.draft_id)
         self.assertEqual(draft['status'], 'generating')
-        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        # The $25 estimate escrows its riyal equivalent (93.75 SAR).
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 6.25)
         # The run died with the browser: expire the hold and sweep it.
         conn.execute("UPDATE point_reservations SET expires_at = '2020-01-01' WHERE status = 'reserved'")
         conn.commit()
@@ -484,7 +485,7 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(row['version'], 2)
         missing = db.upsert_file_type('', 'بدون مفتاح')
         self.assertEqual(missing.get('error'), 'key_and_label_required')
-        self.assertEqual(len(db.get_file_type_registry()), 8)
+        self.assertEqual(len(db.get_file_type_registry()), 9)
 
     def test_operational_overview_counts(self):
         overview = db.operational_overview()
@@ -522,12 +523,12 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(dup.get('error'), 'duplicate_transfer_reference')
 
     def test_recharge_resolves_price_from_package_id(self):
-        package = db.create_billing_package('باقة اختبار', credit_usd=75, price_sar=281.25)
+        package = db.create_billing_package('باقة اختبار', credit_sar=75, price_sar=281.25)
         row = db.create_recharge_request(
             'tenant-1', 'client-supplied-name', amount_usd=9999, price_sar=1,
             package_id=package['id'], requested_by='user-1',
             transfer_reference='TRX-PKG-1')
-        self.assertEqual(row['amount_usd'], 75)
+        self.assertEqual(row['amount_sar'], 75)
         self.assertEqual(row['price_sar'], 281.25)
         self.assertEqual(row['package_name'], 'باقة اختبار')
 
@@ -549,7 +550,7 @@ class LandloomDbTests(unittest.TestCase):
 
     def test_points_overview_buckets(self):
         overview = db.points_overview('tenant-1')
-        self.assertEqual(overview['balance_usd'], 100.0)
+        self.assertEqual(overview['balance_sar'], 100.0)
         self.assertEqual(overview['balance_points'], int(100 * db.POINTS_PER_USD))
         estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
         estimate['estimated_points'] = 500
@@ -559,12 +560,12 @@ class LandloomDbTests(unittest.TestCase):
         db.decide_generation_approval(
             'tenant-1', approval['id'], 'approved', 'boss-1', 'المدير', allow_self=True)
         overview = db.points_overview('tenant-1')
-        self.assertGreater(overview['reserved_usd'], 0)
+        self.assertGreater(overview['reserved_sar'], 0)
         # The hold is escrow: spendable drops, total owned stays whole.
-        self.assertLess(overview['available_usd'], 100.0)
-        self.assertEqual(overview['balance_usd'], 100.0)
-        self.assertEqual(overview['available_usd'] + overview['reserved_usd'],
-                         overview['balance_usd'])
+        self.assertLess(overview['available_sar'], 100.0)
+        self.assertEqual(overview['balance_sar'], 100.0)
+        self.assertEqual(overview['available_sar'] + overview['reserved_sar'],
+                         overview['balance_sar'])
 
     def test_ledger_adjustment_kinds_and_reversal(self):
         credit = db.record_ledger_credit('tenant-1', 25, note='شحن', actor='platform_admin')
@@ -768,6 +769,7 @@ class LandloomApiTests(unittest.TestCase):
         self.application_module = application_module
         self.app = application_module.app
         self.app.config.update(TESTING=True)
+        application_module.OPENROUTER_MANAGEMENT_KEY = None
         self.context = self.app.app_context()
         self.context.push()
         self.tenant_id = db.create_tenant('شركة العمق', 'landloom@x.test', 'hash', 'landloom')
@@ -787,11 +789,12 @@ class LandloomApiTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
-        # The settle/finish endpoints fire a daemon `usage-bill-*` thread that
-        # opens its own SQLite handle — on Windows the temp file cannot be
-        # deleted while that handle lives, so wait for it before cleanup.
+        # The settle/finish endpoints fire daemon `usage-bill-*` threads and
+        # wallet moves fire `cap-sync-*` provider-cap threads — each opens its
+        # own SQLite handle, and on Windows the temp file cannot be deleted
+        # while that handle lives, so wait for them before cleanup.
         for thread in threading.enumerate():
-            if thread.name.startswith('usage-bill-'):
+            if thread.name.startswith(('usage-bill-', 'cap-sync-')):
                 thread.join(timeout=10)
         db.close_db()
         self.context.pop()
@@ -1106,7 +1109,7 @@ class LandloomApiTests(unittest.TestCase):
         self.assertGreaterEqual(read.get_json()['updated'], 1)
 
     def test_recharge_request_tenant_scoped(self):
-        package = db.create_billing_package('باقة نمو', credit_usd=100, price_sar=375)
+        package = db.create_billing_package('باقة نمو', credit_sar=375, price_sar=375)
         missing = self.client.post(
             '/api/recharge-requests', headers=self.headers(self.token),
             json={'packageName': 'باقة نمو', 'amountUsd': 100,
@@ -1120,7 +1123,7 @@ class LandloomApiTests(unittest.TestCase):
                   'referenceNumber': 'TRX-TENANT-1'})
         self.assertEqual(created.status_code, 200)
         # The catalog row owns the numbers — client-supplied fields are ignored.
-        self.assertEqual(created.get_json()['request']['amount_usd'], 100)
+        self.assertEqual(created.get_json()['request']['amount_sar'], 375)
         self.assertEqual(created.get_json()['request']['package_name'], 'باقة نمو')
         listed = self.client.get('/api/recharge-requests', headers=self.headers(self.token))
         self.assertEqual(listed.status_code, 200)

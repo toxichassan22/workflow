@@ -666,7 +666,7 @@ class BillingHoldExclusionTests(ScopeTestBase):
                 tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
                 'draft', draft_id='hold-draft')
             hold = db.reserve_points(
-                tenant, 10, cost_usd=10.0,
+                tenant, 10, cost_sar=10.0,
                 generation_approval_id='appr-1', draft_id=draft_id)
             self.assertNotIn('error', hold, hold)
             self.assertAlmostEqual(db.get_tenant_balance(tenant), 90.0)
@@ -696,7 +696,7 @@ class BillingHoldExclusionTests(ScopeTestBase):
                 tenant, 'owner', {'project_name': 'حر'}, {'basic': 'draft'},
                 'draft', draft_id='free-draft')
             hold = db.reserve_points(
-                tenant, 10, cost_usd=10.0,
+                tenant, 10, cost_sar=10.0,
                 generation_approval_id='appr-2', draft_id='held-draft')
             self.assertNotIn('error', hold, hold)
             db.record_ai_usage_event(
@@ -721,7 +721,7 @@ class BillingHoldExclusionTests(ScopeTestBase):
                 tenant, 'owner', {'project_name': 'تشغيل'}, {'basic': 'approved'},
                 'draft', draft_id='rel-draft')
             hold = db.reserve_points(
-                tenant, 10, cost_usd=10.0,
+                tenant, 10, cost_sar=10.0,
                 generation_approval_id='appr-3', draft_id='rel-draft')
             self.assertNotIn('error', hold, hold)
             db.record_ai_usage_event(
@@ -760,7 +760,7 @@ class RunClaimScopeTests(ScopeTestBase):
                         (ids[name],))
                     conn.commit()
             hold = db.reserve_points(
-                tenant, 10, cost_usd=10.0,
+                tenant, 10, cost_sar=10.0,
                 generation_approval_id='appr-' + slug, draft_id=draft_id)
             self.assertNotIn('error', hold, hold)
             settle = db.consume_points(tenant, hold['id'])

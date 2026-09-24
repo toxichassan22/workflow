@@ -166,8 +166,10 @@ class PackagesFxTests(unittest.TestCase):
             '/api/ai-usage',
             headers={'Authorization': f'Bearer {company_token}'}).get_json()
         self.assertTrue(body['success'])
-        self.assertAlmostEqual(body['billing']['balance_usd'], 10.0)
-        self.assertAlmostEqual(body['billing']['balance_sar'], 35.0)
+        # The wallet is riyal-native now: 10 SAR reads back 10, with the
+        # dollar twin divided out at the stored rate.
+        self.assertAlmostEqual(body['billing']['balance_sar'], 10.0)
+        self.assertAlmostEqual(body['billing']['balance_usd'], round(10.0 / 3.5, 2))
         self.assertEqual(body['billing']['fx']['rate'], 3.5)
 
     def test_usd_to_sar_rounding(self):
@@ -218,7 +220,8 @@ class PackagesFxTests(unittest.TestCase):
         self.assertAlmostEqual(saved.get_json()['tenant']['creditBalanceSar'], 250.0)
         with self.app.app_context():
             tenant = db.get_tenant_by_id(self.tenant_id)
-        self.assertAlmostEqual(float(tenant['credit_balance']), 100.0)
+        # The wallet column is riyal-denominated: the keyed figure lands as-is.
+        self.assertAlmostEqual(float(tenant['credit_balance']), 250.0)
 
     def test_usage_totals_carry_sar(self):
         client = self.app.test_client()
@@ -254,7 +257,7 @@ class PackagesFxTests(unittest.TestCase):
         with self.app.app_context():
             company = db.create_tenant('Reset Co', 'reset-fx@example.test', 'hash', 'reset-fx')
             db.update_tenant(company, credit_balance=5.0)
-            package = db.create_billing_package('باقة تصفير', credit_usd=5.0)
+            package = db.create_billing_package('باقة تصفير', credit_sar=5.0)
             db.assign_tenant_package(company, package['id'])
             db.record_ai_usage_event(
                 company, 'model-r', flow='slide', total_tokens=10,

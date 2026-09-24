@@ -352,36 +352,51 @@
       await llLoadTickets();
     }
 
-    // ── Points overview (t30) ─────────────────────────────────────────────
+    // ── Wallet overview: the four riyal figures ───────────────────────────
     async function llLoadPointsOverview() {
       const box = document.getElementById('llPointsOverview');
       if (!box) return;
       if (!hasPermission('billing')) { box.innerHTML = ''; return; }
-      const data = await api('GET', '/api/points/overview').catch(() => null);
-      if (!data || !data.success || !data.points) {
+      const data = await api('GET', '/api/client/overview').catch(() => null);
+      if (!data || !data.success) {
         box.innerHTML = '';
         return;
       }
-      const p = data.points;
-      const card = (label, value, suffix) =>
-        '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + llEscape(String(value)) +
-        ' <span style="font-size:12px;font-weight:400;color:#64748b;">' + suffix + '</span></h3></div>';
+      const fmt = (v) => (v == null ? '0' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+      const cycleConsumed = (data.package && data.package.consumed_sar != null)
+        ? data.package.consumed_sar
+        : ((data.lifetime || {}).consumed_sar || 0);
+      const card = (label, value) =>
+        '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + llEscape(fmt(value)) +
+        ' <span style="font-size:12px;font-weight:400;color:#64748b;">ريال</span></h3></div>';
       box.innerHTML = '<div class="tenant-dashboard-stats">' +
-        card('الرصيد الحالي', p.current_points, 'نقطة') +
-        card('المحجوز', p.reserved_points, 'نقطة') +
-        card('المتاح', p.available_points, 'نقطة') +
-        card('المنتهي', p.expired_points, 'نقطة') +
+        card('الرصيد الحالي', data.balance_sar) +
+        card('المحجوز', data.reserved_sar) +
+        card('المستهلك', cycleConsumed) +
+        card('إجمالي المستهلك', (data.lifetime || {}).consumed_sar) +
         '</div>';
     }
 
     // ── Recharge requests (t33, d09) ──────────────────────────────────────
+    async function llOpenRechargeAttachment(requestId, slot) {
+      const token = getTenantToken();
+      const response = await fetch(
+        '/api/recharge-requests/' + encodeURIComponent(requestId) + '/attachment/' + slot,
+        { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      if (!response.ok) { toast(WFT('downloads.load_failed', 'تعذر تحميل الملف')); return; }
+      window.open(URL.createObjectURL(await response.blob()), '_blank');
+    }
+
     async function llLoadRechargeRequests(targetBoxId) {
       const box = document.getElementById(targetBoxId || 'llRechargeList');
       if (!box) return;
       if (!hasPermission('billing')) { box.innerHTML = ''; return; }
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
       const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) || targetBoxId === 'sagRechargeRequestsList';
-      const url = isAdmin ? '/api/admin/recharge-requests' : '/api/recharge-requests';
+      const filterId = isAdmin ? 'sagRechargeStatusFilter' : 'llRechargeStatusFilter';
+      const status = (document.getElementById(filterId) || {}).value || '';
+      const base = isAdmin ? '/api/admin/recharge-requests' : '/api/recharge-requests';
+      const url = base + (status ? '?status=' + encodeURIComponent(status) : '');
       const data = await api('GET', url).catch(() => null);
       if (!data || !data.success) {
         box.innerHTML = '<p class="tenant-hint">تعذر تحميل طلبات الشحن.</p>';
@@ -397,10 +412,16 @@
         return;
       }
       box.innerHTML = requests.map(r => {
-        const date = (r.created_at || '').slice(0, 16).replace('T', ' ');
+        const date = (r.requested_at || r.created_at || '').slice(0, 16).replace('T', ' ');
         const tenantInfo = (isAdmin && (r.tenant_name || r.company_name)) ? ('<span>الشركة:</span> ' + llEscape(r.tenant_name || r.company_name) + ' | ') : '';
         const ref = r.transfer_reference ? (' | <span>المرجع البنكي:</span> ' + llEscape(r.transfer_reference)) : '';
         const inv = r.reference_number ? (' | <span style="color:#1c7a2e;font-weight:600;">سند مالي:</span> ' + llEscape(r.reference_number)) : '';
+        const receiptLink = r.receipt_file_id
+          ? ' | <a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'receipt\');return false;">إيصال التحويل</a>' : '';
+        const invoiceLink = r.invoice_file_id
+          ? ' | <a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'invoice\');return false;">الفاتورة</a>' : '';
+        const note = (r.status === 'rejected' && r.decision_note)
+          ? '<div class="meta" style="color:var(--danger,#c0392b);margin-top:4px"><span>سبب الرفض:</span> ' + llEscape(r.decision_note) + '</div>' : '';
         const actions = (isAdmin && r.status === 'pending')
           ? '<div style="display:flex;gap:6px;margin-top:6px;">' +
             '<button type="button" class="btn small green" onclick="llDecideRecharge(\'' + r.id + '\', \'approved\')">اعتماد الطلب</button>' +
@@ -409,7 +430,8 @@
           : '';
         return '<div class="tenant-presentation-card">' +
           '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + ((r.price_sar != null ? r.price_sar : (r.amount_sar != null ? r.amount_sar : 0)) + ' <span>ريال</span>') + '</h3>' +
-          '<div class="meta">' + tenantInfo + '<span>' + llStatus(r.status) + '</span> | <span>' + llEscape(date) + '</span>' + ref + inv + '</div>' +
+          '<div class="meta">' + tenantInfo + '<span>' + llStatus(r.status) + '</span> | <span>' + llEscape(date) + '</span>' + ref + inv + receiptLink + invoiceLink + '</div>' +
+          note +
           actions +
           '</div></div>';
       }).join('');
@@ -501,18 +523,69 @@
       await llLoadRechargeRequests();
     }
 
+    // ── Recharge decision modal: approve (optional invoice) or reject (reason) ──
     async function llDecideRecharge(requestId, decision) {
-      const data = await api('POST', '/api/admin/recharge-requests/' + encodeURIComponent(requestId) + '/decision', {
-        decision: decision
-      }).catch(e => e);
-      if (data && data.success) {
-        toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
-        if (typeof llLoadRechargeRequests === 'function') {
-          await llLoadRechargeRequests('llRechargeList');
+      document.getElementById('llRechargeDecisionId').value = requestId;
+      document.getElementById('llRechargeDecisionKind').value = decision;
+      const isApprove = decision === 'approved';
+      document.getElementById('llRechargeDecisionTitle').textContent =
+        isApprove ? 'اعتماد طلب الشحن' : 'رفض طلب الشحن';
+      document.getElementById('llRechargeInvoiceField').style.display = isApprove ? '' : 'none';
+      document.getElementById('llRechargeReasonField').style.display = isApprove ? 'none' : '';
+      document.getElementById('llRechargeNoteField').style.display = isApprove ? 'none' : '';
+      const err = document.getElementById('llRechargeDecisionError');
+      if (err) err.textContent = '';
+      const invoice = document.getElementById('llRechargeInvoice');
+      if (invoice) invoice.value = '';
+      const note = document.getElementById('llRechargeNote');
+      if (note) note.value = '';
+      if (!isApprove) {
+        const select = document.getElementById('llRechargeReason');
+        const data = await api('GET', '/api/admin/settings/rejection-reasons').catch(() => null);
+        const reasons = (data && data.success && data.reasons) || [];
+        select.innerHTML = '<option value="">—</option>' +
+          reasons.map(r => '<option value="' + llEscape(r) + '">' + llEscape(r) + '</option>').join('');
+      }
+      openLlModal('llRechargeDecisionModal');
+    }
+
+    async function llSubmitRechargeDecision() {
+      const requestId = document.getElementById('llRechargeDecisionId').value;
+      const decision = document.getElementById('llRechargeDecisionKind').value;
+      const errBox = document.getElementById('llRechargeDecisionError');
+      if (errBox) errBox.textContent = '';
+      let invoiceFileId = null;
+      let note = '';
+      if (decision === 'approved') {
+        const input = document.getElementById('llRechargeInvoice');
+        if (input && input.files && input.files[0]) {
+          const form = new FormData();
+          form.append('file', input.files[0]);
+          form.append('fileType', 'recharge_invoice');
+          const up = await api('POST', '/api/project-files', form, true).catch(e => e);
+          if (!up || !up.success) {
+            if (errBox) errBox.textContent = (up && up.error) || 'تعذر رفع الفاتورة';
+            return;
+          }
+          invoiceFileId = up.file.id;
         }
-        if (typeof adminLoadRecharges === 'function') await adminLoadRecharges();
       } else {
-        toast(WFT('recharge.decision_failed', 'تعذر تسجيل القرار'));
+        const reason = (document.getElementById('llRechargeReason') || {}).value || '';
+        const extra = ((document.getElementById('llRechargeNote') || {}).value || '').trim();
+        note = reason && extra ? reason + ' — ' + extra : (reason || extra);
+      }
+      const payload = { decision: decision };
+      if (invoiceFileId) payload.invoiceFileId = invoiceFileId;
+      if (note) payload.note = note;
+      const data = await api('POST', '/api/admin/recharge-requests/' + encodeURIComponent(requestId) + '/decision', payload).catch(e => e);
+      if (data && data.success) {
+        closeLlModal('llRechargeDecisionModal');
+        toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
+        if (typeof adminLoadRecharges === 'function') await adminLoadRecharges();
+        if (typeof llLoadRechargeRequests === 'function') await llLoadRechargeRequests('llRechargeList');
+      } else {
+        const msg = (data && data.error) || WFT('recharge.decision_failed', 'تعذر تسجيل القرار');
+        if (errBox) { errBox.textContent = msg; } else { toast(msg); }
       }
     }
 
@@ -585,6 +658,7 @@
       await llLoadRechargeRequests('sagRechargeRequestsList');
       const data = await api('GET', '/api/admin/recharge-requests').catch(() => null);
       const requests = (data && data.success && data.requests) ? data.requests : [];
+      // Counts always reflect the full queue, not the active status filter.
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('adminStatRechargePending', requests.filter(r => r.status === 'pending').length);
       set('adminStatRechargeApproved', requests.filter(r => r.status === 'approved').length);
@@ -709,7 +783,28 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([llLoadFileTypes(), adminLoadPackages()]);
+      await Promise.all([llLoadFileTypes(), adminLoadPackages(), llLoadRejectionReasons()]);
+    }
+
+    // ── Recharge rejection reasons (platform settings) ────────────────────
+    async function llLoadRejectionReasons() {
+      const box = document.getElementById('adminRejectionReasons');
+      if (!box) return;
+      const data = await api('GET', '/api/admin/settings/rejection-reasons').catch(() => null);
+      const reasons = (data && data.success && data.reasons) || [];
+      box.value = reasons.join('\n');
+    }
+
+    async function adminSaveRejectionReasons() {
+      const box = document.getElementById('adminRejectionReasons');
+      if (!box) return;
+      const reasons = box.value.split('\n').map(s => s.trim()).filter(Boolean);
+      const res = await api('PUT', '/api/admin/settings/rejection-reasons', { reasons: reasons }).catch(e => e);
+      if (res && res.success) {
+        toast(WFT('recharge.reasons_saved', 'تم حفظ أسباب الرفض'));
+      } else {
+        toast((res && res.error) || 'تعذر حفظ الأسباب');
+      }
     }
 
     // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──

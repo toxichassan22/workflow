@@ -455,10 +455,10 @@ def api_admin_packages():
     """List all billing packages with the margin figures the catalog owner
     tunes against — admin-only, never exposed on the client purchase feed.
 
-    A purchased package lands as wallet credit (billed dollars): the holder
-    burns it at raw provider cost x BILLING_MULTIPLIER, so the provider-side
-    cost of a fully consumed package is credit_usd / multiplier. The margin
-    is the SAR price converted to USD minus that estimate.
+    A purchased package lands as wallet credit in riyals: the holder burns it
+    at raw provider cost x rate x BILLING_MULTIPLIER, so the provider-side
+    cost of a fully consumed package is credit_sar / multiplier. The margin
+    is the SAR price minus that estimate.
     """
     packages = db.list_billing_packages()
     try:
@@ -473,18 +473,20 @@ def api_admin_packages():
         fx_rate = 0.0
     for package in packages:
         try:
-            credit = float(package.get('credit_usd') or 0.0)
+            credit_sar = package.get('credit_sar')
+            credit_sar = float(credit_sar) if credit_sar is not None \
+                else db.usd_to_sar(package.get('credit_usd'), fx_rate or None)
         except (TypeError, ValueError):
-            credit = 0.0
-        cost = credit / multiplier
-        package['est_cost_usd'] = round(cost, 2)
-        package['credit_sar'] = db.usd_to_sar(credit, fx_rate or None)
-        package['est_cost_sar'] = db.usd_to_sar(cost, fx_rate or None)
+            credit_sar = 0.0
+        cost_sar = credit_sar / multiplier
+        package['credit_sar'] = round(credit_sar, 2)
+        package['est_cost_sar'] = round(cost_sar, 2)
+        package['est_cost_usd'] = round(cost_sar / fx_rate, 2) if fx_rate > 0 else None
         price_sar = package.get('price_sar')
-        if price_sar is not None and fx_rate > 0:
-            margin_usd = float(price_sar) / fx_rate - cost
-            package['est_margin_usd'] = round(margin_usd, 2)
-            package['est_margin_sar'] = round(margin_usd * fx_rate, 2)
+        if price_sar is not None:
+            margin_sar = float(price_sar) - cost_sar
+            package['est_margin_sar'] = round(margin_sar, 2)
+            package['est_margin_usd'] = round(margin_sar / fx_rate, 2) if fx_rate > 0 else None
     return jsonify({'success': True, 'packages': packages,
                     'billingMultiplier': multiplier,
                     'fxRate': fx_rate or None})
@@ -493,24 +495,24 @@ def api_admin_packages():
 @app.route('/api/admin/packages', methods=['POST'])
 @require_admin
 def api_admin_packages_create():
-    """Create a package (custom by default). credit_usd may be zero.
+    """Create a package (custom by default). credit_sar may be zero.
 
-    The desk keys the wallet credit in riyals (``creditSar``); it is converted
-    to the internal USD figure at the active rate. ``creditUsd`` stays accepted
-    for old callers.
+    The desk keys the wallet credit in riyals (``creditSar``); the row keeps
+    the dollar equivalent for provider-side audit. ``creditUsd`` stays
+    accepted for old callers and converts at the active rate.
     """
     data = request.json or {}
     credit_usd = data.get('creditUsd', data.get('credit_usd'))
     credit_sar = data.get('creditSar', data.get('credit_sar'))
-    if credit_sar is not None:
+    if credit_sar is None and credit_usd is not None:
         try:
-            credit_usd = db.sar_to_usd(credit_sar)
+            credit_sar = db.usd_to_sar(credit_usd)
         except (TypeError, ValueError):
-            return jsonify({'error': 'Invalid credit_sar'}), 400
+            return jsonify({'error': 'Invalid credit_usd'}), 400
     try:
         package = db.create_billing_package(
             data.get('name'),
-            credit_usd if credit_usd is not None else 0,
+            credit_sar if credit_sar is not None else 0,
             data.get('priceSar', data.get('price_sar')),
             is_custom=bool(data.get('isCustom', data.get('is_custom', True))),
         )
@@ -528,12 +530,12 @@ def api_admin_package_update(package_id):
     if 'name' in data:
         kwargs['name'] = data.get('name')
     if 'creditSar' in data or 'credit_sar' in data:
-        try:
-            kwargs['credit_usd'] = db.sar_to_usd(data.get('creditSar', data.get('credit_sar')))
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Invalid credit_sar'}), 400
+        kwargs['credit_sar'] = data.get('creditSar', data.get('credit_sar'))
     elif 'creditUsd' in data or 'credit_usd' in data:
-        kwargs['credit_usd'] = data.get('creditUsd', data.get('credit_usd'))
+        try:
+            kwargs['credit_sar'] = db.usd_to_sar(data.get('creditUsd', data.get('credit_usd')))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid credit_usd'}), 400
     if 'priceSar' in data or 'price_sar' in data:
         kwargs['price_sar'] = data.get('priceSar', data.get('price_sar'))
     if 'isActive' in data or 'is_active' in data:

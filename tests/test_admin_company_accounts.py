@@ -69,7 +69,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
                 'phone': '+966500000001',
                 'username': f'company_{suffix}',
                 'plan': 'pro',
-                'creditBalance': 1250.5,
+                'creditBalanceSar': 1250.5,
                 'isActive': True,
                 'passwordMode': 'set_link',
                 'sendWelcomeEmail': False,

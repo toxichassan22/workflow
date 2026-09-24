@@ -1328,6 +1328,12 @@
       <div class="tenant-content-panel">
         <div class="tenant-panel-heading">
           <h3 class="dash-section-title" data-i18n="admin.recharge_inbox">طلبات الشحن من الشركات</h3>
+          <select id="sagRechargeStatusFilter" onchange="adminLoadRecharges()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
+            <option value="">كل الحالات</option>
+            <option value="pending">بانتظار المراجعة</option>
+            <option value="approved">معتمدة</option>
+            <option value="rejected">مرفوضة</option>
+          </select>
         </div>
         <div id="sagRechargeRequestsList"></div>
       </div>
@@ -1400,6 +1406,17 @@
           <h3 class="dash-section-title" data-i18n="admin.file_types_title">سجل أنواع الملفات المعتمدة</h3>
         </div>
         <div id="adminFileTypesList"></div>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">أسباب رفض طلبات الشحن</h3>
+        </div>
+        <div class="tenant-field">
+          <textarea id="adminRejectionReasons" rows="4" style="width:100%;resize:vertical"></textarea>
+        </div>
+        <div class="sag-modal-actions" style="margin-top:10px">
+          <button type="button" class="btn primary" onclick="adminSaveRejectionReasons()">حفظ الأسباب</button>
+        </div>
       </div>
     </section>
 
@@ -1523,9 +1540,17 @@
       <!-- Tab 2: Recharge & Wallet -->
       <div id="llTabPane_recharge" style="display:none">
         <div id="llPointsOverview" style="margin-bottom:16px"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
           <h3 class="dash-section-title" style="margin:0">طلبات الشحن</h3>
-          <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="openLlModal('llRechargeModal');llLoadRechargePackages()">طلب شحن جديد</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <select id="llRechargeStatusFilter" onchange="llLoadRechargeRequests()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
+              <option value="">كل الحالات</option>
+              <option value="pending">بانتظار المراجعة</option>
+              <option value="approved">معتمدة</option>
+              <option value="rejected">مرفوضة</option>
+            </select>
+            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="openLlModal('llRechargeModal');llLoadRechargePackages()">طلب شحن جديد</button>
+          </div>
         </div>
         <div id="llRechargeList" style="margin-bottom:24px"></div>
       </div>
@@ -1586,6 +1611,28 @@
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
             <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeModal')">إلغاء</button>
             <button type="button" class="btn primary" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal 2b: Recharge decision (super admin) -->
+      <div id="llRechargeDecisionModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeDecisionModal')">
+        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeDecisionTitle">
+          <div class="sag-modal-head">
+            <h2 id="llRechargeDecisionTitle">قرار طلب الشحن</h2>
+            <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeDecisionModal')">إغلاق</button>
+          </div>
+          <input type="hidden" id="llRechargeDecisionId">
+          <input type="hidden" id="llRechargeDecisionKind">
+          <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
+            <div class="tenant-field" id="llRechargeInvoiceField" style="display:none"><label for="llRechargeInvoice">الفاتورة</label><input type="file" id="llRechargeInvoice" accept=".pdf,.png,.jpg,.jpeg"></div>
+            <div class="tenant-field" id="llRechargeReasonField" style="display:none"><label for="llRechargeReason">سبب الرفض</label><select id="llRechargeReason"></select></div>
+            <div class="tenant-field" id="llRechargeNoteField" style="display:none"><label for="llRechargeNote">ملاحظة إضافية</label><input type="text" id="llRechargeNote"></div>
+          </div>
+          <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeDecisionError"></div>
+          <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+            <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeDecisionModal')">إلغاء</button>
+            <button type="button" class="btn primary" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
           </div>
         </div>
       </div>

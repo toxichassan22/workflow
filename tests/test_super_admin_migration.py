@@ -60,6 +60,11 @@ class SuperAdminMigrationTests(unittest.TestCase):
         db.init_db()
         self.old_id = str(uuid.uuid4())
         con = sqlite3.connect(self.db_path)
+        # init_db() seeds an env super admin when ADMIN_EMAIL/ADMIN_PASSWORD
+        # are set — the fixture wants a clean slate, so drop seeded rows first.
+        con.execute('DELETE FROM users')
+        con.execute('DELETE FROM tenant_branding')
+        con.execute('DELETE FROM tenants')
         con.execute(
             "INSERT INTO tenants (id, company_name, email, password_hash, plan, is_admin, is_active)"
             " VALUES (?,?,?,?, 'enterprise',1,1)",

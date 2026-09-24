@@ -511,9 +511,12 @@ def _require_billing_balance(flow_key):
     except Exception:
         return None
     try:
-        estimate = float(db.get_billing_flow_estimates().get(flow_key) or 0.0)
+        # Flow estimates are priced in USD product units; the wallet compares
+        # in riyals, so the estimate crosses the active rate first.
+        estimate_sar = db.usd_to_sar(
+            float(db.get_billing_flow_estimates().get(flow_key) or 0.0))
     except (TypeError, ValueError):
-        estimate = 0.0
+        estimate_sar = 0.0
     try:
         balance = db.get_tenant_balance(g.tenant_id)
     except Exception:
@@ -524,15 +527,13 @@ def _require_billing_balance(flow_key):
             'error': 'تعذر التحقق من رصيد الشركة الآن. أعد المحاولة بعد قليل',
             'error_code': 'BILLING_CHECK_UNAVAILABLE',
         }), 503
-    if balance < estimate:
+    if balance < estimate_sar:
         return jsonify({
             'success': False,
             'error': 'الرصيد غير كافٍ لتشغيل هذه العملية. اشحن رصيد الشركة ثم أعد المحاولة',
             'error_code': 'INSUFFICIENT_BALANCE',
-            'required_usd': round(estimate, 2),
-            'available_usd': round(balance, 2),
-            'required_sar': db.usd_to_sar(estimate),
-            'available_sar': db.usd_to_sar(balance),
+            'required_sar': round(estimate_sar, 2),
+            'available_sar': round(balance, 2),
         }), 402
     return None
 
@@ -580,11 +581,11 @@ def api_ai_usage():
             _refresh_fx_rate_async()
             unbilled = db.get_unbilled_usage(
                 g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
-            balance_usd = db.get_tenant_balance(g.tenant_id)
+            balance_sar = db.get_tenant_balance(g.tenant_id)
             fx = db.get_fx_rate()
             billing_info = {
-                'balance_usd': balance_usd,
-                'balance_sar': db.usd_to_sar(balance_usd, fx.get('rate')),
+                'balance_sar': balance_sar,
+                'balance_usd': db.sar_to_usd(balance_sar, fx.get('rate')),
                 'fx': {'rate': fx.get('rate'), 'source': fx.get('source'),
                        'updatedAt': fx.get('updated_at')},
                 'multiplier': db.get_billing_multiplier(),
@@ -594,8 +595,8 @@ def api_ai_usage():
         except Exception as billing_exc:
             print(f"[BILLING] unbilled lookup failed: {billing_exc}")
             billing_info = {
-                'balance_usd': 0.0,
                 'balance_sar': 0.0,
+                'balance_usd': 0.0,
                 'fx': {'rate': db.FX_DEFAULT_USD_SAR, 'source': 'default',
                        'updatedAt': None},
                 'multiplier': db.get_billing_multiplier(),
@@ -722,10 +723,11 @@ def api_billing_ledger():
             to_date=request.args.get('to'), draft_id=request.args.get('draftId'),
             presentation_id=request.args.get('presentationId'),
             actor=request.args.get('actor'))
+        balance_sar = db.get_tenant_balance(g.tenant_id)
         return jsonify({
             'success': True,
-            'balance_usd': db.get_tenant_balance(g.tenant_id),
-            'balance_sar': db.usd_to_sar(db.get_tenant_balance(g.tenant_id)),
+            'balance_sar': balance_sar,
+            'balance_usd': db.sar_to_usd(balance_sar),
             'multiplier': db.get_billing_multiplier(),
             'enforced': db.billing_enforcement_enabled(),
             'unbilled': db.get_unbilled_usage(g.tenant_id),
@@ -758,30 +760,26 @@ def api_billing_checkout():
             'success': False,
             'error': 'الرصيد غير كافٍ لإتمام الفوترة. اشحن رصيد الشركة ثم أعد المحاولة',
             'error_code': 'INSUFFICIENT_BALANCE',
-            'required_usd': round(short.required_usd, 2),
-            'required_sar': db.usd_to_sar(short.required_usd),
-            'available_sar': db.usd_to_sar(getattr(short, 'available_usd', None)),
-            'available_usd': round(short.available_usd, 2),
+            'required_sar': round(short.required_sar, 2),
+            'available_sar': round(short.available_sar, 2),
         }), 402
     except Exception as exc:
         print(f"[BILLING] checkout failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر إتمام الفوترة'}), 500
     if not result.get('billed'):
         return jsonify({'success': True, 'billed': False, 'reason': result.get('reason'),
-                        'balance_usd': db.get_tenant_balance(g.tenant_id),
-                        'balance_sar': db.usd_to_sar(db.get_tenant_balance(g.tenant_id))})
+                        'balance_sar': db.get_tenant_balance(g.tenant_id)})
     try:
         entry = result.get('entry') or {}
         _notify_tenant_billing(
             g.tenant_id, 'خُصم من المحفظة',
-            f'{db.usd_to_sar(entry.get("amount_usd")):.2f} ريال — الرصيد الحالي '
-            f'{db.usd_to_sar(result.get("balance_usd")):.2f} ريال',
+            f'{float(entry.get("amount_sar") or 0.0):.2f} ريال — الرصيد الحالي '
+            f'{float(result.get("balance_sar") or 0.0):.2f} ريال',
             entity_type='wallet', entity_id='debit:' + str(entry.get('id') or ''))
     except Exception:
         pass
     return jsonify({'success': True, 'billed': True, 'entry': result.get('entry'),
-                    'balance_usd': result.get('balance_usd'),
-                    'balance_sar': db.usd_to_sar(result.get('balance_usd'))})
+                    'balance_sar': result.get('balance_sar')})
 
 
 @app.route('/api/admin/billing/reset-all', methods=['POST'])
@@ -809,63 +807,15 @@ def api_admin_billing_reset_all():
 @app.route('/api/billing/topup', methods=['POST'])
 @require_admin
 def api_billing_topup():
-    """Charge a company wallet by hand (manual top-up recorded in the ledger).
+    """Manual wallet top-ups are retired: funding is package-only.
 
-    Platform-admin only: wallet credit must never be minted by the company
-    that spends it — client funding flows exclusively through recharge
-    requests against catalog packages, approved by the platform desk.
-    ``tenantId`` names the company to credit; the platform tenant itself can
-    never receive wallet balance.
+    Companies request a catalog package and the platform desk approves the
+    recharge request — no side door may mint wallet credit. The route stays
+    registered so old callers get a clear refusal instead of a 404.
     """
-    data = request.json or {}
-    tenant_id = str(data.get('tenantId') or data.get('tenant_id') or '').strip()
-    if not tenant_id:
-        return jsonify({'success': False, 'error': 'الشركة مطلوبة',
-                        'error_code': 'tenant_required'}), 400
-    target = db.get_tenant_by_id(tenant_id)
-    if not target:
-        return jsonify({'success': False, 'error': 'الشركة غير موجودة',
-                        'error_code': 'tenant_not_found'}), 404
-    if target.get('is_admin'):
-        return jsonify({'success': False,
-                        'error': _LANDLOOM_ERROR_MESSAGES_AR['platform_tenant_recharge_forbidden'],
-                        'error_code': 'platform_tenant_recharge_forbidden'}), 403
-    # The wallet books in USD internally, but the desk keys amounts in riyals —
-    # a SAR figure is converted at the active rate before it lands.
-    try:
-        amount_sar = data.get('amount_sar', data.get('amountSar'))
-        amount = db.sar_to_usd(amount_sar) \
-            if amount_sar is not None \
-            else float(data.get('amount_usd') or data.get('amount') or 0.0)
-    except (TypeError, ValueError):
-        return jsonify({'success': False, 'error': 'مبلغ الشحن غير صالح'}), 400
-    if amount <= 0:
-        return jsonify({'success': False, 'error': 'مبلغ الشحن يجب أن يكون أكبر من صفر'}), 400
-    idempotency_key = (
-        request.headers.get('X-Idempotency-Key')
-        or data.get('idempotencyKey') or data.get('idempotency_key') or ''
-    ).strip() or None
-    try:
-        result = db.record_ledger_credit(
-            tenant_id, amount, note=data.get('note'),
-            idempotency_key=idempotency_key, actor='platform_admin')
-    except Exception as exc:
-        print(f"[BILLING] topup failed: {exc}")
-        return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
-    if result.get('credited'):
-        try:
-            entry = result.get('entry') or {}
-            _notify_tenant_billing(
-                tenant_id, 'أُضيف رصيد إلى المحفظة',
-                f'{db.usd_to_sar(amount):.2f} ريال — الرصيد الحالي '
-                f'{db.usd_to_sar(result.get("balance_usd")):.2f} ريال',
-                entity_type='wallet', entity_id='topup:' + str(entry.get('id') or ''))
-        except Exception:
-            pass
-    return jsonify({'success': True, 'credited': result.get('credited'),
-                    'entry': result.get('entry'), 'balance_usd': result.get('balance_usd'),
-                    'balance_sar': db.usd_to_sar(result.get('balance_usd')),
-                    'amount_sar': db.usd_to_sar(amount)})
+    return jsonify({'success': False,
+                    'error': 'شحن الرصيد يتم عبر باقات المنصة فقط — اعتمد طلب شحن بدل الإضافة اليدوية',
+                    'error_code': 'package_only_funding'}), 403
 
 
 def extract_chat_content(response, label="GLM"):

@@ -209,6 +209,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "recharge.no_packages": "No packages available",
   "recharge.package_required": "Choose the package to purchase",
   "recharge.reference_or_receipt_required": "Transfer number or transfer receipt is required",
+  "recharge.reasons_saved": "Rejection reasons saved",
   "proposal.final_approval_sealed": "Final file approved and sealed successfully",
   "downloads.download_started": "Download started",
   "file_types.updated": "File type limit updated",

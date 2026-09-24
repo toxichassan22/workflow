@@ -59,14 +59,15 @@ def _derive_attempt_status(cost_usd, generation_id, explicit=None):
 
 
 def _tenant_package_cycle(conn, tenant_id):
-    """(package_id, credit_usd, assigned_at) for the tenant's current cycle.
+    """(package_id, credit_sar, assigned_at) for the tenant's current cycle.
 
     The entitlement comes from the latest tenant_package_history snapshot, so
-    editing the catalog's credit_usd never rewrites an already-granted
+    editing the catalog's credit never rewrites an already-granted
     assignment. ``assigned_at`` is where the new cycle's consumption starts —
     re-assigning a spent package begins a fresh window instead of inheriting
     the old cycle's burn. Falls back to the catalog credit for assignments
     that predate history tracking. None when the tenant has no valid package.
+    Credit figures are wallet riyals (SAR).
     """
     try:
         if not tenant_id:
@@ -78,26 +79,32 @@ def _tenant_package_cycle(conn, tenant_id):
             return None
         package_id = str(package_id)
         package = conn.execute(
-            'SELECT credit_usd, is_active FROM billing_packages WHERE id = ?',
+            'SELECT credit_sar, credit_usd, is_active FROM billing_packages WHERE id = ?',
             (package_id,)).fetchone()
         if not package or not dict(package).get('is_active'):
             return None
         hist = conn.execute(
-            'SELECT credit_usd, assigned_at FROM tenant_package_history '
+            'SELECT credit_sar, credit_usd, assigned_at FROM tenant_package_history '
             'WHERE tenant_id = ? AND package_id = ? '
             'ORDER BY assigned_at DESC, rowid DESC LIMIT 1',
             (str(tenant_id), package_id)).fetchone()
         if hist:
-            return (package_id, float(dict(hist).get('credit_usd') or 0.0),
-                    dict(hist).get('assigned_at'))
-        return (package_id, float(dict(package).get('credit_usd') or 0.0), None)
+            credit = dict(hist).get('credit_sar')
+            if credit is None:
+                credit = usd_to_sar(dict(hist).get('credit_usd'))
+            return (package_id, float(credit or 0.0), dict(hist).get('assigned_at'))
+        credit = dict(package).get('credit_sar')
+        if credit is None:
+            credit = usd_to_sar(dict(package).get('credit_usd'))
+        return (package_id, float(credit or 0.0), None)
     except Exception:
         return None
 
 
 def _package_cycle_consumed(conn, tenant_id, package_id, assigned_at):
-    """Tagged spend inside the current cycle — rows before ``assigned_at``
-    belong to the previous assignment of the same package."""
+    """Tagged spend inside the current cycle in provider USD — rows before
+    ``assigned_at`` belong to the previous assignment of the same package.
+    Callers convert to SAR at the active rate."""
     consumed = 0.0
     bound = str(assigned_at).replace('T', ' ')[:19] if assigned_at else None
     for table in ('ai_usage_events', 'map_usage_events'):
@@ -114,6 +121,11 @@ def _package_cycle_consumed(conn, tenant_id, package_id, assigned_at):
     return consumed
 
 
+def _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at):
+    """SAR twin of ``_package_cycle_consumed`` at the active rate."""
+    return usd_to_sar(_package_cycle_consumed(conn, tenant_id, package_id, assigned_at))
+
+
 def _tenant_active_package_id(conn, tenant_id):
     """Package a new spend row burns under — only while it still has credit.
 
@@ -127,7 +139,7 @@ def _tenant_active_package_id(conn, tenant_id):
         if not cycle:
             return None
         package_id, credit, assigned_at = cycle
-        if credit - _package_cycle_consumed(conn, tenant_id, package_id, assigned_at) <= 0:
+        if credit - _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at) <= 0:
             return None
         return package_id
     except Exception:

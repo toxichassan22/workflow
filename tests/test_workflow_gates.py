@@ -138,7 +138,7 @@ class WorkflowGateDbTests(unittest.TestCase):
             'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
         self.assertEqual(decided.get('status'), 'approved', decided)
         self.assertTrue(decided.get('reservation_id'))
-        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 100.0 - db.usd_to_sar(25.0))
 
         job = db.create_generation_job(
             'tenant-1', approval_id=approval['id'], draft_id='draft-1',
@@ -183,7 +183,7 @@ class WorkflowGateDbTests(unittest.TestCase):
         self.assertEqual(decided.get('status'), 'approved', decided)
         self.assertEqual(
             db.get_project_draft_by_id('tenant-1', 'draft-1')['status'], 'generating')
-        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 100.0 - db.usd_to_sar(25.0))
 
         # Inside the grace window the client may still be planning — a fresh
         # approval with no job yet is a live run, never a corpse.
@@ -527,7 +527,7 @@ class WorkflowGateDbTests(unittest.TestCase):
             'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
         self.assertEqual(decided.get('status'), 'approved', decided)
         self.assertTrue(decided.get('reservation_id'))
-        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 75.0)
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 100.0 - db.usd_to_sar(25.0))
         draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
         self.assertEqual(draft['status'], 'draft')
 

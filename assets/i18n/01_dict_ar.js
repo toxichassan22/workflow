@@ -209,6 +209,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "recharge.no_packages": "لا توجد باقات متاحة",
   "recharge.package_required": "اختر الباقة المطلوب شراؤها",
   "recharge.reference_or_receipt_required": "رقم الحوالة أو إيصال التحويل مطلوب",
+  "recharge.reasons_saved": "تم حفظ أسباب الرفض",
   "proposal.final_approval_sealed": "تم اعتماد وختم الملف النهائي بنجاح",
   "downloads.download_started": "تم بدء التحميل",
   "file_types.updated": "تم تحديث حد نوع الملف",

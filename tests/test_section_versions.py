@@ -183,6 +183,7 @@ class SectionVersionApiTests(unittest.TestCase):
         cls.application_module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
 
         with cls.app.app_context():
+            db.init_db()
             cls.tenant = db.create_tenant('Company A', 'a@example.test', 'hash-a', 'company-a')
         cls.token = auth.create_token(
             cls.tenant, 'a@example.test', user_id=None, user_name='Company A', user_role='company_admin'

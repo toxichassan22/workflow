@@ -260,6 +260,9 @@ class StructureDispatcherTests(unittest.TestCase):
         cls.app = app.app
         cls.app.config.update(TESTING=True)
         with cls.app.app_context():
+            # `import app` is a no-op when another suite already imported it —
+            # build the schema on this suite's DB_PATH explicitly.
+            db.init_db()
             cls.tenant = db.create_tenant('Structure Safety', 'structure@example.test', 'hash', 'structure-safety')
         cls.token = auth.create_token(cls.tenant, 'structure@example.test', user_id=None,
                                       user_name='Admin', user_role='company_admin')

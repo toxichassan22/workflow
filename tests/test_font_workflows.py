@@ -77,6 +77,9 @@ class FontWorkflowTests(unittest.TestCase):
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
 
         with cls.app.app_context():
+            # `import app` is a no-op when another suite already imported it —
+            # build the schema on this suite's DB_PATH explicitly.
+            db.init_db()
             cls.tenant = db.create_tenant('Font Co', 'fonts@example.test', 'hash-a', 'font-co')
             cls.other_tenant = db.create_tenant('Other Co', 'other@example.test', 'hash-b', 'other-co')
             cls.font_ar = db.create_sag_font('Cairo', 'Cairo', 'arabic', 'regular', source_type='preset', source_data='Cairo')
