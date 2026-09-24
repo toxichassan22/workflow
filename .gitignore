@@ -54,3 +54,4 @@ userfiles/
 # Local scratch/tool state. Never commit: agent scratch space and mimosa hook state.
 sandbox/
 .mimosa/
+task.html
