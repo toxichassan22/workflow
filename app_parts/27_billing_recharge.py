@@ -51,14 +51,22 @@ def api_create_recharge_request():
 @app.route('/api/recharge-requests', methods=['GET'])
 @require_auth
 def api_list_recharge_requests():
-    rows = db.list_recharge_requests(g.tenant_id, status=request.args.get('status'))
+    try:
+        rows = db.list_recharge_requests(g.tenant_id, status=request.args.get('status'))
+    except Exception as exc:
+        app.logger.exception('list_recharge_requests failed for tenant %s', g.tenant_id)
+        return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
     return jsonify({'success': True, 'requests': rows})
 
 
 @app.route('/api/admin/recharge-requests', methods=['GET'])
 @require_admin
 def api_admin_list_recharge_requests():
-    rows = db.list_recharge_requests(status=request.args.get('status'))
+    try:
+        rows = db.list_recharge_requests(status=request.args.get('status'))
+    except Exception as exc:
+        app.logger.exception('admin list_recharge_requests failed')
+        return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
     return jsonify({'success': True, 'requests': rows})
 
 

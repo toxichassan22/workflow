@@ -286,7 +286,8 @@
       const url = base + (status ? '?status=' + encodeURIComponent(status) : '');
       const data = await api('GET', url).catch(() => null);
       if (!data || !data.success) {
-        box.innerHTML = '<p class="tenant-hint">تعذر تحميل طلبات الشحن.</p>';
+        box.innerHTML = '<p class="tenant-hint">تعذر تحميل طلبات الشحن.' +
+          (data && data.error ? ' ' + llEscape(data.error) : '') + '</p>';
         return;
       }
       const requests = data.requests || [];
