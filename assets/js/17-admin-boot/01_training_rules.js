@@ -726,7 +726,7 @@
       const data = await api('GET', '/api/access-requests').catch(() => null);
       const requests = (data && data.requests) || [];
       if (!requests.length) {
-        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.access_requests_empty', 'لا توجد طلبات وصول')) + '</p>';
+        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.access_requests_empty', 'لا توجد طلبات اطّلاع')) + '</p>';
         return;
       }
       const statusLabels = {
@@ -749,7 +749,7 @@
           actions = '<button type="button" class="btn small green" onclick="decideAccessRequest(\'' + r.id + '\', \'approved\')">' + escapeHtml(WFT('users.access_approve', 'اعتماد')) + '</button>' +
             '<button type="button" class="btn small danger" onclick="decideAccessRequest(\'' + r.id + '\', \'denied\')">' + escapeHtml(WFT('users.access_deny', 'رفض')) + '</button>';
         } else if (r.status === 'approved') {
-          actions = '<button type="button" class="btn small danger" onclick="revokeAccessRequest(\'' + r.id + '\')">' + escapeHtml(WFT('users.access_revoke', 'إلغاء الوصول')) + '</button>';
+          actions = '<button type="button" class="btn small danger" onclick="revokeAccessRequest(\'' + r.id + '\')">' + escapeHtml(WFT('users.access_revoke', 'إلغاء الاطّلاع')) + '</button>';
         }
         return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
           '<div><h3 style="font-size:14px">' + escapeHtml(r.requested_by_name || '') + ' — ' + scope + '</h3>' +
@@ -761,7 +761,7 @@
     async function decideAccessRequest(requestId, decision) {
       const data = await api('POST', '/api/access-requests/' + requestId + '/decision', { decision });
       if (data && data.success) {
-        toast(decision === 'approved' ? WFT('users.access_approved_ok', 'اعتمد الوصول') : WFT('users.access_denied_ok', 'رفض الوصول'));
+        toast(decision === 'approved' ? WFT('users.access_approved_ok', 'اعتُمد الاطّلاع') : WFT('users.access_denied_ok', 'رُفض الاطّلاع'));
         renderTenantAccessRequests();
       } else {
         toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
@@ -769,9 +769,9 @@
     }
 
     async function revokeAccessRequest(requestId) {
-      if (!confirm(WFT('users.access_revoke_confirm', 'إلغاء الوصول المعتمد؟'))) return;
+      if (!confirm(WFT('users.access_revoke_confirm', 'إلغاء الاطّلاع المعتمد؟'))) return;
       const data = await api('POST', '/api/access-requests/' + requestId + '/revoke', {});
-      if (data && data.success) { toast(WFT('users.access_revoked_ok', 'ألغي الوصول')); renderTenantAccessRequests(); }
+      if (data && data.success) { toast(WFT('users.access_revoked_ok', 'أُلغي الاطّلاع')); renderTenantAccessRequests(); }
       else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
     }
 

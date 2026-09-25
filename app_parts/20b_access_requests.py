@@ -28,9 +28,10 @@ def api_admin_create_access_request(tenant_id):
     tenant = db.get_tenant_by_id(tenant_id)
     scope_label = {'tenant': 'كل محتوى الشركة',
                    'presentation': 'عرض تقديمي محدد',
-                   'file': 'ملف محدد'}.get(row.get('scope'), 'محتوى الشركة')
+                   'file': 'ملف محدد',
+                   'draft': 'ملف مشروع محدد'}.get(row.get('scope'), 'محتوى الشركة')
     _notify_tenant_admins(
-        tenant_id, 'مدير المنصة يطلب إذن اطّلاع مؤقت',
+        tenant_id, 'مدير المنصة يطلب اطّلاعًا على محتوى شركتك',
         f'يطلب مدير المنصة إذنًا لقراءة {scope_label} لمدة محدودة — السبب: {row.get("reason")}',
         entity_type='admin_access_request', entity_id=row['id'])
     return jsonify({'success': True, 'request': row}), 201

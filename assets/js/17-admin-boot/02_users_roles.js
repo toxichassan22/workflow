@@ -5,7 +5,7 @@
       const phone = ((document.getElementById('newUserPhone') || {}).value || '').trim();
       const responsibility = (document.getElementById('newUserResponsibility') || {}).value || '';
       const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
-      if (!name || !email) { toast('الاسم والبريد مطلوبان'); return; }
+      if (!name || !email) { toast(WFT('users.name_email_required', 'الاسم والبريد مطلوبان')); return; }
       const resetForm = () => {
         ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone'].forEach(id => {
           const el = document.getElementById(id);
@@ -29,7 +29,7 @@
             (invite.emailSent ? '' : ' — <span style="color:#a67c00">' + escapeHtml(WFT('users.invite_email_queued', 'تعذر إرسال البريد')) + '</span>') + '</p>' +
             '<input type="text" readonly value="' + fullUrl + '" style="width:100%;font-size:13px" onclick="this.select()">' +
             '</div>';
-          toast('تم إنشاء الدعوة');
+          toast(WFT('users.invite_created', 'تم إنشاء الدعوة'));
           resetForm();
           openTenantUsers();
         } else {
@@ -716,7 +716,7 @@
       overlay.innerHTML = '<div class="ll-modal-card change-log-card" role="dialog" aria-modal="true">' +
         '<div class="sag-modal-head"><h2 id="changeLogPageTitle">سجل التعديلات</h2>' +
         '<button type="button" class="btn ghost small" id="changeLogPageClose">إغلاق</button></div>' +
-        '<input type="search" id="changeLogSearch" class="change-log-search" placeholder="بحث في السجل">' +
+        '<input type="search" id="changeLogSearch" class="change-log-search" placeholder="بحث في السجل" data-i18n-ph="changelog.search">' +
         '<div id="changeLogPageBody"></div></div>';
       document.body.appendChild(overlay);
       overlay.querySelector('#changeLogPageClose').addEventListener('click', closeChangeLogPage);

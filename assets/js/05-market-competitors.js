@@ -888,8 +888,8 @@
           });
         }
         if (res && res.success && res.status === 'running') {
-          if (note) note.textContent = 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.';
-          toast('استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.');
+          if (note) note.textContent = WFT('gen.took_longer', 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.');
+          toast(WFT('gen.took_longer', 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.'));
           return;
         }
         if (!res || !res.success) {
@@ -1012,7 +1012,7 @@
           });
         }
         if (res && res.success && res.status === 'running') {
-          const stillRunning = 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.';
+          const stillRunning = WFT('gen.took_longer', 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.');
           if (fail) fail.textContent = stillRunning;
           toast(stillRunning);
           return;

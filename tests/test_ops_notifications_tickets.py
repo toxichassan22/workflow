@@ -407,6 +407,48 @@ class OpsSectionTests(unittest.TestCase):
         for cat in ('billing', 'recharge', 'support'):
             self.assertIn(cat, full['categories'])
 
+    def test_hidden_category_rows_never_render_in_employee_feed(self):
+        """The role gate is a row-level wall, not just a filter list: a stray
+        broadcast or a row addressed straight to an employee under a
+        wallet/support category can never surface in the feed or badge."""
+        emp_id = db.create_user(
+            self.tenant_id, 'موظف', 'wall-rows@x.test', 'hash', role='employee')
+        emp_token = auth.create_token(
+            self.tenant_id, 'wall-rows@x.test', user_id=emp_id,
+            user_name='موظف', user_role='employee')
+        db.create_notification(
+            self.tenant_id, 'خصم موجّه', category='billing', user_id=emp_id)
+        db.create_notification(
+            self.tenant_id, 'بث محفظة', category='billing')
+        db.create_notification(
+            self.tenant_id, 'رد دعم', category='support', user_id=emp_id)
+        db.create_notification(
+            self.tenant_id, 'إشعار عام', category='general')
+        titles = [n['title'] for n in self._feed(emp_token)]
+        self.assertIn('إشعار عام', titles)
+        for hidden in ('خصم موجّه', 'بث محفظة', 'رد دعم'):
+            self.assertNotIn(hidden, titles)
+        badge = self.client.get(
+            '/api/notifications/unread-count', headers=self.headers(emp_token)
+        ).get_json()['unread']
+        self.assertEqual(badge, 1)
+        # The company admin's stream is untouched — it still sees everything.
+        admin_titles = [n['title'] for n in self._feed(self.token)]
+        self.assertIn('بث محفظة', admin_titles)
+        self.assertIn('خصم موجّه', admin_titles)
+
+    def test_desk_feed_mutes_company_queue_rows(self):
+        """The platform desk's feed carries only its own queues — a row filed
+        under an approval/job category never renders for it either."""
+        admin = self._admin_token()
+        db.create_notification(
+            'platform-adm', 'اعتماد قسم', category='section_approval')
+        db.create_notification(
+            'platform-adm', 'حدث منصة', category='platform')
+        titles = [n['title'] for n in self._feed(admin)]
+        self.assertIn('حدث منصة', titles)
+        self.assertNotIn('اعتماد قسم', titles)
+
     # ── Overdue approvals escalate as plain notices, not «tasks» ─────────
 
     def test_overdue_approval_escalates_under_its_own_category(self):

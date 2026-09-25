@@ -178,7 +178,7 @@
         String(approval.draft_id || '') === String(draftId) && !approval.section_key);
       if (!activeJobs.length && !activeApprovals.length) return false;
       if (typeof confirm !== 'function' || !confirm(
-        'يوجد توليد قيد التنفيذ لهذا المشروع. هل تريد إيقافه وبدء توليد جديد؟')) return false;
+        WFT('gen.replace_running', 'يوجد توليد قيد التنفيذ لهذا المشروع. هل تريد إيقافه وبدء توليد جديد؟'))) return false;
       let released = false;
       const finishedApprovals = new Set();
       const inactiveJobByApproval = new Map();

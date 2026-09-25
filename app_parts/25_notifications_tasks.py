@@ -73,8 +73,15 @@ def _notification_muted_categories():
     try:
         prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())
     except Exception:
-        return []
-    return [category for category, enabled in prefs.items() if not enabled]
+        prefs = {}
+    muted = [category for category, enabled in prefs.items() if not enabled]
+    # The role gate is a hard wall, not just a filter list: streams the actor
+    # can never receive (wallet/support for staff, tenant work queues for the
+    # desk) are muted at the row level too, so a stray broadcast or a
+    # misaddressed row can never surface in the feed or the badge count.
+    allowed = set(_notification_categories_for_actor())
+    muted += [c for c in db.NOTIFICATION_CATEGORIES if c not in allowed]
+    return muted
 
 
 def _notification_categories_for_actor():

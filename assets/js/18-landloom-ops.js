@@ -738,12 +738,12 @@
         payload = { mode: 'auto' };
       } else {
         const rate = parseFloat((document.getElementById('adminFxRate') || {}).value);
-        if (!Number.isFinite(rate) || rate <= 0) { toast('أدخل سعرًا صالحًا'); return; }
+        if (!Number.isFinite(rate) || rate <= 0) { toast(WFT('fx.invalid_rate', 'أدخل سعرًا صالحًا')); return; }
         payload = { mode: 'manual', rate: rate };
       }
       const res = await api('PUT', '/api/admin/fx-rate', payload).catch(e => e);
       if (res && res.success) {
-        toast('تم تحديث سعر الصرف');
+        toast(WFT('fx.rate_updated', 'تم تحديث سعر الصرف'));
       } else {
         toast((res && res.error) || 'تعذر تحديث سعر الصرف');
       }
