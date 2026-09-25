@@ -731,6 +731,20 @@ def get_tenant_openrouter_key_meta(tenant_id):
     return _tenant_key_public(row)
 
 
+def list_tenant_key_states():
+    """tenant_id -> public key metadata for every stored row, in one query.
+
+    The admin companies list calls this once instead of paying a lookup per
+    row. A tenant with no row is simply absent from the map.
+    """
+    try:
+        conn = get_db()
+        rows = conn.execute('SELECT * FROM tenant_openrouter_keys').fetchall()
+    except Exception:
+        return {}
+    return {row['tenant_id']: _tenant_key_public(row) for row in rows}
+
+
 def get_tenant_openrouter_key_raw(tenant_id):
     """Decrypted provider key for server-side calls only. None when absent."""
     try:

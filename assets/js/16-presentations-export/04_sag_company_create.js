@@ -169,6 +169,9 @@
           data.setupUrl,
           data.welcomeEmailSent
         );
+        if (data.keyProvisioned === false) {
+          toast(WFT('admin.key_provision_failed', 'أُنشئت الشركة لكن إصدار مفتاحها فشل — أصدره من قائمة الشركات'));
+        }
         const tenantsData = await api('GET', '/api/admin/tenants');
         sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
         sagSyncPlanFilter();

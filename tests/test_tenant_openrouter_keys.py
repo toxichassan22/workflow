@@ -668,6 +668,70 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertEqual(meta['openrouter_key_hash'], 'alivehash34')
         self.assertTrue(meta['is_active'])
 
+    def test_create_company_reports_key_provisioning_outcome(self):
+        """Auto-provisioning on create must never stay silent: the response
+        tells the admin whether the managed key actually landed."""
+        module = self.application_module
+        client = self.app.test_client()
+
+        def _payload(suffix):
+            return {
+                'companyName': f'شركة المفتاح {suffix}',
+                'accountManagerName': 'مدير الشركة',
+                'email': f'autokey-{suffix}@example.test',
+                'phone': '+966500000019',
+                'username': f'autokey_{suffix}',
+                'plan': 'pro',
+                'isActive': True,
+                'passwordMode': 'set_link',
+                'sendWelcomeEmail': False,
+            }
+
+        with patch.object(module, '_ensure_tenant_openrouter_key',
+                          return_value={'is_active': True}) as ensure:
+            response = client.post('/api/admin/tenants',
+                                   headers=self._admin_headers(),
+                                   json=_payload('ok'))
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertTrue(response.get_json()['keyProvisioned'])
+        ensure.assert_called_once()
+
+        with patch.object(module, '_ensure_tenant_openrouter_key',
+                          return_value=None):
+            response = client.post('/api/admin/tenants',
+                                   headers=self._admin_headers(),
+                                   json=_payload('miss'))
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertFalse(response.get_json()['keyProvisioned'])
+
+        with patch.object(module, '_ensure_tenant_openrouter_key',
+                          side_effect=RuntimeError('mgmt api down')):
+            response = client.post('/api/admin/tenants',
+                                   headers=self._admin_headers(),
+                                   json=_payload('boom'))
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertFalse(response.get_json()['keyProvisioned'])
+
+    def test_tenants_list_reports_key_state_per_company(self):
+        client = self.app.test_client()
+        keyless_id = self._fresh_tenant('Keyless Co', 'keyless@example.test', 'keyless-co')
+        keyed_id = self._fresh_tenant('Keyed Co', 'keyed@example.test', 'keyed-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                keyed_id, 'sk-or-v1-keyed-secret-aaaaaaaaaaaaaaaa',
+                key_label='Keyed', provenance='auto', limit_usd=10.0)
+        response = client.get('/api/admin/tenants', headers=self._admin_headers())
+        self.assertEqual(response.status_code, 200)
+        tenants = {t['id']: t for t in response.get_json()['tenants']}
+        self.assertTrue(tenants[keyed_id]['keyActive'])
+        self.assertFalse(tenants[keyless_id]['keyActive'])
+
+        with self.app.app_context():
+            db.deactivate_tenant_openrouter_key(keyed_id)
+        response = client.get('/api/admin/tenants', headers=self._admin_headers())
+        tenants = {t['id']: t for t in response.get_json()['tenants']}
+        self.assertFalse(tenants[keyed_id]['keyActive'])
+
     def test_keys_debug_reports_state_without_secrets(self):
         client = self.app.test_client()
         denied = client.get('/api/admin/openrouter-keys/debug', headers=self._headers())

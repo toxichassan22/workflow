@@ -390,11 +390,14 @@
         const planBadge = { 'free': '<span style="color:var(--muted)">Free</span>', 'pro': '<span style="color:var(--green)">Pro</span>', 'enterprise': '<span style="color:#7c3aed">Enterprise</span>' }[t.plan || 'free'] || t.plan;
         const statusBadge = t.isActive ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const adminBadge = t.isAdmin ? ' | <span style="color:#7c3aed;font-weight:600">SAG Admin</span>' : '';
+        const keyBadge = t.isAdmin ? '' : (t.keyActive
+          ? ' | <span style="color:var(--green)">مفتاح نشط</span>'
+          : ' | <span style="color:#c33">بدون مفتاح</span>');
         return '<div class="tenant-presentation-card">' +
           '<div><h3>' + escapeHtml(t.companyName || '') + adminBadge + '</h3>' +
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
-          planBadge + ' | ' + statusBadge + ' | <span>رصيد</span> ' +
+          planBadge + ' | ' + statusBadge + keyBadge + ' | <span>رصيد</span> ' +
           Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US') + ' <span>ريال</span>' +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
@@ -402,6 +405,8 @@
           '<button class="btn small primary" onclick="showSagTenantDetails(\'' + t.id + '\')">عرض الحساب</button>' +
           '<button class="btn small ' + (t.isActive ? 'danger' : 'green') + '" onclick="sagToggleTenant(\'' + t.id + '\', ' + (!t.isActive) + ')">' + (t.isActive ? 'إيقاف' : 'تفعيل') + '</button>' +
           '<button class="btn small ghost" onclick="openSagResetPassword(\'' + t.id + '\')">إعادة تعيين كلمة المرور</button>' +
+          (!t.isAdmin && !t.keyActive
+            ? '<button class="btn small ghost" onclick="sagProvisionTenantKey(\'' + t.id + '\')">إصدار مفتاح</button>' : '') +
           (t.isAdmin ? '' : '<button class="btn small danger" onclick="sagDeleteTenant(\'' + t.id + '\')">حذف</button>') +
           '</div></div>';
       }).join('');
@@ -1047,6 +1052,12 @@
       const data = await api('PUT', '/api/admin/tenants/' + tenantId, { is_active: isActive });
       if (data.success) { toast(isActive ? 'تم التفعيل' : 'تم التعطيل'); openTenantCompanies(); }
       else { toast(data.error || 'فشل'); }
+    }
+
+    async function sagProvisionTenantKey(tenantId) {
+      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/openrouter-key/provision', {});
+      if (data.success) { toast(WFT('admin.key_issued', 'تم إصدار مفتاح الشركة')); openTenantCompanies(); }
+      else { toast(data.error || WFT('admin.key_issue_failed', 'فشل إصدار المفتاح')); }
     }
 
     async function sagDeleteTenant(tenantId) {

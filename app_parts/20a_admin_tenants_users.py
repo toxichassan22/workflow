@@ -106,10 +106,13 @@ def api_admin_tenants():
                 email, company_name, manager_name, username, setup_url
             )
         # Best-effort managed OpenRouter key so the company spends on its own
-        # dashboard-visible limit from day one. Never fails tenant creation.
+        # dashboard-visible limit from day one. Never fails tenant creation —
+        # the outcome rides the response so a silent miss is visible.
+        key_provisioned = False
         try:
-            _ensure_tenant_openrouter_key(
+            provisioned = _ensure_tenant_openrouter_key(
                 tenant_id, limit_usd=_tenant_provider_cap_usd(tenant_id))
+            key_provisioned = bool(provisioned and provisioned.get('is_active'))
         except Exception as exc:
             print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
@@ -121,10 +124,15 @@ def api_admin_tenants():
             'tenant': _company_payload(tenant),
             'setupUrl': setup_url,
             'welcomeEmailSent': email_sent,
+            'keyProvisioned': key_provisioned,
         }), 201
 
     tenants = db.get_all_tenants()
     result = [_company_payload(tenant) for tenant in tenants]
+    key_states = db.list_tenant_key_states()
+    for payload in result:
+        state = key_states.get(payload['id']) or {}
+        payload['keyActive'] = bool(state.get('has_key') and state.get('is_active'))
     return jsonify({'success': True, 'tenants': result})
 
 
