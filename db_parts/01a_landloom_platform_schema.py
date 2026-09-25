@@ -136,6 +136,22 @@ def _create_landloom_tables(conn):
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_approval_tasks_feed ON approval_tasks(tenant_id, status, opened_at DESC)')
 
+    # Responsibility assignments: a user holds a role (editor/approver) on one
+    # draft, or on every draft when draft_id is '*'. An approver row is unique
+    # per (tenant, draft) — one approver per project — while a wildcard
+    # approver ('*') coexists with specific rows as the fallback assignee.
+    conn.execute('''CREATE TABLE IF NOT EXISTS user_assignments (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        draft_id TEXT NOT NULL DEFAULT '*',
+        role TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_user_assignments_user ON user_assignments(user_id, tenant_id)')
+    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_user_assignments_row ON user_assignments(tenant_id, user_id, draft_id, role)')
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_one_approver_per_draft ON user_assignments(tenant_id, draft_id) WHERE role = 'approver'")
+
     # t30/t31: atomic reservations, one active per operation, consumed once.
     conn.execute('''CREATE TABLE IF NOT EXISTS point_reservations (
         id TEXT PRIMARY KEY,

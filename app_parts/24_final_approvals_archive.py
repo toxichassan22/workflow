@@ -23,12 +23,18 @@ def api_request_final_file_approval(presentation_id):
     try:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
         title = (presentation or {}).get('title') or 'عرض'
+        assigned = db.assigned_approver(
+            g.tenant_id, (presentation or {}).get('draft_id'))
         db.create_approval_task(
             g.tenant_id, 'final_approval', f'اعتماد الملف النهائي «{title}»',
             entity_type='final_file_approval', entity_id=approval['id'],
+            assignee_id=(assigned or {}).get('user_id'),
+            assignee_name=(assigned or {}).get('user_name'),
             payload={'presentation_id': presentation_id}, due_hours=48,
             draft_id=(presentation or {}).get('draft_id'))
-        for approver in db.get_users_with_permission(g.tenant_id, 'approve_final_file'):
+        recipients = ([{'id': assigned['user_id']}] if assigned
+                      else db.get_users_with_permission(g.tenant_id, 'approve_final_file'))
+        for approver in recipients:
             db.create_notification(
                 g.tenant_id, 'طلب اعتماد ملف نهائي',
                 f'«{title}» بانتظار قرار اعتماد الملف النهائي',
@@ -58,14 +64,15 @@ def api_decide_final_file_approval(approval_id):
     """Final-file gate decision: approve_final_file holders only, and never the
     requester unless the actor is a company-level administrator (d02)."""
     data = request.json or {}
-    if data.get('decision') in {'approved', 'rejected'} and not _landloom_can('approve_final_file'):
-        return _landloom_forbidden('اعتماد أو رفض الملف النهائي يتطلب صلاحية معتمد الملف')
     # ISS-014: the decision must stay inside the caller's project scope too.
     existing = db.get_final_file_approval(g.tenant_id, approval_id)
     if not existing:
         return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
     pres = db.get_presentation(existing['presentation_id'], tenant_id=g.tenant_id) \
         if existing.get('presentation_id') else None
+    if data.get('decision') in {'approved', 'rejected'} \
+            and not _landloom_can_decide('approve_final_file', (pres or {}).get('draft_id')):
+        return _landloom_forbidden('اعتماد أو رفض الملف النهائي يتطلب صلاحية معتمد الملف')
     if not _presentation_in_scope(pres):
         return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
     result = db.decide_final_file_approval(

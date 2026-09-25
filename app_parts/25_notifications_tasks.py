@@ -201,12 +201,14 @@ def _landloom_is_approver():
 
 
 def _landloom_task_actor_allowed(task):
-    """Close/remind belong to the assigned approver or a holder of the task
-    kind's decision permission; administrators pass through _landloom_can."""
+    """An assigned task belongs to its assignee alone (admins excepted); an
+    unassigned one stays in the pool of the kind's permission holders."""
     if not task:
         return False
-    if task.get('assignee_id') and str(task['assignee_id']) == str(g.user_id):
-        return True
+    if task.get('assignee_id'):
+        if str(task['assignee_id']) == str(g.user_id):
+            return True
+        return _landloom_actor_is_admin()
     return _landloom_can(_APPROVAL_TASK_KIND_PERMISSION.get(task.get('kind'), 'approvals'))
 
 
@@ -215,9 +217,10 @@ def _landloom_task_actor_allowed(task):
 def api_list_approval_tasks():
     tasks = db.list_approval_tasks(
         g.tenant_id, status=request.args.get('status') or 'open', kind=request.args.get('kind'),
-        assignee_id=None if _landloom_is_approver() else g.user_id,
+        assignee_id=request.args.get('assigneeId') or None,
         draft_id=request.args.get('draftId') or None,
         section_key=request.args.get('sectionKey') or None,
+        pool_user_id=None if _landloom_actor_is_admin() or not g.user_id else g.user_id,
     )
     return jsonify({'success': True, 'tasks': tasks})
 
@@ -254,7 +257,8 @@ def api_remind_approval_task(task_id):
     ).fetchone()
     if not task_row:
         return jsonify({'error': 'العنصر غير موجود', 'error_code': 'task_not_found'}), 404
-    if not _landloom_task_actor_allowed(dict(task_row)) and not _landloom_is_approver():
+    if not _landloom_task_actor_allowed(dict(task_row)) \
+            and not (not task_row['assignee_id'] and _landloom_is_approver()):
         return _landloom_forbidden('التذكير بالمهمة يخص المعتمدين')
     result = db.remind_approval_task(g.tenant_id, task_id)
     failure = _landloom_error(result)

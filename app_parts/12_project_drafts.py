@@ -245,12 +245,40 @@ def _versioned_draft_for_read(draft_id):
         return draft, None
     if _has_approvals_permission():
         return draft, None
+    # The draft's assigned approver reviews it even without the global
+    # approvals permission — the assignment IS the approver role.
+    try:
+        if db.user_is_assigned_approver(g.tenant_id, g.user_id, draft.get('id')):
+            return draft, None
+    except Exception:
+        pass
     return None, {'error': 'No project draft found'}
 
 
 def _versioned_draft_for_decide(draft_id):
-    """Draft whose pending version the caller may approve, return or reject."""
-    return _versioned_draft_for_read(draft_id)
+    """Draft whose pending version the caller may approve, return or reject.
+
+    One approver per project: a draft with an assigned approver is decided by
+    that approver alone (company admins keep their override); only a draft
+    with no assignment falls back to the legacy approvals pool.
+    """
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    if not draft or not db.user_may_access_draft(g.user_id, draft):
+        return None, {'error': 'No project draft found'}
+    try:
+        assigned = db.assigned_approver(g.tenant_id, draft.get('id'))
+    except Exception:
+        assigned = None
+    if assigned:
+        if _landloom_actor_is_admin() \
+                or str(assigned.get('user_id') or '') == str(g.user_id or ''):
+            return draft, None
+        return None, {'error': 'No project draft found'}
+    if draft.get('user_id') == _project_draft_actor_id():
+        return draft, None
+    if _has_approvals_permission():
+        return draft, None
+    return None, {'error': 'No project draft found'}
 
 
 def _section_required_missing_labels(tenant_id, section_key, snapshot):
@@ -1136,25 +1164,38 @@ def api_send_section_for_approval():
         return jsonify({'error': 'Unable to store the section snapshot'}), 400
     try:
         # t13-01: every send opens an approver task and notifies the approvers
-        # whose section scope covers this key.
+        # whose section scope covers this key. When the draft carries an
+        # assigned approver the request goes to them alone — responsibility
+        # assignments outrank the permission broadcast.
+        assigned = db.assigned_approver(g.tenant_id, draft['id'])
         db.create_approval_task(
             g.tenant_id, 'section_approval',
             f'اعتماد قسم «{_section_version_label(section_key)}»',
             entity_type='section_version', entity_id=version['id'],
             section_key=section_key,
+            assignee_id=(assigned or {}).get('user_id'),
+            assignee_name=(assigned or {}).get('user_name'),
             payload={'draft_id': draft['id'], 'version_number': version['version_number']},
             due_hours=48, draft_id=draft['id'])
-        for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
-            try:
-                if not db.get_user_field_sections(approver['id'], g.tenant_id).get(section_key, True):
-                    continue
-            except Exception:
-                continue
+        if assigned:
             db.create_notification(
                 g.tenant_id, 'إصدار قسم بانتظار الاعتماد',
                 f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(section_key)} بانتظار قرارك',
-                category='section_approval', user_id=approver['id'],
-                entity_type='section_version', entity_id=version['id'])
+                category='section_approval', user_id=assigned['user_id'],
+                entity_type='section_version', entity_id=version['id'],
+                email_to=None)
+        else:
+            for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
+                try:
+                    if not db.get_user_field_sections(approver['id'], g.tenant_id).get(section_key, True):
+                        continue
+                except Exception:
+                    continue
+                db.create_notification(
+                    g.tenant_id, 'إصدار قسم بانتظار الاعتماد',
+                    f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(section_key)} بانتظار قرارك',
+                    category='section_approval', user_id=approver['id'],
+                    entity_type='section_version', entity_id=version['id'])
     except Exception:
         pass
     _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
@@ -1220,8 +1261,16 @@ def api_decide_section_version():
     actor_id = _project_draft_actor_id()
     # t13-02: a non-admin approver decides only inside their granted field
     # sections; keys outside the field map stay governed by the approvals
-    # permission that already let this caller reach the decision.
-    if not _landloom_actor_is_admin() and str(draft.get('user_id')) != str(actor_id):
+    # permission that already let this caller reach the decision. The draft's
+    # assigned approver is responsible for every section in it.
+    assigned_approver = False
+    try:
+        assigned_approver = db.user_is_assigned_approver(
+            g.tenant_id, g.user_id, draft.get('id'))
+    except Exception:
+        pass
+    if not _landloom_actor_is_admin() and str(draft.get('user_id')) != str(actor_id) \
+            and not assigned_approver:
         section_key = version['section_key']
         if section_key in db.DEFAULT_FIELD_SECTIONS:
             try:
@@ -1526,12 +1575,17 @@ def api_request_project_draft_approval():
     try:
         if draft.get('status') == 'section_approval_pending':
             resolved_id = draft.get('id') or data.get('draftId')
+            assigned = db.assigned_approver(g.tenant_id, resolved_id)
             db.create_approval_task(
                 g.tenant_id, 'section_approval',
                 f'اعتماد مشروع «{draft.get("title") or "مشروع"}»',
                 entity_type='project_draft', entity_id=resolved_id, due_hours=48,
+                assignee_id=(assigned or {}).get('user_id'),
+                assignee_name=(assigned or {}).get('user_name'),
                 draft_id=resolved_id)
-            for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
+            recipients = ([{'id': assigned['user_id']}] if assigned
+                          else db.get_users_with_permission(g.tenant_id, 'approvals'))
+            for approver in recipients:
                 db.create_notification(
                     g.tenant_id, 'مشروع بانتظار الاعتماد',
                     f'«{draft.get("title") or "مشروع"}» أُرسل للاعتماد',
@@ -1553,16 +1607,19 @@ def api_project_draft_approval_status():
 
 
 @app.route('/api/project-draft/pending-approvals', methods=['GET'])
-@require_permission('approvals')
+@require_auth
 def api_pending_project_draft_approvals():
-    """List tenant-only draft approval requests for authorized reviewers."""
+    """List tenant-only draft approval requests for authorized reviewers —
+    permission holders, or users holding an approver assignment."""
+    if not _has_approvals_permission() and not _landloom_has_approver_assignment():
+        return _landloom_forbidden()
     drafts = db.get_pending_project_drafts(
         g.tenant_id, accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
     return jsonify({'success': True, 'drafts': drafts})
 
 
 @app.route('/api/project-draft/review', methods=['POST'])
-@require_permission('approvals')
+@require_auth
 def api_review_project_draft():
     """Approve or return a tenant-scoped project draft for correction."""
     data = request.json or {}
@@ -1571,6 +1628,11 @@ def api_review_project_draft():
     note = (data.get('note') or '').strip()[:3000]
     if not isinstance(draft_id, str) or not draft_id or review_status not in {'approved', 'rejected'}:
         return jsonify({'error': 'draftId and status (approved or rejected) are required'}), 400
+    # The decision needs the approvals permission or the approver assignment
+    # for this exact draft — a bare user can never review somebody's draft.
+    if not _has_approvals_permission() \
+            and not db.user_is_assigned_approver(g.tenant_id, g.user_id, draft_id):
+        return _landloom_forbidden()
     # ISS-014: a scoped reviewer cannot decide a draft outside their scope.
     target = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if target and not db.user_may_access_draft(g.user_id, target):

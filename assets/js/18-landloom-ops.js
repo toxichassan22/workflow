@@ -715,7 +715,7 @@
       await Promise.all([llLoadFileTypes(), adminLoadPackages(), llLoadRejectionReasons(), llLoadFxRate()]);
     }
 
-    // ── USD→SAR rate: manual override or provider-tracked auto mode ──────
+    // ── USD/SAR rate: manual override or provider-tracked auto mode ──────
     async function llLoadFxRate() {
       const input = document.getElementById('adminFxRate');
       if (!input) return;

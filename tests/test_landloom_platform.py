@@ -397,23 +397,56 @@ class LandloomDbTests(unittest.TestCase):
         invalid = db.update_event_task_status('tenant-1', task['id'], 'bogus')
         self.assertEqual(invalid.get('error'), 'invalid_status')
 
-    # ── t20/t21/t22: roles, SoD matrix, users report ─────────────────────
+    # ── project responsibility assignments ─────────────────────────────────
 
-    def test_role_template_clone_and_duplicate_block(self):
-        template = db.list_tenant_role_templates('tenant-1')
-        self.assertIn({'key': 'approvals', 'default_granted': False}, template['permission_keys'])
-        role = db.create_tenant_role('tenant-1', 'مراجع', 'employee',
-                                     {'approvals': True, 'not_a_key': True})
-        self.assertEqual(role['permissions'], {'approvals': True})
-        duplicate = db.create_tenant_role('tenant-1', 'مراجع', 'employee', {'dashboard': True})
-        self.assertEqual(duplicate.get('error'), 'role_name_exists')
-        db.create_user('tenant-1', 'موظف', 'emp@x.test', 'hash', role='employee')
-        user = db.get_user_by_email('emp@x.test')
-        permissions = db.assign_tenant_role_to_user('tenant-1', user['id'], role['id'])
-        self.assertTrue(permissions['approvals'])
-        updated = db.update_tenant_role('tenant-1', role['id'], permissions={'approvals': False})
-        self.assertEqual(updated['permissions'], {'approvals': False})
-        self.assertTrue(db.delete_tenant_role('tenant-1', role['id']))
+    def test_user_assignments_one_approver_per_draft(self):
+        db.create_user('tenant-1', 'معتمد أ', 'a@x.test', 'hash', role='employee')
+        db.create_user('tenant-1', 'معتمد ب', 'b@x.test', 'hash', role='employee')
+        approver_a = db.get_user_by_email('a@x.test')
+        approver_b = db.get_user_by_email('b@x.test')
+        ok = db.set_user_assignments('tenant-1', approver_a['id'],
+                                     [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(len(ok['assignments']), 1)
+        conflict = db.set_user_assignments('tenant-1', approver_b['id'],
+                                           [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(conflict.get('error'), 'approver_exists')
+        self.assertEqual(conflict.get('holder'), 'معتمد أ')
+        # Editors do not collide — two editors on one draft is fine.
+        ok2 = db.set_user_assignments('tenant-1', approver_b['id'],
+                                      [{'draft_id': self.draft_id, 'role': 'editor'}])
+        self.assertEqual(len(ok2['assignments']), 1)
+        self.assertEqual(db.assigned_approver('tenant-1', self.draft_id)['user_id'],
+                         approver_a['id'])
+        self.assertTrue(db.user_is_assigned_approver('tenant-1', approver_a['id'], self.draft_id))
+        self.assertFalse(db.user_is_assigned_approver('tenant-1', approver_b['id'], self.draft_id))
+        # List payloads carry the approver name for «بانتظار تعميد — الاسم».
+        rows = db.attach_approver_names('tenant-1', [{'id': self.draft_id}])
+        self.assertEqual(rows[0]['approver_name'], 'معتمد أ')
+        # The assignment itself grants draft access — no separate scope row needed.
+        draft = db.get_project_draft_by_id('tenant-1', self.draft_id)
+        self.assertTrue(db.user_may_access_draft(approver_a['id'], draft))
+        # Releasing the approver frees the slot for a colleague.
+        db.set_user_assignments('tenant-1', approver_a['id'], [])
+        ok3 = db.set_user_assignments('tenant-1', approver_b['id'],
+                                      [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(len(ok3['assignments']), 1)
+
+    def test_wildcard_approver_covers_and_blocks_every_draft(self):
+        db.create_user('tenant-1', 'معتمد عام', 'w@x.test', 'hash', role='employee')
+        db.create_user('tenant-1', 'معتمد آخر', 'o@x.test', 'hash', role='employee')
+        wildcard = db.get_user_by_email('w@x.test')
+        other = db.get_user_by_email('o@x.test')
+        db.set_user_assignments('tenant-1', wildcard['id'],
+                                [{'draft_id': '*', 'role': 'approver'}])
+        self.assertEqual(db.assigned_approver('tenant-1', self.draft_id)['user_id'],
+                         wildcard['id'])
+        conflict = db.set_user_assignments('tenant-1', other['id'],
+                                           [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(conflict.get('error'), 'approver_exists')
+        rows = db.attach_approver_names('tenant-1', [{'id': self.draft_id}])
+        self.assertEqual(rows[0]['approver_name'], 'معتمد عام')
+
+    # ── t21/t22: SoD matrix, users report ─────────────────────
 
     def test_sod_matrix_flags_self_approval_and_missing_reason(self):
         conn = db.get_db()
@@ -1071,18 +1104,6 @@ class LandloomApiTests(unittest.TestCase):
         listed = self.client.get('/api/event-tasks', headers=self.headers(self.token))
         self.assertEqual(listed.status_code, 200)
         self.assertTrue(listed.get_json()['tasks'])
-
-    def test_roles_require_manage_users_and_tenant_scope(self):
-        role = self.client.post(
-            '/api/roles', headers=self.headers(self.token),
-            json={'name': 'مراجع', 'permissions': {'approvals': True}})
-        self.assertEqual(role.status_code, 200)
-        role_id = role.get_json()['role']['id']
-        # A second company must not see the first company's role.
-        foreign = self.client.post(
-            f'/api/roles/{role_id}/update', headers=self.headers(self.other_token),
-            json={'permissions': {'approvals': False}})
-        self.assertEqual(foreign.status_code, 404)
 
     def test_support_ticket_and_messages(self):
         created = self.client.post(

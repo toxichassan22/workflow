@@ -463,7 +463,7 @@ def get_presentations(tenant_id, draft_id=None, search='', status='', date_from=
                 scope = None
         item['presentation_scope'] = scope
         result.append(item)
-    return result
+    return attach_approver_names(tenant_id, result)
 
 
 def update_presentation(pres_id, tenant_id=None, **fields):

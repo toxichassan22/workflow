@@ -927,6 +927,50 @@ def api_set_user_permissions(user_id):
     return jsonify({'success': True, 'permissions': perms})
 
 
+@app.route('/api/users/<user_id>/assignments', methods=['GET'])
+@require_permission('manage_users')
+def api_get_user_assignments(user_id):
+    """A user's responsibility assignments (editor/approver per project)."""
+    user = db.get_user_by_id(user_id)
+    if not user or user['tenant_id'] != g.tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'success': True,
+                    'assignments': db.list_user_assignments(g.tenant_id, user_id)})
+
+
+@app.route('/api/users/<user_id>/assignments', methods=['PUT'])
+@require_permission('manage_users')
+def api_set_user_assignments(user_id):
+    """Replace a user's assignments. Refused when a requested approver slot is
+    already held by someone else — one approver per project."""
+    user = db.get_user_by_id(user_id)
+    if not user or user['tenant_id'] != g.tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+    data = request.json or {}
+    result = db.set_user_assignments(
+        g.tenant_id, user_id, data.get('assignments') or [])
+    if result.get('error') == 'user_not_found':
+        return jsonify({'error': 'User not found'}), 404
+    if result.get('error') == 'approver_exists':
+        return jsonify({
+            'error': f'المشروع له معتمد بالفعل: {result.get("holder") or "مستخدم آخر"}',
+            'error_code': 'approver_exists',
+            'holder': result.get('holder'),
+        }), 409
+    _record_audit_event('user.assignments_changed', 'user', user_id,
+                        new_value=result.get('assignments'))
+    return jsonify({'success': True, 'assignments': result.get('assignments')})
+
+
+@app.route('/api/assignments', methods=['GET'])
+@require_permission('manage_users')
+def api_list_tenant_assignments():
+    """Every assignment in the company — the admin needs the tenant-wide view
+    to see which projects already have an approver."""
+    return jsonify({'success': True,
+                    'assignments': db.list_tenant_assignments(g.tenant_id)})
+
+
 @app.route('/api/my-permissions', methods=['GET'])
 @require_auth
 def api_get_my_permissions():

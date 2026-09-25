@@ -740,13 +740,22 @@
       return PROPOSAL_LIFECYCLE_CONFIG[s] || { label: s || 'مسودة', labelEn: s || 'Draft', cls: 'status-draft' };
     }
 
-    function getProposalStatusLabel(status) {
+    const APPROVER_PENDING_STATUSES = new Set([
+      'pending_approval', 'submitted', 'section_approval_pending',
+      'generation_approval_pending', 'final_approval_pending',
+    ]);
+
+    function getProposalStatusLabel(status, approverName) {
       const meta = getProposalStatusMeta(status);
       const s = String(status || 'draft').trim();
+      let label = meta.label;
       if (typeof WFT === 'function') {
-        return WFT('lifecycle.' + s, meta.label);
+        label = WFT('lifecycle.' + s, meta.label);
       }
-      return meta.label;
+      if (approverName && APPROVER_PENDING_STATUSES.has(s)) {
+        label += ' — ' + approverName;
+      }
+      return label;
     }
 
     // ── Accessibility (t63): shared modal behaviour ──────────────────────

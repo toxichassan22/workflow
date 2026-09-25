@@ -96,7 +96,7 @@
       const renderDraftCard = (d, recovery, projectCost) => {
         const title = d.title || 'مشروع بدون عنوان';
         const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
-        const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status) : (stMeta.label || 'مسودة');
+        const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
         const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_sar || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');

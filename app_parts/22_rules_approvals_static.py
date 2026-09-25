@@ -162,16 +162,33 @@ def api_request_approval(pres_id):
 
 
 @app.route('/api/approvals', methods=['GET'])
-@require_permission('approvals')
+@require_auth
 def api_get_approvals():
-    """Get all pending approvals for the current tenant."""
+    """Get all pending approvals for the current tenant — permission holders
+    or users holding an approver assignment."""
+    if not _landloom_can('approvals') and not _landloom_has_approver_assignment():
+        return _landloom_forbidden()
     approvals = db.get_pending_approvals(
         g.tenant_id, accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
+    if not _landloom_actor_is_admin() and g.user_id:
+        # A draft with a named approver waits on that approver — the rest of
+        # the pool does not see it in their queue.
+        filtered = []
+        for row in approvals:
+            did = row.get('draft_id')
+            try:
+                assigned = db.assigned_approver(g.tenant_id, did) if did else None
+            except Exception:
+                assigned = None
+            if assigned and str(assigned.get('user_id') or '') != str(g.user_id):
+                continue
+            filtered.append(row)
+        approvals = filtered
     return jsonify({'success': True, 'approvals': approvals})
 
 
 @app.route('/api/approvals/<approval_id>/review', methods=['POST'])
-@require_permission('approvals')
+@require_auth
 def api_review_approval(approval_id):
     """Approve or reject a presentation."""
     data = request.json or {}
@@ -184,6 +201,8 @@ def api_review_approval(approval_id):
         return jsonify({'error': 'Approval not found'}), 404
     # ISS-014: a scoped reviewer can only decide approvals inside their scope.
     pres = db.get_presentation(approval['presentation_id'], tenant_id=g.tenant_id)
+    if not _landloom_can_decide('approvals', (pres or {}).get('draft_id')):
+        return _landloom_forbidden()
     if not _presentation_in_scope(pres):
         return jsonify({'error': 'Approval not found'}), 404
     result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin',

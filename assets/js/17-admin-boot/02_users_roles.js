@@ -174,12 +174,20 @@
       employee: 'موظف',
     };
 
+    const ASSIGNMENT_ROLES = [
+      { key: 'editor', label: 'محرر' },
+      { key: 'approver', label: 'معتمد' },
+    ];
+    let editingAssignments = [];
+    let tenantAssignments = [];
+
     async function openUserPermissionsModal(userId, userName) {
-      const [permData, sectionData, scopeData, rolesData] = await Promise.all([
+      const [permData, sectionData, scopeData, assignData, tenantAssignData] = await Promise.all([
         api('GET', '/api/users/' + userId + '/permissions'),
         api('GET', '/api/users/' + userId + '/field-sections'),
         api('GET', '/api/users/' + userId + '/project-scope').catch(() => null),
-        api('GET', '/api/roles/template').catch(() => null)
+        api('GET', '/api/users/' + userId + '/assignments').catch(() => null),
+        api('GET', '/api/assignments').catch(() => null)
       ]);
       if (!permData.success || !sectionData.success) { toast('تعذر تحميل الصلاحيات'); return; }
       const perms = permData.permissions || {};
@@ -188,7 +196,10 @@
       const availableSections = sectionData.available || [];
       const scopeDrafts = (scopeData && scopeData.drafts) || [];
       const scopeSet = new Set((scopeData && scopeData.scope) || []);
-      const tenantRoles = (rolesData && rolesData.roles) || [];
+      editingAssignments = ((assignData && assignData.assignments) || []).map(a => ({
+        draft_id: a.draft_id || '*', role: a.role,
+      }));
+      tenantAssignments = (tenantAssignData && tenantAssignData.assignments) || [];
       editingUserPermissions = { userId, userName, availableSections, scopeDrafts };
 
       const permRows = keys.map(key => {
@@ -212,10 +223,6 @@
         '<input type="checkbox" class="scopeDraftCb" value="' + escapeHtml(d.id) + '" ' + (scopeSet.has(d.id) ? 'checked' : '') + '></div>'
       ).join('') : '<p class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
 
-      const roleOptions = tenantRoles.map(r =>
-        '<option value="' + escapeHtml(r.id) + '">' + escapeHtml(r.name) + '</option>'
-      ).join('');
-
       const modal = document.createElement('div');
       modal.id = 'userPermissionsModal';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -223,20 +230,6 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
         '<h3><span>صلاحيات:</span> ' + escapeHtml(userName) + '</h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'userPermissionsModal\').remove()">إغلاق</button></div>' +
-        '<div style="margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">' +
-        '<div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px;">تطبيق قالب دور قياسي:</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'editor\')">محرر</button>' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'section_approver\')">معتمد قسم</button>' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'generation_approver\')">معتمد توليد</button>' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'final_file_approver\')">معتمد ملف</button>' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'profile\')">بروفايل</button>' +
-        '<button type="button" class="btn small ghost" onclick="applyRoleTemplateQuick(\'support\')">دعم</button>' +
-        '</div></div>' +
-        (roleOptions ? '<div style="margin-bottom:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">' +
-          '<div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px;">' + escapeHtml(WFT('users.role_assign', 'تعيين قالب مخصص')) + '</div>' +
-          '<div style="display:flex;gap:6px"><select id="assignRoleSelect" style="flex:1">' + roleOptions + '</select>' +
-          '<button type="button" class="btn small ghost" onclick="assignTenantRole()">' + escapeHtml(WFT('users.role_assign_btn', 'تعيين')) + '</button></div></div>' : '') +
         '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
         '' +
         permRows +
@@ -245,44 +238,72 @@
         sectionRows +
         '<h4 style="margin:20px 0 8px;color:var(--p)">' + escapeHtml(WFT('users.project_scope', 'ملفات المشاريع المسموحة')) + '</h4>' +
         scopeRows +
+        '<h4 style="margin:20px 0 8px;color:var(--p)">' + escapeHtml(WFT('users.assignments_title', 'المسؤوليات على المشاريع')) + '</h4>' +
+        '<div id="permAssignmentsList"></div>' +
+        '<div class="tenant-btns" style="margin-top:8px">' +
+        '<button type="button" class="btn small ghost" onclick="addAssignmentRow()">' + escapeHtml(WFT('users.assignment_add', 'إضافة تعيين')) + '</button>' +
+        '</div>' +
         '<div class="tenant-btns" style="margin-top:16px">' +
         '<button class="btn primary" onclick="saveUserPermissions()">حفظ الصلاحيات</button>' +
         '</div></div>';
       document.body.appendChild(modal);
+      renderAssignmentRows();
     }
 
-    function applyRoleTemplateQuick(templateKey) {
-      const templates = {
-        editor: ['dashboard', 'create_presentation', 'view_presentations', 'generate_images', 'generate_maps', 'copy_presentation'],
-        section_approver: ['dashboard', 'view_presentations', 'approvals'],
-        generation_approver: ['dashboard', 'view_presentations', 'approve_generation'],
-        final_file_approver: ['dashboard', 'view_presentations', 'approve_final_file', 'export_files'],
-        profile: ['dashboard', 'company_settings', 'custom_fields', 'billing'],
-        support: ['dashboard', 'view_presentations', 'support_tickets']
-      };
-      const allowed = templates[templateKey] || [];
-      Object.keys(PERMISSION_LABELS).forEach(key => {
-        const cb = document.getElementById('perm_' + key);
-        if (cb) cb.checked = allowed.includes(key);
-      });
+    function assignmentDraftOptions(selected) {
+      const drafts = (editingUserPermissions && editingUserPermissions.scopeDrafts) || [];
+      return '<option value="*">كل المشاريع</option>' + drafts.map(d =>
+        '<option value="' + escapeHtml(d.id) + '"' + (d.id === selected ? ' selected' : '') + '>' + escapeHtml(d.title || d.id) + '</option>'
+      ).join('');
     }
 
-    async function assignTenantRole() {
-      if (!editingUserPermissions) return;
-      const sel = document.getElementById('assignRoleSelect');
-      const roleId = sel ? sel.value : '';
-      if (!roleId) return;
-      const data = await api('POST', '/api/roles/' + roleId + '/assign', { userId: editingUserPermissions.userId });
-      if (data && data.success) {
-        toast(WFT('users.role_assigned', 'عين القالب'));
-        const perms = data.permissions || {};
-        Object.keys(PERMISSION_LABELS).forEach(key => {
-          const cb = document.getElementById('perm_' + key);
-          if (cb && key in perms) cb.checked = !!perms[key];
-        });
-      } else {
-        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
+    function assignmentHolder(draftId, role) {
+      if (role !== 'approver') return '';
+      const me = editingUserPermissions && editingUserPermissions.userId;
+      const hit = tenantAssignments.find(a =>
+        a.user_id !== me && a.role === 'approver' &&
+        (a.draft_id === '*' || draftId === '*' || a.draft_id === draftId));
+      return hit ? (hit.user_name || hit.user_id) : '';
+    }
+
+    function renderAssignmentRows() {
+      const box = document.getElementById('permAssignmentsList');
+      if (!box) return;
+      if (!editingAssignments.length) {
+        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
+        return;
       }
+      box.innerHTML = editingAssignments.map((a, i) => {
+        const holder = assignmentHolder(a.draft_id, a.role);
+        const roleOptions = ASSIGNMENT_ROLES.map(r =>
+          '<option value="' + r.key + '"' + (r.key === a.role ? ' selected' : '') + '>' + r.label + '</option>'
+        ).join('');
+        return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">' +
+          '<select class="assignDraftSel" data-i="' + i + '" onchange="updateAssignmentRow(' + i + ')" style="flex:2;min-width:140px">' + assignmentDraftOptions(a.draft_id) + '</select>' +
+          '<select class="assignRespSel" data-i="' + i + '" onchange="updateAssignmentRow(' + i + ')" style="flex:1;min-width:110px">' + roleOptions + '</select>' +
+          '<button type="button" class="btn small danger" onclick="removeAssignmentRow(' + i + ')">' + escapeHtml(WFT('common.delete', 'حذف')) + '</button>' +
+          (holder ? '<div class="tenant-hint" style="width:100%">' + escapeHtml(WFT('users.assignment_holder', 'المعتمد الحالي: ')) + escapeHtml(holder) + '</div>' : '') +
+          '</div>';
+      }).join('');
+    }
+
+    function addAssignmentRow() {
+      editingAssignments.push({ draft_id: '*', role: 'editor' });
+      renderAssignmentRows();
+    }
+
+    function removeAssignmentRow(i) {
+      editingAssignments.splice(i, 1);
+      renderAssignmentRows();
+    }
+
+    function updateAssignmentRow(i) {
+      const draftSel = document.querySelector('.assignDraftSel[data-i="' + i + '"]');
+      const respSel = document.querySelector('.assignRespSel[data-i="' + i + '"]');
+      if (!editingAssignments[i]) return;
+      if (draftSel) editingAssignments[i].draft_id = draftSel.value;
+      if (respSel) editingAssignments[i].role = respSel.value;
+      renderAssignmentRows();
     }
 
     async function saveUserPermissions() {
@@ -299,17 +320,30 @@
         sections[s.key] = cb ? cb.checked : false;
       });
       const draftIds = Array.from(document.querySelectorAll('.scopeDraftCb:checked')).map(cb => cb.value);
+      const assignments = editingAssignments.map(a => ({
+        draft_id: a.draft_id || '*', role: a.role,
+      }));
       showLoader('جاري حفظ الصلاحيات', '');
       const [permRes, sectionRes, scopeRes] = await Promise.all([
         api('PUT', '/api/users/' + editingUserPermissions.userId + '/permissions', { permissions }),
         api('PUT', '/api/users/' + editingUserPermissions.userId + '/field-sections', { sections }),
         api('PUT', '/api/users/' + editingUserPermissions.userId + '/project-scope', { draftIds }).catch(() => ({ success: true }))
       ]);
+      const assignRes = await api('PUT', '/api/users/' + editingUserPermissions.userId + '/assignments', { assignments }).catch(() => ({ success: true }));
       hideLoader();
-      const modal = document.getElementById('userPermissionsModal');
-      if (modal) modal.remove();
-      if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success)) { toast('تم حفظ الصلاحيات'); }
-      else { toast(permRes.error || sectionRes.error || (scopeRes && scopeRes.error) || 'فشل الحفظ'); }
+      const failed = assignRes && assignRes.error_code === 'approver_exists';
+      if (!failed) {
+        const modal = document.getElementById('userPermissionsModal');
+        if (modal) modal.remove();
+      }
+      if (failed) {
+        toast(WFT('users.assignment_conflict', 'المشروع له معتمد آخر بالفعل') + (assignRes.holder ? ': ' + assignRes.holder : ''));
+        const tenantData = await api('GET', '/api/assignments').catch(() => null);
+        tenantAssignments = (tenantData && tenantData.assignments) || tenantAssignments;
+        renderAssignmentRows();
+      }
+      else if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success) && (!assignRes || assignRes.success)) { toast('تم حفظ الصلاحيات'); }
+      else { toast(permRes.error || sectionRes.error || (scopeRes && scopeRes.error) || (assignRes && assignRes.error) || 'فشل الحفظ'); }
     }
 
     async function sendTenantInvite() {

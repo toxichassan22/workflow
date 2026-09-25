@@ -674,7 +674,6 @@
       }).join('') : '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
       list.innerHTML = reportBanner + usersHtml;
       renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
-      renderTenantRoles();
       renderTenantAccessRequests();
       populateInviteScopePickers();
     }
@@ -711,91 +710,6 @@
       } else {
         toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
       }
-    }
-
-    async function renderTenantRoles() {
-      const box = document.getElementById('tenantRolesList');
-      if (!box) return;
-      const data = await api('GET', '/api/roles/template').catch(() => null);
-      const roles = (data && data.roles) || [];
-      if (!roles.length) {
-        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.roles_empty', 'لا توجد قوالب مخصصة')) + '</p>';
-        return;
-      }
-      box.innerHTML = roles.map(r =>
-        '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
-        '<div><h3 style="font-size:14px">' + escapeHtml(r.name) + '</h3>' +
-        '<div class="meta"><span>' + escapeHtml(USER_ROLE_LABELS[r.base_role] || r.base_role || '') + '</span></div></div>' +
-        '<div class="tenant-actions" style="gap:6px">' +
-        '<button type="button" class="btn small ghost" onclick="editTenantRole(\'' + r.id + '\')">' + escapeHtml(WFT('users.role_edit', 'تعديل')) + '</button>' +
-        '<button type="button" class="btn small danger" onclick="deleteTenantRole(\'' + r.id + '\', \'' + escapeHtml(r.name) + '\')">' + escapeHtml(WFT('common.delete', 'حذف')) + '</button>' +
-        '</div></div>'
-      ).join('');
-    }
-
-    async function createTenantRole() {
-      const name = ((document.getElementById('newRoleName') || {}).value || '').trim();
-      const baseRole = 'employee';
-      if (!name) { toast(WFT('users.role_name_required', 'اسم القالب مطلوب')); return; }
-      const data = await api('POST', '/api/roles', { name, baseRole });
-      if (data && data.success) {
-        toast(WFT('users.role_created', 'أنشئ القالب'));
-        document.getElementById('newRoleName').value = '';
-        renderTenantRoles();
-      } else {
-        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
-      }
-    }
-
-    async function editTenantRole(roleId) {
-      const data = await api('GET', '/api/roles/template').catch(() => null);
-      const role = ((data && data.roles) || []).find(r => r.id === roleId);
-      if (!role) { toast(WFT('common.error', 'حدث خطأ')); return; }
-      document.getElementById('roleTemplateModal')?.remove();
-      const perms = role.permissions || {};
-      const permRows = Object.keys(PERMISSION_LABELS).map(key =>
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">' +
-        '<label>' + escapeHtml(PERMISSION_LABELS[key]) + '</label>' +
-        '<input type="checkbox" id="rolePerm_' + key + '" ' + (perms[key] ? 'checked' : '') + '></div>'
-      ).join('');
-      const modal = document.createElement('div');
-      modal.id = 'roleTemplateModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:480px;width:100%;max-height:85vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3>' + escapeHtml(role.name) + '</h3>' +
-        '<button class="btn ghost" onclick="document.getElementById(\'roleTemplateModal\').remove()">' + escapeHtml(WFT('common.close', 'إغلاق')) + '</button></div>' +
-        '<div class="tenant-field" style="margin-bottom:12px"><label>' + escapeHtml(WFT('users.role_name', 'اسم القالب')) + '</label>' +
-        '<input type="text" id="editRoleName" value="' + escapeHtml(role.name) + '"></div>' +
-        permRows +
-        '<div class="tenant-btns" style="margin-top:16px">' +
-        '<button class="btn primary" onclick="saveTenantRole(\'' + roleId + '\')">' + escapeHtml(WFT('common.save', 'حفظ')) + '</button>' +
-        '</div></div>';
-      document.body.appendChild(modal);
-    }
-
-    async function saveTenantRole(roleId) {
-      const name = ((document.getElementById('editRoleName') || {}).value || '').trim();
-      const permissions = {};
-      Object.keys(PERMISSION_LABELS).forEach(key => {
-        const cb = document.getElementById('rolePerm_' + key);
-        permissions[key] = cb ? cb.checked : false;
-      });
-      const data = await api('POST', '/api/roles/' + roleId + '/update', { name, permissions });
-      if (data && data.success) {
-        toast(WFT('users.role_saved', 'حفظ القالب'));
-        document.getElementById('roleTemplateModal')?.remove();
-        renderTenantRoles();
-      } else {
-        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
-      }
-    }
-
-    async function deleteTenantRole(roleId, roleName) {
-      if (!confirm(WFT('users.role_delete_confirm', 'حذف القالب') + ': ' + roleName + '؟')) return;
-      const data = await api('POST', '/api/roles/' + roleId + '/delete', {});
-      if (data && data.success) { toast(WFT('users.role_deleted', 'حذف القالب')); renderTenantRoles(); }
-      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
     }
 
     async function renderTenantAccessRequests() {

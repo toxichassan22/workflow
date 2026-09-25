@@ -654,7 +654,7 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
         item['has_slides'] = bool(item.get('has_slides'))
         item['has_maps'] = bool(item.get('has_maps'))
         result.append(item)
-    return result
+    return attach_approver_names(tenant_id, result)
 
 
 def get_all_project_drafts(tenant_id):
@@ -703,7 +703,8 @@ def get_pending_project_drafts(tenant_id, accessible_draft_ids=None):
             query += ' AND 0'
     query += ' ORDER BY requested_at DESC'
     rows = conn.execute(query, params).fetchall()
-    return [_hydrate_project_draft(row) for row in rows]
+    return attach_approver_names(
+        tenant_id, [_hydrate_project_draft(row) for row in rows])
 
 
 def delete_project_draft(tenant_id, user_id):

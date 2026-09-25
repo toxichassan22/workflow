@@ -569,7 +569,8 @@
     function renderSagTenantDrafts(drafts) {
       if (!drafts.length) return '<p class="tenant-hint">لا توجد ملفات مشاريع</p>';
       return drafts.map(d => {
-        const status = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
+        const status = (d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة') +
+          (d.status === 'pending_approval' && d.approver_name ? ' — ' + escapeHtml(d.approver_name) : '');
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(d.title || 'مشروع بدون عنوان') + '</h3>' +
           '<div class="meta"><span>' + status + '</span> | ' + escapeHtml(date) + '</div></div></div>';
@@ -579,7 +580,8 @@
     function renderSagTenantPresentations(presentations, tenantId) {
       if (!presentations.length) return '<p class="tenant-hint">لا توجد عروض</p>';
       return presentations.map(p => {
-        const status = p.status === 'pending_approval' ? 'بانتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
+        const status = (p.status === 'pending_approval' ? 'بانتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة') +
+          (p.status === 'pending_approval' && p.approver_name ? ' — ' + escapeHtml(p.approver_name) : '');
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
           '<div class="meta"><span>' + (p.slideCount || 0) + '</span> <span>شريحة</span> | <span>' + status + '</span> | ' + escapeHtml(date) + '</div></div>' +

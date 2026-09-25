@@ -226,7 +226,7 @@ def create_approval_task(tenant_id, kind, title, entity_type=None, entity_id=Non
 
 
 def list_approval_tasks(tenant_id, status='open', kind=None, assignee_id=None, draft_id=None,
-                        section_key=None, limit=100):
+                        section_key=None, pool_user_id=None, limit=100):
     conn = get_db()
     query = ('SELECT t.*, d.title AS project_name FROM approval_tasks t '
              'LEFT JOIN project_drafts d ON d.id = t.draft_id AND d.tenant_id = t.tenant_id '
@@ -241,6 +241,11 @@ def list_approval_tasks(tenant_id, status='open', kind=None, assignee_id=None, d
     if assignee_id:
         query += ' AND t.assignee_id = ?'
         params.append(assignee_id)
+    if pool_user_id:
+        # Employee view: own assigned tasks plus the unassigned pool — a task
+        # assigned to a colleague stays invisible to the rest of the pool.
+        query += ' AND (t.assignee_id IS NULL OR t.assignee_id = ?)'
+        params.append(pool_user_id)
     if draft_id:
         query += ' AND t.draft_id = ?'
         params.append(draft_id)

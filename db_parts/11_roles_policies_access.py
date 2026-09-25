@@ -69,102 +69,6 @@ def _create_identity_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_admin_access_admin ON admin_access_requests(admin_tenant_id, status)')
 
 
-def list_tenant_role_templates(tenant_id):
-    """Return every grantable permission with default state for a new template."""
-    conn = get_db()
-    employee_defaults = DEFAULT_PERMISSIONS.get('employee', {})
-    keys = []
-    for key in PERMISSION_KEYS:
-        keys.append({'key': key, 'default_granted': bool(employee_defaults.get(key, False))})
-    custom = conn.execute(
-        'SELECT id, name, base_role, permissions_json, created_at, updated_at '
-        'FROM tenant_roles WHERE tenant_id = ? ORDER BY created_at', (tenant_id,)
-    ).fetchall()
-    return {
-        'permission_keys': keys,
-        'roles': [dict(r) for r in custom],
-    }
-
-
-def create_tenant_role(tenant_id, name, base_role, permissions):
-    conn = get_db()
-    if not name or not str(name).strip():
-        return {'error': 'name_required'}
-    clean = {k: bool(v) for k, v in (permissions or {}).items() if k in PERMISSION_KEYS}
-    role_id = str(uuid.uuid4())
-    now = _utcnow().isoformat()
-    existing = conn.execute(
-        'SELECT id FROM tenant_roles WHERE tenant_id = ? AND name = ?',
-        (tenant_id, str(name).strip())
-    ).fetchone()
-    if existing:
-        return {'error': 'role_name_exists'}
-    try:
-        conn.execute(
-            '''INSERT INTO tenant_roles (id, tenant_id, name, base_role, permissions_json,
-               created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (role_id, tenant_id, str(name).strip(), base_role if base_role in DEFAULT_PERMISSIONS else 'employee',
-             json.dumps(clean), now, now)
-        )
-        conn.commit()
-    except sqlite3.IntegrityError:
-        return {'error': 'role_name_exists'}
-    return get_tenant_role(tenant_id, role_id)
-
-
-def get_tenant_role(tenant_id, role_id):
-    conn = get_db()
-    row = conn.execute(
-        'SELECT * FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id)
-    ).fetchone()
-    if not row:
-        return None
-    result = dict(row)
-    try:
-        result['permissions'] = json.loads(result.pop('permissions_json') or '{}')
-    except (ValueError, TypeError):
-        result['permissions'] = {}
-    return result
-
-
-def update_tenant_role(tenant_id, role_id, name=None, permissions=None):
-    conn = get_db()
-    role = conn.execute(
-        'SELECT id FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id)
-    ).fetchone()
-    if not role:
-        return None
-    if name is not None:
-        if not str(name).strip():
-            return {'error': 'name_required'}
-        conn.execute('UPDATE tenant_roles SET name = ?, updated_at = ? WHERE id = ?',
-                     (str(name).strip(), _utcnow().isoformat(), role_id))
-    if permissions is not None:
-        clean = {k: bool(v) for k, v in permissions.items() if k in PERMISSION_KEYS}
-        conn.execute('UPDATE tenant_roles SET permissions_json = ?, updated_at = ? WHERE id = ?',
-                     (json.dumps(clean), _utcnow().isoformat(), role_id))
-    conn.commit()
-    return get_tenant_role(tenant_id, role_id)
-
-
-def delete_tenant_role(tenant_id, role_id):
-    conn = get_db()
-    cursor = conn.execute('DELETE FROM tenant_roles WHERE id = ? AND tenant_id = ?', (role_id, tenant_id))
-    conn.commit()
-    return cursor.rowcount > 0
-
-
-def assign_tenant_role_to_user(tenant_id, user_id, role_id):
-    """Clone the template onto the user's per-key permission overrides."""
-    role = get_tenant_role(tenant_id, role_id)
-    if not role:
-        return None
-    for key in PERMISSION_KEYS:
-        if key in role['permissions']:
-            set_user_permission(user_id, key, role['permissions'][key])
-    return get_user_permissions(user_id)
-
-
 def separation_of_duties_matrix(tenant_id):
     """t21: flag self-approvals and decisions without a mandatory reason."""
     conn = get_db()
@@ -477,19 +381,35 @@ def user_project_scope_limited(user_id):
     row = conn.execute(
         'SELECT 1 FROM user_project_scopes WHERE user_id = ? LIMIT 1', (user_id,)
     ).fetchone()
+    if row:
+        return True
+    # A responsibility assignment scopes the user too — but a wildcard
+    # assignment ('*') is intentionally unrestricted.
+    row = conn.execute(
+        "SELECT 1 FROM user_assignments WHERE user_id = ? AND draft_id != '*' LIMIT 1",
+        (user_id,),
+    ).fetchone()
     return bool(row)
 
 
 def user_accessible_draft_ids(user_id, tenant_id):
-    """t20: draft ids a project-scoped user may touch — their scope plus their
-    own files. ``None`` when the user carries no scope rows (the legacy
-    unrestricted access) or has no user id (tenant-direct logins)."""
+    """t20: draft ids a project-scoped user may touch — their scope, their
+    assignment drafts, plus their own files. ``None`` when the user carries no
+    scope rows and no non-wildcard assignment (legacy unrestricted access), or
+    when a '*' assignment covers every project."""
     if not user_id:
         return None
     conn = get_db()
     scope = {row['draft_id'] for row in conn.execute(
         'SELECT draft_id FROM user_project_scopes WHERE user_id = ? AND tenant_id = ?',
         (user_id, tenant_id)).fetchall()}
+    assignments = conn.execute(
+        'SELECT draft_id FROM user_assignments WHERE user_id = ? AND tenant_id = ?',
+        (user_id, tenant_id)).fetchall()
+    assignment_ids = {row['draft_id'] for row in assignments}
+    if '*' in assignment_ids:
+        return None
+    scope |= assignment_ids
     if not scope:
         return None
     own = {row['id'] for row in conn.execute(
@@ -501,14 +421,23 @@ def user_accessible_draft_ids(user_id, tenant_id):
 def user_may_access_draft(user_id, draft):
     """t20: scoped users act only on their listed drafts, plus drafts they own.
 
-    An actor with no scope rows keeps the legacy unrestricted access, and the
-    draft's owner always keeps access to their own file.
+    An actor with no scope or assignment rows keeps the legacy unrestricted
+    access, and the draft's owner always keeps access to their own file.
     """
     if not user_id or not draft:
         return True
     if draft.get('user_id') and str(draft['user_id']) == str(user_id):
         return True
-    scope = get_user_project_scope_ids(user_id)
+    conn = get_db()
+    scope = {r['draft_id'] for r in conn.execute(
+        'SELECT draft_id FROM user_project_scopes WHERE user_id = ?', (user_id,)
+    ).fetchall()}
+    assignments = {r['draft_id'] for r in conn.execute(
+        'SELECT draft_id FROM user_assignments WHERE user_id = ?', (user_id,)
+    ).fetchall()}
+    if '*' in assignments:
+        return True
+    scope |= assignments
     if not scope:
         return True
     return draft.get('id') in scope
@@ -540,6 +469,192 @@ def set_user_project_scope(tenant_id, user_id, draft_ids):
         conn.rollback()
         raise
     return {'scope': sorted(wanted), 'limited': bool(wanted)}
+
+
+# ── responsibility assignments: editor/approver per project ──────────────────
+
+ASSIGNMENT_ROLES = ('editor', 'approver')
+ASSIGNMENT_ALL_DRAFTS = '*'
+
+
+def list_user_assignments(tenant_id, user_id):
+    """The user's assignment rows, newest first, with the draft title."""
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT a.*, d.title AS draft_title FROM user_assignments a
+           LEFT JOIN project_drafts d ON d.id = a.draft_id
+           WHERE a.tenant_id = ? AND a.user_id = ? ORDER BY a.created_at DESC''',
+        (str(tenant_id), str(user_id)),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_tenant_assignments(tenant_id):
+    """Every assignment in the company, with user and draft labels — the admin
+    needs the tenant-wide view to resolve the one-approver-per-project rule."""
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT a.*, u.name AS user_name, u.email AS user_email,
+                  d.title AS draft_title
+           FROM user_assignments a
+           LEFT JOIN users u ON u.id = a.user_id
+           LEFT JOIN project_drafts d ON d.id = a.draft_id
+           WHERE a.tenant_id = ? ORDER BY a.created_at DESC''',
+        (str(tenant_id),),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_user_assignments(tenant_id, user_id, rows):
+    """Replace one user's assignments atomically.
+
+    Each row is {draftId, role}; draftId '*' means every project. Validation:
+    the user must belong to the tenant, roles are limited to editor/approver,
+    draft ids must exist in the tenant, and an approver row is refused when a
+    different user already approves that project (or every project).
+    """
+    conn = get_db()
+    user = conn.execute(
+        'SELECT id FROM users WHERE id = ? AND tenant_id = ?', (user_id, tenant_id)
+    ).fetchone()
+    if not user:
+        return {'error': 'user_not_found'}
+    valid_drafts = {
+        r['id'] for r in conn.execute(
+            'SELECT id FROM project_drafts WHERE tenant_id = ?', (tenant_id,)
+        ).fetchall()
+    }
+    cleaned = []
+    seen = set()
+    for row in rows or []:
+        draft_id = str((row or {}).get('draftId') or (row or {}).get('draft_id') or '').strip()
+        role = str((row or {}).get('role') or '').strip()
+        if not draft_id or role not in ASSIGNMENT_ROLES:
+            continue
+        if draft_id == ASSIGNMENT_ALL_DRAFTS:
+            draft_id = ASSIGNMENT_ALL_DRAFTS
+        elif draft_id not in valid_drafts:
+            continue
+        key = (draft_id, role)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append({'draft_id': draft_id, 'role': role})
+    # One approver per project, checked across the whole tenant: a specific
+    # draft's approver conflicts with another user's row on that draft or on
+    # the wildcard, and a wildcard approver conflicts with any other approver.
+    approver_rows = [r for r in cleaned if r['role'] == 'approver']
+    if approver_rows:
+        others = conn.execute(
+            '''SELECT a.draft_id, u.name AS user_name FROM user_assignments a
+               LEFT JOIN users u ON u.id = a.user_id
+               WHERE a.tenant_id = ? AND a.role = 'approver' AND a.user_id != ?''',
+            (str(tenant_id), str(user_id)),
+        ).fetchall()
+        others_map = {r['draft_id']: (r['user_name'] or '') for r in others}
+        wildcard_mine = any(r['draft_id'] == ASSIGNMENT_ALL_DRAFTS for r in approver_rows)
+        for row in approver_rows:
+            holder = others_map.get(row['draft_id']) or (
+                others_map.get(ASSIGNMENT_ALL_DRAFTS)
+                if row['draft_id'] != ASSIGNMENT_ALL_DRAFTS else None)
+            if wildcard_mine and not holder and others_map:
+                holder = next(iter(others_map.values()))
+            if holder:
+                return {'error': 'approver_exists', 'draft_id': row['draft_id'],
+                        'holder': holder}
+    try:
+        conn.execute(
+            'DELETE FROM user_assignments WHERE user_id = ? AND tenant_id = ?',
+            (str(user_id), str(tenant_id)),
+        )
+        for row in cleaned:
+            conn.execute(
+                'INSERT INTO user_assignments (id, tenant_id, user_id, draft_id, role) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (str(uuid.uuid4()), str(tenant_id), str(user_id), row['draft_id'], row['role']),
+            )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        # The one-approver index caught a concurrent claim on the slot.
+        return {'error': 'approver_exists', 'draft_id': None, 'holder': None}
+    except Exception:
+        conn.rollback()
+        raise
+    return {'assignments': cleaned}
+
+
+def assigned_approver(tenant_id, draft_id):
+    """The approver responsible for a draft: its specific row wins, else the
+    wildcard approver. Returns {'user_id', 'user_name'} or None."""
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT a.user_id, u.name AS user_name FROM user_assignments a
+           LEFT JOIN users u ON u.id = a.user_id
+           WHERE a.tenant_id = ? AND a.role = 'approver'
+             AND a.draft_id IN (?, ?)
+             AND (u.is_active IS NULL OR u.is_active = 1)
+           ORDER BY CASE WHEN a.draft_id = ? THEN 0 ELSE 1 END
+           LIMIT 1''',
+        (str(tenant_id), str(draft_id), ASSIGNMENT_ALL_DRAFTS, str(draft_id)),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def user_is_assigned_approver(tenant_id, user_id, draft_id):
+    """True when the user approves this draft — its row or the wildcard."""
+    if not user_id or not draft_id:
+        return False
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT 1 FROM user_assignments
+           WHERE tenant_id = ? AND user_id = ? AND role = 'approver'
+             AND draft_id IN (?, ?) LIMIT 1''',
+        (str(tenant_id), str(user_id), str(draft_id), ASSIGNMENT_ALL_DRAFTS),
+    ).fetchone()
+    return bool(row)
+
+
+def user_assignment_draft_ids(user_id, tenant_id):
+    """Draft ids the user's assignments cover; '*' present means all drafts."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT draft_id FROM user_assignments WHERE user_id = ? AND tenant_id = ?',
+        (str(user_id), str(tenant_id)),
+    ).fetchall()
+    ids = {r['draft_id'] for r in rows}
+    if ASSIGNMENT_ALL_DRAFTS in ids:
+        return None  # wildcard: unrestricted
+    return ids
+
+
+def attach_approver_names(tenant_id, rows):
+    """Set ``approver_name`` on dict rows carrying ``draft_id`` — the specific
+    project's approver wins, else the wildcard approver covers it. List
+    payloads use it to render «بانتظار تعميد — الاسم»."""
+    if not rows:
+        return rows
+    conn = get_db()
+    assigns = conn.execute(
+        '''SELECT a.draft_id, u.name AS user_name FROM user_assignments a
+           LEFT JOIN users u ON u.id = a.user_id
+           WHERE a.tenant_id = ? AND a.role = 'approver'
+             AND (u.is_active IS NULL OR u.is_active = 1)''',
+        (str(tenant_id),),
+    ).fetchall()
+    if not assigns:
+        return rows
+    specific = {str(r['draft_id']): r['user_name'] for r in assigns
+                if r['draft_id'] != ASSIGNMENT_ALL_DRAFTS}
+    wildcard = next((r['user_name'] for r in assigns
+                     if r['draft_id'] == ASSIGNMENT_ALL_DRAFTS), None)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        did = row.get('draft_id') or row.get('id')
+        name = specific.get(str(did)) if did else None
+        row['approver_name'] = name or wildcard
+    return rows
 
 
 # ── ISS-005: attempt counters with temporary lockout ─────────────────────────

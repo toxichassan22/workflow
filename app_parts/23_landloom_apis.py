@@ -153,6 +153,36 @@ def _landloom_can(permission_key):
     return bool(perms.get(permission_key))
 
 
+def _landloom_can_decide(permission_key, draft_id):
+    """One approver per project: when the draft carries an assigned approver,
+    only they (or a company admin) may decide — the bare permission no longer
+    outranks the assignment. Without an assignment the permission pool stays."""
+    if draft_id:
+        try:
+            assigned = db.assigned_approver(g.tenant_id, draft_id)
+        except Exception:
+            assigned = None
+        if assigned:
+            if _landloom_actor_is_admin():
+                return True
+            return str(assigned.get('user_id') or '') == str(g.user_id or '')
+    if _landloom_can(permission_key):
+        return True
+    try:
+        return db.user_is_assigned_approver(g.tenant_id, g.user_id, draft_id)
+    except Exception:
+        return False
+
+
+def _landloom_has_approver_assignment():
+    """Any approver row for this user — gates the approver-facing lists."""
+    try:
+        rows = db.list_user_assignments(g.tenant_id, g.user_id)
+        return any(r.get('role') == 'approver' for r in rows)
+    except Exception:
+        return False
+
+
 def _landloom_forbidden(message='هذا الإجراء يتطلب صلاحية الاعتماد المختصة'):
     return jsonify({'error': message, 'error_code': 'permission_required'}), 403
 
@@ -213,16 +243,23 @@ def api_create_generation_approval():
     if failure:
         return failure
     try:
-        # The request opens an approver task and pings every generation
-        # approver so the gate does not wait on somebody noticing.
+        # The request opens an approver task and pings the approvers so the
+        # gate does not wait on somebody noticing. An assigned approver for
+        # this draft owns the request alone; without one, every generation-
+        # permission holder hears it as before.
+        assigned = db.assigned_approver(g.tenant_id, draft_id)
         db.create_approval_task(
             g.tenant_id, 'generation_approval',
             f'اعتماد توليد «{draft.get("title") or "مشروع"}»',
             entity_type='generation_approval', entity_id=approval['id'],
+            assignee_id=(assigned or {}).get('user_id'),
+            assignee_name=(assigned or {}).get('user_name'),
             payload={'draft_id': draft_id,
                      'estimated_points': approval.get('estimated_points')},
             due_hours=48, draft_id=draft_id)
-        for approver in db.get_users_with_permission(g.tenant_id, 'approve_generation'):
+        recipients = ([{'id': assigned['user_id']}] if assigned
+                      else db.get_users_with_permission(g.tenant_id, 'approve_generation'))
+        for approver in recipients:
             db.create_notification(
                 g.tenant_id, 'طلب اعتماد توليد جديد',
                 f'«{draft.get("title") or "مشروع"}» بانتظار قرار اعتماد التوليد',
@@ -274,7 +311,8 @@ def api_decide_generation_approval(approval_id):
     self_decision = bool(approval_row) \
         and str(approval_row.get('requested_by') or '') == str(_landloom_actor_id())
     policy_self_ok = db.get_tenant_policy(g.tenant_id, 'generation_self_approval', 'block') == 'allow'
-    if decision in {'approved', 'rejected'} and not _landloom_can('approve_generation') \
+    if decision in {'approved', 'rejected'} \
+            and not _landloom_can_decide('approve_generation', (approval_row or {}).get('draft_id')) \
             and not (self_decision and policy_self_ok):
         return _landloom_forbidden('اعتماد أو رفض طلب التوليد يتطلب صلاحية معتمد التوليد')
     # A section-scoped request is drift-checked against its own section's live
@@ -332,7 +370,7 @@ def api_settle_generation_approval(approval_id):
     if not approval:
         return jsonify({'error': 'الاعتماد غير موجود', 'error_code': 'approval_not_found'}), 404
     if str(approval.get('requested_by')) != str(_landloom_actor_id()) \
-            and not _landloom_can('approve_generation'):
+            and not _landloom_can_decide('approve_generation', approval.get('draft_id')):
         return _landloom_forbidden('تسوية الحجز تخص مقدم الطلب أو معتمد التوليد')
     data = request.json or {}
     job_id = str(data.get('jobId') or '').strip()
@@ -390,7 +428,7 @@ def api_create_generation_job(approval_id):
         return jsonify({'error': 'مهمة التوليد تتطلب اعتمادًا ساريًا',
                         'error_code': 'job_not_approved'}), 409
     if str(approval.get('requested_by')) != str(_landloom_actor_id()) \
-            and not _landloom_can('approve_generation'):
+            and not _landloom_can_decide('approve_generation', approval.get('draft_id')):
         return _landloom_forbidden('مهمة التوليد تخص مقدم الطلب أو معتمد التوليد')
     data = request.json or {}
     snapshot = db._json_object(approval.get('input_snapshot'))
