@@ -485,7 +485,7 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(row['version'], 2)
         missing = db.upsert_file_type('', 'بدون مفتاح')
         self.assertEqual(missing.get('error'), 'key_and_label_required')
-        self.assertEqual(len(db.get_file_type_registry()), 9)
+        self.assertEqual(len(db.get_file_type_registry()), 10)
 
     def test_operational_overview_counts(self):
         overview = db.operational_overview()

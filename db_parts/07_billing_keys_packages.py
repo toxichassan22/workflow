@@ -43,6 +43,7 @@ BALANCE_CHANGE_HOOK = None
 
 def _fire_balance_change(tenant_id):
     """Notify the registered listener that a wallet moved. Never raises."""
+    _maybe_warn_low_balance(tenant_id)
     hook = BALANCE_CHANGE_HOOK
     if not hook or not tenant_id:
         return
@@ -50,6 +51,37 @@ def _fire_balance_change(tenant_id):
         hook(tenant_id)
     except Exception as exc:
         print(f'[BILLING] balance-change hook failed for {tenant_id}: {exc}')
+
+
+LOW_BALANCE_CYCLE_RATIO = 0.20
+
+
+def _maybe_warn_low_balance(tenant_id):
+    """One low-balance notice per recharge cycle: when the wallet drops under
+    20% of the latest approved recharge (or of lifetime credit for a package-
+    less wallet) the company admin gets an in-app + email notice. The notice
+    is keyed to the recharge id, so a new approval re-arms the warning."""
+    try:
+        balance = get_tenant_balance(tenant_id)
+        cycle = get_latest_approved_recharge(tenant_id)
+        base = float((cycle or {}).get('amount_sar') or 0.0)
+        cycle_key = str((cycle or {}).get('id') or 'wallet')
+        if base <= 0:
+            base = float(get_tenant_wallet_credited(tenant_id) or 0.0)
+        if base <= 0 or balance >= base * LOW_BALANCE_CYCLE_RATIO:
+            return
+        if recent_notification_exists(
+                tenant_id, 'low_balance', cycle_key, since_hours=24 * 3650):
+            return
+        tenant = get_tenant_by_id(tenant_id)
+        create_notification(
+            tenant_id, 'رصيدك أوشك على الانتهاء',
+            body='الرصيد المتاح أقل من 20% من قيمة آخر شحنة — جدّد الباقة لتفادي توقف التوليد.',
+            category='billing', user_id='tenant-admin:' + str(tenant_id),
+            entity_type='low_balance', entity_id=cycle_key,
+            email_to=(tenant or {}).get('email'))
+    except Exception as exc:
+        print(f'[BILLING] low-balance check failed for {tenant_id}: {exc}')
 
 
 def get_billing_multiplier():

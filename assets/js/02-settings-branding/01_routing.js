@@ -720,7 +720,7 @@
         tenantSlidesPage: 'tenantProjectPage'
       };
       const activePageId = parentPages[pageId] || pageId;
-      const activeTab = (typeof llActiveTab !== 'undefined' && llActiveTab) || 'tasks';
+      const activeTab = (typeof llActiveTab !== 'undefined' && llActiveTab) || 'recharge';
       document.querySelectorAll('[data-nav-page]').forEach(link => {
         const navTab = link.getAttribute('data-nav-tab');
         const active = link.dataset.navPage === activePageId && (!navTab || navTab === activeTab);

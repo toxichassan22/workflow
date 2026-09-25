@@ -36,8 +36,8 @@
       }
     }
 
-    const LANDLOOM_OPS_TABS = ['tasks', 'recharge', 'tickets'];
-    let llActiveTab = 'tasks';
+    const LANDLOOM_OPS_TABS = ['recharge', 'tickets'];
+    let llActiveTab = 'recharge';
 
     function landloomOpsTabVisible(t) {
       const btn = document.getElementById('llTabBtn_' + t);
@@ -49,7 +49,7 @@
       // lands on the first one the member may see.
       const target = landloomOpsTabVisible(tabKey)
         ? tabKey
-        : (LANDLOOM_OPS_TABS.find(landloomOpsTabVisible) || 'tasks');
+        : (LANDLOOM_OPS_TABS.find(landloomOpsTabVisible) || 'recharge');
       llActiveTab = target;
       LANDLOOM_OPS_TABS.forEach(t => {
         const pane = document.getElementById('llTabPane_' + t);
@@ -73,167 +73,13 @@
 
     async function openLandloomOpsPage(tabKey) {
       showTenantPage('tenantLandloomOpsPage');
-      showLandloomOpsTab(tabKey || 'tasks');
+      showLandloomOpsTab(tabKey || 'recharge');
 
       await Promise.all([
-        llLoadEventTasks(),
-        llLoadNotifications(),
         llLoadTickets(),
         llLoadPointsOverview(),
         llLoadRechargeRequests()
       ]);
-    }
-
-    // ── Event tasks + approver task center (t24/t42) ───────────────────────
-    let llAllTasks = [];
-
-    async function llLoadEventTasks() {
-      const box = document.getElementById('llTasksList');
-      if (!box) return;
-      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      const [data, approvals] = await Promise.all([
-        api('GET', '/api/event-tasks').catch(() => null),
-        api('GET', '/api/approval-tasks?status=all').catch(() => null),
-      ]);
-      if (!data || !data.success) {
-        box.innerHTML = '<p class="tenant-hint">تعذر تحميل المهام.</p>';
-        return;
-      }
-      const tasks = (data.tasks || []).map(t => Object.assign({}, t, { _kind: 'event' }));
-      const approvalTasks = ((approvals && approvals.tasks) || []).map(t => Object.assign({}, t, { _kind: 'approval' }));
-      llAllTasks = tasks.concat(approvalTasks).sort((a, b) =>
-        String(a.due_at || a.event_date || '').localeCompare(String(b.due_at || b.event_date || '')));
-      const openCount = llAllTasks.filter(t => t.status === 'open').length;
-      const stat = document.getElementById('llStatTasks');
-      if (stat) stat.textContent = openCount;
-      llPopulateTaskFilters();
-      llRenderTasks();
-    }
-
-    // t24: project and section filter options follow whatever the loaded
-    // tasks actually reference — the list stays honest even mid-review.
-    function llPopulateTaskFilters() {
-      const projectSelect = document.getElementById('llTasksProjectFilter');
-      const sectionSelect = document.getElementById('llTasksSectionFilter');
-      if (projectSelect) {
-        const previous = projectSelect.value;
-        const projects = {};
-        llAllTasks.forEach(t => {
-          if (t.draft_id) projects[t.draft_id] = t.project_name || t.draft_id;
-        });
-        projectSelect.innerHTML = '<option value="">كل المشاريع</option>' +
-          Object.keys(projects).sort((a, b) => String(projects[a]).localeCompare(String(projects[b])))
-            .map(id => '<option value="' + llEscape(id) + '">' + llEscape(projects[id]) + '</option>').join('');
-        projectSelect.value = projects[previous] ? previous : '';
-      }
-      if (sectionSelect) {
-        const previous = sectionSelect.value;
-        const sections = {};
-        llAllTasks.forEach(t => {
-          if (t.section_key) {
-            sections[t.section_key] = (typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined'
-              && PROJECT_SECTION_PRESENTATION_TITLES[t.section_key]) || t.section_key;
-          }
-        });
-        sectionSelect.innerHTML = '<option value="">كل الأقسام</option>' +
-          Object.keys(sections).sort((a, b) => String(sections[a]).localeCompare(String(sections[b])))
-            .map(key => '<option value="' + llEscape(key) + '">' + llEscape(sections[key]) + '</option>').join('');
-        sectionSelect.value = sections[previous] ? previous : '';
-      }
-    }
-
-    function llRenderTasks() {
-      const box = document.getElementById('llTasksList');
-      if (!box) return;
-      const kindFilter = (document.getElementById('llTasksKindFilter') || {}).value || '';
-      const prioFilter = (document.getElementById('llTasksPriorityFilter') || {}).value || '';
-      const statusFilter = (document.getElementById('llTasksStatusFilter') || {}).value || 'open';
-      const projectFilter = (document.getElementById('llTasksProjectFilter') || {}).value || '';
-      const sectionFilter = (document.getElementById('llTasksSectionFilter') || {}).value || '';
-      const filtered = llAllTasks.filter(t => {
-        const kind = t._kind === 'approval' ? (t.kind || 'approval') : 'manual';
-        if (kindFilter && kind !== kindFilter) return false;
-        if (prioFilter && (t.priority || 'normal') !== prioFilter) return false;
-        if (statusFilter === 'open' && t.status !== 'open') return false;
-        if (statusFilter === 'done' && ['done', 'completed', 'cancelled'].indexOf(t.status) === -1) return false;
-        if (projectFilter && String(t.draft_id || '') !== projectFilter) return false;
-        if (sectionFilter && String(t.section_key || '') !== sectionFilter) return false;
-        return true;
-      });
-      if (!filtered.length) {
-        box.innerHTML = '<p class="tenant-hint">لا توجد مهام بعد.</p>';
-        return;
-      }
-      const myUserId = String((tenantUser && tenantUser._userId) || '');
-      const myActorId = myUserId || ('tenant-admin:' + ((tenantUser && tenantUser.id) || ''));
-      const canManageTasks = hasPermission('manage_users');
-      const isApprover = hasPermission('approvals') || hasPermission('approve_generation') ||
-        hasPermission('approve_final_file');
-      const kindLabel = { section_approval: 'اعتماد قسم', generation_approval: 'اعتماد توليد',
-        final_approval: 'اعتماد ملف نهائي', recharge: 'طلب شحن',
-        support: 'تذكرة دعم', revision: 'مراجعة', manual: 'مهمة يدوية' };
-      box.innerHTML = filtered.map(t => {
-        const due = (t.due_at || t.event_date || '').slice(0, 16).replace('T', ' ');
-        const recurring = t.recurrence && t.recurrence !== 'none'
-          ? ' | <span>متكررة:</span> ' + ({ daily: 'يوميًا', weekly: 'أسبوعيًا', monthly: 'شهريًا' }[t.recurrence] || t.recurrence)
-          : '';
-        const prio = t.priority && t.priority !== 'normal'
-          ? ' | <span>الأولوية:</span> ' + llEscape(({ high: 'عالية', urgent: 'عاجلة', low: 'منخفضة' }[t.priority] || t.priority))
-          : '';
-        const kind = t._kind === 'approval'
-          ? ' | <span style="color:#8a5a00;">' + llEscape(kindLabel[t.kind] || 'اعتماد') + '</span>' : '';
-        const project = t.project_name ? ' | <span>المشروع:</span> ' + llEscape(t.project_name) : '';
-        const assignee = t.assignee_name ? ' | <span>المكلف:</span> ' + llEscape(t.assignee_name) : '';
-        const escalated = t.escalated_at ? ' | <span style="color:#c33;font-weight:700">مصعّدة</span>' : '';
-        const overdue = t.is_overdue ? ' | <span style="color:#c33;font-weight:700">متأخرة</span>' : '';
-        const isMine = canManageTasks || String(t.assignee_user_id || t.assignee_id || '') === myUserId ||
-          String(t.created_by || '') === myActorId;
-        const remindBtn = t.status === 'open' && t._kind === 'approval' && (isMine || isApprover)
-          ? '<button class="btn ghost" onclick="llRemindApprovalTask(\'' + t.id + '\')">تذكير</button>' : '';
-        const action = t.status === 'open' && isMine
-          ? (t._kind === 'approval'
-            ? '<button class="btn ghost" onclick="llCloseApprovalTask(\'' + t.id + '\')">إغلاق</button>'
-            : '<button class="btn ghost" onclick="llCompleteTask(\'' + t.id + '\')">إتمام</button>')
-          : '';
-        return '<div class="tenant-presentation-card"><div><h3>' + llEscape(t.title) + '</h3>' +
-          '<div class="meta"><span>' + llStatus(t.status) + '</span>' + kind + project +
-          (due ? ' | <span>الاستحقاق:</span> ' + llEscape(due) : '') + recurring + prio + assignee + escalated + overdue + '</div></div>' +
-          '<div style="display:flex;gap:6px">' + remindBtn + action + '</div></div>';
-      }).join('');
-    }
-
-    async function llRemindApprovalTask(id) {
-      const data = await api('POST', '/api/approval-tasks/' + id + '/remind', {}).catch(() => null);
-      if (data && data.success) toast(WFT('tasks.reminder_sent', 'أُرسل التذكير'));
-      await llLoadEventTasks();
-    }
-
-    async function llCloseApprovalTask(id) {
-      await api('POST', '/api/approval-tasks/' + id + '/close', {}).catch(() => null);
-      await llLoadEventTasks();
-    }
-
-    async function llCompleteTask(id) {
-      await api('POST', '/api/event-tasks/' + id + '/status', { status: 'completed' }).catch(() => null);
-      await llLoadEventTasks();
-    }
-
-    async function llCreateTask() {
-      const title = (document.getElementById('llTaskTitle') || {}).value || '';
-      const dueAt = (document.getElementById('llTaskDue') || {}).value || '';
-      const recurrence = (document.getElementById('llTaskRecurrence') || {}).value || 'none';
-      const errBox = document.getElementById('llTasksError');
-      if (errBox) errBox.textContent = '';
-      const data = await api('POST', '/api/event-tasks', { title: title.trim(), dueAt, recurrence }).catch(e => e);
-      if (!data || !data.success) {
-        if (errBox) errBox.textContent = (data && data.error) || 'تعذر إنشاء المهمة.';
-        return;
-      }
-      document.getElementById('llTaskTitle').value = '';
-      document.getElementById('llTaskDue').value = '';
-      closeLlModal('llTaskModal');
-      toast(WFT('tasks.created', 'تم إضافة المهمة بنجاح'));
-      await llLoadEventTasks();
     }
 
     // ── Notifications ────────────────────────────────────────────────────
@@ -287,10 +133,11 @@
         return;
       }
       box.innerHTML = tickets.map(t => {
-        const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
         return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="llOpenTicket(\'' + t.id + '\')">' +
           '<div><h3>#' + llEscape(t.number) + ' ' + llEscape(t.subject) + '</h3>' +
-          '<div class="meta"><span>' + llStatus(t.status) + '</span> | <span>الأولوية:</span> <span>' + llEscape(priorityLabels[t.priority] || t.priority) + '</span></div></div></div>';
+          '<div class="meta"><span>' + llStatus(t.status) + '</span>' +
+          (t.attachment_count ? ' | <span>' + llEscape(WFT('tickets.has_attachment', 'يحتوي مرفقًا')) + '</span>' : '') +
+          '</div></div></div>';
       }).join('');
     }
 
@@ -311,15 +158,37 @@
         '<span style="font-size:11px;color:var(--muted)">' + llEscape((m.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
         '<p style="margin:4px 0 0;font-size:13px">' + llEscape(m.body) + '</p></div>'
       ).join('');
+      const attachments = (t.attachments || []).map(a =>
+        '<button type="button" class="btn small ghost" onclick="llOpenTicketAttachment(\'' + id + '\',\'' + a.file_id + '\')">' +
+        llEscape(a.original_name || WFT('tickets.attachment', 'مرفق')) + '</button>').join('');
       detail.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         '<h3 style="margin:0">#' + llEscape(t.number) + ' ' + llEscape(t.subject) + ' — <span>' + llStatus(t.status) + '</span></h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'llTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
+        (attachments ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + attachments + '</div>' : '') +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         (t.status !== 'closed'
           ? '<div style="display:flex;gap:8px"><input type="text" id="llReplyBody" style="flex:1">' +
             '<button class="btn primary" onclick="llReplyTicket(\'' + id + '\')">إرسال</button></div>'
           : '');
+    }
+
+    async function llOpenTicketAttachment(ticketId, fileId) {
+      const token = getTenantToken();
+      const response = await fetch(
+        '/api/support/tickets/' + encodeURIComponent(ticketId) + '/attachments/' + encodeURIComponent(fileId),
+        { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      if (!response.ok) { toast(WFT('downloads.load_failed', 'تعذر تحميل الملف')); return; }
+      window.open(URL.createObjectURL(await response.blob()), '_blank');
+    }
+
+    async function adminOpenTicketAttachment(ticketId, fileId) {
+      const token = getTenantToken();
+      const response = await fetch(
+        '/api/admin/support/tickets/' + encodeURIComponent(ticketId) + '/attachments/' + encodeURIComponent(fileId),
+        { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      if (!response.ok) { toast(WFT('downloads.load_failed', 'تعذر تحميل الملف')); return; }
+      window.open(URL.createObjectURL(await response.blob()), '_blank');
     }
 
     async function llReplyTicket(id) {
@@ -331,15 +200,31 @@
       await llLoadTickets();
     }
 
+    async function llUploadTicketAttachment() {
+      const input = document.getElementById('llTicketAttachment');
+      if (!input || !input.files || !input.files[0]) return null;
+      const form = new FormData();
+      form.append('file', input.files[0]);
+      form.append('fileType', 'ticket_attachment');
+      const data = await api('POST', '/api/project-files', form, true).catch(e => e);
+      if (!data || !data.success) return { error: (data && data.error) || WFT('tickets.attachment_failed', 'تعذر رفع المرفق') };
+      return data.file;
+    }
+
     async function llCreateTicket() {
       const subject = (document.getElementById('llTicketSubject') || {}).value || '';
       const body = (document.getElementById('llTicketBody') || {}).value || '';
       const errBox = document.getElementById('llTicketsError');
       if (errBox) errBox.textContent = '';
       const category = (document.getElementById('llTicketCategory') || {}).value || 'general';
-      const priority = (document.getElementById('llTicketPriority') || {}).value || 'normal';
+      const attachment = await llUploadTicketAttachment();
+      if (attachment && attachment.error) {
+        if (errBox) errBox.textContent = attachment.error;
+        return;
+      }
       const data = await api('POST', '/api/support/tickets', {
-        subject: subject.trim(), body: body.trim(), category: category, priority: priority
+        subject: subject.trim(), body: body.trim(), category: category,
+        attachmentFileId: attachment ? attachment.id : null
       }).catch(e => e);
       if (!data || !data.success) {
         if (errBox) errBox.textContent = (data && data.error) || 'تعذر إنشاء التذكرة.';
@@ -347,6 +232,8 @@
       }
       document.getElementById('llTicketSubject').value = '';
       document.getElementById('llTicketBody').value = '';
+      const attInput = document.getElementById('llTicketAttachment');
+      if (attInput) attInput.value = '';
       closeLlModal('llTicketModal');
       toast(WFT('tickets.created', 'تم إرسال تذكرة الدعم بنجاح'));
       await llLoadTickets();
@@ -720,6 +607,9 @@
         ' <span style="font-size:11px;color:var(--muted)">' + llEscape((m.created_at || '').slice(0, 16).replace('T', ' ')) + '</span>' +
         '<p style="margin:4px 0 0;font-size:13px">' + llEscape(m.body) + '</p></div>'
       ).join('');
+      const attachments = (t.attachments || []).map(a =>
+        '<button type="button" class="btn small ghost" onclick="adminOpenTicketAttachment(\'' + id + '\',\'' + a.file_id + '\')">' +
+        llEscape(a.original_name || WFT('tickets.attachment', 'مرفق')) + '</button>').join('');
       const statusActions = t.status !== 'closed'
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' +
           '<button type="button" class="btn small ghost" onclick="adminSetTicketStatus(\'' + id + '\', \'in_progress\')">قيد المعالجة</button>' +
@@ -736,6 +626,16 @@
         '<div class="meta" style="margin-top:4px"><span>الشركة:</span> ' + llEscape(t.tenant_name || '') +
         ' | <span>الفئة:</span> ' + llEscape(t.category || 'عامة') +
         ' | <span>المكلف:</span> <span id="adminTicketAssignee">' + llEscape(t.assignee_name || '—') + '</span></div>' +
+        (attachments ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + attachments + '</div>' : '') +
+        '<div id="adminTicketPriorityRow" style="display:flex;gap:8px;margin:10px 0;align-items:center">' +
+        '<span style="font-size:12px">' + llEscape(WFT('tickets.priority', 'الأولوية')) + ':</span>' +
+        '<select id="adminTicketPrioritySel">' +
+        ['normal', 'low', 'high', 'urgent'].map(p =>
+          '<option value="' + p + '"' + ((t.priority || 'normal') === p ? ' selected' : '') + '>' +
+          llEscape(llTicketPriorityLabel(p)) + '</option>').join('') +
+        '</select>' +
+        '<button type="button" class="btn small ghost" onclick="adminSetTicketPriority(\'' + id + '\')">' +
+        llEscape(WFT('tickets.update_priority', 'تحديث الأولوية')) + '</button></div>' +
         '<div id="adminTicketAssignRow" style="display:flex;gap:8px;margin:10px 0;align-items:center"></div>' +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         statusActions;
@@ -770,6 +670,21 @@
       if (!body.trim()) return;
       const res = await api('POST', '/api/admin/support/tickets/' + id + '/messages', { body: body.trim() }).catch(e => e);
       if (!res || !res.success) { toast((res && res.error) || 'تعذر إرسال الرد'); return; }
+      await adminOpenTicket(id);
+      await adminLoadTickets();
+    }
+
+    function llTicketPriorityLabel(p) {
+      const fallback = { normal: 'عادية', low: 'منخفضة', high: 'مرتفعة', urgent: 'عاجلة' }[p] || p;
+      return WFT('tickets.priority_' + p, fallback);
+    }
+
+    async function adminSetTicketPriority(id) {
+      const sel = document.getElementById('adminTicketPrioritySel');
+      if (!sel) return;
+      const res = await api('POST', '/api/admin/support/tickets/' + id + '/status', { priority: sel.value }).catch(e => e);
+      if (!res || !res.success) { toast((res && res.error) || 'تعذر تحديث الأولوية'); return; }
+      toast(WFT('tickets.updated', 'تم التحديث'));
       await adminOpenTicket(id);
       await adminLoadTickets();
     }

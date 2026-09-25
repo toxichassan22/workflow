@@ -333,3 +333,37 @@ def api_update_event_task_status(task_id):
     _record_audit_event('event_task.status', 'event_task', task_id,
                         new_value=result.get('status'))
     return jsonify({'success': True, 'task': result})
+
+
+# ── Super-admin announcements: one notice to a company or to all of them ─────
+
+@app.route('/api/admin/notifications', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_admin_send_notification():
+    """The platform desk addresses one company or broadcasts to every active
+    one. The row lands tenant-wide (user_id NULL) so every login of the
+    company sees it in the notifications feed."""
+    data = request.json or {}
+    title = str(data.get('title') or '').strip()
+    body = str(data.get('body') or '').strip() or None
+    if not title:
+        return jsonify({'success': False, 'error': 'عنوان الإشعار مطلوب'}), 400
+    target = str(data.get('tenantId') or 'all').strip()
+    admin_ids = set(db.list_admin_tenant_ids())
+    if target == 'all':
+        tenants = [t for t in db.get_all_tenants()
+                   if t['id'] not in admin_ids and t.get('is_active', 1)]
+    else:
+        tenant = db.get_tenant_by_id(target)
+        if not tenant or target in admin_ids:
+            return jsonify({'success': False, 'error': 'الشركة غير موجودة'}), 404
+        tenants = [tenant]
+    sent = 0
+    for tenant in tenants:
+        db.create_notification(
+            tenant['id'], title, body=body, category='platform',
+            user_id=None, entity_type='admin_announcement', entity_id=None)
+        sent += 1
+    _record_audit_event('admin_notification.sent', 'tenant', target,
+                        new_value=title)
+    return jsonify({'success': True, 'sent': sent})

@@ -302,7 +302,8 @@ PROJECT_FILE_EXTENSIONS = {
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
                       'regulation_reference', 'team_logo', 'competitor_logo', 'visual_reference',
-                      'conceptual_plan', 'project_logo', 'recharge_receipt', 'recharge_invoice'}
+                      'conceptual_plan', 'project_logo', 'recharge_receipt', 'recharge_invoice',
+                      'ticket_attachment'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
 PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference', 'project_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
@@ -322,6 +323,7 @@ _UPLOAD_TYPE_REGISTRY_KEY = {
     'project_logo': 'project_logo',
     'recharge_receipt': 'recharge_receipt',
     'recharge_invoice': 'recharge_invoice',
+    'ticket_attachment': 'ticket_attachment',
 }
 
 
@@ -365,7 +367,11 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
     extension = os.path.splitext(original_name)[1].lower()
     mime_type = PROJECT_FILE_EXTENSIONS.get(extension)
     if not mime_type:
-        raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
+        # Support-ticket attachments take any extension; unknown types are
+        # stored as octet-stream so downloads never render in the browser.
+        if file_type != 'ticket_attachment':
+            raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
+        mime_type = 'application/octet-stream'
     if file_type in PROJECT_IMAGE_ONLY_TYPES and not mime_type.startswith('image/'):
         raise ValueError('هذا الحقل يقبل الصور فقط (PNG أو JPG أو WEBP)')
     allowed_exts, max_bytes = _upload_file_rule(file_type)

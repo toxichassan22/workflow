@@ -36,14 +36,16 @@ def create_support_ticket(tenant_id, subject, category='general', priority='norm
 
 def list_support_tickets(tenant_id, status=None, limit=100):
     conn = get_db()
+    base = ('SELECT t.*, (SELECT COUNT(*) FROM support_ticket_attachments a '
+            'WHERE a.ticket_id = t.id) AS attachment_count FROM support_tickets t')
     if status:
         rows = conn.execute(
-            'SELECT * FROM support_tickets WHERE tenant_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?',
+            base + ' WHERE t.tenant_id = ? AND t.status = ? ORDER BY t.updated_at DESC LIMIT ?',
             (tenant_id, status, int(limit)),
         ).fetchall()
     else:
         rows = conn.execute(
-            'SELECT * FROM support_tickets WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?',
+            base + ' WHERE t.tenant_id = ? ORDER BY t.updated_at DESC LIMIT ?',
             (tenant_id, int(limit)),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -70,7 +72,8 @@ def get_support_ticket(tenant_id, ticket_id):
 def list_all_support_tickets(status=None, limit=200):
     """Platform inbox: tickets of every company with the company name attached."""
     conn = get_db()
-    query = ('SELECT t.*, tn.company_name AS tenant_name '
+    query = ('SELECT t.*, tn.company_name AS tenant_name, '
+             '(SELECT COUNT(*) FROM support_ticket_attachments a WHERE a.ticket_id = t.id) AS attachment_count '
              'FROM support_tickets t LEFT JOIN tenants tn ON tn.id = t.tenant_id')
     params = []
     if status:
@@ -193,3 +196,20 @@ def assign_support_ticket(tenant_id, ticket_id, assignee_id, actor_name=None):
     result = dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
     result['assignee_name'] = assignee_name
     return result
+
+
+def set_support_ticket_priority(ticket_id, priority):
+    """Desk-only triage field — the client API never writes it."""
+    if priority not in SUPPORT_TICKET_PRIORITIES:
+        return {'error': 'invalid_priority'}
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id FROM support_tickets WHERE id = ?', (str(ticket_id),)).fetchone()
+    if not row:
+        return {'error': 'ticket_not_found'}
+    conn.execute(
+        'UPDATE support_tickets SET priority = ?, updated_at = ? WHERE id = ?',
+        (str(priority), _utcnow().isoformat(), str(ticket_id)),
+    )
+    conn.commit()
+    return dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())

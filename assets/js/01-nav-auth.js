@@ -188,7 +188,7 @@
             ? (overrides.draftId || currentProjectPresentationsDraftId() || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
         visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
-        opsTab: pageId === 'tenantLandloomOpsPage' ? ((typeof llActiveTab !== 'undefined' && llActiveTab) || 'tasks') : null,
+        opsTab: pageId === 'tenantLandloomOpsPage' ? ((typeof llActiveTab !== 'undefined' && llActiveTab) || 'recharge') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
         ...overrides
       };

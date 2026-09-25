@@ -767,6 +767,8 @@ FILE_TYPE_REGISTRY_DEFAULTS = [
      'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
     {'key': 'recharge_invoice', 'label_ar': 'فاتورة شحن الرصيد', 'label_en': 'Recharge invoice',
      'kind': 'document', 'max_size_mb': 15, 'allowed_extensions': ['.pdf', '.png', '.jpg', '.jpeg']},
+    {'key': 'ticket_attachment', 'label_ar': 'مرفق تذكرة دعم', 'label_en': 'Support ticket attachment',
+     'kind': 'document', 'max_size_mb': 30, 'allowed_extensions': []},
 ]
 
 

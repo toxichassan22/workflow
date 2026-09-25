@@ -1293,6 +1293,30 @@
       renderAdminDashboard(overview);
       if (sagChartRange.preset !== '12') sagApplyChartRange();
       if (typeof llLoadNotifications === 'function') llLoadNotifications('adminNotificationsList');
+      const announceSel = document.getElementById('adminAnnounceTarget');
+      if (announceSel) {
+        const current = announceSel.value;
+        announceSel.innerHTML = '<option value="all">' + llEscape(WFT('admin.announce_all', 'كل الشركات')) + '</option>' +
+          sagAllTenants.filter(t => !t.is_admin).map(t =>
+            '<option value="' + llEscape(t.id) + '">' + llEscape(t.company_name || t.name || t.email || t.id) + '</option>').join('');
+        if (current) announceSel.value = current;
+      }
+    }
+
+    async function adminSendAnnouncement() {
+      const target = (document.getElementById('adminAnnounceTarget') || {}).value || 'all';
+      const title = ((document.getElementById('adminAnnounceTitle') || {}).value || '').trim();
+      const body = ((document.getElementById('adminAnnounceBody') || {}).value || '').trim();
+      if (!title) { toast(WFT('admin.announce_title_required', 'عنوان الإشعار مطلوب')); return; }
+      const res = await api('POST', '/api/admin/notifications',
+        { tenantId: target, title: title, body: body }).catch(e => e);
+      if (!res || !res.success) {
+        toast((res && res.error) || WFT('admin.announce_failed', 'تعذر إرسال الإشعار'));
+        return;
+      }
+      document.getElementById('adminAnnounceTitle').value = '';
+      document.getElementById('adminAnnounceBody').value = '';
+      toast(WFT('admin.announce_sent', 'تم إرسال الإشعار'));
     }
 
     // Re-render on language toggle: every dashboard label is built through

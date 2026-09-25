@@ -108,7 +108,6 @@
         generation_approval: () => openTenantApprovals(),
         final_file_approval: () => openTenantApprovals(),
         approval_task: () => openTenantApprovals(),
-        event_task: opsTab('tasks'),
         support_ticket: opsTab('tickets'),
         recharge_request: opsTab('recharge'),
         wallet: opsTab('recharge'),

@@ -133,9 +133,6 @@
               data-i18n="nav.operations">العمليات</button>
             <div class="tenant-nav-items">
               <button type="button" class="tenant-sidebar-link"
-                data-nav-page="tenantLandloomOpsPage" data-nav-tab="tasks"
-                onclick="openLandloomOpsPage('tasks')" data-i18n="nav.ops_tasks">المهام والتنبيهات</button>
-              <button type="button" class="tenant-sidebar-link"
                 data-nav-page="tenantNotificationsPage"
                 onclick="openNotificationsPage()" data-i18n="nav.notifications">الإشعارات</button>
               <button type="button" class="tenant-sidebar-link" data-permission="billing"
@@ -1167,6 +1164,22 @@
           <div id="adminNotificationsList"></div>
         </div>
       </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.announce_title">إشعار للشركات</h3>
+        </div>
+        <div class="tenant-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+          <div class="tenant-field"><label for="adminAnnounceTarget" data-i18n="admin.announce_target">الشركة</label>
+            <select id="adminAnnounceTarget"><option value="all" data-i18n="admin.announce_all">كل الشركات</option></select></div>
+          <div class="tenant-field"><label for="adminAnnounceTitle" data-i18n="admin.announce_subject">العنوان</label>
+            <input type="text" id="adminAnnounceTitle"></div>
+          <div class="tenant-field full" style="grid-column:1/-1"><label for="adminAnnounceBody" data-i18n="admin.announce_body">النص</label>
+            <textarea id="adminAnnounceBody" rows="3"></textarea></div>
+        </div>
+        <div class="sag-modal-actions" style="margin-top:10px">
+          <button type="button" class="btn primary" onclick="adminSendAnnouncement()" data-i18n="admin.announce_send">إرسال الإشعار</button>
+        </div>
+      </div>
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -1468,10 +1481,6 @@
       <!-- Quick KPI Stats -->
       <div class="ops-stat-grid">
         <div class="tenant-dash-card stat">
-          <h3 id="llStatTasks">0</h3>
-          <p>المهام المفتوحة</p>
-        </div>
-        <div class="tenant-dash-card stat">
           <h3 id="llStatNotifications">0</h3>
           <p>التنبيهات الجديدة</p>
         </div>
@@ -1487,54 +1496,8 @@
 
       <!-- Navigation Tabs -->
       <div class="sag-tabs" id="landloomOpsTabs">
-        <button type="button" class="btn small primary" id="llTabBtn_tasks" onclick="showLandloomOpsTab('tasks')" data-i18n="nav.ops_tasks">المهام والتنبيهات</button>
-        <button type="button" class="btn small ghost" id="llTabBtn_recharge" data-permission="billing" onclick="showLandloomOpsTab('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
+        <button type="button" class="btn small primary" id="llTabBtn_recharge" data-permission="billing" onclick="showLandloomOpsTab('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
         <button type="button" class="btn small ghost" id="llTabBtn_tickets" data-permission="support_tickets" onclick="showLandloomOpsTab('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
-      </div>
-
-      <!-- Tab 1: Tasks & Notifications -->
-      <div id="llTabPane_tasks">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0">المهام</h3>
-          <button type="button" class="btn primary small" onclick="openLlModal('llTaskModal')">مهمة جديدة</button>
-        </div>
-        <div class="sag-filters" style="margin-bottom:12px">
-          <select id="llTasksKindFilter" onchange="llRenderTasks()" class="tenant-filter-select">
-            <option value="">كل الأنواع</option>
-            <option value="manual">مهام يدوية</option>
-            <option value="section_approval">اعتماد قسم</option>
-            <option value="generation_approval">اعتماد توليد</option>
-            <option value="final_approval">اعتماد ملف نهائي</option>
-            <option value="recharge">طلب شحن</option>
-            <option value="support">تذكرة دعم</option>
-            <option value="revision">مراجعة</option>
-          </select>
-          <select id="llTasksPriorityFilter" onchange="llRenderTasks()" class="tenant-filter-select">
-            <option value="">كل الأولويات</option>
-            <option value="low">منخفضة</option>
-            <option value="normal">عادية</option>
-            <option value="high">عالية</option>
-            <option value="urgent">عاجلة</option>
-          </select>
-          <select id="llTasksStatusFilter" onchange="llRenderTasks()" class="tenant-filter-select">
-            <option value="open">المفتوحة</option>
-            <option value="done">المغلقة</option>
-            <option value="all">الكل</option>
-          </select>
-          <select id="llTasksProjectFilter" onchange="llRenderTasks()" class="tenant-filter-select" aria-label="فلترة حسب المشروع">
-            <option value="">كل المشاريع</option>
-          </select>
-          <select id="llTasksSectionFilter" onchange="llRenderTasks()" class="tenant-filter-select" aria-label="فلترة حسب القسم">
-            <option value="">كل الأقسام</option>
-          </select>
-        </div>
-        <div id="llTasksList" style="margin-bottom:24px"></div>
-
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0">التنبيهات</h3>
-          <button type="button" class="btn ghost small" onclick="llMarkAllRead()">تحديد الكل كمقروء</button>
-        </div>
-        <div id="llNotificationsList" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Tab 2: Recharge & Wallet -->
@@ -1563,33 +1526,6 @@
         </div>
         <div id="llTicketsList" style="margin-bottom:24px"></div>
         <div id="llTicketDetail" style="display:none;margin-top:16px;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>
-      </div>
-
-      <!-- Modal 1: New Task -->
-      <div id="llTaskModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llTaskModal')">
-        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llTaskModalTitle">
-          <div class="sag-modal-head">
-            <h2 id="llTaskModalTitle">مهمة جديدة</h2>
-            <button type="button" class="btn ghost small" onclick="closeLlModal('llTaskModal')">إغلاق</button>
-          </div>
-          <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label for="llTaskTitle">عنوان المهمة</label><input type="text" id="llTaskTitle" placeholder="اجتماع تسليم المعرض"></div>
-            <div class="tenant-field"><label for="llTaskDue">موعد الاستحقاق</label><input type="datetime-local" id="llTaskDue"></div>
-            <div class="tenant-field"><label for="llTaskRecurrence">التكرار</label>
-              <select id="llTaskRecurrence">
-                <option value="none">بدون تكرار</option>
-                <option value="daily">يوميًا</option>
-                <option value="weekly">أسبوعيًا</option>
-                <option value="monthly">شهريًا</option>
-              </select>
-            </div>
-          </div>
-          <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llTasksError"></div>
-          <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
-            <button type="button" class="btn ghost" onclick="closeLlModal('llTaskModal')">إلغاء</button>
-            <button type="button" class="btn primary" onclick="llCreateTask()">إضافة المهمة</button>
-          </div>
-        </div>
       </div>
 
       <!-- Modal 2: Recharge Request -->
@@ -1657,13 +1593,8 @@
                 <option value="other">أخرى</option>
               </select>
             </div>
-            <div class="tenant-field"><label for="llTicketPriority">الأولوية</label>
-              <select id="llTicketPriority">
-                <option value="normal">عادية</option>
-                <option value="low">منخفضة</option>
-                <option value="high">مرتفعة</option>
-                <option value="urgent">عاجلة</option>
-              </select>
+            <div class="tenant-field"><label for="llTicketAttachment">مرفق</label>
+              <input type="file" id="llTicketAttachment">
             </div>
             <div class="tenant-field full"><label for="llTicketBody">التفاصيل</label><textarea id="llTicketBody" rows="4" placeholder="تفاصيل المشكلة"></textarea></div>
           </div>
