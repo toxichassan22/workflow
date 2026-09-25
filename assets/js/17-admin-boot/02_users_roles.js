@@ -2,15 +2,44 @@
       const name = document.getElementById('newUserName').value.trim();
       const email = document.getElementById('newUserEmail').value.trim();
       const password = document.getElementById('newUserPassword').value;
-      if (!name || !email || !password) { toast('كل الحقول مطلوبة'); return; }
+      const phone = ((document.getElementById('newUserPhone') || {}).value || '').trim();
+      const sections = Array.from(document.querySelectorAll('.inviteSectionCb:checked')).map(cb => cb.value);
+      const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
+      if (!name || !email) { toast('الاسم والبريد مطلوبان'); return; }
+      const resetForm = () => {
+        ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        document.querySelectorAll('.inviteSectionCb:checked,.inviteProjectCb:checked').forEach(cb => { cb.checked = false; });
+      };
+      // No password typed: the employee picks their own via the invite link —
+      // same form, two delivery paths.
+      if (!password) {
+        const result = document.getElementById('inviteResult');
+        if (result) showInlineLoader(result, WFT('common.sending', 'جاري الإرسال...'));
+        const invite = await api('POST', '/api/invites', { email, name, phone, sections, projects });
+        if (invite && invite.success) {
+          const fullUrl = window.location.origin + invite.inviteUrl;
+          if (result) result.innerHTML = '<div style="background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:8px">' +
+            '<p style="margin:0 0 8px"><strong>' + escapeHtml(WFT('users.invite_created', 'تم إنشاء الدعوة')) + '</strong>' +
+            (invite.emailSent ? '' : ' — <span style="color:#a67c00">' + escapeHtml(WFT('users.invite_email_queued', 'تعذر إرسال البريد')) + '</span>') + '</p>' +
+            '<input type="text" readonly value="' + fullUrl + '" style="width:100%;font-size:13px" onclick="this.select()">' +
+            '</div>';
+          toast('تم إنشاء الدعوة');
+          resetForm();
+          openTenantUsers();
+        } else {
+          if (result) result.innerHTML = '<p style="color:#c33">' + escapeHtml((invite && invite.error) || WFT('common.error', 'فشل')) + '</p>';
+        }
+        return;
+      }
       const pwError = passwordPolicyError(password);
       if (pwError) { toast(pwError); return; }
-      const data = await api('POST', '/api/users', { name, email, password });
+      const data = await api('POST', '/api/users', { name, email, password, phone, sections, projects });
       if (data.success) {
         toast('تم إضافة الموظف' + (data.emailSent === false ? ' — تعذر إرسال البريد' : ''));
-        document.getElementById('newUserName').value = '';
-        document.getElementById('newUserEmail').value = '';
-        document.getElementById('newUserPassword').value = '';
+        resetForm();
         openTenantUsers();
       } else {
         toast(data.error || 'فشل إضافة الموظف');
@@ -350,38 +379,6 @@
       }
       else if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success) && (!assignRes || assignRes.success)) { toast('تم حفظ الصلاحيات'); }
       else { toast(permRes.error || sectionRes.error || (scopeRes && scopeRes.error) || (assignRes && assignRes.error) || 'فشل الحفظ'); }
-    }
-
-    async function sendTenantInvite() {
-      const email = document.getElementById('inviteEmail').value.trim();
-      if (!email) { toast(WFT('users.invite_email_required', 'أدخل بريد الموظف')); return; }
-      const result = document.getElementById('inviteResult');
-      showInlineLoader(result, WFT('common.sending', 'جاري الإرسال...'));
-      const sections = Array.from(document.querySelectorAll('.inviteSectionCb:checked')).map(cb => cb.value);
-      const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
-      const data = await api('POST', '/api/invites', {
-        email,
-        name: ((document.getElementById('inviteName') || {}).value || '').trim() || null,
-        phone: ((document.getElementById('invitePhone') || {}).value || '').trim() || null,
-        sections,
-        projects,
-      });
-      if (data.success) {
-        const fullUrl = window.location.origin + data.inviteUrl;
-        result.innerHTML = '<div style="background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:8px">' +
-          '<p style="margin:0 0 8px"><strong>' + escapeHtml(WFT('users.invite_created', 'تم إنشاء الدعوة')) + '</strong>' +
-          (data.emailSent ? '' : ' — <span style="color:#a67c00">' + escapeHtml(WFT('users.invite_email_queued', 'تعذر إرسال البريد')) + '</span>') + '</p>' +
-          '<input type="text" readonly value="' + fullUrl + '" style="width:100%;font-size:13px" onclick="this.select()">' +
-          '</div>';
-        document.getElementById('inviteEmail').value = '';
-        const nameEl = document.getElementById('inviteName');
-        if (nameEl) nameEl.value = '';
-        const phoneEl = document.getElementById('invitePhone');
-        if (phoneEl) phoneEl.value = '';
-        openTenantUsers();
-      } else {
-        result.innerHTML = '<p style="color:#c33">' + escapeHtml(data.error || WFT('common.error', 'فشل')) + '</p>';
-      }
     }
 
     // ── Presentation Versions & Edit Log ──

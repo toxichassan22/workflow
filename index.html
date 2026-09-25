@@ -901,44 +901,27 @@
             <input type="email" id="newUserEmail" placeholder="ahmed@company.com">
           </div>
           <div class="tenant-field">
-            <label>كلمة المرور *</label>
+            <label>كلمة المرور (اختياري)</label>
             <div style="position:relative">
               <input type="password" id="newUserPassword" placeholder="10 أحرف على الأقل، حروف وأرقام" style="padding-left:64px">
               <button type="button" onclick="togglePasswordVisibility('newUserPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
             </div>
           </div>
-        </div>
-        <div class="tenant-btns" style="margin-top:12px">
-          <button class="btn primary" onclick="addTenantUser()">+ إضافة موظف</button>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--line);margin:20px 0">
-
-        <h3 style="margin-bottom:8px" data-i18n="users.invite_title">إرسال دعوة بالإيميل</h3>
-        <div class="tenant-grid">
           <div class="tenant-field">
-            <label data-i18n="users.invite_email">بريد الموظف *</label>
-            <input type="email" id="inviteEmail" placeholder="ahmed@company.com">
+            <label>الجوال</label>
+            <input type="text" id="newUserPhone" dir="ltr">
           </div>
           <div class="tenant-field">
-            <label data-i18n="users.invite_name">اسم الموظف</label>
-            <input type="text" id="inviteName">
-          </div>
-          <div class="tenant-field">
-            <label data-i18n="users.invite_phone">الجوال</label>
-            <input type="text" id="invitePhone" dir="ltr">
-          </div>
-          <div class="tenant-field">
-            <label data-i18n="users.invite_sections">أقسام النموذج</label>
+            <label>أقسام النموذج</label>
             <div id="inviteSectionsPicker" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
           <div class="tenant-field">
-            <label data-i18n="users.invite_projects">ملفات المشاريع</label>
+            <label>ملفات المشاريع</label>
             <div id="inviteProjectsPicker" style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto"></div>
           </div>
         </div>
         <div class="tenant-btns" style="margin-top:12px">
-          <button class="btn primary" onclick="sendTenantInvite()" data-i18n="users.invite_send">إرسال دعوة</button>
+          <button class="btn primary" onclick="addTenantUser()">+ إضافة موظف</button>
         </div>
         <div id="inviteResult" style="margin-top:12px"></div>
         <div id="tenantInvitesList" style="margin-top:12px"></div>
