@@ -48,8 +48,8 @@ def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=Non
             transfer_reference, receipt_file_id, requested_by, requested_by_name)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (row_id, tenant_id, package_id, str(package_name).strip(), float(amount_usd or 0),
-         float(amount_sar) if amount_sar is not None else usd_to_sar(amount_usd or 0),
-         float(price_sar) if price_sar is not None else None, transfer_reference, receipt_file_id,
+         round(float(amount_sar) + 1e-9, 2) if amount_sar is not None else usd_to_sar(amount_usd or 0),
+         round(float(price_sar) + 1e-9, 2) if price_sar is not None else None, transfer_reference, receipt_file_id,
          requested_by, requested_by_name),
     )
     conn.commit()

@@ -683,6 +683,7 @@ def _ensure_platform_columns(conn):
     except Exception as exc:
         print(f'[DB] Migration notice: sag_admin_panel grant cleanup: {exc}')
     _migrate_wallet_to_sar(conn)
+    _round_sar_money_columns(conn)
 
 
 def _migrate_wallet_to_sar(conn):
@@ -707,19 +708,56 @@ def _migrate_wallet_to_sar(conn):
     if rate <= 0:
         rate = FX_DEFAULT_USD_SAR
     try:
-        conn.execute('UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) * ?', (rate,))
-        conn.execute('UPDATE tenant_ledger SET amount_sar = amount_usd * ? WHERE amount_sar IS NULL', (rate,))
-        conn.execute('UPDATE billing_packages SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
-        conn.execute('UPDATE billing_package_versions SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
-        conn.execute('UPDATE tenant_package_history SET credit_sar = credit_usd * ? WHERE credit_sar IS NULL', (rate,))
-        conn.execute('UPDATE point_reservations SET cost_sar = cost_usd * ? WHERE cost_sar IS NULL', (rate,))
-        conn.execute('UPDATE recharge_requests SET amount_sar = amount_usd * ? WHERE amount_sar IS NULL', (rate,))
+        conn.execute('UPDATE tenants SET credit_balance = ROUND(COALESCE(credit_balance, 0) * ?, 2)', (rate,))
+        conn.execute('UPDATE tenant_ledger SET amount_sar = ROUND(amount_usd * ?, 2) WHERE amount_sar IS NULL', (rate,))
+        conn.execute('UPDATE billing_packages SET credit_sar = ROUND(credit_usd * ?, 2) WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE billing_package_versions SET credit_sar = ROUND(credit_usd * ?, 2) WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE tenant_package_history SET credit_sar = ROUND(credit_usd * ?, 2) WHERE credit_sar IS NULL', (rate,))
+        conn.execute('UPDATE point_reservations SET cost_sar = ROUND(cost_usd * ?, 2) WHERE cost_sar IS NULL', (rate,))
+        conn.execute('UPDATE recharge_requests SET amount_sar = ROUND(amount_usd * ?, 2) WHERE amount_sar IS NULL', (rate,))
         conn.execute(
             "INSERT INTO platform_settings (key, value, updated_at) VALUES ('wallet_currency', 'sar', datetime('now')) "
             "ON CONFLICT(key) DO UPDATE SET value = 'sar', updated_at = datetime('now')")
         conn.commit()
     except Exception as exc:
         print(f'[DB] Migration notice: wallet SAR conversion: {exc}')
+
+
+def _round_sar_money_columns(conn):
+    """Snap every stored SAR money figure to the halala.
+
+    The wallet migration and a few write paths once stored raw float products
+    (``credit_usd * rate``), which baked sub-halala noise like 499.9875 into
+    catalog and ledger rows. Idempotent: rows already at 2dp fail the WHERE
+    and the UPDATE is a no-op.
+    """
+    targets = (
+        ('tenants', 'credit_balance'),
+        ('tenant_ledger', 'amount_sar'),
+        ('billing_packages', 'credit_sar'),
+        ('billing_packages', 'price_sar'),
+        ('billing_package_versions', 'credit_sar'),
+        ('tenant_package_history', 'credit_sar'),
+        ('point_reservations', 'cost_sar'),
+        ('recharge_requests', 'amount_sar'),
+        ('recharge_requests', 'price_sar'),
+        ('topup_receipts', 'amount_sar'),
+        ('topup_receipts', 'price_sar'),
+        ('topup_receipts', 'tax_amount_sar'),
+        ('topup_receipts', 'total_sar'),
+    )
+    for table, column in targets:
+        try:
+            conn.execute(
+                f'UPDATE {table} SET {column} = ROUND({column}, 2) '
+                f'WHERE {column} IS NOT NULL AND ABS({column} - ROUND({column}, 2)) > 1e-9')
+        except Exception:
+            # A column absent on an older schema is the _add helpers' job.
+            pass
+    try:
+        conn.commit()
+    except Exception:
+        pass
 
 
 def _dedupe_open_workflow_rows(conn):

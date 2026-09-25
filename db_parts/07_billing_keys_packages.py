@@ -933,7 +933,7 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True)
     if not label or len(label) > 120:
         raise ValueError('Invalid package name')
     try:
-        credit = float(credit_sar or 0.0)
+        credit = round(float(credit_sar or 0.0) + 1e-9, 2)
     except (TypeError, ValueError):
         raise ValueError('Invalid credit_sar')
     if credit < 0:
@@ -941,7 +941,7 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True)
     price = None
     if price_sar is not None:
         try:
-            price = float(price_sar)
+            price = round(float(price_sar) + 1e-9, 2)
         except (TypeError, ValueError):
             raise ValueError('Invalid price_sar')
         if price < 0:
@@ -974,7 +974,7 @@ def update_billing_package(package_id, name=None, credit_sar=None, price_sar=Non
         params.append(label)
     if credit_sar is not None:
         try:
-            credit = float(credit_sar)
+            credit = round(float(credit_sar) + 1e-9, 2)
         except (TypeError, ValueError):
             raise ValueError('Invalid credit_sar')
         if credit < 0:
@@ -985,7 +985,7 @@ def update_billing_package(package_id, name=None, credit_sar=None, price_sar=Non
         params.append(sar_to_usd(credit))
     if price_sar is not None:
         try:
-            price = float(price_sar)
+            price = round(float(price_sar) + 1e-9, 2)
         except (TypeError, ValueError):
             raise ValueError('Invalid price_sar')
         if price < 0:

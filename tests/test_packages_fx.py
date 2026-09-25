@@ -209,6 +209,47 @@ class PackagesFxTests(unittest.TestCase):
         feed_row = next(p for p in feed['packages'] if p['id'] == package['id'])
         self.assertAlmostEqual(feed_row['credit_sar'], 200.0)
 
+    def test_money_figures_store_at_halala_precision(self):
+        """Sub-halala float noise (133.33 x 3.75 = 499.9875...) must never be
+        stored: the create/update paths round to 2dp and init_db normalizes
+        legacy artifacts left by the unrounded wallet migration."""
+        client = self.app.test_client()
+        noise = 133.33 * 3.75  # 499.98750000000001 — the exact artifact seen live
+        self.assertNotEqual(noise, round(noise, 2))
+
+        created = client.post(
+            '/api/admin/packages', headers=self._admin_headers(),
+            json={'name': 'باقة الضجيج', 'creditSar': noise, 'priceSar': noise})
+        self.assertEqual(created.status_code, 201, created.get_json())
+        package = created.get_json()['package']
+        self.assertEqual(package['credit_sar'], 499.99)
+        self.assertEqual(package['price_sar'], 499.99)
+
+        updated = client.put(
+            f"/api/admin/packages/{package['id']}", headers=self._admin_headers(),
+            json={'creditSar': noise})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.get_json()['package']['credit_sar'], 499.99)
+
+        # Plant raw artifacts the way the old migration wrote them, then let
+        # init_db's normalization pass snap them to the halala.
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE billing_packages SET credit_sar = ? WHERE id = ?',
+                         (noise, package['id']))
+            conn.execute('UPDATE tenants SET credit_balance = ? WHERE id = ?',
+                         (noise, self.tenant_id))
+            conn.commit()
+            db.init_db()
+            row = db.get_db().execute(
+                'SELECT credit_sar FROM billing_packages WHERE id = ?',
+                (package['id'],)).fetchone()
+            wallet = db.get_db().execute(
+                'SELECT credit_balance FROM tenants WHERE id = ?',
+                (self.tenant_id,)).fetchone()
+        self.assertEqual(row['credit_sar'], 499.99)
+        self.assertEqual(wallet['credit_balance'], 499.99)
+
     def test_tenant_credit_balance_keyed_in_sar(self):
         client = self.app.test_client()
         client.put('/api/admin/fx-rate', headers=self._admin_headers(),

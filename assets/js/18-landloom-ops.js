@@ -7,6 +7,14 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    function llMoney(value) {
+      // Money renders at halala precision — a raw float like 499.98750000000001
+      // (stored by an old unrounded conversion) must never reach the screen.
+      if (value == null || value === '') return '0';
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '0';
+    }
+
     function llStatus(status) {
       const labels = {
         open: 'مفتوحة', done: 'مغلقة', completed: 'منجزة', cancelled: 'ملغاة',
@@ -319,7 +327,7 @@
             '</div>'
           : '';
         return '<div class="tenant-presentation-card">' +
-          '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + ((r.price_sar != null ? r.price_sar : (r.amount_sar != null ? r.amount_sar : 0)) + ' <span>ريال</span>') + '</h3>' +
+          '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + (llMoney(r.price_sar != null ? r.price_sar : r.amount_sar) + ' <span>ريال</span>') + '</h3>' +
           '<div class="meta">' + tenantInfo + '<span>' + llStatus(r.status) + '</span> | <span>' + llEscape(date) + '</span>' + ref + inv + receiptLink + invoiceLink + '</div>' +
           note +
           actions +
@@ -342,8 +350,8 @@
       }
       select.innerHTML = llRechargePackages.map(p =>
         '<option value="' + llEscape(p.id) + '">' + llEscape(p.name) +
-        ' (' + (p.credit_sar != null ? p.credit_sar : (p.credit_usd || 0)) + ' <span>ريال</span>' +
-        (p.price_sar ? ' — ' + p.price_sar + ' <span>ريال</span>' : '') + ')</option>'
+        ' (' + llMoney(p.credit_sar) + ' <span>ريال</span>' +
+        (p.price_sar ? ' — ' + llMoney(p.price_sar) + ' <span>ريال</span>' : '') + ')</option>'
       ).join('');
       llShowPackageInfo();
     }
@@ -743,12 +751,12 @@
       }
       box.innerHTML = llAdminPackages.map(p => {
         const cost = (p.est_cost_sar != null)
-          ? ' | <span>التكلفة التقديرية: ' + llEscape(String(p.est_cost_sar)) + ' <span>ريال</span></span>' : '';
+          ? ' | <span>التكلفة التقديرية: ' + llEscape(llMoney(p.est_cost_sar)) + ' <span>ريال</span></span>' : '';
         const margin = (p.est_margin_sar != null)
-          ? ' | <span>الربح التقديري: ' + llEscape(String(p.est_margin_sar)) + ' <span>ريال</span></span>' : '';
+          ? ' | <span>الربح التقديري: ' + llEscape(llMoney(p.est_margin_sar)) + ' <span>ريال</span></span>' : '';
         return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + llEscape(p.name) + '</h3>' +
-          '<div class="meta"><span>' + (p.price_sar != null ? llEscape(String(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
-          ' | <span>' + llEscape(String(p.credit_sar != null ? p.credit_sar : (p.credit_usd || 0))) + ' <span>ريال رصيد</span></span>' + cost + margin +
+          '<div class="meta"><span>' + (p.price_sar != null ? llEscape(llMoney(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
+          ' | <span>' + llEscape(llMoney(p.credit_sar)) + ' <span>ريال رصيد</span></span>' + cost + margin +
           ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' + llEscape(p.id) + '\')">تعديل</button>' +
@@ -764,9 +772,10 @@
       const p = llAdminPackages.find(item => item.id === packageId);
       if (!p) return;
       llEditingPackageId = packageId;
+      const llRound2 = (v) => (v == null ? '' : Math.round(Number(v) * 100) / 100);
       document.getElementById('adminPackageName').value = p.name || '';
-      document.getElementById('adminPackagePrice').value = (p.price_sar != null ? p.price_sar : '');
-      document.getElementById('adminPackageCredit').value = (p.credit_sar != null ? p.credit_sar : '');
+      document.getElementById('adminPackagePrice').value = llRound2(p.price_sar);
+      document.getElementById('adminPackageCredit').value = llRound2(p.credit_sar);
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
       const cancel = document.getElementById('adminPackageCancel');
