@@ -264,7 +264,8 @@ def api_create_generation_approval():
                 g.tenant_id, 'طلب اعتماد توليد جديد',
                 f'«{draft.get("title") or "مشروع"}» بانتظار قرار اعتماد التوليد',
                 category='generation_approval', user_id=approver['id'],
-                entity_type='generation_approval', entity_id=approval['id'])
+                entity_type='generation_approval', entity_id=approval['id'],
+                mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_audit_event('generation_approval.requested', 'generation_approval', approval['id'],
@@ -339,7 +340,8 @@ def api_decide_generation_approval(approval_id):
             g.tenant_id, 'generation_approval', approval_id,
             closed_by_name=_landloom_actor_name())
         requester = str(result.get('requested_by') or '')
-        if requester and requester != str(_landloom_actor_id()):
+        if requester and requester != str(_landloom_actor_id()) \
+                and not requester.startswith('tenant-admin:'):
             message = {'approved': 'اعتُمد طلب التوليد',
                        'rejected': 'رُفض طلب التوليد',
                        'cancelled': 'أُلغي طلب التوليد'}.get(decision)
@@ -348,7 +350,8 @@ def api_decide_generation_approval(approval_id):
                     g.tenant_id, message, str(data.get('note') or '').strip() or None,
                     category='generation_approval',
                     user_id=requester,
-                    entity_type='generation_approval', entity_id=approval_id)
+                    entity_type='generation_approval', entity_id=approval_id,
+                    mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_audit_event(f'generation_approval.{decision}', 'generation_approval', approval_id,
@@ -599,5 +602,8 @@ def api_finish_generation_job(job_id):
 @app.route('/api/points/reservations', methods=['GET'])
 @require_auth
 def api_list_point_reservations():
+    """Active wallet holds — the same company-admin-only wallet surface."""
+    if not _landloom_can('billing'):
+        return _landloom_forbidden('عرض حجوزات المحفظة يتطلب صلاحية الفوترة')
     reservations = db.list_point_reservations(g.tenant_id, status=request.args.get('status'))
     return jsonify({'success': True, 'reservations': reservations})

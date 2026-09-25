@@ -292,6 +292,114 @@ class OpsSectionTests(unittest.TestCase):
         self.assertIn('عام للجميع', titles)
         self.assertNotIn('أمر إداري', titles)
 
+    # ── Admin self-echo: own acts never ping the admin feed ─────────────
+
+    def test_admin_initiated_notice_does_not_echo_back(self):
+        emp_id = db.create_user(
+            self.tenant_id, 'محرر', 'echo-ed@x.test', 'hash', role='employee')
+        response = self.client.post(
+            '/api/notifications', headers=self.headers(self.token),
+            json={'title': 'ملاحظة للمحرر', 'userId': emp_id})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        employee_feed = db.list_notifications(self.tenant_id, user_id=emp_id)
+        self.assertIn('ملاحظة للمحرر', [n['title'] for n in employee_feed])
+        # The admin authored it — his own feed must not carry a copy.
+        self.assertNotIn('ملاحظة للمحرر', [n['title'] for n in self._feed(self.token)])
+
+    def test_employee_initiated_notice_mirrors_to_admin(self):
+        sender_id = db.create_user(
+            self.tenant_id, 'معتمد', 'echo-ap@x.test', 'hash', role='employee')
+        db.set_user_permission(sender_id, 'manage_users', True)
+        target_id = db.create_user(
+            self.tenant_id, 'محرر', 'echo-tg@x.test', 'hash', role='employee')
+        emp_token = auth.create_token(
+            self.tenant_id, 'echo-ap@x.test', user_id=sender_id,
+            user_name='معتمد', user_role='employee')
+        response = self.client.post(
+            '/api/notifications', headers=self.headers(emp_token),
+            json={'title': 'راجع القسم', 'userId': target_id})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn('راجع القسم', [n['title'] for n in self._feed(self.token)])
+
+    def test_decision_on_admin_own_submission_notifies_nobody_admin_side(self):
+        """A decision on a version the company admin sent stays in the audit
+        trail only — the tenant-admin address never receives «اعتُمد قسمك»."""
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.user_id,
+            {'project_name': 'برج المشرق'}, {'basic': 'draft'}, 'draft',
+            draft_id='draft-admin-sec')
+        version = db.create_section_version(
+            self.tenant_id, draft_id, 'basic', {'project_name': 'برج المشرق'},
+            'tenant-admin:' + self.tenant_id, 'مدير الشركة')
+        self.assertNotIn('error', version)
+        approver_id = db.create_user(
+            self.tenant_id, 'معتمد', 'dec-ap@x.test', 'hash', role='employee')
+        db.set_user_permission(approver_id, 'approvals', True)
+        approver_token = auth.create_token(
+            self.tenant_id, 'dec-ap@x.test', user_id=approver_id,
+            user_name='معتمد', user_role='employee')
+        response = self.client.post(
+            '/api/project-draft/section-version/decision',
+            headers=self.headers(approver_token),
+            json={'versionId': version['id'], 'decision': 'approved'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertNotIn('اعتُمد قسمك', [n['title'] for n in self._feed(self.token)])
+
+    # ── Wallet surfaces stay with the company admin ─────────────────────
+
+    def _employee_token(self, email):
+        emp_id = db.create_user(self.tenant_id, 'موظف', email, 'hash', role='employee')
+        return auth.create_token(
+            self.tenant_id, email, user_id=emp_id, user_name='موظف', user_role='employee')
+
+    def test_employee_wallet_reads_are_forbidden(self):
+        emp_token = self._employee_token('wallet-ed@x.test')
+        for url in ('/api/recharge-requests', '/api/billing/packages',
+                    '/api/points/overview', '/api/points/reservations'):
+            response = self.client.get(url, headers=self.headers(emp_token))
+            self.assertEqual(response.status_code, 403, url)
+
+    def test_client_overview_hides_wallet_figures_from_employees(self):
+        emp_token = self._employee_token('ov-ed@x.test')
+        body = self.client.get(
+            '/api/client/overview', headers=self.headers(emp_token)).get_json()
+        self.assertTrue(body['success'], body)
+        self.assertTrue(body.get('wallet_restricted'))
+        self.assertIn('funds_available', body)
+        for key in ('balance_sar', 'balance_usd', 'reserved_sar',
+                    'package', 'lifetime', 'fx'):
+            self.assertNotIn(key, body)
+        self.assertNotIn('consumption_sar', body['totals'])
+        full = self.client.get(
+            '/api/client/overview', headers=self.headers(self.token)).get_json()
+        self.assertIn('balance_sar', full)
+        self.assertIn('package', full)
+
+    def test_employee_feed_lists_no_wallet_support_or_task_categories(self):
+        emp_token = self._employee_token('cats-ed@x.test')
+        body = self.client.get(
+            '/api/notifications', headers=self.headers(emp_token)).get_json()
+        for hidden in ('billing', 'recharge', 'support', 'task'):
+            self.assertNotIn(hidden, body['categories'])
+        full = self.client.get(
+            '/api/notifications', headers=self.headers(self.token)).get_json()
+        for cat in ('billing', 'recharge', 'support'):
+            self.assertIn(cat, full['categories'])
+
+    # ── Overdue approvals escalate as plain notices, not «tasks» ─────────
+
+    def test_overdue_approval_escalates_under_its_own_category(self):
+        task = db.create_approval_task(
+            self.tenant_id, 'section_approval', 'اعتماد قسم «الأساسيات»',
+            due_hours=-25)
+        escalated = db.escalate_overdue_approval_tasks(self.tenant_id)
+        self.assertIn(task['id'], escalated)
+        note = next(
+            n for n in self._feed(self.token) if n['entity_type'] == 'approval_task')
+        self.assertEqual(note['category'], 'section_approval')
+        self.assertNotIn('مهمة', note['title'])
+        self.assertIn('متأخر', note['title'])
+
     # ── Responsibility presets ────────────────────────────────────────────
 
     def test_responsibility_presets_on_add_user(self):

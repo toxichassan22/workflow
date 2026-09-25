@@ -51,6 +51,10 @@ def api_create_recharge_request():
 @app.route('/api/recharge-requests', methods=['GET'])
 @require_auth
 def api_list_recharge_requests():
+    # Wallet movements are the company admin's alone — employees hold no
+    # billing permission, so the desk list refuses them outright.
+    if not _landloom_can('billing'):
+        return _landloom_forbidden('عرض طلبات الشحن يتطلب صلاحية الفوترة')
     try:
         rows = db.list_recharge_requests(g.tenant_id, status=request.args.get('status'))
     except Exception as exc:
@@ -81,6 +85,8 @@ def api_recharge_request_attachment(request_id, slot):
     """
     if slot not in ('receipt', 'invoice'):
         return jsonify({'success': False, 'error': 'المرفق غير معروف'}), 404
+    if not _landloom_can('billing'):
+        return _landloom_forbidden('عرض مرفقات الشحن يتطلب صلاحية الفوترة')
     row = db.get_recharge_request(request_id)
     if not row:
         return jsonify({'success': False, 'error': 'الطلب غير موجود'}), 404
@@ -97,7 +103,10 @@ def api_recharge_request_attachment(request_id, slot):
 @require_auth
 def api_billing_packages():
     """t33: the purchase screen lists every active package the super admin
-    manages, never hardcoded prices."""
+    manages, never hardcoded prices. The catalog is part of the recharge
+    surface — employees without billing never read it."""
+    if not _landloom_can('billing'):
+        return _landloom_forbidden('عرض باقات الشحن يتطلب صلاحية الفوترة')
     packages = db.with_sar_fields(db.list_billing_packages(active_only=True))
     return jsonify({'success': True, 'packages': packages, 'taxRate': db.TAX_RATE_SAR})
 
@@ -121,7 +130,10 @@ def api_billing_receipt(receipt_id):
 @app.route('/api/points/overview', methods=['GET'])
 @require_auth
 def api_points_overview():
-    """t30: current, reserved, available and expired balances in one read."""
+    """t30: current, reserved, available and expired balances in one read —
+    wallet figures stay behind the billing permission."""
+    if not _landloom_can('billing'):
+        return _landloom_forbidden('عرض رصيد المحفظة يتطلب صلاحية الفوترة')
     return jsonify({'success': True, 'points': db.points_overview(g.tenant_id)})
 
 
@@ -246,6 +258,19 @@ def api_client_overview():
                     'assigned_at': cycle_start,
                 }
         reserved_sar = db.get_active_hold_total_sar(g.tenant_id)
+        if not _landloom_can('billing'):
+            # Staff never see wallet figures: the generation gate only needs a
+            # sufficiency flag, and the totals carry no money fields.
+            remaining = float((package or {}).get('remaining_sar') or balance_sar or 0.0)
+            return jsonify({
+                'success': True,
+                'wallet_restricted': True,
+                'funds_available': remaining > 0,
+                'totals': {
+                    'projects': view.get('projects'),
+                    'presentations': view.get('presentations'),
+                },
+            })
         return jsonify({
             'success': True,
             'totals': {

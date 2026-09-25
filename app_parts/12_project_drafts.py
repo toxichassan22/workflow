@@ -1191,7 +1191,7 @@ def api_send_section_for_approval():
                 f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(section_key)} بانتظار قرارك',
                 category='section_approval', user_id=assigned['user_id'],
                 entity_type='section_version', entity_id=version['id'],
-                email_to=None)
+                mirror_admin=not _landloom_actor_is_admin(), email_to=None)
         else:
             for approver in db.get_users_with_permission(g.tenant_id, 'approvals'):
                 try:
@@ -1203,7 +1203,8 @@ def api_send_section_for_approval():
                     g.tenant_id, 'إصدار قسم بانتظار الاعتماد',
                     f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(section_key)} بانتظار قرارك',
                     category='section_approval', user_id=approver['id'],
-                    entity_type='section_version', entity_id=version['id'])
+                    entity_type='section_version', entity_id=version['id'],
+                    mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_change('draft', draft['id'], 'إرسال قسم للاعتماد',
@@ -1335,7 +1336,10 @@ def api_decide_section_version():
                 assignee_id=None if sender.startswith('tenant-admin:') else sender or None,
                 payload={'version_id': version_id, 'note': decided.get('decision_note')},
                 draft_id=draft['id'])
-        if sender and sender != str(actor_id):
+        # A decision on the company admin's own submission never notifies the
+        # tenant-admin address — the actor already knows, and the audit trail
+        # is where admin-caused decisions live.
+        if sender and sender != str(actor_id) and not sender.startswith('tenant-admin:'):
             message = {'approved': 'اعتُمد قسمك',
                        'returned': 'أُعيد قسمك للتعديل',
                        'rejected': 'رُفض قسمك'}[decision]
@@ -1344,7 +1348,8 @@ def api_decide_section_version():
                 f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(version["section_key"])}',
                 category='section_approval',
                 user_id=sender,
-                entity_type='section_version', entity_id=version_id)
+                entity_type='section_version', entity_id=version_id,
+                mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_change('draft', draft['id'], action, [detail])
@@ -1599,7 +1604,8 @@ def api_request_project_draft_approval():
                     g.tenant_id, 'مشروع بانتظار الاعتماد',
                     f'«{draft.get("title") or "مشروع"}» أُرسل للاعتماد',
                     category='section_approval', user_id=approver['id'],
-                    entity_type='project_draft', entity_id=resolved_id)
+                    entity_type='project_draft', entity_id=resolved_id,
+                    mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
@@ -1676,13 +1682,15 @@ def api_review_project_draft():
             closed_by_name=_project_draft_actor_name())
         reviewed_draft = reviewed.get('draft') or {}
         requester = str(reviewed_draft.get('requested_by') or '')
-        if requester and requester != str(_project_draft_actor_id()):
+        if requester and requester != str(_project_draft_actor_id()) \
+                and not requester.startswith('tenant-admin:'):
             message = 'اعتُمد مشروعك' if review_status == 'approved' else 'أُعيد مشروعك للتعديل'
             db.create_notification(
                 g.tenant_id, message, note or None,
                 category='section_approval',
                 user_id=requester,
-                entity_type='project_draft', entity_id=draft_id)
+                entity_type='project_draft', entity_id=draft_id,
+                mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     action = 'اعتماد المشروع' if review_status == 'approved' else 'إعادة المشروع للتعديل'

@@ -658,19 +658,26 @@
         ((tenantUser && tenantUser._userRole) || 'company_admin') === 'company_admin' ||
         Boolean(estimateData && estimateData.can_self_decide);
 
-      let remainingSar = 0;
+      // The wallet is the company admin's surface: billing actors see the
+      // actual balance, employees get only a sufficiency flag from the
+      // restricted overview — the modal never renders figures for them.
+      const canSeeWallet = typeof hasPermission === 'function' && hasPermission('billing');
+      let remainingSar = null;
+      let isBalanceSufficient = false;
       try {
         const ov = await api('GET', '/api/client/overview');
-        if (ov?.package) {
+        if (ov && ov.wallet_restricted) {
+          isBalanceSufficient = Boolean(ov.funds_available);
+        } else if (ov?.package) {
           remainingSar = Number(ov.package.remaining_sar ?? ov.package.remaining_usd) || 0;
-        } else {
+          isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
+        } else if (ov) {
           remainingSar = Number(ov?.balance_sar ?? ov?.balance_usd) || 0;
+          isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
         }
       } catch (err) {
         console.warn('Overview fetch error:', err);
       }
-
-      const isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
 
       return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -686,12 +693,15 @@
           '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
           '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>' + points + ' نقطة</strong></div>' +
           '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ريال</strong></div>' +
-          '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
-          '<span>رصيد المحفظة المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال</strong>' +
-          '</div></div>' +
+          (canSeeWallet && remainingSar !== null
+            ? '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
+              '<span>رصيد المحفظة المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال</strong>' +
+              '</div>'
+            : '') +
+          '</div>' +
           (!isBalanceSufficient
             ? '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px;border-radius:8px;font-size:12px;margin-bottom:14px;">' +
-              'الرصيد المتاح في باقة الشركة غير كافٍ لتغطية التكلفة التقديرية. يرجى شحن الرصيد أولاً.' +
+              'الرصيد المتاح في باقة الشركة غير كافٍ لتغطية التكلفة التقديرية.' +
               '</div>'
             : '') +
           '<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">' +
@@ -700,7 +710,9 @@
             ? (canSelfDecide
               ? '<button type="button" id="genApproveConfirmBtn" class="btn primary" style="padding:8px 20px;">تعميد وبدء التوليد</button>'
               : '<span class="tenant-hint" id="genApproveWaiting">أُرسل الطلب — بانتظار قرار معتمد التوليد</span>')
-            : '<button type="button" id="genApproveRechargeBtn" class="btn primary" style="padding:8px 20px;">شحن الرصيد</button>') +
+            : (canSeeWallet
+              ? '<button type="button" id="genApproveRechargeBtn" class="btn primary" style="padding:8px 20px;">شحن الرصيد</button>'
+              : '')) +
           '</div></div>';
 
         document.body.appendChild(modal);

@@ -484,8 +484,9 @@ def _require_admin_content_access(tenant_id, scope, target_id=None):
         print(f'[ACCESS GRANT] audit write failed: {exc}')
     if not grant.get('first_accessed_at'):
         _notify_tenant_admins(
-            tenant_id, 'وصول إداري إلى محتوى الشركة',
-            'اطلع مدير النظام على محتوى شركتك بموجب طلب الوصول المعتمد: ' + (grant.get('reason') or ''),
+            tenant_id, 'مدير المنصة اطّلع على محتوى شركتك',
+            'اطّلع مدير المنصة على محتوى شركتك بموجب إذن الاطّلاع المعتمد — السبب: '
+            + (grant.get('reason') or ''),
             entity_type='admin_access_request', entity_id=grant['id'])
     return grant
 

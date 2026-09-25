@@ -39,7 +39,8 @@ def api_request_final_file_approval(presentation_id):
                 g.tenant_id, 'طلب اعتماد ملف نهائي',
                 f'«{title}» بانتظار قرار اعتماد الملف النهائي',
                 category='final_approval', user_id=approver['id'],
-                entity_type='final_file_approval', entity_id=approval['id'])
+                entity_type='final_file_approval', entity_id=approval['id'],
+                mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_audit_event('final_file_approval.requested', 'final_file_approval', approval['id'],
@@ -87,14 +88,16 @@ def api_decide_final_file_approval(approval_id):
             g.tenant_id, 'final_file_approval', approval_id,
             closed_by_name=_landloom_actor_name())
         requester = str(result.get('requested_by') or '')
-        if requester and requester != str(_landloom_actor_id()):
+        if requester and requester != str(_landloom_actor_id()) \
+                and not requester.startswith('tenant-admin:'):
             message = 'اعتُمد الملف النهائي' if data.get('decision') == 'approved' \
                 else 'أُعيد الملف النهائي للتعديل'
             db.create_notification(
                 g.tenant_id, message, str(data.get('note') or '').strip() or None,
                 category='final_approval',
                 user_id=requester,
-                entity_type='final_file_approval', entity_id=approval_id)
+                entity_type='final_file_approval', entity_id=approval_id,
+                mirror_admin=not _landloom_actor_is_admin())
     except Exception:
         pass
     _record_audit_event(f"final_file_approval.{data.get('decision')}", 'final_file_approval',

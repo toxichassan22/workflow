@@ -59,6 +59,22 @@ def _notification_muted_categories():
     return [category for category, enabled in prefs.items() if not enabled]
 
 
+def _notification_categories_for_actor():
+    """Categories this actor may actually receive. Wallet, recharge and the
+    support desk are company-admin territory (employee sessions have those
+    permissions pinned off), so staff feeds never list them as filters or
+    preference toggles."""
+    categories = list(db.NOTIFICATION_CATEGORIES)
+    if _landloom_actor_is_admin():
+        return categories
+    hidden = set()
+    if not _landloom_can('billing'):
+        hidden.update(('billing', 'recharge'))
+    if not _landloom_can('support_tickets'):
+        hidden.add('support')
+    return [category for category in categories if category not in hidden]
+
+
 # ── t40: notifications ───────────────────────────────────────────────────────
 
 @app.route('/api/notifications', methods=['GET'])
@@ -91,7 +107,8 @@ def api_list_notifications():
     unread = db.count_notifications(
         g.tenant_id, user_id=recipient, unread_only=True, muted_categories=muted)
     return jsonify({'success': True, 'notifications': items, 'total': total,
-                    'unreadCount': unread, 'categories': list(db.NOTIFICATION_CATEGORIES)})
+                    'unreadCount': unread,
+                    'categories': _notification_categories_for_actor()})
 
 
 @app.route('/api/notifications/unread-count', methods=['GET'])
@@ -109,7 +126,7 @@ def api_notifications_unread_count():
 def api_get_notification_preferences():
     prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())
     return jsonify({'success': True, 'preferences': prefs,
-                    'categories': list(db.NOTIFICATION_CATEGORIES)})
+                    'categories': _notification_categories_for_actor()})
 
 
 @app.route('/api/notifications/preferences', methods=['PUT'])
@@ -125,7 +142,7 @@ def api_set_notification_preferences():
             db.set_notification_preference(g.tenant_id, recipient, category, bool(enabled))
     prefs = db.get_notification_preferences(g.tenant_id, recipient)
     return jsonify({'success': True, 'preferences': prefs,
-                    'categories': list(db.NOTIFICATION_CATEGORIES)})
+                    'categories': _notification_categories_for_actor()})
 
 
 @app.route('/api/notifications', methods=['POST'])
@@ -149,6 +166,7 @@ def api_create_notification():
         user_id=target_user,
         entity_type=data.get('entityType'), entity_id=data.get('entityId'),
         email_to=data.get('emailTo'),
+        mirror_admin=not _landloom_actor_is_admin(),
     )
     return jsonify({'success': True, 'notification': row})
 

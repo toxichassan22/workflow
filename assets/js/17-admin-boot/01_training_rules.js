@@ -734,8 +734,15 @@
         denied: WFT('users.access_denied', 'مرفوض'), expired: WFT('users.access_expired', 'منتهي'),
         revoked: WFT('users.access_revoked', 'ملغي'),
       };
+      const scopeLabels = {
+        tenant: WFT('users.access_scope_tenant', 'كل محتوى الشركة'),
+        presentation: WFT('users.access_scope_presentation', 'عرض تقديمي محدد'),
+        file: WFT('users.access_scope_file', 'ملف محدد'),
+      };
       box.innerHTML = requests.map(r => {
         const state = '<span>' + escapeHtml(statusLabels[r.status] || r.status) + '</span>';
+        const scope = '<span>' + escapeHtml(scopeLabels[r.scope] || scopeLabels.tenant) + '</span>' +
+          (r.target_id ? ' — ' + escapeHtml(r.target_id) : '');
         const expiry = r.expires_at ? ' | <span>' + escapeHtml(WFT('users.access_expires', 'ينتهي')) + ':</span> ' + escapeHtml(String(r.expires_at).slice(0, 16).replace('T', ' ')) : '';
         let actions = '';
         if (r.status === 'pending') {
@@ -745,7 +752,7 @@
           actions = '<button type="button" class="btn small danger" onclick="revokeAccessRequest(\'' + r.id + '\')">' + escapeHtml(WFT('users.access_revoke', 'إلغاء الوصول')) + '</button>';
         }
         return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
-          '<div><h3 style="font-size:14px">' + escapeHtml(r.requested_by_name || '') + ' — ' + escapeHtml(r.scope || 'tenant') + '</h3>' +
+          '<div><h3 style="font-size:14px">' + escapeHtml(r.requested_by_name || '') + ' — ' + scope + '</h3>' +
           '<div class="meta">' + state + ' | ' + escapeHtml(r.reason || '') + expiry + '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' + actions + '</div></div>';
       }).join('');

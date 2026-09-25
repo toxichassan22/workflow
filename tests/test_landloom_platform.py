@@ -792,7 +792,7 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(legacy['category'], 'general')
 
     def test_notification_list_filters_and_counts(self):
-        db.create_notification('tenant-1', 'مهمة', category='task', user_id='user-1')
+        db.create_notification('tenant-1', 'مهمة', category='job', user_id='user-1')
         db.create_notification('tenant-1', 'رصيد', category='billing', user_id='user-1')
         db.create_notification('tenant-1', 'عام', user_id='user-2')
         listed = db.list_notifications('tenant-1', user_id='user-1', category='billing')
@@ -818,13 +818,13 @@ class LandloomDbTests(unittest.TestCase):
                          {'error': 'invalid_category'})
         prefs = db.get_notification_preferences('tenant-1', 'user-1')
         self.assertFalse(prefs['billing'])
-        self.assertTrue(prefs['task'])
+        self.assertTrue(prefs['job'])
         self.assertTrue(db.get_notification_preferences('tenant-1', 'user-2')['billing'])
         db.create_notification('tenant-1', 'رصيد', category='billing', user_id='user-1')
-        db.create_notification('tenant-1', 'مهمة', category='task', user_id='user-1')
+        db.create_notification('tenant-1', 'مهمة', category='job', user_id='user-1')
         items = db.list_notifications('tenant-1', user_id='user-1', muted_categories=['billing'])
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]['category'], 'task')
+        self.assertEqual(items[0]['category'], 'job')
         self.assertEqual(
             db.count_notifications('tenant-1', user_id='user-1', muted_categories=['billing']), 1)
 
@@ -1262,15 +1262,15 @@ class LandloomApiTests(unittest.TestCase):
             json={'categories': {'billing': False, 'junk': False}})
         self.assertEqual(updated.status_code, 200)
         self.assertFalse(updated.get_json()['preferences']['billing'])
-        self.assertTrue(updated.get_json()['preferences']['task'])
+        self.assertTrue(updated.get_json()['preferences']['job'])
         db.create_notification(self.tenant_id, 'فاتورة', category='billing',
                                user_id=self.user_id)
-        db.create_notification(self.tenant_id, 'مهمة', category='task',
+        db.create_notification(self.tenant_id, 'مهمة', category='job',
                                user_id=self.user_id)
         listed = self.client.get('/api/notifications', headers=self.headers(self.token))
         cats = {n['category'] for n in listed.get_json()['notifications']}
         self.assertNotIn('billing', cats)
-        self.assertIn('task', cats)
+        self.assertIn('job', cats)
         restored = self.client.put(
             '/api/notifications/preferences', headers=self.headers(self.token),
             json={'category': 'billing', 'enabled': True})

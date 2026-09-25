@@ -1,7 +1,9 @@
 # ── t41/t24/t42: notifications and the approval task center ─────────────────
 
+# The owner removed the task list from the product, so no 'task' category:
+# the escalation sweep files its notices under the approval kind itself.
 NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_approval', 'recharge',
-                           'billing', 'support', 'task', 'job', 'platform', 'general')
+                           'billing', 'support', 'job', 'platform', 'general')
 
 
 def create_notification(tenant_id, title, body=None, category='general', user_id=None,
@@ -371,7 +373,7 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
         clauses.insert(0, 'tenant_id = ?')
         params.insert(0, tenant_id)
     rows = conn.execute(
-        'SELECT id, tenant_id, title, assignee_id FROM approval_tasks WHERE '
+        'SELECT id, tenant_id, kind, title, assignee_id FROM approval_tasks WHERE '
         + ' AND '.join(clauses), params,
     ).fetchall()
     escalated = []
@@ -379,13 +381,30 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
         conn.execute('UPDATE approval_tasks SET escalated_at = ? WHERE id = ?', (_utcnow().isoformat(), row['id']))
         escalated.append(row['id'])
     conn.commit()
+    # The task list is gone from the product, so the escalation lands as a
+    # plain notice in the overdue item's own stream — never under 'task'.
+    kind_category = {
+        'section_approval': 'section_approval', 'revision': 'section_approval',
+        'generation_approval': 'generation_approval', 'final_approval': 'final_approval',
+        'support': 'support', 'recharge': 'recharge',
+    }
+    kind_title = {
+        'section_approval': 'اعتماد قسم متأخر عن موعده',
+        'revision': 'مراجعة قسم متأخرة عن موعدها',
+        'generation_approval': 'اعتماد توليد متأخر عن موعده',
+        'final_approval': 'اعتماد ملف نهائي متأخر عن موعده',
+        'support': 'تذكرة دعم متأخرة عن موعدها',
+        'recharge': 'طلب شحن متأخر عن موعده',
+    }
     for row in rows:
         admin_email = next(
             (a['email'] for a in tenant_admin_contacts(row['tenant_id']) if a.get('email')),
             None)
         create_notification(
-            row['tenant_id'], 'مهمة اعتماد متأخرة صعّدت',
-            body=row['title'], category='task',
+            row['tenant_id'],
+            kind_title.get(row['kind'], 'طلب متأخر عن موعده'),
+            body=row['title'],
+            category=kind_category.get(row['kind'], 'general'),
             entity_type='approval_task', entity_id=row['id'],
             user_id='tenant-admin:' + str(row['tenant_id']),
             email_to=admin_email)
