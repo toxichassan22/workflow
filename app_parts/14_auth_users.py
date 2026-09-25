@@ -207,6 +207,47 @@ def _bill_tenant_unbilled_usage_async(tenant_id):
         print(f"[BILLING] usage billing spawn failed: {exc}")
 
 
+def _trial_watch_sweep():
+    """Warn a company once when its trial enters the final days, and once when
+    it lapses. Both notices are keyed to the trial end date, so an admin who
+    extends the window re-arms the warnings automatically."""
+    warned = expired = 0
+    with _worker_app_context():
+        for tenant in db.get_all_tenants() or []:
+            if tenant.get('is_admin') or not tenant.get('is_active'):
+                continue
+            try:
+                state = db.tenant_trial_state(tenant)
+            except Exception:
+                continue
+            kind = {'expiring': 'trial_expiring', 'expired': 'trial_expired'} \
+                .get(state.get('state'))
+            if not kind:
+                continue
+            ends = str(state.get('ends_at') or '')
+            if db.recent_notification_exists(
+                    tenant['id'], kind, ends, since_hours=24 * 3650):
+                continue
+            if kind == 'trial_expiring':
+                title = 'الفترة التجريبية تنتهي قريبًا'
+                body = (f'تنتهي تجربة الشركة خلال {state.get("days_left")} يوم '
+                        '— راجع الاشتراك لتفادي توقف التوليد.')
+            else:
+                title = 'انتهت الفترة التجريبية'
+                body = ('انتهت تجربة الشركة وتوقف التوليد — '
+                        'تواصل مع الإدارة للاشتراك والاستئناف.')
+            db.create_notification(
+                tenant['id'], title, body=body, category='billing',
+                user_id='tenant-admin:' + str(tenant['id']),
+                entity_type=kind, entity_id=ends,
+                email_to=tenant.get('email'))
+            if kind == 'trial_expiring':
+                warned += 1
+            else:
+                expired += 1
+    return {'warned': warned, 'expired': expired}
+
+
 def _run_housekeeping_tick():
     """One bounded pass over every standing sweep: outbound mail, approval-task
     reminders and escalations, stale point holds and silent generation jobs.
@@ -223,6 +264,7 @@ def _run_housekeeping_tick():
         ('rate_limits', db.rate_limit_cleanup),
         ('usage_billing', _bill_all_unbilled_usage),
         ('cap_resync', _resync_pending_tenant_caps),
+        ('trial_watch', _trial_watch_sweep),
     )
     for name, fn in steps:
         try:
@@ -283,7 +325,7 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
     body = (
         f'مرحبًا {account_name}\n\n'
         f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
-        f'اسم المستخدم: {username}\n'
+        f'البريد الإلكتروني: {recipient}\n'
         f'رابط تعيين كلمة المرور: {setup_url}\n\n'
         'هذا الرابط صالح للاستخدام مرة واحدة.'
     )
@@ -291,6 +333,7 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
 
 
 def _company_payload(tenant):
+    trial = db.tenant_trial_state(tenant)
     return {
         'id': tenant['id'],
         'companyName': tenant['company_name'],
@@ -320,6 +363,8 @@ def _company_payload(tenant):
         'activatedAt': tenant.get('activated_at'),
         'activatedByName': tenant.get('activated_by_name'),
         'trialEndsAt': tenant.get('trial_ends_at'),
+        'trialState': trial.get('state'),
+        'trialDaysLeft': trial.get('days_left'),
         'deactivatedReason': tenant.get('deactivated_reason'),
     }
 
@@ -461,7 +506,7 @@ def api_login():
     if limited:
         return limited
     data = request.json or {}
-    identity = (data.get('email') or data.get('username') or '').strip().lower()
+    identity = (data.get('email') or '').strip().lower()
     password = data.get('password', '')
 
     if not identity or not password:
@@ -474,8 +519,8 @@ def api_login():
     if limited:
         return limited
 
-    tenant = db.get_tenant_by_email(identity) or db.get_tenant_by_username(identity)
-    user = db.get_user_by_email(identity) or db.get_user_by_username(identity)
+    tenant = db.get_tenant_by_email(identity)
+    user = db.get_user_by_email(identity)
 
     # ISS-002: the primary company admin is a single login identity owned by
     # the tenants row; its users row is the management record whose live state
@@ -643,6 +688,7 @@ def api_password_setup_complete(raw_token):
 def api_me():
     """Get current tenant/user info."""
     t = g.tenant
+    trial = db.tenant_trial_state(t)
     result = {
         'success': True,
         'tenant': {
@@ -654,6 +700,9 @@ def api_me():
             'subdomain': t.get('subdomain'),
             'domain': t.get('domain'),
             'slug': db.tenant_slug(t),
+            'trialEndsAt': t.get('trial_ends_at'),
+            'trialState': trial.get('state'),
+            'trialDaysLeft': trial.get('days_left'),
         }
     }
     if g.user_id:

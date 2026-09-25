@@ -101,13 +101,13 @@ class AdminCompanyAccountTests(unittest.TestCase):
         self.assertTrue(result['setupUrl'].endswith(result['setupUrl'].rsplit('/', 1)[-1]))
         self.assertFalse(result['welcomeEmailSent'])
 
-    def test_password_setup_link_is_one_time_and_supports_username_login(self):
+    def test_password_setup_link_is_one_time_and_login_is_email_only(self):
         result = self._create_company('password')
         raw_token = result['setupUrl'].rsplit('/', 1)[-1]
 
         details = self.client.get(f'/api/auth/password-setup/{raw_token}')
         self.assertEqual(details.status_code, 200)
-        self.assertEqual(details.get_json()['username'], 'company_password')
+        self.assertEqual(details.get_json()['email'], 'company-password@example.test')
 
         completed = self.client.post(
             f'/api/auth/password-setup/{raw_token}',
@@ -116,9 +116,22 @@ class AdminCompanyAccountTests(unittest.TestCase):
         self.assertEqual(completed.status_code, 200, completed.get_json())
         self.assertTrue(completed.get_json()['token'])
 
-        login = self.client.post(
+        # Login is email+password only: the username is an internal identifier,
+        # not a credential — a username-shaped payload never authenticates.
+        refused = self.client.post(
             '/api/auth/login',
             json={'username': 'company_password', 'password': 'SecurePass123'},
+        )
+        self.assertNotEqual(refused.status_code, 200)
+        by_username_in_email_field = self.client.post(
+            '/api/auth/login',
+            json={'email': 'company_password', 'password': 'SecurePass123'},
+        )
+        self.assertEqual(by_username_in_email_field.status_code, 401)
+
+        login = self.client.post(
+            '/api/auth/login',
+            json={'email': 'company-password@example.test', 'password': 'SecurePass123'},
         )
         self.assertEqual(login.status_code, 200, login.get_json())
 
@@ -293,7 +306,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         login = self.client.post(
             '/api/auth/login',
-            json={'username': 'suspend_company', 'password': 'ManualPass123'},
+            json={'email': 'suspend-company@example.test', 'password': 'ManualPass123'},
         )
         self.assertEqual(login.status_code, 200, login.get_json())
 
@@ -307,7 +320,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         blocked = self.client.post(
             '/api/auth/login',
-            json={'username': 'suspend_company', 'password': 'ManualPass123'},
+            json={'email': 'suspend-company@example.test', 'password': 'ManualPass123'},
         )
         self.assertEqual(blocked.status_code, 403)
 
@@ -320,7 +333,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         login_again = self.client.post(
             '/api/auth/login',
-            json={'username': 'suspend_company', 'password': 'ManualPass123'},
+            json={'email': 'suspend-company@example.test', 'password': 'ManualPass123'},
         )
         self.assertEqual(login_again.status_code, 200, login_again.get_json())
 
@@ -356,7 +369,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         login = self.client.post(
             '/api/auth/login',
-            json={'username': 'company_resetflow', 'password': 'ManualReset123'},
+            json={'email': 'company-resetflow@example.test', 'password': 'ManualReset123'},
         )
         self.assertEqual(login.status_code, 200, login.get_json())
 
@@ -425,7 +438,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         login = self.client.post(
             '/api/auth/login',
-            json={'username': 'manual_company', 'password': 'ManualPass123'},
+            json={'email': 'manual-company@example.test', 'password': 'ManualPass123'},
         )
         self.assertEqual(login.status_code, 200, login.get_json())
 
@@ -604,7 +617,7 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         login = self.client.post(
             '/api/auth/login',
-            json={'username': 'company_onetimelink', 'password': 'SecurePass123'},
+            json={'email': 'company-onetimelink@example.test', 'password': 'SecurePass123'},
         )
         self.assertEqual(login.status_code, 200, login.get_json())
 

@@ -757,8 +757,8 @@
         '<h2>تعيين كلمة المرور</h2>' +
         '<p>' + escapeHtml(data.companyName || '') + '</p>' +
         '<div class="tenant-grid full" style="margin-bottom:16px;text-align:right">' +
-        '<div class="tenant-field"><label>اسم المستخدم</label><p style="margin:0">' +
-        escapeHtml(data.username || '') + '</p></div></div>' +
+        '<div class="tenant-field"><label>البريد الإلكتروني</label><p style="margin:0">' +
+        escapeHtml(data.email || '') + '</p></div></div>' +
         '<div id="passwordSetupError" class="auth-error"></div>' +
         '<form class="auth-form active" onsubmit="handlePasswordSetup(event, \'' +
         rawToken.replace(/'/g, '') + '\')">' +

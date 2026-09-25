@@ -167,6 +167,70 @@ class HousekeepingDbTests(unittest.TestCase):
         self.assertIsNone(listed[pkg['id']]['duration_days'])
         self.assertEqual(listed[pkg['id']]['features'], [])
 
+    # ── trial window state and its housekeeping watch ──────────────────────
+
+    def test_trial_state_none_without_date_and_active_with_far_date(self):
+        tenant = db.get_tenant_by_id('tenant-1')
+        self.assertEqual(db.tenant_trial_state(tenant)['state'], 'none')
+
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() + timedelta(days=30)).isoformat())
+        state = db.tenant_trial_state(db.get_tenant_by_id('tenant-1'))
+        self.assertEqual(state['state'], 'active')
+        self.assertEqual(state['days_left'], 30)
+
+    def test_trial_state_expiring_inside_warn_window_and_expired_after(self):
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() + timedelta(days=2)).isoformat())
+        state = db.tenant_trial_state(db.get_tenant_by_id('tenant-1'))
+        self.assertEqual(state['state'], 'expiring')
+        self.assertEqual(state['days_left'], 2)
+
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() - timedelta(days=1)).isoformat())
+        state = db.tenant_trial_state(db.get_tenant_by_id('tenant-1'))
+        self.assertEqual(state['state'], 'expired')
+        self.assertEqual(state['days_left'], 0)
+
+        # A date-only value counts through that whole day, not just midnight.
+        db.update_tenant('tenant-1', trial_ends_at=db._utcnow().date().isoformat())
+        self.assertEqual(
+            db.tenant_trial_state(db.get_tenant_by_id('tenant-1'))['state'],
+            'expiring')
+
+    def test_trial_state_expired_is_exempted_by_package_subscription(self):
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() - timedelta(days=1)).isoformat())
+        tenant = db.get_tenant_by_id('tenant-1')
+        self.assertEqual(db.tenant_trial_state(tenant)['state'], 'expired')
+        pkg = db.create_billing_package('باقة مشتركة', credit_sar=10)
+        db.create_subscription('tenant-1', package_id=pkg['id'])
+        self.assertEqual(db.tenant_trial_state(tenant)['state'], 'none')
+
+    def test_trial_watch_sweep_notifies_once_per_window(self):
+        import app as application_module
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() + timedelta(days=1)).isoformat())
+        result = application_module._trial_watch_sweep()
+        self.assertEqual(result['warned'], 1)
+        notes = db.get_db().execute(
+            "SELECT entity_type, entity_id FROM notifications WHERE tenant_id = 'tenant-1'"
+        ).fetchall()
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]['entity_type'], 'trial_expiring')
+        # Idempotent: a second pass inside the same window notifies nobody.
+        self.assertEqual(application_module._trial_watch_sweep()['warned'], 0)
+
+        # Once the window lapses the sweep sends the expiry notice instead.
+        db.update_tenant('tenant-1', trial_ends_at=(
+            db._utcnow() - timedelta(hours=2)).isoformat())
+        result = application_module._trial_watch_sweep()
+        self.assertEqual(result['expired'], 1)
+        types = {r['entity_type'] for r in db.get_db().execute(
+            "SELECT entity_type FROM notifications WHERE tenant_id = 'tenant-1'"
+        ).fetchall()}
+        self.assertEqual(types, {'trial_expiring', 'trial_expired'})
+
 
 class HousekeepingApiTests(unittest.TestCase):
     def setUp(self):
@@ -228,6 +292,35 @@ class HousekeepingApiTests(unittest.TestCase):
         for step in ('email', 'reminders', 'escalations',
                      'stale_reservations', 'stale_generation_jobs'):
             self.assertIn(step, summary)
+
+    def test_expired_trial_refuses_generation_before_any_work(self):
+        # A guarded generation route answers TRIAL_EXPIRED up front — the
+        # refusal fires even with billing enforcement off.
+        db.update_tenant(self.tenant_id, trial_ends_at=(
+            db._utcnow() - timedelta(days=1)).isoformat())
+        res = self.client.post(
+            '/api/generate-titles', headers=self.headers(self.token), json={})
+        self.assertEqual(res.status_code, 403, res.get_json())
+        self.assertEqual(res.get_json().get('error_code'), 'TRIAL_EXPIRED')
+        # The AI-layer choke refuses the same company even off the route path.
+        gate = self.application_module._tenant_key_gate(tenant_id=self.tenant_id)
+        self.assertIsNotNone(gate)
+        self.assertEqual(gate.get('error_code'), 'TRIAL_EXPIRED')
+
+    def test_active_trial_and_no_trial_pass_the_gates(self):
+        res = self.client.post(
+            '/api/generate-titles', headers=self.headers(self.token), json={})
+        self.assertNotEqual(res.status_code, 403)
+        self.assertIsNone(
+            self.application_module._tenant_key_gate(tenant_id=self.tenant_id))
+
+        db.update_tenant(self.tenant_id, trial_ends_at=(
+            db._utcnow() + timedelta(days=10)).isoformat())
+        res = self.client.post(
+            '/api/generate-titles', headers=self.headers(self.token), json={})
+        self.assertNotEqual(res.status_code, 403)
+        self.assertIsNone(
+            self.application_module._tenant_key_gate(tenant_id=self.tenant_id))
 
     def test_drain_marks_outbox_and_delivery_rows(self):
         note = db.create_notification(

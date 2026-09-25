@@ -242,6 +242,7 @@
       }
       setTenantUser(tenantUser);
       updateTenantTopbar();
+      renderTrialBanner();
       applyRolePermissions();
       applyTenantBrandingData(brandingData);
       // A path the user actually asked for wins over the last-visited page, so deep links and
@@ -413,6 +414,27 @@
       updateTenantLogoMark();
       const adminBtn = document.getElementById('tenantAdminBtn');
       if (adminBtn) adminBtn.classList.toggle('tenant-hidden', !tenantUser.isAdmin);
+    }
+
+    function renderTrialBanner() {
+      const old = document.getElementById('trialBanner');
+      if (old) old.remove();
+      const state = tenantUser && !tenantUser.isAdmin ? tenantUser.trialState : null;
+      if (state !== 'expired' && state !== 'expiring') return;
+      const days = Number(tenantUser.trialDaysLeft) || 0;
+      const banner = document.createElement('div');
+      banner.id = 'trialBanner';
+      banner.style.cssText = 'padding:10px 20px;text-align:center;font-weight:700;font-size:13px;' +
+        (state === 'expired'
+          ? 'background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca'
+          : 'background:#fffbeb;color:#92400e;border-bottom:1px solid #fde68a');
+      banner.textContent = state === 'expired'
+        ? 'انتهت الفترة التجريبية للشركة وتوقف التوليد — تواصل مع الإدارة لتجديد الاشتراك'
+        : (days <= 1 ? 'تنتهي الفترة التجريبية للشركة غدًا'
+          : days === 2 ? 'تنتهي الفترة التجريبية للشركة خلال يومين'
+          : 'تنتهي الفترة التجريبية للشركة خلال ' + days + ' أيام');
+      const topbar = document.querySelector('.tenant-topbar');
+      if (topbar) topbar.insertAdjacentElement('afterend', banner);
     }
 
     async function loadTenantFontCss() {

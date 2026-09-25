@@ -89,18 +89,30 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
     """
     try:
         with _worker_app_context():
-            if not REQUIRE_TENANT_OPENROUTER_KEY:
-                return None
             tid = tenant_id
             if tid is None:
                 tid = _tenant_id_from_usage_ctx(usage_ctx)
-            if not tid:
-                return None
-            try:
-                tenant = db.get_tenant_by_id(tid)
-            except Exception:
-                tenant = None
+            tenant = None
+            if tid:
+                try:
+                    tenant = db.get_tenant_by_id(tid)
+                except Exception:
+                    tenant = None
             if tenant and tenant.get('is_admin'):
+                return None
+            # An elapsed trial blocks every AI call for the company regardless
+            # of strict key mode — the account stays open (billing, login) but
+            # generation is the paid product and stops here.
+            if tenant is not None:
+                try:
+                    if db.tenant_trial_state(tenant).get('state') == 'expired':
+                        return {'message': 'انتهت الفترة التجريبية للشركة — جدد الاشتراك لاستئناف التوليد',
+                                'error_code': 'TRIAL_EXPIRED'}
+                except Exception as exc:
+                    print(f"[TRIAL] gate check failed for {tid}: {exc}")
+            if not REQUIRE_TENANT_OPENROUTER_KEY:
+                return None
+            if not tid:
                 return None
             try:
                 meta = db.get_tenant_openrouter_key_meta(tid)

@@ -214,6 +214,8 @@
     function showAuthPage() {
       const app = document.querySelector('.app');
       if (app) app.style.display = 'none';
+      const trialBanner = document.getElementById('trialBanner');
+      if (trialBanner) trialBanner.remove();
       document.getElementById('tenantAppPage').classList.remove('active');
       document.getElementById('tenantAuthPage').classList.add('active');
       // The login screen owns the bare domain: it never carries an /app/...

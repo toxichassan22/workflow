@@ -99,6 +99,47 @@ def current_subscription(tenant_id):
     return dict(row) if row else None
 
 
+# A trial inside its final days warns the company admin once before it lapses.
+TRIAL_WARN_DAYS = 3
+
+
+def tenant_trial_state(tenant):
+    """Trial window state for one tenant row: none / active / expiring / expired.
+
+    ``trial_ends_at`` is the only signal — companies without it are simply not on
+    a trial. A date-only value counts through that whole day (23:59:59), and an
+    elapsed window stops mattering once an active subscription pins a package:
+    paying tenants are not locked out by a stale trial date.
+    """
+    ends_raw = str((tenant or {}).get('trial_ends_at') or '').strip()
+    if not ends_raw:
+        return {'state': 'none', 'days_left': None, 'ends_at': None}
+    try:
+        ends_dt = datetime.fromisoformat(
+            ends_raw[:10] + 'T23:59:59' if len(ends_raw) == 10 else ends_raw)
+    except (TypeError, ValueError):
+        return {'state': 'none', 'days_left': None, 'ends_at': ends_raw}
+    if ends_dt.tzinfo is not None:
+        ends_dt = ends_dt.replace(tzinfo=None)
+    now = _utcnow()
+    if ends_dt <= now:
+        try:
+            sub = current_subscription(tenant.get('id'))
+        except Exception:
+            sub = None
+        if sub and sub.get('package_id'):
+            return {'state': 'none', 'days_left': None, 'ends_at': ends_raw}
+        return {'state': 'expired', 'days_left': 0, 'ends_at': ends_raw}
+    days_left = int((ends_dt - now).total_seconds() // 86400)
+    if (ends_dt - now).total_seconds() % 86400:
+        days_left += 1
+    return {
+        'state': 'expiring' if days_left <= TRIAL_WARN_DAYS else 'active',
+        'days_left': days_left,
+        'ends_at': ends_raw,
+    }
+
+
 def list_subscriptions(tenant_id):
     conn = get_db()
     rows = conn.execute(

@@ -501,10 +501,22 @@ def _require_billing_balance(flow_key):
     """Pre-flight wallet guard for expensive operations.
 
     Returns None when the operation may proceed, otherwise a (body, status)
-    tuple the route must return. Enforcement is off unless BILLING_ENFORCE=1,
-    so existing behaviour and tests are unchanged until the owner enables it.
+    tuple the route must return. The trial gate is unconditional — an expired
+    trial refuses the operation even when billing enforcement is off — while
+    the wallet check runs only with BILLING_ENFORCE=1.
     Metering itself never raises; only this explicit billing guard can refuse.
     """
+    try:
+        _tenant = getattr(g, 'tenant', None)
+        if _tenant and not getattr(g, 'is_admin', False) \
+                and db.tenant_trial_state(_tenant).get('state') == 'expired':
+            return jsonify({
+                'success': False,
+                'error': 'انتهت الفترة التجريبية للشركة — جدد الاشتراك لاستئناف التوليد',
+                'error_code': 'TRIAL_EXPIRED',
+            }), 403
+    except Exception:
+        pass
     try:
         if not db.billing_enforcement_enabled():
             return None
