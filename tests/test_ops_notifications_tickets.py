@@ -232,6 +232,25 @@ class OpsSectionTests(unittest.TestCase):
                    if n['entity_type'] == 'support_ticket' and 'حالة' in (n['title'] or '')]
         self.assertEqual(len(notices), 1)
 
+    def test_admin_resolve_closes_the_ticket(self):
+        """«تم الحل» is terminal: the ticket lands in 'closed' directly."""
+        created = self.client.post(
+            '/api/support/tickets', headers=self.headers(self.token),
+            json={'subject': 'مشكلة', 'body': 'تفاصيل'})
+        ticket_id = created.get_json()['ticket']['id']
+        admin = self._admin_token()
+        response = self.client.post(
+            f'/api/admin/support/tickets/{ticket_id}/status',
+            headers=self.headers(admin), json={'status': 'closed'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        ticket = response.get_json()['ticket']
+        self.assertEqual(ticket['status'], 'closed')
+        self.assertTrue(ticket.get('closed_at'))
+        notices = [n for n in self._feed(self.token)
+                   if n['entity_type'] == 'support_ticket' and 'حالة' in (n['title'] or '')]
+        self.assertEqual(len(notices), 1)
+        self.assertIn('مغلقة', notices[0]['body'])
+
     # ── Ticket attachments ────────────────────────────────────────────────
 
     def _upload_attachment(self, token, name='notes.txt', content=b'attachment-body'):

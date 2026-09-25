@@ -612,7 +612,9 @@
         llEscape(a.original_name || WFT('tickets.attachment', 'مرفق')) + '</button>').join('');
       const statusActions = t.status !== 'closed'
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' +
-          [['in_progress', 'قيد المعالجة', 'ghost'], ['resolved', 'تم الحل', 'green'], ['closed', 'إغلاق', 'danger']]
+          // «تم الحل» is the terminal act — it closes the ticket directly,
+          // so a solved ticket never sits in a separate resolved state.
+          [['in_progress', 'قيد المعالجة', 'ghost'], ['closed', 'تم الحل', 'green']]
             .filter(a => a[0] !== t.status)
             .map(a => '<button type="button" class="btn small ' + a[2] + '" onclick="adminSetTicketStatus(\'' + id + '\', \'' + a[0] + '\')">' + a[1] + '</button>')
             .join('') +

@@ -204,9 +204,13 @@ def api_admin_update_support_ticket_status(ticket_id):
             return failure
         _record_audit_event('support_ticket.status', 'support_ticket', ticket_id,
                             new_value=row.get('status'))
+        status_label = {'open': 'مفتوحة', 'in_progress': 'قيد المعالجة',
+                        'waiting_customer': 'بانتظار العميل', 'escalated': 'مصعّدة',
+                        'resolved': 'تم الحل', 'closed': 'مغلقة',
+                        'reopened': 'معاد فتحها'}.get(row.get('status'), row.get('status'))
         db.create_notification(
             ticket['tenant_id'], 'تحديث حالة التذكرة',
-            body=f'{ticket.get("subject") or ""} — {row.get("status")}',
+            body=f'{ticket.get("subject") or ""} — {status_label}',
             category='support', user_id=ticket.get('created_by'),
             entity_type='support_ticket', entity_id=ticket_id)
     row = db.get_support_ticket_admin(ticket_id) or row
