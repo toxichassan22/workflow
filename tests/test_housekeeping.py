@@ -1,10 +1,9 @@
 """Housekeeping passes (t24/t40/t41/d08).
 
-Covers the automatic reminder/escalation sweeps and the email outbox
-drain: each runs on a timer or an explicit admin call, reaches the assignee
-and company admins in-app and by email, and stays idempotent so a repeated
-tick never notifies twice. Runs against a temporary SQLite database and never
-touches a real SMTP server.
+Covers the escalation sweep and the email outbox drain: each runs on a timer
+or an explicit admin call, reaches the company admin in-app and by email, and
+stays idempotent so a repeated tick never notifies twice. Runs against a
+temporary SQLite database and never touches a real SMTP server.
 """
 
 import os
@@ -69,38 +68,6 @@ class HousekeepingDbTests(unittest.TestCase):
     def _outbox_rows(self):
         conn = db.get_db()
         return conn.execute('SELECT * FROM email_outbox').fetchall()
-
-    # ── t24: automatic reminders ─────────────────────────────────────────
-
-    def test_due_reminder_notifies_assignee_once_per_cooldown(self):
-        task = db.create_approval_task(
-            'tenant-1', 'generation_approval', 'اعتماد توليد برج المشرق',
-            assignee_id=self.assignee_id, assignee_name='المعتمد', due_hours=1)
-        reminded = db.send_due_approval_reminders(due_window_hours=12)
-        self.assertIn(task['id'], reminded)
-        updated = db.get_db().execute(
-            'SELECT reminded_at FROM approval_tasks WHERE id = ?', (task['id'],)
-        ).fetchone()
-        self.assertTrue(updated['reminded_at'])
-        notes = self._notifications(self.assignee_id)
-        self.assertEqual(len(notes), 1)
-        self.assertEqual(notes[0]['category'], 'task')
-        outbox = self._outbox_rows()
-        self.assertEqual(len(outbox), 1)
-        self.assertEqual(outbox[0]['to_email'], 'approver@x.test')
-        # A second pass inside the cooldown does not re-remind.
-        self.assertEqual(db.send_due_approval_reminders(due_window_hours=12), [])
-        self.assertEqual(len(self._outbox_rows()), 1)
-
-    def test_manual_reminder_emails_the_assignee(self):
-        task = db.create_approval_task(
-            'tenant-1', 'section_approval', 'اعتماد قسم',
-            assignee_id=self.assignee_id, assignee_name='المعتمد')
-        result = db.remind_approval_task('tenant-1', task['id'])
-        self.assertTrue(result['reminded_at'])
-        outbox = self._outbox_rows()
-        self.assertEqual(len(outbox), 1)
-        self.assertEqual(outbox[0]['to_email'], 'approver@x.test')
 
     # ── t24: escalation ──────────────────────────────────────────────────
 

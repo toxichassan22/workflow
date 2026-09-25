@@ -540,16 +540,17 @@ def get_user_permissions(user_id, default_role='employee'):
     # sag_admin_panel is a platform-session attribute, not a grantable company
     # permission — a stale grant row must never resurrect it for an employee.
     defaults['sag_admin_panel'] = False
-    # Support tickets are the company admin's channel to the platform desk —
-    # no employee grant may open them, whatever a stale or future row says.
+    # Support tickets and the wallet belong to the company admin alone — no
+    # employee grant may open them, whatever a stale or future row says.
     defaults['support_tickets'] = False
+    defaults['billing'] = False
     return defaults
 
 
 def set_user_permission(user_id, permission_key, granted):
     """Set or override a permission for a user."""
     if permission_key not in PERMISSION_KEYS \
-            or permission_key in ('sag_admin_panel', 'support_tickets'):
+            or permission_key in ('sag_admin_panel', 'support_tickets', 'billing'):
         return False
     conn = get_db()
     perm_id = str(uuid.uuid4())

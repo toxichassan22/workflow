@@ -109,9 +109,9 @@ class IdentityDbTests(unittest.TestCase):
 
         admin_perms = db.get_user_permissions(legacy['company_admin'])
         for key in db.PERMISSION_KEYS:
-            # support_tickets is the tenant-direct admin's channel — an
-            # employee row never carries it, however broad its grants.
-            expected = key not in ('sag_admin_panel', 'support_tickets')
+            # support_tickets and billing belong to the tenant-direct admin —
+            # an employee row never carries them, however broad its grants.
+            expected = key not in ('sag_admin_panel', 'support_tickets', 'billing')
             self.assertEqual(admin_perms.get(key), expected, key)
 
         editor_perms = db.get_user_permissions(legacy['section_editor'])
@@ -819,11 +819,18 @@ class IdentityApiTests(unittest.TestCase):
         denied = self.client.post('/api/recharge-requests', headers=self.headers(emp_token),
                                   json={'packageName': 'باقة', 'amountUsd': 10})
         self.assertEqual(denied.status_code, 403)
-        db.set_user_permission(uid, 'billing', True)
+        # The wallet is the company admin's alone — the billing grant refuses
+        # to land on an employee row and the request stays denied.
+        self.assertFalse(db.set_user_permission(uid, 'billing', True))
         package = db.create_billing_package('باقة نمو', credit_sar=375, price_sar=375)
-        allowed = self.client.post('/api/recharge-requests', headers=self.headers(emp_token),
+        still_denied = self.client.post('/api/recharge-requests', headers=self.headers(emp_token),
+                                        json={'packageId': package['id'],
+                                              'referenceNumber': 'TRX-SEC-1'})
+        self.assertEqual(still_denied.status_code, 403)
+        allowed = self.client.post('/api/recharge-requests',
+                                   headers=self.headers(self.admin_user_token),
                                    json={'packageId': package['id'],
-                                         'referenceNumber': 'TRX-SEC-1'})
+                                         'referenceNumber': 'TRX-SEC-2'})
         self.assertEqual(allowed.status_code, 200, allowed.get_json())
 
     # ── ISS-005: login attempt limits over HTTP ──────────────────────────

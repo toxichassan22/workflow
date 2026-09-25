@@ -110,8 +110,6 @@ class PostgresParityTests(unittest.TestCase):
         task = db.create_approval_task(
             tenant_id, 'section_approval', 'اعتماد قسم', due_hours=48)
         self.assertEqual(task['status'], 'open')
-        reminded = db.remind_approval_task(tenant_id, task['id'])
-        self.assertTrue(reminded['reminded_at'])
         closed = db.close_approval_task(tenant_id, task['id'])
         self.assertEqual(closed['status'], 'done')
 

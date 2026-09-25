@@ -342,18 +342,6 @@ def get_users_with_permission(tenant_id, permission_key):
     return users
 
 
-def _user_email(user_id):
-    """Resolve a notification recipient's mailbox; None when unknown."""
-    if not user_id:
-        return None
-    try:
-        row = get_user_by_id(user_id)
-    except Exception:
-        return None
-    email = (row or {}).get('email')
-    return str(email).strip() if email else None
-
-
 def tenant_admin_contacts(tenant_id):
     """The company's admin — the primary user linked from the tenants row."""
     conn = get_db()
@@ -367,64 +355,6 @@ def tenant_admin_contacts(tenant_id):
     except Exception:
         return []
     return [{'id': r['id'], 'name': r['name'], 'email': r['email']} for r in rows]
-
-
-def remind_approval_task(tenant_id, task_id):
-    """t24: remind the assignee — stamps reminded_at AND notifies them."""
-    conn = get_db()
-    row = conn.execute(
-        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, tenant_id),
-    ).fetchone()
-    if not row:
-        return {'error': 'task_not_found'}
-    if row['status'] != 'open':
-        return {'error': 'task_not_open'}
-    conn.execute('UPDATE approval_tasks SET reminded_at = ? WHERE id = ?', (_utcnow().isoformat(), task_id))
-    conn.commit()
-    if row['assignee_id']:
-        create_notification(
-            tenant_id, 'تذكير بمهمة معلقة', body=row['title'], category='task',
-            entity_type='approval_task', entity_id=task_id,
-            user_id=row['assignee_id'],
-            email_to=_user_email(row['assignee_id']))
-    return dict(conn.execute('SELECT * FROM approval_tasks WHERE id = ?', (task_id,)).fetchone())
-
-
-def send_due_approval_reminders(tenant_id=None, due_window_hours=12, cooldown_hours=24):
-    """t24: automatic reminder pass — open tasks whose due time is near or past
-    get reminded once per cooldown window; the assignee is notified in-app and
-    by email when they have a mailbox."""
-    conn = get_db()
-    from datetime import timedelta
-    now = _utcnow()
-    due_limit = (now + timedelta(hours=int(due_window_hours))).isoformat()
-    cooldown = (now - timedelta(hours=int(cooldown_hours))).isoformat()
-    clauses = [
-        "status = 'open'", 'due_at IS NOT NULL', 'due_at <= ?',
-        '(reminded_at IS NULL OR reminded_at < ?)',
-    ]
-    params = [due_limit, cooldown]
-    if tenant_id:
-        clauses.insert(0, 'tenant_id = ?')
-        params.insert(0, tenant_id)
-    rows = conn.execute(
-        'SELECT * FROM approval_tasks WHERE ' + ' AND '.join(clauses), params,
-    ).fetchall()
-    reminded = []
-    for row in rows:
-        conn.execute(
-            'UPDATE approval_tasks SET reminded_at = ? WHERE id = ?',
-            (now.isoformat(), row['id']),
-        )
-        reminded.append(row['id'])
-    conn.commit()
-    for row in rows:
-        create_notification(
-            row['tenant_id'], 'تذكير بمهمة معلقة', body=row['title'], category='task',
-            entity_type='approval_task', entity_id=row['id'],
-            user_id=row['assignee_id'],
-            email_to=_user_email(row['assignee_id']))
-    return reminded
 
 
 def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
@@ -460,44 +390,3 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
             user_id='tenant-admin:' + str(row['tenant_id']),
             email_to=admin_email)
     return escalated
-
-
-def send_due_event_task_reminders(tenant_id=None, due_window_hours=12, cooldown_hours=24):
-    """Event tasks whose due time is near or past remind once per cooldown
-    window — the assignee when there is one, otherwise the company-owner
-    login (an unassigned task is the owner's job)."""
-    conn = get_db()
-    from datetime import timedelta
-    now = _utcnow()
-    due_limit = (now + timedelta(hours=int(due_window_hours))).isoformat()
-    cooldown = (now - timedelta(hours=int(cooldown_hours))).isoformat()
-    clauses = [
-        "status = 'open'", 'due_at IS NOT NULL', 'due_at <= ?',
-        '(reminded_at IS NULL OR reminded_at < ?)',
-    ]
-    params = [due_limit, cooldown]
-    if tenant_id:
-        clauses.insert(0, 'tenant_id = ?')
-        params.insert(0, tenant_id)
-    try:
-        rows = conn.execute(
-            'SELECT * FROM event_tasks WHERE ' + ' AND '.join(clauses), params,
-        ).fetchall()
-    except Exception:
-        return []
-    reminded = []
-    for row in rows:
-        conn.execute(
-            'UPDATE event_tasks SET reminded_at = ? WHERE id = ?',
-            (now.isoformat(), row['id']),
-        )
-        reminded.append(row['id'])
-    conn.commit()
-    for row in rows:
-        assignee = row['assignee_user_id']
-        create_notification(
-            row['tenant_id'], 'مهمة تقترب من موعدها', body=row['title'], category='task',
-            entity_type='event_task', entity_id=row['id'],
-            user_id=assignee or 'tenant-admin:' + str(row['tenant_id']),
-            email_to=_user_email(assignee))
-    return reminded

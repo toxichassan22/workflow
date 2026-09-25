@@ -281,7 +281,6 @@ def client_dashboard(tenant_id):
     return {
         'lifecycle': lifecycle,
         'open_approval_tasks': _count('approval_tasks', "status = 'open'"),
-        'open_event_tasks': _count('event_tasks', "status = 'open'"),
         'open_tickets': _count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
         'unread_notifications': notifications_unread,
         'month_consumption_usd': round(month_ai + month_maps, 4),

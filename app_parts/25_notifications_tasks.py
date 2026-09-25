@@ -33,24 +33,10 @@ def _notify_super_admins(title, body, entity_type=None, entity_id=None, category
 
 
 def _notify_tenant_billing(tenant_id, title, body, entity_type=None, entity_id=None):
-    """Wallet movements reach the users holding the billing permission plus
-    the company-owner login (addressed as 'tenant-admin:<id>', which employee
-    accounts never match)."""
+    """Wallet movements reach the company admin alone — the billing permission
+    is pinned off for employees, so the notice goes straight to the
+    tenant-admin address (which no employee session ever reads)."""
     try:
-        # The primary admin's user row rewrites to the tenant-admin address on
-        # insert — skip it here or the explicit admin row below doubles up.
-        try:
-            primary_id = str((db.get_tenant_by_id(tenant_id) or {}).get('primary_user_id') or '')
-        except Exception:
-            primary_id = ''
-        notified = {primary_id}
-        for user in db.get_users_with_permission(tenant_id, 'billing'):
-            if user['id'] in notified:
-                continue
-            notified.add(user['id'])
-            db.create_notification(
-                tenant_id, title, body, category='billing', user_id=user['id'],
-                entity_type=entity_type, entity_id=entity_id, mirror_admin=False)
         db.create_notification(
             tenant_id, title, body, category='billing',
             user_id='tenant-admin:' + str(tenant_id),
@@ -200,12 +186,6 @@ _APPROVAL_TASK_KIND_PERMISSION = {
 }
 
 
-def _landloom_is_approver():
-    """Any gate-keeping permission makes the actor part of the approver pool."""
-    return _landloom_can('approvals') or _landloom_can('approve_generation') \
-        or _landloom_can('approve_final_file')
-
-
 def _landloom_task_actor_allowed(task):
     """An assigned task belongs to its assignee alone (admins excepted); an
     unassigned one stays in the pool of the kind's permission holders."""
@@ -251,25 +231,6 @@ def api_close_approval_task(task_id):
     _record_audit_event('approval_task.closed', 'approval_task', task_id,
                         old_value='open', new_value='closed',
                         metadata={'cancel_reason': data.get('cancelReason')})
-    return jsonify({'success': True, 'task': result})
-
-
-@app.route('/api/approval-tasks/<task_id>/remind', methods=['POST'])
-@require_auth
-def api_remind_approval_task(task_id):
-    conn = db.get_db()
-    task_row = conn.execute(
-        'SELECT * FROM approval_tasks WHERE id = ? AND tenant_id = ?', (task_id, g.tenant_id)
-    ).fetchone()
-    if not task_row:
-        return jsonify({'error': 'العنصر غير موجود', 'error_code': 'task_not_found'}), 404
-    if not _landloom_task_actor_allowed(dict(task_row)) \
-            and not (not task_row['assignee_id'] and _landloom_is_approver()):
-        return _landloom_forbidden('التذكير بالمهمة يخص المعتمدين')
-    result = db.remind_approval_task(g.tenant_id, task_id)
-    failure = _landloom_error(result)
-    if failure:
-        return failure
     return jsonify({'success': True, 'task': result})
 
 

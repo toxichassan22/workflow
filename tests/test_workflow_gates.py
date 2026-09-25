@@ -604,6 +604,9 @@ class ExportDownloadGateTests(unittest.TestCase):
         cls.application_module.OUTPUT_DIR = os.path.join(cls.temp_dir.name, 'outputs')
 
         with cls.app.app_context():
+            # `import app` is a no-op when another suite already loaded it —
+            # the schema has to be created on THIS fixture's own DB_PATH.
+            db.init_db()
             cls.tenant = db.create_tenant('Gate Co', 'gate@example.test', 'hash-g', 'gate-co')
         cls.token = auth.create_token(
             cls.tenant, 'gate@example.test', user_id=None,

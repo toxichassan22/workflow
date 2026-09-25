@@ -378,25 +378,10 @@ class LandloomDbTests(unittest.TestCase):
             'tenant-1', 'section_approval', 'اعتماد قسم الأساسيات',
             entity_type='section_version', entity_id='v1')
         self.assertEqual(task['status'], 'open')
-        reminded = db.remind_approval_task('tenant-1', task['id'])
-        self.assertTrue(reminded['reminded_at'])
         closed = db.close_approval_task('tenant-1', task['id'], closed_by_name='المعتمد')
         self.assertEqual(closed['status'], 'done')
         again = db.close_approval_task('tenant-1', task['id'], closed_by_name='المعتمد')
         self.assertEqual(again.get('error'), 'task_not_open')
-
-    def test_event_task_recurrence_reopens(self):
-        task = db.create_event_task(
-            'tenant-1', 'اجتماع أسبوعي', recurrence='weekly', due_at='2026-09-20T10:00',
-            created_by='user-1', created_by_name='رئيس القسم')
-        self.assertEqual(task['status'], 'open')
-        done = db.update_event_task_status('tenant-1', task['id'], 'completed', actor_name='رئيس القسم')
-        self.assertEqual(done['status'], 'completed')
-        tasks = db.list_event_tasks('tenant-1', status='open')
-        self.assertEqual(len(tasks), 1)
-        self.assertTrue(tasks[0]['due_at'] > '2026-09-20')
-        invalid = db.update_event_task_status('tenant-1', task['id'], 'bogus')
-        self.assertEqual(invalid.get('error'), 'invalid_status')
 
     # ── project responsibility assignments ─────────────────────────────────
 
@@ -495,7 +480,7 @@ class LandloomDbTests(unittest.TestCase):
         db.apply_invite_scope(admin['id'], db.get_invite('tenant-1', invite['id']))
         perms = db.get_user_permissions(admin['id'])
         self.assertTrue(all(v for k, v in perms.items()
-                            if k not in ('sag_admin_panel', 'support_tickets')))
+                            if k not in ('sag_admin_panel', 'support_tickets', 'billing')))
         self.assertEqual(db.list_user_assignments('tenant-1', admin['id']), [])
         self.assertTrue(db.user_may_access_draft(admin['id'],
                                                  db.get_project_draft_by_id('tenant-1', self.draft_id)))
@@ -797,18 +782,6 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(channels.get('in_app'), 'delivered')
         self.assertEqual(channels.get('email'), 'queued')
 
-    # ── t42: event tasks carry entity link and priority ──────────────────
-
-    def test_event_task_entity_link_and_priority(self):
-        task = db.create_event_task(
-            'tenant-1', 'مراجعة ملف', entity_type='project_draft', entity_id='draft-1',
-            priority='urgent', created_by='user-1')
-        self.assertEqual(task['entity_type'], 'project_draft')
-        self.assertEqual(task['entity_id'], 'draft-1')
-        self.assertEqual(task['priority'], 'urgent')
-        bad = db.create_event_task('tenant-1', 'مهمة', priority='bogus')
-        self.assertEqual(bad['priority'], 'normal')
-
     # ── smart notifications: categories, prefs, reminders ────────────────
 
     def test_notification_new_categories(self):
@@ -861,25 +834,6 @@ class LandloomDbTests(unittest.TestCase):
         self.assertFalse(db.recent_notification_exists('tenant-1', 'wallet', 'w2'))
         self.assertFalse(db.recent_notification_exists('tenant-2', 'wallet', 'w1'))
         self.assertFalse(db.recent_notification_exists('tenant-1', 'wallet', 'w1', since_hours=0))
-
-    def test_event_task_reminders_once(self):
-        due = (db._utcnow() + timedelta(hours=6)).isoformat()
-        db.create_event_task('tenant-1', 'قريبة', assignee_user_id='user-1', due_at=due)
-        db.create_event_task('tenant-1', 'بدون إسناد', due_at=due)
-        far = (db._utcnow() + timedelta(hours=30)).isoformat()
-        db.create_event_task('tenant-1', 'بعيدة', assignee_user_id='user-1', due_at=far)
-        done = db.create_event_task('tenant-1', 'منجزة', assignee_user_id='user-1', due_at=due)
-        db.update_event_task_status('tenant-1', done['id'], 'completed')
-        self.assertEqual(len(db.send_due_event_task_reminders()), 2)
-        self.assertEqual(db.send_due_event_task_reminders(), [])
-        items = db.list_notifications('tenant-1', user_id='user-1', category='task')
-        self.assertEqual(len(items), 1)
-        # The admin feed carries the unassigned task's own row plus the
-        # mirrored copy of the assignee's reminder — the admin sees every
-        # notice that lands between staff members.
-        owner = db.list_notifications(
-            'tenant-1', user_id='tenant-admin:tenant-1', category='task')
-        self.assertEqual(len(owner), 2)
 
     def test_stale_generation_job_notifies_creator_once(self):
         job = db.create_generation_job('tenant-1', draft_id='draft-1', created_by='user-1')
@@ -1139,7 +1093,7 @@ class LandloomApiTests(unittest.TestCase):
             json={'status': 'in_progress'})
         self.assertEqual(admin_move.status_code, 200, admin_move.get_json())
 
-    def test_approval_task_close_and_remind_are_gated(self):
+    def test_approval_task_close_is_gated(self):
         _, emp_token = self._user_token('موظف', 'emp-task@x.test', 'employee')
         approver_id, approver_token = self._user_token('معتمد', 'task-appr@x.test', 'generation_approver')
         task = db.create_approval_task(
@@ -1148,12 +1102,6 @@ class LandloomApiTests(unittest.TestCase):
         denied_close = self.client.post(
             f'/api/approval-tasks/{task["id"]}/close', headers=self.headers(emp_token), json={})
         self.assertEqual(denied_close.status_code, 403)
-        denied_remind = self.client.post(
-            f'/api/approval-tasks/{task["id"]}/remind', headers=self.headers(emp_token), json={})
-        self.assertEqual(denied_remind.status_code, 403)
-        reminded = self.client.post(
-            f'/api/approval-tasks/{task["id"]}/remind', headers=self.headers(approver_token), json={})
-        self.assertEqual(reminded.status_code, 200, reminded.get_json())
         closed = self.client.post(
             f'/api/approval-tasks/{task["id"]}/close', headers=self.headers(approver_token), json={})
         self.assertEqual(closed.status_code, 200, closed.get_json())

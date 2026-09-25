@@ -933,9 +933,10 @@ def api_get_user_permissions(user_id):
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
     perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
-    # support_tickets is pinned off for employees — offering it as a toggle
-    # would flip and revert; sag_admin_panel is platform-session only.
-    keys = [k for k in db.PERMISSION_KEYS if k not in ('sag_admin_panel', 'support_tickets')]
+    # support_tickets and billing are pinned off for employees — offering them
+    # as toggles would flip and revert; sag_admin_panel is platform-session only.
+    keys = [k for k in db.PERMISSION_KEYS
+            if k not in ('sag_admin_panel', 'support_tickets', 'billing')]
     return jsonify({'success': True, 'permissions': perms, 'availableKeys': keys})
 
 
