@@ -695,9 +695,12 @@
           const resend = (!i.is_used && !i.is_expired)
             ? '<button type="button" class="btn small ghost" onclick="resendTenantInvite(\'' + i.id + '\')">' + escapeHtml(WFT('users.invite_resend', 'إعادة الإرسال')) + '</button>'
             : '';
+          const link = (!i.is_used && !i.is_expired && i.token)
+            ? '<input type="text" readonly value="' + escapeHtml(window.location.origin + '/invite/' + i.token) + '" style="width:100%;font-size:12px;margin-top:6px" onclick="this.select()">'
+            : '';
           return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
             '<div><h3 style="font-size:14px">' + escapeHtml(i.email) + '</h3>' +
-            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || 'موظف') + ' | ' + state + mail + '</div></div>' +
+            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || 'موظف') + ' | ' + state + mail + '</div>' + link + '</div>' +
             '<div class="tenant-actions" style="gap:6px">' + resend + '</div></div>';
         }).join('');
     }
