@@ -5,7 +5,7 @@
     const NOTIF_CATEGORY_FALLBACKS = {
       general: 'عام', section_approval: 'اعتماد الأقسام', generation_approval: 'اعتماد التوليد',
       final_approval: 'اعتماد الملف النهائي', recharge: 'طلبات الشحن', billing: 'المحفظة والفوترة',
-      support: 'الدعم الفني', task: 'المهام', job: 'مهام التوليد', platform: 'المنصة'
+      support: 'الدعم الفني', job: 'مهام التوليد', platform: 'المنصة'
     };
     const NOTIF_CATEGORY_KEYS = Object.keys(NOTIF_CATEGORY_FALLBACKS);
     let notifPollTimer = null;
@@ -275,13 +275,20 @@
 
     // A subscription-expiry notice carries «tenant:state:end-date» in
     // entity_id — landing here pre-picks that company in the announce
-    // composer so the renewal message is one typed body away.
+    // composer so the renewal message is one send away.
     function prefillAnnounceForTenant(n) {
-      const tenantId = String((n && n.entity_id) || '').split(':')[0];
+      const parts = String((n && n.entity_id) || '').split(':');
+      const tenantId = parts[0];
       const sel = document.getElementById('notifAnnounceTarget');
       if (sel && tenantId) sel.value = tenantId;
       const title = document.getElementById('notifAnnounceTitle');
       if (title && !title.value) title.value = 'تجديد الباقة';
+      const body = document.getElementById('notifAnnounceBody');
+      if (body && !body.value && parts[2]) {
+        body.value = parts[1] === 'expired'
+          ? 'انتهت باقتكم في ' + parts[2] + ' — إن رغبتم في التجديد يسعدنا تواصلكم معنا.'
+          : 'باقتكم تنتهي في ' + parts[2] + ' — إن رغبتم في التجديد يسعدنا تواصلكم معنا.';
+      }
     }
 
     // ── Per-user category preferences ────────────────────────────────────

@@ -51,6 +51,24 @@ def _notification_recipient_key():
     return getattr(g, 'user_id', None) or 'tenant-admin:' + str(g.tenant_id)
 
 
+def _recipient_is_actor(tenant_id, recipient, actor_id, actor_is_admin):
+    """A decision never pings its own decider. The company admin's two
+    addresses — the 'tenant-admin:<id>' key and the primary user's row id —
+    are one person whose rows fold onto the same feed, so «self» covers
+    either spelling. A *different* decider still notifies the admin
+    recipient normally."""
+    if not recipient or str(recipient) == str(actor_id):
+        return True
+    if not actor_is_admin:
+        return False
+    if str(recipient).startswith('tenant-admin:'):
+        return str(actor_id or '').startswith('tenant-admin:')
+    try:
+        return bool(db.is_primary_company_admin(tenant_id, recipient))
+    except Exception:
+        return False
+
+
 def _notification_muted_categories():
     try:
         prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())
@@ -63,8 +81,13 @@ def _notification_categories_for_actor():
     """Categories this actor may actually receive. Wallet, recharge and the
     support desk are company-admin territory (employee sessions have those
     permissions pinned off), so staff feeds never list them as filters or
-    preference toggles."""
+    preference toggles. The platform desk's feed is narrower still: only the
+    queues that actually land on it — company events, top-up requests and
+    support tickets."""
     categories = list(db.NOTIFICATION_CATEGORIES)
+    if getattr(g, 'is_admin', False):
+        desk = {'recharge', 'support', 'platform', 'general'}
+        return [category for category in categories if category in desk]
     if _landloom_actor_is_admin():
         return categories
     hidden = set()

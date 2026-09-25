@@ -55,7 +55,7 @@ def api_create_support_ticket():
     _notify_super_admins(
         'تذكرة دعم جديدة',
         f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("subject") or ""}',
-        entity_type='support_ticket', entity_id=row['id'])
+        entity_type='support_ticket', entity_id=row['id'], category='support')
     return jsonify({'success': True, 'ticket': row})
 
 

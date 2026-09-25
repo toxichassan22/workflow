@@ -2870,7 +2870,6 @@ window.__WFI18N_EN_AUTO = /*I18N_EN_AUTO_BEGIN*/{
 "تعذر تحميل التنبيهات.": "Could not load notifications.",
 "تعذر تحميل القائمة": "Could not load the list",
 "تعذر تحميل الملف": "Could not load the file",
-"تعذر تحميل المهام.": "Could not load tasks.",
 "تعذر تحميل سجل أنواع الملفات.": "Could not load the file-type registry.",
 "تعذر تحميل طلبات الشحن.": "Could not load top-up requests.",
 "تعذر تسجيل القرار": "Could not record the decision",

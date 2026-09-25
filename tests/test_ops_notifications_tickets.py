@@ -321,9 +321,10 @@ class OpsSectionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertIn('راجع القسم', [n['title'] for n in self._feed(self.token)])
 
-    def test_decision_on_admin_own_submission_notifies_nobody_admin_side(self):
-        """A decision on a version the company admin sent stays in the audit
-        trail only — the tenant-admin address never receives «اعتُمد قسمك»."""
+    def test_decision_on_admin_submission_reaches_the_admin_feed(self):
+        """The admin hears every staff exchange — a verdict on work he
+        submitted himself included. His own decisions are the only silent
+        ones; those stay in the audit trail alone."""
         draft_id = db.save_project_draft(
             self.tenant_id, self.user_id,
             {'project_name': 'برج المشرق'}, {'basic': 'draft'}, 'draft',
@@ -341,6 +342,26 @@ class OpsSectionTests(unittest.TestCase):
         response = self.client.post(
             '/api/project-draft/section-version/decision',
             headers=self.headers(approver_token),
+            json={'versionId': version['id'], 'decision': 'approved'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        own = [n for n in self._feed(self.token) if n['title'] == 'اعتُمد قسمك']
+        self.assertEqual(len(own), 1)
+        self.assertEqual(own[0]['user_id'], 'tenant-admin:' + self.tenant_id)
+
+    def test_admin_own_decision_on_his_submission_stays_silent(self):
+        """A decision the admin took himself never echoes onto his feed —
+        the audit trail is where admin-caused decisions live."""
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.user_id,
+            {'project_name': 'برج المشرق'}, {'basic': 'draft'}, 'draft',
+            draft_id='draft-admin-self')
+        version = db.create_section_version(
+            self.tenant_id, draft_id, 'basic', {'project_name': 'برج المشرق'},
+            'tenant-admin:' + self.tenant_id, 'مدير الشركة')
+        self.assertNotIn('error', version)
+        response = self.client.post(
+            '/api/project-draft/section-version/decision',
+            headers=self.headers(self.token),
             json={'versionId': version['id'], 'decision': 'approved'})
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertNotIn('اعتُمد قسمك', [n['title'] for n in self._feed(self.token)])
@@ -478,6 +499,49 @@ class OpsSectionTests(unittest.TestCase):
         self.assertEqual(result['expired'], 1)
         titles = [n['title'] for n in self._feed(admin)]
         self.assertIn('انتهت صلاحية باقة شركة', titles)
+
+    # ── Platform desk feed: only the queues that actually land on it ─────
+
+    def test_self_registered_company_pings_the_desk(self):
+        """A self-serve signup is the one «new company joined» notice — the
+        desk never hears about companies it created itself."""
+        admin = self._admin_token()
+        response = self.client.post('/api/auth/register', json={
+            'companyName': 'شركة التسجيل الذاتي', 'email': 'selfreg@x.test',
+            'password': 'Secret12345'})
+        self.assertEqual(response.status_code, 201, response.get_json())
+        tenant_id = response.get_json()['tenant']['id']
+        note = next(
+            (n for n in self._feed(admin) if n['entity_type'] == 'tenant'), None)
+        self.assertIsNotNone(note)
+        self.assertEqual(note['title'], 'شركة جديدة انضمت إلى المنصة')
+        self.assertEqual(note['entity_id'], tenant_id)
+        self.assertEqual(note['category'], 'platform')
+
+    def test_platform_admin_categories_are_desk_only(self):
+        admin = self._admin_token()
+        body = self.client.get(
+            '/api/notifications', headers=self.headers(admin)).get_json()
+        self.assertEqual(
+            sorted(body['categories']), ['general', 'platform', 'recharge', 'support'])
+
+    def test_desk_notices_land_under_their_own_categories(self):
+        admin = self._admin_token()
+        package = db.create_billing_package('باقة المكتب', credit_sar=50, price_sar=50)
+        created = self.client.post(
+            '/api/recharge-requests', headers=self.headers(self.token),
+            json={'packageId': package['id'], 'referenceNumber': 'TRX-DESK-1'})
+        self.assertEqual(created.status_code, 200, created.get_json())
+        recharge = next(
+            n for n in self._feed(admin) if n['entity_type'] == 'recharge_request')
+        self.assertEqual(recharge['category'], 'recharge')
+        ticket = self.client.post(
+            '/api/support/tickets', headers=self.headers(self.token),
+            json={'subject': 'عطل', 'body': 'تفاصيل'})
+        self.assertEqual(ticket.status_code, 200, ticket.get_json())
+        support = next(
+            n for n in self._feed(admin) if n['entity_type'] == 'support_ticket')
+        self.assertEqual(support['category'], 'support')
 
     # ── Ticket attachments ────────────────────────────────────────────────
 

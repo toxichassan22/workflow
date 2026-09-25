@@ -488,6 +488,11 @@ def api_register():
         )
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or subdomain already registered'}), 409
+    # A self-serve signup is the one «new company» event the desk did not
+    # author — admin-created companies notify nobody.
+    _notify_super_admins(
+        'شركة جديدة انضمت إلى المنصة', f'«{company_name}» — {email}',
+        entity_type='tenant', entity_id=tenant_id)
     token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name,
                          user_role='company_admin')
     return jsonify({

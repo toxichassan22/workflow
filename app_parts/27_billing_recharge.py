@@ -44,7 +44,7 @@ def api_create_recharge_request():
         'طلب شحن جديد',
         f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("package_name") or ""}'
         f' — {row.get("price_sar") or row.get("amount_sar") or ""} ريال',
-        entity_type='recharge_request', entity_id=row['id'])
+        entity_type='recharge_request', entity_id=row['id'], category='recharge')
     return jsonify({'success': True, 'request': row})
 
 

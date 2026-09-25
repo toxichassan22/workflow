@@ -340,8 +340,8 @@ def api_decide_generation_approval(approval_id):
             g.tenant_id, 'generation_approval', approval_id,
             closed_by_name=_landloom_actor_name())
         requester = str(result.get('requested_by') or '')
-        if requester and requester != str(_landloom_actor_id()) \
-                and not requester.startswith('tenant-admin:'):
+        if not _recipient_is_actor(g.tenant_id, requester, _landloom_actor_id(),
+                                   _landloom_actor_is_admin()):
             message = {'approved': 'اعتُمد طلب التوليد',
                        'rejected': 'رُفض طلب التوليد',
                        'cancelled': 'أُلغي طلب التوليد'}.get(decision)
