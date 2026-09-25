@@ -787,7 +787,13 @@ def api_add_user():
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email already in use'}), 409
     _apply_user_scope_payload(user_id, data)
-    return jsonify({'success': True, 'userId': user_id}), 201
+    try:
+        email_sent = _send_user_welcome_email(email, name, db.get_tenant_by_id(g.tenant_id))
+    except Exception:
+        email_sent = False
+    _record_audit_event('user.created', 'user', user_id, entity_name=name,
+                        metadata={'email': email, 'email_sent': email_sent})
+    return jsonify({'success': True, 'userId': user_id, 'emailSent': email_sent}), 201
 
 
 def _apply_user_scope_payload(user_id, data):
@@ -957,6 +963,11 @@ def api_set_user_assignments(user_id):
             'error_code': 'approver_exists',
             'holder': result.get('holder'),
         }), 409
+    if result.get('error') == 'too_many_editors':
+        return jsonify({
+            'error': 'المشروع يقبل خمسة محررين كحد أقصى',
+            'error_code': 'too_many_editors',
+        }), 409
     _record_audit_event('user.assignments_changed', 'user', user_id,
                         new_value=result.get('assignments'))
     return jsonify({'success': True, 'assignments': result.get('assignments')})
@@ -1020,6 +1031,20 @@ def api_set_user_field_sections(user_id):
 
     sections = db.get_user_field_sections(user_id)
     return jsonify({'success': True, 'sections': sections})
+
+
+def _send_user_welcome_email(recipient, user_name, tenant):
+    """Welcome mail for a directly-added employee: account exists, sign in with
+    the email; the password itself is never sent — the admin hands it over."""
+    company_name = (tenant or {}).get('company_name') or 'الشركة'
+    base_url = _current_base_url().rstrip('/')
+    return send_platform_email(
+        recipient,
+        f'تم إنشاء حسابك في {company_name}',
+        f'مرحبًا {user_name}\n\n'
+        f'تم إنشاء حسابك في {company_name} على منصة LandLoom AI.\n'
+        f'سجّل الدخول ببريدك الإلكتروني وكلمة المرور التي استلمتها من مديرك:\n{base_url}\n'
+    )
 
 
 def _send_invite_email(invite, tenant, email=None):

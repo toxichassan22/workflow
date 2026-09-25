@@ -283,6 +283,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "users.assignment_add": "Add assignment",
   "users.assignment_holder": "Current approver: ",
   "users.assignment_conflict": "This project already has another approver",
+  "users.assignment_editor_cap": "A project takes five editors at most",
   "users.access_requests_title": "Platform-admin access requests",
   "users.access_requests_empty": "No access requests",
   "users.access_pending": "Pending",

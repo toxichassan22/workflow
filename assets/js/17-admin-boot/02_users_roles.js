@@ -7,7 +7,7 @@
       if (pwError) { toast(pwError); return; }
       const data = await api('POST', '/api/users', { name, email, password });
       if (data.success) {
-        toast('تم إضافة الموظف');
+        toast('تم إضافة الموظف' + (data.emailSent === false ? ' — تعذر إرسال البريد' : ''));
         document.getElementById('newUserName').value = '';
         document.getElementById('newUserEmail').value = '';
         document.getElementById('newUserPassword').value = '';
@@ -331,15 +331,21 @@
       ]);
       const assignRes = await api('PUT', '/api/users/' + editingUserPermissions.userId + '/assignments', { assignments }).catch(() => ({ success: true }));
       hideLoader();
-      const failed = assignRes && assignRes.error_code === 'approver_exists';
+      const conflicted = assignRes && assignRes.error_code === 'approver_exists';
+      const editorCap = assignRes && assignRes.error_code === 'too_many_editors';
+      const failed = conflicted || editorCap;
       if (!failed) {
         const modal = document.getElementById('userPermissionsModal');
         if (modal) modal.remove();
       }
-      if (failed) {
+      if (conflicted) {
         toast(WFT('users.assignment_conflict', 'المشروع له معتمد آخر بالفعل') + (assignRes.holder ? ': ' + assignRes.holder : ''));
         const tenantData = await api('GET', '/api/assignments').catch(() => null);
         tenantAssignments = (tenantData && tenantData.assignments) || tenantAssignments;
+        renderAssignmentRows();
+      }
+      else if (editorCap) {
+        toast(WFT('users.assignment_editor_cap', 'المشروع يقبل خمسة محررين كحد أقصى'));
         renderAssignmentRows();
       }
       else if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success) && (!assignRes || assignRes.success)) { toast('تم حفظ الصلاحيات'); }

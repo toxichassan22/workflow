@@ -284,6 +284,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "users.assignment_add": "إضافة تعيين",
   "users.assignment_holder": "المعتمد الحالي: ",
   "users.assignment_conflict": "المشروع له معتمد آخر بالفعل",
+  "users.assignment_editor_cap": "المشروع يقبل خمسة محررين كحد أقصى",
   "users.access_requests_title": "طلبات وصول مدير النظام",
   "users.access_requests_empty": "لا توجد طلبات وصول",
   "users.access_pending": "قيد الانتظار",

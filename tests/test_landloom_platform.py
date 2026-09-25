@@ -446,6 +446,31 @@ class LandloomDbTests(unittest.TestCase):
         rows = db.attach_approver_names('tenant-1', [{'id': self.draft_id}])
         self.assertEqual(rows[0]['approver_name'], 'معتمد عام')
 
+    def test_editor_cap_is_five_per_draft(self):
+        editors = []
+        for i in range(5):
+            db.create_user('tenant-1', f'محرر {i}', f'ed{i}@x.test', 'hash', role='employee')
+            editors.append(db.get_user_by_email(f'ed{i}@x.test'))
+        for user in editors:
+            result = db.set_user_assignments('tenant-1', user['id'],
+                                             [{'draft_id': self.draft_id, 'role': 'editor'}])
+            self.assertEqual(len(result['assignments']), 1)
+        db.create_user('tenant-1', 'محرر سادس', 'ed6@x.test', 'hash', role='employee')
+        sixth = db.get_user_by_email('ed6@x.test')
+        blocked = db.set_user_assignments('tenant-1', sixth['id'],
+                                        [{'draft_id': self.draft_id, 'role': 'editor'}])
+        self.assertEqual(blocked.get('error'), 'too_many_editors')
+        # Editing an existing holder's rows re-checks against the others, not them.
+        same = db.set_user_assignments('tenant-1', editors[0]['id'],
+                                       [{'draft_id': self.draft_id, 'role': 'editor'}])
+        self.assertEqual(len(same['assignments']), 1)
+        # A different draft stays open for the sixth editor.
+        other_draft = db.save_project_draft(
+            'tenant-1', 'user-1', {'project_name': 'آخر'}, {}, 'draft', draft_id='draft-2')
+        ok = db.set_user_assignments('tenant-1', sixth['id'],
+                                     [{'draft_id': other_draft, 'role': 'editor'}])
+        self.assertEqual(len(ok['assignments']), 1)
+
     # ── t21/t22: SoD matrix, users report ─────────────────────
 
     def test_sod_matrix_flags_self_approval_and_missing_reason(self):

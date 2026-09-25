@@ -562,6 +562,28 @@ def set_user_assignments(tenant_id, user_id, rows):
             if holder:
                 return {'error': 'approver_exists', 'draft_id': row['draft_id'],
                         'holder': holder}
+    # Up to five editors per project, counting the wildcard rows that cover it.
+    editor_rows = [r for r in cleaned if r['role'] == 'editor']
+    if editor_rows:
+        others_ed = conn.execute(
+            '''SELECT a.user_id, a.draft_id FROM user_assignments a
+               WHERE a.tenant_id = ? AND a.role = 'editor' AND a.user_id != ?''',
+            (str(tenant_id), str(user_id)),
+        ).fetchall()
+        wildcard_editors = {r['user_id'] for r in others_ed
+                            if r['draft_id'] == ASSIGNMENT_ALL_DRAFTS}
+        specific_editors = {}
+        for r in others_ed:
+            if r['draft_id'] != ASSIGNMENT_ALL_DRAFTS:
+                specific_editors.setdefault(r['draft_id'], set()).add(r['user_id'])
+        affected = {r['draft_id'] for r in editor_rows
+                    if r['draft_id'] != ASSIGNMENT_ALL_DRAFTS}
+        if any(r['draft_id'] == ASSIGNMENT_ALL_DRAFTS for r in editor_rows):
+            affected |= set(valid_drafts)
+        for draft_id in affected:
+            covering = specific_editors.get(draft_id, set()) | wildcard_editors
+            if len(covering) >= 5:
+                return {'error': 'too_many_editors', 'draft_id': draft_id}
     try:
         conn.execute(
             'DELETE FROM user_assignments WHERE user_id = ? AND tenant_id = ?',
