@@ -209,6 +209,29 @@ class OpsSectionTests(unittest.TestCase):
             headers=self.headers(admin), json={'priority': 'bogus'})
         self.assertEqual(bad.status_code, 400)
 
+    def test_admin_same_status_update_is_a_noop(self):
+        created = self.client.post(
+            '/api/support/tickets', headers=self.headers(self.token),
+            json={'subject': 'مشكلة', 'body': 'تفاصيل'})
+        ticket_id = created.get_json()['ticket']['id']
+        admin = self._admin_token()
+        first = self.client.post(
+            f'/api/admin/support/tickets/{ticket_id}/status',
+            headers=self.headers(admin), json={'status': 'in_progress'})
+        self.assertEqual(first.status_code, 200)
+        notices = [n for n in self._feed(self.token)
+                   if n['entity_type'] == 'support_ticket' and 'حالة' in (n['title'] or '')]
+        self.assertEqual(len(notices), 1)
+        # Re-clicking the current status changes nothing and re-notifies nobody.
+        again = self.client.post(
+            f'/api/admin/support/tickets/{ticket_id}/status',
+            headers=self.headers(admin), json={'status': 'in_progress'})
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.get_json()['ticket']['status'], 'in_progress')
+        notices = [n for n in self._feed(self.token)
+                   if n['entity_type'] == 'support_ticket' and 'حالة' in (n['title'] or '')]
+        self.assertEqual(len(notices), 1)
+
     # ── Ticket attachments ────────────────────────────────────────────────
 
     def _upload_attachment(self, token, name='notes.txt', content=b'attachment-body'):

@@ -612,9 +612,10 @@
         llEscape(a.original_name || WFT('tickets.attachment', 'مرفق')) + '</button>').join('');
       const statusActions = t.status !== 'closed'
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' +
-          '<button type="button" class="btn small ghost" onclick="adminSetTicketStatus(\'' + id + '\', \'in_progress\')">قيد المعالجة</button>' +
-          '<button type="button" class="btn small green" onclick="adminSetTicketStatus(\'' + id + '\', \'resolved\')">تم الحل</button>' +
-          '<button type="button" class="btn small danger" onclick="adminSetTicketStatus(\'' + id + '\', \'closed\')">إغلاق</button>' +
+          [['in_progress', 'قيد المعالجة', 'ghost'], ['resolved', 'تم الحل', 'green'], ['closed', 'إغلاق', 'danger']]
+            .filter(a => a[0] !== t.status)
+            .map(a => '<button type="button" class="btn small ' + a[2] + '" onclick="adminSetTicketStatus(\'' + id + '\', \'' + a[0] + '\')">' + a[1] + '</button>')
+            .join('') +
           '</div>' +
           '<div style="display:flex;gap:8px"><input type="text" id="adminReplyBody" style="flex:1">' +
           '<button class="btn primary" onclick="adminReplyTicket(\'' + id + '\')">إرسال</button></div>'

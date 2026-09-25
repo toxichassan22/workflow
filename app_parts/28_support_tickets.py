@@ -196,7 +196,7 @@ def api_admin_update_support_ticket_status(ticket_id):
         _record_audit_event('support_ticket.priority', 'support_ticket', ticket_id,
                             new_value=priority)
     row = ticket
-    if data.get('status'):
+    if data.get('status') and data.get('status') != ticket['status']:
         row = db.update_support_ticket_status(ticket['tenant_id'], ticket_id, data.get('status'),
                                               actor_name=_landloom_actor_name())
         failure = _landloom_error(row)
