@@ -1642,6 +1642,23 @@
 
       <div id="tenantNotificationsList"></div>
 
+      <div class="tenant-content-panel" id="notifAnnouncePanel" hidden>
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.announce_title">إشعار للشركات</h3>
+        </div>
+        <div class="tenant-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+          <div class="tenant-field"><label for="notifAnnounceTarget" data-i18n="admin.announce_target">الشركة</label>
+            <select id="notifAnnounceTarget"><option value="all" data-i18n="admin.announce_all">كل الشركات</option></select></div>
+          <div class="tenant-field"><label for="notifAnnounceTitle" data-i18n="admin.announce_subject">العنوان</label>
+            <input type="text" id="notifAnnounceTitle"></div>
+          <div class="tenant-field full" style="grid-column:1/-1"><label for="notifAnnounceBody" data-i18n="admin.announce_body">النص</label>
+            <textarea id="notifAnnounceBody" rows="3"></textarea></div>
+        </div>
+        <div class="sag-modal-actions" style="margin-top:10px">
+          <button type="button" class="btn primary" onclick="adminSendAnnouncement('notifAnnounce')" data-i18n="admin.announce_send">إرسال الإشعار</button>
+        </div>
+      </div>
+
       <div class="tenant-content-panel notif-prefs-panel">
         <div class="tenant-panel-heading">
           <h3 class="dash-section-title" data-i18n="notif.prefs_title">تفضيلات الإشعارات</h3>

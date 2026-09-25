@@ -1304,20 +1304,17 @@
       renderAdminDashboard(overview);
       if (sagChartRange.preset !== '12') sagApplyChartRange();
       if (typeof llLoadNotifications === 'function') llLoadNotifications('adminNotificationsList');
-      const announceSel = document.getElementById('adminAnnounceTarget');
-      if (announceSel) {
-        const current = announceSel.value;
-        announceSel.innerHTML = '<option value="all">' + llEscape(WFT('admin.announce_all', 'كل الشركات')) + '</option>' +
-          sagAllTenants.filter(t => !t.is_admin).map(t =>
-            '<option value="' + llEscape(t.id) + '">' + llEscape(t.company_name || t.name || t.email || t.id) + '</option>').join('');
-        if (current) announceSel.value = current;
-      }
+      fillAnnounceTargets(document.getElementById('adminAnnounceTarget'), sagAllTenants);
     }
 
-    async function adminSendAnnouncement() {
-      const target = (document.getElementById('adminAnnounceTarget') || {}).value || 'all';
-      const title = ((document.getElementById('adminAnnounceTitle') || {}).value || '').trim();
-      const body = ((document.getElementById('adminAnnounceBody') || {}).value || '').trim();
+    // prefix selects the field set — the dashboard panel uses «adminAnnounce»,
+    // the notifications page panel uses «notifAnnounce»; both post to the
+    // same super-admin endpoint.
+    async function adminSendAnnouncement(prefix) {
+      prefix = prefix || 'adminAnnounce';
+      const target = (document.getElementById(prefix + 'Target') || {}).value || 'all';
+      const title = ((document.getElementById(prefix + 'Title') || {}).value || '').trim();
+      const body = ((document.getElementById(prefix + 'Body') || {}).value || '').trim();
       if (!title) { toast(WFT('admin.announce_title_required', 'عنوان الإشعار مطلوب')); return; }
       const res = await api('POST', '/api/admin/notifications',
         { tenantId: target, title: title, body: body }).catch(e => e);
@@ -1325,8 +1322,8 @@
         toast((res && res.error) || WFT('admin.announce_failed', 'تعذر إرسال الإشعار'));
         return;
       }
-      document.getElementById('adminAnnounceTitle').value = '';
-      document.getElementById('adminAnnounceBody').value = '';
+      document.getElementById(prefix + 'Title').value = '';
+      document.getElementById(prefix + 'Body').value = '';
       toast(WFT('admin.announce_sent', 'تم إرسال الإشعار'));
     }
 

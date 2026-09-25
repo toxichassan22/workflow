@@ -167,14 +167,18 @@
       showTenantPage('tenantNotificationsPage');
       // The page is shared between the super admin and company workspaces, so
       // its kicker follows the role instead of a static label.
+      const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
       const kicker = document.getElementById('notifPageKicker');
       if (kicker) {
-        const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
         const key = isAdmin ? 'chrome.platform' : 'chrome.workspace';
         kicker.dataset.i18n = key;
         kicker.textContent = WFT(key, isAdmin ? 'إدارة المنصة' : 'مساحة العمل');
       }
-      await Promise.all([renderNotificationsPage(), renderNotificationPrefs()]);
+      const announcePanel = document.getElementById('notifAnnouncePanel');
+      if (announcePanel) announcePanel.hidden = !isAdmin;
+      const jobs = [renderNotificationsPage(), renderNotificationPrefs()];
+      if (isAdmin) jobs.push(fillAnnounceTargets(document.getElementById('notifAnnounceTarget')));
+      await Promise.all(jobs);
     }
 
     function setNotifStatusFilter(status) {
@@ -246,6 +250,26 @@
         ' onclick="notificationDelete(event,\'' + llEscape(n.id) + '\')"' +
         ' onkeydown="event.stopPropagation()">' + llEscape(WFT('common.delete', 'حذف')) + '</button>' +
         '</div></div>';
+    }
+
+    // The announce dropdown is filled from the tenants list the dashboard
+    // already loaded; when the admin lands here first, fetch it once and
+    // share the same cache instead of paying a second request.
+    async function fillAnnounceTargets(sel, tenants) {
+      if (!sel) return;
+      let list = Array.isArray(tenants) ? tenants : null;
+      if (!list) {
+        if (!Array.isArray(sagAllTenants) || !sagAllTenants.length) {
+          const data = await api('GET', '/api/admin/tenants').catch(() => null);
+          if (data && data.success && Array.isArray(data.tenants)) sagAllTenants = data.tenants;
+        }
+        list = sagAllTenants || [];
+      }
+      const current = sel.value;
+      sel.innerHTML = '<option value="all">' + llEscape(WFT('admin.announce_all', 'كل الشركات')) + '</option>' +
+        list.filter(t => !t.is_admin).map(t =>
+          '<option value="' + llEscape(t.id) + '">' + llEscape(t.company_name || t.name || t.email || t.id) + '</option>').join('');
+      if (current) sel.value = current;
     }
 
     // ── Per-user category preferences ────────────────────────────────────
