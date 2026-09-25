@@ -413,6 +413,13 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
     """
     created = None
     tenant_id = tenant.get('id') if isinstance(tenant, dict) else tenant
+    # A re-provision replaces the stored row — remember the superseded
+    # upstream key so the dashboard does not keep a live orphan.
+    prior_hash = None
+    try:
+        prior_hash = (db.get_tenant_openrouter_key_meta(tenant_id) or {}).get('openrouter_key_hash')
+    except Exception:
+        prior_hash = None
     try:
         try:
             slug = (db.tenant_slug(tenant) if isinstance(tenant, dict) else '') or str(tenant_id)[:8]
@@ -458,6 +465,11 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
                         tenant_id, openrouter_key_hash=live_hash)
             except Exception:
                 pass
+        if prior_hash and prior_hash != created.get('hash'):
+            try:
+                _openrouter_delete_managed_key(prior_hash)
+            except Exception as exc:
+                print(f"[OPENROUTER KEYS] superseded key cleanup failed for {tenant_id}: {exc}")
         return meta, None
     except Exception as exc:
         print(f"[OPENROUTER KEYS] provision failed: {exc}")
@@ -480,29 +492,30 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
         with _worker_app_context():
             if not tenant_id or not _openrouter_management_key():
                 return None
-            try:
-                tenant = db.get_tenant_by_id(tenant_id)
-            except Exception:
-                tenant = None
-            if tenant and tenant.get('is_admin'):
-                return None
-            try:
-                existing = db.get_tenant_openrouter_key_meta(tenant_id)
-            except Exception:
-                existing = {'has_key': False}
-            if existing.get('has_key') and existing.get('is_active'):
-                return existing
-            meta, _error = _provision_one_tenant_key(
-                tenant or {'id': tenant_id},
-                TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
-                limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
-            )
-            if not meta:
-                # The refusal is the visible symptom; this is the cause — without
-                # it the gate log only ever says «no key row» forever.
-                print(f"[OPENROUTER KEYS] auto-provision failed for tenant {tenant_id}: "
-                      f"{_error or 'unknown'}")
-            return meta
+            with _provision_lock(tenant_id):
+                try:
+                    tenant = db.get_tenant_by_id(tenant_id)
+                except Exception:
+                    tenant = None
+                if tenant and tenant.get('is_admin'):
+                    return None
+                try:
+                    existing = db.get_tenant_openrouter_key_meta(tenant_id)
+                except Exception:
+                    existing = {'has_key': False}
+                if existing.get('has_key') and existing.get('is_active'):
+                    return existing
+                meta, _error = _provision_one_tenant_key(
+                    tenant or {'id': tenant_id},
+                    TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,
+                    limit_reset or TENANT_OPENROUTER_DEFAULT_RESET,
+                )
+                if not meta:
+                    # The refusal is the visible symptom; this is the cause — without
+                    # it the gate log only ever says «no key row» forever.
+                    print(f"[OPENROUTER KEYS] auto-provision failed for tenant {tenant_id}: "
+                          f"{_error or 'unknown'}")
+                return meta
     except Exception as exc:
         print(f"[OPENROUTER KEYS] auto-provision failed: {exc}")
         return None
@@ -690,6 +703,8 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd=None):
 
 _BALANCE_SYNC_LOCKS = {}
 _BALANCE_SYNC_LOCKS_GUARD = threading.Lock()
+_PROVISION_LOCKS = {}
+_PROVISION_LOCKS_GUARD = threading.Lock()
 
 
 def _balance_sync_lock(tenant_id):
@@ -698,6 +713,19 @@ def _balance_sync_lock(tenant_id):
         if lock is None:
             lock = threading.Lock()
             _BALANCE_SYNC_LOCKS[tenant_id] = lock
+        return lock
+
+
+def _provision_lock(tenant_id):
+    """Per-tenant provision serialization: two concurrent gate hits must not
+    each create an upstream key — the loser's key would orphan on the
+    dashboard. Cross-worker races can still happen under gunicorn; the
+    superseded-hash cleanup in _provision_one_tenant_key covers those."""
+    with _PROVISION_LOCKS_GUARD:
+        lock = _PROVISION_LOCKS.get(str(tenant_id))
+        if lock is None:
+            lock = threading.Lock()
+            _PROVISION_LOCKS[str(tenant_id)] = lock
         return lock
 
 

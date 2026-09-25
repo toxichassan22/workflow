@@ -407,6 +407,29 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
             self.assertFalse(
                 db.get_tenant_openrouter_key_meta(tenant_id).get('has_key'))
 
+    def test_reprovision_deletes_superseded_upstream_key(self):
+        """Auto re-provisioning an inactive key must not orphan the old
+        dashboard key — the row is replaced and the prior hash deleted."""
+        module = self.application_module
+        tenant_id = self._fresh_tenant('Swap Co', 'swap-key@example.test', 'swap-key-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-old-key-oooooooooooooooo', provenance='auto',
+                openrouter_key_hash='oldhash44', limit_usd=5.0)
+            db.deactivate_tenant_openrouter_key(tenant_id)
+        created_body = {'key': 'sk-or-v1-new-key-nnnnnnnnnnnnnnnn',
+                        'label': 'landloom-swap', 'limit': 5.0,
+                        'limit_reset': 'monthly', 'hash': 'newhash55'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}) as deleted:
+            meta = module._ensure_tenant_openrouter_key(tenant_id, limit_usd=5.0)
+        self.assertTrue(meta and meta.get('has_key'), meta)
+        self.assertEqual(meta['openrouter_key_hash'], 'newhash55')
+        deleted.assert_called_once_with('oldhash44')
+
     def test_store_failure_deletes_upstream_key(self):
         module = self.application_module
         client = self.app.test_client()
