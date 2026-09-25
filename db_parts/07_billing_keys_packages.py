@@ -713,6 +713,7 @@ def _tenant_key_public(row):
         'last_limit_remaining': data.get('last_limit_remaining'),
         'last_usage': data.get('last_usage'),
         'last_checked_at': data.get('last_checked_at'),
+        'cap_sync_pending': bool(data.get('cap_sync_pending')),
         'updated_at': data.get('updated_at'),
         'created_at': data.get('created_at'),
     }
@@ -816,7 +817,8 @@ def set_tenant_openrouter_key(tenant_id, raw_key, key_label=None, limit_usd=None
 
 def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=None,
                                       is_active=None, last_limit_remaining=None,
-                                      last_usage=None, openrouter_key_hash=None):
+                                      last_usage=None, openrouter_key_hash=None,
+                                      cap_sync_pending=None):
     """Update key metadata without touching the secret. Returns public metadata."""
     conn = get_db()
     row = conn.execute(
@@ -858,6 +860,9 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
     if openrouter_key_hash is not None:
         assignments.append('openrouter_key_hash = ?')
         params.append(str(openrouter_key_hash or None))
+    if cap_sync_pending is not None:
+        assignments.append('cap_sync_pending = ?')
+        params.append(1 if cap_sync_pending else 0)
     if last_limit_remaining is not None or last_usage is not None:
         assignments.append('last_checked_at = ?')
         params.append(_utcnow().strftime('%Y-%m-%d %H:%M:%S'))
@@ -877,6 +882,23 @@ def update_tenant_openrouter_key_meta(tenant_id, limit_usd=None, limit_reset=Non
 def deactivate_tenant_openrouter_key(tenant_id):
     """Disable a tenant key locally. Returns public metadata."""
     return update_tenant_openrouter_key_meta(tenant_id, is_active=False)
+
+
+def list_tenant_keys_pending_cap_sync(limit=25):
+    """tenant_ids whose last provider-cap push never confirmed, oldest rows
+    first. The housekeeping sweep retries them so one failed PATCH cannot
+    leave the dashboard limit stale until the next wallet movement."""
+    try:
+        conn = get_db()
+        rows = conn.execute(
+            'SELECT tenant_id FROM tenant_openrouter_keys '
+            'WHERE cap_sync_pending = 1 AND is_active = 1 '
+            'ORDER BY updated_at LIMIT ?',
+            (int(limit),)
+        ).fetchall()
+    except Exception:
+        return []
+    return [row['tenant_id'] for row in rows]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

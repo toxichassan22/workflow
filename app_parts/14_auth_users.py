@@ -222,6 +222,7 @@ def _run_housekeeping_tick():
         ('dead_generating_drafts', db.recover_dead_generating_drafts),
         ('rate_limits', db.rate_limit_cleanup),
         ('usage_billing', _bill_all_unbilled_usage),
+        ('cap_resync', _resync_pending_tenant_caps),
     )
     for name, fn in steps:
         try:

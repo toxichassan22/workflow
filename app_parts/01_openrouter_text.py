@@ -750,6 +750,32 @@ def _sync_tenant_credit_to_openrouter(tenant_id, new_limit_usd=None):
                 )
                 if not res.get('ok') and not res.get('skipped'):
                     print(f"[OPENROUTER KEYS] update key limit returned {res}")
+                # Record whether the dashboard now carries this cap. A failed
+                # push marks the row so the housekeeping sweep retries it —
+                # before this, one dropped PATCH left the limit stale until
+                # the next wallet movement. Only writes on transitions.
+                try:
+                    if bool(res.get('ok')) == bool(existing.get('cap_sync_pending')):
+                        db.update_tenant_openrouter_key_meta(
+                            tenant_id,
+                            cap_sync_pending=0 if res.get('ok') else 1)
+                except Exception:
+                    pass
+            elif existing.get('provenance') == 'auto' and _openrouter_management_key():
+                # An auto row whose upstream handle cannot be resolved: the
+                # key was deleted on the dashboard or the lookup failed.
+                # _ensure audits upstream before re-issuing, so a genuinely
+                # dead key is re-provisioned here while an audit failure just
+                # leaves the row flagged for the next sweep.
+                meta = _ensure_tenant_openrouter_key(
+                    tenant_id, limit_usd=new_limit, limit_reset=reset_policy)
+                try:
+                    healed = bool((meta or {}).get('openrouter_key_hash'))
+                    if healed == bool(existing.get('cap_sync_pending')):
+                        db.update_tenant_openrouter_key_meta(
+                            tenant_id, cap_sync_pending=0 if healed else 1)
+                except Exception:
+                    pass
             return db.get_tenant_openrouter_key_meta(tenant_id)
         else:
             return _ensure_tenant_openrouter_key(
@@ -811,6 +837,29 @@ def _schedule_tenant_limit_sync(tenant_id):
                          name=f'cap-sync-{tenant_key[:8]}').start()
     except Exception as exc:
         print(f"[BILLING] provider-cap sync spawn failed: {exc}")
+
+
+def _resync_pending_tenant_caps(limit=25):
+    """Housekeeping step: retry provider-cap pushes that never confirmed.
+
+    Bounded to ``limit`` tenants per tick; each row retries under the
+    per-tenant balance lock so it cannot race a live balance-change sync.
+    Never raises — a still-failing row just stays pending for the next tick.
+    """
+    if not _openrouter_management_key():
+        return {'pending': 0, 'resynced': 0}
+    with _worker_app_context():
+        tenant_ids = db.list_tenant_keys_pending_cap_sync(limit=limit)
+        resynced = 0
+        for tenant_id in tenant_ids:
+            try:
+                with _balance_sync_lock(str(tenant_id)):
+                    meta = _sync_tenant_credit_to_openrouter(tenant_id)
+                if meta and not meta.get('cap_sync_pending'):
+                    resynced += 1
+            except Exception:
+                pass
+    return {'pending': len(tenant_ids) - resynced, 'resynced': resynced}
 
 
 # Wallet figures are riyals — the spend floor is a SAR amount (≈$10).

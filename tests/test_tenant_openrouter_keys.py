@@ -922,6 +922,55 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
                 db.get_tenant_openrouter_key_raw(tenant_id),
                 'sk-or-v1-pool-key-yyyyyyyyyyyyyyyy')
 
+    def test_failed_cap_push_is_flagged_and_retried_by_sweep(self):
+        """A PATCH that never lands must not leave the dashboard stale: the row
+        is flagged pending and the housekeeping sweep re-pushes the current cap
+        on the same key — never a second key — then clears the flag."""
+        module = self.application_module
+        tenant_id = self._fresh_tenant('Retry Co', 'retry-cap@example.test', 'retry-cap-co')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-retry-key-aaaaaaaaaaaaaaaa', provenance='auto',
+                openrouter_key_hash='retryhash1', limit_usd=0.0)
+            conn = db.get_db()
+            conn.execute('UPDATE tenants SET credit_balance = 160.0 WHERE id = ?',
+                         (tenant_id,))
+            conn.commit()
+
+        # First push fails → the row is marked pending and queued for the sweep.
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_key_status',
+                             return_value={'usage': 10.0}), \
+                patch.object(module, '_openrouter_update_managed_key',
+                             return_value={'ok': False, 'status': 500}), \
+                self.app.app_context():
+            module._sync_tenant_credit_to_openrouter(tenant_id, 100.0)
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+            self.assertTrue(meta['cap_sync_pending'])
+            self.assertIn(tenant_id, db.list_tenant_keys_pending_cap_sync())
+
+        # The sweep re-pushes usage + the freshly computed cap on the existing
+        # key; a confirmed push clears the flag and creates no second key.
+        with self.app.app_context():
+            expected_cap = (160.0 / float(db.get_fx_rate()['rate'])
+                            / float(db.get_billing_multiplier()))
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_key_status',
+                             return_value={'usage': 10.0}), \
+                patch.object(module, '_openrouter_update_managed_key',
+                             return_value={'ok': True}) as patched_update, \
+                patch.object(module, '_openrouter_create_managed_key') as patched_create:
+            summary = module._resync_pending_tenant_caps()
+            self.assertGreaterEqual(summary['resynced'], 1)
+            patched_update.assert_called_once_with(
+                'retryhash1', limit_usd=expected_cap + 10.0,
+                limit_reset='none', disabled=False)
+            patched_create.assert_not_called()
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+            self.assertFalse(meta['cap_sync_pending'])
+            self.assertNotIn(tenant_id, db.list_tenant_keys_pending_cap_sync())
+
 
 if __name__ == '__main__':
     unittest.main()

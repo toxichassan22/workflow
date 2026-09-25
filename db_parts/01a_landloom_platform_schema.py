@@ -675,6 +675,9 @@ def _ensure_platform_columns(conn):
     _add('point_reservations', 'cost_sar', 'REAL')
     _add('recharge_requests', 'amount_sar', 'REAL')
     _add('recharge_requests', 'invoice_file_id', 'TEXT')
+    # Tracks a provider-cap push that never confirmed so the housekeeping
+    # sweep retries it instead of leaving the dashboard limit stale.
+    _add('tenant_openrouter_keys', 'cap_sync_pending', 'INTEGER DEFAULT 0')
     # sag_admin_panel is a platform-session attribute, not a grantable company
     # permission — drop stale grant rows written before the guard existed.
     try:
