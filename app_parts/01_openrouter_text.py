@@ -332,6 +332,51 @@ def _openrouter_list_managed_keys(limit_pages=100):
         return {'error': str(exc)}
 
 
+_UPSTREAM_AUDIT_TTL_SECONDS = 60.0
+_upstream_audit_snapshot = {'at': 0.0, 'hashes': None, 'labels': None}
+
+
+def _upstream_key_audit(force=False):
+    """Live dashboard key hashes + labels. Cached briefly so a burst of
+    gated calls pays one Management-API list per minute, not per request.
+    Returns (hashes, labels, error)."""
+    snap = _upstream_audit_snapshot
+    if not force and snap['hashes'] is not None \
+            and time.time() - snap['at'] < _UPSTREAM_AUDIT_TTL_SECONDS:
+        return snap['hashes'], snap['labels'], None
+    listed = _openrouter_list_managed_keys()
+    if isinstance(listed, dict) and listed.get('error'):
+        return None, None, listed.get('error')
+    hashes, labels = set(), set()
+    for item in listed:
+        if not isinstance(item, dict):
+            continue
+        if item.get('hash'):
+            hashes.add(str(item['hash']))
+        label = str(item.get('label') or item.get('name') or '')
+        if label:
+            labels.add(label)
+    snap['hashes'], snap['labels'], snap['at'] = hashes, labels, time.time()
+    return hashes, labels, None
+
+
+def _upstream_key_audit_invalidate():
+    """Provisioning or deleting keys makes the cached audit stale."""
+    _upstream_audit_snapshot['at'] = 0.0
+
+
+def _tenant_key_live_upstream(meta, hashes, labels):
+    """Does the stored key row still resolve to a live dashboard key? A row
+    without a stored hash/label cannot be disproven — benefit of the doubt."""
+    key_hash = str((meta or {}).get('openrouter_key_hash') or '')
+    if key_hash:
+        return key_hash in hashes
+    label = str((meta or {}).get('key_label') or '')
+    if label:
+        return label in labels
+    return True
+
+
 def _managed_orphan_keys():
     """Dashboard keys no company row references. Returns (orphans, error)."""
     listed = _openrouter_list_managed_keys()
@@ -470,6 +515,7 @@ def _provision_one_tenant_key(tenant, limit_usd, limit_reset):
                 _openrouter_delete_managed_key(prior_hash)
             except Exception as exc:
                 print(f"[OPENROUTER KEYS] superseded key cleanup failed for {tenant_id}: {exc}")
+        _upstream_key_audit_invalidate()
         return meta, None
     except Exception as exc:
         print(f"[OPENROUTER KEYS] provision failed: {exc}")
@@ -504,7 +550,19 @@ def _ensure_tenant_openrouter_key(tenant_id, limit_usd=None, limit_reset=None):
                 except Exception:
                     existing = {'has_key': False}
                 if existing.get('has_key') and existing.get('is_active'):
-                    return existing
+                    # Only platform-provisioned keys are audited upstream — a
+                    # manually pasted key is the admin's explicit choice and
+                    # may legitimately live outside the managed dashboard.
+                    if existing.get('provenance') != 'auto':
+                        return existing
+                    # A locally active row can point at a dashboard key that
+                    # was deleted upstream — verify against the (cached)
+                    # audit before trusting it, fail open on audit errors.
+                    hashes, labels, audit_err = _upstream_key_audit()
+                    if audit_err or _tenant_key_live_upstream(existing, hashes, labels):
+                        return existing
+                    print(f"[OPENROUTER KEYS] stored key for tenant {tenant_id} "
+                          "is dead upstream; re-provisioning")
                 meta, _error = _provision_one_tenant_key(
                     tenant or {'id': tenant_id},
                     TENANT_OPENROUTER_DEFAULT_LIMIT_USD if limit_usd is None else limit_usd,

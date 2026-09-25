@@ -423,6 +423,8 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_create_managed_key',
                              return_value=dict(created_body)), \
+                patch.object(module, '_upstream_key_audit',
+                             return_value=(set(), set(), None)), \
                 patch.object(module, '_openrouter_delete_managed_key',
                              return_value={'ok': True}) as deleted:
             meta = module._ensure_tenant_openrouter_key(tenant_id, limit_usd=5.0)
@@ -545,7 +547,9 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_create_managed_key',
                              side_effect=_fake_create), \
-                patch.object(module, '_openrouter_key_status', side_effect=_fake_status):
+                patch.object(module, '_openrouter_key_status', side_effect=_fake_status), \
+                patch.object(module, '_upstream_key_audit',
+                             return_value=(set(), set(), None)):
             done = client.post('/api/admin/openrouter-keys/ensure-all',
                                headers=self._admin_headers(), json={'batch': 50})
         self.assertEqual(done.status_code, 200, done.get_json())
@@ -568,15 +572,24 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         bare_id = self._fresh_tenant('Repeat Co', 'repeat-bulk@example.test', 'repeat-bulk')
         calls = {'n': 0}
 
+        upstream = []
+
         def _fake_create(name, limit_usd, limit_reset='monthly'):
             calls['n'] += 1
-            return {'key': f'sk-or-v1-repeat-key-{calls["n"]}-jjjjjjjjjj',
+            item = {'key': f'sk-or-v1-repeat-key-{calls["n"]}-jjjjjjjjjj',
                     'label': name, 'limit': 5.0,
                     'limit_reset': limit_reset, 'hash': f'repeathash-{calls["n"]}'}
+            upstream.append(item)
+            return item
+
+        def _fake_audit(force=False):
+            return ({str(i['hash']) for i in upstream},
+                    {str(i['label']) for i in upstream}, None)
 
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_create_managed_key',
                              side_effect=_fake_create), \
+                patch.object(module, '_upstream_key_audit', side_effect=_fake_audit), \
                 patch.object(module, '_openrouter_delete_managed_key',
                              return_value={'ok': True}):
             first = client.post('/api/admin/openrouter-keys/ensure-all',
@@ -610,6 +623,8 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_create_managed_key',
                              return_value=dict(created_body)), \
+                patch.object(module, '_upstream_key_audit',
+                             return_value=(set(), set(), None)), \
                 patch.object(module, '_openrouter_delete_managed_key',
                              return_value={'ok': True}) as deleted:
             done = client.post('/api/admin/openrouter-keys/ensure-all',
@@ -620,6 +635,38 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         by_tenant = {row['tenantId']: row for row in body['results']}
         self.assertTrue(by_tenant[tenant_id]['ok'])
         self.assertIsNone(by_tenant[tenant_id]['error'])
+
+    def test_ensure_all_reprovisions_when_upstream_key_deleted(self):
+        """A row claiming a key the dashboard no longer has counts as keyless —
+        this is the "all keyed" lie when a key was deleted on the dashboard."""
+        module = self.application_module
+        client = self.app.test_client()
+        tenant_id = self._fresh_tenant('Dead Co', 'dead-key@example.test', 'dead-key')
+        with self.app.app_context():
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-dead-key-zzzzzzzzzzzzzzzz', provenance='auto',
+                openrouter_key_hash='deadhash12', limit_usd=5.0)
+        created_body = {'key': 'sk-or-v1-alive-key-aaaaaaaaaaaaaaaa',
+                        'label': 'landloom-dead', 'limit': 5.0,
+                        'limit_reset': 'monthly', 'hash': 'alivehash34'}
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+                patch.object(module, '_openrouter_create_managed_key',
+                             return_value=dict(created_body)), \
+                patch.object(module, '_upstream_key_audit',
+                             return_value=(set(), set(), None)), \
+                patch.object(module, '_openrouter_delete_managed_key',
+                             return_value={'ok': True}):
+            done = client.post('/api/admin/openrouter-keys/ensure-all',
+                               headers=self._admin_headers(), json={'batch': 50, 'limitUsd': 5})
+        self.assertEqual(done.status_code, 200, done.get_json())
+        body = done.get_json()
+        by_tenant = {row['tenantId']: row for row in body['results']}
+        self.assertIn(tenant_id, by_tenant)
+        self.assertTrue(by_tenant[tenant_id]['ok'])
+        with self.app.app_context():
+            meta = db.get_tenant_openrouter_key_meta(tenant_id)
+        self.assertEqual(meta['openrouter_key_hash'], 'alivehash34')
+        self.assertTrue(meta['is_active'])
 
     def test_keys_debug_reports_state_without_secrets(self):
         client = self.app.test_client()
@@ -795,6 +842,8 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
                 patch.object(module, '_openrouter_create_managed_key',
                              return_value=dict(created_body)), \
+                patch.object(module, '_upstream_key_audit',
+                             return_value=({'poolhash33'}, {'landloom-pool'}, None)), \
                 patch.object(module, '_openrouter_delete_managed_key',
                              return_value={'ok': True}) as deleted:
             worker = threading.Thread(target=_provision)

@@ -111,6 +111,12 @@ def api_admin_tenant_keys_ensure_all():
         tenants = db.get_all_tenants()
     except Exception as exc:
         return jsonify({'error': f'Tenant list failed: {exc}'}), 500
+    # A row can claim a key whose dashboard copy was deleted manually —
+    # without the upstream audit the endpoint reports "all keyed" while the
+    # company is actually dead. One fresh list covers every tenant.
+    upstream_hashes, upstream_labels, audit_error = _upstream_key_audit(force=True)
+    if audit_error:
+        return jsonify({'error': f'Upstream key audit failed: {audit_error}'}), 503
     targets = []
     already_keyed = 0
     total_companies = 0
@@ -122,7 +128,9 @@ def api_admin_tenant_keys_ensure_all():
             meta = db.get_tenant_openrouter_key_meta(tenant.get('id'))
         except Exception:
             continue
-        if meta.get('has_key') and meta.get('is_active'):
+        if meta.get('has_key') and meta.get('is_active') \
+                and (meta.get('provenance') != 'auto'
+                     or _tenant_key_live_upstream(meta, upstream_hashes, upstream_labels)):
             already_keyed += 1
             continue
         old_hash = meta.get('openrouter_key_hash') if meta.get('has_key') else None
