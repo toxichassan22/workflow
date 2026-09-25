@@ -347,7 +347,7 @@ def api_decide_generation_approval(approval_id):
                 db.create_notification(
                     g.tenant_id, message, str(data.get('note') or '').strip() or None,
                     category='generation_approval',
-                    user_id=None if requester.startswith('tenant-admin:') else requester,
+                    user_id=requester,
                     entity_type='generation_approval', entity_id=approval_id)
     except Exception:
         pass

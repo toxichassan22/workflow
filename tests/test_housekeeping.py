@@ -104,7 +104,7 @@ class HousekeepingDbTests(unittest.TestCase):
 
     # ── t24: escalation ──────────────────────────────────────────────────
 
-    def test_overdue_task_escalates_to_assignee_and_admins(self):
+    def test_overdue_task_escalates_to_the_company_admin(self):
         task = db.create_approval_task(
             'tenant-1', 'final_approval', 'اعتماد الملف النهائي',
             assignee_id=self.assignee_id, assignee_name='المعتمد', due_hours=1)
@@ -119,9 +119,8 @@ class HousekeepingDbTests(unittest.TestCase):
             'SELECT escalated_at FROM approval_tasks WHERE id = ?', (task['id'],)
         ).fetchone()
         self.assertTrue(updated['escalated_at'])
-        self.assertTrue(self._notifications(self.assignee_id))
-        # Notices for the primary row land on the tenant-admin feed — the
-        # company admin's session reads under that address.
+        # The assignee gets no reminder — the company admin owns the signal.
+        self.assertFalse(self._notifications(self.assignee_id))
         self.assertTrue(self._notifications('tenant-admin:tenant-1'))
         self.assertEqual(db.escalate_overdue_approval_tasks(), [])
 
@@ -289,7 +288,7 @@ class HousekeepingApiTests(unittest.TestCase):
             headers=self.headers(self.admin_token), json={})
         self.assertEqual(response.status_code, 200, response.get_json())
         summary = response.get_json()['summary']
-        for step in ('email', 'reminders', 'escalations',
+        for step in ('email', 'escalations', 'subscription_watch',
                      'stale_reservations', 'stale_generation_jobs'):
             self.assertIn(step, summary)
 

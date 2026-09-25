@@ -74,6 +74,7 @@ def apply_invite_scope(user_id, invite):
         grant_company_admin_permissions(user_id)
         return None
     if responsibility in ASSIGNMENT_ROLES:
+        apply_responsibility_preset(user_id, responsibility)
         valid = {
             row['id'] for row in conn.execute(
                 'SELECT id FROM project_drafts WHERE tenant_id = ?', (tenant_id,)

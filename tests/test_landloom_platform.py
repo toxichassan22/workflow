@@ -2,7 +2,7 @@
 
 Covers generation approvals with cost estimate and points reservation,
 final-file approvals with stamping, downloads ledger, proposal copies,
-archive/restore, notifications, approval tasks, event tasks, role templates,
+archive/restore, notifications, approval tasks, role templates,
 separation-of-duties matrix, recharge requests, support tickets,
 the file-type registry and their HTTP endpoints. Runs against a temporary
 SQLite database and never calls Google or an AI API.
@@ -364,9 +364,10 @@ class LandloomDbTests(unittest.TestCase):
         db.create_notification('tenant-1', 'تنبيه عام', body='نص')
         db.create_notification('tenant-1', 'تنبيه خاص', body='نص', user_id='user-1')
         unread = db.list_notifications('tenant-1', unread_only=True)
-        self.assertEqual(len(unread), 2)
+        self.assertEqual(len(unread), 3)  # عام + خاص + نسخة الأدمن المرآة
         updated = db.mark_notifications_read('tenant-1', 'user-1')
         self.assertGreaterEqual(updated, 1)
+        db.mark_notifications_read('tenant-1', 'tenant-admin:tenant-1')
         conn = db.get_db()
         rows = conn.execute('SELECT title, read_at FROM notifications').fetchall()
         read_map = {row['title']: row['read_at'] for row in rows}
@@ -493,7 +494,8 @@ class LandloomDbTests(unittest.TestCase):
                                   projects=[self.draft_id])
         db.apply_invite_scope(admin['id'], db.get_invite('tenant-1', invite['id']))
         perms = db.get_user_permissions(admin['id'])
-        self.assertTrue(all(v for k, v in perms.items() if k != 'sag_admin_panel'))
+        self.assertTrue(all(v for k, v in perms.items()
+                            if k not in ('sag_admin_panel', 'support_tickets')))
         self.assertEqual(db.list_user_assignments('tenant-1', admin['id']), [])
         self.assertTrue(db.user_may_access_draft(admin['id'],
                                                  db.get_project_draft_by_id('tenant-1', self.draft_id)))
@@ -872,9 +874,12 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(db.send_due_event_task_reminders(), [])
         items = db.list_notifications('tenant-1', user_id='user-1', category='task')
         self.assertEqual(len(items), 1)
+        # The admin feed carries the unassigned task's own row plus the
+        # mirrored copy of the assignee's reminder — the admin sees every
+        # notice that lands between staff members.
         owner = db.list_notifications(
             'tenant-1', user_id='tenant-admin:tenant-1', category='task')
-        self.assertEqual(len(owner), 1)
+        self.assertEqual(len(owner), 2)
 
     def test_stale_generation_job_notifies_creator_once(self):
         job = db.create_generation_job('tenant-1', draft_id='draft-1', created_by='user-1')
@@ -1099,17 +1104,21 @@ class LandloomApiTests(unittest.TestCase):
     def test_support_ticket_creation_and_status_are_gated(self):
         emp_id, creator_token = self._user_token('عميل', 'cust@x.test', 'employee')
         _, support_token = self._user_token('دعم', 'sup@x.test', 'support')
-        # Opening a ticket is a desk act: a plain employee is refused, a
-        # support_tickets holder (or the company admin) is not.
-        denied_create = self.client.post(
-            '/api/support/tickets', headers=self.headers(creator_token),
-            json={'subject': 'مشكلة', 'body': 'تفاصيل'})
-        self.assertEqual(denied_create.status_code, 403)
-        denied_list = self.client.get(
-            '/api/support/tickets', headers=self.headers(creator_token))
-        self.assertEqual(denied_list.status_code, 403)
+        # Tickets are the company admin's channel to the platform — employees
+        # cannot file or list them even when a stale support_tickets grant row
+        # exists (the effective permission is force-denied for employees).
+        db.set_user_permission(emp_id, 'support_tickets', 1)
+        self.assertFalse(db.get_user_permissions(emp_id)['support_tickets'])
+        for token in (creator_token, support_token):
+            denied_create = self.client.post(
+                '/api/support/tickets', headers=self.headers(token),
+                json={'subject': 'مشكلة', 'body': 'تفاصيل'})
+            self.assertEqual(denied_create.status_code, 403)
+            denied_list = self.client.get(
+                '/api/support/tickets', headers=self.headers(token))
+            self.assertEqual(denied_list.status_code, 403)
         created = self.client.post(
-            '/api/support/tickets', headers=self.headers(support_token),
+            '/api/support/tickets', headers=self.headers(self.token),
             json={'subject': 'مشكلة', 'body': 'تفاصيل'})
         self.assertEqual(created.status_code, 200, created.get_json())
         ticket_id = created.get_json()['ticket']['id']
@@ -1149,36 +1158,18 @@ class LandloomApiTests(unittest.TestCase):
             f'/api/approval-tasks/{task["id"]}/close', headers=self.headers(approver_token), json={})
         self.assertEqual(closed.status_code, 200, closed.get_json())
 
-    def test_event_task_status_limited_to_assignee_creator_or_manager(self):
-        _, creator_token = self._user_token('منشئ', 'creator@x.test', 'employee')
-        assignee_id, assignee_token = self._user_token('مكلف', 'assignee@x.test', 'employee')
-        _, third_token = self._user_token('غريب', 'third-ev@x.test', 'employee')
-        created = self.client.post(
-            '/api/event-tasks', headers=self.headers(creator_token),
-            json={'title': 'مهمة تسليم', 'assigneeId': assignee_id})
-        self.assertEqual(created.status_code, 200, created.get_json())
-        task_id = created.get_json()['task']['id']
-        denied = self.client.post(
-            f'/api/event-tasks/{task_id}/status', headers=self.headers(third_token),
-            json={'status': 'completed'})
-        self.assertEqual(denied.status_code, 403)
-        done = self.client.post(
-            f'/api/event-tasks/{task_id}/status', headers=self.headers(assignee_token),
-            json={'status': 'completed'})
-        self.assertEqual(done.status_code, 200, done.get_json())
-
     def test_disabled_or_deleted_user_token_is_rejected(self):
         user_id, token = self._user_token('موظف', 'gone@x.test', 'employee')
-        ok = self.client.get('/api/event-tasks', headers=self.headers(token))
+        ok = self.client.get('/api/notifications', headers=self.headers(token))
         self.assertEqual(ok.status_code, 200)
         db.update_user(user_id, is_active=0)
-        denied = self.client.get('/api/event-tasks', headers=self.headers(token))
+        denied = self.client.get('/api/notifications', headers=self.headers(token))
         self.assertEqual(denied.status_code, 403)
         db.update_user(user_id, is_active=1)
-        restored = self.client.get('/api/event-tasks', headers=self.headers(token))
+        restored = self.client.get('/api/notifications', headers=self.headers(token))
         self.assertEqual(restored.status_code, 200)
         db.delete_user(user_id)
-        removed = self.client.get('/api/event-tasks', headers=self.headers(token))
+        removed = self.client.get('/api/notifications', headers=self.headers(token))
         self.assertEqual(removed.status_code, 403)
 
     def test_permission_grant_applies_to_existing_token(self):
@@ -1224,23 +1215,6 @@ class LandloomApiTests(unittest.TestCase):
             '/api/project-draft/section-version', headers=self.headers(outsider_token),
             json={'draftId': draft_id, 'sectionKey': 'basic'})
         self.assertEqual(denied.status_code, 404)
-
-    def test_event_tasks_roundtrip_and_auth(self):
-        no_auth = self.client.get('/api/event-tasks')
-        self.assertEqual(no_auth.status_code, 401)
-        created = self.client.post(
-            '/api/event-tasks', headers=self.headers(self.token),
-            json={'title': 'اجتماع تسليم', 'recurrence': 'weekly'})
-        self.assertEqual(created.status_code, 200)
-        task_id = created.get_json()['task']['id']
-        completed = self.client.post(
-            f'/api/event-tasks/{task_id}/status', headers=self.headers(self.token),
-            json={'status': 'completed'})
-        self.assertEqual(completed.status_code, 200)
-        self.assertEqual(completed.get_json()['task']['status'], 'completed')
-        listed = self.client.get('/api/event-tasks', headers=self.headers(self.token))
-        self.assertEqual(listed.status_code, 200)
-        self.assertTrue(listed.get_json()['tasks'])
 
     def test_support_ticket_and_messages(self):
         created = self.client.post(
@@ -1395,21 +1369,6 @@ class LandloomApiTests(unittest.TestCase):
         row = db.get_db().execute(
             'SELECT 1 AS x FROM notifications WHERE id = ?', (other['id'],)).fetchone()
         self.assertIsNotNone(row)
-
-    def test_event_task_assignment_notifies_assignee(self):
-        assignee_id, assignee_token = self._user_token('مكلف', 'assignee@x.test', 'employee')
-        created = self.client.post(
-            '/api/event-tasks', headers=self.headers(self.token),
-            json={'title': 'تجهيز العرض', 'assigneeId': assignee_id})
-        self.assertEqual(created.status_code, 200)
-        listed = self.client.get('/api/notifications', headers=self.headers(assignee_token))
-        tasks = [n for n in listed.get_json()['notifications'] if n['category'] == 'task']
-        self.assertTrue(tasks)
-        self.assertEqual(tasks[0]['entity_type'], 'event_task')
-        foreign = self.client.post(
-            '/api/event-tasks', headers=self.headers(self.token),
-            json={'title': 'خارجية', 'assigneeId': 'not-in-tenant'})
-        self.assertEqual(foreign.status_code, 404)
 
     def test_super_admin_feed_and_tenant_isolation(self):
         conn = db.get_db()

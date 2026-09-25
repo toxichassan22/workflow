@@ -108,9 +108,8 @@ def api_admin_tenants():
         except Exception as exc:
             print(f"[OPENROUTER KEYS] auto-provision on create failed: {exc}")
         tenant = db.get_tenant_by_id(tenant_id)
-        _notify_super_admins(
-            'شركة جديدة انضمت إلى المنصة', company_name,
-            entity_type='tenant', entity_id=tenant_id)
+        # No «new company» notice: the desk created it — a notification would
+        # only echo the admin's own click back at them.
         return jsonify({
             'success': True,
             'tenant': _company_payload(tenant),

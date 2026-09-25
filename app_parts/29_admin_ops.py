@@ -114,10 +114,6 @@ def api_admin_set_tenant_activation(tenant_id):
     _record_audit_event('tenant.activated' if is_active else 'tenant.deactivated',
                         'tenant', tenant_id, entity_name=tenant.get('company_name'),
                         new_value={'reason': data.get('reason')} if not is_active else None)
-    _notify_super_admins(
-        'فُعّلت شركة' if is_active else 'عُلّقت شركة',
-        tenant.get('company_name') or '',
-        entity_type='tenant', entity_id=tenant_id)
     return jsonify({'success': True, 'tenant': _company_payload(result)})
 
 
@@ -144,6 +140,76 @@ def api_admin_tenant_subscription(tenant_id):
     _record_audit_event('tenant.subscription_changed', 'tenant', tenant_id,
                         new_value=row.get('package_id'))
     return jsonify({'success': True, 'subscription': row}), 201
+
+
+# ── Subscription watch: the desk hears once when a company's window nears its
+# end and once when it lapses — the renewal nudge itself stays a human send ──
+
+SUBSCRIPTION_WATCH_WARN_DAYS = int(os.environ.get('SUBSCRIPTION_WATCH_WARN_DAYS') or 7)
+
+
+def _subscription_watch_sweep():
+    """Ping every super admin when a company's paid subscription (or bare
+    trial) approaches or passes its end date. One notice per state per end
+    date: editing the window re-arms it, so a renewed plan never goes stale.
+    The follow-up — messaging the company — stays a deliberate desk act via
+    the announcement composer."""
+    warned = expired = 0
+    admin_ids = db.list_admin_tenant_ids()
+    if not admin_ids:
+        return {'warned': 0, 'expired': 0}
+    now = db._utcnow()
+    with _worker_app_context():
+        for tenant in db.get_all_tenants() or []:
+            if tenant.get('is_admin') or not tenant.get('is_active'):
+                continue
+            try:
+                sub = db.current_subscription(tenant['id'])
+            except Exception:
+                sub = None
+            ends_raw = str((sub or {}).get('ends_at') or '').strip()
+            label = (sub or {}).get('package_name') or 'الباقة'
+            if not ends_raw:
+                ends_raw = str(tenant.get('trial_ends_at') or '').strip()
+                label = 'الفترة التجريبية'
+            if not ends_raw:
+                continue
+            try:
+                ends_dt = datetime.fromisoformat(
+                    ends_raw[:10] + 'T23:59:59' if len(ends_raw) == 10 else ends_raw)
+            except (TypeError, ValueError):
+                continue
+            if ends_dt.tzinfo is not None:
+                ends_dt = ends_dt.replace(tzinfo=None)
+            state = 'expired' if ends_dt <= now else (
+                'expiring' if (ends_dt - now).days <= SUBSCRIPTION_WATCH_WARN_DAYS else None)
+            if not state:
+                continue
+            company = tenant.get('company_name') or 'شركة'
+            if state == 'expiring':
+                title = 'باقة شركة تقترب من الانتهاء'
+                body = f'«{company}» — {label} تنتهي خلال {max(0, (ends_dt - now).days)} يوم'
+            else:
+                title = 'انتهت صلاحية باقة شركة'
+                body = f'«{company}» — انتهت {label} في {ends_raw[:10]}'
+            # tenant_id:state:ends re-arms the dedup key whenever the window moves.
+            entity_id = f"{tenant['id']}:{state}:{ends_raw[:10]}"
+            sent = 0
+            for admin_id in admin_ids:
+                if db.recent_notification_exists(
+                        admin_id, 'subscription', entity_id, since_hours=24 * 3650):
+                    continue
+                db.create_notification(
+                    admin_id, title, body, category='platform', user_id=None,
+                    entity_type='subscription', entity_id=entity_id)
+                sent += 1
+            if not sent:
+                continue
+            if state == 'expiring':
+                warned += 1
+            else:
+                expired += 1
+    return {'warned': warned, 'expired': expired}
 
 
 @app.route('/api/admin/packages/<package_id>/versions', methods=['GET', 'POST'])

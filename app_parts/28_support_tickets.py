@@ -17,10 +17,10 @@ def _landloom_ticket_actor_is_creator(ticket):
 @app.route('/api/support/tickets', methods=['POST'])
 @require_auth
 def api_create_support_ticket():
-    """Opening a ticket is a support-desk act: the company admin or a user
-    granted support_tickets — not every authenticated employee."""
-    if not _landloom_can('support_tickets'):
-        return _landloom_forbidden('فتح تذاكر الدعم يتطلب صلاحية تذاكر الدعم')
+    """Opening a ticket is the company admin's channel to the platform desk —
+    employees never file tickets themselves."""
+    if not _landloom_actor_is_admin():
+        return _landloom_forbidden('فتح تذاكر الدعم لمدير الشركة')
     data = request.json or {}
     # Priority is a desk-only field: the client never sets it, every ticket
     # lands 'normal' and the platform triages from its own inbox.
@@ -50,6 +50,7 @@ def api_create_support_ticket():
     db.create_notification(
         g.tenant_id, 'تذكرة دعم جديدة',
         body=row.get('subject'), category='support',
+        user_id='tenant-admin:' + str(g.tenant_id),
         entity_type='support_ticket', entity_id=row['id'])
     _notify_super_admins(
         'تذكرة دعم جديدة',
@@ -61,9 +62,9 @@ def api_create_support_ticket():
 @app.route('/api/support/tickets', methods=['GET'])
 @require_auth
 def api_list_support_tickets():
-    """The inbox is the desk surface — permission holders only."""
-    if not _landloom_can('support_tickets'):
-        return _landloom_forbidden('عرض تذاكر الدعم يتطلب صلاحية تذاكر الدعم')
+    """The inbox is the company admin's desk surface — employees never see it."""
+    if not _landloom_actor_is_admin():
+        return _landloom_forbidden('عرض تذاكر الدعم لمدير الشركة')
     rows = db.list_support_tickets(g.tenant_id, status=request.args.get('status'))
     return jsonify({'success': True, 'tickets': rows})
 
@@ -74,8 +75,8 @@ def api_get_support_ticket(ticket_id):
     row = db.get_support_ticket(g.tenant_id, ticket_id)
     if not row:
         return jsonify({'error': 'Ticket not found', 'error_code': 'ticket_not_found'}), 404
-    if not _landloom_can('support_tickets') and not _landloom_ticket_actor_is_creator(row):
-        return _landloom_forbidden('عرض التذكرة يتطلب صلاحية تذاكر الدعم')
+    if not _landloom_actor_is_admin() and not _landloom_ticket_actor_is_creator(row):
+        return _landloom_forbidden('عرض التذكرة لمدير الشركة')
     return jsonify({'success': True, 'ticket': row})
 
 
@@ -83,12 +84,12 @@ def api_get_support_ticket(ticket_id):
 @require_auth
 def api_add_support_message(ticket_id):
     data = request.json or {}
-    if not _landloom_can('support_tickets'):
+    if not _landloom_actor_is_admin():
         ticket = db.get_support_ticket(g.tenant_id, ticket_id)
         if not ticket:
             return jsonify({'error': 'التذكرة غير موجودة', 'error_code': 'ticket_not_found'}), 404
         if not _landloom_ticket_actor_is_creator(ticket):
-            return _landloom_forbidden('الرد على التذكرة يتطلب صلاحية تذاكر الدعم')
+            return _landloom_forbidden('الرد على التذكرة لمدير الشركة')
     row = db.add_support_message(
         g.tenant_id, ticket_id, data.get('body'), author_id=_landloom_actor_id(),
         author_name=_landloom_actor_name(), author_role='customer',
@@ -114,8 +115,8 @@ def api_support_ticket_attachment(ticket_id, file_id):
     ticket = db.get_support_ticket(g.tenant_id, ticket_id)
     if not ticket:
         return jsonify({'success': False, 'error': 'التذكرة غير موجودة'}), 404
-    if not _landloom_can('support_tickets') and not _landloom_ticket_actor_is_creator(ticket):
-        return _landloom_forbidden('عرض التذكرة يتطلب صلاحية تذاكر الدعم')
+    if not _landloom_actor_is_admin() and not _landloom_ticket_actor_is_creator(ticket):
+        return _landloom_forbidden('عرض التذكرة لمدير الشركة')
     return _ticket_attachment_response(ticket, file_id)
 
 

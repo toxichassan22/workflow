@@ -102,6 +102,7 @@
         recharge_request: () => openAdminRechargePage(),
         support_ticket: () => openAdminTicketsPage(),
         tenant: () => openTenantCompanies(),
+        subscription: (n) => openNotificationsPage().then(() => prefillAnnounceForTenant(n)),
       } : {
         section_version: () => openTenantApprovals(),
         project_draft: () => openTenantApprovals(),
@@ -270,6 +271,17 @@
         list.filter(t => !t.is_admin).map(t =>
           '<option value="' + llEscape(t.id) + '">' + llEscape(t.company_name || t.name || t.email || t.id) + '</option>').join('');
       if (current) sel.value = current;
+    }
+
+    // A subscription-expiry notice carries «tenant:state:end-date» in
+    // entity_id — landing here pre-picks that company in the announce
+    // composer so the renewal message is one typed body away.
+    function prefillAnnounceForTenant(n) {
+      const tenantId = String((n && n.entity_id) || '').split(':')[0];
+      const sel = document.getElementById('notifAnnounceTarget');
+      if (sel && tenantId) sel.value = tenantId;
+      const title = document.getElementById('notifAnnounceTitle');
+      if (title && !title.value) title.value = 'تجديد الباقة';
     }
 
     // ── Per-user category preferences ────────────────────────────────────

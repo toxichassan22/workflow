@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -250,6 +251,125 @@ class OpsSectionTests(unittest.TestCase):
                    if n['entity_type'] == 'support_ticket' and 'حالة' in (n['title'] or '')]
         self.assertEqual(len(notices), 1)
         self.assertIn('مغلقة', notices[0]['body'])
+
+    # ── Company-admin visibility: every staff notice mirrors to the admin ──
+
+    def test_employee_notifications_mirror_to_the_company_admin(self):
+        emp_id = db.create_user(
+            self.tenant_id, 'محرر', 'mirror-ed@x.test', 'hash', role='employee')
+        db.create_notification(
+            self.tenant_id, 'اعتُمد قسمك', category='section_approval',
+            user_id=emp_id)
+        employee_feed = db.list_notifications(self.tenant_id, user_id=emp_id)
+        self.assertEqual(
+            [n['title'] for n in employee_feed if n['title'] == 'اعتُمد قسمك'],
+            ['اعتُمد قسمك'])
+        admin_feed = [n['title'] for n in self._feed(self.token)]
+        self.assertIn('اعتُمد قسمك', admin_feed)
+
+    def test_admin_feed_rows_do_not_mirror_twice(self):
+        db.create_notification(self.tenant_id, 'بثّ عام')
+        db.create_notification(
+            self.tenant_id, 'للأدمن', user_id='tenant-admin:' + self.tenant_id)
+        db.create_notification(
+            self.tenant_id, 'محفظة', category='billing', user_id='someone',
+            mirror_admin=False)
+        titles = [n['title'] for n in self._feed(self.token)]
+        self.assertEqual(titles.count('بثّ عام'), 1)
+        self.assertEqual(titles.count('للأدمن'), 1)
+        self.assertNotIn('محفظة', titles)
+
+    def test_employees_cannot_read_the_admin_only_rows(self):
+        emp_id = db.create_user(
+            self.tenant_id, 'موظف', 'emp-feed@x.test', 'hash', role='employee')
+        emp_token = auth.create_token(
+            self.tenant_id, 'emp-feed@x.test', user_id=emp_id,
+            user_name='موظف', user_role='employee')
+        db.create_notification(
+            self.tenant_id, 'أمر إداري', user_id='tenant-admin:' + self.tenant_id)
+        db.create_notification(self.tenant_id, 'عام للجميع')
+        titles = [n['title'] for n in self._feed(emp_token)]
+        self.assertIn('عام للجميع', titles)
+        self.assertNotIn('أمر إداري', titles)
+
+    # ── Responsibility presets ────────────────────────────────────────────
+
+    def test_responsibility_presets_on_add_user(self):
+        created = self.client.post('/api/users', headers=self.headers(self.token), json={
+            'name': 'معتمد', 'email': 'preset-ap@x.test', 'password': 'Secret12345',
+            'responsibility': 'approver'})
+        self.assertIn(created.status_code, (200, 201), created.get_json())
+        approver = db.get_user_by_email('preset-ap@x.test')
+        perms = db.get_user_permissions(approver['id'])
+        self.assertTrue(perms['approvals'])
+        self.assertTrue(perms['approve_generation'])
+        self.assertTrue(perms['approve_final_file'])
+        for denied in ('create_presentation', 'billing', 'support_tickets',
+                       'company_settings', 'manage_users', 'ai_rules'):
+            self.assertFalse(perms[denied], denied)
+
+        created = self.client.post('/api/users', headers=self.headers(self.token), json={
+            'name': 'محرر', 'email': 'preset-ed@x.test', 'password': 'Secret12345',
+            'responsibility': 'editor'})
+        self.assertIn(created.status_code, (200, 201), created.get_json())
+        editor = db.get_user_by_email('preset-ed@x.test')
+        perms = db.get_user_permissions(editor['id'])
+        self.assertTrue(perms['create_presentation'])
+        self.assertTrue(perms['export_files'])
+        for denied in ('approvals', 'approve_generation', 'approve_final_file',
+                       'billing', 'support_tickets', 'company_settings',
+                       'manage_users', 'ai_rules'):
+            self.assertFalse(perms[denied], denied)
+
+    def test_support_tickets_are_company_admin_only(self):
+        emp_id = db.create_user(
+            self.tenant_id, 'موظف', 'emp-ticket@x.test', 'hash', role='employee')
+        emp_token = auth.create_token(
+            self.tenant_id, 'emp-ticket@x.test', user_id=emp_id,
+            user_name='موظف', user_role='employee')
+        for method, url in (
+                ('POST', '/api/support/tickets'),
+                ('GET', '/api/support/tickets')):
+            response = (self.client.post if method == 'POST' else self.client.get)(
+                url, headers=self.headers(emp_token),
+                json={'subject': 'عطل', 'body': 'مساعدة'} if method == 'POST' else None)
+            self.assertEqual(response.status_code, 403, (method, url, response.get_json()))
+        # A stale grant row can never reopen the desk for an employee.
+        db.set_user_permission(emp_id, 'support_tickets', True)
+        self.assertFalse(db.get_user_permissions(emp_id)['support_tickets'])
+        denied = self.client.post(
+            '/api/support/tickets', headers=self.headers(emp_token),
+            json={'subject': 'عطل', 'body': 'مساعدة'})
+        self.assertEqual(denied.status_code, 403)
+
+    # ── Subscription watch: the desk hears before a package lapses ────────
+
+    def test_subscription_watch_warns_the_platform_desk(self):
+        admin = self._admin_token()
+        package = db.create_billing_package('باقة سنوية', credit_sar=1000, price_sar=1000)
+        ends = (db._utcnow() + timedelta(days=5)).isoformat()
+        db.create_subscription(
+            self.tenant_id, package_id=package['id'], ends_at=ends)
+        result = self.application_module._subscription_watch_sweep()
+        self.assertEqual(result['warned'], 1)
+        feed = self._feed(admin)
+        note = next((n for n in feed if n['entity_type'] == 'subscription'), None)
+        self.assertIsNotNone(note)
+        self.assertEqual(note['title'], 'باقة شركة تقترب من الانتهاء')
+        self.assertTrue(note['entity_id'].startswith(self.tenant_id))
+        # The same window never notifies twice.
+        self.assertEqual(self.application_module._subscription_watch_sweep()['warned'], 0)
+
+    def test_subscription_watch_reports_an_elapsed_package(self):
+        admin = self._admin_token()
+        package = db.create_billing_package('باقة', credit_sar=10, price_sar=10)
+        db.create_subscription(
+            self.tenant_id, package_id=package['id'],
+            ends_at=(db._utcnow() - timedelta(days=1)).isoformat())
+        result = self.application_module._subscription_watch_sweep()
+        self.assertEqual(result['expired'], 1)
+        titles = [n['title'] for n in self._feed(admin)]
+        self.assertIn('انتهت صلاحية باقة شركة', titles)
 
     # ── Ticket attachments ────────────────────────────────────────────────
 

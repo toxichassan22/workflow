@@ -255,9 +255,8 @@ def _run_housekeeping_tick():
     summary = {}
     steps = (
         ('email', _drain_email_outbox),
-        ('reminders', db.send_due_approval_reminders),
         ('escalations', db.escalate_overdue_approval_tasks),
-        ('event_task_reminders', db.send_due_event_task_reminders),
+        ('subscription_watch', _subscription_watch_sweep),
         ('stale_reservations', db.release_stale_reservations),
         ('stale_generation_jobs', db.sweep_stale_generation_jobs),
         ('dead_generating_drafts', db.recover_dead_generating_drafts),
@@ -808,6 +807,7 @@ def _apply_user_responsibility_payload(user_id, data):
         db.grant_company_admin_permissions(user_id)
         return None
     if responsibility in db.ASSIGNMENT_ROLES:
+        db.apply_responsibility_preset(user_id, responsibility)
         projects = data.get('projects')
         draft_ids = [str(p) for p in projects] if isinstance(projects, list) and projects else [db.ASSIGNMENT_ALL_DRAFTS]
         result = db.set_user_assignments(
@@ -933,7 +933,9 @@ def api_get_user_permissions(user_id):
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
     perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
-    keys = [k for k in db.PERMISSION_KEYS if k != 'sag_admin_panel']
+    # support_tickets is pinned off for employees — offering it as a toggle
+    # would flip and revert; sag_admin_panel is platform-session only.
+    keys = [k for k in db.PERMISSION_KEYS if k not in ('sag_admin_panel', 'support_tickets')]
     return jsonify({'success': True, 'permissions': perms, 'availableKeys': keys})
 
 

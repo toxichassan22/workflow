@@ -5,7 +5,7 @@ NOTIFICATION_CATEGORIES = ('section_approval', 'generation_approval', 'final_app
 
 
 def create_notification(tenant_id, title, body=None, category='general', user_id=None,
-                        entity_type=None, entity_id=None, email_to=None):
+                        entity_type=None, entity_id=None, email_to=None, mirror_admin=True):
     conn = get_db()
     # A notice addressed to the primary user row belongs to the company admin —
     # its session runs tenant-direct and reads under the tenant-admin address,
@@ -32,6 +32,25 @@ def create_notification(tenant_id, title, body=None, category='general', user_id
            VALUES (?, ?, ?, 'in_app', 'delivered', ?)''',
         (str(uuid.uuid4()), row_id, tenant_id, now),
     )
+    # The company admin sees every notice exchanged between staff members: a
+    # row addressed to a specific employee is copied onto the tenant-admin
+    # feed (its own row, so the admin's read/delete state never touches the
+    # employee's). Callers that already address the admin themselves pass
+    # mirror_admin=False to avoid a duplicate.
+    if mirror_admin and user_id and not str(user_id).startswith('tenant-admin:'):
+        mirror_id = str(uuid.uuid4())
+        conn.execute(
+            '''INSERT INTO notifications (id, tenant_id, user_id, category, title, body, entity_type, entity_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (mirror_id, tenant_id, 'tenant-admin:' + str(tenant_id),
+             category if category in NOTIFICATION_CATEGORIES else 'general',
+             title, body, entity_type, entity_id),
+        )
+        conn.execute(
+            '''INSERT INTO notification_deliveries (id, notification_id, tenant_id, channel, status, delivered_at)
+               VALUES (?, ?, ?, 'in_app', 'delivered', ?)''',
+            (str(uuid.uuid4()), mirror_id, tenant_id, now),
+        )
     if email_to:
         delivery_id = str(uuid.uuid4())
         conn.execute(
@@ -431,19 +450,15 @@ def escalate_overdue_approval_tasks(tenant_id=None, overdue_hours=24):
         escalated.append(row['id'])
     conn.commit()
     for row in rows:
-        notified = set()
-        recipients = [row['assignee_id']] + [a['id'] for a in tenant_admin_contacts(row['tenant_id'])]
-        admin_emails = {a['id']: a['email'] for a in tenant_admin_contacts(row['tenant_id'])}
-        for user_id in recipients:
-            if not user_id or user_id in notified:
-                continue
-            notified.add(user_id)
-            create_notification(
-                row['tenant_id'], 'مهمة اعتماد متأخرة صعّدت',
-                body=row['title'], category='task',
-                entity_type='approval_task', entity_id=row['id'],
-                user_id=user_id,
-                email_to=admin_emails.get(user_id) or _user_email(user_id))
+        admin_email = next(
+            (a['email'] for a in tenant_admin_contacts(row['tenant_id']) if a.get('email')),
+            None)
+        create_notification(
+            row['tenant_id'], 'مهمة اعتماد متأخرة صعّدت',
+            body=row['title'], category='task',
+            entity_type='approval_task', entity_id=row['id'],
+            user_id='tenant-admin:' + str(row['tenant_id']),
+            email_to=admin_email)
     return escalated
 
 

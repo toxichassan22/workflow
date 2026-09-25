@@ -487,6 +487,46 @@ _RETIRED_ROLE_PRESETS = {
 }
 
 
+# The standing-team contract as permission envelopes: picking «editor» or
+# «approver» on the add form or an invite stamps these grants/denies. An
+# editor builds and exports work; an approver only views and decides —
+# neither touches the wallet, the support desk, company settings, the user
+# list or the AI rules. «admin» responsibility is handled separately by
+# grant_company_admin_permissions.
+RESPONSIBILITY_PRESETS = {
+    'editor': {
+        'dashboard': True, 'create_presentation': True, 'view_presentations': True,
+        'generate_images': True, 'generate_maps': True, 'export_files': True,
+        'copy_presentation': True,
+        'company_settings': False, 'custom_fields': False, 'manage_users': False,
+        'ai_rules': False, 'training_data': False, 'approvals': False,
+        'approve_generation': False, 'approve_final_file': False,
+        'post_approval_edit': False, 'support_tickets': False, 'billing': False,
+        'audit_log': False,
+    },
+    'approver': {
+        'dashboard': True, 'view_presentations': True,
+        'approvals': True, 'approve_generation': True, 'approve_final_file': True,
+        'create_presentation': False, 'generate_images': False, 'generate_maps': False,
+        'export_files': False, 'copy_presentation': False, 'post_approval_edit': False,
+        'company_settings': False, 'custom_fields': False, 'manage_users': False,
+        'ai_rules': False, 'training_data': False, 'support_tickets': False,
+        'billing': False, 'audit_log': False,
+    },
+}
+
+
+def apply_responsibility_preset(user_id, responsibility):
+    """Stamp the responsibility's permission envelope on a user row. Explicit
+    deny rows pin the doors shut even if a template default later flips."""
+    preset = RESPONSIBILITY_PRESETS.get(responsibility)
+    if not preset:
+        return False
+    for key, granted in preset.items():
+        set_user_permission(user_id, key, granted)
+    return True
+
+
 def get_user_permissions(user_id, default_role='employee'):
     """Get effective permissions for a user. Defaults apply when no override exists."""
     conn = get_db()
@@ -500,12 +540,16 @@ def get_user_permissions(user_id, default_role='employee'):
     # sag_admin_panel is a platform-session attribute, not a grantable company
     # permission — a stale grant row must never resurrect it for an employee.
     defaults['sag_admin_panel'] = False
+    # Support tickets are the company admin's channel to the platform desk —
+    # no employee grant may open them, whatever a stale or future row says.
+    defaults['support_tickets'] = False
     return defaults
 
 
 def set_user_permission(user_id, permission_key, granted):
     """Set or override a permission for a user."""
-    if permission_key not in PERMISSION_KEYS or permission_key == 'sag_admin_panel':
+    if permission_key not in PERMISSION_KEYS \
+            or permission_key in ('sag_admin_panel', 'support_tickets'):
         return False
     conn = get_db()
     perm_id = str(uuid.uuid4())

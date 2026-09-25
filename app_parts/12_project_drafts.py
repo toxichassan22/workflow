@@ -278,8 +278,6 @@ def _versioned_draft_for_decide(draft_id):
                 or str(assigned.get('user_id') or '') == str(g.user_id or ''):
             return draft, None
         return None, {'error': 'No project draft found'}
-    if draft.get('user_id') == _project_draft_actor_id():
-        return draft, None
     if _has_approvals_permission():
         return draft, None
     return None, {'error': 'No project draft found'}
@@ -605,6 +603,12 @@ def api_save_project_draft():
         return jsonify({'error': 'Draft not found'}), 404
     previous_data = (previous or {}).get('draft_data') if isinstance(previous, dict) else {}
     previous_statuses = (previous or {}).get('section_statuses') if isinstance(previous, dict) else {}
+    # Approvers read, decide and annotate — they never write project content.
+    # The permission gate, not the assignment, decides who may save: the
+    # approver envelope denies create_presentation, and the company admin's
+    # tenant-direct session (user_id None) bypasses altogether.
+    if g.user_id is not None and not _landloom_can('create_presentation'):
+        return _landloom_forbidden('تحرير المشاريع يخص المحررين')
     # A section the actor cannot open cannot be written through the save either.
     # The company admin (tenant-direct session) bypasses: require_permission
     # already grants it every permission, and section toggles govern employees.
@@ -1339,7 +1343,7 @@ def api_decide_section_version():
                 g.tenant_id, message,
                 f'«{draft.get("title") or "مشروع"}» — القسم {_section_version_label(version["section_key"])}',
                 category='section_approval',
-                user_id=None if sender.startswith('tenant-admin:') else sender,
+                user_id=sender,
                 entity_type='section_version', entity_id=version_id)
     except Exception:
         pass
@@ -1677,7 +1681,7 @@ def api_review_project_draft():
             db.create_notification(
                 g.tenant_id, message, note or None,
                 category='section_approval',
-                user_id=None if requester.startswith('tenant-admin:') else requester,
+                user_id=requester,
                 entity_type='project_draft', entity_id=draft_id)
     except Exception:
         pass

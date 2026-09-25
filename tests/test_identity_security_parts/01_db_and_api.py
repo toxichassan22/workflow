@@ -109,7 +109,9 @@ class IdentityDbTests(unittest.TestCase):
 
         admin_perms = db.get_user_permissions(legacy['company_admin'])
         for key in db.PERMISSION_KEYS:
-            expected = key != 'sag_admin_panel'
+            # support_tickets is the tenant-direct admin's channel — an
+            # employee row never carries it, however broad its grants.
+            expected = key not in ('sag_admin_panel', 'support_tickets')
             self.assertEqual(admin_perms.get(key), expected, key)
 
         editor_perms = db.get_user_permissions(legacy['section_editor'])

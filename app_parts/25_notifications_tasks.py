@@ -1,7 +1,7 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Notifications and work-item tasks (t40-t42): the notification feed
-# with per-user preferences and mute categories, the approval-task feed
-# with close/remind, and event tasks with status transitions.
+# with per-user preferences and mute categories, and the approval-task
+# feed with close/remind.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -37,14 +37,20 @@ def _notify_tenant_billing(tenant_id, title, body, entity_type=None, entity_id=N
     the company-owner login (addressed as 'tenant-admin:<id>', which employee
     accounts never match)."""
     try:
-        notified = set()
+        # The primary admin's user row rewrites to the tenant-admin address on
+        # insert — skip it here or the explicit admin row below doubles up.
+        try:
+            primary_id = str((db.get_tenant_by_id(tenant_id) or {}).get('primary_user_id') or '')
+        except Exception:
+            primary_id = ''
+        notified = {primary_id}
         for user in db.get_users_with_permission(tenant_id, 'billing'):
             if user['id'] in notified:
                 continue
             notified.add(user['id'])
             db.create_notification(
                 tenant_id, title, body, category='billing', user_id=user['id'],
-                entity_type=entity_type, entity_id=entity_id)
+                entity_type=entity_type, entity_id=entity_id, mirror_admin=False)
         db.create_notification(
             tenant_id, title, body, category='billing',
             user_id='tenant-admin:' + str(tenant_id),
@@ -264,78 +270,6 @@ def api_remind_approval_task(task_id):
     failure = _landloom_error(result)
     if failure:
         return failure
-    return jsonify({'success': True, 'task': result})
-
-
-# ── t42: event tasks ─────────────────────────────────────────────────────────
-
-@app.route('/api/event-tasks', methods=['GET'])
-@require_auth
-def api_list_event_tasks():
-    # Staff see their own tasks (assigned to or created by them); managers and
-    # administrators keep the company-wide board.
-    own_only = None if _landloom_can('manage_users') else _landloom_actor_id()
-    tasks = db.list_event_tasks(
-        g.tenant_id, status=request.args.get('status'),
-        assignee_user_id=request.args.get('assigneeId'), own_actor_id=own_only,
-    )
-    return jsonify({'success': True, 'tasks': tasks})
-
-
-@app.route('/api/event-tasks', methods=['POST'])
-@require_auth
-def api_create_event_task():
-    data = request.json or {}
-    assignee_id = data.get('assigneeId')
-    if assignee_id:
-        assignee = db.get_user_by_id(assignee_id)
-        if not assignee or str(assignee.get('tenant_id')) != str(g.tenant_id):
-            return jsonify({'error': 'المكلف بالمهمة غير موجود في هذه الشركة',
-                            'error_code': 'assignee_not_found'}), 404
-    row = db.create_event_task(
-        g.tenant_id, data.get('title'), description=data.get('description'),
-        event_date=data.get('eventDate'), due_at=data.get('dueAt'),
-        assignee_user_id=assignee_id, recurrence=data.get('recurrence') or 'none',
-        entity_type=data.get('entityType'), entity_id=data.get('entityId'),
-        priority=data.get('priority') or 'normal',
-        created_by=_landloom_actor_id(), created_by_name=_landloom_actor_name(),
-    )
-    failure = _landloom_error(row)
-    if failure:
-        return failure
-    _record_audit_event('event_task.created', 'event_task', row['id'], entity_name=row['title'],
-                        metadata={'recurrence': row.get('recurrence'), 'due_at': row.get('due_at')})
-    if row.get('assignee_user_id'):
-        try:
-            db.create_notification(
-                g.tenant_id, 'أُسندت إليك مهمة جديدة', body=row.get('title'),
-                category='task', user_id=row['assignee_user_id'],
-                entity_type='event_task', entity_id=row['id'])
-        except Exception:
-            pass
-    return jsonify({'success': True, 'task': row})
-
-
-@app.route('/api/event-tasks/<task_id>/status', methods=['POST'])
-@require_auth
-def api_update_event_task_status(task_id):
-    task = db.get_event_task(g.tenant_id, task_id)
-    if not task:
-        return jsonify({'error': 'Task not found', 'error_code': 'task_not_found'}), 404
-    actor_id = _landloom_actor_id()
-    if str(task.get('assignee_user_id') or '') != str(g.user_id or '') \
-            and str(task.get('created_by') or '') != actor_id \
-            and not _landloom_can('manage_users'):
-        return _landloom_forbidden('تحديث المهمة يخص المكلف بها أو منشئها')
-    result = db.update_event_task_status(g.tenant_id, task_id, (request.json or {}).get('status'),
-                                         actor_name=_landloom_actor_name())
-    if result is None:
-        return jsonify({'error': 'Task not found', 'error_code': 'task_not_found'}), 404
-    failure = _landloom_error(result)
-    if failure:
-        return failure
-    _record_audit_event('event_task.status', 'event_task', task_id,
-                        new_value=result.get('status'))
     return jsonify({'success': True, 'task': result})
 
 
