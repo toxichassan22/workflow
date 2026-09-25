@@ -318,6 +318,41 @@ class OpsSectionTests(unittest.TestCase):
             json={'subject': 'بدون مرفق'})
         self.assertEqual(plain.status_code, 200, plain.get_json())
 
+    def test_sag_admin_panel_grant_never_survives(self):
+        """A stale sag_admin_panel grant row must not resurrect the platform
+        flag for a company session — it made the ops page call admin routes.
+        Only non-primary employee sessions keep user_id, so the grant must be
+        pinned on one of those, not the primary admin row."""
+        emp_id = db.create_user(
+            self.tenant_id, 'موظف', 'emp@x.test', 'hash', role='employee')
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO user_permissions (id, user_id, permission_key, granted) "
+            "VALUES ('stale-1', ?, 'sag_admin_panel', 1) "
+            "ON CONFLICT(user_id, permission_key) DO UPDATE SET granted = 1",
+            (emp_id,))
+        conn.commit()
+        emp_token = auth.create_token(
+            self.tenant_id, 'emp@x.test', user_id=emp_id,
+            user_name='موظف', user_role='employee')
+
+        # The merge can never flip it on, and the setter refuses to write it.
+        perms = db.get_user_permissions(emp_id)
+        self.assertFalse(perms['sag_admin_panel'])
+        self.assertFalse(db.set_user_permission(emp_id, 'sag_admin_panel', True))
+
+        # /api/my-permissions feeds hasPermission() — it must stay clean.
+        mine = self.client.get('/api/my-permissions', headers=self.headers(emp_token))
+        self.assertEqual(mine.status_code, 200)
+        self.assertFalse(mine.get_json()['permissions']['sag_admin_panel'])
+
+        # init_db wipes the stale grant itself.
+        db.init_db()
+        row = db.get_db().execute(
+            "SELECT granted FROM user_permissions WHERE user_id = ? AND permission_key = 'sag_admin_panel'",
+            (emp_id,)).fetchone()
+        self.assertIsNone(row)
+
 
 if __name__ == '__main__':
     unittest.main()

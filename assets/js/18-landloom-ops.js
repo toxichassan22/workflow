@@ -279,7 +279,9 @@
       if (!box) return;
       if (!hasPermission('billing')) { box.innerHTML = ''; return; }
       box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      const isAdmin = (typeof hasPermission === 'function' && hasPermission('sag_admin_panel')) || targetBoxId === 'sagRechargeRequestsList';
+      // The platform flag on the session is authoritative — a permission grant
+      // can be stale or wrong, isAdmin comes straight from the token check.
+      const isAdmin = (typeof tenantUser !== 'undefined' && tenantUser && tenantUser.isAdmin) || targetBoxId === 'sagRechargeRequestsList';
       const filterId = isAdmin ? 'sagRechargeStatusFilter' : 'llRechargeStatusFilter';
       const status = (document.getElementById(filterId) || {}).value || '';
       const base = isAdmin ? '/api/admin/recharge-requests' : '/api/recharge-requests';

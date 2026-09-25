@@ -675,6 +675,13 @@ def _ensure_platform_columns(conn):
     _add('point_reservations', 'cost_sar', 'REAL')
     _add('recharge_requests', 'amount_sar', 'REAL')
     _add('recharge_requests', 'invoice_file_id', 'TEXT')
+    # sag_admin_panel is a platform-session attribute, not a grantable company
+    # permission — drop stale grant rows written before the guard existed.
+    try:
+        conn.execute("DELETE FROM user_permissions WHERE permission_key = 'sag_admin_panel'")
+        conn.commit()
+    except Exception as exc:
+        print(f'[DB] Migration notice: sag_admin_panel grant cleanup: {exc}')
     _migrate_wallet_to_sar(conn)
 
 

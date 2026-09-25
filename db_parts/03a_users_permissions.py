@@ -494,12 +494,15 @@ def get_user_permissions(user_id, default_role='employee'):
     ).fetchall()
     for row in rows:
         defaults[row['permission_key']] = bool(row['granted'])
+    # sag_admin_panel is a platform-session attribute, not a grantable company
+    # permission — a stale grant row must never resurrect it for an employee.
+    defaults['sag_admin_panel'] = False
     return defaults
 
 
 def set_user_permission(user_id, permission_key, granted):
     """Set or override a permission for a user."""
-    if permission_key not in PERMISSION_KEYS:
+    if permission_key not in PERMISSION_KEYS or permission_key == 'sag_admin_panel':
         return False
     conn = get_db()
     perm_id = str(uuid.uuid4())
