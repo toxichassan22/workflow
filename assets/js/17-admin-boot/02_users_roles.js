@@ -7,10 +7,12 @@
       const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
       if (!name || !email) { toast('الاسم والبريد مطلوبان'); return; }
       const resetForm = () => {
-        ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone', 'newUserResponsibility'].forEach(id => {
+        ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone'].forEach(id => {
           const el = document.getElementById(id);
           if (el) el.value = '';
         });
+        const respSel = document.getElementById('newUserResponsibility');
+        if (respSel) respSel.selectedIndex = 0;
         document.querySelectorAll('.inviteProjectCb:checked').forEach(cb => { cb.checked = false; });
         toggleNewUserProjects();
       };
