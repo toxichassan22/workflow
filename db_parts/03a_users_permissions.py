@@ -259,8 +259,11 @@ def is_primary_company_admin(tenant_id, user_id):
 
 
 def delete_user(user_id):
-    """Delete a user."""
+    """Delete a user. ``user_assignments.user_id`` carries no FK, so its rows
+    are swept here — a dead approver would otherwise keep the one-approver
+    slot on its drafts and lock decisions to a ghost."""
     conn = get_db()
+    conn.execute('DELETE FROM user_assignments WHERE user_id = ?', (user_id,))
     conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
     conn.commit()
 
@@ -650,6 +653,30 @@ def tenant_users_report(tenant_id):
         (tenant_id,),
     ).fetchall():
         users.append(dict(row))
+    # Responsibility lives outside users.role (every row is 'employee'): the
+    # assignment roles a user holds, and whether their grants already cover
+    # every company permission — the «أدمن» pick from the add form.
+    assign_roles = {}
+    try:
+        for a in conn.execute(
+            'SELECT DISTINCT user_id, role FROM user_assignments WHERE tenant_id = ?',
+            (tenant_id,),
+        ).fetchall():
+            assign_roles.setdefault(a['user_id'], []).append(a['role'])
+    except Exception:
+        assign_roles = {}
+    grants = {}
+    try:
+        for p in conn.execute(
+            'SELECT user_id, permission_key FROM user_permissions WHERE granted = 1'
+        ).fetchall():
+            grants.setdefault(p['user_id'], set()).add(p['permission_key'])
+    except Exception:
+        grants = {}
+    company_keys = {k for k in PERMISSION_KEYS if k != 'sag_admin_panel'}
+    for u in users:
+        u['responsibilities'] = sorted(set(assign_roles.get(u['id'], [])))
+        u['admin_like'] = company_keys <= grants.get(u['id'], set())
     invites = []
     try:
         for row in conn.execute(

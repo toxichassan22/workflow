@@ -203,11 +203,13 @@ def _section_version_label(section_key):
 
 
 def _versioned_draft_or_404(draft_id):
-    """The actor-owned draft version flows act on, or a not-found error dict."""
+    """The draft version flows act on — the owner's, or one the caller is
+    assigned to edit — or a not-found error dict."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
     if not draft:
         return None, {'error': 'No project draft found'}
-    if draft.get('user_id') != _project_draft_actor_id():
+    if draft.get('user_id') != _project_draft_actor_id() \
+            and not db.user_is_assigned_editor(g.tenant_id, g.user_id, draft.get('id')):
         return None, {'error': 'No project draft found'}
     if not db.user_may_access_draft(g.user_id, draft):
         return None, {'error': 'No project draft found'}
@@ -246,9 +248,11 @@ def _versioned_draft_for_read(draft_id):
     if _has_approvals_permission():
         return draft, None
     # The draft's assigned approver reviews it even without the global
-    # approvals permission — the assignment IS the approver role.
+    # approvals permission — the assignment IS the approver role. Its
+    # assigned editor reads the version history they work against.
     try:
-        if db.user_is_assigned_approver(g.tenant_id, g.user_id, draft.get('id')):
+        if db.user_is_assigned_approver(g.tenant_id, g.user_id, draft.get('id')) \
+                or db.user_is_assigned_editor(g.tenant_id, g.user_id, draft.get('id')):
             return draft, None
     except Exception:
         pass
@@ -1378,7 +1382,8 @@ def api_cancel_section_version():
         return jsonify(error), 404
     if _section_key_forbidden(version.get('section_key')):
         return jsonify({'error': 'Section version not found'}), 404
-    if draft.get('user_id') != _project_draft_actor_id() and not _has_approvals_permission():
+    if draft.get('user_id') != _project_draft_actor_id() and not _has_approvals_permission() \
+            and str(version.get('created_by') or '') != str(_project_draft_actor_id()):
         return jsonify({'error': 'Section version not found'}), 404
     cancelled = db.cancel_section_version(
         g.tenant_id, version_id,

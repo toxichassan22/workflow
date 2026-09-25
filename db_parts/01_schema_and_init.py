@@ -60,6 +60,7 @@ def init_db():
         _migrate_generation_approval_columns(conn)
         _migrate_point_reservation_columns(conn)
         _migrate_workflow_gate_columns(conn)
+        _migrate_user_assignments_cleanup(conn)
         # Runs after _create_tables: the primary-user backfill there still keys
         # off the legacy 'company_admin' role before it is collapsed here.
         _collapse_legacy_user_roles(conn)

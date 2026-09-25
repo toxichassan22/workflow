@@ -464,3 +464,18 @@ def _migrate_branding_columns(conn):
         conn.commit()
     except Exception as e:
         print(f"[DB MIGRATION ERR] {e}")
+
+
+def _migrate_user_assignments_cleanup(conn):
+    """Drop assignment rows whose user no longer exists.
+
+    ``user_assignments.user_id`` carries no foreign key, so users removed
+    before ``delete_user`` learned to sweep left orphan rows behind — an
+    orphan approver kept the one-approver slot on its drafts and ghost
+    editors still counted toward the five-editor cap."""
+    try:
+        conn.execute(
+            'DELETE FROM user_assignments WHERE user_id NOT IN (SELECT id FROM users)')
+        conn.commit()
+    except Exception as e:
+        print(f"[DB MIGRATION ERR] {e}")

@@ -1168,8 +1168,9 @@ def api_accept_invite(token):
         invite['tenant_id'], name, invite['email'], hash_password(password),
         role=invite_role, phone=invite.get('phone'),
     )
+    invite_assignment_error = None
     try:
-        db.apply_invite_scope(user_id, invite)
+        invite_assignment_error = db.apply_invite_scope(user_id, invite)
     except Exception:
         pass
     db.mark_invite_used(token)
@@ -1186,7 +1187,8 @@ def api_accept_invite(token):
             'companyName': tenant['company_name'],
             'email': tenant['email'],
         },
-        'user': {'id': user_id, 'name': name, 'email': invite['email'], 'role': invite_role}
+        'user': {'id': user_id, 'name': name, 'email': invite['email'], 'role': invite_role},
+        'assignmentError': invite_assignment_error,
     }), 201
 
 

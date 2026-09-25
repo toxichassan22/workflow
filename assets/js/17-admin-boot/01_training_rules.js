@@ -656,9 +656,14 @@
         '<button type="button" class="btn small ghost" style="margin-right:auto;" onclick="showSodMatrixModal()">مصفوفة الفصل بين المهام</button>' +
         '</div>';
       const usersHtml = data.users.length ? data.users.map(u => {
-        const roleLabel = u.is_primary ? WFT('role.company_admin', 'أدمن الشركة') : (USER_ROLE_LABELS[u.role] || 'موظف');
-        const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const reportUser = reportUsers[u.id] || {};
+        const respLabels = (reportUser.responsibilities || [])
+          .map(r => (ASSIGNMENT_ROLES.find(x => x.key === r) || {}).label || r);
+        const roleLabel = u.is_primary ? WFT('role.company_admin', 'أدمن الشركة')
+          : reportUser.admin_like ? 'أدمن'
+          : respLabels.length ? respLabels.join('، ')
+          : (USER_ROLE_LABELS[u.role] || 'موظف');
+        const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const lastLogin = reportUser.last_login_at
           ? ' | <span>' + escapeHtml(WFT('users.last_login', 'آخر دخول')) + ':</span> ' + escapeHtml(String(reportUser.last_login_at).slice(0, 16).replace('T', ' '))
           : '';

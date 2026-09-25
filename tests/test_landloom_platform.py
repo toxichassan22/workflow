@@ -498,6 +498,66 @@ class LandloomDbTests(unittest.TestCase):
         self.assertTrue(db.user_may_access_draft(admin['id'],
                                                  db.get_project_draft_by_id('tenant-1', self.draft_id)))
 
+    def test_delete_user_releases_assignment_rows(self):
+        """A deleted approver frees the slot — its rows carried no FK."""
+        db.create_user('tenant-1', 'معتمد محذوف', 'del@x.test', 'hash', role='employee')
+        dead = db.get_user_by_email('del@x.test')
+        db.set_user_assignments('tenant-1', dead['id'],
+                                [{'draft_id': self.draft_id, 'role': 'approver'}])
+        db.delete_user(dead['id'])
+        self.assertIsNone(db.assigned_approver('tenant-1', self.draft_id))
+        self.assertEqual(db.list_tenant_assignments('tenant-1'), [])
+        db.create_user('tenant-1', 'معتمد جديد', 'new-ap@x.test', 'hash', role='employee')
+        ok = db.set_user_assignments(
+            'tenant-1', db.get_user_by_email('new-ap@x.test')['id'],
+            [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(len(ok['assignments']), 1)
+
+    def test_orphaned_assignment_rows_are_ignored_and_swept(self):
+        """Rows outliving a hard-deleted user hold no slot and get swept."""
+        conn = db.get_db()
+        conn.execute(
+            "INSERT INTO user_assignments (id, tenant_id, user_id, draft_id, role) "
+            "VALUES ('ghost-1', 'tenant-1', 'ghost-user', ?, 'approver')", (self.draft_id,))
+        conn.commit()
+        # The orphan does not resolve as the approver nor block the slot.
+        self.assertIsNone(db.assigned_approver('tenant-1', self.draft_id))
+        db.create_user('tenant-1', 'معتمد', 'm@x.test', 'hash', role='employee')
+        ok = db.set_user_assignments(
+            'tenant-1', db.get_user_by_email('m@x.test')['id'],
+            [{'draft_id': self.draft_id, 'role': 'approver'}])
+        self.assertEqual(len(ok['assignments']), 1)
+        self.assertIsNone(conn.execute(
+            "SELECT 1 FROM user_assignments WHERE user_id = 'ghost-user'").fetchone())
+
+    def test_invite_approver_conflict_surfaces_error(self):
+        """An invited approver on a taken slot is reported, not silently dropped."""
+        db.create_user('tenant-1', 'معتمد أول', 'first-ap@x.test', 'hash', role='employee')
+        first = db.get_user_by_email('first-ap@x.test')
+        db.set_user_assignments('tenant-1', first['id'],
+                                [{'draft_id': self.draft_id, 'role': 'approver'}])
+        db.create_user('tenant-1', 'معتمد مدعو', 'inv-ap@x.test', 'hash', role='employee')
+        invited = db.get_user_by_email('inv-ap@x.test')
+        invite = db.create_invite('tenant-1', 'inv-ap@x.test',
+                                  responsibility='approver', projects=[self.draft_id])
+        err = db.apply_invite_scope(invited['id'], db.get_invite('tenant-1', invite['id']))
+        self.assertEqual(err, 'approver_exists')
+        self.assertFalse(db.user_is_assigned_approver('tenant-1', invited['id'], self.draft_id))
+
+    def test_tenant_users_report_marks_admin_like_and_responsibilities(self):
+        db.create_user('tenant-1', 'أدمن', 'adm@x.test', 'hash', role='employee')
+        admin = db.get_user_by_email('adm@x.test')
+        db.grant_company_admin_permissions(admin['id'])
+        db.create_user('tenant-1', 'محرر', 'rep-ed@x.test', 'hash', role='employee')
+        editor = db.get_user_by_email('rep-ed@x.test')
+        db.set_user_assignments('tenant-1', editor['id'],
+                                [{'draft_id': self.draft_id, 'role': 'editor'}])
+        report = db.tenant_users_report('tenant-1')
+        rows = {u['email']: u for u in report['users']}
+        self.assertTrue(rows['adm@x.test']['admin_like'])
+        self.assertEqual(rows['rep-ed@x.test']['responsibilities'], ['editor'])
+        self.assertFalse(rows['rep-ed@x.test']['admin_like'])
+
     # ── t21/t22: SoD matrix, users report ─────────────────────
 
     def test_sod_matrix_flags_self_approval_and_missing_reason(self):
@@ -1139,6 +1199,31 @@ class LandloomApiTests(unittest.TestCase):
             f'/api/generation-approvals/{approval_id}/decision', headers=self.headers(emp_token),
             json={'decision': 'approved'})
         self.assertEqual(allowed.status_code, 200, allowed.get_json())
+
+    def test_assigned_editor_sends_and_cancels_version_on_shared_draft(self):
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.user_id,
+            {'project_name': 'برج مشترك', 'project_type': 'سكني', 'city': 'الرياض'},
+            {'basic': 'draft'}, 'draft', draft_id='shared-draft')
+        editor_id, editor_token = self._user_token('محرر معين', 'ed-assign@x.test', 'employee')
+        db.set_user_assignments(self.tenant_id, editor_id,
+                                [{'draft_id': draft_id, 'role': 'editor'}])
+        sent = self.client.post(
+            '/api/project-draft/section-version', headers=self.headers(editor_token),
+            json={'draftId': draft_id, 'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        # The sender may withdraw their own send on a draft they don't own.
+        version_id = sent.get_json()['version']['id']
+        cancelled = self.client.post(
+            '/api/project-draft/section-version/cancel', headers=self.headers(editor_token),
+            json={'versionId': version_id})
+        self.assertEqual(cancelled.status_code, 200, cancelled.get_json())
+        # A bare employee still cannot submit on somebody else's draft.
+        _, outsider_token = self._user_token('غريب', 'out-assign@x.test', 'employee')
+        denied = self.client.post(
+            '/api/project-draft/section-version', headers=self.headers(outsider_token),
+            json={'draftId': draft_id, 'sectionKey': 'basic'})
+        self.assertEqual(denied.status_code, 404)
 
     def test_event_tasks_roundtrip_and_auth(self):
         no_auth = self.client.get('/api/event-tasks')

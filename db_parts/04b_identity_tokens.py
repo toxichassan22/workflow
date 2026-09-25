@@ -63,14 +63,16 @@ def apply_invite_scope(user_id, invite):
     An «admin» responsibility means every company permission and no project
     restriction; «editor»/«approver» become project assignments (the listed
     drafts, or every draft when the picker was left empty); anything else
-    keeps the plain-employee scope semantics.
+    keeps the plain-employee scope semantics. Returns an assignment error
+    code when the responsibility could not be applied — the same validations
+    the direct add-user path reports — or ``None`` on success.
     """
     conn = get_db()
     tenant_id = invite.get('tenant_id')
     responsibility = invite.get('responsibility')
     if responsibility == 'admin':
         grant_company_admin_permissions(user_id)
-        return
+        return None
     if responsibility in ASSIGNMENT_ROLES:
         valid = {
             row['id'] for row in conn.execute(
@@ -80,14 +82,10 @@ def apply_invite_scope(user_id, invite):
         projects = _json_or(invite.get('projects_json'), None)
         wanted = [str(d) for d in projects if str(d) in valid] if isinstance(projects, list) else []
         targets = wanted or [ASSIGNMENT_ALL_DRAFTS]
-        for draft_id in targets:
-            conn.execute(
-                'INSERT OR IGNORE INTO user_assignments (id, tenant_id, user_id, draft_id, role) '
-                'VALUES (?, ?, ?, ?, ?)',
-                (str(uuid.uuid4()), tenant_id, user_id, draft_id, responsibility),
-            )
-        conn.commit()
-        return
+        result = set_user_assignments(
+            tenant_id, user_id,
+            [{'draft_id': d, 'role': responsibility} for d in targets])
+        return (result or {}).get('error')
     sections = _json_or(invite.get('sections_json'), None)
     if isinstance(sections, list) and sections:
         allowed = set(str(s) for s in sections)
@@ -107,6 +105,7 @@ def apply_invite_scope(user_id, invite):
                     (str(uuid.uuid4()), tenant_id, user_id, draft_id),
                 )
         conn.commit()
+    return None
 
 
 def create_password_setup_token(tenant_id, user_id, expiry_hours=24):

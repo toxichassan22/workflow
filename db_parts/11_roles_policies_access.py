@@ -498,7 +498,7 @@ def list_tenant_assignments(tenant_id):
         '''SELECT a.*, u.name AS user_name, u.email AS user_email,
                   d.title AS draft_title
            FROM user_assignments a
-           LEFT JOIN users u ON u.id = a.user_id
+           JOIN users u ON u.id = a.user_id
            LEFT JOIN project_drafts d ON d.id = a.draft_id
            WHERE a.tenant_id = ? ORDER BY a.created_at DESC''',
         (str(tenant_id),),
@@ -520,6 +520,13 @@ def set_user_assignments(tenant_id, user_id, rows):
     ).fetchone()
     if not user:
         return {'error': 'user_not_found'}
+    # user_assignments.user_id carries no FK: rows outliving a deleted user
+    # would keep holding its approver slot and editor seats forever.
+    conn.execute(
+        'DELETE FROM user_assignments WHERE tenant_id = ?'
+        ' AND user_id NOT IN (SELECT id FROM users)',
+        (str(tenant_id),),
+    )
     valid_drafts = {
         r['id'] for r in conn.execute(
             'SELECT id FROM project_drafts WHERE tenant_id = ?', (tenant_id,)
@@ -548,7 +555,7 @@ def set_user_assignments(tenant_id, user_id, rows):
     if approver_rows:
         others = conn.execute(
             '''SELECT a.draft_id, u.name AS user_name FROM user_assignments a
-               LEFT JOIN users u ON u.id = a.user_id
+               JOIN users u ON u.id = a.user_id
                WHERE a.tenant_id = ? AND a.role = 'approver' AND a.user_id != ?''',
             (str(tenant_id), str(user_id)),
         ).fetchall()
@@ -568,6 +575,7 @@ def set_user_assignments(tenant_id, user_id, rows):
     if editor_rows:
         others_ed = conn.execute(
             '''SELECT a.user_id, a.draft_id FROM user_assignments a
+               JOIN users u ON u.id = a.user_id
                WHERE a.tenant_id = ? AND a.role = 'editor' AND a.user_id != ?''',
             (str(tenant_id), str(user_id)),
         ).fetchall()
@@ -613,10 +621,10 @@ def assigned_approver(tenant_id, draft_id):
     conn = get_db()
     row = conn.execute(
         '''SELECT a.user_id, u.name AS user_name FROM user_assignments a
-           LEFT JOIN users u ON u.id = a.user_id
+           JOIN users u ON u.id = a.user_id
            WHERE a.tenant_id = ? AND a.role = 'approver'
              AND a.draft_id IN (?, ?)
-             AND (u.is_active IS NULL OR u.is_active = 1)
+             AND u.is_active = 1
            ORDER BY CASE WHEN a.draft_id = ? THEN 0 ELSE 1 END
            LIMIT 1''',
         (str(tenant_id), str(draft_id), ASSIGNMENT_ALL_DRAFTS, str(draft_id)),
@@ -632,6 +640,20 @@ def user_is_assigned_approver(tenant_id, user_id, draft_id):
     row = conn.execute(
         '''SELECT 1 FROM user_assignments
            WHERE tenant_id = ? AND user_id = ? AND role = 'approver'
+             AND draft_id IN (?, ?) LIMIT 1''',
+        (str(tenant_id), str(user_id), str(draft_id), ASSIGNMENT_ALL_DRAFTS),
+    ).fetchone()
+    return bool(row)
+
+
+def user_is_assigned_editor(tenant_id, user_id, draft_id):
+    """True when the user edits this draft — its row or the wildcard."""
+    if not user_id or not draft_id:
+        return False
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT 1 FROM user_assignments
+           WHERE tenant_id = ? AND user_id = ? AND role = 'editor'
              AND draft_id IN (?, ?) LIMIT 1''',
         (str(tenant_id), str(user_id), str(draft_id), ASSIGNMENT_ALL_DRAFTS),
     ).fetchone()
@@ -660,9 +682,9 @@ def attach_approver_names(tenant_id, rows):
     conn = get_db()
     assigns = conn.execute(
         '''SELECT a.draft_id, u.name AS user_name FROM user_assignments a
-           LEFT JOIN users u ON u.id = a.user_id
+           JOIN users u ON u.id = a.user_id
            WHERE a.tenant_id = ? AND a.role = 'approver'
-             AND (u.is_active IS NULL OR u.is_active = 1)''',
+             AND u.is_active = 1''',
         (str(tenant_id),),
     ).fetchall()
     if not assigns:
