@@ -251,18 +251,21 @@ class PackagesFxTests(unittest.TestCase):
         self.assertEqual(wallet['credit_balance'], 499.99)
 
     def test_tenant_credit_balance_keyed_in_sar(self):
+        """Wallet money is package-only: a raw creditBalance write on the
+        tenant route is ignored — the balance keeps what the ledger booked."""
         client = self.app.test_client()
         client.put('/api/admin/fx-rate', headers=self._admin_headers(),
                    json={'mode': 'manual', 'rate': 2.5})
+        with self.app.app_context():
+            db.update_tenant(self.tenant_id, credit_balance=100.0)
         saved = client.put(
             f'/api/admin/tenants/{self.tenant_id}', headers=self._admin_headers(),
             json={'creditBalanceSar': 250})
         self.assertEqual(saved.status_code, 200, saved.get_json())
-        self.assertAlmostEqual(saved.get_json()['tenant']['creditBalanceSar'], 250.0)
+        self.assertAlmostEqual(float(saved.get_json()['tenant']['creditBalanceSar'] or 0), 100.0)
         with self.app.app_context():
             tenant = db.get_tenant_by_id(self.tenant_id)
-        # The wallet column is riyal-denominated: the keyed figure lands as-is.
-        self.assertAlmostEqual(float(tenant['credit_balance']), 250.0)
+        self.assertAlmostEqual(float(tenant['credit_balance']), 100.0)
 
     def test_usage_totals_carry_sar(self):
         client = self.app.test_client()

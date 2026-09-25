@@ -1416,6 +1416,21 @@
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
+          <h3 class="dash-section-title">سعر الصرف USD/SAR</h3>
+          <span class="tenant-hint" id="adminFxInfo"></span>
+        </div>
+        <form onsubmit="adminSaveFxRate(event)"><div class="tenant-grid">
+          <div class="tenant-field">
+            <label for="adminFxRate">السعر</label>
+            <input type="number" id="adminFxRate" min="0.0001" step="0.0001" required dir="ltr">
+          </div>
+        </div><div class="sag-modal-actions">
+          <button type="submit" class="btn primary">حفظ السعر</button>
+          <button type="button" class="btn ghost" onclick="adminSaveFxRate(null, true)">العودة للتحديث التلقائي</button>
+        </div></form>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
           <h3 class="dash-section-title" data-i18n="admin.file_types_title">سجل أنواع الملفات المعتمدة</h3>
         </div>
         <div id="adminFileTypesList"></div>

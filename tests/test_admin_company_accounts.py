@@ -89,7 +89,9 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         self.assertEqual(tenant['account_manager_name'], 'مدير الحساب create')
         self.assertEqual(tenant['username'], 'company_create')
-        self.assertEqual(float(tenant['credit_balance']), 1250.5)
+        # Wallet funding is package-only: a free creditBalance field on the
+        # create payload is ignored — the wallet opens empty.
+        self.assertEqual(float(tenant['credit_balance']), 0.0)
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0]['id'], tenant['primary_user_id'])
         # The primary link — not a role value — is what makes this row the
@@ -181,7 +183,9 @@ class AdminCompanyAccountTests(unittest.TestCase):
         self.assertEqual(tenant['companyName'], 'شركة الملف المحدثة')
         self.assertEqual(tenant['accountManagerName'], 'مدير الملف المحدث')
         self.assertEqual(tenant['plan'], 'enterprise')
-        self.assertEqual(tenant['creditBalance'], 9000)
+        # A free-balance write is banned: the field is ignored, so the wallet
+        # keeps whatever the ledger (recharges/adjustments) put there.
+        self.assertEqual(float(tenant['creditBalance'] or 0), 0.0)
 
         with self.app.app_context():
             primary = db.get_user_by_id(tenant['primaryUserId'])
@@ -427,7 +431,6 @@ class AdminCompanyAccountTests(unittest.TestCase):
 
         for payload, expected in (
             ({'plan': 'diamond'}, 400),
-            ({'creditBalance': -10}, 400),
             ({'phone': '12'}, 400),
             ({'username': 'x'}, 400),
         ):

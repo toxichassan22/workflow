@@ -735,7 +735,7 @@
         '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
         '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
         '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
-        '<div class="tenant-field"><label for="sagDetailCredit">الرصيد (ريال)</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)) + '" required></div>' +
+        '<div class="tenant-field"><label>الرصيد الحالي (ريال)</label><p style="margin:0;font-weight:700">' + Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
@@ -749,6 +749,15 @@
         (t.deactivatedReason ? ' | سبب الإيقاف: ' + escapeHtml(t.deactivatedReason) : '') + '</p></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
+        '<h3 class="dash-section-title" style="margin-top:18px">تصحيح رصيد</h3>' +
+        '<form onsubmit="sagSubmitLedgerAdjust(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
+        '<div class="tenant-field"><label for="sagAdjKind">نوع الحركة</label><select id="sagAdjKind">' +
+        '<option value="correction">تصحيح</option>' +
+        '<option value="refund">استرداد</option>' +
+        '<option value="expiry">انتهاء صلاحية</option></select></div>' +
+        '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (ريال)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
+        '<div class="tenant-field full"><label for="sagAdjNote">ملاحظة</label><input id="sagAdjNote" maxlength="300"></div>' +
+        '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الحركة</button></div></form>' +
         '</div>' +
         '<div id="sagTenantTabUsers" style="display:none">' +
         '<h3 class="dash-section-title">المستخدمون</h3>' +
@@ -825,7 +834,6 @@
         phone: document.getElementById('sagDetailPhone').value.trim(),
         username: document.getElementById('sagDetailUsername').value.trim().toLowerCase(),
         plan: document.getElementById('sagDetailPlan').value,
-        creditBalanceSar: document.getElementById('sagDetailCredit').value,
         isActive: document.getElementById('sagDetailStatus').value === 'active',
         legalName: (document.getElementById('sagDetailLegalName') || {}).value || '',
         taxNumber: (document.getElementById('sagDetailTaxNumber') || {}).value || '',
@@ -854,6 +862,27 @@
         }
       }
       toast('تم حفظ بيانات الشركة');
+      await openTenantCompanies();
+      await showSagTenantDetails(tenantId);
+    }
+
+    // Wallet money moves only through the ledger: an approved recharge or a
+    // typed adjustment here (correction / refund / expiry) with an optional
+    // note — never a raw balance write.
+    async function sagSubmitLedgerAdjust(event, tenantId) {
+      event.preventDefault();
+      const amount = parseFloat((document.getElementById('sagAdjAmount') || {}).value);
+      const kind = (document.getElementById('sagAdjKind') || {}).value || 'correction';
+      const note = ((document.getElementById('sagAdjNote') || {}).value || '').trim();
+      if (!Number.isFinite(amount) || amount === 0) { toast('أدخل مبلغًا صالحًا'); return; }
+      const data = await api('POST', '/api/admin/ledger/adjust', {
+        tenantId: tenantId, amountSar: amount, kind: kind, note: note || undefined
+      }).catch(e => e);
+      if (!data || !data.success) {
+        toast((data && data.error) || 'تعذر تسجيل حركة الرصيد');
+        return;
+      }
+      toast('تم تسجيل حركة الرصيد');
       await openTenantCompanies();
       await showSagTenantDetails(tenantId);
     }

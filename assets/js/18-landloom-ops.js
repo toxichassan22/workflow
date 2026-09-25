@@ -712,7 +712,42 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([llLoadFileTypes(), adminLoadPackages(), llLoadRejectionReasons()]);
+      await Promise.all([llLoadFileTypes(), adminLoadPackages(), llLoadRejectionReasons(), llLoadFxRate()]);
+    }
+
+    // ── USD→SAR rate: manual override or provider-tracked auto mode ──────
+    async function llLoadFxRate() {
+      const input = document.getElementById('adminFxRate');
+      if (!input) return;
+      const data = await api('GET', '/api/admin/fx-rate').catch(() => null);
+      const fx = (data && data.fx) || {};
+      if (fx.rate != null) input.value = fx.rate;
+      const info = document.getElementById('adminFxInfo');
+      if (info) {
+        const src = ({ manual: 'يدوي', auto: 'تلقائي', env: 'من إعدادات الخادم', default: 'افتراضي' })[fx.source] || fx.source || '';
+        info.textContent = (fx.rate != null ? '1 USD = ' + llMoney(fx.rate) + ' SAR' : '') +
+          (src ? ' — المصدر: ' + src : '') +
+          (fx.updated_at ? ' — ' + String(fx.updated_at).slice(0, 16).replace('T', ' ') : '');
+      }
+    }
+
+    async function adminSaveFxRate(event, auto) {
+      if (event) event.preventDefault();
+      let payload;
+      if (auto) {
+        payload = { mode: 'auto' };
+      } else {
+        const rate = parseFloat((document.getElementById('adminFxRate') || {}).value);
+        if (!Number.isFinite(rate) || rate <= 0) { toast('أدخل سعرًا صالحًا'); return; }
+        payload = { mode: 'manual', rate: rate };
+      }
+      const res = await api('PUT', '/api/admin/fx-rate', payload).catch(e => e);
+      if (res && res.success) {
+        toast('تم تحديث سعر الصرف');
+      } else {
+        toast((res && res.error) || 'تعذر تحديث سعر الصرف');
+      }
+      await llLoadFxRate();
     }
 
     // ── Recharge rejection reasons (platform settings) ────────────────────

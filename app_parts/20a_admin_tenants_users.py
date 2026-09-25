@@ -27,16 +27,10 @@ def api_admin_tenants():
         password = data.get('password') or ''
         is_active = bool(data.get('isActive', True))
         send_welcome = bool(data.get('sendWelcomeEmail', True))
-        try:
-            if data.get('creditBalanceSar') is not None:
-                credit_balance = float(data.get('creditBalanceSar'))
-            elif data.get('creditBalance') is not None:
-                # Legacy callers keyed dollars; the wallet books riyals.
-                credit_balance = db.usd_to_sar(data.get('creditBalance'))
-            else:
-                credit_balance = 0.0
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Credit balance must be a valid number'}), 400
+        # Wallet funding is package-only — a new company always starts empty;
+        # any creditBalance*/credit_balance field on the payload is ignored so
+        # no unledgered money can be minted through this route.
+        credit_balance = 0.0
 
         if not company_name or not manager_name or not email or not username or not phone:
             return jsonify({'error': 'All company and account fields are required'}), 400
@@ -50,8 +44,6 @@ def api_admin_tenants():
             return jsonify({'error': 'Invalid phone number'}), 400
         if plan not in ADMIN_COMPANY_PLANS:
             return jsonify({'error': 'Invalid plan'}), 400
-        if credit_balance < 0:
-            return jsonify({'error': 'Credit balance cannot be negative'}), 400
         conflict = _identity_conflict(email, username)
         if conflict:
             return jsonify({'error': conflict}), 409
@@ -153,14 +145,13 @@ def api_admin_update_tenant(tenant_id):
         'phone': 'phone',
         'email': 'email',
         'plan': 'plan',
-        'creditBalance': 'credit_balance',
         'isActive': 'is_active',
     }
     for input_key, db_key in key_map.items():
         if input_key in data:
             company_fields[db_key] = data[input_key]
     for db_key in ['company_name', 'account_manager_name', 'username', 'phone', 'email',
-                   'plan', 'credit_balance', 'is_active']:
+                   'plan', 'is_active']:
         if db_key in data:
             company_fields[db_key] = data[db_key]
     for input_key, db_key in _COMPANY_PROFILE_KEY_MAP.items():
@@ -170,17 +161,9 @@ def api_admin_update_tenant(tenant_id):
             company_fields[db_key] = str(data[db_key] or '').strip()
     if 'trialEndsAt' in data:
         company_fields['trial_ends_at'] = data['trialEndsAt']
-    # The desk keys balances in riyals; the wallet stores riyals.
-    if data.get('creditBalanceSar') is not None:
-        try:
-            company_fields['credit_balance'] = float(data.get('creditBalanceSar'))
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Credit balance must be a valid number'}), 400
-    elif data.get('creditBalance') is not None:
-        try:
-            company_fields['credit_balance'] = db.usd_to_sar(data.get('creditBalance'))
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Credit balance must be a valid number'}), 400
+    # Wallet money moves only through the ledger — approved recharges or an
+    # audited /api/admin/ledger/adjust movement. creditBalance* fields on this
+    # route are ignored: a raw set would mint unledgered credit.
 
     if 'company_name' in company_fields:
         company_fields['company_name'] = str(company_fields['company_name'] or '').strip()
@@ -206,13 +189,6 @@ def api_admin_update_tenant(tenant_id):
             return jsonify({'error': 'Invalid phone number'}), 400
     if 'plan' in company_fields and company_fields['plan'] not in ADMIN_COMPANY_PLANS:
         return jsonify({'error': 'Invalid plan'}), 400
-    if 'credit_balance' in company_fields:
-        try:
-            company_fields['credit_balance'] = float(company_fields['credit_balance'])
-        except (TypeError, ValueError):
-            return jsonify({'error': 'Credit balance must be a valid number'}), 400
-        if company_fields['credit_balance'] < 0:
-            return jsonify({'error': 'Credit balance cannot be negative'}), 400
     if 'is_active' in company_fields:
         company_fields['is_active'] = 1 if company_fields['is_active'] else 0
 
@@ -225,7 +201,6 @@ def api_admin_update_tenant(tenant_id):
         if conflict:
             return jsonify({'error': conflict}), 409
 
-    synced_credit_balance = company_fields.get('credit_balance')
     activation_request = company_fields.pop('is_active', None)
     for key in ['account_manager_name', 'username', 'phone', 'email']:
         if key in company_fields:
@@ -254,9 +229,6 @@ def api_admin_update_tenant(tenant_id):
         if primary_user_id and primary_user_id != tenant.get('primary_user_id'):
             if not db.set_primary_company_admin(tenant_id, primary_user_id):
                 return jsonify({'error': 'User not found'}), 404
-        # credit_balance may have been written directly (no ledger entry, no
-        # hook) — re-sync the provider cap from the freshest entitlement.
-        _sync_tenant_credit_to_openrouter(tenant_id)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or username already registered'}), 409
     return jsonify({

@@ -755,8 +755,10 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         self.assertNotIn('sk-or-v1-debug-key', dumped)
         self.assertNotIn('key_enc', dumped)
 
-    def test_tenant_update_credit_balance_syncs_openrouter_key(self):
-        """Updating tenant credit_balance via PUT /api/admin/tenants/<id> must sync OpenRouter key limit."""
+    def test_tenant_credit_balance_syncs_openrouter_key_and_put_ignores_money(self):
+        """The cap sync converts the current wallet; and a PUT that still
+        carries creditBalanceSar leaves the balance untouched — funding is
+        package-only, no free-credit writes through the tenant routes."""
         module = self.application_module
         client = self.app.test_client()
         tenant_id = self._fresh_tenant('Sync Co', 'sync-keys@example.test', 'sync-keys-co')
@@ -764,25 +766,31 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
             db.set_tenant_openrouter_key(
                 tenant_id, 'sk-or-v1-sync-key-qqqqqqqqqqqqqqqq', provenance='auto',
                 openrouter_key_hash='synchash123', limit_usd=10.0)
+            db.update_tenant(tenant_id, credit_balance=75.5)
 
         with self.app.app_context():
             # The wallet is riyals; the provider cap converts it back:
             # balance / FX rate / BILLING_MULTIPLIER, with 'none' re-pushed.
             expected_cap = 75.5 / float(db.get_fx_rate()['rate']) / float(db.get_billing_multiplier())
         with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
-                patch.object(module, '_openrouter_update_managed_key', return_value={'ok': True}) as patched_update:
-            resp = client.put(f'/api/admin/tenants/{tenant_id}',
-                              headers=self._admin_headers(),
-                              json={'creditBalanceSar': 75.5})
-            self.assertEqual(resp.status_code, 200, resp.get_json())
+                patch.object(module, '_openrouter_key_status', return_value={'error': 'offline'}), \
+                patch.object(module, '_openrouter_update_managed_key', return_value={'ok': True}) as patched_update, \
+                self.app.app_context():
+            module._sync_tenant_credit_to_openrouter(tenant_id)
             patched_update.assert_called_once_with(
                 'synchash123', limit_usd=expected_cap, limit_reset='none', disabled=False)
 
         with self.app.app_context():
             meta = db.get_tenant_openrouter_key_meta(tenant_id)
             self.assertEqual(meta['limit_usd'], expected_cap)
-            balance = db.get_tenant_balance(tenant_id)
-            self.assertEqual(balance, 75.5)
+            self.assertEqual(db.get_tenant_balance(tenant_id), 75.5)
+
+        resp = client.put(f'/api/admin/tenants/{tenant_id}',
+                          headers=self._admin_headers(),
+                          json={'creditBalanceSar': 9999})
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        with self.app.app_context():
+            self.assertEqual(db.get_tenant_balance(tenant_id), 75.5)
 
     def test_sync_recovers_missing_openrouter_key_hash_from_dashboard(self):
         """When tenant key has NULL openrouter_key_hash, sync must discover and cache it from dashboard keys."""
