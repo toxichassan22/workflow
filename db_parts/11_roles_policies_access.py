@@ -474,6 +474,7 @@ def set_user_project_scope(tenant_id, user_id, draft_ids):
 # ── responsibility assignments: editor/approver per project ──────────────────
 
 ASSIGNMENT_ROLES = ('editor', 'approver')
+RESPONSIBILITY_ROLES = ASSIGNMENT_ROLES + ('admin',)
 ASSIGNMENT_ALL_DRAFTS = '*'
 
 

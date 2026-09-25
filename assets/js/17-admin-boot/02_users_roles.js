@@ -3,22 +3,23 @@
       const email = document.getElementById('newUserEmail').value.trim();
       const password = document.getElementById('newUserPassword').value;
       const phone = ((document.getElementById('newUserPhone') || {}).value || '').trim();
-      const sections = Array.from(document.querySelectorAll('.inviteSectionCb:checked')).map(cb => cb.value);
+      const responsibility = (document.getElementById('newUserResponsibility') || {}).value || '';
       const projects = Array.from(document.querySelectorAll('.inviteProjectCb:checked')).map(cb => cb.value);
       if (!name || !email) { toast('الاسم والبريد مطلوبان'); return; }
       const resetForm = () => {
-        ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone'].forEach(id => {
+        ['newUserName', 'newUserEmail', 'newUserPassword', 'newUserPhone', 'newUserResponsibility'].forEach(id => {
           const el = document.getElementById(id);
           if (el) el.value = '';
         });
-        document.querySelectorAll('.inviteSectionCb:checked,.inviteProjectCb:checked').forEach(cb => { cb.checked = false; });
+        document.querySelectorAll('.inviteProjectCb:checked').forEach(cb => { cb.checked = false; });
+        toggleNewUserProjects();
       };
       // No password typed: the employee picks their own via the invite link —
       // same form, two delivery paths.
       if (!password) {
         const result = document.getElementById('inviteResult');
         if (result) showInlineLoader(result, WFT('common.sending', 'جاري الإرسال...'));
-        const invite = await api('POST', '/api/invites', { email, name, phone, sections, projects });
+        const invite = await api('POST', '/api/invites', { email, name, phone, responsibility, projects });
         if (invite && invite.success) {
           const fullUrl = window.location.origin + invite.inviteUrl;
           if (result) result.innerHTML = '<div style="background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:8px">' +
@@ -36,14 +37,27 @@
       }
       const pwError = passwordPolicyError(password);
       if (pwError) { toast(pwError); return; }
-      const data = await api('POST', '/api/users', { name, email, password, phone, sections, projects });
+      const data = await api('POST', '/api/users', { name, email, password, phone, responsibility, projects });
       if (data.success) {
-        toast('تم إضافة الموظف' + (data.emailSent === false ? ' — تعذر إرسال البريد' : ''));
+        toast('تم إضافة الموظف' + (data.emailSent === false ? ' — تعذر إرسال البريد' : '') +
+          (data.assignmentError ? ' — ' + assignmentErrorText(data.assignmentError) : ''));
         resetForm();
         openTenantUsers();
       } else {
         toast(data.error || 'فشل إضافة الموظف');
       }
+    }
+
+    function toggleNewUserProjects() {
+      const field = document.getElementById('newUserProjectsField');
+      const isAdmin = (document.getElementById('newUserResponsibility') || {}).value === 'admin';
+      if (field) field.style.display = isAdmin ? 'none' : '';
+    }
+
+    function assignmentErrorText(error) {
+      if (error === 'approver_exists') return 'للمشروع معتمد بالفعل';
+      if (error === 'too_many_editors') return WFT('users.assignment_editor_cap', 'المشروع يقبل خمسة محررين كحد أقصى');
+      return error;
     }
 
     async function toggleUserActive(userId, isActive) {

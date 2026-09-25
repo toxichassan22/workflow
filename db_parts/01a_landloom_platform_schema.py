@@ -272,6 +272,7 @@ def _ensure_landloom_columns(conn):
     _add('invite_links', 'sections_json', 'sections_json TEXT')
     _add('invite_links', 'projects_json', 'projects_json TEXT')
     _add('invite_links', 'email_status', "email_status TEXT DEFAULT 'pending'")
+    _add('invite_links', 'responsibility', 'responsibility TEXT')
     _add('invite_links', 'email_error', 'email_error TEXT')
     _add('invite_links', 'email_attempts', 'email_attempts INTEGER DEFAULT 0')
     _add('invite_links', 'email_sent_at', 'email_sent_at TEXT')

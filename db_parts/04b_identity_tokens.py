@@ -12,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_invite(tenant_id, email, expiry_days=7, role='employee', name=None,
-                  phone=None, sections=None, projects=None):
+                  phone=None, sections=None, projects=None, responsibility=None):
     """Create an invite link carrying the pre-assigned role and scope (t21)."""
     import secrets as _secrets
     conn = get_db()
@@ -21,15 +21,16 @@ def create_invite(tenant_id, email, expiry_days=7, role='employee', name=None,
     from datetime import timedelta
     expires = (_utcnow() + timedelta(days=expiry_days)).isoformat()
     clean_role = role if role in USER_ROLES else 'employee'
+    clean_resp = responsibility if responsibility in ('editor', 'approver', 'admin') else None
     sections_json = json.dumps(list(sections), ensure_ascii=False) if sections is not None else None
     projects_json = json.dumps(list(projects), ensure_ascii=False) if projects is not None else None
     conn.execute(
         '''INSERT INTO invite_links
-           (id, tenant_id, email, token, expires_at, name, phone, role, sections_json, projects_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           (id, tenant_id, email, token, expires_at, name, phone, role, sections_json, projects_json, responsibility)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (invite_id, tenant_id, email.lower(), token, expires,
          str(name or '').strip() or None, str(phone or '').strip() or None, clean_role,
-         sections_json, projects_json)
+         sections_json, projects_json, clean_resp)
     )
     conn.commit()
     return {'id': invite_id, 'token': token, 'expires_at': expires}
@@ -57,9 +58,36 @@ def mark_invite_email(invite_id, status, error=None):
 
 
 def apply_invite_scope(user_id, invite):
-    """Give a newly registered user the sections and projects named on the invite."""
+    """Give a newly registered user the scope and responsibility on the invite.
+
+    An «admin» responsibility means every company permission and no project
+    restriction; «editor»/«approver» become project assignments (the listed
+    drafts, or every draft when the picker was left empty); anything else
+    keeps the plain-employee scope semantics.
+    """
     conn = get_db()
     tenant_id = invite.get('tenant_id')
+    responsibility = invite.get('responsibility')
+    if responsibility == 'admin':
+        grant_company_admin_permissions(user_id)
+        return
+    if responsibility in ASSIGNMENT_ROLES:
+        valid = {
+            row['id'] for row in conn.execute(
+                'SELECT id FROM project_drafts WHERE tenant_id = ?', (tenant_id,)
+            ).fetchall()
+        }
+        projects = _json_or(invite.get('projects_json'), None)
+        wanted = [str(d) for d in projects if str(d) in valid] if isinstance(projects, list) else []
+        targets = wanted or [ASSIGNMENT_ALL_DRAFTS]
+        for draft_id in targets:
+            conn.execute(
+                'INSERT OR IGNORE INTO user_assignments (id, tenant_id, user_id, draft_id, role) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (str(uuid.uuid4()), tenant_id, user_id, draft_id, responsibility),
+            )
+        conn.commit()
+        return
     sections = _json_or(invite.get('sections_json'), None)
     if isinstance(sections, list) and sections:
         allowed = set(str(s) for s in sections)

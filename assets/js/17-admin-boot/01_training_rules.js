@@ -764,23 +764,9 @@
     }
 
     async function populateInviteScopePickers() {
-      const sectionsBox = document.getElementById('inviteSectionsPicker');
       const projectsBox = document.getElementById('inviteProjectsPicker');
-      if (!sectionsBox && !projectsBox) return;
-      const [sectionsData, projectsData] = await Promise.all([
-        api('GET', '/api/field-sections').catch(() => null),
-        api('GET', '/api/project-drafts').catch(() => null),
-      ]);
-      if (sectionsBox) {
-        const sections = (sectionsData && (sectionsData.sections || sectionsData.available)) || [];
-        const keys = Array.isArray(sections) ? sections : Object.keys(sections);
-        sectionsBox.innerHTML = (keys || []).map(s => {
-          const key = typeof s === 'string' ? s : s.key;
-          const label = typeof s === 'string' ? s : (s.label || s.key);
-          return '<label style="display:flex;align-items:center;gap:4px;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 8px">' +
-            '<input type="checkbox" class="inviteSectionCb" value="' + escapeHtml(key) + '">' + escapeHtml(label) + '</label>';
-        }).join('') || '<span class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</span>';
-      }
+      if (!projectsBox) return;
+      const projectsData = await api('GET', '/api/project-drafts').catch(() => null);
       if (projectsBox) {
         const drafts = (projectsData && (projectsData.drafts || projectsData.projects)) || [];
         projectsBox.innerHTML = drafts.map(d =>

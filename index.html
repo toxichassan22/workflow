@@ -912,10 +912,15 @@
             <input type="text" id="newUserPhone" dir="ltr">
           </div>
           <div class="tenant-field">
-            <label>أقسام النموذج</label>
-            <div id="inviteSectionsPicker" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            <label>المسؤولية</label>
+            <select id="newUserResponsibility" onchange="toggleNewUserProjects()">
+              <option value="">موظف</option>
+              <option value="editor">محرر</option>
+              <option value="approver">معتمد</option>
+              <option value="admin">أدمن</option>
+            </select>
           </div>
-          <div class="tenant-field">
+          <div class="tenant-field" id="newUserProjectsField">
             <label>ملفات المشاريع</label>
             <div id="inviteProjectsPicker" style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto"></div>
           </div>

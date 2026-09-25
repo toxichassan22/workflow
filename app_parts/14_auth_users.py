@@ -786,14 +786,37 @@ def api_add_user():
                                  username=(data.get('username') or '').strip() or None)
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email already in use'}), 409
-    _apply_user_scope_payload(user_id, data)
+    assignment_error = _apply_user_responsibility_payload(user_id, data)
+    if data.get('responsibility') != 'admin':
+        _apply_user_scope_payload(user_id, data)
     try:
         email_sent = _send_user_welcome_email(email, name, db.get_tenant_by_id(g.tenant_id))
     except Exception:
         email_sent = False
     _record_audit_event('user.created', 'user', user_id, entity_name=name,
                         metadata={'email': email, 'email_sent': email_sent})
-    return jsonify({'success': True, 'userId': user_id, 'emailSent': email_sent}), 201
+    return jsonify({'success': True, 'userId': user_id, 'emailSent': email_sent,
+                    'assignmentError': assignment_error}), 201
+
+
+def _apply_user_responsibility_payload(user_id, data):
+    """Apply the responsibility picked on the add form («editor»/«approver»
+    become project assignments, «admin» grants every company permission).
+    Returns a conflict message when an assignment could not be set."""
+    responsibility = data.get('responsibility') or None
+    if responsibility == 'admin':
+        db.grant_company_admin_permissions(user_id)
+        return None
+    if responsibility in db.ASSIGNMENT_ROLES:
+        projects = data.get('projects')
+        draft_ids = [str(p) for p in projects] if isinstance(projects, list) and projects else [db.ASSIGNMENT_ALL_DRAFTS]
+        result = db.set_user_assignments(
+            g.tenant_id, user_id, [{'draft_id': d, 'role': responsibility} for d in draft_ids])
+        if result.get('error'):
+            return result['error']
+    elif responsibility is not None:
+        return 'invalid_responsibility'
+    return None
 
 
 def _apply_user_scope_payload(user_id, data):
@@ -1076,12 +1099,16 @@ def api_create_invite():
     role = data.get('role') or 'employee'
     if role not in db.USER_ROLES:
         return jsonify({'error': 'Invalid role'}), 400
+    responsibility = data.get('responsibility') or None
+    if responsibility is not None and responsibility not in db.RESPONSIBILITY_ROLES:
+        return jsonify({'error': 'Invalid responsibility'}), 400
     invite = db.create_invite(
         g.tenant_id, email,
         role=role,
         name=data.get('name'), phone=data.get('phone'),
         sections=data.get('sections') if isinstance(data.get('sections'), list) else None,
         projects=data.get('projects') if isinstance(data.get('projects'), list) else None,
+        responsibility=responsibility,
     )
     tenant = db.get_tenant_by_id(g.tenant_id)
     email_sent = _send_invite_email(invite, tenant, email)

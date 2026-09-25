@@ -471,6 +471,33 @@ class LandloomDbTests(unittest.TestCase):
                                      [{'draft_id': other_draft, 'role': 'editor'}])
         self.assertEqual(len(ok['assignments']), 1)
 
+    def test_invite_responsibility_applies_on_acceptance(self):
+        db.create_user('tenant-1', 'محرر مدعو', 'ed@x.test', 'hash', role='employee')
+        editor = db.get_user_by_email('ed@x.test')
+        invite = db.create_invite('tenant-1', 'ed@x.test',
+                                  responsibility='editor', projects=[self.draft_id])
+        db.apply_invite_scope(editor['id'], db.get_invite('tenant-1', invite['id']))
+        rows = db.list_user_assignments('tenant-1', editor['id'])
+        self.assertEqual([(r['draft_id'], r['role']) for r in rows],
+                         [(self.draft_id, 'editor')])
+        # An approver invite with no projects picked covers every draft.
+        db.create_user('tenant-1', 'معتمد مدعو', 'ap@x.test', 'hash', role='employee')
+        approver = db.get_user_by_email('ap@x.test')
+        invite = db.create_invite('tenant-1', 'ap@x.test', responsibility='approver')
+        db.apply_invite_scope(approver['id'], db.get_invite('tenant-1', invite['id']))
+        self.assertTrue(db.user_is_assigned_approver('tenant-1', approver['id'], self.draft_id))
+        # An admin invite grants every company permission instead of a scope.
+        db.create_user('tenant-1', 'أدمن مدعو', 'ad@x.test', 'hash', role='employee')
+        admin = db.get_user_by_email('ad@x.test')
+        invite = db.create_invite('tenant-1', 'ad@x.test', responsibility='admin',
+                                  projects=[self.draft_id])
+        db.apply_invite_scope(admin['id'], db.get_invite('tenant-1', invite['id']))
+        perms = db.get_user_permissions(admin['id'])
+        self.assertTrue(all(v for k, v in perms.items() if k != 'sag_admin_panel'))
+        self.assertEqual(db.list_user_assignments('tenant-1', admin['id']), [])
+        self.assertTrue(db.user_may_access_draft(admin['id'],
+                                                 db.get_project_draft_by_id('tenant-1', self.draft_id)))
+
     # ── t21/t22: SoD matrix, users report ─────────────────────
 
     def test_sod_matrix_flags_self_approval_and_missing_reason(self):
