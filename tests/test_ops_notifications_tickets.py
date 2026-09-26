@@ -321,6 +321,39 @@ class OpsSectionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertIn('راجع القسم', [n['title'] for n in self._feed(self.token)])
 
+    def test_approval_request_pool_never_addresses_the_admin(self):
+        """The admin watches an editor→approver request through the mirrored
+        copy — his own user row must not sit in the approver pool, or the same
+        request would land on his feed twice (addressed + mirror)."""
+        pool = [u['id'] for u in
+                db.get_users_with_permission(self.tenant_id, 'approvals')]
+        self.assertNotIn(self.user_id, pool)
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.user_id,
+            {'project_name': 'برج النخبة', 'project_type': 'سكني',
+             'city': 'الرياض'}, {'basic': 'draft'}, 'draft',
+            draft_id='draft-pool-admin')
+        approver_id = db.create_user(
+            self.tenant_id, 'معتمد', 'pool-ap@x.test', 'hash', role='employee')
+        db.set_user_permission(approver_id, 'approvals', True)
+        editor_id = db.create_user(
+            self.tenant_id, 'محرر', 'pool-ed@x.test', 'hash', role='employee')
+        db.set_user_assignments(
+            self.tenant_id, editor_id, [{'draft_id': draft_id, 'role': 'editor'}])
+        editor_token = auth.create_token(
+            self.tenant_id, 'pool-ed@x.test', user_id=editor_id,
+            user_name='محرر', user_role='employee')
+        sent = self.client.post(
+            '/api/project-draft/section-version', headers=self.headers(editor_token),
+            json={'draftId': draft_id, 'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        admin_requests = [n for n in self._feed(self.token)
+                          if n['category'] == 'section_approval']
+        self.assertEqual(len(admin_requests), 1)
+        approver_feed = db.list_notifications(self.tenant_id, user_id=approver_id)
+        self.assertIn('إصدار قسم بانتظار الاعتماد',
+                      [n['title'] for n in approver_feed])
+
     def test_decision_on_admin_submission_stays_silent(self):
         """The admin hears every staff exchange, but a verdict on work he
         submitted himself is his own loop closing — it stays in the draft

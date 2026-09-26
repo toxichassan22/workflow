@@ -324,7 +324,13 @@ def close_approval_tasks_for_entity(tenant_id, entity_type, entity_id, closed_by
 
 
 def get_users_with_permission(tenant_id, permission_key):
-    """Tenant users whose effective permissions grant ``permission_key``."""
+    """Tenant users whose effective permissions grant ``permission_key``.
+
+    The primary company-admin row never joins these pools: it holds every
+    grant, so it would collect an addressed copy of every approval request on
+    top of the mirror copy the feed already gets — the admin watches staff
+    exchanges through the mirror and is not a work-queue recipient himself.
+    """
     conn = get_db()
     try:
         rows = conn.execute(
@@ -333,8 +339,17 @@ def get_users_with_permission(tenant_id, permission_key):
         ).fetchall()
     except Exception:
         return []
+    try:
+        primary = conn.execute(
+            'SELECT primary_user_id FROM tenants WHERE id = ?', (tenant_id,)
+        ).fetchone()
+        primary_id = str(primary['primary_user_id'] or '') if primary else ''
+    except Exception:
+        primary_id = ''
     users = []
     for row in rows:
+        if primary_id and str(row['id']) == primary_id:
+            continue
         try:
             perms = get_user_permissions(row['id'], row['role'] or 'employee')
         except Exception:
