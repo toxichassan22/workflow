@@ -69,6 +69,22 @@ def _recipient_is_actor(tenant_id, recipient, actor_id, actor_is_admin):
         return False
 
 
+def _recipient_is_tenant_admin(tenant_id, recipient):
+    """True when a notification address belongs to the company admin — either
+    spelling, 'tenant-admin:<id>' or the primary user's row id. A verdict on
+    work the admin submitted himself is his own loop closing, so decision
+    endpoints skip it instead of echoing it back onto his feed; the draft
+    history and audit trail still record it."""
+    if not recipient:
+        return False
+    if str(recipient).startswith('tenant-admin:'):
+        return True
+    try:
+        return bool(db.is_primary_company_admin(tenant_id, recipient))
+    except Exception:
+        return False
+
+
 def _notification_muted_categories():
     try:
         prefs = db.get_notification_preferences(g.tenant_id, _notification_recipient_key())

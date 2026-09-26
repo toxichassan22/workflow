@@ -285,7 +285,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "users.assignment_conflict": "المشروع له معتمد آخر بالفعل",
   "users.assignment_editor_cap": "المشروع يقبل خمسة محررين كحد أقصى",
   "users.access_requests_title": "طلبات اطّلاع مدير المنصة على المحتوى",
-  "users.access_requests_hint": "مدير المنصة قد يطلب إذن اطّلاع مؤقت على محتوى شركتك بسبب معلن؛ المحتوى لا يظهر له إلا بعد اعتمادك وتنتهي صلاحية الإذن تلقائيًا",
+  "users.access_requests_hint": "طلب مؤقت من مدير المنصة لعرض محتوى شركتك للقراءة فقط — لا يمنحه أي تحكم إداري في حسابك، والمحتوى لا يظهر له إلا بعد اعتمادك، وتنتهي صلاحية الإذن تلقائيًا",
   "users.access_scope_tenant": "كل محتوى الشركة",
   "users.access_scope_presentation": "عرض تقديمي محدد",
   "users.access_scope_file": "ملف محدد",

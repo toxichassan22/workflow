@@ -89,7 +89,8 @@ def api_decide_final_file_approval(approval_id):
             closed_by_name=_landloom_actor_name())
         requester = str(result.get('requested_by') or '')
         if not _recipient_is_actor(g.tenant_id, requester, _landloom_actor_id(),
-                                   _landloom_actor_is_admin()):
+                                   _landloom_actor_is_admin()) \
+                and not _recipient_is_tenant_admin(g.tenant_id, requester):
             message = 'اعتُمد الملف النهائي' if data.get('decision') == 'approved' \
                 else 'أُعيد الملف النهائي للتعديل'
             db.create_notification(

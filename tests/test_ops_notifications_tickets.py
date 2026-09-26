@@ -321,10 +321,10 @@ class OpsSectionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertIn('راجع القسم', [n['title'] for n in self._feed(self.token)])
 
-    def test_decision_on_admin_submission_reaches_the_admin_feed(self):
-        """The admin hears every staff exchange — a verdict on work he
-        submitted himself included. His own decisions are the only silent
-        ones; those stay in the audit trail alone."""
+    def test_decision_on_admin_submission_stays_silent(self):
+        """The admin hears every staff exchange, but a verdict on work he
+        submitted himself is his own loop closing — it stays in the draft
+        history and audit trail without pinging his feed."""
         draft_id = db.save_project_draft(
             self.tenant_id, self.user_id,
             {'project_name': 'برج المشرق'}, {'basic': 'draft'}, 'draft',
@@ -344,9 +344,36 @@ class OpsSectionTests(unittest.TestCase):
             headers=self.headers(approver_token),
             json={'versionId': version['id'], 'decision': 'approved'})
         self.assertEqual(response.status_code, 200, response.get_json())
-        own = [n for n in self._feed(self.token) if n['title'] == 'اعتُمد قسمك']
-        self.assertEqual(len(own), 1)
-        self.assertEqual(own[0]['user_id'], 'tenant-admin:' + self.tenant_id)
+        self.assertNotIn('اعتُمد قسمك', [n['title'] for n in self._feed(self.token)])
+        # The approver's verdict is still written into the project record.
+        overview = db.section_versions_overview(self.tenant_id, draft_id)
+        self.assertEqual(overview['basic']['status'], 'approved')
+
+    def test_verdict_on_admin_generation_request_stays_silent(self):
+        """Same rule on the generation gate: an approver's decision on a
+        request the admin filed himself never echoes onto the admin feed."""
+        draft_id = db.save_project_draft(
+            self.tenant_id, self.user_id,
+            {'project_name': 'برج المشرق'}, {}, 'draft',
+            draft_id='draft-admin-gen')
+        approver_id = db.create_user(
+            self.tenant_id, 'معتمد', 'gen-ap@x.test', 'hash', role='employee')
+        db.set_user_permission(approver_id, 'approve_generation', True)
+        approver_token = auth.create_token(
+            self.tenant_id, 'gen-ap@x.test', user_id=approver_id,
+            user_name='معتمد', user_role='employee')
+        approval = db.create_generation_approval(
+            self.tenant_id, draft_id,
+            {'estimated_cost_usd': 0, 'estimated_points': 0, 'slides_count': 0},
+            'tenant-admin:' + self.tenant_id, 'مدير الشركة')
+        self.assertNotIn('error', approval)
+        response = self.client.post(
+            f'/api/generation-approvals/{approval["id"]}/decision',
+            headers=self.headers(approver_token),
+            json={'decision': 'rejected'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertNotIn('رُفض طلب التوليد',
+                         [n['title'] for n in self._feed(self.token)])
 
     def test_admin_own_decision_on_his_submission_stays_silent(self):
         """A decision the admin took himself never echoes onto his feed —

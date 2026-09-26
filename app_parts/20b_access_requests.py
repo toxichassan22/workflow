@@ -25,14 +25,12 @@ def api_admin_create_access_request(tenant_id):
     failure = _landloom_error(row)
     if failure:
         return failure
-    tenant = db.get_tenant_by_id(tenant_id)
-    scope_label = {'tenant': 'كل محتوى الشركة',
-                   'presentation': 'عرض تقديمي محدد',
-                   'file': 'ملف محدد',
-                   'draft': 'ملف مشروع محدد'}.get(row.get('scope'), 'محتوى الشركة')
     _notify_tenant_admins(
-        tenant_id, 'مدير المنصة يطلب اطّلاعًا على محتوى شركتك',
-        f'يطلب مدير المنصة إذنًا لقراءة {scope_label} لمدة محدودة — السبب: {row.get("reason")}',
+        tenant_id, 'طلب اطّلاع على محتوى شركتك',
+        'مدير المنصة يطلب إذن اطّلاع للقراءة فقط على '
+        + _access_scope_label(row.get('scope'), row.get('target_id'), tenant_id)
+        + ' لمدة محدودة — لا يمنحه أي تحكم إداري في حسابك — السبب: '
+        + str(row.get('reason') or ''),
         entity_type='admin_access_request', entity_id=row['id'])
     return jsonify({'success': True, 'request': row}), 201
 

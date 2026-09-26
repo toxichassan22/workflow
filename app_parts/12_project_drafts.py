@@ -1336,10 +1336,11 @@ def api_decide_section_version():
                 assignee_id=None if sender.startswith('tenant-admin:') else sender or None,
                 payload={'version_id': version_id, 'note': decided.get('decision_note')},
                 draft_id=draft['id'])
-        # The admin sees every staff exchange — including a verdict on work
-        # he submitted himself. Only a self-decision stays notification-free;
-        # the audit trail is where admin-caused decisions live regardless.
-        if not _recipient_is_actor(g.tenant_id, sender, actor_id, _landloom_actor_is_admin()):
+        # The admin sees every staff exchange, but a verdict on work he
+        # submitted himself is his own loop closing — it stays in the draft
+        # history and audit trail without pinging his feed.
+        if not _recipient_is_actor(g.tenant_id, sender, actor_id, _landloom_actor_is_admin()) \
+                and not _recipient_is_tenant_admin(g.tenant_id, sender):
             message = {'approved': 'اعتُمد قسمك',
                        'returned': 'أُعيد قسمك للتعديل',
                        'rejected': 'رُفض قسمك'}[decision]
@@ -1683,7 +1684,8 @@ def api_review_project_draft():
         reviewed_draft = reviewed.get('draft') or {}
         requester = str(reviewed_draft.get('requested_by') or '')
         if not _recipient_is_actor(g.tenant_id, requester, _project_draft_actor_id(),
-                                   _landloom_actor_is_admin()):
+                                   _landloom_actor_is_admin()) \
+                and not _recipient_is_tenant_admin(g.tenant_id, requester):
             message = 'اعتُمد مشروعك' if review_status == 'approved' else 'أُعيد مشروعك للتعديل'
             db.create_notification(
                 g.tenant_id, message, note or None,

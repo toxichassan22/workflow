@@ -451,6 +451,26 @@ def _admin_tenant_or_404(tenant_id):
     return tenant, None
 
 
+def _access_scope_label(scope, target_id=None, tenant_id=None):
+    """Human label naming exactly what a content-view grant covers — the
+    approving company admin sees the file/project name, not a bare scope key."""
+    base = {'tenant': 'كل محتوى الشركة',
+            'presentation': 'عرض تقديمي',
+            'file': 'ملف',
+            'draft': 'ملف مشروع'}.get(scope, 'محتوى الشركة')
+    name = None
+    try:
+        if scope == 'draft' and target_id:
+            name = (db.get_project_draft_by_id(tenant_id, target_id) or {}).get('title')
+        elif scope == 'presentation' and target_id:
+            name = (db.get_presentation(target_id, tenant_id=tenant_id) or {}).get('title')
+        elif scope == 'file' and target_id:
+            name = (db.get_project_file_by_id(str(target_id)) or {}).get('original_name')
+    except Exception:
+        name = None
+    return f'{base} «{name}»' if name else base
+
+
 def _require_admin_content_access(tenant_id, scope, target_id=None):
     """d07: a platform admin may read client content only under an active grant.
 
@@ -462,7 +482,7 @@ def _require_admin_content_access(tenant_id, scope, target_id=None):
     grant = db.active_admin_access_grant(tenant_id, scope=scope, target_id=target_id)
     if not grant:
         return (jsonify({
-            'error': 'قراءة محتوى العميل تتطلب طلب وصول معتمدًا من مدير الشركة',
+            'error': 'الاطّلاع على محتوى العميل يتطلب إذن اطّلاع معتمدًا من مدير الشركة',
             'error_code': 'access_grant_required',
             'tenant_id': tenant_id,
         }), 403)
@@ -485,8 +505,8 @@ def _require_admin_content_access(tenant_id, scope, target_id=None):
     if not grant.get('first_accessed_at'):
         _notify_tenant_admins(
             tenant_id, 'مدير المنصة اطّلع على محتوى شركتك',
-            'اطّلع مدير المنصة على محتوى شركتك بموجب إذن الاطّلاع المعتمد — السبب: '
-            + (grant.get('reason') or ''),
+            'اطّلع مدير المنصة على ' + _access_scope_label(scope, target_id, tenant_id)
+            + ' للقراءة فقط بموجب الإذن المعتمد — السبب: ' + (grant.get('reason') or ''),
             entity_type='admin_access_request', entity_id=grant['id'])
     return grant
 
