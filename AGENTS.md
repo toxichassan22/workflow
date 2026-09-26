@@ -327,7 +327,7 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
 
 ## The admin agent (`/api/training-chat`)
 
-It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-5.6-sol`) with `reasoning_effort='medium'`, because it
+It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-6-sol`) with `reasoning_effort='medium'`, because it
 changes company settings; it used to run on the fast text model with 2,000 tokens and no reasoning.
 
 - **Every tool re-checks the caller's own permission.** The route gate is `training_data` only, so

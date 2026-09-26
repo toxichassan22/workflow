@@ -81,7 +81,7 @@ class AiUsageTests(unittest.TestCase):
                 prompt_tokens=100, completion_tokens=50, total_tokens=150,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-1')
             db.record_ai_usage_event(
-                self.tenant_id, 'openai/gpt-5.6-sol', flow='designer_chat',
+                self.tenant_id, 'openai/gpt-6-sol', flow='designer_chat',
                 prompt_tokens=200, completion_tokens=100, total_tokens=300,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-2')
             db.record_ai_usage_event(
