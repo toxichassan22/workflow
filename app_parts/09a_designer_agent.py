@@ -143,8 +143,71 @@ def _agent_error_turn(text):
 
 
 def _is_billing_error_text(text):
-    t = str(text or '').lower()
-    return '402' in t or 'insufficient' in t or 'رصيد' in t or 'balance' in t
+    return _is_company_credit_error(text)
+
+
+# ── Balance pre-flight ───────────────────────────────────────────────────────
+
+def _agent_run_estimate_sar(tasks):
+    """Rough billed-SAR estimate for a task plan: the planner turn plus one
+    worker call per targeted slide (per-image pricing for generate_image).
+
+    Deliberately conservative: it exists to refuse a run the wallet clearly
+    cannot finish — mid-run failures still degrade to the billing-stop path.
+    """
+    try:
+        estimates = db.get_billing_flow_estimates()
+    except Exception:
+        estimates = {}
+    per_call = float(estimates.get('slide_single') or 0.25)
+    per_image = float(estimates.get('image_generation') or 0.5)
+    calls = 1  # the planner turn itself
+    images = 0
+    for task in tasks or []:
+        if not isinstance(task, dict) or task.get('engine') != 'worker':
+            continue
+        op = str(task.get('op') or '')
+        slide_count = max(1, len(task.get('slides') or []))
+        if op == 'generate_image':
+            images += 1
+        elif op == 'split':
+            try:
+                calls += max(1, int(task.get('parts') or (task.get('params') or {}).get('parts') or 2))
+            except (TypeError, ValueError):
+                calls += 2
+        elif op == 'restructure':
+            calls += 1
+        else:
+            calls += slide_count
+    try:
+        return db.usd_to_sar(calls * per_call + images * per_image)
+    except Exception:
+        return 0.0
+
+
+def _agent_balance_preflight(ctx, tasks):
+    """Refuse a run early when the wallet visibly cannot cover its estimate.
+
+    Gated on BILLING_ENFORCE=1 like every other billing guard — with
+    enforcement off, tests and zero-balance tenants must still generate; the
+    runner's billing-stop then preserves partial successes instead.
+    """
+    try:
+        if not db.billing_enforcement_enabled():
+            return None
+    except Exception:
+        return None
+    need_sar = _agent_run_estimate_sar(tasks)
+    if need_sar <= 0:
+        return None
+    available = _designer_available_sar(ctx['tenant_id'])
+    if available >= need_sar:
+        return None
+    return _agent_chat_response(
+        ctx,
+        f'رصيد شركتك المتاح حاليًا ~{available:.2f} ريال، والتكلفة التقديرية '
+        f'لهذا الطلب ~{need_sar:.2f} ريال — اشحن المحفظة ثم أعد المحاولة.',
+        kind='reply')
 
 
 # ── Planner read tools ───────────────────────────────────────────────────────
@@ -224,9 +287,9 @@ def _designer_agent_plan(ctx, session=None):
             result = openrouter_response_message(response, 'DESIGNER-PLANNER')
         except RuntimeError as exc:
             errors.append(str(exc))
-            if _is_billing_error_text(str(exc)):
-                return _agent_error_turn('توقف التخطيط: رصيد الذكاء الاصطناعي غير كافٍ لإكمال الطلب.'), messages, errors
-            return _agent_error_turn('تعذر التخطيط الآن — ' + str(exc)[:300]), messages, errors
+            if _is_company_credit_error(exc):
+                return _agent_error_turn(_COMPANY_CREDIT_EXHAUSTED_MSG), messages, errors
+            return _agent_error_turn('تعذر التخطيط الآن — ' + _client_safe_llm_error(exc)[:300]), messages, errors
         if result['tool_calls']:
             messages.append(openrouter_assistant_tool_message(result))
             images = []
@@ -304,6 +367,9 @@ def _designer_agent_turn(ctx):
         if pending and isinstance(agent_state.get('slides'), list):
             ctx['slides'] = slides = agent_state['slides']
             ctx['plan_id'] = agent_state.get('planId')
+            block = _agent_balance_preflight(ctx, agent_state['tasks'])
+            if block is not None:
+                return block
             with _agent_render_session(ctx['branding'], tenant_id) as session:
                 run = _designer_agent_run(agent_state['tasks'], ctx, session)
             return _designer_agent_finish(run, ctx)
@@ -316,6 +382,9 @@ def _designer_agent_turn(ctx):
             for t in clean:
                 t['status'] = 'pending'
                 t.pop('failureReason', None)
+            block = _agent_balance_preflight(ctx, clean)
+            if block is not None:
+                return block
             with _agent_render_session(ctx['branding'], tenant_id) as session:
                 run = _designer_agent_run(clean, ctx, session)
             return _designer_agent_finish(run, ctx)
@@ -331,6 +400,9 @@ def _designer_agent_turn(ctx):
             slides, current_index=ctx['current_index'])
         if tasks:
             ctx['plan_id'] = confirm.get('id')
+            block = _agent_balance_preflight(ctx, tasks)
+            if block is not None:
+                return block
             with _agent_render_session(ctx['branding'], tenant_id) as session:
                 run = _designer_agent_run(tasks, ctx, session)
             return _designer_agent_finish(run, ctx)
@@ -364,6 +436,9 @@ def _designer_agent_turn(ctx):
                 ctx, 'لم أستطع تحويل الطلب إلى مهام صالحة على الشرائح الحالية' + note,
                 kind='ask')
 
+        block = _agent_balance_preflight(ctx, tasks)
+        if block is not None:
+            return block
         confirm_needed = (len(tasks) >= _AGENT_CONFIRM_TASK_THRESHOLD
                           or any(designer_agent_ops.needs_confirmation(t) for t in tasks))
         if confirm_needed and not data.get('autoConfirm'):
@@ -450,7 +525,8 @@ def _designer_agent_finish(run, ctx):
     if run['cancelled']:
         response_text = f'أُلغي الطلب بعد إنجاز {len(succeeded)} من {len(tasks)} مهمة — بقيت التعديلات الناجحة.'
     elif run['billing_stopped']:
-        response_text = f'توقف التنفيذ عند استنفاد رصيد الذكاء الاصطناعي — أُنجزت {len(succeeded)} من {len(tasks)} مهمة وبقيت محفوظة.'
+        response_text = (f'توقف التنفيذ لاستنفاد رصيد شركتك — أُنجزت {len(succeeded)} من {len(tasks)} '
+                         'مهمة وبقيت محفوظة. اشحن المحفظة ثم أعد المحاولة.')
     elif succeeded:
         response_text = 'تم تطبيق التعديلات المطلوبة.'
         if failed:
@@ -460,7 +536,7 @@ def _designer_agent_finish(run, ctx):
     else:
         response_text = 'لم يتم تنفيذ أي تعديل على العرض.'
         if failed:
-            first_reason = failed[0].get('failureReason') or ''
+            first_reason = _client_safe_llm_error(failed[0].get('failureReason') or '')
             response_text += f' السبب: {first_reason[:200]}'
 
     persisted = _normalize_designer_chat_messages(ctx['history_for_turn'])[-DESIGNER_CHAT_STORED_TURNS * 2:]

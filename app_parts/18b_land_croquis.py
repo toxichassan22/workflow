@@ -531,8 +531,8 @@ def _execute_extract_croquis():
             insufficient_credit = 'afford' in model_error or 'credit' in model_error.lower()
             blocked_format = bool(_JSON_MODE_BLOCK_RE.search(model_error or ''))
             if insufficient_credit:
-                message = ('رصيد OpenRouter لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
-                           'أضف رصيدًا أو قلّل LAND_ANALYSIS_MAX_TOKENS.')
+                message = ('رصيد شركتك لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
+                           'اشحن المحفظة ثم أعد المحاولة.')
                 return jsonify({
                     'success': False,
                     'error': message,

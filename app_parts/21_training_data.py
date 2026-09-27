@@ -845,6 +845,11 @@ def _build_agent_system_state(tenant_id):
 ###  مكتبة فريق العمل ({len(team_entities)} جهة):
 {chr(10).join(team_lines) if team_lines else '  لا توجد جهات في المكتبة.'}
 
+###  رصيد الشركة:
+- رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} ريال
+- المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} ريال
+- المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} ريال
+
 ###  إعدادات الخرائط:
 - نوع الخريطة الافتراضي: {branding.get('default_map_type', 'satellite')}
 - نظرة عامة/معالم/طرق/نطاق: {branding.get('map_style_overview', 'satellite')} / {branding.get('map_style_landmarks', 'satellite')} / {branding.get('map_style_access', 'satellite')} / {branding.get('map_style_catchment', 'satellite')}

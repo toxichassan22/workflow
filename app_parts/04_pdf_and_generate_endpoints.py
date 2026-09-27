@@ -1091,8 +1091,8 @@ def api_generate_images():
     # Only fail if nothing usable came back; otherwise preserve partial results with a warning.
     if requested_cover and not has_cover and not has_moodboard:
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-            return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'}), 400
-        return jsonify({'success': False, 'error': 'تعذر توليد الصور — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'}), 400
+            return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
+        return jsonify({'success': False, 'error': 'تعذر توليد الصور حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'}), 400
     warning = None
     if requested_cover and not has_cover:
         warning = 'تعذر توليد صورة الغلاف — تم توليد المود بورد فقط'

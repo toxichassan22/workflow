@@ -657,7 +657,7 @@
       function recordError(res, fallback) {
         tenantCreativeImages.last_error =
           (res && res.error_code === 'NO_API_KEY')
-            ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env'
+            ? 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.'
             : ((res && res.error) || fallback || null);
         tenantCreativeImages.last_warning = null;
       }

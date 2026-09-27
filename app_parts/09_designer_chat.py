@@ -123,7 +123,8 @@ def api_designer_chat():
     # provider balance. Answer those turns locally with zero tokens spent.
     _free_probe_uris = _normalize_designer_attached_images(data)
     _free_text = _designer_chat_free_reply(
-        message, has_attachment=bool(_free_probe_uris), history=history_for_turn)
+        message, has_attachment=bool(_free_probe_uris), history=history_for_turn,
+        available_sar=_designer_available_sar(tenant_id))
     if _free_text is not None:
         _free_messages = list(history_for_turn)
         if not _free_messages or _free_messages[-1].get('content') != message or _free_messages[-1].get('role') != 'user':
@@ -421,9 +422,9 @@ def api_designer_chat():
                     call_zai_chat(planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                     'DESIGNER-PLANNER')
             except Exception as _planner_exc:
-                if _is_openrouter_credit_error(_planner_exc):
+                if _is_company_credit_error(_planner_exc):
                     return jsonify({'success': False,
-                                    'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.',
+                                    'error': _COMPANY_CREDIT_EXHAUSTED_MSG,
                                     'error_code': 'INSUFFICIENT_CREDITS'}), 402
                 if not _is_designer_prompt_token_error(_planner_exc):
                     raise
@@ -499,9 +500,9 @@ def api_designer_chat():
                             call_zai_chat(slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                             'DESIGNER-PLANNER')
                     except Exception as _slim_exc:
-                        if _is_openrouter_credit_error(_slim_exc):
+                        if _is_company_credit_error(_slim_exc):
                             return jsonify({'success': False,
-                                            'error': 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.',
+                                            'error': _COMPANY_CREDIT_EXHAUSTED_MSG,
                                             'error_code': 'INSUFFICIENT_CREDITS'}), 402
                         if _is_designer_prompt_token_error(_slim_exc):
                             _detail = f' {table_failure_note}' if table_failure_note else ''
@@ -529,7 +530,7 @@ def api_designer_chat():
         return jsonify({'success': False, 'error': str(exc), 'error_code': 'DESIGNER_INVALID_TARGET'}), 422
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
-        return jsonify({'success': False, 'error': str(exc)}), 500
+        return jsonify({'success': False, 'error': _client_safe_llm_error(exc)}), 500
 
 
 @app.route('/api/files', methods=['GET'])

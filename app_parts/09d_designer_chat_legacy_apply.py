@@ -465,7 +465,7 @@ def _designer_legacy_apply(plan, actions, message, data, slides, project_data,
 
             image = persist_generated_image(image_raw, tenant_id)
             if not image:
-                raise RuntimeError('تعذر توليد الصورة. تحقق من إعداد OpenRouter ورصيده.')
+                raise RuntimeError('تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.')
             targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
             position = params.get('position', 'surgical')
             for idx in targets:

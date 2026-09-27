@@ -514,7 +514,7 @@ def api_visual_concept_generate():
                             usage_ctx=_usage_ctx('image', data))
     if not image:
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-            return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
+            return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد صورة التصور البصري', 'error_code': 'IMAGE_FAILED'}), 503
     return jsonify({
         'success': True,

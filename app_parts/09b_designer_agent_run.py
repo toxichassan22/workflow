@@ -405,7 +405,7 @@ def _agent_exec_generate_image(task, ctx, session, feedback=''):
     except Exception as exc:
         return False, None, f'image_generation_failed:{exc}', None
     if not image:
-        return False, 'تعذر توليد الصورة. تحقق من إعداد OpenRouter ورصيده.', 'image_generation_failed', None
+        return False, 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'image_generation_failed', None
     position = str(params.get('position') or 'surgical')
     caption = comp_name or prompt[:60]
     caption_markup = (f'<div data-visual-media-caption="1" style="font-size:12px;color:#c5a059;'

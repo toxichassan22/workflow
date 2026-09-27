@@ -110,10 +110,10 @@ def api_generate_main_image():
         else:
             # AI4: Return descriptive Arabic error based on config state
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
-            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
+                return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _client_safe_llm_error(e)}), 500
 
 
 
@@ -138,10 +138,10 @@ def api_generate_slide_image():
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
-            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
+                return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _client_safe_llm_error(e)}), 500
 
 
 @app.route('/api/generate-image', methods=['POST'])
@@ -165,10 +165,10 @@ def api_generate_image_single():
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
-            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
+                return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': _client_safe_llm_error(e)}), 500
 
 
 

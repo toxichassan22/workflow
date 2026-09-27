@@ -306,8 +306,8 @@ HTML الحالي:
             failure_reasons.append('invalid_html')
             print(f'[DESIGNER-EDIT] invalid HTML on attempt {attempt}')
         except Exception as edit_exc:
-            if _is_openrouter_credit_error(edit_exc):
-                return html, 'رصيد مفتاح الذكاء الاصطناعي (OpenRouter) غير كافٍ أو تم تجاوز الحد الشهري للمفتاح؛ يرجى مراجعة إعدادات المفتاح أو شحن الرصيد.'
+            if _is_company_credit_error(edit_exc):
+                return html, _COMPANY_CREDIT_EXHAUSTED_MSG
             failure_reasons.append('provider_error')
             app.logger.exception('[DESIGNER-EDIT] attempt %s failed for slide %s', attempt, slide_index + 1)
 

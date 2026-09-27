@@ -1279,7 +1279,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('model not found', error)
 
         source = read_module_source('app.py')
-        self.assertIn('رصيد OpenRouter لا يكفي', source)
+        self.assertIn('رصيد شركتك لا يكفي', source)
         self.assertIn("'providerError': model_error", source)
 
     def test_land_analysis_retries_an_empty_provider_response(self):
