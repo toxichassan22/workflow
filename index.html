@@ -1411,14 +1411,18 @@
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title">أسباب رفض طلبات الشحن</h3>
+          <h3 class="dash-section-title" data-i18n="admin.rejection_reasons_title">أسباب رفض طلبات الشحن</h3>
         </div>
-        <div class="tenant-field">
-          <textarea id="adminRejectionReasons" rows="4" style="width:100%;resize:vertical"></textarea>
-        </div>
-        <div class="sag-modal-actions" style="margin-top:10px">
-          <button type="button" class="btn primary" onclick="adminSaveRejectionReasons()">حفظ الأسباب</button>
-        </div>
+        <div id="adminRejectionReasonsList"></div>
+        <form onsubmit="adminSubmitRejectionReason(event)" style="margin-top:12px"><div class="tenant-grid">
+          <div class="tenant-field">
+            <label for="adminRejectionReasonInput" data-i18n="admin.rejection_reason">السبب</label>
+            <input type="text" id="adminRejectionReasonInput" maxlength="300" required>
+          </div>
+        </div><div class="sag-modal-actions">
+          <button type="submit" class="btn primary" id="adminRejectionReasonSubmit" data-i18n="admin.rejection_reason_add">إضافة سبب</button>
+          <button type="button" class="btn ghost" id="adminRejectionReasonCancel" style="display:none" onclick="adminCancelRejectionReasonEdit()">إلغاء</button></div>
+        </form>
       </div>
     </section>
 
