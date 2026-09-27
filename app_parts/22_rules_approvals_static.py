@@ -921,6 +921,8 @@ def health():
         'map_label_font': os.path.basename(maps_service.bundled_arabic_overlay_font_path() or ''),
         'model': GLM_MODEL,
         'image_model': IMAGE_MODEL,
+        'designer_agent': DESIGNER_AGENT,
+        'designer_agent_planner_model': DESIGNER_AGENT_PLANNER_MODEL if DESIGNER_AGENT else None,
     })
 
 @app.route('/preview')
