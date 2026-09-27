@@ -217,7 +217,11 @@ def _public_job(job):
     """Job file minus server-only internals before it is returned to a client."""
     if not isinstance(job, dict):
         return job
-    return {k: v for k, v in job.items() if k not in _JOB_INTERNAL_KEYS}
+    out = {k: v for k, v in job.items() if k not in _JOB_INTERNAL_KEYS}
+    state = out.get('agentState')
+    if isinstance(state, dict) and 'slides' in state:
+        out['agentState'] = {k: v for k, v in state.items() if k != 'slides'}
+    return out
 
 
 def _market_job_dir(tenant_id):

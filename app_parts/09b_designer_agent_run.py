@@ -6,33 +6,22 @@
 
 # ── Task executors ───────────────────────────────────────────────────────────
 
-def _agent_worker_edit_slide(ctx, slide, index, instruction, total, feedback=''):
-    """One worker call on one slide through the existing edit pipeline."""
-    full_instruction = instruction
-    if feedback:
-        full_instruction += (
-            '\n\nملاحظة تحقق: المحاولة السابقة رُفضت للأسباب التالية — عالجها حرفياً: '
-            + str(feedback)[:800])
-    html, reply = _designer_edit_slide(
-        slide.get('html', ''), slide.get('title', f'شريحة {index + 1}'),
-        full_instruction, index, ctx['project_data'], ctx['presentation_id'],
-        ctx['branding'], tenant_id=ctx['tenant_id'],
-        creative_images=ctx['creative_images'], user_image_refs=ctx['user_image_refs'],
-        slide_type=slide.get('type', 'content'), total_slides=total,
-        content_source=slide.get('content_source') or slide.get('contentSource'))
-    return html, reply
-
-
 def _agent_exec_edit(task, ctx, session, feedback=''):
+    """One scoped worker call per slide — partial success inside the task is
+    kept and reported, a fully failed task returns the last worker reason."""
     indexes = task['_indexes']
-    changed, replies = [], []
+    changed, replies, last_reason = [], [], None
     for idx in indexes:
         slide = slides_at(ctx, idx)
         if slide is None:
             continue
         before = slide.get('html', '')
         html, reply = _agent_worker_edit_slide(
-            ctx, slide, idx, task['_instruction'], len(ctx['slides']), feedback)
+            ctx, slide, idx, task['_instruction'], len(ctx['slides']),
+            session, feedback, task.get('style_brief') or '')
+        if html is None:
+            last_reason = reply or ctx.get('agent_last_worker_reason') or 'worker_failed'
+            continue
         if reply:
             replies.append(reply)
         if designer_chat_reliability.materially_changed(before, html, reply):
@@ -44,8 +33,11 @@ def _agent_exec_edit(task, ctx, session, feedback=''):
                 slide['captions'] = extracted
             changed.append(idx)
     if not changed:
-        return False, None, 'unchanged', None
-    return True, ' '.join(dict.fromkeys(r for r in replies if r)) or None, None, None
+        return False, None, last_reason or 'unchanged', None
+    note = ' '.join(dict.fromkeys(r for r in replies if r)) or None
+    if last_reason and note:
+        note += f' (تعذرت بعض الشرائح: {str(last_reason)[:120]})'
+    return True, note, None, None
 
 
 def slides_at(ctx, idx):
@@ -56,14 +48,11 @@ def slides_at(ctx, idx):
 
 
 def _agent_exec_split(task, ctx, session, feedback=''):
+    """execute_structure keeps the deterministic split candidates and atomic
+    preservation check; the model fallback now goes through the scoped worker
+    instead of the full-context legacy editor."""
     slides = ctx['slides']
     idx = task['_indexes'][0]
-    progress_cb = lambda p, m: ctx['report_progress'](p, m)
-    edit_slide = lambda html, title, instruction, index, kind, total, source: _designer_edit_slide(
-        html, title, instruction, index, ctx['project_data'], ctx['presentation_id'],
-        ctx['branding'], tenant_id=ctx['tenant_id'],
-        creative_images=ctx['creative_images'], user_image_refs=ctx['user_image_refs'],
-        slide_type=kind, total_slides=total, content_source=source)
     params = {'slide_number': idx + 1, 'instruction': task['_instruction']}
     if task.get('parts') is not None:
         params['parts'] = task['parts']
@@ -71,15 +60,22 @@ def _agent_exec_split(task, ctx, session, feedback=''):
         params['parts'] = task['params']['parts']
     record, status = designer_chat_safety.execute_structure(
         'split_slide', params, slides, task['_instruction'],
-        edit_slide=edit_slide, reliability=designer_chat_reliability,
-        carry_watermark=_carry_slide_watermark, progress=progress_cb)
+        edit_slide=_agent_structure_edit(ctx, session, feedback,
+                                         task.get('style_brief') or ''),
+        reliability=designer_chat_reliability,
+        carry_watermark=_carry_slide_watermark,
+        progress=lambda p, m: ctx['report_progress'](p, m))
     ok = record.get('status') == 'success'
     after = [slides[j].get('html', '') for j in (record.get('indexes') or []) if j < len(slides)] if ok else None
-    return ok, status, record.get('reason'), after
+    reason = record.get('reason')
+    if not ok and ctx.get('agent_last_worker_reason'):
+        reason = str(reason or '') + ':' + ctx['agent_last_worker_reason']
+    return ok, status, reason, after
 
 
 def _agent_exec_restructure(task, ctx, session, feedback=''):
-    """Regroup a contiguous set of source slides into target_count via the worker."""
+    """Regroup a contiguous set of source slides into target_count via one
+    scoped worker call, then the shared finalize pipeline."""
     slides = ctx['slides']
     indexes = task['_indexes']
     sources = [slides[i] for i in indexes]
@@ -89,42 +85,29 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     except (TypeError, ValueError):
         return False, None, 'invalid_target_count', None
     source_htmls = [s.get('html', '') for s in sources]
-    schema = {'type': 'json_schema', 'json_schema': {
-        'name': 'restructure_result',
-        'schema': {'type': 'object', 'properties': {
-            'slides': {'type': 'array', 'items': {'type': 'object', 'properties': {
-                'title': {'type': 'string'}, 'html': {'type': 'string'}},
-                'required': ['title', 'html'], 'additionalProperties': True}}},
-            'required': ['slides'], 'additionalProperties': True},
-        'strict': False}}
     brief = task.get('style_brief') or ''
-    system = (
-        f'أعد هيكلة محتوى الشرائح المصدر أدناه في {target} شريحة بالضبط. '
-        'الحفاظ حرفياً على كل نص ورقم وصف جدول وصورة ورابط وخريطة وخصائص البيانات '
-        'من المصادر إلزامي — بلا تلخيص أو حذف أو اختراع. أعد توزيع المحتوى بشكل '
-        f'متوازن واحترافي فقط. {"الموجز الأسلوبي: " + brief if brief else ""} '
-        f'{"المحاولة السابقة رُفضت: " + feedback if feedback else ""} '
-        'أخرج JSON بصيغة {"slides":[{"title":"..","html":".."}]} والـ html شريحة كاملة '
-        'بجذر <div class="slide" style="width:1280px;height:720px;...">.')
-    user = json.dumps({'sources': [{'title': s.get('title', ''), 'html': s.get('html', '')}
-                                   for s in sources],
-                       'instruction': task['_instruction']}, ensure_ascii=False)
+    instruction = task['_instruction'] + (f'\nالموجز الأسلوبي: {brief}' if brief else '')
     try:
-        response = call_openrouter_messages(
-            [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-            response_format=schema, model=DESIGNER_AGENT_WORKER_MODEL,
-            max_tokens=DESIGNER_EDIT_MAX_TOKENS * 2, temperature=0.35,
-            usage_ctx=_agent_usage_ctx(ctx))
-        result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')
-        payload = _designer_json_response(result['content'])
-        produced = payload.get('slides') if isinstance(payload, dict) else None
+        produced, error = _agent_worker_restructure(
+            ctx, sources, target, instruction, feedback)
     except Exception as exc:
         return False, None, f'generation_failed:{exc}', None
-    if not isinstance(produced, list) or len(produced) != target:
-        return False, None, 'incomplete_result', None
-    part_htmls = [str(p.get('html') or '') for p in produced if isinstance(p, dict)]
-    if len(part_htmls) != target:
-        return False, None, 'incomplete_result', None
+    if error or produced is None:
+        return False, None, error or 'incomplete_result', None
+    finalized = []
+    try:
+        for i, part in enumerate(produced):
+            out = _agent_worker_finalize(
+                str(part.get('html') or ''), source_htmls[0], task['_instruction'], ctx,
+                slide_num=min(indexes) + i + 1,
+                title=str(part.get('title') or sources[0].get('title') or ''),
+                total=len(slides) - len(sources) + target,
+                slide_type=sources[0].get('type', 'content'),
+                content_source=sources[0].get('content_source') or sources[0].get('contentSource'))
+            finalized.append({'title': str(part.get('title') or ''), 'html': out})
+    except Exception as exc:
+        return False, None, f'finalize_failed:{exc}', None
+    part_htmls = [p['html'] for p in finalized]
     try:
         for html in part_htmls:
             designer_chat_safety.validate_single_slide(html)
@@ -133,11 +116,10 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
         return False, None, str(exc), None
     lo = min(indexes)
     replacements = []
-    for i, part in enumerate(produced):
-        html = _carry_slide_watermark(source_htmls[0], str(part.get('html') or ''))
+    for i, part in enumerate(finalized):
         replacement = copy.deepcopy(sources[0])
-        replacement.update(title=str(part.get('title') or sources[0].get('title') or ''),
-                           html=html, _designer_keep_html=True, is_custom=True)
+        replacement.update(title=part['title'] or sources[0].get('title') or '',
+                           html=part['html'], _designer_keep_html=True, is_custom=True)
         if i:
             replacement['id'] = designer_agent_ids.new_slide_id()
             replacement['restructured_from'] = [s.get('id') for s in sources]
@@ -160,14 +142,11 @@ def _agent_exec_create(task, ctx, session, feedback=''):
             return False, None, 'unknown_after_id', None
     elif after == 'start':
         params['position'] = 1
-    edit_slide = lambda html, title, instruction, index, kind, total, source: _designer_edit_slide(
-        html, title, instruction, index, ctx['project_data'], ctx['presentation_id'],
-        ctx['branding'], tenant_id=ctx['tenant_id'],
-        creative_images=ctx['creative_images'], user_image_refs=ctx['user_image_refs'],
-        slide_type=kind, total_slides=total, content_source=source)
     record, status = designer_chat_safety.execute_structure(
         'create_slide', params, slides, task['_instruction'],
-        edit_slide=edit_slide, reliability=designer_chat_reliability,
+        edit_slide=_agent_structure_edit(ctx, session, feedback,
+                                         task.get('style_brief') or ''),
+        reliability=designer_chat_reliability,
         carry_watermark=_carry_slide_watermark,
         progress=lambda p, m: ctx['report_progress'](p, m))
     ok = record.get('status') == 'success'
@@ -508,7 +487,40 @@ def _agent_job_checkpoint(ctx, tasks, slides):
         print(f"[DESIGNER-AGENT] checkpoint failed: {exc}")
 
 
+def _agent_job_cancel_path(ctx):
+    """Separate cancel marker file — a click can never be lost by a job-file
+    rewrite racing it, because nothing on this path rewrites JSON."""
+    job_id = str(ctx.get('job_id') or '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{6,80}', job_id):
+        return None
+    return os.path.join(_job_dir(_AGENT_JOB_NS, ctx['tenant_id']), f'{job_id}.cancel')
+
+
+def _agent_job_mark_cancelled(ctx):
+    path = _agent_job_cancel_path(ctx)
+    if not path:
+        return False
+    try:
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(str(time.time()))
+        return True
+    except OSError:
+        return False
+
+
+def _agent_job_clear_cancel(ctx):
+    path = _agent_job_cancel_path(ctx)
+    if path:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def _agent_job_cancelled(ctx):
+    path = _agent_job_cancel_path(ctx)
+    if path and os.path.isfile(path):
+        return True
     job = _agent_job_get(ctx)
     return bool(isinstance(job, dict) and job.get('cancelRequested'))
 
@@ -522,6 +534,9 @@ def _designer_agent_run(tasks, ctx, session=None):
     total = len(tasks)
     measure = (session is not None and getattr(session, 'available', False))
     report = ctx['report_progress']
+    # A stale marker from an earlier turn must not kill this run; a fresh click
+    # during the run recreates it and is honored at the next task boundary.
+    _agent_job_clear_cancel(ctx)
 
     for i, task in enumerate(tasks):
         n = task.get('n') or i + 1
@@ -536,6 +551,7 @@ def _designer_agent_run(tasks, ctx, session=None):
             continue
 
         op = task['op']
+        task['status'] = 'running'
         report(15 + int(70 * i / max(1, total)),
                f"مهمة {n}/{total}: {designer_agent_ops.OP_LABELS.get(op, op)}...",
                {'phase': 'agent', 'agentTask': n, 'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
@@ -551,6 +567,7 @@ def _designer_agent_run(tasks, ctx, session=None):
                              'reason': task['failureReason']})
             continue
         task['_indexes'] = indexes
+        ctx['agent_last_worker_reason'] = None
         before_htmls = [slides[i].get('html', '') for i in indexes] if indexes else []
         task['_instruction'] = designer_agent_ops.instruction_for(task)
 
@@ -575,7 +592,11 @@ def _designer_agent_run(tasks, ctx, session=None):
                 for j in m_indexes:
                     if j >= len(slides):
                         continue
-                    _uri, m_report = session.render(slides[j].get('html', ''), screenshot=False)
+                    m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
+                    if m_uri:
+                        # The last slide designed this run is the consistency
+                        # reference the next worker call sees (chatplan 3.6).
+                        ctx['agent_style_ref_uri'] = m_uri
                     m_reasons = _measure_reasons(m_report) if m_report else []
                     if m_reasons:
                         v_ok, v_reasons = False, m_reasons
@@ -607,6 +628,7 @@ def _designer_agent_run(tasks, ctx, session=None):
                f"اكتملت المهمة {n}/{total} ({'نجاح' if ok else 'تعذّر'})",
                {'phase': 'agent', 'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
 
+    _agent_job_clear_cancel(ctx)
     return {'tasks': tasks, 'executed': executed, 'cancelled': cancelled,
             'billing_stopped': billing_stopped,
             'all_failed': not any(t.get('status') == 'success' for t in tasks)}

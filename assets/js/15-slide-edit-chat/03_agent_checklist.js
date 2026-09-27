@@ -6,25 +6,52 @@
     let tenantDesignerPendingPlan = null;
     let tenantDesignerRunTasks = null;
 
-    const DESIGNER_TASK_STATUS_LABELS = {
-      pending: 'بانتظار التنفيذ',
-      running: 'جارٍ التنفيذ',
-      success: 'تمت بنجاح',
-      failed: 'تعذّرت',
-      skipped: 'تخطّيت',
-    };
+    function designerAgentText(key, fallback, params) {
+      return (typeof WFT === 'function') ? WFT(key, fallback, params) : fallback;
+    }
 
     function designerTaskStatusLabel(status) {
-      return DESIGNER_TASK_STATUS_LABELS[String(status || 'pending')] || status || '';
+      const labels = {
+        pending: designerAgentText('designer_agent.task_pending', 'بانتظار التنفيذ'),
+        running: designerAgentText('designer_agent.task_running', 'جارٍ التنفيذ'),
+        success: designerAgentText('designer_agent.task_success', 'تمت بنجاح'),
+        failed: designerAgentText('designer_agent.task_failed', 'تعذّرت'),
+        skipped: designerAgentText('designer_agent.task_skipped', 'تخطّيت'),
+      };
+      return labels[String(status || 'pending')] || status || '';
     }
 
     function designerChecklistBox() {
       return document.getElementById('tenantDesignerChecklist');
     }
 
+    // Display order follows the deck, not the execution order: a plan that
+    // restyles everything and then splits slides 51/59/70 reads top-to-bottom
+    // the way the user sees the presentation. task.n stays the runner's own
+    // sequence number so progress messages still match.
+    function designerTasksInDeckOrder(tasks) {
+      const order = new Map();
+      (Array.isArray(tenantSlidesData) ? tenantSlidesData : []).forEach((slide, i) => {
+        if (slide && slide.id) order.set(String(slide.id), i);
+      });
+      const position = task => {
+        const ids = Array.isArray(task?.slides) ? task.slides : [];
+        const hit = ids.map(id => order.get(String(id))).filter(i => i !== undefined);
+        if (hit.length) return Math.min(...hit);
+        const after = String(task?.after || '');
+        if (after === 'start') return -0.5;
+        if (after === 'end' || !after) return Number.MAX_SAFE_INTEGER;
+        const at = order.get(after);
+        return at === undefined ? Number.MAX_SAFE_INTEGER : at + 0.5;
+      };
+      return (tasks || []).map((task, i) => ({ task, key: position(task), i }))
+        .sort((a, b) => (a.key - b.key) || (a.i - b.i))
+        .map(entry => entry.task);
+    }
+
     function designerTaskRowHtml(task) {
       const n = Number(task?.n || 0);
-      const label = String(task?.label || task?.op || 'مهمة');
+      const label = String(task?.label || task?.op || designerAgentText('designer_agent.task', 'مهمة'));
       const status = String(task?.status || 'pending');
       const titles = Array.isArray(task?.titles) ? task.titles.filter(Boolean) : [];
       const target = titles.length ? ' — ' + titles.slice(0, 3).map(t => escapeHtml(String(t).slice(0, 40))).join('، ') : '';
@@ -54,25 +81,31 @@
       const pending = !!tenantDesignerPendingPlan;
       const running = !!tenantDesignerChatBusy;
       const failedCount = tasks.filter(t => ['failed', 'skipped'].includes(String(t?.status))).length;
-      const rows = tasks.map(designerTaskRowHtml).join('');
+      const rows = designerTasksInDeckOrder(tasks).map(designerTaskRowHtml).join('');
       let actions = '';
       if (pending) {
         actions = '<div class="tenant-designer-checklist-actions">' +
-          '<button type="button" class="btn primary tenant-designer-confirm" onclick="confirmDesignerPlan()">تنفيذ الخطة</button>' +
-          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerPlan()">إلغاء</button>' +
+          '<button type="button" class="btn primary tenant-designer-confirm" onclick="confirmDesignerPlan()">' +
+          designerAgentText('designer_agent.run_plan', 'تنفيذ الخطة') + '</button>' +
+          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerPlan()">' +
+          designerAgentText('designer_agent.cancel', 'إلغاء') + '</button>' +
           '</div>';
       } else if (running) {
         actions = '<div class="tenant-designer-checklist-actions">' +
-          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerJob()">إيقاف التنفيذ</button>' +
+          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerJob()">' +
+          designerAgentText('designer_agent.stop_run', 'إيقاف التنفيذ') + '</button>' +
           '</div>';
       } else if (failedCount) {
         actions = '<div class="tenant-designer-checklist-actions">' +
-          '<button type="button" class="btn ghost tenant-designer-retry" onclick="retryDesignerTasks()">إعادة المهام المتعثرة (' + failedCount + ')</button>' +
+          '<button type="button" class="btn ghost tenant-designer-retry" onclick="retryDesignerTasks()">' +
+          designerAgentText('designer_agent.retry_failed', 'إعادة المهام المتعثرة ({n})', { n: failedCount }) + '</button>' +
           '</div>';
       }
       box.innerHTML = '<div class="tenant-designer-checklist-card">' +
         '<div class="tenant-designer-checklist-title">' +
-        (pending ? 'خطة التنفيذ المقترحة' : 'مهام التنفيذ') + '</div>' + rows + actions + '</div>';
+        (pending ? designerAgentText('designer_agent.pending_plan', 'خطة التنفيذ المقترحة')
+                 : designerAgentText('designer_agent.run_tasks', 'مهام التنفيذ')) +
+        '</div>' + rows + actions + '</div>';
       box.hidden = false;
     }
 
@@ -147,14 +180,14 @@
 
     async function sendDesignerAgentRequest(payload, busyText) {
       const workspaceKey = designerChatWorkspaceKey();
-      setDesignerChatBusy(busyText || 'جاري تنفيذ مهام التصميم...', workspaceKey);
+      setDesignerChatBusy(busyText || designerAgentText('designer_agent.busy_run', 'جاري تنفيذ مهام التصميم...'), workspaceKey);
       const indicator = document.getElementById('tenantChatTypingIndicator');
       restoreDesignerChatBusyIndicator();
       let data = null;
       try {
         data = await requestTenantDesignerChat(payload, indicator);
       } catch (error) {
-        data = { success: false, status: 'waiting', error: error?.message || 'تعذر تنفيذ الطلب.' };
+        data = { success: false, status: 'waiting', error: error?.message || designerAgentText('designer_agent.run_failed', 'تعذر تنفيذ الطلب.') };
       } finally {
         clearDesignerChatBusy(workspaceKey);
       }
@@ -163,7 +196,7 @@
       if (job && !tenantDesignerJobCanApply(job)) {
         applyTenantDesignerChatResult({
           success: false, status: 'failed',
-          error: 'لم تُطبق النتيجة لأن العرض تغير أثناء تنفيذ المهمة.'
+          error: designerAgentText('designer_agent.deck_changed', 'لم تُطبق النتيجة لأن العرض تغير أثناء تنفيذ المهمة.')
         }, payload.message || '');
         clearTenantDesignerJob(job);
         return;
@@ -177,12 +210,12 @@
       if (!plan) return;
       if (tenantDesignerChatBusy || currentTenantDesignerJob()) return;
       tenantDesignerPendingPlan = null;
-      const payload = designerAgentBasePayload('نفّذ الخطة المعروضة');
+      const payload = designerAgentBasePayload(designerAgentText('designer_agent.confirm_message', 'نفّذ الخطة المعروضة'));
       payload.confirmPlan = {
         id: plan.id, deckSignature: plan.deckSignature,
         style_brief: plan.style_brief, ops: plan.ops
       };
-      await sendDesignerAgentRequest(payload, 'جاري تنفيذ الخطة المؤكدة...');
+      await sendDesignerAgentRequest(payload, designerAgentText('designer_agent.busy_confirm', 'جاري تنفيذ الخطة المؤكدة...'));
     }
 
     function cancelDesignerPlan() {
@@ -191,7 +224,7 @@
       tenantDesignerRunTasks = null;
       tenantDesignerMessages.push({
         role: 'assistant',
-        content: 'أُلغيت الخطة — لم يتغير العرض.',
+        content: designerAgentText('designer_agent.plan_cancelled', 'أُلغيت الخطة — لم يتغير العرض.'),
         slides: tenantChatFocusIndexes.slice()
       });
       tenantProjectData.designerChat = designerChatPersistence();
@@ -207,9 +240,9 @@
         .map(t => ({ ...t, status: 'pending', failureReason: undefined }));
       if (!retry.length) return;
       if (tenantDesignerChatBusy || currentTenantDesignerJob()) return;
-      const payload = designerAgentBasePayload('أعد تنفيذ المهام المتعثرة');
+      const payload = designerAgentBasePayload(designerAgentText('designer_agent.retry_message', 'أعد تنفيذ المهام المتعثرة'));
       payload.retryTasks = retry;
-      await sendDesignerAgentRequest(payload, 'جاري إعادة المهام المتعثرة...');
+      await sendDesignerAgentRequest(payload, designerAgentText('designer_agent.busy_retry', 'جاري إعادة المهام المتعثرة...'));
     }
 
     async function cancelDesignerJob() {
@@ -218,8 +251,8 @@
       try {
         await apiWithTimeout(
           'POST', '/api/designer-chat/jobs/' + encodeURIComponent(String(job.jobId)) + '/cancel',
-          null, 15000, 'تعذر إرسال طلب الإيقاف.');
+          null, 15000, designerAgentText('designer_agent.stop_send_failed', 'تعذر إرسال طلب الإيقاف.'));
       } catch (error) {
-        toast(error?.message || 'تعذر إيقاف المهمة');
+        toast(error?.message || designerAgentText('designer_agent.stop_failed', 'تعذر إيقاف المهمة'));
       }
     }

@@ -21,7 +21,7 @@
         if (!Array.isArray(reply.chatHistory)) {
           tenantDesignerMessages.push({
             role: 'assistant',
-            content: reply.response || 'أعددت خطة تنفيذ — راجع المهام ثم أكّد.',
+            content: reply.response || 'أعددت خطة تنفيذ على العرض.',
             slides: tenantChatFocusIndexes.slice()
           });
         }

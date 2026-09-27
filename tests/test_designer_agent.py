@@ -65,10 +65,12 @@ class AgentFlowTests(unittest.TestCase):
     def agent_patches(self, module, planner_turn, editor=None):
         slides_seen = []
 
-        def fake_editor(html, title, instruction, index, *a, **k):
+        def fake_worker(ctx, slide, index, instruction, total, *a, **k):
             slides_seen.append(index)
+            html = slide.get('html', '')
+            title = slide.get('title', '')
             if editor:
-                return editor(html, title, instruction, index, *a, **k)
+                return editor(html, title, instruction, index)
             return html[:html.rfind('</div>')] + '<p>تم التعديل</p></div>', 'تم'
 
         return (
@@ -76,7 +78,7 @@ class AgentFlowTests(unittest.TestCase):
             patch.object(module, '_agent_render_session', return_value=_NoRender()),
             patch.object(module, 'call_openrouter_messages',
                          return_value=planner_reply(planner_turn)),
-            patch.object(module, '_designer_edit_slide', side_effect=fake_editor),
+            patch.object(module, '_agent_worker_edit_slide', side_effect=fake_worker),
             patch.object(module.designer_chat_reliability, '_auto_heal_workspace_slides',
                          side_effect=lambda s, *a: s),
             patch.object(module.slide_engine, 'renumber_presentation_slides',
@@ -159,8 +161,8 @@ class AgentFlowTests(unittest.TestCase):
         slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
         first_id_holder = []
 
-        def capture_editor(html, title, instruction, index, *a, **k):
-            return html + '<p>x</p>', 'تم'
+        def capture_editor(ctx, slide, index, instruction, total, *a, **k):
+            return slide.get('html', '') + '<p>x</p>', 'تم'
 
         turn = {'kind': 'plan', 'ops': [
             {'op': 'delete', 'select': {'positions': [2]}}]}
@@ -168,7 +170,7 @@ class AgentFlowTests(unittest.TestCase):
                 patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
                 patch.object(self.module, 'call_openrouter_messages',
                              return_value=planner_reply(turn)), \
-                patch.object(self.module, '_designer_edit_slide', side_effect=capture_editor), \
+                patch.object(self.module, '_agent_worker_edit_slide', side_effect=capture_editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
                              side_effect=lambda s, *a: s):
             response = self.post({'message': 'احذف الشريحة الثانية', 'slidesData': slides,
@@ -220,6 +222,8 @@ class AgentFlowTests(unittest.TestCase):
     def test_cancel_endpoint_marks_job(self):
         import app as app_module
         job_id = 'agentjob01'
+        ctx = {'job_id': job_id, 'tenant_id': self.tenant}
+        app_module._agent_job_clear_cancel(ctx)
         with self.app.test_request_context():
             app_module._write_job('.designer_chat_jobs', self.tenant, job_id, {
                 'status': 'running', 'success': True, 'progress': 40, 'payload': {'data': {}}})
@@ -227,8 +231,10 @@ class AgentFlowTests(unittest.TestCase):
             f'/api/designer-chat/jobs/{job_id}/cancel',
             headers={'Authorization': 'Bearer ' + self.token})
         self.assertEqual(response.status_code, 200, response.get_json())
-        job = app_module._read_job('.designer_chat_jobs', self.tenant, job_id)
-        self.assertTrue(job['cancelRequested'])
+        # Cancel is a marker file, not a job-document edit — the runner reads
+        # it at the next task boundary and a checkpoint write cannot race it away.
+        self.assertTrue(app_module._agent_job_cancelled(ctx))
+        app_module._agent_job_clear_cancel(ctx)
         # A finished job cannot be cancelled.
         with self.app.test_request_context():
             app_module._write_job('.designer_chat_jobs', self.tenant, job_id,
@@ -259,13 +265,14 @@ class AgentFlowTests(unittest.TestCase):
         def planner_must_not_run(*a, **k):
             raise AssertionError('planner was called during resume')
 
-        def editor(html, title, instruction, index, *a, **k):
+        def editor(ctx, slide, index, instruction, total, *a, **k):
+            html = slide.get('html', '')
             return html[:html.rfind('</div>')] + '<p>RESUMED</p></div>', 'تم'
 
         with patch.object(self.module, 'DESIGNER_AGENT', True), \
                 patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
                 patch.object(self.module, 'call_openrouter_messages', side_effect=planner_must_not_run), \
-                patch.object(self.module, '_designer_edit_slide', side_effect=editor), \
+                patch.object(self.module, '_agent_worker_edit_slide', side_effect=editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
                              side_effect=lambda s, *a: s):
             response = self.post({'message': 'عدل', 'slidesData': slides,
@@ -284,13 +291,14 @@ class AgentFlowTests(unittest.TestCase):
 
         calls = []
 
-        def editor(html, title, instruction, index, *a, **k):
+        def editor(ctx, slide, index, instruction, total, *a, **k):
             calls.append(index)
+            html = slide.get('html', '')
             return html[:html.rfind('</div>')] + '<p>R</p></div>', 'تم'
 
         with patch.object(self.module, 'DESIGNER_AGENT', True), \
                 patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
-                patch.object(self.module, '_designer_edit_slide', side_effect=editor), \
+                patch.object(self.module, '_agent_worker_edit_slide', side_effect=editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
                              side_effect=lambda s, *a: s):
             response = self.post({'message': 'أعد المحاولة', 'slidesData': slides,

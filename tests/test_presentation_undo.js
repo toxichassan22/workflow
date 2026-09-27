@@ -23,6 +23,7 @@ const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding
   '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
   '15-slide-edit-chat/01_render_inline_edit.js',
   '15-slide-edit-chat/02_designer_chat.js',
+  '15-slide-edit-chat/03_agent_checklist.js',
   '16-presentations-export/01_presentations.js',
   '16-presentations-export/02_admin_dashboard.js',
   '16-presentations-export/03_export_delivery.js',
@@ -84,6 +85,17 @@ vm.runInContext(`
   function applyDesignerChatMemory() {}
   function designerChatPersistence() { return {}; }
   function containsSlideRoot(html) { return html.includes('class="slide"'); }
+  function wfNewSlideId() { return 's_' + Math.random().toString(16).slice(2, 10).padEnd(8, '0'); }
+  function ensureSlideIds(slides) {
+    if (!Array.isArray(slides)) return slides;
+    const seen = new Set();
+    for (const slide of slides) {
+      if (!slide || typeof slide !== 'object') continue;
+      if (typeof slide.id !== 'string' || seen.has(slide.id)) slide.id = wfNewSlideId();
+      seen.add(slide.id);
+    }
+    return slides;
+  }
 `, context);
 vm.runInContext(source.slice(helperStart, helperEnd), context);
 for (const name of ['getSlideEditSession', 'touchSlideEditSession', 'pushSlideEditHistory',

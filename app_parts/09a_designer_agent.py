@@ -229,15 +229,29 @@ def _designer_agent_plan(ctx, session=None):
             return _agent_error_turn('تعذر التخطيط الآن — ' + str(exc)[:300]), messages, errors
         if result['tool_calls']:
             messages.append(openrouter_assistant_tool_message(result))
-            for call in result['tool_calls'][:4]:
-                text, image_uri = _agent_tool_result(
-                    call['name'], call.get('arguments') or {}, ctx, session)
+            images = []
+            # Every tool call gets a tool message — OpenAI rejects a request
+            # that answers only some calls. Executed calls are capped at 4;
+            # the rest get an explicit error result instead of silence.
+            for i, call in enumerate(result['tool_calls']):
+                if i < 4:
+                    text, image_uri = _agent_tool_result(
+                        call['name'], call.get('arguments') or {}, ctx, session)
+                    if image_uri:
+                        images.append(image_uri)
+                else:
+                    text = json.dumps(
+                        {'error': 'too_many_tool_calls',
+                         'note': 'أصدر 4 طلبات أدوات كحد أقصى في الجولة الواحدة'},
+                        ensure_ascii=False)
                 messages.append(openrouter_tool_result_message(call, text))
-                if image_uri:
-                    messages.append({'role': 'user', 'content': [
-                        {'type': 'text', 'text': 'معاينة الشريحة المطلوبة:'},
-                        {'type': 'image_url', 'image_url': {'url': image_uri}},
-                    ]})
+            # Vision payloads ride AFTER the tool results, never between them:
+            # a user message interleaved with tool results is a 400 on OpenAI.
+            if images:
+                messages.append({'role': 'user', 'content': [
+                    {'type': 'text', 'text': 'معاينات الشرائح المطلوبة بالترتيب:'},
+                    *[{'type': 'image_url', 'image_url': {'url': uri}} for uri in images],
+                ]})
             continue
         content = result['content']
         try:
@@ -508,6 +522,8 @@ def api_designer_chat_job_cancel(job_id):
         return jsonify({'success': False, 'error': 'المهمة غير موجودة'}), 404
     if job.get('status') not in ('queued', 'running'):
         return jsonify({'success': False, 'error': 'المهمة انتهت بالفعل'}), 409
-    job['cancelRequested'] = True
-    _write_job(_AGENT_JOB_NS, g.tenant_id, job_id, job)
+    # A marker file, not a job-document edit: the runner's checkpoint writes
+    # cannot race away a cancel click because this file is never rewritten.
+    if not _agent_job_mark_cancelled({'job_id': job_id, 'tenant_id': g.tenant_id}):
+        return jsonify({'success': False, 'error': 'تعذر تسجيل طلب الإيقاف'}), 500
     return jsonify({'success': True, 'cancelRequested': True})

@@ -60,10 +60,15 @@ _MEASURE_JS = r"""
 
 
 class SlideRenderSession:
-    """One browser for a whole agent run. ``render`` returns
-    ``(data_uri, report)``; when Playwright is unavailable the session reports
-    ``available = False`` and every call returns ``(None, None)`` so the
-    runner skips measurement instead of failing the task."""
+    """One browser for a whole agent run, started lazily on first render.
+
+    ``available`` means "rendering is possible on this host" (Playwright is
+    importable and the browser has not already failed to start) — the browser
+    itself only launches when ``render`` is first called, so a chat-only agent
+    turn never pays for Chromium. ``render`` returns ``(data_uri, report)``;
+    when Playwright is unavailable every call returns ``(None, None)`` so the
+    runner skips measurement instead of failing the task.
+    """
 
     def __init__(self, branding=None, tenant_id=None, width=1280, height=720):
         self.branding = branding or {}
@@ -77,6 +82,7 @@ class SlideRenderSession:
         self._page = None
         self._tmp_dir = None
         self._font_css = ''
+        self._sync_playwright = None
 
     def __enter__(self):
         try:
@@ -84,19 +90,29 @@ class SlideRenderSession:
         except ImportError as exc:
             self.error = f'playwright_unavailable:{exc}'
             return self
+        self._sync_playwright = sync_playwright
+        self.available = True
+        return self
+
+    def _ensure_started(self):
+        if self._browser is not None and self._page is not None:
+            return True
+        if self._sync_playwright is None:
+            return False
         try:
             self._tmp_dir = tempfile.mkdtemp(prefix='designer_agent_render_')
-            self._pw = sync_playwright().start()
+            self._pw = self._sync_playwright().start()
             self._browser, _how = _launch_chromium(self._pw)
             self._page = self._browser.new_page(
                 viewport={'width': self.width, 'height': self.height})
             _install_export_request_guard(self._page)
             self._font_css, _ff = build_font_css(self.branding, self.tenant_id, embed=True)
-            self.available = True
+            return True
         except Exception as exc:
             self.error = f'{type(exc).__name__}: {exc}'
             self._teardown()
-        return self
+            self.available = False
+            return False
 
     def __exit__(self, *exc_info):
         self._teardown()
@@ -144,6 +160,8 @@ svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px 
     def render(self, slide_html, screenshot=True):
         """Render one slide; returns ``(png_data_uri_or_None, report_or_None)``."""
         if not self.available or not isinstance(slide_html, str) or not slide_html.strip():
+            return None, None
+        if not self._ensure_started():
             return None, None
         try:
             path = Path(self._tmp_dir) / 'slide_render.html'

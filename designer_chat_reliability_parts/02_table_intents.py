@@ -1068,6 +1068,12 @@ def install(app, namespace: Dict[str, Any]) -> None:
             heartbeat_at = float(job.get("updatedAt") or 0)
         response_job = {k: v for k, v in job.items()
                         if k not in ("payload", "actor", "pid")}
+        state = response_job.get("agentState")
+        if isinstance(state, dict) and "slides" in state:
+            # The checkpoint needs the in-flight deck for restart resume, but
+            # polling must never pay megabytes for it — task statuses suffice.
+            state = {k: v for k, v in state.items() if k != "slides"}
+            response_job["agentState"] = state
         response_job["jobId"] = str(job_id)
         response_job["heartbeatAt"] = heartbeat_at
         if response_job.get("status") in {"queued", "running"} and heartbeat_at:
