@@ -29,6 +29,12 @@ class DesignerIntegrationTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
+    @staticmethod
+    def strip_ids(items):
+        # The backend backfills a stable uid=197608(root) gid=197608 groups=197608 on every slide before planning;
+        # fixture slides never had one, so comparisons ignore it.
+        return [{k: v for k, v in s.items() if k != 'id'} for s in items]
+
     def call(self, actions, slides, message, project=None, **kwargs):
         plan = {'response': 'planned', 'actions': actions}
         with patch.object(self.module, 'call_zai_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}) as model:
@@ -47,7 +53,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         response, model = self.call([{'tool': 'edit_slides', 'params': {'target': 'indexes', 'indexes': [2], 'instruction': 'احذف عمود السعر'}}], slides, 'احذف عمود السعر في الشريحة 2')
         self.assertEqual(response.status_code, 200, response.get_json())
         result = response.get_json()['data']['slidesData']
-        self.assertEqual(result[0], slides[0])
+        self.assertEqual(self.strip_ids([result[0]]), [slides[0]])
         expected = slides[1]['html'].replace('<th>السعر</th>', '').replace('<td>1234.56</td>', '').replace('<td>12.34%</td>', '')
         self.assertEqual(result[1]['html'], expected)
         # Supported table deletes bypass the planner LLM entirely (deterministic local edit),
@@ -80,7 +86,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         response, model = self.call([{'tool': 'edit_slides', 'params': {'indexes': [2], 'instruction': 'استبدل اللون #112233 باللون #445566'}}], slides, 'استبدل اللون #112233 باللون #445566 في الشريحة 2')
         self.assertEqual(response.status_code, 200, response.get_json())
         result = response.get_json()['data']['slidesData']
-        self.assertEqual(result[0], slides[0])
+        self.assertEqual(self.strip_ids([result[0]]), [slides[0]])
         self.assertEqual(result[1]['html'], slides[1]['html'].replace('#112233', '#445566'))
         self.assertEqual(model.call_count, 1)
 
@@ -89,8 +95,13 @@ class DesignerIntegrationTests(unittest.TestCase):
         response, _ = self.call([{'tool': 'edit_slides', 'params': {'indexes': [999], 'instruction': 'احذف الصف 1'}}], slides, 'احذف الصف 1', **{'indexes': [999]})
         self.assertEqual(response.status_code, 422)
         response, _ = self.call([{'tool': 'edit_slides', 'params': {'target': 'all', 'instruction': 'احذف الصف 1'}}], slides, 'احذف الصف 1 من كل الشرائح')
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(response.get_json()['slidesData'], slides)
+        # A batch where every slide fails applies nothing and reports the failure —
+        # the old all-or-nothing 422 only survives for structural operations.
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()['data']
+        self.assertEqual(body['actions'][0]['status'], 'failed')
+        self.assertTrue(body.get('failureReason'))
+        self.assertEqual(self.strip_ids(body['slidesData']), slides)
 
     def test_planner_and_editor_get_full_deck_and_project(self):
         slides = self.slides()
@@ -112,7 +123,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         for prompt in prompts:
             for value in ['TAIL_FACT', 'LANDMARK_EXTENSION', '#abcdef', 'Untouched', '1234.56']:
                 self.assertIn(value, prompt)
-        self.assertEqual(response.get_json()['data']['slidesData'][0], slides[0])
+        self.assertEqual(self.strip_ids([response.get_json()['data']['slidesData'][0]]), [slides[0]])
 
     def test_operational_merge_preserves_urls_and_explicit_clears(self):
         with patch.object(db, 'get_project_draft_by_id', return_value={'draft_data': {'image': '/uploads/a.png', 'custom': {'old': True}, 'logo': '/uploads/b.png'}}):

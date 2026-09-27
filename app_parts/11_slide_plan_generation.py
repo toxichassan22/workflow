@@ -952,6 +952,7 @@ def api_generate_slides():
                 'indexEntries': slide_info.get('index_entries', []),
                 'designStyle': slide_info.get('design_style', 'cards'),
             })
+        designer_agent_ids.ensure_slide_ids(slides_out)
 
         return jsonify({
             'success': True,

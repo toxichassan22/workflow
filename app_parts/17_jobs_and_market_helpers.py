@@ -27,7 +27,7 @@ def _write_job(namespace, tenant_id, job_id, payload):
         except Exception:
             existing = None
         if isinstance(existing, dict):
-            for sticky in ('payload', 'actor'):
+            for sticky in ('payload', 'actor', 'agentState'):
                 if sticky not in payload and sticky in existing:
                     payload[sticky] = existing[sticky]
     body = json.dumps(payload, ensure_ascii=False)

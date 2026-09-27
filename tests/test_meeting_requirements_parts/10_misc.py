@@ -67,8 +67,10 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         self.assertEqual(resp.status_code, 200, resp.get_json())
         data = resp.get_json()['data']
         self.assertEqual(data['action'], 'ask')
-        # Slides must be unchanged
-        self.assertEqual(data['slidesData'], slides)
+        # Slides must be unchanged (id is the stable agent key added server-side)
+        self.assertEqual(
+            [{k: v for k, v in s.items() if k != 'id'} for s in data['slidesData']],
+            slides)
         # Client must handle ask/chat_only without navigating
         index_source = read_frontend_text()
         self.assertIn("if (reply.action === 'ask' || reply.action === 'chat_only') {", index_source)

@@ -273,6 +273,12 @@ class StructureDispatcherTests(unittest.TestCase):
         db.DB_PATH = cls.previous_db_path
         cls.temp.cleanup()
 
+    @staticmethod
+    def strip_ids(items):
+        # The backend backfills a stable `id` on every slide; the posted fixture
+        # never had one, so structural comparisons ignore it.
+        return [{k: v for k, v in s.items() if k != 'id'} for s in items]
+
     def dispatch(self, action, slides, editor):
         plan = {'response': 'تم', 'actions': [action]}
         with patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
@@ -296,7 +302,7 @@ class StructureDispatcherTests(unittest.TestCase):
         slides = [slide('<p>A</p>'), slide('<p>B</p>'), slide('<p>C</p>')]
         result = self.dispatch({'tool': 'merge_slides', 'params': {'slide_numbers': [1, 2]}}, slides,
                                lambda *args, **kwargs: (slides[0]['html'], 'done'))
-        self.assertEqual(result['slidesData'], slides)
+        self.assertEqual(self.strip_ids(result['slidesData']), slides)
         self.assertEqual(result['actions'][0]['status'], 'failed')
 
     def test_dispatcher_create_position_one_inserts_before_first(self):
@@ -305,14 +311,18 @@ class StructureDispatcherTests(unittest.TestCase):
         result = self.dispatch({'tool': 'create_slide', 'params': {'position': 1}}, slides,
                                lambda *args, **kwargs: (html, 'done'))
         self.assertEqual(result['slidesData'][0]['html'], html)
-        self.assertEqual(result['slidesData'][1:], slides)
+        self.assertEqual(self.strip_ids(result['slidesData'][1:]), slides)
+        # Every returned slide carries a unique stable id.
+        returned_ids = [s.get('id') for s in result['slidesData']]
+        self.assertEqual(len(set(returned_ids)), 3)
+        self.assertTrue(all(isinstance(i, str) and i for i in returned_ids))
 
     def test_dispatcher_split_partial_provider_failure_is_unchanged(self):
         slides = [slide('<section>A</section><section>B</section>')]
         part = slide('<section>A</section>')['html']
         editor = Mock(side_effect=[(part, 'done'), RuntimeError('offline')])
         result = self.dispatch({'tool': 'split_slide', 'params': {'slide_number': 1, 'parts': 2}}, slides, editor)
-        self.assertEqual(result['slidesData'], slides)
+        self.assertEqual(self.strip_ids(result['slidesData']), slides)
         self.assertEqual(result['actions'][0]['status'], 'failed')
 
     def test_renumber_and_finalize_with_json_string_facts(self):

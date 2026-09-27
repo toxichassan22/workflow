@@ -185,3 +185,52 @@ def remap_action(action, original_slides, slides):
         params['from_index'] = position(params['from_index'])
         params['to_index'] = position(params['to_index'])
     return mapped
+
+
+_REASON_AR = {
+    'incomplete_edit': 'تعذر التعديل في بعض الشرائح',
+    'no_verified_change': 'لم يتغير محتوى الشريحة فعليًا',
+    'invalid_indexes': 'أرقام الشرائح غير صالحة',
+    'invalid_position': 'الموضع المطلوب خارج نطاق العرض',
+    'invalid_parts': 'عدد الأجزاء المطلوب غير صالح',
+    'invalid_slide_html': 'نتجت شريحة غير صالحة البنية',
+    'content_not_preserved': 'فقد جزء من المحتوى أثناء العملية',
+    'generation_failed': 'فشل توليد محتوى الشريحة الجديدة',
+    'watermark_missing': 'لا توجد علامة مائية معتمدة',
+    'team_logo_missing': 'شعار الجهة المطلوبة غير مرفوع',
+    'approved_map_missing': 'لا توجد نسخة معتمدة من الخريطة',
+    'asset_missing': 'الأصل البصري المطلوب غير موجود',
+    'attached_image_missing': 'الصورة المرفقة غير متاحة',
+    'single_slide': 'لا يمكن إزالة كل شرائح العرض',
+    'malformed_table': 'بنية الجدول غير صالحة',
+    'ambiguous_table_request': 'طلب الجدول غير محدد',
+    'would_empty_table': 'العملية ستحذف الجدول بالكامل',
+    'row_name_not_found': 'الصف المطلوب غير موجود',
+    'column_name_not_found': 'العمود المطلوب غير موجود',
+    'non_rectangular_table': 'شبكة الجدول غير منتظمة',
+    'column_layout_unsupported': 'تخطيط أعمدة الجدول غير مدعوم',
+}
+
+
+def action_failure_summary(executed, max_len=600):
+    """One-line Arabic summary of why actions failed — replaces the old habit of
+    gluing every model-produced message into the error, which repeated stale
+    edit descriptions after a rollback."""
+    bits = []
+    for item in executed or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get('status') not in ('failed', 'rejected', 'deferred', 'skipped', 'noop'):
+            continue
+        reason = str(item.get('reason') or '').strip()
+        label = _REASON_AR.get(reason, reason if reason and reason.isascii() else '')
+        nums = sorted({n + 1 for n in (item.get('failed_indexes') or item.get('requested_indexes')
+                                       or item.get('indexes') or []) if isinstance(n, int)})
+        tool = str(item.get('tool') or '')
+        if nums:
+            label = label or tool or 'تعذر التنفيذ'
+            bits.append('الشرائح ' + '، '.join(str(n) for n in nums[:8]) + ': ' + label)
+        elif label:
+            bits.append(label)
+    summary = '؛ '.join(dict.fromkeys(bits))
+    return summary[:max_len] or 'عملية غير منفذة'

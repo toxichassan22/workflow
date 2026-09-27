@@ -1595,3 +1595,85 @@
       white-space: nowrap;
     }
 
+
+    /* Designer agent task checklist (DESIGNER_AGENT) */
+    .tenant-designer-checklist {
+      padding: 8px 10px;
+      border-top: 1px solid var(--ui-border-strong, #e5e2da);
+      background: #f6f5f1;
+    }
+
+    .tenant-designer-checklist-card {
+      background: #fff;
+      border: 1px solid var(--ui-border-strong, #e5e2da);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .tenant-designer-checklist-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--txt);
+    }
+
+    .tenant-designer-task {
+      border-radius: 8px;
+      padding: 6px 8px;
+      background: var(--soft);
+    }
+
+    .tenant-designer-task.is-success { background: #eef7ee; }
+    .tenant-designer-task.is-failed { background: #fbecec; }
+    .tenant-designer-task.is-skipped { background: #f5f3ee; }
+
+    .tenant-designer-task-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .tenant-designer-task-n {
+      min-width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--p);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tenant-designer-task-label {
+      flex: 1;
+      min-width: 0;
+      color: var(--txt);
+      font-weight: 600;
+    }
+
+    .tenant-designer-task-status {
+      font-size: 10px;
+      color: var(--ink-muted);
+      white-space: nowrap;
+    }
+
+    .tenant-designer-task.is-failed .tenant-designer-task-status { color: #b3261e; }
+    .tenant-designer-task.is-success .tenant-designer-task-status { color: #1e7b34; }
+
+    .tenant-designer-task-reason {
+      margin-top: 4px;
+      font-size: 10px;
+      color: var(--ink-muted);
+      line-height: 1.5;
+    }
+
+    .tenant-designer-checklist-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }

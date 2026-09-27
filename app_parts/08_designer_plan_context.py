@@ -1244,14 +1244,49 @@ DESIGNER_CHAT_MAX_ATTACHED_IMAGES = 3
 DESIGNER_CHAT_ATTACHED_IMAGE_LIMIT = 4 * 1024 * 1024
 
 
-def _designer_chat_free_reply(message, has_attachment=False):
+def _designer_last_reply_was_question(history):
+    """True when the assistant's previous turn asked the user something: a
+    short follow-up like «اه» or «تمام» is then an answer, not a greeting."""
+    for entry in reversed(history if isinstance(history, list) else []):
+        if not isinstance(entry, dict) or entry.get('role') != 'assistant':
+            continue
+        text = str(entry.get('content') or '').strip()
+        if not text:
+            return False
+        return '؟' in text or text.endswith('?')
+    return False
+
+
+_DESIGNER_GREETINGS = frozenset({
+    'سلام', 'سلام عليكم', 'السلام عليكم', 'وعليكم السلام', 'مرحبا', 'مرحب',
+    'اهلا', 'أهلا', 'اهلين', 'يا هلا', 'هلا', 'هلا والله', 'هاي', 'هاى',
+    'ازيك', 'عامل ايه', 'عامل إيه', 'صباح الخير', 'صباح النور',
+    'مساء الخير', 'مساء النور', 'شكرا', 'شكرًا', 'تسلم', 'يعطيك العافية',
+    'hello', 'hi', 'hey', 'thanks', 'thank you', 'good morning', 'good evening',
+})
+
+
+def _designer_plain_greeting(text):
+    """True only when the whole message is a greeting. Confirmation words
+    («تمام»، «طيب»، «اه»، «ok»...) are deliberately not greetings: they
+    usually mean «نعم، نفّذ ما عرضته» and must reach the planner."""
+    cleaned = re.sub(r'[^\w\sء-ي]+', ' ', text)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Squash trailing elongation: «هلاااا» becomes «هلا»، «مرحبااا» becomes «مرحبا».
+    cleaned = ' '.join(
+        re.sub(r'([اوىيهة])\1+$', r'\1', word) for word in cleaned.split(' '))
+    return cleaned in _DESIGNER_GREETINGS
+
+
+def _designer_chat_free_reply(message, has_attachment=False, history=None):
     """Deterministic no-AI reply for greetings and capability questions.
 
     These turns used to run the full planner prompt (the whole draft as context) just to
     answer «سلام» or «بتعمل ايه», so the tenant's provider balance moved on a message that
     requested no work. Returning a canned answer here spends zero tokens: no planner call,
     no edit call and no memory call. Returns the reply text, or None when the turn needs
-    the planner.
+    the planner. A greeting is matched whole-message only, and never while the designer
+    is waiting for an answer to its own question.
     """
     if has_attachment:
         return None
@@ -1261,6 +1296,8 @@ def _designer_chat_free_reply(message, has_attachment=False):
     if len(text) > 60:
         return None
     if designer_chat_targets.explicit_slide_numbers(message):
+        return None
+    if _designer_last_reply_was_question(history):
         return None
     edit_markers = (
         'عدل', 'عدّل', 'غير', 'غيّر', 'احذف', 'امسح', 'ضيف', 'أضف', 'اضف', 'حط', 'ضع',
@@ -1279,13 +1316,7 @@ def _designer_chat_free_reply(message, has_attachment=False):
             'أنا Landloom، مساعد التصميم الذكي في المنصة — متخصص في تعديل '
             'وتطوير شرائح عرضك. هذه الرسالة لم تستهلك أي رصيد.'
         )
-    greetings = (
-        'سلام', 'مرحبا', 'مرحب', 'اهلا', 'أهلا', 'هلا', 'هاي', 'هاى', 'ازيك', 'ازيك؟',
-        'عامل ايه', 'عامل إيه', 'صباح الخير', 'مساء الخير', 'مساء النور', 'صباح النور',
-        'شكرا', 'شكرًا', 'تسلم', 'تمام', 'ماشي', 'ماشى', 'اوك', 'أوك', 'طيب', 'اه',
-        'hello', 'hi', 'thanks', 'thank you', 'ok',
-    )
-    if any(greet in text for greet in greetings):
+    if _designer_plain_greeting(text):
         return (
             'أهلاً بك. أخبرني بالتعديل المطلوب على العرض، وسأنفذه مباشرة. '
             'هذه التحية لم تستهلك أي رصيد.'

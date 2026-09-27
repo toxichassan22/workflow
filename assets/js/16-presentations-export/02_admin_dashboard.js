@@ -1276,6 +1276,7 @@
         if (!data || typeof data !== 'object') return;
         if (Array.isArray(data.slidesData)) {
           tenantSlidesData = data.slidesData;
+          ensureSlideIds(tenantSlidesData);
           changed = true;
         }
         if (data.presentationId) {

@@ -46,6 +46,7 @@ import population_service
 import slide_engine
 import change_tracking
 import presentation_assets
+import designer_agent_ids
 import designer_chat_reliability
 import designer_chat_targets
 import designer_chat_colors
@@ -338,6 +339,11 @@ GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6-sol')
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
 DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
+# Designer agent (chatplan): per-task planner/runner path behind a flag. When 0,
+# /api/designer-chat keeps the legacy all-at-once planner.
+DESIGNER_AGENT = (os.environ.get('DESIGNER_AGENT') or '').strip() == '1'
+DESIGNER_AGENT_PLANNER_MODEL = os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or GLM_OPENROUTER_MODEL
+DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or SLIDE_TEXT_MODEL
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the

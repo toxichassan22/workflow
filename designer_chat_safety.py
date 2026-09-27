@@ -7,6 +7,8 @@ import json
 from html.parser import HTMLParser
 import re
 
+import designer_agent_ids
+
 
 class StructureSafetyError(ValueError):
     """A structural request or generated result cannot be safely applied."""
@@ -352,10 +354,15 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
                     progress(25 + int(55 * len(generated) / count),
                              f'تمت معالجة الجزء {len(generated)} من {count}...')
             replacements = []
-            for part in generated:
+            for part_index, part in enumerate(generated):
                 replacement = copy.deepcopy(source)
                 replacement.update(title=part['title'], html=carry_watermark(source_html, part['html']),
                                    _designer_keep_html=True, is_custom=True)
+                # The first part inherits the source identity so a pending task that
+                # referenced it still resolves; later parts are new slides.
+                if part_index:
+                    replacement['id'] = designer_agent_ids.new_slide_id()
+                    replacement['split_from'] = source.get('id')
                 replacements.append(replacement)
             require_preserved([source_html], [part['html'] for part in replacements], count)
             slides[index:index + 1] = replacements
@@ -388,6 +395,7 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
             replacement = copy.deepcopy(slide1)
             replacement.update(html=html, title=title, _designer_keep_html=True, is_custom=True)
             replacement['merged_sources'] = [copy.deepcopy(slide1), copy.deepcopy(slide2)]
+            replacement['merged_from'] = [slide1.get('id'), slide2.get('id')]
             slide1.update(replacement)
             slides.pop(second)
             return ({'tool': tool, 'status': 'success', 'merged_index': first,
@@ -404,7 +412,8 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
             validate_single_slide(html)
             if not reliability.materially_changed(seed, html, reply):
                 raise StructureSafetyError('incomplete_result')
-            slides.insert(index, {'html': html, 'title': title, 'type': kind,
+            slides.insert(index, {'id': designer_agent_ids.new_slide_id(),
+                                  'html': html, 'title': title, 'type': kind,
                                   'designStyle': params.get('designStyle', 'cards'), 'bullets': [],
                                   'metrics': [], '_designer_keep_html': True, 'is_custom': True})
             return ({'tool': tool, 'status': 'success', 'index': index},

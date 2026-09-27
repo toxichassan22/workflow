@@ -605,7 +605,9 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertEqual(reply['response'], 'أي شريحة تقصد؟')
         # Nothing was edited: one model call for the plan, and no edit call after it.
         self.assertEqual(chat.call_count, 1)
-        self.assertEqual(reply['slidesData'], slides)
+        self.assertEqual(
+            [{k: v for k, v in s.items() if k != 'id'} for s in reply['slidesData']],
+            slides)
 
         index_source = read_frontend_text()
         # One chat line: attach, write, send. The suggestions drawer is gone.

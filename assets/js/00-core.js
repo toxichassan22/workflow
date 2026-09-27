@@ -298,6 +298,35 @@
     let tenantArchiveCache = null;
     let tenantLocationGeocodeRequest = null;
 
+    // Stable per-slide identities for the designer agent: positions shuffle on
+    // every structural edit, ids do not. Same scheme as designer_agent_ids.py
+    // (`s_` + 8 hex); valid existing ids are kept and duplicates are rewritten.
+    function wfNewSlideId() {
+      const bytes = new Uint8Array(4);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return 's_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function ensureSlideIds(slides) {
+      if (!Array.isArray(slides)) return slides;
+      const seen = new Set();
+      const valid = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(value);
+      for (const slide of slides) {
+        if (!slide || typeof slide !== 'object') continue;
+        let sid = slide.id;
+        if (!valid(sid) || seen.has(sid)) {
+          do { sid = wfNewSlideId(); } while (seen.has(sid));
+          slide.id = sid;
+        }
+        seen.add(sid);
+      }
+      return slides;
+    }
+
     function mapsSignature(d, highlightSite = true) {
       d = d || tenantProjectData || {};
       const projectStyles = d.map_styles || {};

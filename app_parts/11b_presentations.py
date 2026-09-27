@@ -253,6 +253,8 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
     def freeze_snapshot(state):
         frozen = dict(state)
         parsed = _presentation_state(state)
+        # Every persisted deck — create, update, restore — carries stable slide ids.
+        designer_agent_ids.ensure_slide_ids(parsed['slidesData'])
         for stored, public in [('project_data', 'projectData'), ('slides_data', 'slidesData')]:
             frozen[stored] = (_freeze_presentation_project_metadata(parsed[public], freeze)
                               if stored == 'project_data' else freeze(parsed[public]))
@@ -405,6 +407,7 @@ def api_get_presentation(pres_id):
                 s['html'], g.tenant_id, _branding_cache=branding,
                 project_logo=project_logo_ref,
             )
+    designer_agent_ids.ensure_slide_ids(slides)
     pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
     pres['projectData'] = _draft_data_for_response(pres.get('projectData'))

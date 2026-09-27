@@ -131,6 +131,7 @@
       presentationUndoPending = false;
       try {
         tenantSlidesData = state.slides;
+        ensureSlideIds(tenantSlidesData);
         tenantSlidePlan = state.plan;
         tenantSlideGenerationCheckpoint = state.generationCheckpoint;
         if (typeof tenantPresentationProvenance !== 'undefined') tenantPresentationProvenance = state.provenance;

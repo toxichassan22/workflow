@@ -799,6 +799,10 @@
         const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
         if (tenantDesignerJobMatchesWorkspace(metadata)) {
           updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+          if (Array.isArray(result?.tasks) && result.tasks.length
+            && typeof renderDesignerChecklist === 'function') {
+            renderDesignerChecklist(result.tasks);
+          }
           // Navigate only after the executor starts editing a model-selected slide.
           // Deduplicate polling events so manual scrolling is not constantly undone.
           if (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex)

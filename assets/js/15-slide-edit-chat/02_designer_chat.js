@@ -14,6 +14,25 @@
       applyDesignerChatHistory(reply);
       applyDesignerChatMemory(reply);
 
+      // The agent planner returned a checklist for confirmation: show it and
+      // change nothing until the user presses «تنفيذ الخطة».
+      if (reply.action === 'plan_pending' && typeof applyDesignerPlanPending === 'function') {
+        applyDesignerPlanPending(reply);
+        if (!Array.isArray(reply.chatHistory)) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: reply.response || 'أعددت خطة تنفيذ — راجع المهام ثم أكّد.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+        }
+        tenantProjectData.designerChat = designerChatPersistence();
+        renderTenantDesignerChat();
+        triggerAutoSaveDraft();
+        if (input) input.focus();
+        return true;
+      }
+      if (typeof applyDesignerRunTasks === 'function') applyDesignerRunTasks(reply);
+
       // The designer asked instead of guessing: show the question, change nothing, keep the answer
       // in the input's turn. Guessing and then editing wrongly is worse than one question.
       if (reply.action === 'ask' || reply.action === 'chat_only') {
@@ -39,6 +58,7 @@
         const insertAfter = reply.insertAfterIndex !== undefined ? Number(reply.insertAfterIndex) : (tenantChatSlideIndex + 1);
         const insertIdx = Math.max(0, Math.min(insertAfter, tenantSlidesData.length));
         const newSlide = {
+          id: wfNewSlideId(),
           title: reply.title || 'شريحة جديدة',
           html: reply.html,
           type: reply.type || 'content',
@@ -81,6 +101,7 @@
           return false;
         }
         tenantSlidesData = incoming;
+        ensureSlideIds(tenantSlidesData);
         if (tenantSlidesData.length < oldLength) {
           activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
           tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
@@ -237,6 +258,7 @@
         images: attachedGallery.map(item => item.dataUri),
         slides: target1BasedIndexes
       });
+      if (typeof resetDesignerChecklistForNewTurn === 'function') resetDesignerChecklistForNewTurn();
       if (input) { input.value = ''; growTenantChatInput(input); }
       clearTenantChatAttachment();
       tenantProjectData.designerChat = designerChatPersistence();
@@ -275,6 +297,7 @@
       // The server must not reload the last saved presentation and discard an earlier unsaved
       // change made in this same chat session.
       if (tenantDraftDirty || !tenantPresentationId) {
+        ensureSlideIds(tenantSlidesData);
         chatPayload.slideHtml = tenantSlidesData[tenantChatSlideIndex]?.html || '';
         chatPayload.slideTitle = tenantSlidesData[tenantChatSlideIndex]?.title || '';
         chatPayload.slidesData = tenantSlidesData;
@@ -587,6 +610,7 @@
       const title = String(titleOverride || tenantPresentationTitle
         || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان').trim();
       renumberTenantSlides();
+      ensureSlideIds(tenantSlidesData);
       // api('POST', '/api/presentations'
       tenantProjectData = {
         ...tenantProjectData, tenantSlidePlan, tenantCreativeImages,
@@ -681,6 +705,7 @@
         if (!checkpoint?.success) { toast(checkpoint?.error || 'تعذر حماية النسخة الحالية'); return false; }
         target.revision = checkpoint.revision;
         tenantSlidesData = saved.slidesData || [];
+        ensureSlideIds(tenantSlidesData);
         tenantSlidePlan = recoverTenantSlidePlan(saved.projectData || {}, tenantSlidesData);
         resetPresentationUndo();
       }

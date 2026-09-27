@@ -82,6 +82,9 @@ def api_designer_chat():
         return jsonify({'success': False, 'error': 'لا توجد شرائح مفتوحة لتنفيذ الطلب'}), 400
     if current_index >= len(slides) or any(not isinstance(s, dict) for s in slides):
         return jsonify({'success': False, 'error': 'العرض أو رقم الشريحة الحالية غير صالح', 'error_code': 'DESIGNER_INVALID_TARGET'}), 422
+    # Every slide gets a stable id before the planner/runner sees the deck:
+    # positions shuffle on structural edits, ids do not.
+    designer_agent_ids.ensure_slide_ids(slides)
 
     # Kept so the history can state what the AI actually changed. An AI edit used to leave no trace
     # at all: no log entry, no version, and no record of the instruction behind it.
@@ -119,7 +122,8 @@ def api_designer_chat():
     # The planner prompt carries the whole draft, so even «سلام» used to move the
     # provider balance. Answer those turns locally with zero tokens spent.
     _free_probe_uris = _normalize_designer_attached_images(data)
-    _free_text = _designer_chat_free_reply(message, has_attachment=bool(_free_probe_uris))
+    _free_text = _designer_chat_free_reply(
+        message, has_attachment=bool(_free_probe_uris), history=history_for_turn)
     if _free_text is not None:
         _free_messages = list(history_for_turn)
         if not _free_messages or _free_messages[-1].get('content') != message or _free_messages[-1].get('role') != 'user':
@@ -136,6 +140,27 @@ def api_designer_chat():
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     training_context = db.get_training_context(g.tenant_id) or ''
+
+    # DESIGNER_AGENT=1: per-task planner/runner path (chatplan). The legacy
+    # all-at-once planner below stays untouched for DESIGNER_AGENT=0.
+    if DESIGNER_AGENT:
+        return _designer_agent_turn({
+            'data': data, 'message': message, 'slides': slides,
+            'current_index': current_index, 'project_data': project_data,
+            'creative_images': creative_images,
+            'request_creative_images': request_creative_images,
+            'project_creative_images': project_creative_images,
+            'presentation_id': presentation_id, 'presentation': presentation,
+            'tenant_id': tenant_id, 'branding': branding,
+            'training_context': training_context,
+            'history_for_turn': history_for_turn, 'chat_memory': chat_memory,
+            'history_lines': history_lines, 'focus_indexes': focus_indexes,
+            'preferred_indexes': preferred_indexes,
+            'is_all_slides_request': is_all_slides_request,
+            'slides_before': slides_before, 'job_id': job_id,
+            'report_progress': report_designer_progress,
+        })
+
     summary = [{
         'index': i + 1,
         'title': s.get('title', '') if isinstance(s, dict) else '',
@@ -360,8 +385,8 @@ def api_designer_chat():
 14. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
 15. في سائر طلبات التعديل والتنسيق والتصميم -> اختر tool="edit_slides".
 16. فرّق بدقة بين الصورة والوصف والشعار: طلب وصف أو شرح أو تعليق أو كابشن لصور موجودة (مثل: «أضف وصفاً لصور التصور البصري») يعني تعديلاً نصياً فقط عبر tool="edit_slides" مع تعليمات إضافة نص وصفي تحت الصور الموجودة، دون توليد صورة جديدة ودون أي رمز شعار (ممنوع ##TEAM_LOGO_N## و##LOGO## و##PROJECT_LOGO##). وطلب صورة أو تصميم أو توليد صور جديدة يعني tool="generate_image" لصورة معمارية جديدة وليس شعاراً. ولا تستخدم أي رمز شعار إلا عند طلب شعار صريح في الرسالة الحالية.
-17. إذا طلب المستخدم إعادة توليد أو تصميم قسم كامل أو توزيع محتوى شريحة على عدة شرائح (مثل: «أعد توليد قسم الملخص التنفيذي على أكثر من شريحة مصممة جيداً وقوية بصرياً»):
-- أنت Agent كامل الصلاحية: اختر الشريحة أو الشرائح المناسبة من قائمة الشرائح، ونفذ التقسيم والتوزيع الفاخر عبر tool="split_slide" مع تحديد slide_number و parts وتضمين تعليمات التصميم الجمالي والتوزيع المتناسق في instruction، أو ادمج بين edit_slides و create_slide.
+17. «أعد تصميم» أو «حسّن» قسم أو نطاق من الشرائح (مثل: «أعد تصميم قسم الملخص التنفيذي» أو «حسّن الشرائح 71 إلى 79») تعني tool="edit_slides" على كل شرائح ذلك النطاق — إعادة التصميم لا تعني التقسيم. لا تختر tool="split_slide" إلا إذا طلب المستخدم صراحة تقسيم شريحة أو توزيع محتواها على شرائح (مثل: «قسّم الشريحة 5 إلى شريحتين»).
+- طلب تقليل عدد الشرائح أو الصفحات أو إعادة هيكلة عدة شرائح في عدد أقل أو أكبر (مثل: «قلل الصفحات» أو «اجعل القسم 5 شرائح») يحتاج قراراً من المستخدم عن الشرائح والعدد — اسأل بأداة ask ولا تستخدم split_slide ولا delete_slide تخميناً.
 - احرص دائماً على الحفاظ التام على كامل الأرقام والبيانات والمؤشرات دون حذف أي تفصيل، وتوزيعها في كروت فاخرة وأقسام متوازنة مريحة بصرياً وخالية من أي إيموجي أو أيقونات.
 18. حذف صف أو عمود أو سطر من جدول داخل شريحة (مثل: «احذف الصف الثالث من الجدول» أو «شيل عمود السعر») هو تعديل داخل الشريحة عبر tool="edit_slides" فقط — وليس delete_slide ولا split_slide ولا create_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف (مثل: «احذف الشريحة 5»). قواعد الحفاظ على البيانات لا تمنع هذا الحذف: هو حذف عرضي من الشريحة فقط وبيانات المشروع الأصلية تبقى كما هي. عند اختيار edit_slides لطلب صف/عمود اكتب instruction مكتملة تحمل نوع الحذف (صف أم عمود) ورقمه أو محتواه أو اسم العمود، ولا تنسخ الرد القصير وحده.
 19. الصورة المرفقة في هذه الرسالة هي أصل لا يُستبدل: طلب وضعها في شريحة منفصلة أو داخل شريحة أو كخلفية أو كعلامة مائية أو كشعار إضافي يعني حصراً tool="insert_attached_image" مع الموضع المناسب. ممنوع توليد صورة بديلة لها بـ generate_image، وممنوع استخدام apply_watermark أو insert_team_logo لها. عند غياب صور مرفقة في هذه الرسالة لا تختر insert_attached_image أبداً.
@@ -827,11 +852,22 @@ def api_designer_chat():
                         if response_text:
                             assistant_messages.append(response_text)
                         report_designer_progress(85, f"تم الانتهاء من معالجة الشريحة {idx + 1}...")
+                # A multi-slide edit is per-slide work, not an atomic batch: keep every
+                # slide that changed and report the ones that did not. Only structural
+                # operations stay all-or-nothing (their check is in the failure block).
+                _all_changed = bool(indexes) and len(changed_indexes) == len(indexes)
+                _failed_targets = sorted(set(indexes) - set(changed_indexes))
+                if changed_indexes and _failed_targets:
+                    _missed = '، '.join(str(i + 1) for i in _failed_targets[:10])
+                    assistant_messages.append(
+                        f'تم تعديل {len(changed_indexes)} من {len(indexes)} شريحة؛ '
+                        f'تعذر التعديل في الشرائح {_missed}.')
                 executed.append({
                     'tool': tool,
-                    'status': 'success' if len(changed_indexes) == len(indexes) and indexes else 'failed',
-                    'reason': None if len(changed_indexes) == len(indexes) and indexes else 'incomplete_edit',
+                    'status': 'success' if _all_changed else ('partial' if changed_indexes else 'failed'),
+                    'reason': None if _all_changed else 'incomplete_edit',
                     'indexes': sorted(changed_indexes),
+                    'failed_indexes': _failed_targets,
                     'requested_indexes': indexes,
                 })
             elif tool == 'insert_team_logo':
@@ -1131,6 +1167,8 @@ def api_designer_chat():
                 target_num = designer_chat_targets.slide_number(raw_num, len(slides))
                 dup_idx = target_num - 1
                 cloned = copy.deepcopy(slides[dup_idx])
+                cloned['id'] = designer_agent_ids.new_slide_id()
+                cloned['duplicated_from'] = slides[dup_idx].get('id')
                 cur_title = cloned.get('title', '')
                 cloned['title'] = cur_title + ' (نسخة)' if not cur_title.endswith('(نسخة)') else cur_title
                 slides.insert(dup_idx + 1, cloned)
@@ -1174,15 +1212,13 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
         failed_actions = [item for item in executed if item.get('status') in ('failed', 'rejected', 'deferred', 'skipped', 'noop')]
+        # All-or-nothing is reserved for structural operations: a failed split or merge
+        # must roll back the request because renumbering changed every position. Plain
+        # per-slide edits keep whatever succeeded and report the rest.
         structural_failure = any(item.get('tool') in designer_chat_targets.STRUCTURAL_TOOLS for item in failed_actions)
-        partial_batch_failure = any(
-            item.get('tool') in designer_chat_targets.EDIT_TOOLS
-            and len(item.get('requested_indexes') or []) > 1
-            and len(item.get('indexes') or []) != len(item.get('requested_indexes') or [])
-            for item in failed_actions
-        )
-        if failed_actions and (structural_failure or partial_batch_failure or len(actions) > 1):
-            return jsonify({'success': False, 'error': 'لم يُطبق الطلب لأن إحدى عملياته لم تنجح. ' + ' '.join(dict.fromkeys(assistant_messages)),
+        if structural_failure:
+            return jsonify({'success': False, 'error': 'لم يُطبق الطلب لأن عملية هيكلية لم تنجح: '
+                            + designer_chat_targets.action_failure_summary(executed),
                             'error_code': 'DESIGNER_ATOMIC_EDIT_FAILED', 'actions': executed, 'slidesData': slides_before}), 422
         structural_change = any(item.get('tool') in designer_chat_targets.STRUCTURAL_TOOLS
                                 and item.get('status') == 'success' for item in executed)
@@ -1207,7 +1243,7 @@ def api_designer_chat():
                     if isinstance(item, dict) and isinstance(item.get('inserted_at'), int)]
         turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
         successful_execution = any(
-            isinstance(item, dict) and item.get('status') == 'success'
+            isinstance(item, dict) and item.get('status') in ('success', 'partial')
             for item in executed
         )
         failure_reason = None
@@ -1220,8 +1256,7 @@ def api_designer_chat():
                 item.get('reason') for item in executed
                 if isinstance(item, dict) and item.get('reason')
             ), 'no_verified_change')
-            detail = ' '.join(dict.fromkeys(assistant_messages)).strip()
-            response_text = 'لم يتم تنفيذ أي تعديل على العرض.' + (f' {detail}' if detail else '')
+            response_text = 'لم يتم تنفيذ أي تعديل على العرض. ' + designer_chat_targets.action_failure_summary(executed)
         # Return the updated conversation beside the edited workspace. The browser keeps both in
         # memory until the user explicitly presses save; writing here would make a failed edit
         # impossible to discard with a refresh.

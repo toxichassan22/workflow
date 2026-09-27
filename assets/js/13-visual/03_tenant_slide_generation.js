@@ -468,6 +468,7 @@
         async function commitSlide(i, generated) {
           const plan = tenantSlidePlan.slides[i] || {};
           const slideObj = {
+            id: (i < tenantSlidesData.length && tenantSlidesData[i] && tenantSlidesData[i].id) || wfNewSlideId(),
             title: generated.title || plan.title,
             type: generated.type || plan.type || 'content',
             html: generated.html,
