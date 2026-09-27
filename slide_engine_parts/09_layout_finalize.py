@@ -305,6 +305,8 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
 
     # Content/map/site slides get one canonical header/footer; cover, dividers,
     # moodboards and closing keep their own image-led layouts.
+    if slide_type in _COUNTER_FREE_SLIDE_TYPES or is_cover_or_closing:
+        html = _strip_slide_counter_chrome(html)
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
         html = _ensure_managed_chrome(
             html, slide_title=slide_title, slide_num=slide_num, total_slides=total_slides,
@@ -345,8 +347,12 @@ def _designer_preserves_html(item):
 
 def _rewrite_preserved_counter(html, slide_type, slide_num, total_slides):
     """Change numeric text only, retaining nested counter markup and its styles."""
+    if not html:
+        return html
+    if str(slide_type or '').strip().lower() in _COUNTER_FREE_SLIDE_TYPES:
+        return _strip_slide_counter_chrome(html)
     counter = _slide_counter_text(slide_num, total_slides)
-    if not counter or not html:
+    if not counter:
         return html
     opening = re.compile(r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-slide-counter\s*=\s*["\'][^"\']*["\'][^>]*>', re.IGNORECASE)
     matches = list(opening.finditer(html))

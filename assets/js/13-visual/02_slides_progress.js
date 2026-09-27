@@ -93,7 +93,11 @@
       if (!root) return slide.html;
       const type = String(slide.type || 'content').toLowerCase();
       if (['cover', 'closing', 'moodboard'].includes(type)) {
-        root.querySelectorAll('[data-slide-footer], footer, .slide-footer').forEach(node => node.remove());
+        root.querySelectorAll('[data-slide-footer], footer, .slide-footer, [data-slide-counter]').forEach(node => node.remove());
+        root.querySelectorAll('div, span, p, b, strong, small').forEach(node => {
+          if (node.children.length || !/bottom\s*:/i.test(node.getAttribute('style') || '')) return;
+          if (/^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || '')) node.remove();
+        });
       } else {
         const counter = String(index).padStart(2, '0') + ' — ' + String(total).padStart(2, '0');
         let counters = Array.from(root.querySelectorAll('[data-slide-counter]'));

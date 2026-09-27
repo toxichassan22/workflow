@@ -933,6 +933,8 @@ def _with_data_attribute(open_tag, name):
 def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
     if not html:
         return html
+    if str(slide_type or '').strip().lower() in _COUNTER_FREE_SLIDE_TYPES:
+        return _strip_slide_counter_chrome(html)
     counter = _slide_counter_text(slide_num, total_slides)
     if not counter:
         return html
@@ -976,6 +978,38 @@ def _remove_managed_slide_footer(html):
         r'<(?:div|footer)\b[^>]*\bdata-slide-footer=["\'][^"\']*["\'][^>]*>[\s\S]*?</(?:div|footer)\s*>',
         '', html or '', count=1, flags=re.IGNORECASE,
     )
+
+
+_COUNTER_FREE_SLIDE_TYPES = frozenset({'cover', 'closing', 'moodboard'})
+
+
+def _strip_slide_counter_chrome(html):
+    """Remove page-number chrome from slides that never receive a managed footer.
+
+    Cover, closing and moodboard slides are chrome-free by design. A counter or
+    footer that slipped in through model output or an older migration must be
+    removed here, not rewritten with a fresh number.
+    """
+    if not html:
+        return html
+    marked = re.compile(
+        r'<(?P<tag>[a-z][\w:-]*)\b[^>]*?(?:\bdata-slide-(?:footer|counter)\s*='
+        r'|\bclass\s*=\s*["\'][^"\']*\bslide-footer\b)[^>]*>', re.IGNORECASE)
+    void_tags = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+                 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    while True:
+        match = marked.search(html)
+        if not match:
+            break
+        if match.group('tag').lower() in void_tags or match.group(0).rstrip().endswith('/>'):
+            html = html[:match.start()] + html[match.end():]
+            continue
+        html = html[:match.start()] + html[_slide_element_end(html, match):]
+    html = re.sub(r'<footer\b[^>]*>[\s\S]*?</footer\s*>', '', html, flags=re.IGNORECASE)
+    return re.sub(
+        r'<(?P<ntag>div|span|p|b|strong|small)\b(?=[^>]*\bbottom\s*:)[^>]*>'
+        r'\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*</(?P=ntag)\s*>',
+        '', html, flags=re.IGNORECASE)
 
 
 def _slide_element_end(html, opening_match):
