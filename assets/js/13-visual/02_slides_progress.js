@@ -92,7 +92,7 @@
       const root = template.content.querySelector('.slide');
       if (!root) return slide.html;
       const type = String(slide.type || 'content').toLowerCase();
-      if (['cover', 'closing', 'moodboard'].includes(type)) {
+      if (['cover', 'moodboard'].includes(type)) {
         root.querySelectorAll('[data-slide-footer], footer, .slide-footer, [data-slide-counter]').forEach(node => node.remove());
         root.querySelectorAll('div, span, p, b, strong, small').forEach(node => {
           if (node.children.length || !/bottom\s*:/i.test(node.getAttribute('style') || '')) return;
@@ -104,7 +104,12 @@
         if (!counters.length && type === 'section_divider') {
           counters = Array.from(root.querySelectorAll('div, span')).filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''));
         }
-        if (!counters.length) {
+        if (!counters.length && type === 'closing') {
+          counters = Array.from(root.querySelectorAll('div, span, p, b, strong, small')).filter(node =>
+            !node.children.length && /bottom\s*:/i.test(node.getAttribute('style') || '')
+            && /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
+        }
+        if (!counters.length && type !== 'closing') {
           const footer = root.querySelector('footer, .slide-footer, [data-slide-footer]')
             || Array.from(root.querySelectorAll('footer, div')).find(node => /height:\s*36px/i.test(node.getAttribute('style') || ''));
           if (footer) {
@@ -121,6 +126,15 @@
           node.dataset.slideCounter = '1';
           node.textContent = counter;
         });
+        if (!counters.length && type === 'closing') {
+          const counterEl = document.createElement('div');
+          counterEl.dataset.slideCounter = '1';
+          counterEl.setAttribute('dir', 'ltr');
+          const side = (root.getAttribute('dir') || '').toLowerCase() === 'ltr' ? 'right' : 'left';
+          counterEl.style.cssText = 'position:absolute;bottom:34px;' + side + ':48px;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);';
+          counterEl.textContent = counter;
+          root.appendChild(counterEl);
+        }
       }
       if (type === 'index') {
         const existingRows = root.querySelectorAll('[data-index-section]');

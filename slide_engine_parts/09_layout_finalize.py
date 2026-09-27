@@ -304,9 +304,12 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
     # Content/map/site slides get one canonical header/footer; cover, dividers,
-    # moodboards and closing keep their own image-led layouts.
-    if slide_type in _COUNTER_FREE_SLIDE_TYPES or is_cover_or_closing:
+    # moodboards and closing keep their own image-led layouts. The closing slide
+    # still shows its page number, so it is ensured here — never stripped.
+    if slide_type in _COUNTER_FREE_SLIDE_TYPES or is_cover:
         html = _strip_slide_counter_chrome(html)
+    if is_closing:
+        html = _ensure_slide_counter(html, slide_num, total_slides)
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
         html = _ensure_managed_chrome(
             html, slide_title=slide_title, slide_num=slide_num, total_slides=total_slides,
@@ -349,8 +352,11 @@ def _rewrite_preserved_counter(html, slide_type, slide_num, total_slides):
     """Change numeric text only, retaining nested counter markup and its styles."""
     if not html:
         return html
-    if str(slide_type or '').strip().lower() in _COUNTER_FREE_SLIDE_TYPES:
+    normalized_type = str(slide_type or '').strip().lower()
+    if normalized_type in _COUNTER_FREE_SLIDE_TYPES:
         return _strip_slide_counter_chrome(html)
+    if normalized_type == 'closing':
+        return _ensure_slide_counter(html, slide_num, total_slides)
     counter = _slide_counter_text(slide_num, total_slides)
     if not counter:
         return html

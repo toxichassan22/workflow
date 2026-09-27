@@ -858,8 +858,10 @@ browser after insert, delete and move, and the export request carries the curren
 silently exporting an older saved copy.
 
 - Managed content footers carry `data-slide-footer` and `data-slide-counter` and display current plus
-  total as `03 — 12`. Section dividers carry the same counter marker. Cover, closing and moodboard
-  never receive a managed footer.
+  total as `03 — 12`. Section dividers carry the same counter marker, and the closing slide keeps a
+  live divider-style corner counter that renumbering updates or injects when missing (`_ensure_slide_counter`).
+  Cover and moodboard never receive a managed footer — stray counters there are stripped
+  (`_strip_slide_counter_chrome`), never rewritten.
 - Deterministic index rows carry `data-index-section` / `data-index-page`. Renumbering recomputes each
   section start and the closing page, rebuilds the server index, and updates or removes browser rows.
 - Preserve `section_key`, `content_source`, `source_table` and `index_entries` from the slide plan in

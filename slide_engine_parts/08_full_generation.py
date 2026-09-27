@@ -933,8 +933,11 @@ def _with_data_attribute(open_tag, name):
 def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
     if not html:
         return html
-    if str(slide_type or '').strip().lower() in _COUNTER_FREE_SLIDE_TYPES:
+    normalized_type = str(slide_type or '').strip().lower()
+    if normalized_type in _COUNTER_FREE_SLIDE_TYPES:
         return _strip_slide_counter_chrome(html)
+    if normalized_type == 'closing':
+        return _ensure_slide_counter(html, slide_num, total_slides)
     counter = _slide_counter_text(slide_num, total_slides)
     if not counter:
         return html
@@ -980,15 +983,15 @@ def _remove_managed_slide_footer(html):
     )
 
 
-_COUNTER_FREE_SLIDE_TYPES = frozenset({'cover', 'closing', 'moodboard'})
+_COUNTER_FREE_SLIDE_TYPES = frozenset({'cover', 'moodboard'})
 
 
 def _strip_slide_counter_chrome(html):
     """Remove page-number chrome from slides that never receive a managed footer.
 
-    Cover, closing and moodboard slides are chrome-free by design. A counter or
-    footer that slipped in through model output or an older migration must be
-    removed here, not rewritten with a fresh number.
+    Cover and moodboard slides are chrome-free by design. A counter or footer
+    that slipped in through model output or an older migration must be removed
+    here, not rewritten with a fresh number.
     """
     if not html:
         return html
@@ -1010,6 +1013,43 @@ def _strip_slide_counter_chrome(html):
         r'<(?P<ntag>div|span|p|b|strong|small)\b(?=[^>]*\bbottom\s*:)[^>]*>'
         r'\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*</(?P=ntag)\s*>',
         '', html, flags=re.IGNORECASE)
+
+
+def _ensure_slide_counter(html, slide_num, total_slides):
+    """Keep a live page counter on the closing slide like its siblings.
+
+    The closing slide is displayed with its slide number, so renumbering must
+    update it rather than leave a stale value: existing marked counters are
+    rewritten, an unmarked bottom-corner «NN — NN» element is promoted to a
+    managed counter, and a missing counter is injected divider-style. Footer
+    shells are left untouched — on a closing slide they may carry contact data.
+    """
+    if not html:
+        return html
+    counter = _slide_counter_text(slide_num, total_slides)
+    if not counter:
+        return html
+    if re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
+        return _rewrite_preserved_counter(html, 'content', slide_num, total_slides)
+    leaf = re.compile(
+        r'(?P<open><(?P<tag>div|span|p|b|strong|small)\b[^>]*\bbottom\s*:[^>]*>)'
+        r'\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*(?P<close></(?P=tag)\s*>)', re.IGNORECASE)
+    html, upgraded = leaf.subn(
+        lambda m: _with_data_attribute(m.group('open'), 'data-slide-counter')
+        + counter + m.group('close'), html)
+    if upgraded:
+        return html
+    root_tag = re.search(
+        r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>',
+        html, re.IGNORECASE)
+    ltr = bool(root_tag and re.search(r'\bdir\s*=\s*["\']?ltr', root_tag.group(0), re.IGNORECASE))
+    side = 'right' if ltr else 'left'
+    counter_html = (
+        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;{side}:48px;'
+        f'font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);">{counter}</div>')
+    if re.search(r'</div>\s*$', html):
+        return re.sub(r'</div>\s*$', lambda m: counter_html + m.group(0), html, count=1)
+    return html + counter_html
 
 
 def _slide_element_end(html, opening_match):
