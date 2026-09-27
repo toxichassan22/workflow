@@ -1020,8 +1020,11 @@ def _ensure_slide_counter(html, slide_num, total_slides):
 
     The closing slide is displayed with its slide number, so renumbering must
     update it rather than leave a stale value: existing marked counters are
-    rewritten, an unmarked bottom-corner «NN — NN» element is promoted to a
-    managed counter, and a missing counter is injected divider-style. Footer
+    rewritten, a «NN — NN» leaf or a corner-anchored bare number is promoted to
+    a managed counter — a stale closing number may sit at the top edge, not
+    only the bottom, and may wrap the digits in one inline tag — and a missing
+    counter is injected divider-style. Promoted and injected counters carry an
+    explicit z-index so the brand overlay (z-index:1) cannot cover them. Footer
     shells are left untouched — on a closing slide they may carry contact data.
     """
     if not html:
@@ -1029,24 +1032,55 @@ def _ensure_slide_counter(html, slide_num, total_slides):
     counter = _slide_counter_text(slide_num, total_slides)
     if not counter:
         return html
+
+    def _promote(match):
+        open_tag = match.group('open')
+        if not re.search(r'\bdata-slide-counter\s*=', open_tag, re.IGNORECASE):
+            if not re.search(r'\bdir\s*=', open_tag, re.IGNORECASE):
+                open_tag = open_tag[:-1] + ' dir="ltr">'
+            open_tag = _with_data_attribute(open_tag, 'data-slide-counter')
+            open_tag = _set_tag_style(open_tag, ('z-index',), 'z-index:20!important;')
+        return (open_tag + (match.group('inner') or '') + counter
+                + (match.group('iclose') or '') + match.group('close'))
+
+    # A «NN — NN» leaf is unmistakably a page counter wherever it sits.
+    separated = re.compile(
+        r'(?P<open><(?P<tag>div|span|p|b|strong|small|em|i)\b[^>]*>)'
+        r'(?P<inner><(?P<itag>b|strong|small|em|i|span)\b[^>]*>)?'
+        r'\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*'
+        r'(?P<iclose>(?(inner)</(?P=itag)\s*>|))(?P<close></(?P=tag)\s*>)',
+        re.IGNORECASE)
+    # A bare «NN» is ordinary content until it is pinned to a slide corner.
+    anchored = re.compile(
+        r'(?P<open><(?P<tag>div|span|p|b|strong|small|em|i)\b'
+        r'(?=[^>]*(?<![-\w])(?:top|bottom|left|right|inset)\s*:)[^>]*>)'
+        r'(?P<inner><(?P<itag>b|strong|small|em|i|span)\b[^>]*>)?'
+        r'\s*\d{1,3}\s*(?:[—–-]\s*\d{1,3})?\s*'
+        r'(?P<iclose>(?(inner)</(?P=itag)\s*>|))(?P<close></(?P=tag)\s*>)',
+        re.IGNORECASE)
+
     if re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
-        return _rewrite_preserved_counter(html, 'content', slide_num, total_slides)
-    leaf = re.compile(
-        r'(?P<open><(?P<tag>div|span|p|b|strong|small)\b[^>]*\bbottom\s*:[^>]*>)'
-        r'\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*(?P<close></(?P=tag)\s*>)', re.IGNORECASE)
-    html, upgraded = leaf.subn(
-        lambda m: _with_data_attribute(m.group('open'), 'data-slide-counter')
-        + counter + m.group('close'), html)
-    if upgraded:
+        html = _rewrite_preserved_counter(html, 'content', slide_num, total_slides)
+    html = separated.subn(_promote, html)[0]
+    html = anchored.subn(_promote, html)[0]
+    if re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
         return html
+
     root_tag = re.search(
-        r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>',
+        r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>',
         html, re.IGNORECASE)
     ltr = bool(root_tag and re.search(r'\bdir\s*=\s*["\']?ltr', root_tag.group(0), re.IGNORECASE))
     side = 'right' if ltr else 'left'
     counter_html = (
         f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;{side}:48px;'
-        f'font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);">{counter}</div>')
+        f'z-index:20;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);">{counter}</div>')
+    if root_tag:
+        root_end = _slide_element_end(html, root_tag)
+        close_match = re.search(
+            r'</\s*' + re.escape(root_tag.group('tag')) + r'\s*>$',
+            html[:root_end], re.IGNORECASE)
+        if close_match:
+            return html[:close_match.start()] + counter_html + html[close_match.start():]
     if re.search(r'</div>\s*$', html):
         return re.sub(r'</div>\s*$', lambda m: counter_html + m.group(0), html, count=1)
     return html + counter_html

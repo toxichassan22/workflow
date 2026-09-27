@@ -859,9 +859,11 @@ silently exporting an older saved copy.
 
 - Managed content footers carry `data-slide-footer` and `data-slide-counter` and display current plus
   total as `03 — 12`. Section dividers carry the same counter marker, and the closing slide keeps a
-  live divider-style corner counter that renumbering updates or injects when missing (`_ensure_slide_counter`).
-  Cover and moodboard never receive a managed footer — stray counters there are stripped
-  (`_strip_slide_counter_chrome`), never rewritten.
+  live page counter that renumbering updates, promotes (a `NN — NN` leaf anywhere, or a bare `NN`
+  pinned to any slide edge — top included) or injects divider-style when missing
+  (`_ensure_slide_counter`); promoted/injected counters carry `z-index:20` so the brand overlay
+  (z-index:1) cannot cover them. Cover and moodboard never receive a managed footer — stray counters
+  there are stripped (`_strip_slide_counter_chrome`), never rewritten.
 - Deterministic index rows carry `data-index-section` / `data-index-page`. Renumbering recomputes each
   section start and the closing page, rebuilds the server index, and updates or removes browser rows.
 - Preserve `section_key`, `content_source`, `source_table` and `index_entries` from the slide plan in

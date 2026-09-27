@@ -100,38 +100,66 @@
         });
       } else {
         const counter = String(index).padStart(2, '0') + ' — ' + String(total).padStart(2, '0');
-        let counters = Array.from(root.querySelectorAll('[data-slide-counter]'));
-        if (!counters.length && type === 'section_divider') {
-          counters = Array.from(root.querySelectorAll('div, span')).filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''));
+        const counterText = /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/;
+        const separatedText = /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/;
+        const cornerAnchor = /(?:^|[\s;"'])(?:top|bottom|left|right|inset)\s*:/i;
+        const leafOf = node => {
+          if (!node.children.length && counterText.test(node.textContent || '')) return node;
+          if (node.children.length === 1) {
+            const child = node.children[0];
+            if (['B', 'STRONG', 'SMALL', 'EM', 'I', 'SPAN'].includes(child.tagName)
+                && !child.children.length && counterText.test(child.textContent || '')
+                && String(node.textContent || '').trim() === String(child.textContent || '').trim()) return child;
+          }
+          return null;
+        };
+        let pairs = Array.from(root.querySelectorAll('[data-slide-counter]'))
+          .map(node => ({ owner: node, leaf: leafOf(node) || node }));
+        if (!pairs.length && type === 'section_divider') {
+          pairs = Array.from(root.querySelectorAll('div, span'))
+            .filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''))
+            .map(node => ({ owner: node, leaf: node }));
         }
-        if (!counters.length && type === 'closing') {
-          counters = Array.from(root.querySelectorAll('div, span, p, b, strong, small')).filter(node =>
-            !node.children.length && /bottom\s*:/i.test(node.getAttribute('style') || '')
-            && /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
+        if (type === 'closing') {
+          // A stale closing number may sit at the top edge or wrap its digits in
+          // one inline tag — «NN — NN» anywhere is a counter, a bare «NN» only
+          // when the element is pinned to a slide corner.
+          const claimed = new Set();
+          Array.from(root.querySelectorAll('div, span, p, b, strong, small, em, i')).forEach(node => {
+            if (node.dataset.slideCounter) return;
+            const leaf = leafOf(node);
+            if (!leaf || claimed.has(leaf)) return;
+            if (separatedText.test(leaf.textContent || '') || cornerAnchor.test(node.getAttribute('style') || '')) {
+              claimed.add(leaf);
+              pairs.push({ owner: node, leaf });
+            }
+          });
         }
-        if (!counters.length && type !== 'closing') {
+        if (!pairs.length && type !== 'closing') {
           const footer = root.querySelector('footer, .slide-footer, [data-slide-footer]')
             || Array.from(root.querySelectorAll('footer, div')).find(node => /height:\s*36px/i.test(node.getAttribute('style') || ''));
           if (footer) {
             footer.dataset.slideFooter = '1';
-            const candidates = Array.from(footer.querySelectorAll('span, div')).filter(node => /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
+            const candidates = Array.from(footer.querySelectorAll('span, div')).filter(node => counterText.test(node.textContent || ''));
             const counterNode = candidates[candidates.length - 1];
-            if (counterNode) {
-              counterNode.dataset.slideCounter = '1';
-              counters = [counterNode];
-            }
+            if (counterNode) pairs.push({ owner: counterNode, leaf: counterNode });
           }
         }
-        counters.forEach(node => {
-          node.dataset.slideCounter = '1';
-          node.textContent = counter;
+        pairs.forEach(pair => {
+          pair.owner.dataset.slideCounter = '1';
+          if (type === 'closing') {
+            // The brand overlay sits at z-index:1 — keep the counter above it.
+            pair.owner.style.zIndex = '20';
+            if (!pair.owner.getAttribute('dir')) pair.owner.setAttribute('dir', 'ltr');
+          }
+          pair.leaf.textContent = counter;
         });
-        if (!counters.length && type === 'closing') {
+        if (!pairs.length && type === 'closing') {
           const counterEl = document.createElement('div');
           counterEl.dataset.slideCounter = '1';
           counterEl.setAttribute('dir', 'ltr');
           const side = (root.getAttribute('dir') || '').toLowerCase() === 'ltr' ? 'right' : 'left';
-          counterEl.style.cssText = 'position:absolute;bottom:34px;' + side + ':48px;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);';
+          counterEl.style.cssText = 'position:absolute;bottom:34px;' + side + ':48px;z-index:20;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.55);';
           counterEl.textContent = counter;
           root.appendChild(counterEl);
         }

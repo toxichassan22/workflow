@@ -43,15 +43,20 @@ class MeetingRequirementsTestsPart11(MeetingRequirementsTests):
         self.assertIn('04 — 04', closing_html)
         self.assertNotIn('09 — 12', closing_html)
 
-        # A closing slide with no number element gets one injected.
+        # A closing slide with no number element gets one injected above the
+        # brand overlay — without z-index the counter renders under
+        # data-cover-overlay (z-index:1) and stays invisible.
         slides[3]['html'] = (
             '<div class="slide" dir="rtl" style="width:1280px;height:720px;'
-            'position:relative;background:#111;color:#fff;"><h2>الخاتمة</h2></div>')
+            'position:relative;background:#111;color:#fff;">'
+            '<div data-cover-overlay style="position:absolute;inset:0;z-index:1;"></div>'
+            '<h2>الخاتمة</h2></div>')
         renumbered = engine.renumber_presentation_slides(
             slides, branding=branding, project_data=project)
         closing_html = renumbered[3]['html']
         self.assertIn('data-slide-counter="1"', closing_html)
         self.assertIn('04 — 04', closing_html)
+        self.assertIn('z-index:20', closing_html)
 
         # Designer-preserved closing slides take the preserved path — same rule.
         preserved = [dict(slide, _designer_keep_html=True) for slide in slides]
@@ -60,6 +65,84 @@ class MeetingRequirementsTestsPart11(MeetingRequirementsTests):
         closing_html = renumbered[3]['html']
         self.assertIn('data-slide-counter', closing_html)
         self.assertIn('04 — 04', closing_html)
+
+    def test_renumber_promotes_corner_numbers_on_closing_slide(self):
+        """A stale closing number is not always a bottom-corner «NN — NN» leaf —
+        it may sit at the top edge as a bare digit or wrap its digits in one
+        inline tag. Renumbering must promote those shapes instead of injecting a
+        second counter beside them."""
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#123B6D', 'secondary_color': '#0b1f33',
+            'accent_color': '#C4A35A', 'background_color': '#ffffff',
+            'text_color': '#111111', 'company_name': 'شركة الاختبار',
+        }
+        project = {'project_name': 'المشروع'}
+
+        def deck(closing_html):
+            return [
+                {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+                {'title': 'محتوى', 'type': 'content', 'section_key': 'overview',
+                 'html': '<div class="slide">محتوى</div>'},
+                {'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing',
+                 'html': closing_html},
+            ]
+
+        # Bare digit pinned to the top edge — promoted in place, marked, updated.
+        slides = deck(
+            '<div class="slide" dir="rtl" style="position:relative;background:#111;color:#fff;">'
+            '<h2>الخاتمة</h2><div>تواصل: 0500000000</div>'
+            '<div style="position:absolute;top:40px;right:48px;color:#fff;">73</div></div>')
+        closing_html = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)[2]['html']
+        self.assertIn('data-slide-counter="1"', closing_html)
+        self.assertIn('03 — 03', closing_html)
+        self.assertNotRegex(closing_html, r'>\s*73\s*<')
+        self.assertIn('top:40px;right:48px', closing_html)
+        self.assertIn('0500000000', closing_html)
+
+        # Digits inside one inline wrapper keep the wrapper's styling.
+        slides = deck(
+            '<div class="slide" dir="rtl" style="position:relative;background:#111;color:#fff;">'
+            '<h2>الخاتمة</h2>'
+            '<div style="position:absolute;top:40px;right:48px;">'
+            '<span style="font-size:20px;color:#C4A35A;">73</span></div></div>')
+        closing_html = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)[2]['html']
+        self.assertIn('data-slide-counter="1"', closing_html)
+        self.assertIn('font-size:20px;color:#C4A35A', closing_html)
+        self.assertIn('03 — 03', closing_html)
+        self.assertNotRegex(closing_html, r'>\s*73\s*<')
+
+        # An unanchored «NN — NN» leaf is still unmistakably a counter.
+        slides = deck(
+            '<div class="slide" dir="rtl" style="position:relative;background:#111;color:#fff;">'
+            '<h2>الخاتمة</h2><span>12 — 30</span></div>')
+        closing_html = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)[2]['html']
+        self.assertIn('data-slide-counter="1"', closing_html)
+        self.assertIn('03 — 03', closing_html)
+        self.assertNotIn('12 — 30', closing_html)
+
+        # A bare digit with no corner anchor is content, not a counter — the
+        # injected counter is added without touching it.
+        slides = deck(
+            '<div class="slide" dir="rtl" style="position:relative;background:#111;color:#fff;">'
+            '<h2>الخاتمة</h2><span>عدد الفروع: 73</span></div>')
+        closing_html = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)[2]['html']
+        self.assertIn('عدد الفروع: 73', closing_html)
+        self.assertIn('03 — 03', closing_html)
+
+        # Renumbering is idempotent — promoted counters keep updating, not
+        # duplicating.
+        slides = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)
+        slides = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)
+        closing_html = slides[2]['html']
+        self.assertEqual(closing_html.count('data-slide-counter'), 1)
+        self.assertIn('عدد الفروع: 73', closing_html)
 
     def test_renumber_strips_stray_counter_chrome_from_cover_and_moodboard(self):
         """Cover and moodboard still never receive a managed footer — stray
