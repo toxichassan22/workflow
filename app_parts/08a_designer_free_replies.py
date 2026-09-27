@@ -73,7 +73,19 @@ def _designer_chat_free_reply(message, has_attachment=False, history=None,
         'اسمك', 'مين انت', 'مين إنت', 'انت مين', 'إنت مين', 'من انت', 'من أنت',
         'انت من', 'إنت من', 'who are you', 'your name', 'what are you',
     )
-    if any(marker in text for marker in identity_markers):
+    # Naming a product/assistant name in a question («هل متأكد انك لندلوم مش
+    # سول؟»، «انت سول؟») is an identity check even without a «اسمك» marker.
+    # Question words must match as whole words — «انت» inside «انتاج» or «انك»
+    # inside «بانك» must not read as a question.
+    name_probe = (
+        'سول' in text or 'لندلوم' in text or 'لاندلوم' in text or 'لاند لوم' in text
+        or 'landloom' in text or re.search(r'\bsol\b', text) is not None
+    )
+    name_question = bool(
+        '؟' in text or '?' in text
+        or re.search(r'(?:^|\s)(?:هل|انت|إنت|انك|مش|مو|متأكد|صح)(?=\s|$)', text)
+    )
+    if any(marker in text for marker in identity_markers) or (name_probe and name_question):
         return (
             'أنا Landloom، مساعد التصميم الذكي في المنصة — متخصص في تعديل '
             'وتطوير شرائح عرضك. هذه الرسالة لم تستهلك أي رصيد.'
