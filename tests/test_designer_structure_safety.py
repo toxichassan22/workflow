@@ -305,6 +305,34 @@ class StructureSafetyTests(unittest.TestCase):
         out = slide('<p>5,000,000 ريال</p>')['html']
         self.assertTrue(safety.require_facts_preserved(sources, [out]))
 
+    def test_facts_preserved_ignores_editor_hook_data_attrs(self):
+        # data-field/data-key are editor hooks regenerated markup never carries;
+        # only semantic hooks like data-index-page stay mandatory.
+        sources = [slide('<p><span data-field="price" data-key="k1">5,000,000</span> ريال</p>'
+                         '<div data-visual-slot="hero"></div>')['html']]
+        out = slide('<p>5,000,000 ريال</p>')['html']
+        self.assertTrue(safety.require_facts_preserved(sources, [out]))
+
+    def test_facts_preserved_accepts_reformatted_number_tokens(self):
+        sources = [slide('<p>النطاق 71-79 وتاريخ 27/09/2026 ونسبة 35٪</p>')['html']]
+        out = slide('<p>النطاق 71–79، التاريخ 2026-09-27، النسبة 35%</p>')['html']
+        self.assertTrue(safety.require_facts_preserved(sources, [out]))
+
+    def test_facts_preserved_reason_names_the_dropped_category(self):
+        cases = {
+            'numbers': (slide('<p>إيراد 42 مليون</p>')['html'],
+                        slide('<p>إيراد مليون</p>')['html']),
+            'entities': (slide('<p>مشروع Vision Gate</p>')['html'],
+                         slide('<p>مشروع جديد</p>')['html']),
+            'media': (slide('<img src="/map.png">')['html'],
+                      slide('<p>لا خريطة</p>')['html']),
+        }
+        for category, (source, output) in cases.items():
+            with self.subTest(category=category):
+                with self.assertRaises(safety.StructureSafetyError) as ctx:
+                    safety.require_facts_preserved([source], [output])
+                self.assertIn(category, str(ctx.exception))
+
 
 class StructureDispatcherTests(unittest.TestCase):
     @classmethod
@@ -340,7 +368,8 @@ class StructureDispatcherTests(unittest.TestCase):
 
     def dispatch(self, action, slides, editor):
         plan = {'response': 'تم', 'actions': [action]}
-        with patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
+        with patch.object(self.module, 'DESIGNER_AGENT', False), \
+                patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
                 patch.object(self.module, 'call_zai_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
                 patch.object(self.module, '_designer_edit_slide', side_effect=editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides', side_effect=lambda slides, *args: slides), \

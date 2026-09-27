@@ -88,10 +88,14 @@ class PartialApplyTests(unittest.TestCase):
             cls.tenant = db.create_tenant('Partial', 'partial@example.test', 'hash', 'partial-slug')
         cls.token = auth.create_token(cls.tenant, 'partial@example.test', user_id=None,
                                       user_name='Admin', user_role='company_admin')
+        # Legacy-path tests — hold the agent flag off regardless of local .env.
+        cls.flag_off = patch.object(cls.module, 'DESIGNER_AGENT', False)
+        cls.flag_off.start()
 
     @classmethod
     def tearDownClass(cls):
         import db
+        cls.flag_off.stop()
         db.DB_PATH = cls.previous_db_path
         cls.temp.cleanup()
 

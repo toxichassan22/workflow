@@ -101,9 +101,14 @@ class AdminAgentTests(unittest.TestCase):
             cls.tenant, 'agent@example.test', user_id=None, user_name='Agent Admin',
             user_role='company_admin',
         )
+        # Designer-chat tests here pin the legacy path; hold the agent flag off
+        # regardless of the developer's local .env.
+        cls.agent_flag_off = patch.object(application_module, 'DESIGNER_AGENT', False)
+        cls.agent_flag_off.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.agent_flag_off.stop()
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

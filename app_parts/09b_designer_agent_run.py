@@ -591,6 +591,13 @@ def _designer_agent_run(tasks, ctx, session=None):
                 print(f"[DESIGNER-AGENT] task {n} ({op}) raised: {exc}")
                 ok, reply, reason = False, None, f'exception:{type(exc).__name__}'
             if not ok:
+                retryable = (op == 'restructure' and attempt + 1 < _AGENT_TASK_ATTEMPTS
+                             and str(reason or '').split(':', 1)[0] in (
+                                 'facts_not_preserved', 'content_not_preserved',
+                                 'incomplete_result', 'invalid_slide_html'))
+                if retryable:
+                    feedback = 'النتيجة رُفضت تحققاً: ' + str(reason)
+                    continue
                 break
             if after_htmls is None:
                 after_htmls = [slides[j].get('html', '') for j in

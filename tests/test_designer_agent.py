@@ -374,6 +374,41 @@ class AgentFlowTests(unittest.TestCase):
         self.assertIn('facts_not_preserved', reason)
         self.assertEqual(len(ctx['slides']), 2)
 
+    def test_restructure_retries_once_with_drop_feedback(self):
+        # A facts-check rejection must reach the worker as feedback so the next
+        # attempt can restore the dropped facts instead of failing silently.
+        slides = [
+            slide('<p>إيراد 7,500,000 ريال</p>', title='أ'),
+            slide('<p>تفاصيل التمويل</p>', title='ب'),
+            slide('<p>خارج النطاق</p>', title='خارج'),
+        ]
+        designer_agent_ids.ensure_slide_ids(slides)
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'restructure', 'select': {'ids': [s['id'] for s in slides[:2]]},
+             'instruction': 'ادمج في شريحة', 'target_count': 1}]}
+        good = '<div class="slide"><p>إيراد 7,500,000 ريال — تفاصيل التمويل</p></div>'
+        calls = []
+
+        def worker(ctx, sources, target, instruction, feedback=''):
+            calls.append(feedback)
+            if len(calls) == 1:
+                return [{'title': 'x', 'html': '<div class="slide"><p>ملخص</p></div>'}], None
+            return [{'title': 'x', 'html': good}], None
+
+        patches = self.agent_patches(self.module, turn)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
+                patch.object(self.module, '_agent_worker_restructure', side_effect=worker), \
+                patch.object(self.module, '_agent_worker_finalize',
+                             side_effect=lambda out, *a, **k: out):
+            response = self.post({'message': 'ادمج الشريحتين', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0, 'autoConfirm': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(len(calls), 2)
+        self.assertIn('facts_not_preserved', calls[1])
+        self.assertEqual(body['tasks'][0]['status'], 'success')
+        self.assertIn('7,500,000', body['slidesData'][0]['html'])
+
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):

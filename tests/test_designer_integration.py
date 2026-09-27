@@ -24,9 +24,14 @@ class DesignerIntegrationTests(unittest.TestCase):
             db.init_db()
             cls.tenant = db.create_tenant('Designer', 'designer@example.test', 'hash', 'designer')
         cls.token = auth.create_token(cls.tenant, 'designer@example.test', user_role='company_admin')
+        # These tests exercise the legacy all-at-once path; hold the flag off
+        # regardless of the developer's local .env.
+        cls.flag_off = patch.object(app, 'DESIGNER_AGENT', False)
+        cls.flag_off.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.flag_off.stop()
         cls.temp.cleanup()
 
     @staticmethod

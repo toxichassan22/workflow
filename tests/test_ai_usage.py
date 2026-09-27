@@ -55,9 +55,14 @@ class AiUsageTests(unittest.TestCase):
             cls.tenant_id, 'usage@example.test', user_id=None, user_name='Usage Admin',
             user_role='company_admin',
         )
+        # Designer-chat tests here pin the legacy path; hold the agent flag off
+        # regardless of the developer's local .env.
+        cls.agent_flag_off = patch.object(application_module, 'DESIGNER_AGENT', False)
+        cls.agent_flag_off.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.agent_flag_off.stop()
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

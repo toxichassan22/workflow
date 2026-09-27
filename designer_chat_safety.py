@@ -305,9 +305,9 @@ def require_preserved(source_htmls, result_htmls, expected_parts):
     return True
 
 
-_FACT_DIGIT_TRANS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬', '01234567890123456789.,')
+_FACT_DIGIT_TRANS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬٪', '01234567890123456789.,%')
 _FACT_NUMBER = re.compile(
-    r'[\d\u0660-\u0669\u06f0-\u06f9]+(?:[.,٫٬:/%\-][\d\u0660-\u0669\u06f0-\u06f9]+)*[%٪]?')
+    r'[\d\u0660-\u0669\u06f0-\u06f9]+(?:[.,٫٬:/%\-\u2013\u2014][\d\u0660-\u0669\u06f0-\u06f9]+)*[%٪]?')
 _FACT_LATIN_ENTITY = re.compile(r'\b[A-Za-z][A-Za-z0-9.&-]{2,}\b')
 _ENTITY_STOPWORDS = frozenset({
     'sar', 'usd', 'aed', 'eur', 'km', 'm2', 'sqm', 'kg', 'cm', 'mm',
@@ -316,16 +316,40 @@ _ENTITY_STOPWORDS = frozenset({
 # A separator only counts as a thousands group when exactly three digits follow
 # it — «5,000,000» and «٥٬٠٠٠٬٠٠٠» normalize alike while «100.5» stays decimal.
 _FACT_GROUP_SEP = re.compile(r'(?<=\d)[.,](?=\d{3}(?:\D|$))')
+# Most data-* attributes are editor hooks (data-field, data-key, data-visual-*)
+# that regenerated markup cannot reproduce; only semantic hooks are facts.
+_FACT_DATA_KEYS = frozenset({'data-index-page'})
+
+
+def _fact_norm(text):
+    """Digit-and-whitespace normalisation for comparing factual content."""
+    norm = _FACT_GROUP_SEP.sub('', text.translate(_FACT_DIGIT_TRANS))
+    return ' '.join(norm.split())
+
+
+def _fact_item(item):
+    """Map an inventory key to its fact form — row cells and data values are
+    compared digit-normalised so «٥٬٠٠٠» and «5,000» count as the same fact."""
+    if item[0] == 'row':
+        return ('row', tuple(_fact_norm(cell) for cell in item[1]))
+    if item[0] == 'data':
+        return ('data', item[1], _fact_norm(item[2]))
+    return item
 
 
 def _fact_numbers(text):
-    """Distinct numeric facts (digits, decimals, percents, dates) normalized so
-    «5,000,000» and «٥٠٠٠٠٠٠» compare equal; grouping separators are stripped."""
+    """Distinct numeric atoms. Composite tokens split on range/date separators
+    («71-79», «27/09/2026») so a different dash or ordering never counts as a
+    dropped fact; grouping separators fold («5,000,000» == «٥٠٠٠٠٠٠»)."""
     out = set()
     for token in _FACT_NUMBER.findall(text.translate(_FACT_DIGIT_TRANS)):
-        compact = _FACT_GROUP_SEP.sub('', token).strip('.,:/-')
-        if compact and any(ch.isdigit() for ch in compact):
-            out.add(compact)
+        compact = _FACT_GROUP_SEP.sub('', token).replace(',', '.')
+        for atom in re.split(r'[/:\-\u2013\u2014]', compact):
+            atom = atom.strip('.,%')
+            if atom:
+                atom = atom.lstrip('0') or '0'
+                if any(ch.isdigit() for ch in atom):
+                    out.add(atom)
     return out
 
 
@@ -343,8 +367,9 @@ def require_facts_preserved(source_htmls, result_htmls):
     merge must summarize narrative text and deduplicate the per-slide chrome
     (repeated headers, logos, footers, decorative vectors). The invariant that
     must never break instead: every numeric fact, table row, named entity and
-    non-text asset (media/data attributes) still appears at least once in the
-    result. Anything less and the merge silently drops data.
+    visible asset (media, semantic data hooks) still appears at least once in
+    the result. Anything less and the merge silently drops data. Rejections
+    name the missing category so a retry can repair the exact drop.
     """
     if not result_htmls:
         raise StructureSafetyError('incomplete_result')
@@ -354,22 +379,33 @@ def require_facts_preserved(source_htmls, result_htmls):
         inventory = _Inventory(html)
         source_texts.extend(inventory.text_items)
         required_nontext.update(
-            key for key in inventory.items if key[0] in ('media', 'data', 'row'))
+            _fact_item(key) for key in inventory.items
+            if key[0] in ('media', 'row')
+            or (key[0] == 'data' and key[1] in _FACT_DATA_KEYS))
     actual_nontext = set()
     result_texts = []
     for html in result_htmls:
         inventory = _Inventory(html)
         result_texts.extend(inventory.text_items)
         actual_nontext.update(
-            key for key in inventory.items if key[0] in ('media', 'data', 'row'))
-    if required_nontext - actual_nontext:
-        raise StructureSafetyError('facts_not_preserved')
+            _fact_item(key) for key in inventory.items
+            if key[0] in ('media', 'row')
+            or (key[0] == 'data' and key[1] in _FACT_DATA_KEYS))
+    missing_items = required_nontext - actual_nontext
+    if missing_items:
+        kinds = sorted({key[0] for key in missing_items})
+        sample = ','.join(str(key[1])[:60] for key in sorted(missing_items, key=str)[:3])
+        raise StructureSafetyError(f'facts_not_preserved:{"+".join(kinds)}:{sample}')
     source_text = '\n'.join(source_texts).translate(_FACT_DIGIT_TRANS)
     result_text = '\n'.join(result_texts).translate(_FACT_DIGIT_TRANS)
-    if _fact_numbers(source_text) - _fact_numbers(result_text):
-        raise StructureSafetyError('facts_not_preserved')
-    if _fact_entities(source_text) - _fact_entities(result_text):
-        raise StructureSafetyError('facts_not_preserved')
+    missing_numbers = _fact_numbers(source_text) - _fact_numbers(result_text)
+    if missing_numbers:
+        raise StructureSafetyError(
+            'facts_not_preserved:numbers:' + ','.join(sorted(missing_numbers)[:12]))
+    missing_entities = _fact_entities(source_text) - _fact_entities(result_text)
+    if missing_entities:
+        raise StructureSafetyError(
+            'facts_not_preserved:entities:' + ','.join(sorted(missing_entities)[:12]))
     return True
 
 
