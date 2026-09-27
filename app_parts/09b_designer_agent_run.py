@@ -78,6 +78,11 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     scoped worker call, then the shared finalize pipeline."""
     slides = ctx['slides']
     indexes = task['_indexes']
+    # The splice below replaces slides[lo..hi]: a non-contiguous selector would
+    # silently delete slides that were never part of the task.
+    lo = min(indexes)
+    if sorted(indexes) != list(range(lo, max(indexes) + 1)):
+        return False, None, 'non_contiguous_sources', None
     sources = [slides[i] for i in indexes]
     target = task.get('target_count') or (task.get('params') or {}).get('target_count')
     try:
@@ -111,10 +116,14 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     try:
         for html in part_htmls:
             designer_chat_safety.validate_single_slide(html)
-        designer_chat_safety.require_preserved(source_htmls, part_htmls, target)
+        if target < len(sources):
+            # Shrinking must summarize prose, so literal preservation is
+            # impossible by construction — facts must survive instead.
+            designer_chat_safety.require_facts_preserved(source_htmls, part_htmls)
+        else:
+            designer_chat_safety.require_preserved(source_htmls, part_htmls, target)
     except designer_chat_safety.StructureSafetyError as exc:
         return False, None, str(exc), None
-    lo = min(indexes)
     replacements = []
     for i, part in enumerate(finalized):
         replacement = copy.deepcopy(sources[0])

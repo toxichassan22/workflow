@@ -305,6 +305,74 @@ def require_preserved(source_htmls, result_htmls, expected_parts):
     return True
 
 
+_FACT_DIGIT_TRANS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬', '01234567890123456789.,')
+_FACT_NUMBER = re.compile(
+    r'[\d\u0660-\u0669\u06f0-\u06f9]+(?:[.,٫٬:/%\-][\d\u0660-\u0669\u06f0-\u06f9]+)*[%٪]?')
+_FACT_LATIN_ENTITY = re.compile(r'\b[A-Za-z][A-Za-z0-9.&-]{2,}\b')
+_ENTITY_STOPWORDS = frozenset({
+    'sar', 'usd', 'aed', 'eur', 'km', 'm2', 'sqm', 'kg', 'cm', 'mm',
+    'html', 'http', 'https', 'www', 'com', 'net', 'org', 'pdf', 'png', 'jpg',
+})
+# A separator only counts as a thousands group when exactly three digits follow
+# it — «5,000,000» and «٥٬٠٠٠٬٠٠٠» normalize alike while «100.5» stays decimal.
+_FACT_GROUP_SEP = re.compile(r'(?<=\d)[.,](?=\d{3}(?:\D|$))')
+
+
+def _fact_numbers(text):
+    """Distinct numeric facts (digits, decimals, percents, dates) normalized so
+    «5,000,000» and «٥٠٠٠٠٠٠» compare equal; grouping separators are stripped."""
+    out = set()
+    for token in _FACT_NUMBER.findall(text.translate(_FACT_DIGIT_TRANS)):
+        compact = _FACT_GROUP_SEP.sub('', token).strip('.,:/-')
+        if compact and any(ch.isdigit() for ch in compact):
+            out.add(compact)
+    return out
+
+
+def _fact_entities(text):
+    """Latin name-like tokens (project/entity names, acronyms) — Arabic names
+    have no capitalisation signal, so rows and numbers carry their check."""
+    return {tok for tok in _FACT_LATIN_ENTITY.findall(text)
+            if tok.lower() not in _ENTITY_STOPWORDS and any(ch.isalpha() for ch in tok)}
+
+
+def require_facts_preserved(source_htmls, result_htmls):
+    """Condensing-restructure check: facts survive, prose may be summarized.
+
+    Shrinking N slides into fewer pages cannot satisfy require_preserved — a
+    merge must summarize narrative text and deduplicate the per-slide chrome
+    (repeated headers, logos, footers, decorative vectors). The invariant that
+    must never break instead: every numeric fact, table row, named entity and
+    non-text asset (media/data attributes) still appears at least once in the
+    result. Anything less and the merge silently drops data.
+    """
+    if not result_htmls:
+        raise StructureSafetyError('incomplete_result')
+    required_nontext = set()
+    source_texts = []
+    for html in source_htmls:
+        inventory = _Inventory(html)
+        source_texts.extend(inventory.text_items)
+        required_nontext.update(
+            key for key in inventory.items if key[0] in ('media', 'data', 'row'))
+    actual_nontext = set()
+    result_texts = []
+    for html in result_htmls:
+        inventory = _Inventory(html)
+        result_texts.extend(inventory.text_items)
+        actual_nontext.update(
+            key for key in inventory.items if key[0] in ('media', 'data', 'row'))
+    if required_nontext - actual_nontext:
+        raise StructureSafetyError('facts_not_preserved')
+    source_text = '\n'.join(source_texts).translate(_FACT_DIGIT_TRANS)
+    result_text = '\n'.join(result_texts).translate(_FACT_DIGIT_TRANS)
+    if _fact_numbers(source_text) - _fact_numbers(result_text):
+        raise StructureSafetyError('facts_not_preserved')
+    if _fact_entities(source_text) - _fact_entities(result_text):
+        raise StructureSafetyError('facts_not_preserved')
+    return True
+
+
 def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
                       carry_watermark, progress):
     """Apply exactly one verified operation; return (execution record, Arabic status).

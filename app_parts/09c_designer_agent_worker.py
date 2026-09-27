@@ -307,12 +307,23 @@ def _agent_structure_edit(ctx, session, feedback='', style_brief=''):
 
 def _agent_worker_restructure(ctx, sources, target, instruction, feedback=''):
     """One scoped call regrouping ``sources`` into exactly ``target`` slides."""
+    condensing = target < len(sources)
+    if condensing:
+        keep = (
+            'حافظ على كل رقم وتاريخ ونسبة واسم جهة وصف جدول وصورة ورابط وخريطة '
+            'وخصائص بيانات حرفياً كما وردت. يجوز تلخيص النص السردي ودمج العناصر '
+            'المكررة بين الشرائح — الهيدر والشعارات والتذييل تكفي مرة واحدة — '
+            'لكن ممنوع إسقاط أي حقيقة أو رقم أو بند.')
+    else:
+        keep = (
+            'الحفاظ حرفياً على كل نص ورقم وصف جدول وصورة ورابط وخريطة وخصائص '
+            'البيانات من المصادر إلزامي — بلا تلخيص أو حذف أو اختراع.')
     system = (
         f'أعد هيكلة محتوى الشرائح المصدر أدناه في {target} شريحة بالضبط. '
-        'الحفاظ حرفياً على كل نص ورقم وصف جدول وصورة ورابط وخريطة وخصائص البيانات '
-        'من المصادر إلزامي — بلا تلخيص أو حذف أو اختراع. أعد توزيع المحتوى بشكل '
-        f'متوازن واحترافي فقط. {"المحاولة السابقة رُفضت: " + feedback if feedback else ""} '
-        'أخرج JSON بصيغة {"slides":[{"title":"..","html":".."}]} والـ html شريحة كاملة '
+        + keep
+        + ' أعد توزيع المحتوى بشكل متوازن واحترافي فقط. '
+        + (f'المحاولة السابقة رُفضت: {feedback} ' if feedback else '')
+        + 'أخرج JSON بصيغة {"slides":[{"title":"..","html":".."}]} والـ html شريحة كاملة '
         'بجذر <div class="slide" style="width:1280px;height:720px;...">.')
     user = json.dumps({'sources': [{'title': s.get('title', ''), 'html': s.get('html', '')}
                                    for s in sources],

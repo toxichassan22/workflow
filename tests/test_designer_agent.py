@@ -308,6 +308,72 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertIn('R', response.get_json()['data']['slidesData'][1]['html'])
 
+    def restructure_ctx(self, slides):
+        return {'slides': slides, 'current_index': 0, 'project_data': {},
+                'tenant_id': self.tenant, 'branding': {}, 'presentation_id': None,
+                'creative_images': {}, 'user_image_refs': None,
+                'report_progress': lambda *a, **k: None}
+
+    def test_restructure_rejects_non_contiguous_sources(self):
+        # A splice over [lo..hi] would silently delete the slides between the
+        # selected ids — the executor must refuse instead of dropping them.
+        slides = [slide(f'<p>S{i}</p>', title=f'S{i}') for i in range(5)]
+        designer_agent_ids.ensure_slide_ids(slides)
+        ctx = self.restructure_ctx(slides)
+        task = {'_indexes': [1, 3], '_instruction': 'ادمج', 'op': 'restructure',
+                'slides': [slides[1]['id'], slides[3]['id']], 'target_count': 1}
+        with patch.object(self.module, '_agent_worker_restructure',
+                          side_effect=AssertionError('worker must not run')):
+            ok, reply, reason, after = self.module._agent_exec_restructure(task, ctx, None)
+        self.assertFalse(ok)
+        self.assertEqual(reason, 'non_contiguous_sources')
+        self.assertEqual(len(ctx['slides']), 5)
+
+    def test_condensing_restructure_passes_facts_check(self):
+        header = '<div class="header"><img src="/logo.png"></div>'
+        slides = [
+            slide(header + '<p>نص طويل عن الإيراد</p>'
+                  '<table><tr><td>الإيراد</td><td>5,000,000</td></tr></table>', title='أ'),
+            slide(header + '<p>تفاصيل التمويل 35%</p>'
+                  '<table><tr><td>التكلفة</td><td>2,500</td></tr></table>', title='ب'),
+            slide(header + '<p>خاتمة</p>', title='ج'),
+            slide('<p>خارج النطاق</p>', title='خارج'),
+        ]
+        designer_agent_ids.ensure_slide_ids(slides)
+        ctx = self.restructure_ctx(slides)
+        condensed = ('<div class="slide">' + header + '<p>ملخص الإيراد</p>'
+                     '<table><tr><td>الإيراد</td><td>5,000,000</td></tr>'
+                     '<tr><td>التكلفة</td><td>2,500</td></tr></table>'
+                     '<p>35%</p></div>')
+        produced = [{'title': 'مدمج', 'html': condensed}]
+        task = {'_indexes': [0, 1, 2], '_instruction': 'قلل إلى شريحة',
+                'op': 'restructure', 'slides': [s['id'] for s in slides[:3]],
+                'target_count': 1, 'style_brief': ''}
+        with patch.object(self.module, '_agent_worker_restructure', return_value=(produced, None)), \
+                patch.object(self.module, '_agent_worker_finalize', side_effect=lambda out, *a, **k: out):
+            ok, reply, reason, after = self.module._agent_exec_restructure(task, ctx, None)
+        self.assertTrue(ok, reason)
+        self.assertEqual(len(ctx['slides']), 2)
+        self.assertEqual(ctx['slides'][1]['title'], 'خارج')
+
+    def test_condensing_restructure_rejects_dropped_number(self):
+        slides = [
+            slide('<p>إيراد 7,500,000 ريال</p>', title='أ'),
+            slide('<p>تفاصيل</p>', title='ب'),
+        ]
+        designer_agent_ids.ensure_slide_ids(slides)
+        ctx = self.restructure_ctx(slides)
+        produced = [{'title': 'مدمج', 'html': '<div class="slide"><p>ملخص الإيراد</p></div>'}]
+        task = {'_indexes': [0, 1], '_instruction': 'قلل إلى شريحة',
+                'op': 'restructure', 'slides': [s['id'] for s in slides],
+                'target_count': 1, 'style_brief': ''}
+        with patch.object(self.module, '_agent_worker_restructure', return_value=(produced, None)), \
+                patch.object(self.module, '_agent_worker_finalize', side_effect=lambda out, *a, **k: out):
+            ok, reply, reason, after = self.module._agent_exec_restructure(task, ctx, None)
+        self.assertFalse(ok)
+        self.assertIn('facts_not_preserved', reason)
+        self.assertEqual(len(ctx['slides']), 2)
+
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):

@@ -246,6 +246,65 @@ class StructureSafetyTests(unittest.TestCase):
             with self.assertRaises(safety.StructureSafetyError):
                 safety.validate_single_slide(html)
 
+    def test_facts_preserved_allows_condensed_prose_and_deduped_chrome(self):
+        # Shrinking 3 slides to 1 summarizes narrative text and keeps the
+        # repeated header/logo only once — literal preservation must fail,
+        # the facts check must pass.
+        header = '<div class="header"><img src="/logo.png"><p>شركة المثال</p></div>'
+        sources = [
+            slide(header + '<h1>الملخص</h1><p>نص سردي طويل جداً يشرح المشروع Vision Gate بالتفصيل</p>'
+                    '<table><tr><td>الإيراد</td><td>5,000,000</td></tr></table>')['html'],
+            slide(header + '<p>تفاصيل إضافية عن التمويل بنسبة 35%</p>'
+                    '<table><tr><td>التكلفة</td><td>2,500</td></tr></table>'
+                    '<div data-map-id="overview"></div>')['html'],
+            slide(header + '<p>الخلاصة بتاريخ 2025-03-01</p>')['html'],
+        ]
+        condensed = slide(
+            '<div class="header"><img src="/logo.png"><p>شركة المثال</p></div>'
+            '<h1>الملخص المدمج</h1><p>مشروع Vision Gate — ملخص.</p>'
+            '<table><tr><td>الإيراد</td><td>5,000,000</td></tr>'
+            '<tr><td>التكلفة</td><td>2,500</td></tr></table>'
+            '<p>نسبة 35% — 2025-03-01</p><div data-map-id="overview"></div>')['html']
+        self.assertTrue(safety.require_facts_preserved(sources, [condensed]))
+        with self.assertRaises(safety.StructureSafetyError):
+            safety.require_preserved(sources, [condensed], 1)
+
+    def test_facts_preserved_rejects_dropped_fact(self):
+        base = '<div class="header"><img src="/logo.png"></div>'
+        sources = [
+            slide(base + '<p>إيراد 7,500,000 ريال من Vision Gate</p>'
+                    '<table><tr><td>بند</td><td>42</td></tr></table>'
+                    '<img src="/chart1.png"><div data-index-page="fin"></div>')['html'],
+            slide(base + '<p>ملاحظة</p>')['html'],
+        ]
+        drops = {
+            'number': slide(base + '<p>إيراد ريال من Vision Gate</p>'
+                            '<table><tr><td>بند</td><td>42</td></tr></table>'
+                            '<img src="/chart1.png"><div data-index-page="fin"></div>')['html'],
+            'row': slide(base + '<p>إيراد 7,500,000 ريال من Vision Gate</p>'
+                         '<img src="/chart1.png"><div data-index-page="fin"></div>')['html'],
+            'media': slide(base + '<p>إيراد 7,500,000 ريال من Vision Gate</p>'
+                           '<table><tr><td>بند</td><td>42</td></tr></table>'
+                           '<div data-index-page="fin"></div>')['html'],
+            'data': slide(base + '<p>إيراد 7,500,000 ريال من Vision Gate</p>'
+                          '<table><tr><td>بند</td><td>42</td></tr></table>'
+                          '<img src="/chart1.png">')['html'],
+            'entity': slide(base + '<p>إيراد 7,500,000 ريال</p>'
+                            '<table><tr><td>بند</td><td>42</td></tr></table>'
+                            '<img src="/chart1.png"><div data-index-page="fin"></div>')['html'],
+        }
+        for name, output in drops.items():
+            with self.subTest(dropped=name):
+                with self.assertRaises(safety.StructureSafetyError):
+                    safety.require_facts_preserved(sources, [output])
+        with self.assertRaises(safety.StructureSafetyError):
+            safety.require_facts_preserved(sources, [])
+
+    def test_facts_preserved_normalizes_arabic_digits(self):
+        sources = [slide('<p>التكلفة ٥٬٠٠٠٬٠٠٠ ريال</p>')['html']]
+        out = slide('<p>5,000,000 ريال</p>')['html']
+        self.assertTrue(safety.require_facts_preserved(sources, [out]))
+
 
 class StructureDispatcherTests(unittest.TestCase):
     @classmethod
