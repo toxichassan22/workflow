@@ -627,7 +627,7 @@ def _build_designer_slim_planner_prompt(branding, training_note, watermark_note,
 
 {watermark_note}
 {facts_note}{targets_note}
-أنت Sol، كبير المصممين. حدّد الأداة والشرائح المستهدفة فقط وأعد JSON فقط:
+أنت Landloom، كبير المصممين. حدّد الأداة والشرائح المستهدفة فقط وأعد JSON فقط:
 {{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 - حذف صف أو عمود من جدول داخل شريحة هو edit_slides فقط وليس delete_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف.
 {all_note}
@@ -949,7 +949,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
 
 {project_context}
-أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
+أنت Landloom، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
 1. قواعد الإزاحات والتخطيط الجراحي (Spatial & Layout Precision):
    - تحكّم دقيق بكسلي ونسبية في CSS: رفع أو تنزيل الهيدر، ضبط هوامش البطاقات الداخلية (padding) والخارجية (margins)، وتغيير حجم البطاقات والمسافات البينية (gap).
    - تحويل التخطيط بسلاسة بين عمودين أو ثلاثة أعمدة أو شبكة غير متماثلة (Asymmetric Grid) مع الحفاظ التام على انسيابية العناصر.
@@ -1270,6 +1270,15 @@ def _designer_chat_free_reply(message, has_attachment=False):
     )
     if any(marker in text for marker in edit_markers):
         return None
+    identity_markers = (
+        'اسمك', 'مين انت', 'مين إنت', 'انت مين', 'إنت مين', 'من انت', 'من أنت',
+        'انت من', 'إنت من', 'who are you', 'your name', 'what are you',
+    )
+    if any(marker in text for marker in identity_markers):
+        return (
+            'أنا Landloom، مساعد التصميم الذكي في المنصة — متخصص في تعديل '
+            'وتطوير شرائح عرضك. هذه الرسالة لم تستهلك أي رصيد.'
+        )
     greetings = (
         'سلام', 'مرحبا', 'مرحب', 'اهلا', 'أهلا', 'هلا', 'هاي', 'هاى', 'ازيك', 'ازيك؟',
         'عامل ايه', 'عامل إيه', 'صباح الخير', 'مساء الخير', 'مساء النور', 'صباح النور',
@@ -1288,7 +1297,7 @@ def _designer_chat_free_reply(message, has_attachment=False):
     )
     if any(marker in text for marker in help_markers):
         return (
-            'أنا مساعد التصميم لهذا العرض. أنفذ التعديلات على الشرائح المفتوحة فقط، '
+            'أنا Landloom، مساعد التصميم لهذا العرض. أنفذ التعديلات على الشرائح المفتوحة فقط، '
             'ولا أقرأ المسودة ولا أستهلك رصيداً إلا بعد طلب تعديل واضح منك. '
             'يمكنك طلب تعديل شريحة، إنشاء شريحة جديدة، أو إرفاق صورة ثم طلب وضعها '
             'في شريحة منفصلة أو داخل شريحة أو كعلامة مائية أو كشعار إضافي.'
