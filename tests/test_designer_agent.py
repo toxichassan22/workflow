@@ -409,6 +409,82 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(body['tasks'][0]['status'], 'success')
         self.assertIn('7,500,000', body['slidesData'][0]['html'])
 
+    def test_verify_failure_rolls_back_and_retries_from_original_slides(self):
+        slides = [
+            slide('<p>إيراد 7,500,000 ريال</p>', title='أ'),
+            slide('<p>تفاصيل التمويل</p>', title='ب'),
+            slide('<p>خارج النطاق</p>', title='خارج'),
+        ]
+        designer_agent_ids.ensure_slide_ids(slides)
+        originals = [s['html'] for s in slides]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'restructure', 'select': {'ids': [s['id'] for s in slides[:2]]},
+             'instruction': 'ادمج في شريحة', 'target_count': 1}]}
+        merged = '<div class="slide"><p>إيراد 7,500,000 ريال — تفاصيل التمويل</p></div>'
+        worker_sources = []
+
+        def worker(ctx, sources, target, instruction, feedback=''):
+            worker_sources.append([s.get('html', '') for s in sources])
+            return [{'title': 'x', 'html': merged}], None
+
+        real_verify = designer_agent_ops.verify_task_result
+        verify_calls = []
+
+        def flaky(op, before, after):
+            verify_calls.append(op)
+            if len(verify_calls) == 1:
+                return False, ['overflow:12']
+            return real_verify(op, before, after)
+
+        patches = self.agent_patches(self.module, turn)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
+                patch.object(self.module.designer_agent_ops, 'verify_task_result',
+                             side_effect=flaky), \
+                patch.object(self.module, '_agent_worker_restructure', side_effect=worker), \
+                patch.object(self.module, '_agent_worker_finalize',
+                             side_effect=lambda out, *a, **k: out):
+            response = self.post({'message': 'ادمج الشريحتين', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0, 'autoConfirm': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        # The retry rebuilt from the original two slides, not from the
+        # already-merged (rejected) deck.
+        self.assertEqual(len(worker_sources), 2)
+        self.assertEqual(worker_sources[1], originals[:2])
+        self.assertEqual(body['tasks'][0]['status'], 'success')
+        self.assertEqual(len(body['slidesData']), 2)
+
+    def test_exhausted_verify_failure_restores_the_original_deck(self):
+        slides = [
+            slide('<p>إيراد 7,500,000 ريال</p>', title='أ'),
+            slide('<p>تفاصيل التمويل</p>', title='ب'),
+            slide('<p>خارج النطاق</p>', title='خارج'),
+        ]
+        designer_agent_ids.ensure_slide_ids(slides)
+        originals = [s['html'] for s in slides]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'restructure', 'select': {'ids': [s['id'] for s in slides[:2]]},
+             'instruction': 'ادمج في شريحة', 'target_count': 1}]}
+        merged = '<div class="slide"><p>إيراد 7,500,000 ريال — تفاصيل التمويل</p></div>'
+
+        def worker(ctx, sources, target, instruction, feedback=''):
+            return [{'title': 'x', 'html': merged}], None
+
+        patches = self.agent_patches(self.module, turn)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
+                patch.object(self.module.designer_agent_ops, 'verify_task_result',
+                             return_value=(False, ['overflow:12'])), \
+                patch.object(self.module, '_agent_worker_restructure', side_effect=worker), \
+                patch.object(self.module, '_agent_worker_finalize',
+                             side_effect=lambda out, *a, **k: out):
+            response = self.post({'message': 'ادمج الشريحتين', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0, 'autoConfirm': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        # A failed task must not leave its rejected mutation in the returned deck.
+        self.assertEqual(body['tasks'][0]['status'], 'failed')
+        self.assertEqual([s['html'] for s in body['slidesData']], originals)
+
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):

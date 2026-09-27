@@ -229,7 +229,11 @@ def verify_task_result(op, before_htmls, after_htmls):
             validate_single_slide(html)
         except StructureSafetyError as exc:
             return False, [f'invalid_html:{exc}']
-    if op in EDIT_OPS or op in ('create', 'restructure', 'split'):
+    # Restructure/split already ran their own preservation gate inside the
+    # executor (require_facts_preserved/require_preserved). Recounting
+    # occurrences here would reject a legitimate merge that deduplicates
+    # repeated figures — the executor check is the authority for those ops.
+    if op in EDIT_OPS or op == 'create':
         missing = missing_numbers(before_htmls, after_htmls)
         if missing:
             reasons.append('missing_numbers:' + ','.join(missing[:8]))

@@ -77,7 +77,8 @@
         // request means slides were lost. Neither is applied quietly.
         const incoming = reply.slidesData.filter(item => item && typeof item.html === 'string' && containsSlideRoot(item.html));
         const deleteIntent = Array.isArray(reply.actions) && reply.actions.some(action =>
-          action?.status === 'success' && ['delete_slide', 'remove_slide', 'merge_slides', 'combine_slides'].includes(action.tool));
+          action?.status === 'success' && ['delete_slide', 'remove_slide', 'merge_slides', 'combine_slides',
+            'agent_delete', 'agent_restructure'].includes(action.tool));
         if (!incoming.length || incoming.length !== reply.slidesData.length) {
           tenantDesignerMessages.push({
             role: 'assistant',

@@ -585,12 +585,17 @@ def _designer_agent_run(tasks, ctx, session=None):
         feedback = ''
         for attempt in range(_AGENT_TASK_ATTEMPTS):
             after_htmls = None
+            # Executors mutate slides before verification runs; a rejected
+            # attempt must leave the deck untouched (and retry from the
+            # original slides, not from its own rejected output).
+            deck_backup = [dict(s) if isinstance(s, dict) else s for s in slides]
             try:
                 ok, reply, reason, after_htmls = executor(task, ctx, session, feedback)
             except Exception as exc:
                 print(f"[DESIGNER-AGENT] task {n} ({op}) raised: {exc}")
                 ok, reply, reason = False, None, f'exception:{type(exc).__name__}'
             if not ok:
+                slides[:] = deck_backup
                 retryable = (op == 'restructure' and attempt + 1 < _AGENT_TASK_ATTEMPTS
                              and str(reason or '').split(':', 1)[0] in (
                                  'facts_not_preserved', 'content_not_preserved',
@@ -619,8 +624,9 @@ def _designer_agent_run(tasks, ctx, session=None):
                         break
             if v_ok:
                 break
+            slides[:] = deck_backup
             reason = ';'.join(v_reasons) or 'verification_failed'
-            if attempt + 1 < _AGENT_TASK_ATTEMPTS and op in ('edit', 'redesign', 'rewrite'):
+            if attempt + 1 < _AGENT_TASK_ATTEMPTS and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
                 feedback = 'النتيجة رُفضت تحققاً: ' + reason
                 continue
             ok = False
