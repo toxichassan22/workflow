@@ -90,7 +90,9 @@
 
 
     function tenantMapCoordinatesFromClient(clientX, clientY, img) {
-      if (!tenantMapPreviewState || !img) return null;
+      // Without the zoom the server rendered at, click-to-coordinates math lands the
+      // point at a completely wrong place — refuse instead of storing corrupt data.
+      if (!tenantMapPreviewState || tenantMapPreviewState.frameAccurate === false || !img) return null;
       const rect = img.getBoundingClientRect();
       if (!rect.width || !rect.height) return null;
       const x = (clientX - rect.left) / rect.width - 0.5;
@@ -107,7 +109,12 @@
     function setTenantMapPointFromClick(event) {
       const img = event.currentTarget;
       const coordinates = tenantMapCoordinatesFromClient(event.clientX, event.clientY, img);
-      if (!coordinates) return;
+      if (!coordinates) {
+        if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget) {
+          toast('تعذر تحديد الإحداثيات على هذه الخريطة');
+        }
+        return;
+      }
       const [nextLat, nextLng] = coordinates;
       if (tenantMapPolygonMode && tenantSelectedMapType === 'overview') {
         tenantMapDraftPolygonPoints.push([nextLat, nextLng]);
@@ -352,7 +359,7 @@
       tenantMapDraftPinHistory = [];
       tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = true;
-      renderLocationWorkflowState();
+      selectMapPreviewView('overview');
       renderTenantMapPolygonOverlay();
     }
 
@@ -395,7 +402,7 @@
       tenantMapDraftPolygonPoints = [];
       tenantMapPinMode = true;
       tenantMapDraftPinHistory = [[lat, lng]];
-      renderLocationWorkflowState();
+      selectMapPreviewView('overview');
       renderTenantMapPolygonOverlay();
     }
 

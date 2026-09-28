@@ -999,21 +999,10 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             rel_path = 'uploads/maps/' + os.path.basename(path)
         placeholders[placeholder] = '/' + rel_path
 
-        # The file itself remains a valid persisted map even when a later
-        # renderer version changed its overlays or labels.  Keep importing that
-        # image so slide generation never produces an empty map frame.  Only
-        # trust the attached metadata for marker-aware layout when both versions
-        # match the renderer that produced the current map implementation.
-        current_map_metadata = (
-            metadata.get('map_highlight_version') == maps_service.MAP_HIGHLIGHT_RENDER_VERSION
-            and metadata.get('map_label_version') == maps_service.MAP_LABEL_RENDER_VERSION
-        )
-        if not current_map_metadata:
-            continue
-        # The map row is the source of truth for the image that was actually
-        # approved.  Project JSON can lag behind it when a user edits a map and
-        # immediately starts presentation generation, so do not let stale JSON
-        # metadata survive a hydration pass.
+        # Frame geometry (site pin, zoom, center) is a fact about the persisted file
+        # itself, so it stays trustworthy even when a later renderer version changed
+        # the overlay drawing.  Restoring it unconditionally keeps reopened
+        # presentations from falling back to a wildly wrong default zoom.
         if metadata.get('lat') is not None:
             creative['map_lat'] = metadata['lat']
         if metadata.get('lng') is not None:
@@ -1033,6 +1022,23 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
                 map_centers.setdefault(base_type, {
                     'lat': metadata['center_lat'], 'lng': metadata['center_lng']
                 })
+        if metadata.get('highlight_site') is not None:
+            map_highlight_site = bool(metadata.get('highlight_site'))
+        # The file itself remains a valid persisted map even when a later
+        # renderer version changed its overlays or labels.  Keep importing that
+        # image so slide generation never produces an empty map frame.  Only
+        # trust the attached metadata for marker-aware layout when both versions
+        # match the renderer that produced the current map implementation.
+        current_map_metadata = (
+            metadata.get('map_highlight_version') == maps_service.MAP_HIGHLIGHT_RENDER_VERSION
+            and metadata.get('map_label_version') == maps_service.MAP_LABEL_RENDER_VERSION
+        )
+        if not current_map_metadata:
+            continue
+        # The map row is the source of truth for the image that was actually
+        # approved.  Project JSON can lag behind it when a user edits a map and
+        # immediately starts presentation generation, so do not let stale JSON
+        # metadata survive a hydration pass.
         if 'landmarks_matrix' in metadata:
             creative['map_landmarks'] = metadata['landmarks_matrix']
         if 'access_roads' in metadata:
@@ -1044,8 +1050,6 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         if 'landmark_map_items' in metadata:
             project_data['landmark_map_items'] = metadata['landmark_map_items']
             creative['map_landmark_items'] = metadata['landmark_map_items']
-        if metadata.get('highlight_site') is not None:
-            map_highlight_site = bool(metadata.get('highlight_site'))
     existing_placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
     merged_placeholders = {key: value for key, value in existing_placeholders.items() if key and value}
     merged_placeholders.update(placeholders)

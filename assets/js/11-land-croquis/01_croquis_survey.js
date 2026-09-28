@@ -577,6 +577,30 @@
       return path + '?' + params.join('&') + hash;
     }
 
+    // The clean sidecar only earns its place when the client overlay can repaint what
+    // the marked file already bakes in. With no frame (zoom/center) or no drawable
+    // items the large view degraded to an almost-empty image while the thumbnail —
+    // which always shows the marked file — stayed correct.
+    function mapPreviewOverlayReady(mapType) {
+      if (mapType === 'overview') {
+        if (tenantMapPolygonMode || tenantMapPinMode) return true;
+      } else if (mapType === 'access') {
+        if (tenantRoadEditMode || tenantRoadDrawingTarget) return true;
+      } else if (mapType === 'catchment') {
+        if (tenantCatchmentEditMode) return true;
+      } else if (mapType === 'landmarks') {
+        if (tenantLandmarksEditMode) return true;
+      }
+      const zooms = (tenantCreativeImages && tenantCreativeImages.map_zooms) || {};
+      if (!Number.isFinite(Number(zooms[mapType]))) return false;
+      const centers = (tenantCreativeImages && tenantCreativeImages.map_centers) || {};
+      if (mapType !== 'catchment' && !centers[mapType]) return false;
+      if (mapType === 'catchment') return catchmentMapLandmarks().length > 0;
+      if (mapType === 'landmarks') return nearbyMapLandmarks().length > 0;
+      if (mapType === 'access') return accessRoadGeometry().length > 0;
+      return true;
+    }
+
     function selectMapPreviewView(mapType) {
       const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === mapType);
       if (!view) return false;
@@ -594,7 +618,8 @@
       const placeholders = tenantCreativeImages.map_placeholders || {};
       const markedUrl = view.keys.map(key => placeholders[key]).find(Boolean);
       const editableUrl = view.editableKeys?.map(key => placeholders[key]).find(Boolean);
-      const url = mapPreviewIsVisible(view) ? (editableUrl || markedUrl) : '';
+      const useEditableBase = !!editableUrl && mapPreviewOverlayReady(mapType);
+      const url = mapPreviewIsVisible(view) ? (useEditableBase ? editableUrl : (markedUrl || editableUrl)) : '';
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) {
@@ -613,8 +638,13 @@
       const center = (tenantCreativeImages.map_centers || {})[mapType] || {};
       const lat = Number(center.lat ?? tenantCreativeImages.map_lat ?? tenantProjectData.location_lat);
       const lng = Number(center.lng ?? tenantCreativeImages.map_lng ?? tenantProjectData.location_lng);
-      const zoom = Number((tenantCreativeImages.map_zooms || {})[mapType] || (tenantCreativeImages.map_zooms || {}).overview || 17);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) tenantMapPreviewState = { lat, lng, zoom, usesEditableBase: !!editableUrl };
+      const zooms = tenantCreativeImages.map_zooms || {};
+      const zoom = Number(zooms[mapType] || zooms.overview || 17);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) tenantMapPreviewState = {
+        lat, lng, zoom,
+        usesEditableBase: url === editableUrl,
+        frameAccurate: Number.isFinite(Number(zooms[mapType]))
+      };
       renderTenantMapPolygonOverlay();
       updateTenantMapInteractionState();
       previewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
