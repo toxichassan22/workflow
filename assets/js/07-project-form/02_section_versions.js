@@ -642,7 +642,7 @@
         return value.map(item => ({
           name: (item && (item.name || item.area || item.title)) || '',
           category: item && (item.category || item.type || ''),
-          distance_km: item && (item.distance_km ?? item.distance ?? ''),
+          distance_km: item && locationDistanceKmOrBlank(item),
           duration_minutes: item && (item.duration_minutes ?? item.duration_min ?? item.minutes ?? ''),
           lat: item && (item.lat ?? item.latitude ?? ''),
           lng: item && (item.lng ?? item.longitude ?? ''),

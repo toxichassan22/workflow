@@ -88,6 +88,34 @@ def api_nearby_landmarks():
     return jsonify(result), status
 
 
+def _landmark_distance_sort_value(item):
+    """Distance in km so landmark tables list nearest first; unknown distance sinks."""
+    if not isinstance(item, dict):
+        return float('inf')
+    for key in ('distance_km', 'distance'):
+        try:
+            value = float(item.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    distance_text = item.get('distance_text')
+    if distance_text:
+        match = re.search(r'(\d+(?:\.\d+)?)', str(distance_text).replace(',', ''))
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+    try:
+        meters = float(item.get('distance_meters'))
+    except (TypeError, ValueError):
+        meters = None
+    if meters is not None and math.isfinite(meters):
+        return meters / 1000.0
+    return float('inf')
+
+
 @app.route('/api/preview-map-data', methods=['POST'])
 @require_auth
 def api_preview_map_data():
@@ -166,6 +194,12 @@ def api_preview_map_data():
                 lm['duration_minutes'] = entry.get('duration_min')
                 lm['distance_km'] = entry.get('distance_km')
                 lm['distance_text'] = f"{entry.get('distance_km')} كم" if entry.get('distance_km') else None
+
+    # Rows show nearest-first by the driving distance the table displays; the
+    # matrix is index-aligned with `landmarks`, so it is reordered with them.
+    entry_by_lm = {id(lm): matrix[i] for i, lm in enumerate(geocoded) if i < len(matrix)}
+    landmarks = sorted(landmarks, key=_landmark_distance_sort_value)
+    matrix = [entry_by_lm[id(lm)] for lm in landmarks if id(lm) in entry_by_lm]
 
     catchment_text = project_data.get('catchment_areas') or project_data.get('catchment_zones')
     zones = maps_service._parse_catchment_zones(catchment_text) if isinstance(catchment_text, str) else catchment_text
@@ -343,6 +377,11 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         item['distance_text'] = entry.get('distance_text') or item.get('distance_text')
         item['duration_min'] = entry.get('duration_min') or item.get('duration_min')
         item['duration_minutes'] = entry.get('duration_min') or item.get('duration_minutes')
+    # Driving distance is the displayed column; re-sort once metrics are merged so
+    # Places' preferred-first order doesn't leak into the table.
+    entry_by_item = {id(item): nearby_matrix[i] for i, item in enumerate(nearby_items) if i < len(nearby_matrix)}
+    nearby_items = sorted(nearby_items, key=_landmark_distance_sort_value)
+    nearby_matrix = [entry_by_item[id(item)] for item in nearby_items if id(item) in entry_by_item]
 
     curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=tenant_id)
     city_error = None
@@ -395,7 +434,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         'location_lat': lat,
         'location_detail': arabic_location.get('formatted_address') or location_details.get('formatted_address', ''),
         'location_lng': lng,
-        'nearby_landmarks': landmark_lines(nearby_items, nearby_matrix),
+        'nearby_landmarks': landmark_lines(nearby_items),
         'city_landmarks': landmark_lines(city_items),
     }
     if place_names.get('city') and not str(project_data.get('city') or '').strip():
@@ -419,9 +458,12 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         if index < len(city_matrix) and isinstance(city_matrix[index], dict):
             if city_matrix[index].get('duration_min') is not None:
                 item['duration_minutes'] = city_matrix[index].get('duration_min')
+            if city_matrix[index].get('distance_km') is not None:
+                item['distance_km'] = city_matrix[index].get('distance_km')
             if city_matrix[index].get('distance_text'):
                 item['distance_text'] = city_matrix[index].get('distance_text')
-    fields['city_landmarks'] = landmark_lines(city_items, city_matrix)
+    city_items = sorted(city_items, key=_landmark_distance_sort_value)
+    fields['city_landmarks'] = landmark_lines(city_items)
     catchment_lines = []
     for item in city_items:
         name = item.get('name')

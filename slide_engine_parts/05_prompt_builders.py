@@ -1049,6 +1049,34 @@ def _repair_slide_text_contrast(html):
     return html
 
 
+def _landmark_distance_sort_key(row):
+    """Numeric km so landmark tables list nearest first; unknown distance sinks."""
+    if not isinstance(row, dict):
+        return float('inf')
+    for key in ('distance_km', 'distance'):
+        try:
+            value = float(row.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            return value
+    distance_text = row.get('distance_text') or row.get('distance_str')
+    if distance_text:
+        match = re.search(r'(\d+(?:\.\d+)?)', str(distance_text).replace(',', ''))
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+    try:
+        meters = float(row.get('distance_meters'))
+    except (TypeError, ValueError):
+        meters = None
+    if meters is not None and math.isfinite(meters):
+        return meters / 1000.0
+    return float('inf')
+
+
 def _nearby_landmark_table_rows(project_data, limit=7):
     """Return the same four visible columns used by the nearby-landmarks table."""
     source = project_data if isinstance(project_data, dict) else {}
@@ -1065,6 +1093,7 @@ def _nearby_landmark_table_rows(project_data, limit=7):
 
     selected = [row for row in rows if is_selected(row)]
     rows = selected if selected else rows
+    rows = sorted(rows, key=_landmark_distance_sort_key)
 
     def first_value(row, *keys):
         for key in keys:

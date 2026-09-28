@@ -138,12 +138,32 @@
       tbody.appendChild(tr);
     }
 
+    function locationDistanceKmOrBlank(item) {
+      const direct = parseFloat(item && (item.distance_km ?? item.distance));
+      if (Number.isFinite(direct)) return direct;
+      const textMatch = String((item && item.distance_text) || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
+      return textMatch ? parseFloat(textMatch[1]) : '';
+    }
+
+    function locationDistanceKmValue(item) {
+      const km = locationDistanceKmOrBlank(item);
+      if (km !== '') return km;
+      const meters = parseFloat(item && item.distance_meters);
+      return Number.isFinite(meters) ? meters / 1000 : Infinity;
+    }
+
     function setLocationTableValue(key, value) {
       const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
       if (!table) return;
       const tbody = table.querySelector('tbody');
       tbody.innerHTML = '';
+      if (Array.isArray(value) && (key === 'nearby_landmarks' || key === 'city_landmarks')) {
+        value = value.slice().sort((a, b) => locationDistanceKmValue(a) - locationDistanceKmValue(b));
+      }
       let rows = parseLocationFieldText(key, value);
+      if (key === 'nearby_landmarks' || key === 'city_landmarks') {
+        rows = rows.slice().sort((a, b) => locationDistanceKmValue(a) - locationDistanceKmValue(b));
+      }
       if (key === 'main_roads') {
         const seen = new Set();
         rows = rows.flatMap(row => normalizeAccessRoadNames([row.name]).map(name => ({ ...row, name })))

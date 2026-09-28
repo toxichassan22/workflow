@@ -160,6 +160,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             if isinstance(raw_cm, list):
                 city_marks = raw_cm
         city_marks = [r for r in city_marks if isinstance(r, dict)]
+        city_marks = sorted(city_marks, key=_landmark_distance_sort_key)
 
         def first_val(item, *keys):
             for k in keys:
