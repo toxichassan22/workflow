@@ -4,13 +4,14 @@
         : (Array.isArray(tenantCreativeImages.map_catchment_landmarks) ? tenantCreativeImages.map_catchment_landmarks : []);
       const cityRows = Array.isArray(tenantProjectData.city_landmarks_data) ? tenantProjectData.city_landmarks_data : [];
       const selectedRows = cityRows.filter(item => item?.show_on_map === true || item?.selected === true);
-      const desiredRows = (selectedRows.length ? selectedRows : cityRows).slice(0, 7);
+      // Selected rows cap at 11; with no selection the first 7 show like before.
+      const desiredRows = (selectedRows.length ? selectedRows.slice(0, 11) : cityRows.slice(0, 7));
       const storedByName = new Map(stored.map(item => [String(item?.name || '').trim(), item]));
       const source = tenantCatchmentEditMode && Array.isArray(tenantCatchmentEditDraft?.landmarks)
         ? tenantCatchmentEditDraft.landmarks
         : desiredRows.length
           ? desiredRows.map(item => mergeResolvedMapLandmark(item, storedByName.get(String(item?.name || '').trim())))
-          : stored.slice(0, 7);
+          : stored.slice(0, 11);
       const positions = tenantCatchmentEditMode
         ? tenantCatchmentEditDraft?.labelPositions || {}
         : tenantProjectData.catchment_label_positions || {};
@@ -146,13 +147,14 @@
         : (Array.isArray(tenantCreativeImages.map_landmark_items) ? tenantCreativeImages.map_landmark_items : []);
       const nearbyRows = Array.isArray(tenantProjectData.nearby_landmarks_data) ? tenantProjectData.nearby_landmarks_data : [];
       const selectedRows = nearbyRows.filter(item => item?.show_on_map === true || item?.selected === true);
-      const desiredRows = (selectedRows.length ? selectedRows : nearbyRows).slice(0, 7);
+      // Selected rows cap at 11; with no selection the first 7 show like before.
+      const desiredRows = (selectedRows.length ? selectedRows.slice(0, 11) : nearbyRows.slice(0, 7));
       const storedByName = new Map(stored.map(item => [String(item?.name || '').trim(), item]));
       const source = tenantLandmarksEditMode && Array.isArray(tenantLandmarksEditDraft?.landmarks)
         ? tenantLandmarksEditDraft.landmarks
         : desiredRows.length
           ? desiredRows.map(item => mergeResolvedMapLandmark(item, storedByName.get(String(item?.name || '').trim())))
-          : stored.slice(0, 7);
+          : stored.slice(0, 11);
       const positions = tenantLandmarksEditMode
         ? tenantLandmarksEditDraft?.labelPositions || {}
         : tenantProjectData.landmark_label_positions || {};

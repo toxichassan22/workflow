@@ -263,6 +263,8 @@
 
     async function ensureAccessEditablePreview() {
       if (tenantMapPreviewState?.usesEditableBase) return true;
+      selectMapPreviewView('access');
+      if (tenantMapPreviewState?.usesEditableBase) return true;
       if (!(await applyAccessMapEdits())) return false;
       return selectMapPreviewView('access');
     }
@@ -305,6 +307,8 @@
 
     async function ensureCatchmentEditablePreview() {
       if (tenantMapPreviewState?.usesEditableBase) return true;
+      selectMapPreviewView('catchment');
+      if (tenantMapPreviewState?.usesEditableBase) return true;
       if (!(await applyCatchmentMapEdits())) return false;
       return selectMapPreviewView('catchment');
     }
@@ -346,6 +350,8 @@
     }
 
     async function ensureLandmarksEditablePreview() {
+      if (tenantMapPreviewState?.usesEditableBase) return true;
+      selectMapPreviewView('landmarks');
       if (tenantMapPreviewState?.usesEditableBase) return true;
       if (!(await applyLandmarksMapEdits())) return false;
       return selectMapPreviewView('landmarks');

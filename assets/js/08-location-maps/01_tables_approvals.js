@@ -62,17 +62,18 @@
         selectInput = document.createElement('input');
         selectInput.type = 'checkbox';
         selectInput.className = 'lt-map-select';
+        selectInput.dataset.sectionLockIgnore = '1';
         selectInput.checked = !!(row.show_on_map || row.selected);
         selectInput.addEventListener('change', () => {
           const selected = table.querySelectorAll('.lt-map-select:checked');
-          if (selected.length > 7) {
+          if (selected.length > 11) {
             selectInput.checked = false;
-            toast('الحد الأقصى 7 معالم لكل خريطة');
+            toast('الحد الأقصى 11 معلم لكل خريطة');
           }
           serializeLocationTable(key);
           if (key === 'city_landmarks') invalidateCatchmentMapApproval();
           if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
-          invalidateLocationAnalysisApproval();
+          if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
         });
         selectTd.appendChild(selectInput);
       }
@@ -375,7 +376,13 @@
         const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
         const landmarksModeLocked = key === 'nearby_landmarks' && tenantLandmarksEditMode;
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea')
-          .forEach(control => { control.disabled = approved || roadModeLocked || catchmentModeLocked || landmarksModeLocked; });
+          .forEach(control => {
+            const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
+            // The map-select checkbox is map display config, not analysis content:
+            // it stays clickable after site-analysis approval so users can pick
+            // which landmarks render before (re)generating the map.
+            control.disabled = modeLocked || (approved && !control.classList.contains('lt-map-select'));
+          });
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] button')
           .forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked || landmarksModeLocked; });
         const add = document.querySelector('#tenantProjectForm table[data-location-table="' + key + '"]')?.closest('.location-table-field')?.querySelector('.location-table-add');

@@ -1263,8 +1263,12 @@ def _parse_landmarks_text(text):
     return landmarks
 
 
-def select_map_landmark_rows(structured, limit=7):
-    """Return the approved landmark rows for a map without changing their input order."""
+def select_map_landmark_rows(structured, limit=7, selected_limit=11):
+    """Return the approved landmark rows for a map without changing their input order.
+
+    Explicitly checked rows may go up to ``selected_limit``; with no selection the
+    first ``limit`` rows show like before.
+    """
     if isinstance(structured, str):
         try:
             structured = json.loads(structured)
@@ -1282,7 +1286,9 @@ def select_map_landmark_rows(structured, limit=7):
         row_limit = max(0, min(7, int(limit)))
     except (TypeError, ValueError):
         row_limit = 7
-    return (selected or rows)[:row_limit]
+    if selected:
+        return selected[:selected_limit]
+    return rows[:row_limit]
 
 
 def _merge_landmark_data(landmarks, structured):

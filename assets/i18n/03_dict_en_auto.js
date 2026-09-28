@@ -573,7 +573,7 @@ window.__WFI18N_EN_AUTO = /*I18N_EN_AUTO_BEGIN*/{
 "الحد الأدنى": "Minimum",
 "الحد الأدنى للعائد Hurdle Rate %": "Minimum Hurdle Rate %",
 "الحد الأعلى": "Maximum",
-"الحد الأقصى 7 معالم لكل خريطة": "Maximum 7 landmarks per map",
+"الحد الأقصى 11 معلم لكل خريطة": "Maximum 11 landmarks per map",
 "الحقول": "Fields",
 "الحقول المخصصة": "Custom Fields",
 "الحقول المخصصة للمشاريع": "Custom project fields",

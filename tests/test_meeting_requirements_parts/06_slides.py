@@ -638,6 +638,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertEqual(len(service.select_map_landmark_rows([
             {'name': f'مكان {index}'} for index in range(1, 10)
         ])), 7)
+        # Explicit selections may reach 11; the twelfth checked row is dropped.
+        self.assertEqual(len(service.select_map_landmark_rows([
+            {'name': f'مكان {index}', 'show_on_map': True} for index in range(1, 14)
+        ])), 11)
 
         client = self.app.test_client()
         result = {'placeholders': {}, 'zooms': {'catchment': 12}, 'centers': {'catchment': {'lat': 24.0, 'lng': 46.0}}, 'catchment_landmarks': []}
@@ -723,6 +727,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         rows = [{'name': f'معلم {index}', 'show_on_map': index in (3, 7)} for index in range(1, 10)]
         self.assertEqual([row['name'] for row in service.select_map_landmark_rows(rows)], ['معلم 3', 'معلم 7'])
         self.assertEqual(len(service.select_map_landmark_rows([{'name': f'معلم {index}'} for index in range(1, 10)])), 7)
+        # Explicit selections may reach 11; the twelfth checked row is dropped.
+        self.assertEqual(len(service.select_map_landmark_rows([
+            {'name': f'معلم {index}', 'selected': True} for index in range(1, 14)
+        ])), 11)
 
         client = self.app.test_client()
         # The map gates read approval from the stored draft, never the payload.
