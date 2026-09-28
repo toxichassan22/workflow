@@ -409,5 +409,6 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "land.docs.max_files": "Up to {n} files can be uploaded: the croquis, permit, and any supporting documents",
   "land.docs.overflow": "Maximum {n} files — {m} extra file(s) ignored",
   "map.save_state_failed": "Could not save the map state on the server",
+  "map.edit_apply_failed": "Could not apply the edits to the map",
   "notif.cat.platform": "Platform"
 }/*I18N_EN_END*/;

@@ -343,6 +343,18 @@
       return selectMapPreviewView('access');
     }
 
+    // Edit mode may open on an approved map: the approval then has to lift before
+    // the server recompose below, or the stored flag rejects it. Lifting it here —
+    // only when the clean sidecar is missing and a recompose is actually needed —
+    // keeps cancel-without-changes free for approved maps.
+    async function releaseMapApprovalForEdit(mapType) {
+      if (!tenantCreativeImages.map_approvals?.[mapType]) return;
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
+      releaseLocationSectionApproval();
+      renderMapPreviewGallery(true);
+      await saveMapPreviewState();
+    }
+
     function applyCatchmentMapEdits() {
       return (async () => {
         try {
@@ -383,6 +395,7 @@
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('catchment');
       if (tenantMapPreviewState?.usesEditableBase) return true;
+      await releaseMapApprovalForEdit('catchment');
       if (!(await applyCatchmentMapEdits())) return false;
       return selectMapPreviewView('catchment');
     }
@@ -427,6 +440,7 @@
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('landmarks');
       if (tenantMapPreviewState?.usesEditableBase) return true;
+      await releaseMapApprovalForEdit('landmarks');
       if (!(await applyLandmarksMapEdits())) return false;
       return selectMapPreviewView('landmarks');
     }

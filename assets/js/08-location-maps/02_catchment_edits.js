@@ -30,7 +30,6 @@
     }
 
     async function startCatchmentEditMode() {
-      if (tenantCreativeImages.map_approvals?.catchment) { toast('خريطة المنطقة معتمدة'); return; }
       if (!openLocationTableMap('catchment')) return;
       tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
       tenantCatchmentEditMode = true;
@@ -130,9 +129,11 @@
       releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      triggerAutoSaveDraft();
-      await applyCatchmentMapEdits();
-      toast('تم اعتماد تعديلات خريطة المنطقة');
+      // The released approval must reach the server before the recompose, or the
+      // stored flag rejects it with MAP_ALREADY_APPROVED.
+      await saveMapPreviewState();
+      const applied = await applyCatchmentMapEdits();
+      toast(applied ? 'تم اعتماد تعديلات خريطة المنطقة' : WFT('map.edit_apply_failed', 'تعذر حفظ التعديلات على الخريطة'));
     }
 
     function cancelCatchmentEdits() {
@@ -173,7 +174,6 @@
     }
 
     async function startLandmarksEditMode() {
-      if (tenantCreativeImages.map_approvals?.landmarks) { toast('خريطة المعالم معتمدة'); return; }
       if (!openLocationTableMap('landmarks')) return;
       tenantProjectData.landmark_map_items = nearbyMapLandmarks();
       tenantLandmarksEditMode = true;
@@ -275,9 +275,11 @@
       releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      triggerAutoSaveDraft();
-      await applyLandmarksMapEdits();
-      toast('تم اعتماد تعديلات خريطة المعالم');
+      // The released approval must reach the server before the recompose, or the
+      // stored flag rejects it with MAP_ALREADY_APPROVED.
+      await saveMapPreviewState();
+      const applied = await applyLandmarksMapEdits();
+      toast(applied ? 'تم اعتماد تعديلات خريطة المعالم' : WFT('map.edit_apply_failed', 'تعذر حفظ التعديلات على الخريطة'));
     }
 
     function cancelLandmarksEdits() {

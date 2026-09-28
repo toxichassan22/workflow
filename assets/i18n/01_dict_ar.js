@@ -409,5 +409,6 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "land.docs.max_files": "يمكن رفع {n} ملفات كحد أقصى: الكروكي والرخصة وأي مستندات مساندة",
   "land.docs.overflow": "الحد الأقصى {n} ملفات — تم تجاهل {m} ملف إضافي",
   "map.save_state_failed": "تعذر حفظ حالة الخريطة على الخادم",
+  "map.edit_apply_failed": "تعذر حفظ التعديلات على الخريطة",
   "notif.cat.platform": "المنصة"
 }/*I18N_AR_END*/;

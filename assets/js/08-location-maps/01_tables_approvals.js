@@ -417,6 +417,24 @@
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', -1)" ' + (generationLocked ? 'disabled' : '') + '>تصغير</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()" ' + (mapApproved ? 'disabled' : '') + '>رسم حدود الموقع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()" ' + (mapApproved ? 'disabled' : '') + '>تعيين الموقع</button>';
+        } else if (view.mapType === 'catchment' && tenantCatchmentEditMode) {
+          actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmCatchmentEdits()">اعتماد</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoCatchmentEditsButton" onclick="undoCatchmentEdits()">تراجع</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelCatchmentEdits()">إلغاء</button>';
+        } else if (view.mapType === 'catchment' && generated) {
+          // The edit entry stays live on an approved map: confirming the edits releases
+          // the approval, and cancelling leaves it untouched.
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            approvalButton +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startCatchmentEditMode()">تعديل</button>';
+        } else if (view.mapType === 'landmarks' && tenantLandmarksEditMode) {
+          actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmLandmarksEdits()">اعتماد</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoLandmarksEditsButton" onclick="undoLandmarksEdits()">تراجع</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelLandmarksEdits()">إلغاء</button>';
+        } else if (view.mapType === 'landmarks' && generated) {
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'landmarks\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            approvalButton +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startLandmarksEditMode()">تعديل</button>';
         } else if (mapApproved) {
           // Keep an inconsistent legacy state recoverable: approval can survive while its image
           // reference is missing, and the user must be able to release it before regenerating.
@@ -432,22 +450,6 @@
             approvalButton +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()" ' + (mapApproved ? 'disabled' : '') + '>إضافة / تعديل الطرق</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')" ' + (mapApproved ? 'disabled' : '') + '>رسم مسار الطرق</button>';
-        } else if (view.mapType === 'catchment' && tenantCatchmentEditMode) {
-          actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmCatchmentEdits()">اعتماد</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoCatchmentEditsButton" onclick="undoCatchmentEdits()">تراجع</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelCatchmentEdits()">إلغاء</button>';
-        } else if (view.mapType === 'catchment' && generated) {
-          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            approvalButton +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startCatchmentEditMode()" ' + (mapApproved ? 'disabled' : '') + '>تعديل</button>';
-        } else if (view.mapType === 'landmarks' && tenantLandmarksEditMode) {
-          actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmLandmarksEdits()">اعتماد</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoLandmarksEditsButton" onclick="undoLandmarksEdits()">تراجع</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelLandmarksEdits()">إلغاء</button>';
-        } else if (view.mapType === 'landmarks' && generated) {
-          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'landmarks\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            approvalButton +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startLandmarksEditMode()" ' + (mapApproved ? 'disabled' : '') + '>تعديل</button>';
         } else if (view.mapType !== 'overview') {
           actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (generationLocked ? 'disabled' : '') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>' + approvalButton;
         }
