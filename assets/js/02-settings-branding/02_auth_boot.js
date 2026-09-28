@@ -410,7 +410,10 @@
     function updateTenantTopbar() {
       if (!tenantUser) return;
       document.getElementById('tenantName').textContent = tenantUser.companyName || 'الشركة';
-      document.getElementById('tenantPlan').textContent = tenantUser.plan || 'free';
+      const planBadgeEl = document.getElementById('tenantPlan');
+      const packageLabel = tenantUser.packageName || '';
+      planBadgeEl.textContent = packageLabel;
+      planBadgeEl.style.display = packageLabel ? '' : 'none';
       updateTenantLogoMark();
       const adminBtn = document.getElementById('tenantAdminBtn');
       if (adminBtn) adminBtn.classList.toggle('tenant-hidden', !tenantUser.isAdmin);

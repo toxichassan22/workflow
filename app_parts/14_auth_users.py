@@ -331,6 +331,17 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
     return send_platform_email(recipient, subject, body)
 
 
+def _tenant_package_brief(tenant):
+    """Assigned billing-package summary for tenant payloads. Never raises."""
+    package_id = (tenant or {}).get('package_id')
+    name = None
+    if package_id:
+        package = db.get_billing_package(package_id)
+        if package:
+            name = package.get('name')
+    return {'packageId': package_id, 'packageName': name}
+
+
 def _company_payload(tenant):
     trial = db.tenant_trial_state(tenant)
     return {
@@ -341,6 +352,7 @@ def _company_payload(tenant):
         'phone': tenant.get('phone'),
         'email': tenant['email'],
         'plan': tenant.get('plan', 'free'),
+        **_tenant_package_brief(tenant),
         'creditBalance': db.sar_to_usd(tenant.get('credit_balance')),
         'creditBalanceSar': float(tenant.get('credit_balance') or 0),
         'isActive': bool(tenant.get('is_active')),
@@ -580,6 +592,7 @@ def api_login():
                 'email': tenant['email'],
                 'isAdmin': bool(tenant.get('is_admin')),
                 'plan': tenant.get('plan', 'free'),
+                **_tenant_package_brief(tenant),
                 'domain': tenant.get('domain'),
                 'username': tenant.get('username'),
                 'slug': db.tenant_slug(tenant),
@@ -614,6 +627,7 @@ def api_login():
                 'email': tenant['email'],
                 'isAdmin': False,
                 'plan': tenant.get('plan', 'free'),
+                **_tenant_package_brief(tenant),
                 'domain': tenant.get('domain'),
                 'slug': db.tenant_slug(tenant),
             },
@@ -701,6 +715,7 @@ def api_me():
             'email': t['email'],
             'isAdmin': bool(g.is_admin),
             'plan': t.get('plan', 'free'),
+            **_tenant_package_brief(t),
             'subdomain': t.get('subdomain'),
             'domain': t.get('domain'),
             'slug': db.tenant_slug(t),

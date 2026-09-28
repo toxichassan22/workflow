@@ -101,19 +101,26 @@
     }
 
     const SAG_PLAN_COLORS = ['var(--chart-1)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-2)', 'var(--chart-5)', '#8b5cf6', '#0ea5e9', '#f59e0b'];
-    const SAG_PLAN_ORDER = ['free', 'pro', 'enterprise'];
+    const SAG_NO_PACKAGE = '__none__';
+
+    // «الباقة» on a company is its assigned billing package (tenants.package_id
+    // → billing_packages) — the catalog the desk edits under platform settings.
+    function sagTenantPackageKey(t) {
+      return (t && t.packageId) ? String(t.packageId) : SAG_NO_PACKAGE;
+    }
+
+    function sagPackageLabel(key) {
+      if (key === SAG_NO_PACKAGE) return WFT('admin.no_package', 'بدون باقة');
+      const hit = (sagAllTenants || []).find(t => String(t.packageId || '') === String(key) && t.packageName);
+      return hit ? hit.packageName : String(key);
+    }
 
     function sagSortedPlans(plans) {
       return plans.slice().sort((a, b) => {
-        const ia = SAG_PLAN_ORDER.indexOf(a), ib = SAG_PLAN_ORDER.indexOf(b);
-        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || String(a).localeCompare(String(b));
+        if (a === SAG_NO_PACKAGE) return 1;
+        if (b === SAG_NO_PACKAGE) return -1;
+        return sagPackageLabel(a).localeCompare(sagPackageLabel(b));
       });
-    }
-
-    function sagPlanLabel(plan) {
-      const known = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
-      if (known[plan]) return known[plan];
-      return String(plan || 'free').replace(/[-_]+/g, ' ');
     }
 
     async function sagGoToCompaniesByPlan(plan) {
@@ -128,9 +135,9 @@
       const sel = document.getElementById('sagFilterPlan');
       if (!sel) return;
       const current = sel.value;
-      const plans = sagSortedPlans([...new Set(sagAllTenants.map(t => t.plan || 'free'))]);
-      sel.innerHTML = '<option value="">' + WFT('admin.filter_all_plans', 'كل الخطط') + '</option>' +
-        plans.map(p => '<option value="' + escapeHtml(p) + '">' + escapeHtml(sagPlanLabel(p)) + '</option>').join('');
+      const plans = sagSortedPlans([...new Set(sagAllTenants.filter(t => !t.isAdmin).map(sagTenantPackageKey))]);
+      sel.innerHTML = '<option value="">' + WFT('admin.filter_all_plans', 'كل الباقات') + '</option>' +
+        plans.map(p => '<option value="' + escapeHtml(p) + '">' + escapeHtml(sagPackageLabel(p)) + '</option>').join('');
       if (plans.indexOf(current) !== -1) sel.value = current;
     }
 
@@ -166,11 +173,11 @@
       const donutEl = document.getElementById('sagPlanDonut');
       if (donutEl) {
         const planCounts = {};
-        sagAllTenants.filter(t => !t.isAdmin).forEach(t => { const p = t.plan || 'free'; planCounts[p] = (planCounts[p] || 0) + 1; });
+        sagAllTenants.filter(t => !t.isAdmin).forEach(t => { const p = sagTenantPackageKey(t); planCounts[p] = (planCounts[p] || 0) + 1; });
         const plans = sagSortedPlans(Object.keys(planCounts));
         donutEl.innerHTML = sagDonut(plans.map((p, i) => ({
           key: p,
-          label: sagPlanLabel(p),
+          label: sagPackageLabel(p),
           value: planCounts[p],
           color: SAG_PLAN_COLORS[i % SAG_PLAN_COLORS.length]
         })), WFT('admin.donut_companies', 'شركة'));
@@ -387,7 +394,9 @@
       const list = document.getElementById('sagTenantsList');
       if (!tenants.length) { list.innerHTML = '<p class="tenant-hint">لا توجد شركات</p>'; return; }
       list.innerHTML = tenants.map(t => {
-        const planBadge = { 'free': '<span style="color:var(--muted)">Free</span>', 'pro': '<span style="color:var(--green)">Pro</span>', 'enterprise': '<span style="color:#7c3aed">Enterprise</span>' }[t.plan || 'free'] || t.plan;
+        const planBadge = t.packageName
+          ? '<span style="color:var(--p)">' + escapeHtml(t.packageName) + '</span>'
+          : '<span style="color:var(--muted)">' + escapeHtml(WFT('admin.no_package', 'بدون باقة')) + '</span>';
         const statusBadge = t.isActive ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const adminBadge = t.isAdmin ? ' | <span style="color:#7c3aed;font-weight:600">SAG Admin</span>' : '';
         const keyBadge = t.isAdmin ? '' : (t.keyActive
@@ -421,7 +430,7 @@
           t.companyName, t.accountManagerName, t.email, t.username, t.phone
         ].filter(Boolean).join(' ').toLowerCase();
         if (q && !searchValue.includes(q)) return false;
-        if (plan && t.plan !== plan) return false;
+        if (plan && sagTenantPackageKey(t) !== plan) return false;
         if (status === 'active' && !t.isActive) return false;
         if (status === 'inactive' && t.isActive) return false;
         return true;
@@ -698,9 +707,23 @@
     }
 
     async function showSagTenantDetails(tenantId) {
-      const data = await api('GET', '/api/admin/tenants/' + tenantId + '/details');
+      const [data, pkgData] = await Promise.all([
+        api('GET', '/api/admin/tenants/' + tenantId + '/details'),
+        api('GET', '/api/admin/packages').catch(() => null)
+      ]);
       if (!data.success) { toast('فشل تحميل التفاصيل'); return; }
       const t = data.tenant;
+      const sagPackages = (pkgData && pkgData.success && pkgData.packages) || [];
+      const currentPackageId = t.packageId ? String(t.packageId) : '';
+      let packageOptions = '<option value="">' + escapeHtml(WFT('admin.no_package', 'بدون باقة')) + '</option>' +
+        sagPackages.map(p =>
+          '<option value="' + escapeHtml(p.id) + '"' + (String(p.id) === currentPackageId ? ' selected' : '') + '>' +
+          escapeHtml(p.name) + (p.is_active ? '' : ' — ' + escapeHtml(WFT('admin.package_inactive', 'موقوفة'))) +
+          '</option>').join('');
+      if (currentPackageId && !sagPackages.some(p => String(p.id) === currentPackageId)) {
+        packageOptions += '<option value="' + escapeHtml(currentPackageId) + '" selected>' +
+          escapeHtml(t.packageName || currentPackageId) + '</option>';
+      }
       const c = data.counts;
       const users = data.users || [];
       if (sagCurrentTenantId !== tenantId) sagTenantActiveTab = 'company';
@@ -738,10 +761,8 @@
         '<div class="tenant-field"><label for="sagDetailUsername">اسم المستخدم</label><input id="sagDetailUsername" value="' + escapeHtml(t.username || '') + '" required></div>' +
         '<div class="tenant-field"><label>تاريخ إنشاء الحساب</label><p style="margin:0">' + escapeHtml(t.createdAt || '') + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailSlug">رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
-        '<div class="tenant-field"><label for="sagDetailPlan">الباقة</label><select id="sagDetailPlan">' +
-        '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
-        '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
-        '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
+        '<div class="tenant-field"><label for="sagDetailPackage">الباقة</label><select id="sagDetailPackage" data-current="' + escapeHtml(currentPackageId) + '">' +
+        packageOptions + '</select></div>' +
         '<div class="tenant-field"><label>الرصيد الحالي (ريال)</label><p style="margin:0;font-weight:700">' + Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
@@ -840,7 +861,6 @@
         email: document.getElementById('sagDetailEmail').value.trim().toLowerCase(),
         phone: document.getElementById('sagDetailPhone').value.trim(),
         username: document.getElementById('sagDetailUsername').value.trim().toLowerCase(),
-        plan: document.getElementById('sagDetailPlan').value,
         isActive: document.getElementById('sagDetailStatus').value === 'active',
         legalName: (document.getElementById('sagDetailLegalName') || {}).value || '',
         taxNumber: (document.getElementById('sagDetailTaxNumber') || {}).value || '',
@@ -866,6 +886,17 @@
         }).catch(e => e);
         if (!slugRes || !slugRes.success) {
           toast((slugRes && (slugRes.message || slugRes.error)) || 'تعذر تحديث الرابط');
+        }
+      }
+      const pkgEl = document.getElementById('sagDetailPackage');
+      if (pkgEl && !tenant.isAdmin) {
+        const nextPackage = pkgEl.value || '';
+        if (nextPackage !== (pkgEl.dataset.current || '')) {
+          const pkgRes = await api('POST', '/api/admin/tenants/' + tenantId + '/package',
+            { packageId: nextPackage || null }).catch(e => e);
+          if (!pkgRes || !pkgRes.success) {
+            toast((pkgRes && pkgRes.error) || 'تعذر تحديث الباقة');
+          }
         }
       }
       toast('تم حفظ بيانات الشركة');

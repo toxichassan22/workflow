@@ -1178,10 +1178,8 @@
         <input type="text" id="sagSearchInput" placeholder="بحث بالاسم أو الإيميل أو الدومين..."
           oninput="filterSagTenants()">
         <select id="sagFilterPlan" onchange="filterSagTenants()">
-          <option value="">كل الخطط</option>
-          <option value="free">Free</option>
-          <option value="pro">Pro</option>
-          <option value="enterprise">Enterprise</option>
+          <option value="">كل الباقات</option>
+          <option value="__none__">بدون باقة</option>
         </select>
         <select id="sagFilterStatus" onchange="filterSagTenants()">
           <option value="">كل الحالات</option>
@@ -1242,6 +1240,10 @@
               <div class="tenant-field">
                 <label for="sagCreateTrialDays">مدة التجربة بالأيام</label>
                 <input type="number" id="sagCreateTrialDays" min="0" max="365" dir="ltr">
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreatePackage">الباقة</label>
+                <select id="sagCreatePackage"><option value="">بدون باقة</option></select>
               </div>
               <div class="tenant-field">
                 <label for="sagCreateLegalName">الاسم القانوني</label>

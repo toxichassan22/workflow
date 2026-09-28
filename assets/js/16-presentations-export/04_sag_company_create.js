@@ -13,6 +13,16 @@
       const modal = document.getElementById('sagCompanyCreateModal');
       const form = document.getElementById('sagCompanyCreateForm');
       form.reset();
+      const pkgSel = document.getElementById('sagCreatePackage');
+      if (pkgSel) {
+        const empty = '<option value="">' + WFT('admin.no_package', 'بدون باقة') + '</option>';
+        pkgSel.innerHTML = empty;
+        api('GET', '/api/admin/packages').then(d => {
+          const items = ((d && d.success && d.packages) || []).filter(p => p.is_active);
+          pkgSel.innerHTML = empty + items.map(p =>
+            '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('');
+        }).catch(() => {});
+      }
       document.getElementById('sagCreateStatus').value = 'active';
       document.getElementById('sagCreatePasswordMode').value = 'set_link';
       document.getElementById('sagCreatePassword').type = 'password';
@@ -161,6 +171,16 @@
         if (!data.success) {
           showSagCompanyCreateError(sagCompanyErrorArabic(data.error));
           return;
+        }
+        const chosenPackage = (document.getElementById('sagCreatePackage') || {}).value || '';
+        if (chosenPackage && data.tenant && data.tenant.id) {
+          // Assign through the package endpoint so history and the provider
+          // key cap update go through the same path as a later reassignment.
+          const pkgRes = await api('POST', '/api/admin/tenants/' + data.tenant.id + '/package',
+            { packageId: chosenPackage }).catch(e => e);
+          if (!pkgRes || !pkgRes.success) {
+            toast((pkgRes && pkgRes.error) || 'تعذر تعيين الباقة');
+          }
         }
         document.getElementById('sagCompanyCreateForm').style.display = 'none';
         renderSagSetupResult(
