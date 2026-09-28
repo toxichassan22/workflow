@@ -460,7 +460,9 @@
         if (src[key] !== undefined && src[key] !== null && src[key] !== '') slim[key] = src[key];
       });
       if (Array.isArray(slim.nearby_landmarks_data)) {
-        slim.nearby_landmarks_data = slim.nearby_landmarks_data.slice(0, 20).map(item => {
+        // No row cap: checked rows are the client's choice and all of them render. Large
+        // tables grow the request, and api() chunks the wire body past 24KB anyway.
+        slim.nearby_landmarks_data = slim.nearby_landmarks_data.map(item => {
           if (!item || typeof item !== 'object') return item;
           return Object.fromEntries(
             ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng', 'show_on_map', 'selected', 'row_source']

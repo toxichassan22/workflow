@@ -65,11 +65,6 @@
         selectInput.dataset.sectionLockIgnore = '1';
         selectInput.checked = !!(row.show_on_map || row.selected);
         selectInput.addEventListener('change', () => {
-          const selected = table.querySelectorAll('.lt-map-select:checked');
-          if (selected.length > 11) {
-            selectInput.checked = false;
-            toast('الحد الأقصى 11 معلم لكل خريطة');
-          }
           serializeLocationTable(key);
           if (key === 'city_landmarks') invalidateCatchmentMapApproval();
           if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
