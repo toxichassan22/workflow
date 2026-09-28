@@ -816,6 +816,34 @@ def api_admin_billing_reset_all():
     return jsonify(result)
 
 
+@app.route('/api/admin/tenants/<tenant_id>/reset-balance', methods=['POST'])
+@require_admin
+def api_admin_tenant_reset_balance(tenant_id):
+    """Single-company fresh start: zero the wallet, unassign the package,
+    and (by default) wipe that tenant's spend history. Requires an
+    explicit {"confirm": true} body."""
+    data = request.json or {}
+    if data.get('confirm') is not True:
+        return jsonify({'success': False,
+                        'error': 'أرسل confirm=true لتنفيذ التصفير',
+                        'error_code': 'CONFIRM_REQUIRED'}), 400
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+    clear_usage = bool(data.get('clearUsage', data.get('clear_usage', True)))
+    try:
+        result = db.reset_tenant_balance(tenant_id, clear_usage=clear_usage)
+    except Exception as exc:
+        print(f"[BILLING] tenant reset failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تنفيذ التصفير'}), 500
+    if result is None:
+        return jsonify({'error': 'Tenant not found'}), 404
+    if result.get('skipped'):
+        return jsonify({'error': 'حسابات المدير العام لا تُصفّر'}), 400
+    result['success'] = True
+    return jsonify(result)
+
+
 @app.route('/api/billing/topup', methods=['POST'])
 @require_admin
 def api_billing_topup():

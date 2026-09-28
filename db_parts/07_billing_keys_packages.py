@@ -464,6 +464,42 @@ def reset_all_company_balances(clear_usage=True):
     return result
 
 
+def reset_tenant_balance(tenant_id, clear_usage=True):
+    """Single-company fresh start — the per-tenant twin of
+    ``reset_all_company_balances``: zero the wallet and unassign the
+    package, optionally wiping that tenant's spend history so stale
+    unbilled usage can never bill a future recharge. Super admins are
+    never touched. Returns None for a missing tenant, {'skipped': ...}
+    for an admin."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id, is_admin FROM tenants WHERE id = ?', (str(tenant_id),)).fetchone()
+    if row is None:
+        return None
+    if dict(row).get('is_admin'):
+        return {'skipped': 'admin'}
+    tenant_id = str(tenant_id)
+    conn.execute(
+        'UPDATE tenants SET credit_balance = 0, package_id = NULL WHERE id = ?',
+        (tenant_id,))
+    result = {'tenants_reset': 1, 'ai_deleted': 0, 'maps_deleted': 0,
+              'history_deleted': 0, 'ledger_deleted': 0}
+    if clear_usage:
+        for table, key in (('ai_usage_events', 'ai_deleted'),
+                           ('map_usage_events', 'maps_deleted'),
+                           ('tenant_package_history', 'history_deleted'),
+                           ('tenant_ledger', 'ledger_deleted')):
+            try:
+                cur = conn.execute(
+                    f'DELETE FROM {table} WHERE tenant_id = ?', (tenant_id,))
+                result[key] = cur.rowcount or 0
+            except Exception:
+                pass
+    conn.commit()
+    _fire_balance_change(tenant_id)
+    return result
+
+
 def _norm_range_bound(value, is_end=False):
     """Normalize a UI date/datetime bound ('YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM')
     to the stored 'YYYY-MM-DD HH:MM:SS' format so string comparison works."""

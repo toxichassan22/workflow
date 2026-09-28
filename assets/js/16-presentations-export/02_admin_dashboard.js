@@ -786,6 +786,10 @@
         '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (ريال)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
         '<div class="tenant-field full"><label for="sagAdjNote">ملاحظة</label><input id="sagAdjNote" maxlength="300"></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الحركة</button></div></form>' +
+        (t.isAdmin ? '' :
+        '<div class="sag-modal-actions" style="margin-top:8px">' +
+        '<button type="button" class="btn small danger" onclick="sagResetTenantBalance(\'' + tenantId + '\')">' +
+        escapeHtml(WFT('admin.balance_reset', 'تصفير الرصيد والباقة')) + '</button></div>') +
         '</div>' +
         '<div id="sagTenantTabUsers" style="display:none">' +
         '<h3 class="dash-section-title">المستخدمون</h3>' +
@@ -921,6 +925,23 @@
         return;
       }
       toast(WFT('wallet.movement_recorded', 'تم تسجيل حركة الرصيد'));
+      await openTenantCompanies();
+      await showSagTenantDetails(tenantId);
+    }
+
+    // Fresh start for one company: zero the wallet, unassign the package and
+    // wipe that tenant's spend/ledger history so stale unbilled usage never
+    // bills the next recharge. Server-side confirm gate mirrors reset-all.
+    async function sagResetTenantBalance(tenantId) {
+      if (!confirm(WFT('admin.balance_reset_confirm',
+        'سيُصفّر رصيد الشركة وتُزال باقتها ويُحذف سجل الاستهلاك والفوترة الخاص بها — لا يمكن التراجع. هل تريد المتابعة؟'))) return;
+      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-balance',
+        { confirm: true, clearUsage: true }).catch(e => e);
+      if (!data || !data.success) {
+        toast((data && data.error) || 'تعذر تصفير الرصيد');
+        return;
+      }
+      toast(WFT('admin.balance_reset_done', 'تم تصفير رصيد الشركة'));
       await openTenantCompanies();
       await showSagTenantDetails(tenantId);
     }
