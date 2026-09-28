@@ -1064,6 +1064,8 @@ window.__WFI18N_EN_AUTO = /*I18N_EN_AUTO_BEGIN*/{
 "تعذر تحديث حالة القسم": "Failed to update section status",
 "تعذر تحديث حالة تعديل العرض مؤقتًا.": "Failed to update proposal edit status.",
 "تعذر تحديث خط العرض": "Could not update latitude",
+"تعذر تحديد إطار الخريطة الحالي": "Unable to resolve the current map frame",
+"تعذر تحديد الإحداثيات على هذه الخريطة": "Unable to resolve coordinates on this map",
 "تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي": "Failed to resolve coordinates — try a direct Google Maps link or text address",
 "تعذر تحديد التعديل دون معلومات إضافية.": "Failed to determine edit without additional info.",
 "تعذر تحليل الموقع": "Failed to analyze location",

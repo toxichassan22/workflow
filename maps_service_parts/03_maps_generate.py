@@ -772,12 +772,20 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         regen_seed = int(project_data.get('regen_seed') or 0)
     except (TypeError, ValueError):
         regen_seed = 0
+    # A viewport the user picked in the preview (manual zoom/pan) overrides the
+    # computed frame for the overview and access maps — landmark and catchment
+    # extents stay fitted to their content.
+    zoom_overrides = project_data.get('map_zooms')
+    zoom_overrides = zoom_overrides if isinstance(zoom_overrides, dict) else {}
+    center_overrides = project_data.get('map_centers')
+    center_overrides = center_overrides if isinstance(center_overrides, dict) else {}
     # A regenerate must not re-frame a map whose extent is derived from a real boundary:
-    # shifting the zoom by two levels shrank the plot back to a dot.
+    # shifting the zoom by two levels shrank the plot back to a dot. A manual viewport
+    # wins over the seed shift too — the user asked for that exact frame.
     if project_data.get('refresh_maps') and regen_seed and not (polygon_coords and len(polygon_coords) >= 3):
         zoom_shift = MAP_REGEN_ZOOM_OFFSETS[regen_seed % len(MAP_REGEN_ZOOM_OFFSETS)]
         for map_key in enabled_maps:
-            if map_key in zooms:
+            if map_key in zooms and map_key not in zoom_overrides:
                 zooms[map_key] = max(12, min(20, int(zooms[map_key]) + zoom_shift))
     overview_zoom = zooms['overview']
     landmarks_zoom = zooms['landmarks']
@@ -810,6 +818,35 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         'access': {'lat': map_center_lat, 'lng': map_center_lng},
         'catchment': {'lat': lat, 'lng': lng},
     }
+
+    def _manual_viewport_zoom(map_key, fallback):
+        try:
+            value = int(zoom_overrides.get(map_key))
+        except (TypeError, ValueError):
+            return fallback
+        return max(8, min(20, value)) if 0 < value else fallback
+
+    def _manual_viewport_center(map_key, fallback_lat, fallback_lng):
+        item = center_overrides.get(map_key)
+        if not isinstance(item, dict):
+            return fallback_lat, fallback_lng
+        try:
+            c_lat, c_lng = float(item.get('lat')), float(item.get('lng'))
+        except (TypeError, ValueError):
+            return fallback_lat, fallback_lng
+        if not (-85 <= c_lat <= 85 and -180 <= c_lng <= 180):
+            return fallback_lat, fallback_lng
+        return c_lat, c_lng
+
+    overview_zoom = _manual_viewport_zoom('overview', overview_zoom)
+    access_zoom = _manual_viewport_zoom('access', access_zoom)
+    overview_center_lat, overview_center_lng = _manual_viewport_center('overview', map_center_lat, map_center_lng)
+    access_center_lat, access_center_lng = _manual_viewport_center('access', map_center_lat, map_center_lng)
+    result['zooms'].update({'overview': overview_zoom, 'access': access_zoom})
+    result['centers'].update({
+        'overview': {'lat': overview_center_lat, 'lng': overview_center_lng},
+        'access': {'lat': access_center_lat, 'lng': access_center_lng},
+    })
 
     # The approved latitude/longitude is the user-controlled pin for every map. The boundary may
     # center the viewport, but it must never move that saved pin implicitly.
@@ -966,7 +1003,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            overview_res = get_static_map(map_center_lat, map_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES), bypass_cache=refresh_maps)
+            overview_res = get_static_map(overview_center_lat, overview_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES), bypass_cache=refresh_maps)
             if overview_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
@@ -979,10 +1016,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
                 shutil.copyfile(overview_path, editable_path)
-                metadata = {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []}
+                metadata = {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': overview_center_lat, 'center_lng': overview_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []}
                 if highlight_site:
-                    _draw_site_highlight(overview_path, map_center_lat, map_center_lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
-                _overlay_markers(overview_path, map_center_lat, map_center_lng, overview_zoom, overview_markers, size=(1280, 720))
+                    _draw_site_highlight(overview_path, overview_center_lat, overview_center_lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                _overlay_markers(overview_path, overview_center_lat, overview_center_lng, overview_zoom, overview_markers, size=(1280, 720))
                 result['placeholders'][placeholder] = overview_path
                 result['placeholders'][editable_placeholder] = editable_path
                 _record_maps_call(tenant_id)
@@ -1072,7 +1109,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             access_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            access_res = get_static_map(map_center_lat, map_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES, 'access'), bypass_cache=refresh_maps)
+            access_res = get_static_map(access_center_lat, access_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES, 'access'), bypass_cache=refresh_maps)
             if access_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
@@ -1085,8 +1122,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 shutil.copyfile(access_path, editable_path)
                 rendered_roads = _draw_access_roads(
                     access_path,
-                    map_center_lat,
-                    map_center_lng,
+                    access_center_lat,
+                    access_center_lng,
                     access_zoom,
                     scale=2,
                     project_data=project_data,
@@ -1096,13 +1133,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 ) or []
                 if not result['access_roads']:
                     result['access_roads'] = rendered_roads
-                _overlay_markers(access_path, map_center_lat, map_center_lng, access_zoom, access_markers, size=(1280, 720))
+                _overlay_markers(access_path, access_center_lat, access_center_lng, access_zoom, access_markers, size=(1280, 720))
                 metadata = {
                     'lat': lat,
                     'lng': lng,
                     'zoom': access_zoom,
-                    'center_lat': map_center_lat,
-                    'center_lng': map_center_lng,
+                    'center_lat': access_center_lat,
+                    'center_lng': access_center_lng,
                     'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
                     'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION,
                     'highlight_site': bool(highlight_site),

@@ -64,6 +64,7 @@
         map_placeholders: {},
         map_zooms: {},
         map_centers: {},
+        map_viewport_overrides: {},
         map_landmarks: [],
         map_lat: null,
         map_lng: null,
@@ -189,7 +190,80 @@
 
     function updateTenantMapInteractionState() {
       const image = document.querySelector('#mapPreviewImage img');
-      if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
+      if (!image) return;
+      const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
+      image.style.cursor = modeActive ? 'crosshair' : (mapViewportPanAllowed() ? 'grab' : 'default');
+    }
+
+    function mapViewportAdjustable(mapType) {
+      return mapType === 'overview' || mapType === 'access';
+    }
+
+    // Drag-to-pan is only safe on a frame we can convert clicks against: a known
+    // zoom and centre. Approved maps and every drawing/editing mode keep priority.
+    function mapViewportPanAllowed() {
+      if (!mapViewportAdjustable(tenantSelectedMapType)) return false;
+      if (tenantCreativeImages.map_approvals?.[tenantSelectedMapType]) return false;
+      if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
+      return !!(tenantMapPreviewState && tenantMapPreviewState.frameAccurate);
+    }
+
+    let tenantMapViewportBusy = false;
+
+    async function adjustMapPreviewZoom(mapType, delta) {
+      if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
+      const zooms = tenantCreativeImages.map_zooms || {};
+      const current = Number(zooms[mapType]);
+      if (!Number.isFinite(current)) { toast('تعذر تحديد إطار الخريطة الحالي'); return; }
+      const next = Math.max(8, Math.min(20, Math.round(current + delta)));
+      if (next === current) return;
+      tenantMapViewportBusy = true;
+      try {
+        tenantCreativeImages.map_zooms = { ...zooms, [mapType]: next };
+        tenantCreativeImages.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}), [mapType]: true };
+        await regenerateMapPreview(mapType);
+      } finally {
+        tenantMapViewportBusy = false;
+      }
+    }
+
+    function startMapViewportPan(event) {
+      if (event.button !== 0 || tenantMapViewportBusy || !mapViewportPanAllowed()) return;
+      const box = document.getElementById('mapPreviewImage');
+      const img = box?.querySelector('img');
+      if (!box || !img || !img.src) return;
+      const pan = { startX: event.clientX, startY: event.clientY, dx: 0, dy: 0 };
+      const parts = [img, box.querySelector('#mapPolygonOverlay'), box.querySelector('#mapLabelOverlay')].filter(Boolean);
+      const move = moveEvent => {
+        pan.dx = moveEvent.clientX - pan.startX;
+        pan.dy = moveEvent.clientY - pan.startY;
+        if (Math.abs(pan.dx) + Math.abs(pan.dy) > 3) {
+          parts.forEach(el => { el.style.transform = 'translate(' + pan.dx + 'px,' + pan.dy + 'px)'; });
+          img.style.cursor = 'grabbing';
+        }
+      };
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+        parts.forEach(el => { el.style.transform = ''; });
+        img.style.cursor = '';
+        const dx = pan.dx;
+        const dy = pan.dy;
+        if (Math.abs(dx) + Math.abs(dy) < 5) return;
+        const rect = img.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        // The image point that lands under the centre becomes the new map centre.
+        const coords = tenantMapCoordinatesFromClient(rect.left + rect.width / 2 - dx, rect.top + rect.height / 2 - dy, img);
+        if (!coords) return;
+        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [tenantSelectedMapType]: { lat: coords[0], lng: coords[1] } };
+        tenantCreativeImages.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}), [tenantSelectedMapType]: true };
+        tenantMapViewportBusy = true;
+        regenerateMapPreview(tenantSelectedMapType).finally(() => { tenantMapViewportBusy = false; });
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
     }
 
     async function applyOverviewMapEdits() {

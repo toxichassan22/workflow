@@ -764,7 +764,7 @@
           <div id="locationMapGenerationControls"></div>
           <input type="hidden" id="tenantCoordinatesConfirmed" data-key="location_coordinates_confirmed" data-type="text" value="">
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
-            <img src="" alt="Map preview" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" />
+            <img src="" alt="Map preview" draggable="false" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" onpointerdown="startMapViewportPan(event)" />
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
             <div id="mapLabelOverlay" style="position:absolute;inset:0;pointer-events:none"></div>
           </div>

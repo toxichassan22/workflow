@@ -711,6 +711,14 @@
         payload.enabled_maps = [mapType];
         payload.draftId = tenantProjectData.draftId;
         payload.refresh_maps = true;
+        // Only a viewport the user picked by zooming/panning rides along — a stored
+        // frame from the last render must not freeze the automatic one or disable
+        // the regen seed variation on maps nobody adjusted.
+        const manualViewport = tenantCreativeImages.map_viewport_overrides || {};
+        payload.map_zooms = Object.fromEntries(
+          Object.entries(tenantCreativeImages.map_zooms || {}).filter(([key]) => manualViewport[key]));
+        payload.map_centers = Object.fromEntries(
+          Object.entries(tenantCreativeImages.map_centers || {}).filter(([key]) => manualViewport[key]));
         const regenSeed = Date.now();
         payload.regen_seed = regenSeed;
         const data = await api('POST', '/api/generate-map-image', {

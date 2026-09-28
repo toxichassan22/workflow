@@ -435,9 +435,26 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("tenantSelectedMapType === 'overview' && tenantMapPinMode", index_source)
         self.assertIn("editableKeys: ['##MAP_OVERVIEW_EDITABLE##'", index_source)
         self.assertNotIn('function applyTenantPolygonZoom()', index_source)
+        # Manual viewport: overview/access previews expose zoom buttons and drag-pan,
+        # and the picked frame rides in the regenerate payload for the server.
+        self.assertIn('async function adjustMapPreviewZoom(mapType, delta)', index_source)
+        self.assertIn('function startMapViewportPan(event)', index_source)
+        self.assertIn('function mapViewportPanAllowed()', index_source)
+        self.assertIn('onpointerdown="startMapViewportPan(event)"', index_source)
+        self.assertIn(">تكبير</button>", workflow_body)
+        self.assertIn(">تصغير</button>", workflow_body)
+        self.assertIn("return mapType === 'overview' || mapType === 'access';", index_source)
+        regen_body = index_source.split('async function regenerateMapPreview(mapType)', 1)[1].split('let tenantMapPreviewRequest', 1)[0]
+        self.assertIn('payload.map_zooms', regen_body)
+        self.assertIn('payload.map_centers', regen_body)
         maps_source = read_module_source('maps_service.py')
         self.assertIn("'##MAP_OVERVIEW_EDITABLE##'", maps_source)
         self.assertIn('shutil.copyfile(overview_path, editable_path)', maps_source)
+        self.assertIn("project_data.get('map_zooms')", maps_source)
+        self.assertIn("project_data.get('map_centers')", maps_source)
+        self.assertIn('def _manual_viewport_zoom(', maps_source)
+        self.assertIn('def _manual_viewport_center(', maps_source)
+        self.assertIn('map_key not in zoom_overrides', maps_source)
 
     def test_confirmed_map_pin_overrides_the_original_google_link(self):
         service = self.application_module.maps_service

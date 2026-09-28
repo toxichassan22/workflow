@@ -413,6 +413,8 @@
         } else if (view.mapType === 'overview' && generated) {
           actions = approvalButton +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', 1)" ' + (generationLocked ? 'disabled' : '') + '>تكبير</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', -1)" ' + (generationLocked ? 'disabled' : '') + '>تصغير</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()" ' + (mapApproved ? 'disabled' : '') + '>رسم حدود الموقع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()" ' + (mapApproved ? 'disabled' : '') + '>تعيين الموقع</button>';
         } else if (mapApproved) {
@@ -425,6 +427,8 @@
           actions = manualRoadDrawingControlsHtml();
         } else if (view.mapType === 'access' && generated) {
           actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', 1)" ' + (generationLocked ? 'disabled' : '') + '>تكبير</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', -1)" ' + (generationLocked ? 'disabled' : '') + '>تصغير</button>' +
             approvalButton +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()" ' + (mapApproved ? 'disabled' : '') + '>إضافة / تعديل الطرق</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')" ' + (mapApproved ? 'disabled' : '') + '>رسم مسار الطرق</button>';
