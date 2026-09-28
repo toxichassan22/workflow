@@ -168,7 +168,8 @@ def _create_landloom_tables(conn):
         expires_at TEXT,
         settled_at TEXT,
         settled_by TEXT,
-        note TEXT
+        note TEXT,
+        package_id TEXT
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_point_reservations_tenant ON point_reservations(tenant_id, status)')
     # One live hold per approval operation: a retried or double-fired reserve
@@ -690,6 +691,9 @@ def _ensure_platform_columns(conn):
     _add('billing_package_versions', 'credit_sar', 'REAL')
     _add('tenant_package_history', 'credit_sar', 'REAL')
     _add('point_reservations', 'cost_sar', 'REAL')
+    # A hold funded by an assigned package carries its id — package rows never
+    # touch the wallet; the purse is burned through package-tagged usage.
+    _add('point_reservations', 'package_id', 'TEXT')
     _add('recharge_requests', 'amount_sar', 'REAL')
     _add('recharge_requests', 'invoice_file_id', 'TEXT')
     # Tracks a provider-cap push that never confirmed so the housekeeping

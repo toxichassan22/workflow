@@ -557,11 +557,21 @@ def points_overview(tenant_id):
     conn = get_db()
     balance = get_tenant_balance(tenant_id)
     rows = conn.execute(
-        '''SELECT status, COALESCE(SUM(COALESCE(cost_sar, cost_usd)), 0) AS total, COUNT(*) AS n
+        '''SELECT status,
+                  COALESCE(SUM(CASE WHEN package_id IS NULL
+                               THEN COALESCE(cost_sar, cost_usd) ELSE 0 END), 0) AS wallet_total,
+                  COALESCE(SUM(CASE WHEN package_id IS NOT NULL
+                               THEN COALESCE(cost_sar, cost_usd) ELSE 0 END), 0) AS package_total,
+                  COUNT(*) AS n
            FROM point_reservations WHERE tenant_id = ? GROUP BY status''',
         (str(tenant_id),),
     ).fetchall()
-    buckets = {row['status']: {'sar': float(row['total'] or 0), 'count': int(row['n'])}
+    # Wallet figures stay wallet-funded only: a package escrow never moved
+    # credit_balance, so it reports under its own key instead of inflating
+    # the wallet buckets.
+    buckets = {row['status']: {'sar': float(row['wallet_total'] or 0),
+                               'package_sar': float(row['package_total'] or 0),
+                               'count': int(row['n'])}
                for row in rows}
     reserved_sar = buckets.get('reserved', {}).get('sar', 0.0)
     expired_sar = buckets.get('expired', {}).get('sar', 0.0)
@@ -578,6 +588,7 @@ def points_overview(tenant_id):
         'expired_points': int(round(expired_sar * POINTS_PER_USD)),
         'consumed_sar': round(buckets.get('consumed', {}).get('sar', 0.0), 2),
         'released_sar': round(buckets.get('released', {}).get('sar', 0.0), 2),
+        'package_reserved_sar': round(buckets.get('reserved', {}).get('package_sar', 0.0), 2),
         'reservations': buckets,
     }
 

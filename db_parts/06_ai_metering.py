@@ -126,20 +126,41 @@ def _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at):
     return usd_to_sar(_package_cycle_consumed(conn, tenant_id, package_id, assigned_at))
 
 
+def _package_held_sar(conn, tenant_id, package_id):
+    """Live generation holds escrowed against this package's credit, in SAR.
+
+    Package-funded holds move no wallet money but commit purse capacity, so
+    the package's spendable figure nets them out — otherwise parallel
+    approvals could overbook the same riyals.
+    """
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(COALESCE(cost_sar, cost_usd * ?)), 0) AS total "
+            "FROM point_reservations "
+            "WHERE tenant_id = ? AND package_id = ? AND status = 'reserved'",
+            (_active_fx_rate(), str(tenant_id), str(package_id))).fetchone()
+        return float(dict(row).get('total') or 0.0)
+    except Exception:
+        return 0.0
+
+
 def _tenant_active_package_id(conn, tenant_id):
     """Package a new spend row burns under — only while it still has credit.
 
     An exhausted or deactivated package must not keep owning new usage: rows
     tagged with its id are excluded from wallet billing, so over-quota spend
-    would never reach the wallet at all. Falling back to NULL lets the next
-    row bill against the wallet again.
+    would never reach the wallet at all. Live package-funded holds count as
+    committed credit here. Falling back to NULL lets the next row bill
+    against the wallet again.
     """
     try:
         cycle = _tenant_package_cycle(conn, tenant_id)
         if not cycle:
             return None
         package_id, credit, assigned_at = cycle
-        if credit - _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at) <= 0:
+        free = credit - _package_cycle_consumed_sar(conn, tenant_id, package_id, assigned_at) \
+            - _package_held_sar(conn, tenant_id, package_id)
+        if free <= 0:
             return None
         return package_id
     except Exception:

@@ -208,14 +208,26 @@ uneditable); never grow a giant file again.
   reconciliation prices them. Never mark pending rows billed at $0.
 - `package_id` must be stored as real NULL when no package applies — an older
   write path stored the literal string `'None'`; a migration normalizes it.
+- Approval holds escrow against whichever purse will pay for the run: while an
+  assigned package still has credit, `_hold_points_tx` writes a
+  `point_reservations.package_id` row that commits purse capacity without a
+  wallet debit or ledger entry (settlement flips status only — the
+  package-tagged usage already burned it). When no active package covers the
+  estimate the hold falls back to the wallet debit. `get_package_remaining_sar`
+  and `_tenant_active_package_id` net live package holds out so parallel
+  approvals cannot overbook the purse, and `get_active_hold_total_sar` counts
+  wallet holds only (`package_id IS NULL`) so the provider cap below stays
+  exact. A 402 on `/decision` whose `available_sar` looks wrong usually means
+  the client's money sits in package credit while the wallet is empty.
 - `db.BALANCE_CHANGE_HOOK` fires after every wallet mutation (credits,
   debits, reservations, releases, adjustments). `app.py` registers
   `_schedule_tenant_limit_sync` on it, which re-syncs the tenant's OpenRouter
   key limit off the request path (skipped entirely when `TESTING`). The provider
-  cap is (balance + active holds) / FX rate / `BILLING_MULTIPLIER` +
+  cap is (balance + active wallet holds) / FX rate / `BILLING_MULTIPLIER` +
   package remaining / FX rate — holds count because an approved run already
-  paid, and dividing by the multiplier keeps every future checkout affordable
-  by construction. A drained wallet disables the key; a funded one re-enables it.
+  paid, package holds already sit inside the remaining figure, and dividing by
+  the multiplier keeps every future checkout affordable by construction. A
+  drained wallet disables the key; a funded one re-enables it.
 - `TENANT_OPENROUTER_DEFAULT_RESET` controls the provider `limit_reset`:
   `daily`/`weekly`/`monthly` pass through, `none` (the default) sends `null` —
   a lifetime cap tied to the wallet. Never default to `monthly`: a top-up must

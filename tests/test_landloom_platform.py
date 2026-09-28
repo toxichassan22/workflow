@@ -119,6 +119,96 @@ class LandloomDbTests(unittest.TestCase):
         refreshed = db.get_generation_approval('tenant-1', approval['id'])
         self.assertEqual(refreshed['status'], 'pending')
 
+    def test_package_funded_approval_leaves_wallet_untouched(self):
+        # The company's money sits in an assigned package: the run bills that
+        # purse, so its escrow comes from there too — a wallet debit on top
+        # would charge the tenant twice.
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 0 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        package = db.create_billing_package('باقة نمو', credit_sar=400, price_sar=400)
+        db.assign_tenant_package('tenant-1', package['id'])
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        estimate['estimated_points'] = 8000
+        estimate['estimated_cost_usd'] = 2.0
+        approval = db.create_generation_approval(
+            'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        decided = db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'المعتمد')
+        self.assertEqual(decided.get('status'), 'approved')
+        self.assertTrue(decided.get('reservation_id'))
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 0.0)
+        reservation = db.list_point_reservations('tenant-1', status='reserved')[0]
+        self.assertEqual(reservation['package_id'], package['id'])
+        # The live hold commits purse capacity — remaining nets it out.
+        self.assertAlmostEqual(db.get_package_remaining_sar('tenant-1'),
+                               400 - db.usd_to_sar(2.0))
+
+    def test_package_hold_settle_never_touches_wallet(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 0 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        package = db.create_billing_package('باقة نمو', credit_sar=400, price_sar=400)
+        db.assign_tenant_package('tenant-1', package['id'])
+        estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
+        estimate['estimated_points'] = 8000
+        estimate['estimated_cost_usd'] = 2.0
+        approval = db.create_generation_approval(
+            'tenant-1', self.draft_id, estimate, 'user-1', 'رئيس القسم')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'المعتمد')
+        settled = db.settle_generation_approval(
+            'tenant-1', approval['id'], 'job-1', consumed=True, settled_by='user-1')
+        self.assertEqual(settled['status'], 'consumed')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 0.0)
+        # No wallet escrow existed, so no ledger debit may appear either.
+        entry = conn.execute(
+            "SELECT COUNT(*) AS n FROM tenant_ledger WHERE kind IN ('hold', 'debit', 'release') "
+            "AND tenant_id = ?", ('tenant-1',)).fetchone()
+        self.assertEqual(entry['n'], 0)
+        # Settling freed the committed capacity; remaining is whole again.
+        self.assertAlmostEqual(db.get_package_remaining_sar('tenant-1'), 400.0)
+
+    def test_package_hold_release_refunds_nothing_to_wallet(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 0 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        db.assign_tenant_package(
+            'tenant-1', db.create_billing_package('باقة نمو', credit_sar=400)['id'])
+        reservation = db.reserve_points('tenant-1', 8000, 8.0, draft_id=self.draft_id)
+        self.assertTrue(reservation.get('package_id'))
+        released = db.release_points('tenant-1', reservation['id'], note='فشل')
+        self.assertEqual(released['status'], 'released')
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 0.0)
+        self.assertAlmostEqual(db.get_package_remaining_sar('tenant-1'), 400.0)
+
+    def test_package_holds_cannot_overbook_the_purse(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 0 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        db.assign_tenant_package(
+            'tenant-1', db.create_billing_package('باقة نمو', credit_sar=100)['id'])
+        first = db.reserve_points('tenant-1', 80000, 80.0, draft_id=self.draft_id)
+        self.assertEqual(first['status'], 'reserved')
+        # 20 SAR of purse left — a second 80 hold fits neither purse nor wallet.
+        second = db.reserve_points('tenant-1', 80000, 80.0, draft_id=self.draft_id)
+        self.assertEqual(second.get('error'), 'insufficient_balance')
+        fits = db.reserve_points('tenant-1', 20000, 20.0, draft_id=self.draft_id)
+        self.assertEqual(fits['status'], 'reserved')
+        self.assertTrue(fits.get('package_id'))
+
+    def test_package_shortfall_falls_back_to_wallet_hold(self):
+        conn = db.get_db()
+        conn.execute('UPDATE tenants SET credit_balance = 100 WHERE id = ?', ('tenant-1',))
+        conn.commit()
+        db.assign_tenant_package(
+            'tenant-1', db.create_billing_package('باقة صغيرة', credit_sar=5)['id'])
+        # The purse cannot cover an 8-SAR hold — the wallet escrows it whole.
+        reservation = db.reserve_points('tenant-1', 8000, 8.0, draft_id=self.draft_id)
+        self.assertEqual(reservation['status'], 'reserved')
+        self.assertFalse(reservation.get('package_id'))
+        self.assertAlmostEqual(db.get_tenant_balance('tenant-1'), 92.0)
+
     def test_cancel_is_requester_only(self):
         estimate = db.estimate_generation_cost('tenant-1', draft_id=self.draft_id, slides_count=8)
         approval = db.create_generation_approval(

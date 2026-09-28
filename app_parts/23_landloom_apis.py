@@ -113,6 +113,11 @@ def _landloom_error(result):
                       'sections', 'version_id', 'version_number', 'job_id'):
         if result.get(extra_key):
             payload[extra_key] = result[extra_key]
+    # Money figures ride along even at zero — a 402 that hides the shortfall
+    # makes a funded-looking wallet impossible to debug.
+    for money_key in ('available_sar', 'required_sar'):
+        if result.get(money_key) is not None:
+            payload[money_key] = result[money_key]
     if code in _LANDLOOM_NOT_FOUND:
         return jsonify(payload), 404
     if code in _LANDLOOM_CONFLICT:
