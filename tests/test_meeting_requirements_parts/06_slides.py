@@ -691,7 +691,9 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
         self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
         Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
-        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 12, 'center_lat': 24.0, 'center_lng': 46.0,
+        # Zoom 10 already covers the default 28 km catchment rings, so the
+        # editable sidecar is kept and only the markers are recomposed.
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 10, 'center_lat': 24.0, 'center_lng': 46.0,
                     'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': service.MAP_LABEL_RENDER_VERSION}
         landmarks = [
@@ -783,6 +785,59 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('##MAP_CATCHMENT_EDITABLE##', composed['placeholders'])
         self.assertIn('##MAP_CATCHMENT##', composed['placeholders'])
         self.assertEqual([item['name'] for item in composed['catchment_landmarks']], ['مكان أول'])
+
+    def test_catchment_recompose_refits_frame_to_cover_selected_landmarks(self):
+        # The stored frame was fitted to the rings only, so a checked landmark
+        # beyond it rendered off-canvas and vanished (9 selected -> 8 drawn).
+        # Recompose must widen the frame to keep every checked row drawable.
+        service = self.application_module.maps_service
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        rebuilt_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        rebuilt_path = rebuilt_file.name
+        rebuilt_file.close()
+        base_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        base_path = base_file.name
+        base_file.close()
+        for path in (editable_path, final_path, rebuilt_path, base_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+        # Production frames are fetched at scale=2, so the test image is too.
+        Image.new('RGB', (2560, 1440), '#ddd8cf').save(editable_path)
+        Image.new('RGB', (2560, 1440), '#c8c2b8').save(base_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 14, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
+        landmarks = [{'name': f'معلم {index}', 'lat': 24.001 + index * 0.0001, 'lng': 46.001 + index * 0.0001}
+                     for index in range(1, 9)]
+        landmarks.append({'name': 'معلم بعيد', 'lat': 24.18, 'lng': 46.0})
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment', editable_path, '##MAP_CATCHMENT##',
+                             'draft_catchment-refit', metadata)
+            db.add_map_image(self.tenant_a, 'catchment_editable', editable_path, '##MAP_CATCHMENT_EDITABLE##',
+                             'draft_catchment-refit', metadata)
+            with patch.object(service, 'get_static_map', return_value={'success': True, 'path': base_path}), \
+                    patch.object(service, '_unique_map_path', side_effect=[rebuilt_path, final_path]):
+                composed = service.recompose_catchment_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'catchment_map_landmarks': landmarks,
+                }, self.tenant_a, draft_id='catchment-refit')
+        self.assertNotIn('error', composed)
+        # The far selection forced a wider frame and still rendered.
+        self.assertLess(composed['zooms']['catchment'], 14)
+        self.assertEqual(len(composed['catchment_landmarks']), 9)
+        self.assertIn('معلم بعيد', [item['name'] for item in composed['catchment_landmarks']])
+
+        maps_source = read_module_source('maps_service.py')
+        self.assertIn('landmark_km', maps_source)
+        self.assertIn('zoom_for_radius_km(lat, max(ring_km, landmark_km))', maps_source)
+        self.assertIn('landmark_radius_m / 1000.0', maps_source)
+        self.assertNotIn('LANDMARKS_MAX_RADIUS_KM', maps_source)
 
     def test_landmarks_recompose_rebuilds_missing_sidecar_from_provider_base(self):
         service = self.application_module.maps_service

@@ -224,7 +224,6 @@ ACCESS_ROADMAP_STYLES = [
     'feature:road.local|element:labels|visibility:off',
 ]
 MAP_REGEN_ZOOM_OFFSETS = (1, -1, 2, -2, 0)
-LANDMARKS_MAX_RADIUS_KM = 8.0
 ACCESS_MAP_CONTEXT_RADIUS_KM = 0.6
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
@@ -1163,11 +1162,15 @@ def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks,
             marker_lat = marker.get('lat')
             marker_lng = marker.get('lng')
             if marker_lat is None or marker_lng is None:
+                if marker.get('type') != 'site':
+                    print(f"[MAP] landmark '{marker.get('name')}' has no coordinates — skipped")
                 continue
             dx, dy = _latlng_to_pixel_offset(marker_lat, marker_lng, center_lat, center_lng, zoom, scale=scale)
             px = center_x + dx
             py = center_y + dy
             if not (0 <= px <= img_w and 0 <= py <= img_h):
+                if marker.get('type') != 'site':
+                    print(f"[MAP] landmark '{marker.get('name')}' falls outside the frame at zoom {zoom} — skipped")
                 continue
             is_site = marker.get('type') == 'site'
             pin_size = 120 if is_site else 72

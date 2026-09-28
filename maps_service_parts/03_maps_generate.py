@@ -418,28 +418,53 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id):
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
     rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
+    # The stored frame was fitted to the rings only — a selected landmark beyond
+    # it was drawn off-canvas and dropped. Refit around rings + sent landmarks so
+    # every checked row stays drawable; a tighter existing editable is rebuilt.
+    ring_km = max([ring['km'] for ring in rings] + [0.0])
+    landmark_km = 0.0
+    for item in landmarks:
+        try:
+            landmark_km = max(landmark_km, _distance_meters(
+                lat, lng, float(item.get('lat')), float(item.get('lng'))) / 1000.0)
+        except (TypeError, ValueError):
+            continue
+    needed_zoom = (
+        zoom_for_radius_km(lat, max(ring_km, landmark_km * 1.1))
+        if (ring_km or landmark_km) else None
+    )
     for final_type, editable_type in (
         ('catchment', 'catchment_editable'),
         ('catchment_satellite', 'catchment_satellite_editable'),
         ('catchment_roadmap', 'catchment_roadmap_editable'),
     ):
         final = by_type.get(final_type)
-        if not final or editable_type in by_type:
+        existing = by_type.get(editable_type)
+        source = final or existing
+        if source is None:
             continue
         try:
-            metadata = json.loads(final.get('metadata_json') or '{}')
+            metadata = json.loads(source.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
+        frame_zoom = zoom if needed_zoom is None else min(zoom, needed_zoom)
+        if existing is not None:
+            try:
+                existing_zoom = int(json.loads(existing.get('metadata_json') or '{}').get('zoom'))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                existing_zoom = None
+            if existing_zoom is not None and existing_zoom <= frame_zoom:
+                continue
         active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('catchment') or project_data.get('map_type') or 'satellite')
         if active_maptype in {'auto', 'both'}:
             active_maptype = 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, frame_zoom, None, None, (1280, 720), styles)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, frame_zoom, styles, tenant_id)
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -448,11 +473,19 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id):
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.15)
         if rings:
-            _draw_catchment_zones(editable_path, center_lat, center_lng, zoom, rings, scale=2)
+            _draw_catchment_zones(editable_path, center_lat, center_lng, frame_zoom, rings, scale=2)
         if draw_compass:
             _draw_compass(editable_path, position='top-right')
-        editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
-        editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
+        editable_placeholder = (
+            str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
+            if final else str(existing.get('placeholder') or '')
+        )
+        metadata = {**metadata, 'zoom': frame_zoom}
+        if existing is not None:
+            update_map_image(existing['id'], tenant_id, editable_path, editable_placeholder, metadata)
+            editable_id = existing['id']
+        else:
+            editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
         by_type[editable_type] = {
             'id': editable_id,
             'image_type': editable_type,
@@ -980,11 +1013,14 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                         landmark['lat'] = geo['lat']
                         landmark['lng'] = geo['lng']
             if landmark.get('lat') is None or landmark.get('lng') is None:
+                print(f"[LANDMARKS] '{landmark.get('name')}' has no resolvable coordinates — skipped")
                 continue
             distance_meters = _distance_meters(lat, lng, landmark['lat'], landmark['lng'])
             if distance_meters < 50:
+                print(f"[LANDMARKS] '{landmark.get('name')}' resolves to the site itself — skipped")
                 continue
             if maximum_distance_m is not None and distance_meters > maximum_distance_m:
+                print(f"[LANDMARKS] '{landmark.get('name')}' is {distance_meters / 1000.0:.1f} km away, beyond {maximum_distance_m / 1000.0:.0f} km — skipped")
                 continue
             landmark['distance_meters'] = round(distance_meters)
             resolved.append(landmark)
@@ -1089,7 +1125,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         shown_landmarks = [item for item in landmarks if item.get('distance_meters')]
         if shown_landmarks:
             radius_km = max(item['distance_meters'] for item in shown_landmarks) / 1000.0
-            radius_km = max(0.6, min(LANDMARKS_MAX_RADIUS_KM, radius_km * 1.1))
+            # The frame must cover everything the resolver kept — a tighter cap
+            # drew far-but-valid selections off-canvas and dropped them silently.
+            radius_km = max(0.6, min(landmark_radius_m / 1000.0, radius_km * 1.1))
             fitted_zoom = zoom_for_radius_km(lat, radius_km)
             if fitted_zoom:
                 landmarks_zoom = fitted_zoom
@@ -1215,12 +1253,15 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     if 'catchment' in enabled_maps:
         # zones were pre-parsed before the cache check
         rings = catchment_rings(zones)
-        if rings:
-            fitted_zoom = zoom_for_radius_km(lat, max(ring['km'] for ring in rings))
-            if fitted_zoom:
-                catchment_zoom = fitted_zoom
-                result['zooms']['catchment'] = catchment_zoom
-                print(f"[CATCHMENT] {len(rings)} rings, outer {max(ring['km'] for ring in rings):.1f} km, zoom {catchment_zoom}")
+        ring_km = max([ring['km'] for ring in rings] + [0.0])
+        # The frame must cover the selected landmarks too, not just the rings —
+        # a marker beyond the outer ring was silently drawn off-canvas.
+        landmark_km = max([(item.get('distance_meters') or 0) for item in city_landmarks] + [0.0]) / 1000.0 * 1.1
+        fitted_zoom = zoom_for_radius_km(lat, max(ring_km, landmark_km))
+        if fitted_zoom:
+            catchment_zoom = fitted_zoom
+            result['zooms']['catchment'] = catchment_zoom
+            print(f"[CATCHMENT] {len(rings)} rings + {len(city_landmarks)} landmarks within {max(ring_km, landmark_km):.1f} km, zoom {catchment_zoom}")
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_CATCHMENT_SATELLITE##', 'catchment_satellite'),
