@@ -41,10 +41,8 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
     
     draft_id = project_data.get('draft_id') or project_data.get('draftId') if isinstance(project_data, dict) else None
     db_maps = []
-    if presentation_id:
-        db_maps = db.get_map_images(tenant_id, presentation_id=presentation_id)
-    elif draft_id:
-        db_maps = db.get_map_images(tenant_id, draft_id=draft_id)
+    if presentation_id or draft_id:
+        db_maps = db.get_map_images(tenant_id, presentation_id=presentation_id, draft_id=draft_id)
         
     for m in db_maps:
         placeholder = m.get('placeholder')
@@ -409,10 +407,39 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
             return ''
         return '/uploads/maps/' + os.path.basename(candidate)
 
+    draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id')
+    persisted_rows = []
+    if tenant_id and (presentation_id or draft_id):
+        try:
+            persisted_rows = db.get_map_images(
+                tenant_id, presentation_id=presentation_id, draft_id=draft_id)
+        except Exception:
+            persisted_rows = []
+    # Rows arrive newest-first across the presentation AND its linked draft
+    # scope, so the first usable canonical row is the latest saved map — the
+    # project section's edits stop being invisible to an open presentation.
+    canonical_rows = [
+        row for row in persisted_rows
+        if row.get('image_type') in canonical_types and public_map_url(row.get('file_path'))
+    ]
+    newest_basename = os.path.basename(canonical_rows[0].get('file_path') or '') if canonical_rows else ''
+    older_basenames = {
+        os.path.basename(row.get('file_path') or '')
+        for row in canonical_rows[1:]
+    }
+    older_basenames.discard(newest_basename)
+
+    def stale_echo(value):
+        """A preferred URL that resolves to a file an older persisted row still
+        references is a saved-snapshot echo, not the section's current map."""
+        basename = os.path.basename(urlsplit(str(value or '')).path)
+        return bool(basename) and basename != newest_basename and basename in older_basenames
+
     # The location section is the source of truth for the image the user has just
     # approved or edited.  It is sent separately from project_data by the browser,
-    # so prefer it before consulting map_images, whose rows can belong to an older
-    # presentation snapshot.  This is only a file selection; it never generates a map.
+    # so prefer it — but never a stale snapshot echo of a file the section has
+    # already replaced, which older map_images rows still reference.  This is
+    # only a file selection; it never generates a map.
     preferred_sources = list(preferred_images or [])
     preferred_sources.extend([creative_images, (project_data or {}).get('tenantCreativeImages')])
     for source in preferred_sources:
@@ -422,26 +449,13 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         base = token[:-2]
         for candidate in (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##'):
             value = placeholders.get(candidate)
-            if usable_map_url(value):
+            if usable_map_url(value) and not stale_echo(value):
                 return str(value)
 
-    draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id')
-    if tenant_id and (presentation_id or draft_id):
-        try:
-            rows = db.get_map_images(
-                tenant_id,
-                presentation_id=presentation_id,
-                draft_id=draft_id if not presentation_id else None,
-            )
-        except Exception:
-            rows = []
-        for row in rows:
-            if row.get('image_type') not in canonical_types:
-                continue
-            path = row.get('file_path')
-            public_url = public_map_url(path)
-            if public_url:
-                return public_url
+    for row in canonical_rows:
+        public_url = public_map_url(row.get('file_path'))
+        if public_url:
+            return public_url
 
     # Compatibility fallback for an unsaved draft or a request carrying a map
     # that has not yet been written to map_images.
@@ -478,7 +492,7 @@ def _persisted_map_source_marks(tenant_id, presentation_id=None, draft_id=None):
     try:
         rows = db.get_map_images(
             tenant_id, presentation_id=presentation_id,
-            draft_id=None if presentation_id else draft_id)
+            draft_id=draft_id)
     except Exception:
         rows = []
     for row in rows:
@@ -676,7 +690,7 @@ def _refresh_slide_map_sources(html, project_data, tenant_id, presentation_id=No
         if isinstance(project_data, dict) else None
     marks = _persisted_map_source_marks(
         tenant_id, presentation_id=presentation_id,
-        draft_id=None if presentation_id else draft_id)
+        draft_id=draft_id)
     if not marks:
         return html
 

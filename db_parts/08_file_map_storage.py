@@ -91,26 +91,36 @@ def add_map_image(tenant_id, image_type, file_path, placeholder, presentation_id
 
 def update_map_image(image_id, tenant_id, file_path, placeholder, metadata=None):
     conn = get_db()
+    # A repoint is the newest write for this row: refresh created_at so the
+    # DESC ordering used to pick the current file stays truthful across scopes.
     conn.execute(
-        '''UPDATE map_images SET file_path = ?, placeholder = ?, metadata_json = ?
+        '''UPDATE map_images SET file_path = ?, placeholder = ?, metadata_json = ?, created_at = ?
            WHERE id = ? AND tenant_id = ?''',
         (file_path, placeholder, json.dumps(metadata, ensure_ascii=False) if metadata else None,
-         image_id, tenant_id)
+         _utcnow().isoformat(timespec='microseconds'), image_id, tenant_id)
     )
     conn.commit()
 
 
 def get_map_images(tenant_id, presentation_id=None, draft_id=None, image_type=None):
-    """Get map images for a tenant, optionally filtered by presentation, draft, and type."""
+    """Get map images for a tenant, optionally filtered by presentation, draft, and type.
+
+    When both a presentation and its linked draft are given, rows from BOTH
+    scopes are returned (newest first): the presentation freezes its maps while
+    the project section keeps saving newer ones under the draft scope, and a
+    reader that only sees the presentation scope serves back stale images.
+    """
     conn = get_db()
     query = 'SELECT * FROM map_images WHERE tenant_id = ?'
     params = [tenant_id]
+    scopes = []
     if presentation_id:
-        query += ' AND presentation_id = ?'
-        params.append(presentation_id)
-    elif draft_id:
-        query += ' AND presentation_id = ?'
-        params.append(f"draft_{draft_id}")
+        scopes.append(str(presentation_id))
+    if draft_id:
+        scopes.append(f"draft_{draft_id}")
+    if scopes:
+        query += ' AND presentation_id IN (' + ', '.join('?' for _ in scopes) + ')'
+        params.extend(scopes)
     if image_type:
         query += ' AND image_type = ?'
         params.append(image_type)

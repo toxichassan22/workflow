@@ -1122,6 +1122,13 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
     # its current URL, so it is authoritative for that map.  On a reopened
     # presentation maps_persisted/approvals come from the persisted project state
     # and agree with the DB row, preserving DB hydration as the fallback.
+    persisted_files_by_placeholder = {}
+    for record in persisted_records:
+        record_placeholder = record.get('placeholder')
+        record_path = record.get('file_path')
+        if record_placeholder and record_path and os.path.exists(record_path):
+            persisted_files_by_placeholder.setdefault(record_placeholder, []).append(
+                os.path.basename(record_path))
     requested_placeholders = request_images.get('map_placeholders')
     if isinstance(requested_placeholders, dict):
         for placeholder, path in requested_placeholders.items():
@@ -1136,6 +1143,15 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
                 requested_canonical = requested_placeholders.get(canonical)
                 if requested_canonical and str(path) == str(requested_canonical):
                     continue
+            # Rows are newest-first, so index 0 is the saved file the section
+            # last approved.  A request quoting an older persisted file is a
+            # stale snapshot echo (a reopened presentation re-sending its own
+            # copy) and must not roll the hydrated URL back to that file.
+            persisted_files = persisted_files_by_placeholder.get(placeholder) or []
+            request_basename = os.path.basename(urlsplit(str(path)).path)
+            if persisted_files and request_basename != persisted_files[0] \
+                    and request_basename in persisted_files:
+                continue
             placeholders[placeholder] = path
 
     if placeholders and isinstance(source, dict):

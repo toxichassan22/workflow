@@ -533,9 +533,8 @@ def _designer_legacy_apply(plan, actions, message, data, slides, project_data,
             # the canonical attribute and persisted-file marks, not by URL.
             map_marks = _persisted_map_source_marks(
                 tenant_id, presentation_id=presentation_id,
-                draft_id=None if presentation_id else (
-                    project_data.get('draftId') or project_data.get('draft_id')
-                    if isinstance(project_data, dict) else None))
+                draft_id=(project_data.get('draftId') or project_data.get('draft_id')
+                          if isinstance(project_data, dict) else None))
             successful_targets = []
             for idx in targets:
                 slide = slides[idx] if isinstance(slides[idx], dict) else {}

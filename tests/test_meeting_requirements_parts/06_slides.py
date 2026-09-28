@@ -246,6 +246,101 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
         self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(new_path)))
 
+    def test_get_map_images_merges_linked_presentation_and_draft_scopes(self):
+        maps_dir = Path(self.application_module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        pres_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_pres.png', delete=False)
+        pres_path = pres_file.name
+        pres_file.write(b'presentation-map')
+        pres_file.close()
+        draft_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_draft.png', delete=False)
+        draft_path = draft_file.name
+        draft_file.write(b'draft-edited-map')
+        draft_file.close()
+        for path in (pres_path, draft_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment', pres_path, '##MAP_CATCHMENT##',
+                             presentation_id='pres-scoped-map', metadata={})
+            db.add_map_image(self.tenant_a, 'catchment', draft_path, '##MAP_CATCHMENT##',
+                             presentation_id='draft_scoped-draft', metadata={})
+            rows = db.get_map_images(
+                self.tenant_a, presentation_id='pres-scoped-map', draft_id='scoped-draft')
+
+        self.assertEqual(len(rows), 2)
+        # Newest-first across both scopes: the later draft row leads.
+        self.assertEqual(os.path.basename(rows[0]['file_path']), os.path.basename(draft_path))
+        self.assertEqual(os.path.basename(rows[1]['file_path']), os.path.basename(pres_path))
+
+    def test_map_refresh_ignores_stale_snapshot_echo_for_newer_draft_map(self):
+        module = self.application_module
+        maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        old_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_before_edit.png', delete=False)
+        old_path = old_file.name
+        old_file.write(b'before-edit-map')
+        old_file.close()
+        edited_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_after_edit.png', delete=False)
+        edited_path = edited_file.name
+        edited_file.write(b'after-edit-map')
+        edited_file.close()
+        for path in (old_path, edited_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+        old_url = '/uploads/maps/' + os.path.basename(old_path)
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment', old_path, '##MAP_CATCHMENT##',
+                             presentation_id='pres-echo-map', metadata={})
+            db.add_map_image(self.tenant_a, 'catchment', edited_path, '##MAP_CATCHMENT##',
+                             presentation_id='draft_echo-draft', metadata={})
+            latest = module._latest_canonical_map_url(
+                'catchment',
+                {'draftId': 'echo-draft'},
+                {},
+                tenant_id=self.tenant_a,
+                presentation_id='pres-echo-map',
+                preferred_images=[
+                    {'map_placeholders': {'##MAP_CATCHMENT##': old_url}},
+                ],
+            )
+
+        self.assertEqual(latest, '/uploads/maps/' + os.path.basename(edited_path))
+
+    def test_hydration_approved_stale_echo_does_not_rollback_newer_draft_map(self):
+        maps_dir = Path(self.application_module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        old_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_before_edit.png', delete=False)
+        old_path = old_file.name
+        old_file.write(b'before-edit-map')
+        old_file.close()
+        edited_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_after_edit.png', delete=False)
+        edited_path = edited_file.name
+        edited_file.write(b'after-edit-map')
+        edited_file.close()
+        for path in (old_path, edited_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+        old_url = '/uploads/maps/' + os.path.basename(old_path)
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'landmarks', old_path, '##MAP_LANDMARKS##',
+                             presentation_id='pres-echo-hydrate', metadata={})
+            db.add_map_image(self.tenant_a, 'landmarks', edited_path, '##MAP_LANDMARKS##',
+                             presentation_id='draft_echo-hydrate-draft', metadata={})
+            _project, images = self.application_module._hydrate_map_assets_for_request(
+                {'draftId': 'echo-hydrate-draft'},
+                {
+                    'map_placeholders': {'##MAP_LANDMARKS##': old_url},
+                    'maps_persisted': True,
+                    'map_approvals': {'landmarks': True},
+                },
+                self.tenant_a,
+                presentation_id='pres-echo-hydrate',
+            )
+
+        self.assertTrue(images['map_placeholders']['##MAP_LANDMARKS##'].endswith(
+            os.path.basename(edited_path)))
+
     def test_saved_legacy_map_file_is_not_wiped_by_renderer_version_change(self):
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
         map_path = map_file.name

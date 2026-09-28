@@ -339,7 +339,10 @@ def _agent_exec_code(task, ctx, session, feedback=''):
                    or _latest_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images']))
         if not map_url:
             return False, 'لا توجد خريطة معتمدة من هذا النوع.', 'map_missing', None
-        marks = _persisted_map_source_marks(ctx['tenant_id'], presentation_id=ctx['presentation_id'])
+        _map_project = ctx.get('project_data') or {}
+        marks = _persisted_map_source_marks(
+            ctx['tenant_id'], presentation_id=ctx['presentation_id'],
+            draft_id=_map_project.get('draftId') or _map_project.get('draft_id'))
         for idx in indexes:
             slide = slides_at(ctx, idx)
             if slide is None:
