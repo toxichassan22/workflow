@@ -457,11 +457,54 @@ def _agent_exec_generate_image(task, ctx, session, feedback=''):
     return True, None, None, None
 
 
+def _agent_exec_renumber(task, ctx, session, feedback=''):
+    """Rewrite the managed page counters on the targeted slides.
+
+    The counter is chrome owned by the renumber pipeline, so a «أعد ترقيم»
+    request can never legitimately go through a worker edit: changing the
+    digits trips missing_numbers, and leaving them trips unchanged. This op
+    fixes the number deterministically to the slide's live position — and a
+    content slide that lost its counter gets the managed one back.
+    """
+    slides = ctx['slides']
+    total = len(slides)
+    changed = []
+    for idx in task.get('_indexes') or []:
+        slide = slides_at(ctx, idx)
+        if slide is None:
+            continue
+        slide_type = str(slide.get('type') or 'content').strip().lower()
+        before = str(slide.get('html') or '')
+        html = slide_engine._rewrite_preserved_counter(before, slide_type, idx + 1, total)
+        if (slide_type not in ('cover', 'closing', 'moodboard', 'section_divider')
+                and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE)):
+            counter = slide_engine._slide_counter_text(idx + 1, total)
+            if counter:
+                counter_html = '<span data-slide-counter="1" dir="ltr">' + counter + '</span>'
+                if re.search(r'</footer\s*>', html, re.IGNORECASE):
+                    html = re.sub(r'</footer\s*>', lambda m: counter_html + m.group(0),
+                                  html, count=1, flags=re.IGNORECASE)
+                else:
+                    footer = ('<footer data-slide-footer="1" style="position:absolute;'
+                              'bottom:8px;left:24px;">' + counter_html + '</footer>')
+                    html = re.sub(r'(</div>\s*)$', lambda m: footer + m.group(0),
+                                  html, count=1, flags=re.IGNORECASE)
+        if html != before:
+            slide['html'] = html
+            slide['_designer_keep_html'] = True
+            slide['is_custom'] = True
+            changed.append(idx)
+    if not changed:
+        return False, 'ترقيم الشرائح الظاهر صحيح بالفعل.', 'renumber_unchanged', None
+    return (True, f'أُعيد ترقيم {len(changed)} شريحة.', None,
+            [slides[j].get('html', '') for j in changed])
+
+
 _EXECUTORS = {
     'edit': _agent_exec_edit, 'redesign': _agent_exec_edit, 'rewrite': _agent_exec_edit,
     'split': _agent_exec_split, 'restructure': _agent_exec_restructure,
     'create': _agent_exec_create, 'delete': _agent_exec_delete, 'move': _agent_exec_move,
-    'generate_image': _agent_exec_generate_image,
+    'generate_image': _agent_exec_generate_image, 'renumber': _agent_exec_renumber,
 }
 
 

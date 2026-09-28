@@ -115,10 +115,11 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 - generate_image: توليد صورة جديدة — params {{"prompt":"وصف دقيق","component_name":"","position":"surgical|background|right|left|inline"}}.
 - image_descriptions: إضافة الأوصاف المحفوظة للصور.
 - team_logo / company_logo_panel: شعار الفريق أو شعار الشركة.
+- renumber: تصحيح رقم الصفحة الظاهر على الشرائح المحددة ليطابق ترتيبها — تنفيذ كودي حتمي لطلبات «أعد ترقيم/رقّم الشرائح» ولا يغيّر أي محتوى.
 
 ## قواعد
 - لا تخمّن معرفات غير موجودة في المخطط — عند شك في الهدف اسأل بدل التخمين.
-- «أعد تصميم/حسّن الشكل» تعني redesign؛ «غيّر/عدّل شيئاً محدداً» تعني edit؛ «أعد الصياغة» تعني rewrite.
+- «أعد تصميم/حسّن الشكل» تعني redesign؛ «غيّر/عدّل شيئاً محدداً» تعني edit؛ «أعد الصياغة» تعني rewrite؛ «أعد ترقيم/رقّم الشرائح» تعني renumber — لا تحوّلها إلى edit فالعدّاد يُدار كودياً.
 - الافتراضي عند غياب تحديد هو current (الشريحة المعروضة)، إلا إذا كان الطلب جمعاً واضحاً فاختر all أو ids.
 - كل مهمة وظيفة واحدة: لا تخلط إعادة تصميم وتقسيم على نفس الشريحة في op واحد — أنشئ op لكل مقصود وستُدمج تلقائياً على الأقوى.
 - نبّه في message عندما تحتاج الخطة لتأكيد المستخدم (تغيير عدد الشرائح أو مهام كثيرة)."""
@@ -536,7 +537,10 @@ def _designer_agent_finish(run, ctx):
     else:
         response_text = 'لم يتم تنفيذ أي تعديل على العرض.'
         if failed:
-            first_reason = _client_safe_llm_error(failed[0].get('failureReason') or '')
+            raw_reason = failed[0].get('failureReason') or ''
+            first_reason = (_client_safe_llm_error(raw_reason)
+                            if _is_company_credit_error(raw_reason)
+                            else designer_agent_ops.failure_reason_text(raw_reason))
             response_text += f' السبب: {first_reason[:200]}'
 
     persisted = _normalize_designer_chat_messages(ctx['history_for_turn'])[-DESIGNER_CHAT_STORED_TURNS * 2:]

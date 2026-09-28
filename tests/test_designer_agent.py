@@ -157,6 +157,45 @@ class AgentFlowTests(unittest.TestCase):
         self.assertIn('<p>ب</p>', body['slidesData'][1]['html'])
         self.assertIn('<p>+</p>', body['slidesData'][2]['html'])
 
+    def test_failed_task_reason_is_arabic_not_a_code(self):
+        slides = [slide('<p>الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
+
+        def editor(html, title, instruction, index, *a, **k):
+            return ('<div class="slide" style="width:1280px;height:720px;">'
+                    '<p>الإيراد</p></div>', 'تم')
+
+        patches = self.agent_patches(self.module, turn, editor=editor)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            response = self.post({'message': 'عدل الشريحة', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertNotIn('missing_numbers', body['response'])
+        self.assertIn('120000', body['response'])
+        self.assertNotIn('missing_numbers', body['tasks'][0]['failureReason'])
+        # The machine field keeps the raw code for client logic and logs.
+        self.assertIn('missing_numbers', body['failureReason'])
+
+    def test_renumber_op_rewrites_counters(self):
+        counter = '<span data-slide-counter="1" dir="ltr">07 — 03</span>'
+        slides = [slide('<p>أ</p>' + counter), slide('<p>ب</p>' + counter),
+                  slide('<p>ج</p>' + counter)]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'renumber', 'select': {'all': True}}]}
+        patches = self.agent_patches(self.module, turn)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            response = self.post({'message': 'أعد ترقيم الشرائح', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(body['tasks'][0]['op'], 'renumber')
+        self.assertEqual(body['tasks'][0]['status'], 'success')
+        self.assertIn('01 — 03', body['slidesData'][0]['html'])
+        self.assertIn('02 — 03', body['slidesData'][1]['html'])
+        self.assertIn('03 — 03', body['slidesData'][2]['html'])
+
     def test_structural_plan_waits_for_confirmation(self):
         slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
         first_id_holder = []
@@ -520,6 +559,62 @@ class SelectorAndVerifyTests(unittest.TestCase):
         ok, reasons = designer_agent_ops.verify_task_result('edit', ['<div class="slide">x</div>'], [''])
         self.assertFalse(ok)
         self.assertIn('empty_result', reasons)
+
+    def test_counter_chrome_is_not_a_preserved_fact(self):
+        before = ('<div class="slide"><p>محتوى</p>'
+                  '<footer data-slide-footer="1"><span data-slide-counter="1" dir="ltr">03 — 12</span></footer></div>')
+        after = ('<div class="slide"><p>محتوى محدث</p>'
+                 '<footer data-slide-footer="1"><span data-slide-counter="1" dir="ltr">05 — 12</span></footer></div>')
+        ok, reasons = designer_agent_ops.verify_task_result('edit', [before], [after])
+        self.assertTrue(ok, reasons)
+
+    def test_counter_drop_still_detects_content_numbers(self):
+        before = ('<div class="slide"><p>الإيراد 4,500</p>'
+                  '<footer data-slide-footer="1"><span data-slide-counter="1" dir="ltr">03 — 12</span></footer></div>')
+        after = ('<div class="slide"><p>الإيراد</p>'
+                 '<footer data-slide-footer="1"><span data-slide-counter="1" dir="ltr">03 — 12</span></footer></div>')
+        ok, reasons = designer_agent_ops.verify_task_result('edit', [before], [after])
+        self.assertFalse(ok)
+        self.assertTrue(any(r.startswith('missing_numbers') for r in reasons))
+
+
+class FailureReasonTextTests(unittest.TestCase):
+    def test_missing_numbers_maps_to_arabic_with_values(self):
+        text = designer_agent_ops.failure_reason_text('missing_numbers:7378')
+        self.assertNotIn('missing_numbers', text)
+        self.assertIn('7378', text)
+        self.assertRegex(text, r'[؀-ۿ]')
+        self.assertIn('73، 78', designer_agent_ops.failure_reason_text('missing_numbers:73,78'))
+
+    def test_plain_codes_translate(self):
+        self.assertEqual(designer_agent_ops.failure_reason_text('unchanged'),
+                         'أعاد المصمم الشريحة نفسها دون تغيير قابل للتحقق.')
+        self.assertEqual(designer_agent_ops.failure_reason_text('ids_not_found'),
+                         'لم يُعثر على الشرائح المطلوبة في العرض الحالي.')
+        self.assertNotIn('exception', designer_agent_ops.failure_reason_text('exception:ValueError'))
+        self.assertTrue(designer_agent_ops.failure_reason_text('bogus_code'))
+
+    def test_facts_and_precheck_parts(self):
+        text = designer_agent_ops.failure_reason_text('facts_not_preserved:numbers:80,90')
+        self.assertNotIn('facts_not_preserved', text)
+        self.assertIn('80، 90', text)
+        self.assertEqual(designer_agent_ops.failure_reason_text('table_precheck:سيفرغ الجدول'),
+                         'سيفرغ الجدول')
+        # Arabic worker notes pass through untouched.
+        self.assertEqual(designer_agent_ops.failure_reason_text('لا توجد خريطة معتمدة.'),
+                         'لا توجد خريطة معتمدة.')
+
+    def test_joined_reasons_dedupe(self):
+        out = designer_agent_ops.failure_reason_text('unchanged;unchanged')
+        self.assertEqual(out.count('دون تغيير قابل للتحقق'), 1)
+
+    def test_public_task_shows_display_reason(self):
+        public = designer_agent_ops.public_task({
+            'n': 1, 'op': 'edit', 'status': 'failed', 'failureReason': 'unchanged'})
+        self.assertNotIn('unchanged', public['failureReason'])
+        self.assertIn('دون تغيير', public['failureReason'])
+        ok_task = designer_agent_ops.public_task({'n': 1, 'op': 'edit', 'status': 'success'})
+        self.assertIsNone(ok_task['failureReason'])
 
 
 if __name__ == '__main__':

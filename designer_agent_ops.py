@@ -19,7 +19,7 @@ EDIT_OPS = ('edit', 'redesign', 'rewrite')
 STRUCTURE_OPS = ('split', 'restructure', 'delete', 'move', 'create')
 CODE_OPS = ('table_edit', 'color_edit', 'watermark', 'insert_attached_image',
             'insert_map', 'update_image', 'generate_image', 'image_descriptions',
-            'team_logo', 'company_logo_panel')
+            'team_logo', 'company_logo_panel', 'renumber')
 ALL_OPS = EDIT_OPS + STRUCTURE_OPS + CODE_OPS
 
 # Ops that change slide count or order — they must be confirmed by the user
@@ -45,6 +45,7 @@ OP_LABELS = {
     'image_descriptions': 'أوصاف الصور',
     'team_logo': 'شعار الفريق',
     'company_logo_panel': 'شعار الشركة',
+    'renumber': 'ترقيم الشرائح',
 }
 
 
@@ -120,7 +121,8 @@ def public_task(task):
         'slides': list(task.get('slides') or []),
         'titles': list(task.get('titles') or []),
         'status': task.get('status', 'pending'),
-        'failureReason': task.get('failureReason'),
+        'failureReason': (failure_reason_text(task.get('failureReason'))
+                          if task.get('failureReason') else None),
         'instruction': task.get('instruction') or '',
         'style_brief': task.get('style_brief') or '',
         'params': dict(task.get('params') or {}),
@@ -181,6 +183,8 @@ def instruction_for(task, style_brief=''):
     if op in ('insert_map', 'update_image', 'generate_image', 'team_logo',
               'company_logo_panel', 'insert_attached_image', 'image_descriptions'):
         return raw or task.get('label') or OP_LABELS.get(op, op)
+    if op == 'renumber':
+        return raw or 'صحّح رقم الصفحة الظاهر على الشرائح المحددة لتطابق ترتيبها الحالي.'
     # edit — explicit change on otherwise untouched content
     parts = [raw or task.get('label') or 'طبّق التعديل المطلوب على هذه الشريحة.']
     if task.get('exact_text'):
@@ -274,8 +278,106 @@ def verify_deck_integrity(slides, before_ids=None):
     return reasons
 
 
+# ── Failure-reason display text ─────────────────────────────────────────────
+# Internal reason codes (missing_numbers:…, ids_not_found, clipped:…) are for
+# logs, checkpoints and the machine-readable ``failureReason`` field — never
+# for the chat bubble or the checklist row, where only Arabic display text
+# belongs. Reasons the runner joins with «;» are split and each part mapped;
+# worker notes already written in Arabic pass through untouched.
+
+_FAILURE_REASON_TEXT = {
+    'missing_selector': 'لم يحدد الطلب شريحة قابلة للتنفيذ.',
+    'selector_empty': 'لم يحدد الطلب شريحة قابلة للتنفيذ.',
+    'ids_not_found': 'لم يُعثر على الشرائح المطلوبة في العرض الحالي.',
+    'missing_slide': 'لم يُعثر على الشريحة المطلوبة في العرض الحالي.',
+    'range_endpoint_missing': 'تعذر تحديد نطاق الشرائح المطلوب.',
+    'section_not_found': 'لم يُعثر على القسم المطلوب في العرض.',
+    'non_contiguous_sources': 'الشرائح المحددة غير متجاورة فتعذرت إعادة هيكلتها معًا.',
+    'unknown_after_id': 'موضع الإدراج المحدد غير موجود في العرض.',
+    'no_target_slide': 'لم يُعثر على شريحة مستهدفة صالحة.',
+    'invalid_indexes': 'رقم الشريحة المحدد خارج العرض أو غير واضح.',
+    'invalid_position': 'موضع الإدراج المحدد غير صالح.',
+    'invalid_parts': 'عدد الأجزاء المطلوب غير صالح.',
+    'invalid_target_count': 'عدد الشرائح الهدف غير صالح.',
+    'invalid_slide_html': 'بنية الشريحة لا تسمح بالتحقق الآمن من المحتوى.',
+    'invalid_html': 'لم يُرجع المصمم شريحة HTML صالحة.',
+    'incomplete_result': 'النتيجة غير مكتملة أو لم تتغير.',
+    'content_not_preserved': 'النتيجة لم تحتفظ بكامل محتوى الشرائح الأصلية فرُفضت.',
+    'split_not_partitioned': 'الأجزاء الناتجة مكررة أو غير منفصلة.',
+    'empty_result': 'لم تُرجع المحاولة شريحة صالحة.',
+    'empty_worker_result': 'لم يُرجع المصمم نتيجة صالحة.',
+    'unknown_structure_tool': 'العملية المطلوبة غير معروفة.',
+    'unknown_code_op': 'العملية المطلوبة غير معروفة.',
+    'unchanged': 'أعاد المصمم الشريحة نفسها دون تغيير قابل للتحقق.',
+    'no_material_change': 'أعاد المصمم الشريحة نفسها دون تغيير قابل للتحقق.',
+    'table_unchanged': 'لم يتغير الجدول.',
+    'color_unchanged': 'لم يتغير لون الشريحة.',
+    'watermark_unchanged': 'لم تتغير العلامة المائية.',
+    'image_unchanged': 'لم تتغير الصورة في الشريحة.',
+    'map_unchanged': 'لم تتغير الخريطة في الشريحة.',
+    'renumber_unchanged': 'ترقيم الشرائح الظاهر صحيح بالفعل.',
+    'watermark_missing': 'لا توجد علامة مائية مرفوعة في إعدادات الشركة.',
+    'map_missing': 'لا توجد خريطة معتمدة من هذا النوع.',
+    'asset_missing': 'الأصل البصري المطلوب غير موجود في المشروع.',
+    'attached_image_missing': 'لا توجد صورة مرفقة بهذه الرسالة بالترتيب المطلوب.',
+    'no_missing_descriptions': 'لا توجد أوصاف ناقصة لإضافتها.',
+    'cannot_delete_all': 'لا يمكن حذف كل شرائح العرض.',
+    'cancelled': 'أُلغيت المهمة.',
+    'billing_stopped': 'توقفت المهمة لاستنفاد رصيد الشركة.',
+    'measured_overflow': 'النتيجة تجاوزت حدود إطار الشريحة فرُفضت.',
+    'clipped': 'عناصر في النتيجة خرجت عن إطار الشريحة فرُفضت.',
+    'worker_failed': 'تعذر تنفيذ المهمة على الشريحة.',
+    'verification_failed': 'رُفضت النتيجة في التحقق.',
+    'dropped_boundary_data': 'النتيجة أسقطت أطوال حدود موثقة فرُفضت.',
+    'boundary_data_unchanged': 'أحدث بيانات الحدود مطابقة لما هو ظاهر بالفعل في الشريحة.',
+    'maps_link_missing': 'لا يوجد رابط خرائط محفوظ في بيانات هذا المشروع.',
+    'generation_failed': 'تعذر توليد النتيجة.',
+    'finalize_failed': 'تعذر تجهيز نتيجة الشريحة.',
+    'provider_error': 'تعذر الحصول على نتيجة صالحة من المصمم.',
+    'image_generation_failed': 'تعذر توليد الصورة حاليًا.',
+    'exception': 'حدث خطأ أثناء تنفيذ المهمة.',
+    'unknown': 'تعذر تنفيذ المهمة.',
+}
+
+_FAILURE_REASON_FALLBACK = 'تعذر تنفيذ المهمة — أعد المحاولة بعد قليل.'
+_ARABIC_TEXT_RE = re.compile(r'[؀-ۿ]')
+
+
+def _failure_reason_part_text(part):
+    code, _, detail = part.partition(':')
+    code = code.strip()
+    if code == 'missing_numbers':
+        numbers = '، '.join(n for n in detail.split(',') if n.strip())[:120]
+        return ('النتيجة أسقطت أرقامًا من المحتوى الأصلي'
+                + (f' ({numbers})' if numbers else '')
+                + ' فرُفضت حفاظًا على بيانات العرض.')
+    if code == 'facts_not_preserved':
+        kinds, _, sample = detail.partition(':')
+        if kinds.strip() == 'numbers' and sample.strip():
+            numbers = '، '.join(n for n in sample.split(',') if n.strip())[:120]
+            return f'النتيجة لم تحتفظ بكل أرقام المحتوى الأصلي ({numbers}) فرُفضت.'
+        return 'النتيجة لم تحتفظ بكل حقائق المحتوى الأصلي فرُفضت.'
+    if code == 'table_precheck':
+        return detail.strip() or _FAILURE_REASON_FALLBACK
+    if code in _FAILURE_REASON_TEXT:
+        return _FAILURE_REASON_TEXT[code]
+    if _ARABIC_TEXT_RE.search(part):
+        return part
+    return _FAILURE_REASON_FALLBACK
+
+
+def failure_reason_text(reason):
+    """Arabic display text for an internal failure-reason string."""
+    out = []
+    for chunk in str(reason or '').split(';'):
+        text = _failure_reason_part_text(chunk.strip())
+        if text and text not in out:
+            out.append(text)
+    return ' '.join(out) or _FAILURE_REASON_FALLBACK
+
+
 __all__ = [
     'ALL_OPS', 'CODE_OPS', 'CONFIRM_OPS', 'EDIT_OPS', 'OP_LABELS', 'STRUCTURE_OPS',
-    'instruction_for', 'needs_confirmation', 'public_task', 'resolve_selector',
-    'slide_id_set', 'verify_deck_integrity', 'verify_task_result',
+    'failure_reason_text', 'instruction_for', 'needs_confirmation', 'public_task',
+    'resolve_selector', 'slide_id_set', 'verify_deck_integrity', 'verify_task_result',
 ]

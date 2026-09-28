@@ -22,7 +22,7 @@ _OP_PRIORITY = {
 _WORKER_OPS = {'edit', 'redesign', 'split', 'restructure', 'create', 'generate_image'}
 _CODE_OPS = {'delete', 'move', 'table_edit', 'color_edit', 'watermark',
              'insert_map', 'update_image', 'insert_attached_image',
-             'image_descriptions', 'team_logo', 'company_logo_panel'}
+             'image_descriptions', 'team_logo', 'company_logo_panel', 'renumber'}
 
 _TAG_RE = re.compile(r'<[^>]+>', re.DOTALL)
 _NUM_RE = re.compile(r'\d[\d٠-٩۰-۹.,٬%٪/\s]*\d|\d')
@@ -30,25 +30,39 @@ _WS_RE = re.compile(r'\s+')
 
 
 class _TextGrab(HTMLParser):
-    """Visible text only: script/style/template/svg contents are not text."""
+    """Visible text only: script/style/template/svg contents and managed
+    chrome (footers, page counters) are not slide content — the renumber
+    pipeline owns those digits, so they cannot count as preserved facts."""
 
     _SKIP = {'script', 'style', 'template', 'svg', 'canvas'}
+    _MANAGED_ATTRS = ('data-slide-footer', 'data-slide-counter')
+    _MANAGED_CLASSES = {'slide-footer', 'slide-counter'}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self._skip = 0
+        self._managed = []
 
     def handle_starttag(self, tag, attrs):
         if tag in self._SKIP:
             self._skip += 1
+            return
+        attrs_d = dict(attrs)
+        classes = set((attrs_d.get('class') or '').split())
+        if (any(key in attrs_d for key in self._MANAGED_ATTRS)
+                or classes & self._MANAGED_CLASSES):
+            self._managed.append(tag)
 
     def handle_endtag(self, tag):
         if tag in self._SKIP and self._skip:
             self._skip -= 1
+            return
+        if self._managed and self._managed[-1] == tag:
+            self._managed.pop()
 
     def handle_data(self, data):
-        if not self._skip:
+        if not self._skip and not self._managed:
             self.parts.append(data)
 
 
