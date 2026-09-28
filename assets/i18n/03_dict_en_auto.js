@@ -476,6 +476,7 @@ window.__WFI18N_EN_AUTO = /*I18N_EN_AUTO_BEGIN*/{
 "الإيرادات × مضاعف": "Revenue × multiple",
 "الإيرادات وصافي الدخل": "Revenues & Net Operating Income",
 "الإيضاحات": "Notes",
+"الإطار التلقائي": "Automatic frame",
 "الاتجاه": "Direction",
 "الارتداد": "Setback",
 "الارتدادات": "Setbacks",

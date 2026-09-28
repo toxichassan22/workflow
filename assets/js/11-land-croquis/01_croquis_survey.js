@@ -711,14 +711,13 @@
         payload.enabled_maps = [mapType];
         payload.draftId = tenantProjectData.draftId;
         payload.refresh_maps = true;
-        // Only a viewport the user picked by zooming/panning rides along — a stored
-        // frame from the last render must not freeze the automatic one or disable
-        // the regen seed variation on maps nobody adjusted.
-        const manualViewport = tenantCreativeImages.map_viewport_overrides || {};
-        payload.map_zooms = Object.fromEntries(
-          Object.entries(tenantCreativeImages.map_zooms || {}).filter(([key]) => manualViewport[key]));
-        payload.map_centers = Object.fromEntries(
-          Object.entries(tenantCreativeImages.map_centers || {}).filter(([key]) => manualViewport[key]));
+        // The full stored frames ride along so the draft keeps the complete map
+        // state; the server only honours the ones flagged in map_viewport_overrides,
+        // so a stored frame never freezes a map nobody adjusted or disables the
+        // regen-seed variation.
+        payload.map_zooms = { ...(tenantCreativeImages.map_zooms || {}) };
+        payload.map_centers = { ...(tenantCreativeImages.map_centers || {}) };
+        payload.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };
         const regenSeed = Date.now();
         payload.regen_seed = regenSeed;
         const data = await api('POST', '/api/generate-map-image', {
@@ -742,8 +741,16 @@
           [...view.keys, ...(view.editableKeys || [])].forEach(key => { delete nextPlaceholders[key]; });
         });
         tenantCreativeImages.map_placeholders = { ...nextPlaceholders, ...(data.placeholders || {}) };
-        tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
-        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+        // The response carries a fresh frame for every map type, but only this type
+        // was re-rendered — merging all of them would overwrite a manual viewport
+        // picked on another map (and leave its stored image disagreeing with the
+        // state the overlay converts clicks against).
+        if (data.zooms?.[mapType] !== undefined) {
+          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: data.zooms[mapType] };
+        }
+        if (data.centers?.[mapType] !== undefined) {
+          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: data.centers[mapType] };
+        }
         if (mapType === 'overview' && Array.isArray(data.sitePolygon) && data.sitePolygon.length >= 3) {
           tenantMapPolygonPoints = parseTenantPolygonPoints(data.sitePolygon);
           if (!['manual', 'cleared'].includes(tenantProjectData.location_polygon_source)) tenantProjectData.location_polygon_source = 'auto';

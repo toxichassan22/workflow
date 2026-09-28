@@ -227,6 +227,23 @@
       }
     }
 
+    // Clears a hand-picked zoom/center so the next render frames this map
+    // automatically again — without it a stray pan would pin the frame forever.
+    function resetMapViewport(mapType) {
+      if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
+      if (!(tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
+      const overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };
+      delete overrides[mapType];
+      tenantCreativeImages.map_viewport_overrides = overrides;
+      const zooms = { ...(tenantCreativeImages.map_zooms || {}) };
+      delete zooms[mapType];
+      tenantCreativeImages.map_zooms = zooms;
+      const centers = { ...(tenantCreativeImages.map_centers || {}) };
+      delete centers[mapType];
+      tenantCreativeImages.map_centers = centers;
+      regenerateMapPreview(mapType);
+    }
+
     function startMapViewportPan(event) {
       if (event.button !== 0 || tenantMapViewportBusy || !mapViewportPanAllowed()) return;
       const box = document.getElementById('mapPreviewImage');
@@ -250,7 +267,7 @@
         img.style.cursor = '';
         const dx = pan.dx;
         const dy = pan.dy;
-        if (Math.abs(dx) + Math.abs(dy) < 5) return;
+        if (Math.abs(dx) + Math.abs(dy) < 12) return;
         const rect = img.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
         // The image point that lands under the centre becomes the new map centre.

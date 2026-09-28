@@ -167,6 +167,23 @@ def _overview_polygon(project_data, highlight_site):
     return points if len(points) >= 3 else None
 
 
+def _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id):
+    """Fetch the raw provider base for a frame when its cache file is gone.
+
+    Recompose normally rebuilds a missing editable sidecar from the cached raw
+    map. Legacy maps and wiped map dirs have no cache file either — without this
+    fetch the recompose would silently keep the baked render and the client edit
+    overlay would have nothing to draw on. Uses the same cache key as
+    generation, so a successful call also refills the cache for later edits.
+    """
+    fetched = get_static_map(center_lat, center_lng, zoom=zoom, paths=None,
+                             size=(1280, 720), maptype=active_maptype, styles=styles)
+    if not fetched.get('success'):
+        return None
+    _record_maps_call(tenant_id)
+    return fetched.get('path')
+
+
 def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site):
     from db import add_map_image, get_map_images, update_map_image
     rows = get_map_images(tenant_id, presentation_id=effective_id)
@@ -285,7 +302,9 @@ def _recompose_access_map(project_data, tenant_id, effective_id):
         styles = SATELLITE_CLEAN_STYLES if active_maptype == 'satellite' else ACCESS_ROADMAP_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
         if not os.path.isfile(cached_base):
-            continue
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            if not cached_base:
+                continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
         shutil.copyfile(cached_base, editable_path)
         if active_maptype == 'satellite':
@@ -364,7 +383,10 @@ def recompose_access_map(project_data, tenant_id, presentation_id=None, draft_id
     with _MAP_GENERATION_LOCKS_GUARD:
         lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
     with lock:
-        return _recompose_access_map(project_data, tenant_id, effective_id)
+        scope_ctx = maps_usage_ctx('access', tenant_id=tenant_id,
+                                   presentation_id=presentation_id, draft_id=draft_id)
+        with maps_usage_scope(scope_ctx):
+            return _recompose_access_map(project_data, tenant_id, effective_id)
 
 
 def _recompose_catchment_map(project_data, tenant_id, effective_id):
@@ -417,7 +439,9 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id):
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
         if not os.path.isfile(cached_base):
-            continue
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            if not cached_base:
+                continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
         shutil.copyfile(cached_base, editable_path)
         if active_maptype == 'satellite':
@@ -490,7 +514,10 @@ def recompose_catchment_map(project_data, tenant_id, presentation_id=None, draft
     with _MAP_GENERATION_LOCKS_GUARD:
         lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
     with lock:
-        return _recompose_catchment_map(project_data, tenant_id, effective_id)
+        scope_ctx = maps_usage_ctx('catchment', tenant_id=tenant_id,
+                                   presentation_id=presentation_id, draft_id=draft_id)
+        with maps_usage_scope(scope_ctx):
+            return _recompose_catchment_map(project_data, tenant_id, effective_id)
 
 
 def _recompose_landmarks_map(project_data, tenant_id, effective_id):
@@ -542,7 +569,9 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id):
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
         if not os.path.isfile(cached_base):
-            continue
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            if not cached_base:
+                continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
         shutil.copyfile(cached_base, editable_path)
         if active_maptype == 'satellite':
@@ -613,7 +642,10 @@ def recompose_landmarks_map(project_data, tenant_id, presentation_id=None, draft
     with _MAP_GENERATION_LOCKS_GUARD:
         lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
     with lock:
-        return _recompose_landmarks_map(project_data, tenant_id, effective_id)
+        scope_ctx = maps_usage_ctx('landmarks', tenant_id=tenant_id,
+                                   presentation_id=presentation_id, draft_id=draft_id)
+        with maps_usage_scope(scope_ctx):
+            return _recompose_landmarks_map(project_data, tenant_id, effective_id)
 
 
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True, usage_flow=None):
@@ -774,11 +806,19 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         regen_seed = 0
     # A viewport the user picked in the preview (manual zoom/pan) overrides the
     # computed frame for the overview and access maps — landmark and catchment
-    # extents stay fitted to their content.
+    # extents stay fitted to their content. Only types flagged in
+    # map_viewport_overrides count: the payload also carries every stored frame,
+    # and an unflagged one is just the last render, not a user request.
+    manual_types = project_data.get('map_viewport_overrides')
+    manual_types = {key for key, flag in manual_types.items() if flag} if isinstance(manual_types, dict) else set()
     zoom_overrides = project_data.get('map_zooms')
-    zoom_overrides = zoom_overrides if isinstance(zoom_overrides, dict) else {}
+    zoom_overrides = {
+        key: value for key, value in zoom_overrides.items() if key in manual_types
+    } if isinstance(zoom_overrides, dict) else {}
     center_overrides = project_data.get('map_centers')
-    center_overrides = center_overrides if isinstance(center_overrides, dict) else {}
+    center_overrides = {
+        key: value for key, value in center_overrides.items() if key in manual_types
+    } if isinstance(center_overrides, dict) else {}
     # A regenerate must not re-frame a map whose extent is derived from a real boundary:
     # shifting the zoom by two levels shrank the plot back to a dot. A manual viewport
     # wins over the seed shift too — the user asked for that exact frame.
