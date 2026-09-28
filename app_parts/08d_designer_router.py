@@ -19,6 +19,14 @@ try:
     SPAN_ROUTER_LOCAL_MIN = float(os.environ.get('SPAN_ROUTER_LOCAL_MIN') or 0.5)
 except (TypeError, ValueError):
     SPAN_ROUTER_LOCAL_MIN = 0.5
+try:
+    # The highest needs-design probability that may still route locally. The
+    # default is strict — 0.2, not a 0.5 coin flip — because a lite model that
+    # is merely "probably not design work" must not swallow a real edit
+    # request. Set SPAN_ROUTER_CHAT_MAX=0 to disable local routing entirely.
+    SPAN_ROUTER_CHAT_MAX = float(os.environ.get('SPAN_ROUTER_CHAT_MAX') or 0.2)
+except (TypeError, ValueError):
+    SPAN_ROUTER_CHAT_MAX = 0.2
 
 _SPAN_QUESTIONS = {
     'needs_design_work': {
@@ -94,6 +102,15 @@ def _designer_span_route(message, history=None, usage_ctx=None):
     # instruction), not a fresh question — do not classify it as chat.
     if _designer_last_reply_was_question(history):
         return 'design'
+    # A message that names a slide number is design work by definition: no
+    # canned reply can answer it, so the lite router gets no vote on it. A
+    # malformed range still means design intent — the planner surfaces the
+    # proper target error downstream.
+    try:
+        if designer_chat_targets.explicit_slide_numbers(text):
+            return 'design'
+    except Exception:
+        return 'design'
     if _tenant_key_gate(usage_ctx) is not None:
         # The paid path repeats this gate and renders its message; the router
         # simply has no key to call with.
@@ -140,9 +157,13 @@ def _designer_span_route(message, history=None, usage_ctx=None):
     design_p = _noul_score(answers, 'needs_design_work')
     balance_p = _noul_score(answers, 'asks_credit_balance')
     # A local route requires the model to positively rule out design work; a
-    # missing needs_design score means 'unknown', and unknown goes paid.
-    if design_p is None or design_p >= 0.5:
-        return 'design'
-    if balance_p is not None and balance_p >= SPAN_ROUTER_LOCAL_MIN:
-        return 'balance'
-    return 'chat'
+    # missing needs_design score means 'unknown', and unknown goes paid. The
+    # bar is deliberately stricter than a coin flip: a sub-0.5 score still
+    # means the model saw edit signals and must not swallow the request.
+    route = 'design'
+    if design_p is not None and design_p < SPAN_ROUTER_CHAT_MAX:
+        route = ('balance'
+                 if (balance_p is not None and balance_p >= SPAN_ROUTER_LOCAL_MIN)
+                 else 'chat')
+    print(f"[SPAN-ROUTER] needs_design={design_p} balance={balance_p} route={route}")
+    return route

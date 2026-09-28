@@ -415,6 +415,24 @@ class SpanRouterTests(unittest.TestCase):
         self.assertEqual(result, 'design')
         self.assertEqual(rq.post.call_count, 0)
 
+    def test_numbered_slide_turn_never_reaches_the_provider(self):
+        # Naming a slide is design work by definition — the lite model gets no
+        # vote, so even a wrong-but-confident score cannot swallow the edit.
+        result, rq, _ = self._route(
+            'في سلايدة رقم ١٦ حدث خريطة المعالم لاخر خريطة',
+            response=self._fake_response(answers={
+                'needs_design_work': {'noul': 0.01},
+                'asks_credit_balance': {'noul': 0.01}}))
+        self.assertEqual(result, 'design')
+        self.assertEqual(rq.post.call_count, 0)
+
+    def test_borderline_design_score_goes_paid_not_local(self):
+        # 0.3 is under the old 0.5 coin flip but still means the model saw
+        # edit signals — an ambiguous score fails open to the planner.
+        result, _, _ = self._route('ممكن تظبط الشكل شوية؟', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.3}, 'asks_credit_balance': {'noul': 0.1}}))
+        self.assertEqual(result, 'design')
+
     def test_no_key_and_disabled_flag_skip_the_provider_call(self):
         with patch.dict(self.module.app.config, {'TESTING': False}), \
                 patch.object(self.module, '_has_any_openrouter_key', return_value=False), \
