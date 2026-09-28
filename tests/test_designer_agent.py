@@ -492,11 +492,11 @@ class AgentFlowTests(unittest.TestCase):
         real_verify = designer_agent_ops.verify_task_result
         verify_calls = []
 
-        def flaky(op, before, after):
+        def flaky(op, before, after, **kwargs):
             verify_calls.append(op)
             if len(verify_calls) == 1:
                 return False, ['overflow:12']
-            return real_verify(op, before, after)
+            return real_verify(op, before, after, **kwargs)
 
         patches = self.agent_patches(self.module, turn)
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
@@ -546,6 +546,42 @@ class AgentFlowTests(unittest.TestCase):
         # A failed task must not leave its rejected mutation in the returned deck.
         self.assertEqual(body['tasks'][0]['status'], 'failed')
         self.assertEqual([s['html'] for s in body['slidesData']], originals)
+
+    def test_get_project_data_tool_reads_live_draft(self):
+        # The deck can come from a stale snapshot; the tool re-runs the merge so
+        # the planner sees what the draft holds now — and the keys it returns
+        # are written back so the worker's fact block agrees with them.
+        draft = {'draft_data': {'contact_phone': '0222', 'contact_name': 'جديد',
+                                'project_name': 'P'}}
+        ctx = {'slides': [], 'request_project_data': {'contact_phone': '0111'},
+               'presentation': {'draft_id': 'd1',
+                                'project_data': {'contact_phone': '0111',
+                                                 'project_name': 'P'}},
+               'tenant_id': self.tenant, 'project_data': {'contact_phone': '0111'},
+               'superseded_numbers': set()}
+        with self.app.app_context(), \
+                patch.object(self.module.db, 'get_project_draft_by_id', return_value=draft):
+            text, image = self.module._agent_tool_result(
+                'get_project_data', {'section': 'contact'}, ctx, None)
+        self.assertIsNone(image)
+        payload = json.loads(text)
+        values = {f['key']: f['value'] for f in payload['fields']}
+        self.assertEqual(values.get('contact_phone'), '0222')
+        self.assertEqual(values.get('contact_name'), 'جديد')
+        self.assertEqual(ctx['project_data'].get('contact_phone'), '0222')
+        self.assertIn('0111', ctx['superseded_numbers'])
+
+    def test_get_project_data_tool_lists_sections_when_asked_nothing(self):
+        ctx = {'slides': [], 'request_project_data': {}, 'presentation': None,
+               'tenant_id': self.tenant, 'project_data': {}}
+        with self.app.app_context():
+            text, image = self.module._agent_tool_result(
+                'get_project_data', {}, ctx, None)
+        self.assertIsNone(image)
+        payload = json.loads(text)
+        keys = [s['key'] for s in payload['sections']]
+        self.assertIn('contact', keys)
+        self.assertIn('basic', keys)
 
 
 class SelectorAndVerifyTests(unittest.TestCase):
@@ -599,6 +635,30 @@ class SelectorAndVerifyTests(unittest.TestCase):
         ok, reasons = designer_agent_ops.verify_task_result('edit', [before], [after])
         self.assertFalse(ok)
         self.assertTrue(any(r.startswith('missing_numbers') for r in reasons))
+
+    def test_value_update_drops_authorized_numbers(self):
+        # «غيّر الهاتف إلى …» retires the old figure: a superseded project value
+        # or a number the request itself mandates is not a silent fact loss.
+        before = '<div class="slide"><p>الهاتف 0111 والمساحة 5000</p></div>'
+        after = '<div class="slide"><p>الهاتف 0222 والمساحة 5000</p></div>'
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'edit', [before], [after], allowed_numbers={'0111'})
+        self.assertTrue(ok, reasons)
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'edit', [before], [after], request_text='اجعل الهاتف 0222')
+        self.assertTrue(ok, reasons)
+
+    def test_value_update_still_flags_unrelated_drops(self):
+        before = '<div class="slide"><p>الهاتف 0111 والمساحة 5000 والسنة 2024</p></div>'
+        after = '<div class="slide"><p>الهاتف 0222</p></div>'
+        # One mandated new value excuses one drop — the other two still fail.
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'edit', [before], [after], request_text='اجعل الهاتف 0222')
+        self.assertFalse(ok)
+        self.assertTrue(any(r.startswith('missing_numbers') for r in reasons))
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'edit', [before], [after], allowed_numbers={'0111', '5000', '2024'})
+        self.assertTrue(ok, reasons)
 
 
 class FailureReasonTextTests(unittest.TestCase):

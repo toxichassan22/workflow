@@ -38,8 +38,13 @@ def api_designer_chat():
             except Exception:
                 slides = []
 
+    superseded_values = []
     project_data = _designer_project_data_for_request(
-        request_project_data, presentation, tenant_id)
+        request_project_data, presentation, tenant_id,
+        superseded_out=superseded_values)
+    # Numbers the live draft retired since the deck snapshot: an edit that swaps
+    # them for current values must not trip the missing-numbers guard.
+    superseded_numbers = _superseded_number_tokens(superseded_values)
     tci = project_data.get('tenantCreativeImages')
     if isinstance(tci, str):
         try:
@@ -152,6 +157,8 @@ def api_designer_chat():
             'request_creative_images': request_creative_images,
             'project_creative_images': project_creative_images,
             'presentation_id': presentation_id, 'presentation': presentation,
+            'request_project_data': request_project_data,
+            'superseded_numbers': superseded_numbers,
             'tenant_id': tenant_id, 'branding': branding,
             'training_context': training_context,
             'history_for_turn': history_for_turn, 'chat_memory': chat_memory,

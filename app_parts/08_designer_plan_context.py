@@ -696,49 +696,6 @@ def _table_precheck_note(slides, indexes, message):
     return ''
 
 
-def _designer_project_data_for_request(request_project_data, presentation, tenant_id):
-    """Merge the presentation snapshot with its latest saved draft and current request.
-
-    The linked draft is loaded by id so opening an older presentation never sends Sol stale
-    project facts, while an unrelated newer project owned by the same user is never mixed in.
-    Current browser values win because they may contain edits made after the last explicit save.
-    """
-    cleaned_request = copy.deepcopy(request_project_data) if isinstance(request_project_data, dict) else {}
-    request_data = cleaned_request if isinstance(cleaned_request, dict) else {}
-    presentation_data = {}
-    if isinstance(presentation, dict):
-        raw = presentation.get('project_data')
-        if isinstance(raw, dict):
-            cleaned_presentation = copy.deepcopy(raw)
-            presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
-        elif isinstance(raw, str) and raw.strip():
-            try:
-                decoded = json.loads(raw)
-                cleaned_presentation = decoded if isinstance(decoded, dict) else {}
-                presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
-            except (TypeError, ValueError):
-                presentation_data = {}
-    presentation_draft_id = presentation.get('draft_id') if isinstance(presentation, dict) else None
-    draft_id = (
-        presentation_draft_id
-        or presentation_data.get('draftId') or presentation_data.get('draft_id')
-        or request_data.get('draftId') or request_data.get('draft_id')
-    )
-    draft_data = {}
-    if tenant_id and draft_id:
-        try:
-            draft = db.get_project_draft_by_id(tenant_id, str(draft_id))
-            if isinstance(draft, dict) and isinstance(draft.get('draft_data'), dict):
-                cleaned_draft = copy.deepcopy(draft['draft_data'])
-                draft_data = cleaned_draft if isinstance(cleaned_draft, dict) else {}
-        except Exception as exc:
-            print(f'[DESIGNER-CHAT] Could not load linked draft {draft_id}: {exc}')
-    merged = {**presentation_data, **draft_data, **request_data}
-    if draft_id:
-        merged['draftId'] = str(draft_id)
-    return merged
-
-
 def _designer_requests_boundary_data(instruction):
     text = str(instruction or '').casefold()
     return any(word in text for word in (

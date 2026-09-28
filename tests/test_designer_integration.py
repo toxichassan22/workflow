@@ -137,6 +137,44 @@ class DesignerIntegrationTests(unittest.TestCase):
         self.assertEqual(result['custom'], {})
         self.assertEqual(result['logo'], '')
 
+    def test_snapshot_echo_does_not_shadow_live_draft(self):
+        # A presentation workspace re-sends the project data it was opened with
+        # on every chat turn while the linked draft keeps moving. An echo equal
+        # to the snapshot must not drag the merge back to it — otherwise
+        # «حدّث بيانات التواصل» keeps applying the old approved values forever.
+        presentation = {'draft_id': 'd1', 'project_data': {
+            'project_name': 'P', 'contact_phone': '0111', 'contact_name': 'قديم'}}
+        request = {'project_name': 'P', 'contact_phone': '0111', 'contact_name': 'قديم'}
+        draft = {'draft_data': {'project_name': 'P', 'contact_phone': '0222',
+                                'contact_name': 'جديد'}}
+        superseded = []
+        with patch.object(db, 'get_project_draft_by_id', return_value=draft):
+            result = self.module._designer_project_data_for_request(
+                request, presentation, self.tenant, superseded_out=superseded)
+        self.assertEqual(result['contact_phone'], '0222')
+        self.assertEqual(result['contact_name'], 'جديد')
+        self.assertIn('0111', json.dumps(superseded, ensure_ascii=False))
+
+    def test_form_edit_still_wins_over_snapshot_and_draft(self):
+        # A request value that moved away from the snapshot is a real in-session
+        # form edit — the autosave is what lands it in the draft a moment later.
+        presentation = {'draft_id': 'd1', 'project_data': {'contact_name': 'قديم'}}
+        draft = {'draft_data': {'contact_name': 'قيمة المسودة'}}
+        with patch.object(db, 'get_project_draft_by_id', return_value=draft):
+            result = self.module._designer_project_data_for_request(
+                {'contact_name': 'مُدخل جديد'}, presentation, self.tenant)
+        self.assertEqual(result['contact_name'], 'مُدخل جديد')
+
+    def test_blank_request_field_cannot_wipe_draft_value(self):
+        # The form renders every known field, so a key the snapshot never carried
+        # arrives blank — it must not erase what the draft collected meanwhile.
+        presentation = {'draft_id': 'd1', 'project_data': {'project_name': 'P'}}
+        draft = {'draft_data': {'project_name': 'P', 'contact_email': 'new@x.test'}}
+        with patch.object(db, 'get_project_draft_by_id', return_value=draft):
+            result = self.module._designer_project_data_for_request(
+                {'project_name': 'P', 'contact_email': ''}, presentation, self.tenant)
+        self.assertEqual(result['contact_email'], 'new@x.test')
+
     def test_save_numbering_does_not_rebuild_edited_content(self):
         slides = self.slides()
         slides[1]['_designer_keep_html'] = True

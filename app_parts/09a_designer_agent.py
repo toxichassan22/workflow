@@ -43,6 +43,14 @@ _DESIGNER_AGENT_TOOLS = [
         'description': 'صورة للشريحة كما تبدو الآن — للحالات المشكوك فيها بصرياً فقط (تداخل، تدفق نصي).',
         'parameters': {'type': 'object', 'properties': {
             'id': {'type': 'string'}}, 'required': ['id']}}},
+    {'type': 'function', 'function': {
+        'name': 'get_project_data',
+        'description': 'أحدث بيانات المشروع المحفوظة الآن — قسم كامل أو مفاتيح حقول محددة. استخدمها كلما طلب المستخدم تحديث شريحة من بيانات المشروع أو سأل عن قيمة.',
+        'parameters': {'type': 'object', 'properties': {
+            'section': {'type': 'string',
+                        'description': 'مفتاح القسم أو اسمه: basic|location|land_croquis|contact|section-timeline|section-financial-calc|section-team|section-market-study|section-visual-concept|section-executive-content'},
+            'keys': {'type': 'array', 'items': {'type': 'string'},
+                     'description': 'مفاتيح حقول محددة مثل contact_phone'}}}}},
 ]
 
 _AGENT_PLAN_SCHEMA = {
@@ -89,6 +97,7 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 - get_slides(ids): نص HTML كامل لشرائح محددة (حتى 6 في المرة).
 - density(ids): مؤشرات كثافة (أحرف/صفوف/كروت/صور).
 - render_slide(id): صورة الشريحة الحالية للحالات المشكوك فيها بصرياً.
+- get_project_data(section|keys): أحدث بيانات المشروع المحفوظة الآن لقسم كامل (basic، location، contact، section-team...) أو مفاتيح حقول محددة — القيم المرجعة هي المرجع الملزم الوحيد.
 لا تستدعِ أداة إلا عندما لا يكفي المخطط أعلاه للقرار.
 
 ## القرار — JSON بإحدى الصيغ
@@ -122,6 +131,7 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 - «أعد تصميم/حسّن الشكل» تعني redesign؛ «غيّر/عدّل شيئاً محدداً» تعني edit؛ «أعد الصياغة» تعني rewrite؛ «أعد ترقيم/رقّم الشرائح» تعني renumber — لا تحوّلها إلى edit فالعدّاد يُدار كودياً.
 - الافتراضي عند غياب تحديد هو current (الشريحة المعروضة)، إلا إذا كان الطلب جمعاً واضحاً فاختر all أو ids.
 - كل مهمة وظيفة واحدة: لا تخلط إعادة تصميم وتقسيم على نفس الشريحة في op واحد — أنشئ op لكل مقصود وستُدمج تلقائياً على الأقوى.
+- طلب «حدّث/زامن من بيانات المشروع» (تواصل، أسعار، مساحات، موقع، فريق عمل، جداول) يستوجب استدعاء get_project_data أولاً على القسم المعني ثم نقل القيم المرجعة حرفيًا داخل instruction المهمة — ممنوع الاكتفاء بعبارة «حدّث من البيانات» وممنوع نسخ القيم من HTML الشريحة فقد يكون قديمًا.
 - نبّه في message عندما تحتاج الخطة لتأكيد المستخدم (تغيير عدد الشرائح أو مهام كثيرة)."""
 
 
@@ -244,6 +254,12 @@ def _agent_tool_result(name, args, ctx, session):
         if not uri:
             return json.dumps({'error': 'render_failed'}, ensure_ascii=False), None
         return json.dumps({'report': report}, ensure_ascii=False), uri
+    if name == 'get_project_data':
+        try:
+            return _designer_project_data_tool_result(args, ctx), None
+        except Exception as exc:
+            return json.dumps({'error': f'project_data_failed:{exc}'},
+                              ensure_ascii=False), None
     return json.dumps({'error': f'unknown_tool:{name}'}, ensure_ascii=False), None
 
 

@@ -9,7 +9,9 @@ it can be unit-tested without the app context.
 import re
 from html.parser import HTMLParser
 
-from designer_agent_plan import missing_numbers, slide_text
+from collections import Counter
+
+from designer_agent_plan import extract_visible_numbers, missing_numbers, slide_text
 from designer_chat_safety import StructureSafetyError, validate_single_slide
 
 
@@ -218,12 +220,43 @@ class _OverflowGauge(HTMLParser):
                 self.cards += 1
 
 
-def verify_task_result(op, before_htmls, after_htmls):
+def _excused_missing_numbers(missing, before_htmls, after_htmls,
+                             allowed_numbers, request_text):
+    """Filter out numbers the request itself retired.
+
+    ``allowed_numbers`` carries tokens of project values a fresher draft
+    superseded — the slide can still display the old figure, so its removal is
+    an authorized replacement. Numbers the user or planner wrote into the
+    message, instruction or exact_text are authorized the same way. Finally, a
+    number the request never named may still drop when the task mandated a
+    brand-new value that landed in the result: «غيّر الهاتف إلى X» retires the
+    old phone — but only as many drops as values introduced, so an unrelated
+    figure can never slip through.
+    """
+    allowed = set(allowed_numbers or ())
+    if request_text and str(request_text).strip():
+        allowed |= set(extract_visible_numbers(request_text).keys())
+    residual = [n for n in missing if n not in allowed]
+    if not residual or not request_text or not str(request_text).strip():
+        return residual
+    before, after = Counter(), Counter()
+    for html in before_htmls or []:
+        before |= extract_visible_numbers(html)
+    for html in after_htmls or []:
+        after |= extract_visible_numbers(html)
+    mandated = {tok for tok in extract_visible_numbers(request_text)
+                if after.get(tok) and not before.get(tok)}
+    return [] if len(residual) <= len(mandated) else residual
+
+
+def verify_task_result(op, before_htmls, after_htmls,
+                       allowed_numbers=None, request_text=''):
     """Post-task check. Returns ``(ok, reasons)``.
 
     ``before_htmls``/``after_htmls`` are the slide HTMLs touched by the task.
     Verification fails closed: unverifiable HTML, dropped numbers or an
-    unchanged result on an edit op all count as failure.
+    unchanged result on an edit op all count as failure. ``allowed_numbers``
+    and ``request_text`` mark the drops a value-update is authorized to make.
     """
     reasons = []
     for html in after_htmls:
@@ -239,6 +272,9 @@ def verify_task_result(op, before_htmls, after_htmls):
     # repeated figures — the executor check is the authority for those ops.
     if op in EDIT_OPS or op == 'create':
         missing = missing_numbers(before_htmls, after_htmls)
+        if missing:
+            missing = _excused_missing_numbers(
+                missing, before_htmls, after_htmls, allowed_numbers, request_text)
         if missing:
             reasons.append('missing_numbers:' + ','.join(missing[:8]))
     if op in EDIT_OPS:

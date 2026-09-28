@@ -650,7 +650,12 @@ def _designer_agent_run(tasks, ctx, session=None):
             if after_htmls is None:
                 after_htmls = [slides[j].get('html', '') for j in
                                sorted(task.get('_indexes') or indexes) if j < len(slides)]
-            v_ok, v_reasons = designer_agent_ops.verify_task_result(op, before_htmls, after_htmls)
+            v_ok, v_reasons = designer_agent_ops.verify_task_result(
+                op, before_htmls, after_htmls,
+                allowed_numbers=ctx.get('superseded_numbers'),
+                request_text='\n'.join(str(part) for part in (
+                    ctx.get('message'), task.get('_instruction'),
+                    task.get('exact_text')) if part))
             if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
                 m_indexes = sorted(task.get('_indexes') or indexes)
                 for j in m_indexes:
