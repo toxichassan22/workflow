@@ -1,14 +1,17 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Span router for designer chat: respan/span-01-lite (OpenRouter Decisions API,
 # $0 per call) scores whether a non-canned turn is design work or plain chat,
-# so obvious questions never reach the paid planner. Fail-open by contract:
-# every error, missing key, malformed answer or ambiguous score returns
-# 'design' — a router hiccup can never swallow an edit request.
+# so obvious questions never reach the paid planner. Disabled by default: the
+# lite model kept scoring real edit instructions as chat and swallowing them
+# into canned replies — worse than billing the occasional stray question.
+# SPAN_ROUTER=1 re-enables the billing gate. Fail-open by contract: every
+# error, missing key, malformed answer or ambiguous score returns 'design' —
+# a router hiccup can never swallow an edit request.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 SPAN_ROUTER_MODEL = (os.environ.get('SPAN_ROUTER_MODEL') or 'respan/span-01-lite:free').strip()
 SPAN_ROUTER_URL = (os.environ.get('SPAN_ROUTER_URL') or 'https://openrouter.ai/api/alpha/decisions').strip()
-SPAN_ROUTER_ENABLED = (os.environ.get('SPAN_ROUTER') or '1').strip().lower() not in ('0', 'false', 'off')
+SPAN_ROUTER_ENABLED = (os.environ.get('SPAN_ROUTER') or '0').strip().lower() not in ('0', 'false', 'off')
 try:
     SPAN_ROUTER_TIMEOUT = float(os.environ.get('SPAN_ROUTER_TIMEOUT') or 15)
 except (TypeError, ValueError):

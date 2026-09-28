@@ -342,6 +342,7 @@ class SpanRouterTests(unittest.TestCase):
     def _route(self, message, history=None, response=None, side_effect=None):
         settled = []
         with patch.dict(self.module.app.config, {'TESTING': False}), \
+                patch.object(self.module, 'SPAN_ROUTER_ENABLED', True), \
                 patch.object(self.module, '_has_any_openrouter_key', return_value=True), \
                 patch.object(self.module, '_tenant_key_gate', return_value=None), \
                 patch.object(self.module, '_begin_ai_attempt_record', return_value='evt-1'), \
@@ -432,6 +433,11 @@ class SpanRouterTests(unittest.TestCase):
         result, _, _ = self._route('ممكن تظبط الشكل شوية؟', response=self._fake_response(answers={
             'needs_design_work': {'noul': 0.3}, 'asks_credit_balance': {'noul': 0.1}}))
         self.assertEqual(result, 'design')
+
+    def test_router_is_disabled_by_default(self):
+        # The lite model kept swallowing real edit requests — the planner
+        # decides every non-canned turn unless a deployment opts back in.
+        self.assertFalse(self.module.SPAN_ROUTER_ENABLED)
 
     def test_no_key_and_disabled_flag_skip_the_provider_call(self):
         with patch.dict(self.module.app.config, {'TESTING': False}), \
