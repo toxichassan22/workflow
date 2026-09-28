@@ -5,9 +5,6 @@
 def api_designer_chat():
     """Agentic designer chat operating on one slide or the complete presentation."""
     data = request.json or {}
-    _billing_guard = _require_billing_balance('designer_chat')
-    if _billing_guard is not None:
-        return _billing_guard
     job_id = request.headers.get('X-Designer-Job-Id') or data.get('_job_id')
     tenant_id = g.tenant_id
 
@@ -17,6 +14,19 @@ def api_designer_chat():
     message = (data.get('message') or '').strip()
     if not message:
         return jsonify({'success': False, 'error': 'الطلب فارغ'}), 400
+    # Free-reply preflight, without history: a turn the canned replies can
+    # answer skips the wallet guard, so a zero-balance tenant can still ask
+    # «كام رصيدي». Every other turn keeps ISS-037 — the guard fires before the
+    # payload is probed further.
+    _free_probe_uris = _normalize_designer_attached_images(data)
+    _available_sar = _designer_available_sar(tenant_id)
+    _free_preflight = _designer_chat_free_reply(
+        message, has_attachment=bool(_free_probe_uris),
+        available_sar=_available_sar)
+    if _free_preflight is None:
+        _billing_guard = _require_billing_balance('designer_chat')
+        if _billing_guard is not None:
+            return _billing_guard
     report_designer_progress(10, 'جاري تحليل الطلب وتحديد نطاق التعديل...')
     request_project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     request_creative_images = copy.deepcopy(data.get('creativeImages')) if isinstance(data.get('creativeImages'), dict) else {}
@@ -125,23 +135,42 @@ def api_designer_chat():
 
     # Billing transparency: greetings and capability questions never reach the model.
     # The planner prompt carries the whole draft, so even «سلام» used to move the
-    # provider balance. Answer those turns locally with zero tokens spent.
-    _free_probe_uris = _normalize_designer_attached_images(data)
+    # provider balance. Answer those turns locally with zero tokens spent. This
+    # history-aware pass can veto the preflight probe (a pending assistant
+    # question turns a short reply into an instruction), so the deferred wallet
+    # guard below still wraps the paid path for those turns.
     _free_text = _designer_chat_free_reply(
         message, has_attachment=bool(_free_probe_uris), history=history_for_turn,
-        available_sar=_designer_available_sar(tenant_id))
+        available_sar=_available_sar)
     if _free_text is not None:
-        _free_messages = list(history_for_turn)
-        if not _free_messages or _free_messages[-1].get('content') != message or _free_messages[-1].get('role') != 'user':
-            _free_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
-        _free_messages.append({'role': 'assistant', 'content': _free_text[:2000], 'slides': preferred_indexes[:]})
-        _free_trimmed = _normalize_designer_chat_messages(_free_messages)[-DESIGNER_CHAT_STORED_TURNS * 2:]
-        return jsonify({'success': True, 'data': {
-            'action': 'chat_only', 'response': _free_text, 'actions': [],
-            'memory': chat_memory, 'focusIndexes': focus_indexes,
-            'chatHistory': _free_trimmed, 'saved': False,
-            'ai_calls': 0, 'billed': False,
-        }})
+        return _designer_chat_canned_json(
+            message, _free_text, history_for_turn, chat_memory,
+            focus_indexes, preferred_indexes)
+
+    # Span router (respan/span-01-lite via the Decisions API, $0 per call): the
+    # deterministic replies only cover canned phrasing, so any other turn is
+    # scored design-vs-chat. Chat gets a local answer; a failure or an edit
+    # signal falls through to the paid planner. Plan continuations
+    # (confirm/retry/cancel) and attachments are design work by definition.
+    _route = 'design'
+    if not (data.get('retryTasks') or data.get('confirmPlan')
+            or data.get('cancelPlan') or _free_probe_uris):
+        _route = _designer_span_route(
+            message, history_for_turn,
+            usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id))
+    if _route != 'design':
+        _routed_text = (_designer_balance_reply_text(_available_sar)
+                        if _route == 'balance' else None) or _DESIGNER_CAPABILITY_TEXT
+        return _designer_chat_canned_json(
+            message, _routed_text, history_for_turn, chat_memory,
+            focus_indexes, preferred_indexes)
+
+    # A preflight-free turn that history vetoed (or that the router called
+    # design work) skipped the wallet guard above — the paid path needs it here.
+    if _free_preflight is not None:
+        _billing_guard = _require_billing_balance('designer_chat')
+        if _billing_guard is not None:
+            return _billing_guard
 
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)

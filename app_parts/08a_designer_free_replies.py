@@ -38,6 +38,70 @@ def _designer_plain_greeting(text):
     return cleaned in _DESIGNER_GREETINGS
 
 
+_DESIGNER_IDENTITY_TEXT = (
+    'أنا Landloom، مساعد التصميم الذكي في المنصة — متخصص في تعديل '
+    'وتطوير شرائح عرضك. هذه الرسالة لم تستهلك أي رصيد.'
+)
+
+_DESIGNER_GREETING_TEXT = (
+    'أهلاً بك. أخبرني بالتعديل المطلوب على العرض، وسأنفذه مباشرة. '
+    'هذه التحية لم تستهلك أي رصيد.'
+)
+
+_DESIGNER_CAPABILITY_TEXT = (
+    'أنا Landloom، مساعد التصميم لهذا العرض. أنفذ التعديلات على الشرائح المفتوحة فقط، '
+    'ولا أقرأ المسودة ولا أستهلك رصيداً إلا بعد طلب تعديل واضح منك. '
+    'يمكنك طلب تعديل شريحة، إنشاء شريحة جديدة، أو إرفاق صورة ثم طلب وضعها '
+    'في شريحة منفصلة أو داخل شريحة أو كعلامة مائية أو كشعار إضافي.'
+)
+
+
+def _designer_balance_reply_text(available_sar):
+    """The «كام رصيدي» canned reply with the live figure. ``available_sar`` is
+    the spendable company credit the caller already resolved server-side; None
+    means no balance context was loaded, so the caller falls back instead."""
+    if available_sar is None:
+        return None
+    try:
+        available = float(available_sar)
+    except (TypeError, ValueError):
+        available = 0.0
+    if available <= 0:
+        return (
+            'رصيد شركتك الحالي 0 ريال — المحفظة تحتاج شحنًا قبل أي تعديل جديد. '
+            'هذه الرسالة لم تستهلك أي رصيد.'
+        )
+    try:
+        _per_slide = float(db.get_billing_flow_estimates().get('slide_single') or 0.25)
+        _slide_capacity = int(available / db.usd_to_sar(_per_slide)) if _per_slide else 0
+    except Exception:
+        _slide_capacity = 0
+    capacity_note = (
+        f' — تكفي تقريبًا لتعديل {_slide_capacity} شريحة.' if _slide_capacity > 0 else '.')
+    return (
+        f'رصيد شركتك المتاح حاليًا ~{available:.2f} ريال{capacity_note} '
+        'هذه الرسالة لم تستهلك أي رصيد.'
+    )
+
+
+def _designer_chat_canned_json(message, reply_text, history_for_turn, chat_memory,
+                               focus_indexes, preferred_indexes):
+    """Shared chat_only payload for every no-design-model reply (deterministic
+    free replies and span-router local answers alike)."""
+    msgs = [e for e in (history_for_turn if isinstance(history_for_turn, list) else [])
+            if isinstance(e, dict)]
+    if not msgs or msgs[-1].get('role') != 'user' or msgs[-1].get('content') != message:
+        msgs.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
+    msgs.append({'role': 'assistant', 'content': reply_text[:2000], 'slides': preferred_indexes[:]})
+    trimmed = _normalize_designer_chat_messages(msgs)[-DESIGNER_CHAT_STORED_TURNS * 2:]
+    return jsonify({'success': True, 'data': {
+        'action': 'chat_only', 'response': reply_text, 'actions': [],
+        'memory': chat_memory, 'focusIndexes': focus_indexes,
+        'chatHistory': trimmed, 'saved': False,
+        'ai_calls': 0, 'billed': False,
+    }})
+
+
 def _designer_chat_free_reply(message, has_attachment=False, history=None,
                               available_sar=None):
     """Deterministic no-AI reply for greetings and capability questions.
@@ -86,54 +150,29 @@ def _designer_chat_free_reply(message, has_attachment=False, history=None,
         or re.search(r'(?:^|\s)(?:هل|انت|إنت|انك|مش|مو|متأكد|صح)(?=\s|$)', text)
     )
     if any(marker in text for marker in identity_markers) or (name_probe and name_question):
-        return (
-            'أنا Landloom، مساعد التصميم الذكي في المنصة — متخصص في تعديل '
-            'وتطوير شرائح عرضك. هذه الرسالة لم تستهلك أي رصيد.'
-        )
+        return _DESIGNER_IDENTITY_TEXT
     balance_markers = (
         'رصيدي', 'رصيد شركت', 'رصيدكم', 'كام رصيد', 'كم رصيد', 'كام الرصيد',
         'كم الرصيد', 'رصيد كام', 'محفظتي', 'المحفظة', 'فلوسي', 'قد ايه رصيد',
         'قد إيه رصيد', 'معايا رصيد', 'عندي رصيد', 'عندنا رصيد',
         'my balance', 'company balance', 'wallet balance',
     )
-    if available_sar is not None and any(marker in text for marker in balance_markers):
-        try:
-            available = float(available_sar)
-        except (TypeError, ValueError):
-            available = 0.0
-        if available <= 0:
-            return (
-                'رصيد شركتك الحالي 0 ريال — المحفظة تحتاج شحنًا قبل أي تعديل جديد. '
-                'هذه الرسالة لم تستهلك أي رصيد.'
-            )
-        try:
-            _per_slide = float(db.get_billing_flow_estimates().get('slide_single') or 0.25)
-            _slide_capacity = int(available / db.usd_to_sar(_per_slide)) if _per_slide else 0
-        except Exception:
-            _slide_capacity = 0
-        capacity_note = (
-            f' — تكفي تقريبًا لتعديل {_slide_capacity} شريحة.' if _slide_capacity > 0 else '.')
-        return (
-            f'رصيد شركتك المتاح حاليًا ~{available:.2f} ريال{capacity_note} '
-            'هذه الرسالة لم تستهلك أي رصيد.'
-        )
+    # A short message that mentions رصيد/محفظة at all is about the wallet —
+    # the marker list alone missed «هو الرصيد اللي فاضل قد إيه؟», which fell
+    # through to the capability reply instead of the real figure.
+    if available_sar is not None and (
+            'رصيد' in text or 'محفظ' in text
+            or any(marker in text for marker in balance_markers)):
+        return _designer_balance_reply_text(available_sar)
     if _designer_plain_greeting(text):
-        return (
-            'أهلاً بك. أخبرني بالتعديل المطلوب على العرض، وسأنفذه مباشرة. '
-            'هذه التحية لم تستهلك أي رصيد.'
-        )
+        return _DESIGNER_GREETING_TEXT
     help_markers = (
         'بتعمل ايه', 'بتعمل إيه', 'ايه قدراتك', 'إيه قدراتك', 'ممكن تعمل ايه',
         'تقدر تعمل ايه', 'مساعدة', 'مساعده', 'help', 'قدراتك', 'ازاي استخدم',
         'كيف استخدم', 'بتسحب رصيد', 'الرصيد', 'بتكلف',
     )
     if any(marker in text for marker in help_markers):
-        return (
-            'أنا Landloom، مساعد التصميم لهذا العرض. أنفذ التعديلات على الشرائح المفتوحة فقط، '
-            'ولا أقرأ المسودة ولا أستهلك رصيداً إلا بعد طلب تعديل واضح منك. '
-            'يمكنك طلب تعديل شريحة، إنشاء شريحة جديدة، أو إرفاق صورة ثم طلب وضعها '
-            'في شريحة منفصلة أو داخل شريحة أو كعلامة مائية أو كشعار إضافي.'
-        )
+        return _DESIGNER_CAPABILITY_TEXT
     return None
 
 

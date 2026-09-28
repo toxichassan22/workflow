@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import auth
 import db
@@ -183,6 +183,261 @@ class DesignerIntegrationTests(unittest.TestCase):
         self.assertEqual(result[1]['html'], slides[1]['html'])
         result = self.module.slide_engine.renumber_presentation_slides(slides, branding={}, project_data={}, preserve_html=True)
         self.assertEqual([s['html'] for s in result], [s['html'] for s in slides])
+
+    # ── Free balance replies and the span-01-lite router ──────────────────────
+
+    def test_balance_question_is_answered_free_without_model(self):
+        slides = self.slides()
+        with patch.object(self.module, '_designer_available_sar', return_value=150.0), \
+                patch.object(self.module, '_designer_span_route') as router, \
+                patch.object(self.module, 'call_zai_chat') as model, \
+                patch.object(self.module, 'call_openrouter_messages') as agent_model:
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'هو الرصيد اللي فاضل في شركتك قد إيه؟',
+                      'slidesData': slides, 'projectData': {}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(body['action'], 'chat_only')
+        self.assertIn('150', body['response'])
+        self.assertIn('لم تستهلك أي رصيد', body['response'])
+        self.assertEqual(body['ai_calls'], 0)
+        self.assertFalse(body['billed'])
+        self.assertEqual(model.call_count, 0)
+        self.assertEqual(agent_model.call_count, 0)
+        self.assertEqual(router.call_count, 0)
+
+    def test_zero_balance_tenant_gets_balance_reply_not_402(self):
+        # The wallet guard used to fire before the canned replies, so an empty
+        # wallet could not even ask «كام رصيدي». The free candidate now skips
+        # the guard, while the paid path further down stays guarded.
+        slides = self.slides()
+        with patch.object(db, 'billing_enforcement_enabled', return_value=True), \
+                patch.object(db, 'get_tenant_balance', return_value=0.0), \
+                patch.object(db, 'get_package_remaining_sar', return_value=0.0), \
+                patch.object(self.module, 'call_zai_chat') as model:
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'كام رصيدي دلوقتي؟', 'slidesData': slides,
+                      'projectData': {}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertIn('0 ريال', body['response'])
+        self.assertIn('لم تستهلك أي رصيد', body['response'])
+        self.assertEqual(body['ai_calls'], 0)
+        self.assertEqual(model.call_count, 0)
+
+    def test_paid_candidate_still_gated_under_enforcement(self):
+        # An edit request on an empty wallet must still hit the wallet guard —
+        # the preflight probe only releases genuinely free turns.
+        slides = self.slides()
+        with patch.object(db, 'billing_enforcement_enabled', return_value=True), \
+                patch.object(db, 'get_tenant_balance', return_value=0.0):
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'عدل عنوان الشريحة', 'slidesData': slides,
+                      'projectData': {}})
+        self.assertEqual(response.status_code, 402, response.get_json())
+        self.assertEqual(response.get_json().get('error_code'), 'INSUFFICIENT_BALANCE')
+
+    def test_history_vetoed_free_candidate_still_gated(self):
+        # «سلام» reads free in preflight, but the assistant's pending question
+        # makes it an answer — the deferred guard must catch it before planning.
+        slides = self.slides()
+        history = [{'role': 'assistant', 'content': 'أي شريحة تقصد؟'}]
+        with patch.object(db, 'billing_enforcement_enabled', return_value=True), \
+                patch.object(db, 'get_tenant_balance', return_value=0.0):
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'سلام', 'slidesData': slides, 'projectData': {},
+                      'history': history})
+        self.assertEqual(response.status_code, 402, response.get_json())
+
+    def test_router_local_route_answers_without_planner(self):
+        slides = self.slides()
+        with patch.object(self.module, '_designer_span_route', return_value='chat') as router, \
+                patch.object(self.module, 'call_zai_chat') as model:
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'إيه أخبارك النهاردة؟', 'slidesData': slides,
+                      'projectData': {}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(body['action'], 'chat_only')
+        self.assertIn('Landloom', body['response'])
+        self.assertEqual(router.call_count, 1)
+        self.assertEqual(model.call_count, 0)
+
+    def test_router_balance_route_answers_figure_without_marker(self):
+        slides = self.slides()
+        with patch.object(self.module, '_designer_span_route', return_value='balance'), \
+                patch.object(self.module, '_designer_available_sar', return_value=200.0), \
+                patch.object(self.module, 'call_zai_chat') as model:
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'فاضل ايه في الحساب؟', 'slidesData': slides,
+                      'projectData': {}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertIn('200', body['response'])
+        self.assertIn('لم تستهلك أي رصيد', body['response'])
+        self.assertEqual(model.call_count, 0)
+
+    def test_router_design_route_reaches_the_planner(self):
+        slides = self.slides()
+        plan = {'response': 'تم', 'actions': [
+            {'tool': 'edit_slides', 'params': {'target': 'indexes', 'indexes': [1],
+                                             'instruction': 'حسّن الخط'}}]}
+        with patch.object(self.module, '_designer_span_route', return_value='design') as router, \
+                patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
+                patch.object(self.module, 'call_zai_chat',
+                             return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}) as model, \
+                patch.object(self.module, '_designer_edit_slide',
+                             side_effect=lambda html, *a, **k: (html + 'x', 'تم')), \
+                patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
+                             side_effect=lambda s, *a: s):
+            response = self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'حسن الخط في الشريحة 1', 'slidesData': slides,
+                      'projectData': {'project_name': 'P'}, 'slideIndex': 0})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(router.call_count, 1)
+        self.assertEqual(model.call_count, 1)
+
+    def test_router_skips_plan_continuations(self):
+        slides = self.slides()
+        plan = {'response': 'تم', 'actions': []}
+        with patch.object(self.module, '_designer_span_route', return_value='chat') as router, \
+                patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
+                patch.object(self.module, 'call_zai_chat',
+                             return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}):
+            self.module.app.test_client().post(
+                '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'نعم', 'slidesData': slides, 'projectData': {},
+                      'confirmPlan': {'ops': [], 'deckSignature': 'x'}})
+        # Whatever the legacy path does with the continuation, the router must
+        # never run on it — the message is a plan decision, not a chat turn.
+        self.assertEqual(router.call_count, 0)
+
+
+class SpanRouterTests(unittest.TestCase):
+    """respan/span-01-lite Decisions-API router: scores each turn design-vs-chat."""
+
+    @classmethod
+    def setUpClass(cls):
+        import app
+        cls.module = app
+
+    @staticmethod
+    def _fake_response(status=200, payload=None, answers=None):
+        fake = Mock()
+        fake.status_code = status
+        fake.text = 'x'
+        fake.json.return_value = payload if payload is not None else {
+            'answers': answers or {},
+            'usage': {'input_tokens': 120, 'output_tokens': 0, 'cost': 0},
+            'id': 'gen-dec-test'}
+        return fake
+
+    def _route(self, message, history=None, response=None, side_effect=None):
+        settled = []
+        with patch.dict(self.module.app.config, {'TESTING': False}), \
+                patch.object(self.module, '_has_any_openrouter_key', return_value=True), \
+                patch.object(self.module, '_tenant_key_gate', return_value=None), \
+                patch.object(self.module, '_begin_ai_attempt_record', return_value='evt-1'), \
+                patch.object(self.module, '_settle_ai_attempt_record',
+                             side_effect=lambda *a: settled.append(a)), \
+                patch.object(self.module, 'requests') as rq:
+            if side_effect is not None:
+                rq.post.side_effect = side_effect
+            else:
+                rq.post.return_value = response
+            result = self.module._designer_span_route(message, history=history)
+        return result, rq, settled
+
+    def test_balance_message_routes_to_balance(self):
+        result, rq, _ = self._route('هو الرصيد قد إيه؟', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.02},
+            'asks_credit_balance': {'noul': 0.8}}))
+        self.assertEqual(result, 'balance')
+        self.assertEqual(rq.post.call_count, 1)
+        _, kwargs = rq.post.call_args
+        self.assertEqual(kwargs['json']['model'], self.module.SPAN_ROUTER_MODEL)
+        self.assertEqual(set(kwargs['json']['questions']),
+                         {'needs_design_work', 'asks_credit_balance'})
+        self.assertTrue(kwargs['json']['state'])
+
+    def test_edit_message_routes_to_design(self):
+        result, _, _ = self._route('عدل عنوان الشريحة', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.9}, 'asks_credit_balance': {'noul': 0.02}}))
+        self.assertEqual(result, 'design')
+
+    def test_design_signal_beats_balance_signal(self):
+        # «احذف سطر الرصيد من الجدول» mentions the wallet but is an edit —
+        # design wins whenever its score clears the bar.
+        result, _, _ = self._route('احذف سطر الرصيد', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.7}, 'asks_credit_balance': {'noul': 0.9}}))
+        self.assertEqual(result, 'design')
+
+    def test_plain_question_routes_to_chat(self):
+        result, _, _ = self._route('كيف حالك؟', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.05}, 'asks_credit_balance': {'noul': 0.1}}))
+        self.assertEqual(result, 'chat')
+
+    def test_provider_failure_falls_open_to_design(self):
+        result, rq, _ = self._route('x', side_effect=Exception('network down'))
+        self.assertEqual(result, 'design')
+        self.assertEqual(rq.post.call_count, 1)
+        result, _, _ = self._route('x', response=self._fake_response(
+            status=500, payload={'error': {'message': 'provider down'}}))
+        self.assertEqual(result, 'design')
+        result, _, _ = self._route('x', response=self._fake_response(payload={}))
+        self.assertEqual(result, 'design')
+
+    def test_missing_design_score_is_unknown_not_local(self):
+        # A balance score alone never routes locally: without the design signal
+        # the message might still be an edit the model failed to read.
+        result, _, _ = self._route('فلوسي كام؟', response=self._fake_response(answers={
+            'asks_credit_balance': {'noul': 0.95}}))
+        self.assertEqual(result, 'design')
+        result, _, _ = self._route('x', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 7.0}}))
+        self.assertEqual(result, 'design')
+        result, _, _ = self._route('x', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 'nope'}}))
+        self.assertEqual(result, 'design')
+
+    def test_pending_question_turn_skips_the_provider_call(self):
+        history = [{'role': 'user', 'content': 'عدل القسم المالي'},
+                   {'role': 'assistant', 'content': 'أي شريحة تقصد؟'}]
+        result, rq, _ = self._route('الأولى', history=history,
+                                    response=self._fake_response())
+        self.assertEqual(result, 'design')
+        self.assertEqual(rq.post.call_count, 0)
+
+    def test_no_key_and_disabled_flag_skip_the_provider_call(self):
+        with patch.dict(self.module.app.config, {'TESTING': False}), \
+                patch.object(self.module, '_has_any_openrouter_key', return_value=False), \
+                patch.object(self.module, '_tenant_key_gate', return_value=None), \
+                patch.object(self.module, 'requests') as rq:
+            self.assertEqual(self.module._designer_span_route('x'), 'design')
+        self.assertEqual(rq.post.call_count, 0)
+        with patch.object(self.module, 'SPAN_ROUTER_ENABLED', False), \
+                patch.object(self.module, 'requests') as rq2:
+            self.assertEqual(self.module._designer_span_route('x'), 'design')
+        self.assertEqual(rq2.post.call_count, 0)
+
+    def test_metered_span_call_records_the_zero_cost(self):
+        result, _, settled = self._route('كيفك', response=self._fake_response(answers={
+            'needs_design_work': {'noul': 0.1}}))
+        self.assertEqual(result, 'chat')
+        self.assertEqual(len(settled), 1)
+        event_id, status, usage, generation_id = settled[0]
+        self.assertEqual(event_id, 'evt-1')
+        self.assertEqual(status, 'ok')
+        self.assertEqual(usage['cost_usd'], 0)
+        self.assertEqual(usage['prompt_tokens'], 120)
+        self.assertEqual(generation_id, 'gen-dec-test')
 
 
 if __name__ == '__main__':
