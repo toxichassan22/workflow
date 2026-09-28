@@ -146,6 +146,7 @@
         tenantLandmarkPlacementTarget.tr.dataset.lat = nextLat.toFixed(6);
         tenantLandmarkPlacementTarget.tr.dataset.lng = nextLng.toFixed(6);
         serializeLocationTable(tenantLandmarkPlacementTarget.key);
+        scheduleMapTableRecompose(tenantLandmarkPlacementTarget.key);
         tenantLandmarkPlacementTarget = null;
         invalidateLocationAnalysisApproval();
         triggerAutoSaveDraft();

@@ -68,6 +68,7 @@
           serializeLocationTable(key);
           if (key === 'city_landmarks') invalidateCatchmentMapApproval();
           if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
+          scheduleMapTableRecompose(key);
           if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
         });
         selectTd.appendChild(selectInput);
@@ -94,6 +95,7 @@
         if (cfg.road) invalidateAccessMapApproval();
         if (key === 'city_landmarks') invalidateCatchmentMapApproval();
         if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
+        scheduleMapTableRecompose(key);
         invalidateLocationAnalysisApproval();
       });
       if (cfg.road) {
@@ -122,6 +124,7 @@
         if (cfg.road) invalidateAccessMapApproval();
         if (key === 'city_landmarks') invalidateCatchmentMapApproval();
         if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
+        scheduleMapTableRecompose(key);
         invalidateLocationAnalysisApproval();
       }));
 
@@ -342,6 +345,70 @@
       if (!changed && !sectionChanged) return;
       renderLocationWorkflowState();
       triggerAutoSaveDraft();
+    }
+
+    // A table edit must reach the persisted raster on its own: the designer
+    // chat refreshes a slide from the latest stored map file, so a change that
+    // only edits project data keeps serving the pre-edit image. Each mutation
+    // schedules a debounced overlay recompose — the same local redraw the
+    // confirm buttons run — so the stored raster tracks the tables without
+    // extra steps or warnings.
+    const tenantMapRecomposeTimers = {};
+    const tenantMapRecomposeInflight = {};
+    const MAP_RECOMPOSE_TOKENS = {
+      access: '##MAP_ACCESS##', catchment: '##MAP_CATCHMENT##', landmarks: '##MAP_LANDMARKS##'
+    };
+
+    function scheduleMapRecomposeType(mapType) {
+      const token = MAP_RECOMPOSE_TOKENS[mapType];
+      if (!token) return;
+      // Nothing to refresh until this map has actually been generated.
+      const base = token.slice(0, -2);
+      const placeholders = (tenantCreativeImages && tenantCreativeImages.map_placeholders) || {};
+      if (![token, base + '_SATELLITE##', base + '_ROADMAP##'].some(t => placeholders[t])) return;
+      clearTimeout(tenantMapRecomposeTimers[mapType]);
+      tenantMapRecomposeTimers[mapType] = setTimeout(() => {
+        void runMapTableRecompose(mapType).catch(e => console.warn('[MAP RECOMPOSE]', e));
+      }, 1500);
+    }
+
+    function scheduleMapTableRecompose(key) {
+      scheduleMapRecomposeType((LOCATION_TABLE_FIELDS[key] || {}).mapType);
+    }
+
+    function runMapTableRecompose(mapType) {
+      delete tenantMapRecomposeTimers[mapType];
+      if (tenantMapRecomposeInflight[mapType]) {
+        scheduleMapRecomposeType(mapType);
+        return tenantMapRecomposeInflight[mapType];
+      }
+      // An open edit session owns this raster — its confirm path applies it.
+      if ((mapType === 'landmarks' && tenantLandmarksEditMode)
+          || (mapType === 'catchment' && tenantCatchmentEditMode)
+          || (mapType === 'access' && (tenantRoadEditMode || tenantRoadDrawingTarget))) return Promise.resolve();
+      const apply = { landmarks: applyLandmarksMapEdits, catchment: applyCatchmentMapEdits, access: applyAccessMapEdits }[mapType];
+      if (typeof apply !== 'function') return Promise.resolve();
+      const run = (async () => {
+        try {
+          // Persist the released approval before recomposing, or the stored
+          // flag rejects the overlay with MAP_ALREADY_APPROVED.
+          if (typeof saveMapPreviewState === 'function') await saveMapPreviewState();
+          await apply();
+        } finally {
+          delete tenantMapRecomposeInflight[mapType];
+        }
+      })();
+      tenantMapRecomposeInflight[mapType] = run;
+      return run;
+    }
+
+    async function flushMapTableRecompose() {
+      const pending = Object.keys(tenantMapRecomposeTimers);
+      pending.forEach(mapType => clearTimeout(tenantMapRecomposeTimers[mapType]));
+      const runs = pending.map(mapType => runMapTableRecompose(mapType));
+      // An apply already in flight still leaves the outgoing payload one
+      // raster behind — wait for those alongside the freshly scheduled runs.
+      await Promise.all([...runs, ...Object.values(tenantMapRecomposeInflight)]);
     }
 
     async function toggleLocationAnalysisApproval() {

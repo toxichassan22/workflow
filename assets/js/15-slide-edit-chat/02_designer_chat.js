@@ -236,6 +236,15 @@
       let requestWorkspaceKey = designerChatWorkspaceKey();
       setDesignerChatBusy('جاري تجهيز بيانات المشروع...', requestWorkspaceKey);
       try {
+        // A staged map edit must be committed before this turn is built, or the
+        // slide gets refreshed from the pre-edit raster.
+        if (tenantRoadEditMode && typeof confirmAccessRoadEdits === 'function') await confirmAccessRoadEdits();
+        if (tenantCatchmentEditMode && typeof confirmCatchmentEdits === 'function') await confirmCatchmentEdits();
+        if (tenantLandmarksEditMode && typeof confirmLandmarksEdits === 'function') await confirmLandmarksEdits();
+      } catch (confirmError) {
+        console.warn('[DESIGNER-CHAT] map edit auto-confirm failed', confirmError);
+      }
+      try {
         if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
           const currentFormData = await collectTenantFormData();
           tenantProjectData = { ...tenantProjectData, ...currentFormData };
@@ -244,6 +253,12 @@
         clearDesignerChatBusy(requestWorkspaceKey);
         toast(error?.message || 'تعذر تجهيز بيانات المشروع الحالية.');
         return;
+      }
+      try {
+        // Same for a table edit still inside its recompose debounce window.
+        if (typeof flushMapTableRecompose === 'function') await flushMapTableRecompose();
+      } catch (flushError) {
+        console.warn('[DESIGNER-CHAT] map recompose flush failed', flushError);
       }
       requestWorkspaceKey = designerChatWorkspaceKey();
       if (tenantDesignerChatBusy) tenantDesignerChatBusy.workspaceKey = requestWorkspaceKey;
