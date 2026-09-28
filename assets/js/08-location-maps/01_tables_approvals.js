@@ -158,6 +158,16 @@
       if (!table) return;
       const tbody = table.querySelector('tbody');
       tbody.innerHTML = '';
+      if (!Array.isArray(value)) {
+        // Text lines carry no show_on_map/lat/lng — the structured mirror does. Hydration and
+        // the deferred createLocationTableField fill both hand us text, so prefer the mirror or
+        // the trailing serializeLocationTable would write the stripped copy over the stored one.
+        const structured = key === 'main_roads'
+          ? tenantProjectData.main_roads_data
+          : key === 'nearby_landmarks' ? tenantProjectData.nearby_landmarks_data
+            : key === 'city_landmarks' ? tenantProjectData.city_landmarks_data : null;
+        if (Array.isArray(structured) && structured.length) value = structured;
+      }
       if (Array.isArray(value) && (key === 'nearby_landmarks' || key === 'city_landmarks')) {
         value = value.slice().sort((a, b) => locationDistanceKmValue(a) - locationDistanceKmValue(b));
       }

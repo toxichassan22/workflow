@@ -229,6 +229,41 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertEqual(json.loads(draft_data['directions_table'])[0]['direction'], 'north')
         self.assertEqual(json.loads(draft_data['directions_table'])[0]['setback'], '5م')
 
+    def test_location_table_population_prefers_the_structured_landmark_rows(self):
+        """The text lines carry no show_on_map/lat/lng, so hydrating a table from text and
+        serializing it straight back used to wipe the stored selection and coordinates —
+        the structured mirror must win whenever it has rows, whichever caller passes text."""
+        index_source = read_frontend_text()
+        fill_body = index_source.split('function setLocationTableValue(key, value) {', 1)[1] \
+            .split('function refreshLocationTables()', 1)[0]
+        self.assertIn("key === 'nearby_landmarks' ? tenantProjectData.nearby_landmarks_data", fill_body)
+        self.assertIn("key === 'city_landmarks' ? tenantProjectData.city_landmarks_data", fill_body)
+        self.assertIn('tenantProjectData.main_roads_data', fill_body)
+        self.assertIn('if (Array.isArray(structured) && structured.length) value = structured;', fill_body)
+        self.assertLess(fill_body.index('value = structured'), fill_body.index('serializeLocationTable(key)'))
+
+        client = self.app.test_client()
+        landmarks = [
+            {'name': 'معلم محدد', 'category': 'تجاري', 'lat': 24.7136, 'lng': 46.6753,
+             'show_on_map': True, 'row_source': 'ai'},
+            {'name': 'معلم عادي', 'category': 'صحي', 'lat': 24.7201, 'lng': 46.6801,
+             'show_on_map': False, 'row_source': 'ai'},
+        ]
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {
+                'nearby_landmarks': 'معلم محدد — تجاري\nمعلم عادي — صحي',
+                'nearby_landmarks_data': landmarks,
+                'city_landmarks_data': landmarks,
+            }
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
+        draft_data = loaded.get_json()['draft']['draft_data']
+        self.assertTrue(draft_data['nearby_landmarks_data'][0]['show_on_map'])
+        self.assertEqual(draft_data['nearby_landmarks_data'][0]['lat'], 24.7136)
+        self.assertFalse(draft_data['nearby_landmarks_data'][1]['show_on_map'])
+        self.assertTrue(draft_data['city_landmarks_data'][0]['show_on_map'])
+
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because
         the directions table falls back to parcels[0].directions on reload."""
