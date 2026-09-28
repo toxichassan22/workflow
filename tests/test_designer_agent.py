@@ -196,6 +196,29 @@ class AgentFlowTests(unittest.TestCase):
         self.assertIn('02 — 03', body['slidesData'][1]['html'])
         self.assertIn('03 — 03', body['slidesData'][2]['html'])
 
+    def test_renumber_flattens_mangled_counter(self):
+        # «73 78» / «7873 78» digit soup is still the counter, not content.
+        slides = [
+            slide('<p>أ</p><span data-slide-counter="1">78 — 73</span>'),
+            slide('<p>خاتمة</p><div data-slide-counter="1">73 78</div>',
+                  slide_type='closing'),
+            slide('<p>ج</p><div style="position:absolute;bottom:34px;left:48px;">7873 78</div>',
+                  slide_type='closing'),
+        ]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'renumber', 'select': {'all': True}}]}
+        patches = self.agent_patches(self.module, turn)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            response = self.post({'message': 'أعد ترقيم الشرائح', 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(body['tasks'][0]['status'], 'success')
+        self.assertIn('01 — 03', body['slidesData'][0]['html'])
+        self.assertIn('02 — 03', body['slidesData'][1]['html'])
+        self.assertIn('03 — 03', body['slidesData'][2]['html'])
+        self.assertNotIn('73 78', body['slidesData'][1]['html'])
+
     def test_structural_plan_waits_for_confirmation(self):
         slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
         first_id_holder = []

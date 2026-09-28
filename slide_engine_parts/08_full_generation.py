@@ -1043,19 +1043,21 @@ def _ensure_slide_counter(html, slide_num, total_slides):
         return (open_tag + (match.group('inner') or '') + counter
                 + (match.group('iclose') or '') + match.group('close'))
 
-    # A «NN — NN» leaf is unmistakably a page counter wherever it sits.
+    # A «NN — NN» leaf is unmistakably a page counter wherever it sits — the
+    # space-separated «NN NN» form is the same counter with a lost separator.
     separated = re.compile(
         r'(?P<open><(?P<tag>div|span|p|b|strong|small|em|i)\b[^>]*>)'
         r'(?P<inner><(?P<itag>b|strong|small|em|i|span)\b[^>]*>)?'
-        r'\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*'
+        r'\s*\d{1,3}\s*(?:[—–-]|\s)\s*\d{1,3}\s*'
         r'(?P<iclose>(?(inner)</(?P=itag)\s*>|))(?P<close></(?P=tag)\s*>)',
         re.IGNORECASE)
-    # A bare «NN» is ordinary content until it is pinned to a slide corner.
+    # A bare «NN» is ordinary content until it is pinned to a slide corner —
+    # the same holds for digit soup («7873 78») too long to be real content.
     anchored = re.compile(
         r'(?P<open><(?P<tag>div|span|p|b|strong|small|em|i)\b'
         r'(?=[^>]*(?<![-\w])(?:top|bottom|left|right|inset)\s*:)[^>]*>)'
         r'(?P<inner><(?P<itag>b|strong|small|em|i|span)\b[^>]*>)?'
-        r'\s*\d{1,3}\s*(?:[—–-]\s*\d{1,3})?\s*'
+        r'\s*(?:\d{1,3}\s*(?:[—–-]|\s)\s*\d{1,4}|\d{1,3}|(?:\d{1,4}\s+){1,2}\d{1,4})\s*'
         r'(?P<iclose>(?(inner)</(?P=itag)\s*>|))(?P<close></(?P=tag)\s*>)',
         re.IGNORECASE)
 

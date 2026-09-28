@@ -476,7 +476,7 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
         slide_type = str(slide.get('type') or 'content').strip().lower()
         before = str(slide.get('html') or '')
         html = slide_engine._rewrite_preserved_counter(before, slide_type, idx + 1, total)
-        if (slide_type not in ('cover', 'closing', 'moodboard', 'section_divider')
+        if (slide_type not in ('cover', 'closing', 'moodboard')
                 and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE)):
             counter = slide_engine._slide_counter_text(idx + 1, total)
             if counter:

@@ -372,13 +372,22 @@ def _rewrite_preserved_counter(html, slide_type, slide_num, total_slides):
             continue
         body = html[match.end():close]
         text = re.sub(r'<[^>]*>', '', body).strip()
+        # A managed counter missing dir="ltr" can display its two numbers
+        # swapped inside an RTL slide — normalize the tag whenever we touch it.
+        open_tag = match.group(0)
+        if not re.search(r'\bdir\s*=', open_tag, re.IGNORECASE):
+            open_tag = open_tag[:-1] + ' dir="ltr">'
         if not re.fullmatch(r'\d+(?:\s*[—–/\-]\s*\d+)?', text):
+            # A body that degenerated into digit soup («73 78», «7873 78») is
+            # still the counter, just mangled — flatten it to canonical text.
+            if re.search(r'\d', text) and not re.search(r'[^\d\s.,٬%٪/—–\-]', text):
+                html = html[:match.start()] + open_tag + counter + html[close:]
             continue
         values = iter(counter.split(' — ') if re.search(r'[—–/\-]', text) else [counter])
         parts = re.split(r'(<[^>]*>)', body)
         for i in range(0, len(parts), 2):
             parts[i] = re.sub(r'\d+', lambda m: next(values, m.group(0)), parts[i])
-        html = html[:match.end()] + ''.join(parts) + html[close:]
+        html = html[:match.start()] + open_tag + ''.join(parts) + html[close:]
     return html
 
 
