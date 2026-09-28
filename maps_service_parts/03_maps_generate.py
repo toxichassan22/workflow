@@ -479,9 +479,18 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id):
         final_placeholder = str(editable.get('placeholder') or '').replace('_EDITABLE##', '##')
         final_path = _unique_map_path(tenant_id, effective_id, final_type)
         shutil.copyfile(editable['file_path'], final_path)
+        # An empty payload list means the client holds no resolved coordinates
+        # (map predates editable sidecars, or its table rows were never
+        # geocoded). Redraw the render set stored on the row instead of wiping
+        # the markers off the approved image.
+        draw_landmarks = landmarks if landmarks else (metadata.get('catchment_landmarks') or [])
+        label_positions = project_data.get('catchment_label_positions')
+        if not label_positions:
+            label_positions = {item['name']: item['label_point'] for item in draw_landmarks
+                               if isinstance(item, dict) and item.get('name') and item.get('label_point')}
         current_landmarks = _draw_catchment_markers(
-            final_path, center_lat, center_lng, zoom, landmarks,
-            project_data.get('catchment_label_positions'), scale=2
+            final_path, center_lat, center_lng, zoom, draw_landmarks,
+            label_positions, scale=2
         )
         next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'catchment_landmarks': current_landmarks}
         final = by_type.get(final_type)
@@ -607,9 +616,16 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id):
         final_placeholder = str(editable.get('placeholder') or '').replace('_EDITABLE##', '##')
         final_path = _unique_map_path(tenant_id, effective_id, final_type)
         shutil.copyfile(editable['file_path'], final_path)
+        # Same empty-payload guard as the catchment recompose: fall back to the
+        # render set stored on the row rather than wiping the approved markers.
+        draw_landmarks = landmarks if landmarks else (metadata.get('landmark_map_items') or [])
+        label_positions = project_data.get('landmark_label_positions')
+        if not label_positions:
+            label_positions = {item['name']: item['label_point'] for item in draw_landmarks
+                               if isinstance(item, dict) and item.get('name') and item.get('label_point')}
         current_landmarks = _draw_catchment_markers(
-            final_path, center_lat, center_lng, zoom, landmarks,
-            project_data.get('landmark_label_positions'), scale=2, site_lat=site_lat, site_lng=site_lng
+            final_path, center_lat, center_lng, zoom, draw_landmarks,
+            label_positions, scale=2, site_lat=site_lat, site_lng=site_lng
         )
         next_metadata = {**metadata, 'lat': site_lat, 'lng': site_lng, 'landmark_map_items': current_landmarks}
         final = by_type.get(final_type)

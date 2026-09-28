@@ -33,14 +33,19 @@
       if (!openLocationTableMap('catchment')) return;
       tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
       tenantCatchmentEditMode = true;
-      tenantCatchmentEditDraft = {
-        landmarks: JSON.parse(JSON.stringify(tenantProjectData.catchment_map_landmarks || [])),
-        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.catchment_label_positions || {}))
-      };
+      // The draft is captured after the ensure: a server recompose can resolve
+      // fresh landmark coordinates (and rebuild a missing editable base), and
+      // the working copy must carry them or nothing on the map is draggable.
+      tenantCatchmentEditDraft = null;
       tenantCatchmentEditHistory = [];
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       await ensureCatchmentEditablePreview();
+      tenantCatchmentEditDraft = {
+        landmarks: JSON.parse(JSON.stringify(catchmentMapLandmarks())),
+        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.catchment_label_positions || {}))
+      };
+      renderTenantMapPolygonOverlay();
     }
 
     function startCatchmentLabelDrag(event, name) {
@@ -177,14 +182,16 @@
       if (!openLocationTableMap('landmarks')) return;
       tenantProjectData.landmark_map_items = nearbyMapLandmarks();
       tenantLandmarksEditMode = true;
-      tenantLandmarksEditDraft = {
-        landmarks: JSON.parse(JSON.stringify(tenantProjectData.landmark_map_items || [])),
-        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.landmark_label_positions || {}))
-      };
+      tenantLandmarksEditDraft = null;
       tenantLandmarksEditHistory = [];
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       await ensureLandmarksEditablePreview();
+      tenantLandmarksEditDraft = {
+        landmarks: JSON.parse(JSON.stringify(nearbyMapLandmarks())),
+        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.landmark_label_positions || {}))
+      };
+      renderTenantMapPolygonOverlay();
     }
 
     function startLandmarksLabelDrag(event, name) {

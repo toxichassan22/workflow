@@ -745,6 +745,79 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("project_data.get('catchment_label_positions')", maps_source)
         self.assertIn('preferred_point=', maps_source)
 
+    def test_catchment_recompose_rebuilds_missing_sidecar_from_provider_base(self):
+        # A map generated before editable sidecars (or whose raw base cache was
+        # wiped) has only the marked row: recompose must re-fetch the same raw
+        # frame and rebuild the editable file instead of leaving the baked
+        # render un-editable. An empty client landmark list must also not wipe
+        # the markers — the stored render set on the row is the fallback.
+        service = self.application_module.maps_service
+        from PIL import Image
+        marked_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        marked_path = marked_file.name
+        marked_file.close()
+        base_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        base_path = base_file.name
+        base_file.close()
+        self.addCleanup(lambda: os.path.exists(marked_path) and os.unlink(marked_path))
+        self.addCleanup(lambda: os.path.exists(base_path) and os.unlink(base_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(marked_path)
+        Image.new('RGB', (1280, 720), '#c8c2b8').save(base_path)
+        stored_landmarks = [
+            {'name': 'مكان أول', 'lat': 24.001, 'lng': 46.001, 'label_point': [24.002, 46.002]},
+        ]
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 12, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION,
+                    'catchment_landmarks': stored_landmarks}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment', marked_path, '##MAP_CATCHMENT##',
+                             'draft_catchment-legacy-sidecar', metadata)
+            with patch.object(service, 'get_static_map', return_value={'success': True, 'path': base_path}) as provider:
+                composed = service.recompose_catchment_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                }, self.tenant_a, draft_id='catchment-legacy-sidecar')
+            provider.assert_called_once()
+        self.assertNotIn('error', composed)
+        self.assertIn('##MAP_CATCHMENT_EDITABLE##', composed['placeholders'])
+        self.assertIn('##MAP_CATCHMENT##', composed['placeholders'])
+        self.assertEqual([item['name'] for item in composed['catchment_landmarks']], ['مكان أول'])
+
+    def test_landmarks_recompose_rebuilds_missing_sidecar_from_provider_base(self):
+        service = self.application_module.maps_service
+        from PIL import Image
+        marked_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        marked_path = marked_file.name
+        marked_file.close()
+        base_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        base_path = base_file.name
+        base_file.close()
+        self.addCleanup(lambda: os.path.exists(marked_path) and os.unlink(marked_path))
+        self.addCleanup(lambda: os.path.exists(base_path) and os.unlink(base_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(marked_path)
+        Image.new('RGB', (1280, 720), '#c8c2b8').save(base_path)
+        stored_items = [
+            {'name': 'معلم أول', 'lat': 24.001, 'lng': 46.001, 'label_point': [24.002, 46.002]},
+        ]
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 14, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION,
+                    'landmark_map_items': stored_items}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'landmarks', marked_path, '##MAP_LANDMARKS##',
+                             'draft_landmarks-legacy-sidecar', metadata)
+            with patch.object(service, 'get_static_map', return_value={'success': True, 'path': base_path}) as provider:
+                composed = service.recompose_landmarks_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                }, self.tenant_a, draft_id='landmarks-legacy-sidecar')
+            provider.assert_called_once()
+        self.assertNotIn('error', composed)
+        self.assertIn('##MAP_LANDMARKS_EDITABLE##', composed['placeholders'])
+        self.assertIn('##MAP_LANDMARKS##', composed['placeholders'])
+        self.assertEqual([item['name'] for item in composed['landmark_map_items']], ['معلم أول'])
+
     def test_landmarks_map_editing_preserves_existing_selection_logic(self):
         service = self.application_module.maps_service
         rows = [{'name': f'معلم {index}', 'show_on_map': index in (3, 7)} for index in range(1, 10)]
