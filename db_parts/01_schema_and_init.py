@@ -438,7 +438,8 @@ def _create_tables(conn):
 
     -- AuditEvent: Unified immutable audit log (Landloom spec sections 6, 15, 18).
     -- Captures user, time, action, entity, old_value, new_value, and metadata.
-    -- Append-only ledger: modifications and deletions are strictly forbidden.
+    -- Append-only ledger: modifications and deletions are forbidden while the
+    -- tenant lives. Deleting the company itself cascades its ledger away.
     -- Keep every comment here free of the statement separator.
     CREATE TABLE IF NOT EXISTS audit_events (
         id TEXT PRIMARY KEY,
@@ -874,10 +875,14 @@ def _is_postgres_conn(conn):
 def _ensure_audit_events_triggers(conn):
     """Enforce immutability on audit_events at database level.
 
-    Audit events must be strictly append-only on both backends. SQLite uses
-    RAISE(ABORT) triggers; PostgreSQL gets a plpgsql function fired by
-    BEFORE UPDATE/DELETE triggers. Failure is reported, never swallowed, so a
-    missing trigger can never look like a healthy install.
+    Audit events are append-only while their company exists: rows cannot be
+    edited or picked off one by one. Deleting the tenant itself is exempt —
+    the cascade removes the parent row first, so the guard sees no owning
+    tenant and lets the ledger die with its company instead of aborting the
+    whole DELETE with a 500. SQLite uses RAISE(ABORT) triggers; PostgreSQL
+    gets a plpgsql function fired by BEFORE UPDATE/DELETE triggers. Failure
+    is reported, never swallowed, so a missing trigger can never look like a
+    healthy install.
     """
     if _is_postgres_conn(conn):
         try:
@@ -885,6 +890,10 @@ def _ensure_audit_events_triggers(conn):
                 CREATE OR REPLACE FUNCTION audit_events_immutable()
                 RETURNS trigger AS $func$
                 BEGIN
+                    IF TG_OP = 'DELETE'
+                       AND NOT EXISTS (SELECT 1 FROM tenants WHERE id = OLD.tenant_id) THEN
+                        RETURN OLD;
+                    END IF;
                     RAISE EXCEPTION 'audit_events are immutable and cannot be modified';
                 END;
                 $func$ LANGUAGE plpgsql
@@ -913,9 +922,14 @@ def _ensure_audit_events_triggers(conn):
                 SELECT RAISE(ABORT, 'audit_events are immutable and cannot be updated');
             END
         """)
+        # Dropped and recreated unconditionally: databases created before the
+        # cascade carve-out still carry the old unconditional trigger, which
+        # aborts any tenant delete that owns audit rows.
+        conn.execute('DROP TRIGGER IF EXISTS trg_audit_events_no_delete')
         conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_audit_events_no_delete
+            CREATE TRIGGER trg_audit_events_no_delete
             BEFORE DELETE ON audit_events
+            WHEN EXISTS (SELECT 1 FROM tenants WHERE id = OLD.tenant_id)
             BEGIN
                 SELECT RAISE(ABORT, 'audit_events are immutable and cannot be deleted');
             END

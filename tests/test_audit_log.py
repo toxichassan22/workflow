@@ -87,6 +87,32 @@ class AuditLogDbTests(unittest.TestCase):
         with self.assertRaises(Exception):
             conn.execute("DELETE FROM audit_events WHERE id = ?", (event['id'],))
 
+    def test_tenant_delete_cascades_its_audit_events(self):
+        """Deleting a company must not 500 on the immutability trigger: the
+        guard fires only while the owning tenant row exists, so the tenant
+        cascade still removes the ledger with the company."""
+        db.record_audit_event(
+            tenant_id='tenant-1', action='create',
+            entity_type='project_draft', entity_id='draft-9')
+        db.record_audit_event(
+            tenant_id='tenant-2', action='create',
+            entity_type='project_draft', entity_id='draft-10')
+
+        db.delete_tenant('tenant-1')
+
+        conn = db.get_db()
+        self.assertIsNone(conn.execute(
+            "SELECT id FROM tenants WHERE id = 'tenant-1'").fetchone())
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) AS c FROM audit_events WHERE tenant_id = 'tenant-1'"
+        ).fetchone()['c'], 0)
+        # The surviving company's rows stay put — and stay guarded.
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) AS c FROM audit_events WHERE tenant_id = 'tenant-2'"
+        ).fetchone()['c'], 1)
+        with self.assertRaises(Exception):
+            conn.execute("DELETE FROM audit_events WHERE tenant_id = 'tenant-2'")
+
     def test_record_and_get_audit_event(self):
         """Audit events record and deserialize JSON structures, strings, and metadata."""
         old_data = {'status': 'draft', 'area': 1000}
