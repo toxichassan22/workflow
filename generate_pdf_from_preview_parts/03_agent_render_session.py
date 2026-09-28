@@ -199,4 +199,52 @@ def measure_report_reasons(report):
     return reasons
 
 
-__all__ = ['SlideRenderSession', 'measure_report_reasons']
+_LAYOUT_TOLERANCE_PX = 8
+
+
+def _worst_clip_px(report):
+    worst = 0
+    for item in report.get('clipped') or []:
+        try:
+            worst = max(worst, int(item.get('overPx') or 0))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return worst
+
+
+def measure_regression_reasons(before, after):
+    """Failure reasons only for what the edit made WORSE than the source.
+
+    A slide that already overflowed used to fail every later edit — change
+    one word and the result is rejected for the overflow it inherited, on
+    every attempt. An edit must not break the layout; it is not required to
+    repair a fault it did not cause. Without a usable source measurement the
+    absolute rule (measure_report_reasons) applies.
+    """
+    reasons = measure_report_reasons(after)
+    if not reasons or not isinstance(before, dict) or not before.get('ok'):
+        return reasons
+    out = []
+    before_scroll = before.get('slideScroll') or {}
+    after_scroll = after.get('slideScroll') or {}
+    for axis, key in (('overflowX', 'w'), ('overflowY', 'h')):
+        if not after.get(axis):
+            continue
+        if not before.get(axis):
+            out.append('measured_overflow')
+            break
+        try:
+            grew = float(after_scroll.get(key) or 0) - float(before_scroll.get(key) or 0)
+        except (TypeError, ValueError):
+            grew = 0
+        if grew > _LAYOUT_TOLERANCE_PX:
+            out.append('measured_overflow')
+            break
+    clipped = after.get('clipped') or []
+    if clipped and _worst_clip_px(after) > _worst_clip_px(before) + _LAYOUT_TOLERANCE_PX:
+        first = clipped[0]
+        out.append(f'clipped:{first.get("tag")}:{first.get("overPx")}px')
+    return out
+
+
+__all__ = ['SlideRenderSession', 'measure_regression_reasons', 'measure_report_reasons']

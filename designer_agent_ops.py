@@ -11,7 +11,8 @@ from html.parser import HTMLParser
 
 from collections import Counter
 
-from designer_agent_plan import extract_visible_numbers, missing_numbers, slide_text
+import designer_numbers
+from designer_agent_plan import extract_visible_numbers, missing_numbers, slide_text, visible_text_nodes
 from designer_chat_safety import StructureSafetyError, validate_single_slide
 
 
@@ -233,7 +234,10 @@ def _excused_missing_numbers(missing, before_htmls, after_htmls,
     old phone — but only as many drops as values introduced, so an unrelated
     figure can never slip through.
     """
-    allowed = set(allowed_numbers or ())
+    # Callers may hand raw values («1,200», «٠١١١»); compare them as atoms.
+    allowed = set()
+    for value in allowed_numbers or ():
+        allowed.update(designer_numbers.number_atoms(value) or [str(value)])
     if request_text and str(request_text).strip():
         allowed |= set(extract_visible_numbers(request_text).keys())
     residual = [n for n in missing if n not in allowed]
@@ -284,6 +288,118 @@ def verify_task_result(op, before_htmls, after_htmls,
         if all(b == a for b, a in zip(before_htmls, after_htmls)):
             reasons.append('table_unchanged')
     return (not reasons), reasons
+
+
+# ── Retry policy ────────────────────────────────────────────────────────────
+# A failed attempt is worth another model call only when the model can do
+# something different: a verification rejection it can repair from the
+# feedback below, or a transient provider/parse failure. Deterministic code
+# ops, missing assets and selector errors fail identically on every attempt,
+# and billing errors must stop the run (the runner checks those separately).
+
+_WORKER_TASK_OPS = frozenset(EDIT_OPS + ('split', 'restructure', 'create',
+                                         'team_logo', 'company_logo_panel'))
+_RETRYABLE_CODES = frozenset({
+    'missing_numbers', 'facts_not_preserved', 'content_not_preserved',
+    'split_not_partitioned', 'incomplete_result', 'invalid_slide_html',
+    'invalid_html', 'empty_result', 'empty_worker_result', 'unchanged',
+    'no_material_change', 'measured_overflow', 'clipped', 'verification_failed',
+    'provider_error', 'exception', 'finalize_failed', 'generation_failed',
+    'worker_failed',
+})
+
+
+def reason_codes(reason):
+    """``'missing_numbers:5;clipped:div:40px'`` gives ``['missing_numbers', 'clipped']``."""
+    return [part.strip().partition(':')[0].strip()
+            for part in str(reason or '').split(';') if part.strip()]
+
+
+def is_retryable_failure(op, reason, rejected_by_check=False):
+    """True when another worker attempt could plausibly succeed.
+
+    ``rejected_by_check`` marks a result the executor produced and the
+    verification or layout measurement rejected — the model can always try
+    to repair that. An executor failure retries only on the known transient
+    or repairable codes.
+    """
+    if op not in _WORKER_TASK_OPS:
+        return False
+    if rejected_by_check:
+        return True
+    codes = reason_codes(reason)
+    return bool(codes) and set(codes) <= _RETRYABLE_CODES
+
+
+_FACT_KIND_TEXT = {'row': 'صفوف جداول', 'media': 'صور أو خرائط', 'data': 'روابط فهرس',
+                   'entities': 'أسماء جهات أو مشاريع'}
+
+
+def _missing_numbers_note(atoms, before_htmls):
+    nodes = [node for html in before_htmls or [] for node in visible_text_nodes(html)]
+    pairs = designer_numbers.atom_contexts(nodes, atoms)
+    listed = '، '.join(f'«{atom}» (في: «{context}»)' if context else f'«{atom}»'
+                       for atom, context in pairs[:10])
+    return ('المحاولة السابقة أسقطت قيمًا رقمية موجودة في الشريحة الأصلية: ' + listed
+            + ' — أعد كل قيمة منها كما وردت حرفيًا وبنفس صيغتها، ولا تحذف أي رقم آخر.')
+
+
+def retry_feedback(reason, before_htmls=None, measure_report=None):
+    """Arabic correction note for the next attempt.
+
+    The old note was «النتيجة رُفضت تحققاً: missing_numbers:9/20275» — a code
+    the worker cannot act on. This names what was wrong in terms the worker
+    can fix: each dropped value with the source text it lived in, the element
+    that left the frame with its text, the structural contract it broke.
+    Transient provider failures add nothing — the retry itself is the fix.
+    """
+    notes = []
+    for part in str(reason or '').split(';'):
+        code, _, detail = part.strip().partition(':')
+        code = code.strip()
+        if not code:
+            continue
+        if code == 'missing_numbers':
+            atoms = [atom for atom in detail.split(',') if atom.strip()]
+            if atoms:
+                notes.append(_missing_numbers_note(atoms, before_htmls))
+        elif code == 'facts_not_preserved':
+            kinds, _, sample = detail.partition(':')
+            if kinds.strip() == 'numbers':
+                atoms = [atom for atom in sample.split(',') if atom.strip()]
+                notes.append(_missing_numbers_note(atoms, before_htmls))
+            else:
+                label = '، '.join(_FACT_KIND_TEXT.get(k, k) for k in kinds.split('+') if k)
+                notes.append(f'المحاولة السابقة أسقطت عناصر من المصدر ({label}): {sample[:300]}'
+                             ' — أعد كل عنصر منها كما ورد.')
+        elif code in ('content_not_preserved', 'split_not_partitioned'):
+            notes.append('المحاولة السابقة لم تنقل كل نصوص المصدر وصفوفه وصوره مرة واحدة دون تكرار'
+                         ' — انقل كل عنصر حرفيًا إلى موضع واحد فقط.')
+        elif code in ('unchanged', 'no_material_change'):
+            notes.append('المحاولة السابقة أعادت الشريحة دون تغيير ظاهر — طبّق التعديل المطلوب فعليًا'
+                         ' مع الحفاظ على كل المحتوى.')
+        elif code == 'incomplete_result':
+            notes.append('المحاولة السابقة لم تُرجع العدد المطلوب من الشرائح بمحتوى مكتمل — أعد العدد'
+                         ' المطلوب بالضبط.')
+        elif code in ('clipped', 'measured_overflow'):
+            clipped = (measure_report or {}).get('clipped') if isinstance(measure_report, dict) else None
+            first = clipped[0] if isinstance(clipped, list) and clipped and isinstance(clipped[0], dict) else {}
+            where = f' وهو يحمل النص «{str(first.get("text") or "")[:60]}»' if first.get('text') else ''
+            amount = f' بمقدار {first.get("overPx")}px' if first.get('overPx') else ''
+            notes.append(f'في المحاولة السابقة خرج محتوى عن إطار الشريحة 1280x720{amount}{where}'
+                         ' — صغّر الخطوط والمسافات أو أعد توزيع العناصر حتى يبقى كل شيء داخل الإطار'
+                         ' دون حذف أي نص أو رقم.')
+        elif code in ('invalid_html', 'invalid_slide_html', 'empty_result', 'empty_worker_result'):
+            notes.append('المحاولة السابقة لم تُرجع شريحة HTML صالحة — أعد JSON صحيحًا فيه شريحة واحدة'
+                         ' بجذر <div class="slide"> وكل الوسوم مغلقة ومتوازنة.')
+        elif code in ('provider_error', 'exception', 'finalize_failed', 'generation_failed',
+                      'worker_failed', 'verification_failed'):
+            continue
+        else:
+            text = failure_reason_text(part)
+            if text != _FAILURE_REASON_FALLBACK:
+                notes.append(text)
+    return ' '.join(dict.fromkeys(note for note in notes if note))
 
 
 def verify_deck_integrity(slides, before_ids=None):
@@ -414,6 +530,7 @@ def failure_reason_text(reason):
 
 __all__ = [
     'ALL_OPS', 'CODE_OPS', 'CONFIRM_OPS', 'EDIT_OPS', 'OP_LABELS', 'STRUCTURE_OPS',
-    'failure_reason_text', 'instruction_for', 'needs_confirmation', 'public_task',
-    'resolve_selector', 'slide_id_set', 'verify_deck_integrity', 'verify_task_result',
+    'failure_reason_text', 'instruction_for', 'is_retryable_failure', 'needs_confirmation',
+    'public_task', 'reason_codes', 'resolve_selector', 'retry_feedback', 'slide_id_set',
+    'verify_deck_integrity', 'verify_task_result',
 ]

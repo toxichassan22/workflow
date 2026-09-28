@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 import re
 
 import designer_agent_ids
+import designer_numbers
 
 
 class StructureSafetyError(ValueError):
@@ -123,6 +124,9 @@ class _Inventory(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.items = Counter()
         self.text_items = []
+        # Visible text node by node — block flushing glues inline siblings
+        # («<span>9/2027</span><span>5</span>»), so numbers are read from here.
+        self.nodes = []
         self.stack = []
         self.text = []
         self.roots = 0
@@ -214,6 +218,7 @@ class _Inventory(HTMLParser):
         if self.stack[-1][1]:
             return
         self.text.append(data)
+        self.nodes.append(data)
         if self.cell is not None:
             self.cell.append(data)
 
@@ -305,9 +310,7 @@ def require_preserved(source_htmls, result_htmls, expected_parts):
     return True
 
 
-_FACT_DIGIT_TRANS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬٪', '01234567890123456789.,%')
-_FACT_NUMBER = re.compile(
-    r'[\d\u0660-\u0669\u06f0-\u06f9]+(?:[.,٫٬:/%\-\u2013\u2014][\d\u0660-\u0669\u06f0-\u06f9]+)*[%٪]?')
+_FACT_DIGIT_TRANS = designer_numbers.DIGIT_TRANS
 _FACT_LATIN_ENTITY = re.compile(r'\b[A-Za-z][A-Za-z0-9.&-]{2,}\b')
 _ENTITY_STOPWORDS = frozenset({
     'sar', 'usd', 'aed', 'eur', 'km', 'm2', 'sqm', 'kg', 'cm', 'mm',
@@ -337,22 +340,6 @@ def _fact_item(item):
     return item
 
 
-def _fact_numbers(text):
-    """Distinct numeric atoms. Composite tokens split on range/date separators
-    («71-79», «27/09/2026») so a different dash or ordering never counts as a
-    dropped fact; grouping separators fold («5,000,000» == «٥٠٠٠٠٠٠»)."""
-    out = set()
-    for token in _FACT_NUMBER.findall(text.translate(_FACT_DIGIT_TRANS)):
-        compact = _FACT_GROUP_SEP.sub('', token).replace(',', '.')
-        for atom in re.split(r'[/:\-\u2013\u2014]', compact):
-            atom = atom.strip('.,%')
-            if atom:
-                atom = atom.lstrip('0') or '0'
-                if any(ch.isdigit() for ch in atom):
-                    out.add(atom)
-    return out
-
-
 def _fact_entities(text):
     """Latin name-like tokens (project/entity names, acronyms) — Arabic names
     have no capitalisation signal, so rows and numbers carry their check."""
@@ -374,19 +361,21 @@ def require_facts_preserved(source_htmls, result_htmls):
     if not result_htmls:
         raise StructureSafetyError('incomplete_result')
     required_nontext = set()
-    source_texts = []
+    source_texts, source_nodes = [], []
     for html in source_htmls:
         inventory = _Inventory(html)
         source_texts.extend(inventory.text_items)
+        source_nodes.extend(inventory.nodes)
         required_nontext.update(
             _fact_item(key) for key in inventory.items
             if key[0] in ('media', 'row')
             or (key[0] == 'data' and key[1] in _FACT_DATA_KEYS))
     actual_nontext = set()
-    result_texts = []
+    result_texts, result_nodes = [], []
     for html in result_htmls:
         inventory = _Inventory(html)
         result_texts.extend(inventory.text_items)
+        result_nodes.extend(inventory.nodes)
         actual_nontext.update(
             _fact_item(key) for key in inventory.items
             if key[0] in ('media', 'row')
@@ -398,7 +387,10 @@ def require_facts_preserved(source_htmls, result_htmls):
         raise StructureSafetyError(f'facts_not_preserved:{"+".join(kinds)}:{sample}')
     source_text = '\n'.join(source_texts).translate(_FACT_DIGIT_TRANS)
     result_text = '\n'.join(result_texts).translate(_FACT_DIGIT_TRANS)
-    missing_numbers = _fact_numbers(source_text) - _fact_numbers(result_text)
+    # Distinct atoms, node by node — a merge may state a repeated figure once,
+    # and «71-79» / «27/09/2026» split so a different dash is not a drop.
+    missing_numbers = (set(designer_numbers.count_atoms(source_nodes))
+                       - set(designer_numbers.count_atoms(result_nodes)))
     if missing_numbers:
         raise StructureSafetyError(
             'facts_not_preserved:numbers:' + ','.join(sorted(missing_numbers)[:12]))

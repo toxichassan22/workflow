@@ -153,8 +153,17 @@ def _agent_error_turn(text):
     return {'kind': 'reply', 'message': text}
 
 
+# Only a provider failure can mean the wallet ran dry. A reason string also
+# carries slide data («missing_numbers:14020») and a worker summary can say
+# «الرصيد النقدي»; reading the whole text made a dropped figure containing
+# «402» stop the run and tell the client to recharge a funded wallet.
+_AGENT_PROVIDER_FAILURE_RE = re.compile(
+    r'(?:^|[;:])\s*(?:provider_error|generation_failed|image_generation_failed):(?P<detail>.*)', re.S)
+
+
 def _is_billing_error_text(text):
-    return _is_company_credit_error(text)
+    match = _AGENT_PROVIDER_FAILURE_RE.search(str(text or ''))
+    return bool(match) and _is_company_credit_error(match.group('detail'))
 
 
 # ── Balance pre-flight ───────────────────────────────────────────────────────
@@ -555,7 +564,7 @@ def _designer_agent_finish(run, ctx):
         if failed:
             raw_reason = failed[0].get('failureReason') or ''
             first_reason = (_client_safe_llm_error(raw_reason)
-                            if _is_company_credit_error(raw_reason)
+                            if _is_billing_error_text(raw_reason)
                             else designer_agent_ops.failure_reason_text(raw_reason))
             response_text += f' السبب: {first_reason[:200]}'
 

@@ -385,6 +385,12 @@ D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_admin_agent
 
 `tests.test_full_flow` contains no unittest cases (reports "Ran 0 tests") — that is expected.
 
+The local `.env` may carry `BILLING_ENFORCE=1`; `load_dotenv()` does not override a variable
+already set, so run the suites with `BILLING_ENFORCE=0` in the environment — otherwise every
+designer-chat test answers 402 `INSUFFICIENT_BALANCE` (the tests use zero-balance tenants).
+Designer suites: `tests.test_designer_agent`, `tests.test_designer_agent_plan`,
+`tests.test_designer_structure_safety`, `tests.test_designer_integration`.
+
 Python syntax check (loaders + every part file):
 ```powershell
 D:\workflow\.venv\Scripts\python.exe -c "import ast, glob; [ast.parse(open(f,encoding='utf-8').read(), f) for f in tuple(glob.glob('*.py')) + tuple(glob.glob('*_parts/*.py')) + tuple(glob.glob('exports/*_parts/*.py')) + tuple(glob.glob('tests/*_parts/*.py'))]"
@@ -1054,6 +1060,50 @@ asked again. Now:
   the previous turn was about) before falling back to the current slide, and the prompt says so.
 - `designerChat` is in `GENERATION_PAYLOAD_DROPPED`, `PROMPT_PREVIOUS_OUTPUT` and
   `DRAFT_BOOKKEEPING_KEYS`: it never reaches a slide prompt and never counts as draft content.
+
+## Designer agent: verification, retries and the failure journal
+
+A task the client sees as «تعذّرت» was usually a false rejection the retry could not repair. Four
+causes were found together, and each has a rule now:
+
+- **A number is an atom inside one text node** (`designer_numbers.py`, the single reader for
+  every preservation gate: `verify_task_result`, `require_facts_preserved`, the request and
+  superseded excusals). The old reader joined the slide text with spaces and let a number run
+  across whitespace, so a cell «إلى 9/2027» beside a cell «5» read as «9/20275»; any relayout
+  «dropped» it and the retry was told to restore a value that never existed. Never join nodes,
+  never let whitespace join digits. «9/2027» is 9 and 2027, separators fold only before exactly
+  three digits, padding is dropped only on 1–2 digit fields (phones keep their zero), and the
+  unit exponent in «م2»/«كم2»/«m2» is not a value (so «م²» compares equal).
+- **A retry gets feedback it can act on** (`designer_agent_ops.retry_feedback`): the dropped
+  value with the source text around it — a bare table cell is shown with its neighbours
+  («إلى 9/2027 | 5 | الإنشاء») — or the clipped element's text and overflow, never a raw code.
+  `is_retryable_failure` retries every worker op once on a check rejection or a transient
+  provider/parse failure (timeouts used to fail the task outright); deterministic code-op
+  failures and billing errors never retry.
+- **Layout is judged against the source.** On edit/redesign/rewrite the render measurement
+  rejects only what the result made worse (`measure_regression_reasons`); a slide that already
+  overflowed used to fail every unrelated edit on every attempt. Split/restructure keep the
+  absolute rule.
+- **Only a provider failure means the wallet ran dry.** `_is_billing_error_text` reads the
+  `provider_error:` / `generation_failed:` part only. It used to read the whole reason and the
+  worker summary, so `missing_numbers:14020` (contains «402») or a summary saying «الرصيد
+  النقدي» stopped the run and told a funded client to recharge.
+- **Only an `edit` task's own wording may take the deterministic color path.** The worker used
+  to test the composed instruction, so a redesign whose style brief said «ألوان الهوية وخلفية
+  بيضاء», a create «بخلفية بيضاء», or any edit carrying a brief read as «color-only», failed the
+  narrow grammar and ended as `color_unchanged` without a model call. `_agent_exec_content_edit`
+  passes the raw `task['instruction']` as `color_request`; redesign/rewrite/split/create/logo and
+  image placement never take the shortcut. A genuine color-only edit the grammar refuses still
+  fails closed, per the `designer_chat_colors` contract.
+
+Every failed task writes one record to `uploads/.designer_agent_failures/<tenant>/` (request,
+task, each attempt's reason, feedback and rejected HTML, the source HTML; base64 images
+stripped, last 300 per company). `GET /api/admin/designer-failures` (super admin; `tenantId`,
+`reason`, `limit`) lists them newest first with a count per reason code; `GET
+/api/admin/designer-failures/<tenant>/<id>` returns the record plus `replay` — the verification
+re-run with the current build, so after a fix ships an old failure reads `ok: true`. When a
+client reports a failure, read the record before guessing; when a reason code starts piling up
+there, it is the next false rejection to fix.
 
 ## Performance rules
 

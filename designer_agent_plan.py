@@ -13,6 +13,7 @@ from collections import Counter
 from html.parser import HTMLParser
 
 import designer_agent_ids
+import designer_numbers
 
 # Per-slide op priority: the stronger operation absorbs weaker ones targeting
 # the same slide (a redesign inside a restructure is part of the restructure).
@@ -25,7 +26,6 @@ _CODE_OPS = {'delete', 'move', 'table_edit', 'color_edit', 'watermark',
              'image_descriptions', 'team_logo', 'company_logo_panel', 'renumber'}
 
 _TAG_RE = re.compile(r'<[^>]+>', re.DOTALL)
-_NUM_RE = re.compile(r'\d[\d٠-٩۰-۹.,٬%٪/\s]*\d|\d')
 _WS_RE = re.compile(r'\s+')
 
 
@@ -327,20 +327,29 @@ def expand_plan(plan, slides, current_index=None):
 
 # ── Verification helpers ────────────────────────────────────────────────────
 
-def extract_visible_numbers(html):
-    """Multiset of numeric literals in visible text, digits normalized.
+def visible_text_nodes(html):
+    """Visible text nodes in document order (the slide_text visibility rules).
 
-    Eastern Arabic digits become western; thousand separators are removed so
-    «1,234.56»، «1234.56» and «١٢٣٤٫٥٦» compare equal.
+    Numbers are read one node at a time: joining nodes — even with a space —
+    lets two neighbouring cells read as one pseudo-number.
     """
-    text = slide_text(html)
-    trans = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٪', '01234567890123456789.%')
-    counts = Counter()
-    for match in _NUM_RE.finditer(text.translate(trans)):
-        token = re.sub(r'[,\s٬]', '', match.group(0)).rstrip('.,')
-        if token:
-            counts[token] += 1
-    return counts
+    grab = _TextGrab()
+    try:
+        grab.feed(str(html or ''))
+        grab.close()
+    except Exception:
+        return [part for part in _TAG_RE.split(str(html or '')) if part.strip()]
+    return [part for part in grab.parts if part.strip()]
+
+
+def extract_visible_numbers(html):
+    """Multiset of numeric atoms in visible text (see designer_numbers).
+
+    Eastern Arabic digits become western and grouping separators fold, so
+    «1,234.56»، «1234.56» and «١٬٢٣٤٫٥٦» compare equal; «9/2027» is the atoms
+    9 and 2027, and a cell never merges into the cell beside it.
+    """
+    return designer_numbers.count_atoms(visible_text_nodes(html))
 
 
 def missing_numbers(source_htmls, result_htmls):

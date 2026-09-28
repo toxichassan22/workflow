@@ -137,6 +137,7 @@ def _agent_worker_vision(ctx, slide_html, session):
     uri, report = (None, None)
     if session is not None and getattr(session, 'available', False):
         uri, report = session.render(slide_html)
+        _agent_remember_layout(ctx, slide_html, report)
     consistency = ctx.get('agent_style_ref_uri')
     note = ''
     if uri:
@@ -209,11 +210,17 @@ def _agent_worker_note_failure(ctx, reason):
 
 
 def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
-                             session=None, feedback='', style_brief=''):
+                             session=None, feedback='', style_brief='', color_request=None):
     """One scoped worker call on one slide.
 
     Returns ``(html, reply)`` on success and ``(None, reason)`` on failure —
     the runner owns retry/verification, so no attempts loop lives here.
+
+    ``color_request`` is the raw wording of an ``edit`` task: only that may
+    take the deterministic color path. The composed instruction must not —
+    a redesign whose style brief says «ألوان الهوية وخلفية بيضاء», a create
+    «بخلفية بيضاء» or any edit carrying a brief read as «color-only», failed
+    the grammar and ended the task as color_unchanged without a model call.
     """
     html = slide.get('html', '')
     title = slide.get('title', f'شريحة {index + 1}')
@@ -232,8 +239,8 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
             and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request')):
         reason_text = _TABLE_PRECHECK_ARABIC_REASONS.get(table_edit['reason'], table_edit['reason'])
         return None, _agent_worker_note_failure(ctx, f'table_precheck:{reason_text}')
-    if designer_chat_colors.is_color_only_request(instruction):
-        color_html, color_message = designer_chat_colors.apply_color_edit(html, instruction)
+    if color_request and designer_chat_colors.is_color_only_request(color_request):
+        color_html, color_message = designer_chat_colors.apply_color_edit(html, color_request)
         if color_html and color_html != html:
             return color_html, color_message
         return None, _agent_worker_note_failure(ctx, 'color_unchanged')
@@ -255,7 +262,7 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
     facts = _agent_worker_facts(ctx, slide=slide)
     text = (f'عنوان الشريحة: {title}\nرقمها الحالي في العرض: {index + 1} من {total}\n'
             f'الطلب:\n{instruction}'
-            + (f'\nملاحظة تحقق على محاولة سابقة — عالجها حرفياً: {feedback[:800]}' if feedback else '')
+            + (f'\nملاحظة تحقق على محاولة سابقة — عالجها حرفياً: {feedback[:1600]}' if feedback else '')
             + vision_note
             + f'\n\nHTML الحالي:\n{clean_html}')
     user_content = [{'type': 'text', 'text': text}]

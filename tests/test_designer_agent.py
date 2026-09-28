@@ -32,6 +32,36 @@ class _NoRender:
         return False
 
 
+class _MeasuringRender(_NoRender):
+    """Render session stand-in that measures: «LONG» in the HTML clips 30px
+    (an overflow the source already had), «WORSE» clips 90px."""
+    available = True
+
+    def render(self, html, screenshot=True):
+        clipped = []
+        if 'WORSE' in html:
+            clipped = [{'tag': 'div', 'overPx': 90, 'text': 'جدول المراحل الممتد'}]
+        elif 'LONG' in html:
+            clipped = [{'tag': 'div', 'overPx': 30, 'text': 'جدول المراحل'}]
+        report = {'ok': True, 'overflowX': False, 'overflowY': False, 'clipped': clipped,
+                  'slideScroll': {'w': 1280, 'h': 720}}
+        return ('data:image/png;base64,AAAA' if screenshot else None), report
+
+
+# The failing slide from the field: a cell «إلى 9/2027» beside a cell «5» read
+# as the pseudo-number «9/20275», so every relayout was rejected for dropping a
+# value that never existed on the slide.
+TIMELINE_TABLE = (
+    '<h1>الجدول الزمني ومراحل التطوير</h1><table>'
+    '<tr><th>المرحلة</th><th>من</th><th>إلى</th><th>المدة (شهر)</th></tr>'
+    '<tr><td>التصميم</td><td>من 4/2027</td><td>إلى 9/2027</td><td>5</td></tr>'
+    '<tr><td>الإنشاء</td><td>10/2027</td><td>12/2029</td><td>26</td></tr></table>')
+TIMELINE_CARDS = (
+    '<h1>الجدول الزمني ومراحل التطوير</h1>'
+    '<div class="card"><b>التصميم</b><span>5 أشهر</span><span>من 4/2027 إلى 9/2027</span></div>'
+    '<div class="card"><b>الإنشاء</b><span>26 شهر</span><span>10/2027 — 12/2029</span></div>')
+
+
 class AgentFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -44,15 +74,27 @@ class AgentFlowTests(unittest.TestCase):
         cls.module = app
         cls.app = app.app
         cls.app.config.update(TESTING=True)
+        # Job files and failure-journal records stay inside the temp dir.
+        cls.previous_uploads = app.UPLOADS_DIR
+        app.UPLOADS_DIR = os.path.join(cls.temp.name, 'uploads')
         with cls.app.app_context():
             db.init_db()
             cls.tenant = db.create_tenant('Agent', 'agent@example.test', 'hash', 'agent-slug')
+            cls.platform_tenant = db.create_tenant(
+                'Platform', 'platform@example.test', 'hash', 'platform-slug')
+            db.get_db().execute('UPDATE tenants SET is_admin = 1 WHERE id = ?',
+                                (cls.platform_tenant,))
+            db.get_db().commit()
         cls.token = auth.create_token(cls.tenant, 'agent@example.test', user_id=None,
                                       user_name='Admin', user_role='company_admin')
+        cls.platform_token = auth.create_token(
+            cls.platform_tenant, 'platform@example.test', user_id=None,
+            user_name='Platform', user_role='company_admin')
 
     @classmethod
     def tearDownClass(cls):
         import db
+        cls.module.UPLOADS_DIR = cls.previous_uploads
         db.DB_PATH = cls.previous_db_path
         cls.temp.cleanup()
 
@@ -467,7 +509,10 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         body = response.get_json()['data']
         self.assertEqual(len(calls), 2)
-        self.assertIn('facts_not_preserved', calls[1])
+        # The feedback names the dropped value and the source text it lived
+        # in — a raw reason code gave the worker nothing to act on.
+        self.assertIn('«7500000»', calls[1])
+        self.assertIn('إيراد 7,500,000 ريال', calls[1])
         self.assertEqual(body['tasks'][0]['status'], 'success')
         self.assertIn('7,500,000', body['slidesData'][0]['html'])
 
@@ -583,6 +628,242 @@ class AgentFlowTests(unittest.TestCase):
         self.assertIn('contact', keys)
         self.assertIn('basic', keys)
 
+    # ── Retry, feedback, layout and journal ─────────────────────────────────
+
+    def run_with_worker(self, slides, turn, worker, render=None, message='أعد تصميم الشريحة'):
+        with patch.object(self.module, 'DESIGNER_AGENT', True), \
+                patch.object(self.module, '_agent_render_session',
+                             return_value=render or _NoRender()), \
+                patch.object(self.module, 'call_openrouter_messages',
+                             return_value=planner_reply(turn)), \
+                patch.object(self.module, '_agent_worker_edit_slide', side_effect=worker), \
+                patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
+                             side_effect=lambda s, *a: s), \
+                patch.object(self.module.slide_engine, 'renumber_presentation_slides',
+                             side_effect=lambda s, **k: s):
+            response = self.post({'message': message, 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0, 'autoConfirm': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()['data']
+
+    def journal_files(self):
+        folder = os.path.join(self.module.UPLOADS_DIR, '.designer_agent_failures', self.tenant)
+        return set(os.listdir(folder)) if os.path.isdir(folder) else set()
+
+    def test_timeline_relayout_passes_and_a_real_drop_retries_with_its_context(self):
+        slides = [slide(TIMELINE_TABLE, title='الجدول الزمني ومراحل التطوير')]
+        turn = {'kind': 'plan', 'ops': [{'op': 'redesign', 'select': {'all': True}}]}
+        feedbacks = []
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            feedbacks.append(feedback)
+            cards = TIMELINE_CARDS if feedback else TIMELINE_CARDS.replace('<span>5 أشهر</span>', '')
+            return slide(cards)['html'], 'تم'
+
+        before = self.journal_files()
+        body = self.run_with_worker(slides, turn, worker)
+        self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
+        self.assertEqual(len(feedbacks), 2)
+        self.assertEqual(feedbacks[0], '')
+        # The retry names the value that really went missing and where it sat.
+        self.assertIn('«5» (في: «إلى 9/2027 | 5 | الإنشاء»)', feedbacks[1])
+        self.assertNotIn('20275', feedbacks[1])
+        self.assertIn('5 أشهر', body['slidesData'][0]['html'])
+        self.assertEqual(self.journal_files(), before)
+
+    def test_transient_worker_failure_is_retried(self):
+        slides = [slide('<p>الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'أضف عنوانًا'}]}
+        calls = []
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            calls.append(feedback)
+            if len(calls) == 1:
+                return None, 'provider_error:[DESIGNER-WORKER] انتهت مهلة الاتصال بالمزوّد'
+            html = slide_['html']
+            return html[:html.rfind('</div>')] + '<h2>عنوان</h2></div>', 'تم'
+
+        body = self.run_with_worker(slides, turn, worker, message='أضف عنوانًا')
+        self.assertEqual(len(calls), 2)
+        # A timeout gives the model nothing to fix — the retry itself is the fix.
+        self.assertEqual(calls[1], '')
+        self.assertEqual(body['tasks'][0]['status'], 'success')
+
+    def test_billing_failure_is_not_retried_and_stops_the_run(self):
+        slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
+        calls = []
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            calls.append(index)
+            return None, 'provider_error:[DESIGNER-WORKER] {"message": "[402] Insufficient credits"}'
+
+        body = self.run_with_worker(slides, turn, worker, message='عدل الكل')
+        self.assertEqual(calls, [0])
+        self.assertTrue(body['agent']['billingStopped'])
+        self.assertEqual([t['status'] for t in body['tasks']], ['failed', 'skipped'])
+
+    def test_dropped_figure_containing_402_is_not_a_wallet_stop(self):
+        # «14020» contains «402» and the worker summary says «الرصيد»; neither
+        # is an exhausted wallet, and the next task must still run.
+        slides = [slide('<p>المساحة 14020 م²</p>'), slide('<p>ب</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            if index == 0:
+                return slide('<p>المساحة</p>')['html'], 'حافظت على الرصيد النقدي'
+            html = slide_['html']
+            return html[:html.rfind('</div>')] + '<p>+</p></div>', 'تم'
+
+        body = self.run_with_worker(slides, turn, worker, message='عدل الكل')
+        self.assertFalse(body['agent']['billingStopped'])
+        self.assertEqual([t['status'] for t in body['tasks']], ['failed', 'success'])
+        self.assertIn('14020', body['tasks'][0]['failureReason'])
+        self.assertNotIn('اشحن', body['response'])
+
+    def test_billing_detection_reads_provider_failures_only(self):
+        detect = self.module._is_billing_error_text
+        self.assertFalse(detect('missing_numbers:14020'))
+        self.assertFalse(detect('clipped:div:402px'))
+        self.assertFalse(detect('حافظت على الرصيد النقدي'))
+        self.assertTrue(detect('provider_error:[DESIGNER-WORKER] {"message": "[402] Insufficient credits"}'))
+        self.assertTrue(detect('incomplete_result:provider_error:[402] insufficient credits'))
+
+    def test_inherited_overflow_does_not_fail_an_unrelated_edit(self):
+        slides = [slide('<p>LONG الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'أضف عنوانًا'}]}
+        feedbacks = []
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            feedbacks.append(feedback)
+            html = slide_['html']
+            return html[:html.rfind('</div>')] + '<h2>عنوان</h2></div>', 'تم'
+
+        body = self.run_with_worker(slides, turn, worker, render=_MeasuringRender(),
+                                    message='أضف عنوانًا')
+        self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
+        self.assertEqual(feedbacks, [''])
+
+    def test_new_overflow_retries_with_the_clipped_element_text(self):
+        slides = [slide('<p>LONG الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'أضف عنوانًا'}]}
+        feedbacks = []
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            feedbacks.append(feedback)
+            extra = '<h2>عنوان</h2>' if feedback else '<h2>WORSE عنوان</h2>'
+            html = slide_['html']
+            return html[:html.rfind('</div>')] + extra + '</div>', 'تم'
+
+        body = self.run_with_worker(slides, turn, worker, render=_MeasuringRender(),
+                                    message='أضف عنوانًا')
+        self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
+        self.assertEqual(len(feedbacks), 2)
+        self.assertIn('جدول المراحل الممتد', feedbacks[1])
+        self.assertIn('90px', feedbacks[1])
+
+    def run_real_worker(self, slides, turn, worker_html, message):
+        """Real scoped worker; only the provider round-trips are faked."""
+        worker_calls = []
+
+        def provider(messages, **kwargs):
+            schema = ((kwargs.get('response_format') or {}).get('json_schema') or {}).get('name')
+            if schema == 'designer_worker_result':
+                worker_calls.append(messages)
+                return {'choices': [{'message': {'content': json.dumps(
+                    {'slides': [{'title': 'x', 'html': worker_html}], 'summary': 'تم'},
+                    ensure_ascii=False)}}]}
+            return planner_reply(turn)
+
+        with patch.object(self.module, 'DESIGNER_AGENT', True), \
+                patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
+                patch.object(self.module, 'call_openrouter_messages', side_effect=provider), \
+                patch.object(self.module, '_agent_worker_finalize',
+                             side_effect=lambda out, *a, **k: out), \
+                patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
+                             side_effect=lambda s, *a: s), \
+                patch.object(self.module.slide_engine, 'renumber_presentation_slides',
+                             side_effect=lambda s, **k: s):
+            response = self.post({'message': message, 'slidesData': slides,
+                                  'projectData': {}, 'slideIndex': 0, 'autoConfirm': True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()['data'], worker_calls
+
+    def test_redesign_whose_brief_names_colors_reaches_the_model(self):
+        # The brief «ألوان الهوية وخلفية بيضاء» made the composed instruction
+        # read as color-only: the grammar refused it and the redesign ended as
+        # color_unchanged without a single model call.
+        slides = [slide('<h1>الملخص</h1><p>الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'style_brief': 'استخدم ألوان الهوية بتباين أقوى وخلفية بيضاء',
+                'ops': [{'op': 'redesign', 'select': {'all': True}}]}
+        redesigned = slide('<h1 style="color:#0b1f33">الملخص</h1><div class="card">الإيراد 120,000</div>')['html']
+        body, worker_calls = self.run_real_worker(slides, turn, redesigned, 'أعد تصميم الشريحة')
+        self.assertEqual(len(worker_calls), 1)
+        self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
+        self.assertIn('class="card"', body['slidesData'][0]['html'])
+
+    def test_plain_color_edit_with_a_brief_stays_deterministic(self):
+        html = ('<div class="slide" style="width:1280px;height:720px;background:#ffffff;">'
+                '<p>الإيراد 120,000</p></div>')
+        slides = [{'title': 'شريحة', 'type': 'content', 'html': html}]
+        turn = {'kind': 'plan', 'style_brief': 'طابع فاخر',
+                'ops': [{'op': 'edit', 'select': {'all': True},
+                         'instruction': 'غير لون الخلفية الى الأزرق'}]}
+        body, worker_calls = self.run_real_worker(slides, turn, html, 'غير لون الخلفية الى الأزرق')
+        self.assertEqual(worker_calls, [])
+        self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
+        self.assertIn('#0000ff', body['slidesData'][0]['html'].lower())
+
+    def test_failed_task_is_journaled_for_the_platform_admin(self):
+        slides = [slide('<p>الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            return slide('<p>الإيراد</p>')['html'], 'تم'
+
+        before = self.journal_files()
+        body = self.run_with_worker(slides, turn, worker, message='عدل الشريحة')
+        self.assertEqual(body['tasks'][0]['status'], 'failed')
+        new = self.journal_files() - before
+        self.assertEqual(len(new), 1)
+        failure_id = next(iter(new))[:-len('.json')]
+
+        client = self.app.test_client()
+        company = {'Authorization': 'Bearer ' + self.token}
+        platform = {'Authorization': 'Bearer ' + self.platform_token}
+        self.assertEqual(client.get('/api/admin/designer-failures', headers=company).status_code, 403)
+        listing = client.get(f'/api/admin/designer-failures?tenantId={self.tenant}', headers=platform)
+        self.assertEqual(listing.status_code, 200, listing.get_json())
+        payload = listing.get_json()
+        row = next(f for f in payload['failures'] if f['id'] == failure_id)
+        self.assertEqual(row['reasonCodes'], ['missing_numbers'])
+        self.assertEqual(row['attempts'], 2)
+        self.assertEqual(row['tenantName'], 'Agent')
+        self.assertGreaterEqual(payload['byReason']['missing_numbers'], 1)
+
+        detail = client.get(f'/api/admin/designer-failures/{self.tenant}/{failure_id}', headers=platform)
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        record = detail.get_json()['failure']
+        self.assertIn('120,000', record['sourceHtml'][0])
+        self.assertEqual(record['attempts'][0]['feedback'], '')
+        self.assertIn('«120000»', record['attempts'][1]['feedback'])
+        self.assertIn('<p>الإيراد</p>', record['attempts'][1]['resultHtml'][0])
+        # Replayed with this build's checks: still a genuine drop.
+        replay = detail.get_json()['replay']
+        self.assertFalse(replay['ok'])
+        self.assertEqual(replay['reasons'], ['missing_numbers:120000'])
+
+        self.assertEqual(client.get(
+            f'/api/admin/designer-failures/{self.tenant}/0000000000000-000000',
+            headers=platform).status_code, 404)
+        self.assertIsNone(self.module._agent_failure_dir('../outside'))
+
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):
@@ -659,6 +940,79 @@ class SelectorAndVerifyTests(unittest.TestCase):
         ok, reasons = designer_agent_ops.verify_task_result(
             'edit', [before], [after], allowed_numbers={'0111', '5000', '2024'})
         self.assertTrue(ok, reasons)
+
+    def test_timeline_relayout_is_not_a_dropped_number(self):
+        before = slide(TIMELINE_TABLE)['html']
+        after = slide(TIMELINE_CARDS)['html']
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'redesign', [before], [after], request_text='أعد تصميم شريحة الجدول الزمني')
+        self.assertTrue(ok, reasons)
+        # A genuine drop still fails — named by a value the slide really shows.
+        dropped = after.replace('<span>5 أشهر</span>', '')
+        ok, reasons = designer_agent_ops.verify_task_result(
+            'redesign', [before], [dropped], request_text='أعد تصميم شريحة الجدول الزمني')
+        self.assertFalse(ok)
+        self.assertEqual(reasons, ['missing_numbers:5'])
+
+    def test_inline_siblings_are_separate_numbers_in_the_facts_check(self):
+        # «<span>9/2027</span><span>5</span>» glued to «9/20275» in the
+        # restructure facts check the same way cells did in the edit check.
+        import designer_chat_safety
+        source = '<div class="slide"><p><span>إلى 9/2027</span><span>5</span> أشهر</p></div>'
+        merged = '<div class="slide"><p>المدة 5 أشهر حتى 9/2027</p></div>'
+        self.assertTrue(designer_chat_safety.require_facts_preserved([source], [merged]))
+
+    def test_retry_policy(self):
+        retryable = designer_agent_ops.is_retryable_failure
+        self.assertTrue(retryable('edit', 'provider_error:timeout'))
+        self.assertTrue(retryable('redesign', 'unchanged'))
+        self.assertTrue(retryable('split', 'incomplete_result:empty_worker_result'))
+        self.assertTrue(retryable('redesign', 'overflow:12', rejected_by_check=True))
+        self.assertFalse(retryable('edit', 'table_precheck:سيفرغ الجدول'))
+        self.assertFalse(retryable('edit', 'color_unchanged'))
+        self.assertFalse(retryable('table_edit', 'table_unchanged', rejected_by_check=True))
+        self.assertFalse(retryable('insert_map', 'map_missing'))
+
+    def test_retry_feedback_is_actionable(self):
+        before = slide(TIMELINE_TABLE)['html']
+        note = designer_agent_ops.retry_feedback('missing_numbers:5,2029', [before])
+        self.assertIn('«5» (في: «إلى 9/2027 | 5 | الإنشاء»)', note)
+        self.assertIn('«2029»', note)
+        self.assertNotIn('missing_numbers', note)
+        note = designer_agent_ops.retry_feedback(
+            'clipped:div:40px', [before],
+            {'clipped': [{'tag': 'div', 'overPx': 40, 'text': 'جدول المراحل'}]})
+        self.assertIn('جدول المراحل', note)
+        self.assertIn('40px', note)
+        self.assertEqual(designer_agent_ops.retry_feedback('provider_error:timeout', [before]), '')
+
+
+class LayoutRegressionTests(unittest.TestCase):
+    CLEAN = {'ok': True, 'overflowX': False, 'overflowY': False, 'clipped': [],
+             'slideScroll': {'w': 1280, 'h': 720}}
+    CLIPPED = dict(CLEAN, clipped=[{'tag': 'div', 'overPx': 30, 'text': 'جدول'}])
+
+    def setUp(self):
+        import generate_pdf_from_preview
+        self.regressions = generate_pdf_from_preview.measure_regression_reasons
+
+    def test_inherited_fault_is_not_a_regression(self):
+        self.assertEqual(self.regressions(self.CLIPPED, self.CLIPPED), [])
+        overflowing = dict(self.CLEAN, overflowY=True, slideScroll={'w': 1280, 'h': 760})
+        self.assertEqual(self.regressions(overflowing, dict(overflowing)), [])
+
+    def test_new_or_worse_fault_is_a_regression(self):
+        self.assertEqual(self.regressions(self.CLEAN, self.CLIPPED), ['clipped:div:30px'])
+        worse = dict(self.CLIPPED, clipped=[{'tag': 'p', 'overPx': 60, 'text': 'x'}])
+        self.assertEqual(self.regressions(self.CLIPPED, worse), ['clipped:p:60px'])
+        overflowing = dict(self.CLEAN, overflowY=True, slideScroll={'w': 1280, 'h': 760})
+        self.assertEqual(self.regressions(self.CLEAN, overflowing), ['measured_overflow'])
+        grown = dict(overflowing, slideScroll={'w': 1280, 'h': 800})
+        self.assertEqual(self.regressions(overflowing, grown), ['measured_overflow'])
+
+    def test_unknown_source_keeps_the_absolute_rule(self):
+        self.assertEqual(self.regressions(None, self.CLIPPED), ['clipped:div:30px'])
+        self.assertEqual(self.regressions(None, self.CLEAN), [])
 
 
 class FailureReasonTextTests(unittest.TestCase):

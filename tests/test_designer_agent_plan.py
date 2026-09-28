@@ -2,6 +2,7 @@ import unittest
 
 import designer_agent_ids
 import designer_agent_plan as agent_plan
+import designer_numbers
 
 
 def mk_slides(count, start=1):
@@ -150,6 +151,53 @@ class NumberExtractionTests(unittest.TestCase):
         counts = agent_plan.extract_visible_numbers(html)
         self.assertIn('5', counts)
         self.assertNotIn('9999', counts)
+
+    # A cell «إلى 9/2027» followed by a cell «5» used to read as «9/20275»:
+    # a pseudo-number that vanished on any relayout and failed the task for a
+    # value that never existed on the slide.
+    TIMELINE_TABLE = (
+        '<div class="slide"><table>'
+        '<tr><th>المرحلة</th><th>من</th><th>إلى</th><th>المدة (شهر)</th></tr>'
+        '<tr><td>التصميم</td><td>من 4/2027</td><td>إلى 9/2027</td><td>5</td></tr>'
+        '<tr><td>الإنشاء</td><td>10/2027</td><td>12/2029</td><td>26</td></tr>'
+        '</table><p>6 1,200 7,200</p></div>')
+    TIMELINE_CARDS = (
+        '<div class="slide">'
+        '<div class="card"><b>التصميم</b><span>5 أشهر</span><span>من 4/2027 إلى 9/2027</span></div>'
+        '<div class="card"><b>الإنشاء</b><span>26 شهر</span><span>10/2027 — 12/2029</span></div>'
+        '<p>6 | 1,200 | 7,200</p></div>')
+
+    def test_neighbouring_cells_never_glue_into_one_number(self):
+        counts = agent_plan.extract_visible_numbers(self.TIMELINE_TABLE)
+        for pseudo in ('9/20275', '20275', '10/202712/202926', '612007200'):
+            self.assertNotIn(pseudo, counts)
+        self.assertEqual(counts['2027'], 3)
+        for atom in ('4', '9', '5', '10', '12', '2029', '26', '6', '1200', '7200'):
+            self.assertIn(atom, counts)
+
+    def test_table_to_cards_relayout_drops_nothing(self):
+        self.assertEqual(agent_plan.missing_numbers([self.TIMELINE_TABLE], [self.TIMELINE_CARDS]), [])
+        dropped = self.TIMELINE_CARDS.replace('<span>5 أشهر</span>', '')
+        self.assertEqual(agent_plan.missing_numbers([self.TIMELINE_TABLE], [dropped]), ['5'])
+
+    def test_atoms_normalize_separators_padding_and_units(self):
+        atoms = designer_numbers.number_atoms
+        self.assertEqual(atoms('٥٬٠٠٠٬٠٠٠'), atoms('5,000,000'))
+        self.assertEqual(atoms('١٢٣٤٫٥٠'), ['1234.5'])
+        self.assertEqual(atoms('27/09/2026'), ['27', '9', '2026'])
+        self.assertEqual(atoms('المرحلة 01'), atoms('المرحلة 1'))
+        # Padding on a long run is part of the value: phones keep their zero.
+        self.assertEqual(atoms('0551234567'), ['0551234567'])
+        # «م2» and «م²» are the same unit, not a dropped «2».
+        self.assertEqual(atoms('20,275 م2'), atoms('20,275 م²'))
+        self.assertEqual(atoms('71–79'), ['71', '79'])
+
+    def test_atom_contexts_show_where_a_bare_cell_sat(self):
+        nodes = agent_plan.visible_text_nodes(self.TIMELINE_TABLE)
+        pairs = dict(designer_numbers.atom_contexts(nodes, ['5', '7200', '404']))
+        self.assertEqual(pairs['5'], 'إلى 9/2027 | 5 | الإنشاء')
+        self.assertIn('7,200', pairs['7200'])
+        self.assertEqual(pairs['404'], '')
 
 
 if __name__ == '__main__':

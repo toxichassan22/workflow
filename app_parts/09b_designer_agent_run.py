@@ -6,7 +6,7 @@
 
 # ── Task executors ───────────────────────────────────────────────────────────
 
-def _agent_exec_edit(task, ctx, session, feedback=''):
+def _agent_exec_edit(task, ctx, session, feedback='', color_request=None):
     """One scoped worker call per slide — partial success inside the task is
     kept and reported, a fully failed task returns the last worker reason."""
     indexes = task['_indexes']
@@ -18,7 +18,8 @@ def _agent_exec_edit(task, ctx, session, feedback=''):
         before = slide.get('html', '')
         html, reply = _agent_worker_edit_slide(
             ctx, slide, idx, task['_instruction'], len(ctx['slides']),
-            session, feedback, task.get('style_brief') or '')
+            session, feedback, task.get('style_brief') or '',
+            color_request=color_request)
         if html is None:
             last_reason = reply or ctx.get('agent_last_worker_reason') or 'worker_failed'
             continue
@@ -38,6 +39,13 @@ def _agent_exec_edit(task, ctx, session, feedback=''):
     if last_reason and note:
         note += f' (تعذرت بعض الشرائح: {str(last_reason)[:120]})'
     return True, note, None, None
+
+
+def _agent_exec_content_edit(task, ctx, session, feedback=''):
+    """``edit``: its own raw wording — never the composed instruction with the
+    style brief — may take the free deterministic color path first."""
+    return _agent_exec_edit(task, ctx, session, feedback,
+                            color_request=str(task.get('instruction') or '').strip() or None)
 
 
 def slides_at(ctx, idx):
@@ -161,7 +169,12 @@ def _agent_exec_create(task, ctx, session, feedback=''):
     ok = record.get('status') == 'success'
     after = ([slides[record['index']].get('html', '')]
              if ok and isinstance(record.get('index'), int) and record['index'] < len(slides) else None)
-    return ok, status, record.get('reason'), after
+    reason = record.get('reason')
+    if not ok and ctx.get('agent_last_worker_reason'):
+        # Same as split: the worker's own failure (a provider or billing
+        # error) hides behind execute_structure's generic incomplete_result.
+        reason = str(reason or '') + ':' + ctx['agent_last_worker_reason']
+    return ok, status, reason, after
 
 
 def _agent_exec_delete(task, ctx, session, feedback=''):
@@ -501,7 +514,7 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
 
 
 _EXECUTORS = {
-    'edit': _agent_exec_edit, 'redesign': _agent_exec_edit, 'rewrite': _agent_exec_edit,
+    'edit': _agent_exec_content_edit, 'redesign': _agent_exec_edit, 'rewrite': _agent_exec_edit,
     'split': _agent_exec_split, 'restructure': _agent_exec_restructure,
     'create': _agent_exec_create, 'delete': _agent_exec_delete, 'move': _agent_exec_move,
     'generate_image': _agent_exec_generate_image, 'renumber': _agent_exec_renumber,
@@ -617,6 +630,7 @@ def _designer_agent_run(tasks, ctx, session=None):
             task['failureReason'] = sel_err[0] if isinstance(sel_err, list) and sel_err else (sel_err or 'missing_slide')
             executed.append({'tool': f'agent_{op}', 'status': 'failed', 'task': n,
                              'reason': task['failureReason']})
+            _agent_record_failure(ctx, task, task['failureReason'], [], [])
             continue
         task['_indexes'] = indexes
         ctx['agent_last_worker_reason'] = None
@@ -626,8 +640,13 @@ def _designer_agent_run(tasks, ctx, session=None):
         executor = _EXECUTORS.get(op) or _agent_exec_code
         ok, reply, reason = False, None, None
         feedback = ''
+        attempts_log = []
+        before_by_index = dict(zip(indexes, before_htmls))
         for attempt in range(_AGENT_TASK_ATTEMPTS):
             after_htmls = None
+            measure_report = None
+            rejected_by_check = False
+            ctx['agent_last_worker_reason'] = None
             # Executors mutate slides before verification runs; a rejected
             # attempt must leave the deck untouched (and retry from the
             # original slides, not from its own rejected output).
@@ -637,47 +656,46 @@ def _designer_agent_run(tasks, ctx, session=None):
             except Exception as exc:
                 print(f"[DESIGNER-AGENT] task {n} ({op}) raised: {exc}")
                 ok, reply, reason = False, None, f'exception:{type(exc).__name__}'
-            if not ok:
-                slides[:] = deck_backup
-                retryable = (op == 'restructure' and attempt + 1 < _AGENT_TASK_ATTEMPTS
-                             and str(reason or '').split(':', 1)[0] in (
-                                 'facts_not_preserved', 'content_not_preserved',
-                                 'incomplete_result', 'invalid_slide_html'))
-                if retryable:
-                    feedback = 'النتيجة رُفضت تحققاً: ' + str(reason)
-                    continue
-                break
-            if after_htmls is None:
-                after_htmls = [slides[j].get('html', '') for j in
-                               sorted(task.get('_indexes') or indexes) if j < len(slides)]
-            v_ok, v_reasons = designer_agent_ops.verify_task_result(
-                op, before_htmls, after_htmls,
-                allowed_numbers=ctx.get('superseded_numbers'),
-                request_text='\n'.join(str(part) for part in (
-                    ctx.get('message'), task.get('_instruction'),
-                    task.get('exact_text')) if part))
-            if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
-                m_indexes = sorted(task.get('_indexes') or indexes)
-                for j in m_indexes:
-                    if j >= len(slides):
-                        continue
-                    m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
-                    if m_uri:
-                        # The last slide designed this run is the consistency
-                        # reference the next worker call sees (chatplan 3.6).
-                        ctx['agent_style_ref_uri'] = m_uri
-                    m_reasons = _measure_reasons(m_report) if m_report else []
-                    if m_reasons:
-                        v_ok, v_reasons = False, m_reasons
-                        break
-            if v_ok:
-                break
+            if ok:
+                if after_htmls is None:
+                    after_htmls = [slides[j].get('html', '') for j in
+                                   sorted(task.get('_indexes') or indexes) if j < len(slides)]
+                v_ok, v_reasons = designer_agent_ops.verify_task_result(
+                    op, before_htmls, after_htmls,
+                    allowed_numbers=ctx.get('superseded_numbers'),
+                    request_text='\n'.join(str(part) for part in (
+                        ctx.get('message'), task.get('_instruction'),
+                        task.get('exact_text')) if part))
+                if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
+                    for j in sorted(task.get('_indexes') or indexes):
+                        if j >= len(slides):
+                            continue
+                        m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
+                        if m_uri:
+                            # The last slide designed this run is the consistency
+                            # reference the next worker call sees (chatplan 3.6).
+                            ctx['agent_style_ref_uri'] = m_uri
+                        # Single-slide edits answer only for regressions against
+                        # their own source; split/restructure rebuild the layout.
+                        source = before_by_index.get(j) if op in designer_agent_ops.EDIT_OPS else None
+                        m_reasons = _agent_layout_reasons(ctx, session, source, m_report)
+                        if m_reasons:
+                            v_ok, v_reasons, measure_report = False, m_reasons, m_report
+                            break
+                if v_ok:
+                    break
+                ok, rejected_by_check = False, True
+                reason = ';'.join(v_reasons) or 'verification_failed'
             slides[:] = deck_backup
-            reason = ';'.join(v_reasons) or 'verification_failed'
-            if attempt + 1 < _AGENT_TASK_ATTEMPTS and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
-                feedback = 'النتيجة رُفضت تحققاً: ' + reason
+            attempts_log.append({'attempt': attempt + 1, 'reason': str(reason or '')[:400],
+                                 'feedback': feedback, 'resultHtml': after_htmls or []})
+            # Every worker op retries what the model can repair or a transient
+            # provider failure — once, with feedback that names the defect.
+            if (attempt + 1 < _AGENT_TASK_ATTEMPTS
+                    and designer_agent_ops.is_retryable_failure(op, reason, rejected_by_check)
+                    and not _is_billing_error_text(str(reason or ''))):
+                feedback = designer_agent_ops.retry_feedback(reason, before_htmls, measure_report)
                 continue
-            ok = False
             break
 
         if ok:
@@ -693,6 +711,7 @@ def _designer_agent_run(tasks, ctx, session=None):
                              'reason': task['failureReason']})
             if _is_billing_error_text(str(reason or '')) or _is_billing_error_text(str(reply or '')):
                 billing_stopped = True
+            _agent_record_failure(ctx, task, reason, before_htmls, attempts_log)
         _agent_job_checkpoint(ctx, tasks, slides)
         report(15 + int(70 * (i + 1) / max(1, total)),
                f"اكتملت المهمة {n}/{total} ({'نجاح' if ok else 'تعذّر'})",
@@ -734,4 +753,37 @@ def _measure_reasons(report):
         return renderer.measure_report_reasons(report)
     except Exception:
         return []
+
+
+def _measure_regression_reasons(before, after):
+    try:
+        import generate_pdf_from_preview as renderer
+        return renderer.measure_regression_reasons(before, after)
+    except Exception:
+        return []
+
+
+def _agent_layout_key(html):
+    return hashlib.sha1(str(html or '').encode('utf-8')).hexdigest()
+
+
+def _agent_remember_layout(ctx, html, report):
+    """Keep the source measurement the worker's vision render already paid for."""
+    if html and isinstance(report, dict):
+        ctx.setdefault('agent_layout_cache', {})[_agent_layout_key(html)] = report
+
+
+def _agent_layout_reasons(ctx, session, source_html, report):
+    """Layout faults of one measured result slide. Given its source slide,
+    only what the result made worse counts — an inherited overflow must not
+    fail an unrelated edit on every attempt."""
+    if not report:
+        return []
+    if not source_html:
+        return _measure_reasons(report)
+    cache = ctx.setdefault('agent_layout_cache', {})
+    key = _agent_layout_key(source_html)
+    if key not in cache:
+        _uri, cache[key] = session.render(source_html, screenshot=False)
+    return _measure_regression_reasons(cache[key], report)
 
