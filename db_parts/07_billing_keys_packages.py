@@ -445,12 +445,14 @@ def reset_all_company_balances(clear_usage=True):
     wallets = conn.execute(
         f'UPDATE tenants SET credit_balance = 0, package_id = NULL WHERE {scope}')
     result = {'tenants_reset': wallets.rowcount or 0, 'ai_deleted': 0,
-              'maps_deleted': 0, 'history_deleted': 0, 'ledger_deleted': 0}
+              'maps_deleted': 0, 'history_deleted': 0, 'ledger_deleted': 0,
+              'reservations_deleted': 0}
     if clear_usage:
         for table, key in (('ai_usage_events', 'ai_deleted'),
                            ('map_usage_events', 'maps_deleted'),
                            ('tenant_package_history', 'history_deleted'),
-                           ('tenant_ledger', 'ledger_deleted')):
+                           ('tenant_ledger', 'ledger_deleted'),
+                           ('point_reservations', 'reservations_deleted')):
             try:
                 cur = conn.execute(
                     f'DELETE FROM {table} WHERE tenant_id IN '
@@ -483,12 +485,17 @@ def reset_tenant_balance(tenant_id, clear_usage=True):
         'UPDATE tenants SET credit_balance = 0, package_id = NULL WHERE id = ?',
         (tenant_id,))
     result = {'tenants_reset': 1, 'ai_deleted': 0, 'maps_deleted': 0,
-              'history_deleted': 0, 'ledger_deleted': 0}
+              'history_deleted': 0, 'ledger_deleted': 0,
+              'reservations_deleted': 0}
     if clear_usage:
+        # Live holds go with the wipe: a surviving 'reserved' row would keep
+        # the provider cap nonzero and, worse, its expiry would refund money
+        # into the wallet the operator just zeroed.
         for table, key in (('ai_usage_events', 'ai_deleted'),
                            ('map_usage_events', 'maps_deleted'),
                            ('tenant_package_history', 'history_deleted'),
-                           ('tenant_ledger', 'ledger_deleted')):
+                           ('tenant_ledger', 'ledger_deleted'),
+                           ('point_reservations', 'reservations_deleted')):
             try:
                 cur = conn.execute(
                     f'DELETE FROM {table} WHERE tenant_id = ?', (tenant_id,))
