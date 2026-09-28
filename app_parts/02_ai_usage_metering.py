@@ -530,7 +530,11 @@ def _require_billing_balance(flow_key):
     except (TypeError, ValueError):
         estimate_sar = 0.0
     try:
-        balance = db.get_tenant_balance(g.tenant_id)
+        # Package credit spends alongside the wallet — usage tagged with the
+        # package burns from its own purse, so the gate compares the estimate
+        # against wallet + unburned package credit, not the wallet alone.
+        balance = float(db.get_tenant_balance(g.tenant_id) or 0.0) \
+            + float(db.get_package_remaining_sar(g.tenant_id) or 0.0)
     except Exception:
         # ISS-037: an unreadable wallet is not a funded wallet — enforcement
         # that fails open turns every storage hiccup into a free paid run.
