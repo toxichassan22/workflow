@@ -407,7 +407,7 @@
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
           planBadge + ' | ' + statusBadge + keyBadge + ' | <span>رصيد</span> ' +
-          Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US') + ' <span>ريال</span>' +
+          Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US') + ' <span>ريال</span>' +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
@@ -763,7 +763,7 @@
         '<div class="tenant-field"><label for="sagDetailSlug">رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailPackage">الباقة</label><select id="sagDetailPackage" data-current="' + escapeHtml(currentPackageId) + '">' +
         packageOptions + '</select></div>' +
-        '<div class="tenant-field"><label>الرصيد الحالي (ريال)</label><p style="margin:0;font-weight:700">' + Number(t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0)).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
+        '<div class="tenant-field"><label>الرصيد الحالي (ريال)</label><p style="margin:0;font-weight:700">' + Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +

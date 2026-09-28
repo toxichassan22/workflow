@@ -265,7 +265,7 @@
         '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + llEscape(fmt(value)) +
         ' <span style="font-size:12px;font-weight:400;color:#64748b;">ريال</span></h3></div>';
       box.innerHTML = '<div class="tenant-dashboard-stats">' +
-        card('الرصيد الحالي', data.balance_sar) +
+        card('الرصيد الحالي', data.effective_balance_sar != null ? data.effective_balance_sar : data.balance_sar) +
         card('المحجوز', data.reserved_sar) +
         card('المستهلك', cycleConsumed) +
         card('إجمالي المستهلك', (data.lifetime || {}).consumed_sar) +

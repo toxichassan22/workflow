@@ -282,6 +282,12 @@ def api_client_overview():
             'package': package,
             'balance_sar': balance_sar,
             'balance_usd': db.sar_to_usd(balance_sar, fx.get('rate')),
+            # Spendable total: the wallet plus the real package's unburned
+            # credit. The synthetic wallet-package block above is excluded —
+            # its remaining is the balance itself, so adding it would double.
+            'effective_balance_sar': round(
+                balance_sar
+                + float(((view.get('package') or {}).get('remaining_sar')) or 0.0), 2),
             'reserved_sar': round(reserved_sar, 2),
             'lifetime': {
                 'consumed_usd': view.get('lifetime_consumed_usd'),

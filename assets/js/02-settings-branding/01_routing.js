@@ -864,8 +864,10 @@
       const pkg = (data && data.package) || null;
       // The server resolves the quota: a real package carries its own credit,
       // and a bare wallet reports everything the platform ever credited.
-      const balance = Number((data && (data.balance_sar ?? data.balance_usd)) || 0);
-      const remaining = pkg ? Number((pkg.remaining_sar ?? pkg.remaining_usd) || 0) : balance;
+      // The headline is the effective spendable total — wallet plus the
+      // unburned credit of the assigned package (packages burn first).
+      const balance = Number((data && (data.effective_balance_sar ?? data.balance_sar ?? data.balance_usd)) || 0);
+      const remaining = balance;
       const consumed = pkg ? Number((pkg.consumed_sar ?? pkg.consumed_usd) || 0) : 0;
       const credit = pkg ? Number((pkg.credit_sar ?? pkg.credit_usd) || 0) : remaining;
       const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;

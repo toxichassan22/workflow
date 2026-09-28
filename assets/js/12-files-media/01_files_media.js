@@ -668,11 +668,8 @@
         const ov = await api('GET', '/api/client/overview');
         if (ov && ov.wallet_restricted) {
           isBalanceSufficient = Boolean(ov.funds_available);
-        } else if (ov?.package) {
-          remainingSar = Number(ov.package.remaining_sar ?? ov.package.remaining_usd) || 0;
-          isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
         } else if (ov) {
-          remainingSar = Number(ov?.balance_sar ?? ov?.balance_usd) || 0;
+          remainingSar = Number(ov.effective_balance_sar ?? ov.balance_sar ?? ov.balance_usd) || 0;
           isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
         }
       } catch (err) {
@@ -695,7 +692,7 @@
           '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ريال</strong></div>' +
           (canSeeWallet && remainingSar !== null
             ? '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
-              '<span>رصيد المحفظة المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال</strong>' +
+              '<span>الرصيد المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال</strong>' +
               '</div>'
             : '') +
           '</div>' +

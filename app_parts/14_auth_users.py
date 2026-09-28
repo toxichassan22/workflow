@@ -344,6 +344,8 @@ def _tenant_package_brief(tenant):
 
 def _company_payload(tenant):
     trial = db.tenant_trial_state(tenant)
+    package_remaining = db.get_package_remaining_sar(tenant['id'])
+    wallet_sar = float(tenant.get('credit_balance') or 0)
     return {
         'id': tenant['id'],
         'companyName': tenant['company_name'],
@@ -354,7 +356,11 @@ def _company_payload(tenant):
         'plan': tenant.get('plan', 'free'),
         **_tenant_package_brief(tenant),
         'creditBalance': db.sar_to_usd(tenant.get('credit_balance')),
-        'creditBalanceSar': float(tenant.get('credit_balance') or 0),
+        'creditBalanceSar': wallet_sar,
+        # What the company can actually burn: wallet riyals plus the
+        # unburned credit of its assigned package (packages spend first).
+        'packageRemainingSar': round(package_remaining, 2),
+        'effectiveBalanceSar': round(wallet_sar + package_remaining, 2),
         'isActive': bool(tenant.get('is_active')),
         'isAdmin': bool(tenant.get('is_admin')),
         'primaryUserId': tenant.get('primary_user_id'),
