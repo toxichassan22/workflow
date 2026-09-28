@@ -366,7 +366,7 @@ def api_designer_chat():
 - حرية تعديل شرائح الغلاف والخاتمة وجميع شرائح المحتوى والخرائط والتحليلات.
 - تعديل CSS والتخطيط (رفع/تنزيل الهيدر، تغيير الأحجام، إزاحة العناصر يميناً/يساراً، تعديل الألوان والخطوط).
 - تعديل جراحي فوري لمحتوى أي شريحة (إضافة بطاقات، حذف عناصر، تعديل نصوص) دون مساس ببقية الشريحة.
-- إدارة دورة حياة الشرائح كاملة: حذف شريحة (delete_slide)، تكرار شريحة (duplicate_slide)، إعادة ترتيب الشرائح (reorder_slides)، تقسيم شريحة كثيفة إلى شريحتين أو أكثر (split_slide)، دمج شريحتين (merge_slides)، أو إنشاء شريحة جديدة (create_slide).
+- إدارة دورة حياة الشرائح كاملة: حذف شريحة (delete_slide)، تكرار شريحة (duplicate_slide)، إعادة ترتيب الشرائح (reorder_slides)، تقسيم شريحة كثيفة إلى شريحتين أو أكثر بتوزيع محتواها عليها (split_slide)، دمج شريحتين (merge_slides)، أو إنشاء شريحة جديدة (create_slide).
 - إدراج الخرائط الأربع المعتمدة بدقة (insert_canonical_map): خريطة الموقع العام، خريطة شبكة الطرق والوصول، خريطة النطاق الجغرافي، وخريطة المعالم الحيوية.
 - إدراج وتعديل المخططات والرسوم المالية المعتمدة (insert_financial_chart): شلال التدفقات، تحليل الحساسية، التدفقات المركبة، وهيكل التمويل.
 - توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح مع بطاقة شرح توضيحي.
@@ -391,7 +391,7 @@ def api_designer_chat():
 - delete_slide: params={{"slide_number":1-based, "slide_numbers":[1-based]}}
 - duplicate_slide: params={{"slide_number":1-based}}
 - reorder_slides: params={{"from_index":1-based, "to_index":1-based}}
-- split_slide: params={{"slide_number":1-based, "parts":2, "instruction":"تفاصيل التقسيم والتنظيم"}}
+- split_slide: params={{"slide_number":1-based, "parts":2, "instruction":"تفاصيل التقسيم والتنظيم"}} — التقسيم يوزع محتوى الشريحة بالترتيب على الشرائح الناتجة بحيث يقع كل عنصر في شريحة واحدة؛ إخراج الشريحة كاملة مرة أخرى ليس تقسيماً، ولنسخها كما هي استخدم duplicate_slide.
 - merge_slides: params={{"slide_numbers":[1-based, 1-based], "instruction":"تفاصيل الدمج"}}
 - create_slide: params={{"title":"العنوان", "type":"content|cover|divider|table|kpi", "instruction":"محتوى الشريحة وتصميمها", "position":1-based}}
 - regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}}
@@ -410,7 +410,7 @@ def api_designer_chat():
 3. إذا طلب حذف شريحة (مثل: "احذف الشريحة 5") -> اختر tool="delete_slide" مع slide_number.
 4. إذا طلب تكرار شريحة (مثل: "كرر الشريحة 2") -> اختر tool="duplicate_slide" مع slide_number.
 5. إذا طلب تغيير ترتيب (مثل: "انقل الشريحة 8 إلى 4") -> اختر tool="reorder_slides" مع from_index و to_index.
-6. إذا طلب تقسيم أو تجزئة شريحة أو محتوى شريحة معينة (مثل: "اقسم محتوى الملخص التنفيذي" أو "جزئ الشريحة 4") -> اختر tool="split_slide" مع slide_number للشريحة المستهدفة.
+6. إذا طلب تقسيم أو تجزئة شريحة أو محتوى شريحة معينة (مثل: "اقسم محتوى الملخص التنفيذي" أو "جزئ الشريحة 4") -> اختر tool="split_slide" مع slide_number للشريحة المستهدفة — التقسيم يعني توزيع محتواها على الشرائح الناتجة لا تكرارها، والتكرار الصريح هو duplicate_slide.
 7. إذا طلب دمج شريحتين (مثل: "ادمج الشريحة 3 مع 4") -> اختر tool="merge_slides" مع slide_numbers.
 8. إذا طلب إنشاء أو إضافة شريحة جديدة -> اختر tool="create_slide" مع العنوان والمحتوى والموضع.
 9. إذا طلب خريطة الموقع أو الوصول أو المعالم -> اختر tool="insert_canonical_map".

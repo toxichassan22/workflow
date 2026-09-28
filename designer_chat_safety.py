@@ -257,6 +257,14 @@ def _text_covered_across(item, part_texts):
     return not remaining.lstrip()
 
 
+# A split part still carrying this share of the source's distinct text/row
+# items is a relabeled copy of the slide, not a partition slice. Markup-level
+# distinctness cannot tell two regenerated full copies apart — a different
+# «الجزء N» heading or rebuilt layout already changes the multiset — so the
+# guard measures how much of the source content each part still holds.
+_SPLIT_PART_COVERAGE_LIMIT = 0.9
+
+
 def require_preserved(source_htmls, result_htmls, expected_parts):
     """Reject missing text occurrences, row associations, data attributes or media.
 
@@ -307,6 +315,16 @@ def require_preserved(source_htmls, result_htmls, expected_parts):
     if expected_parts > 1:
         if any(inventory.items == required for inventory in inventories) or len({frozenset(inventory.items.items()) for inventory in inventories}) != expected_parts:
             raise StructureSafetyError('split_not_partitioned')
+        content_keys = [key for key in required if key[0] in ('text', 'row')]
+        if content_keys:
+            for inventory in inventories:
+                joined = ' '.join(inventory.text_items)
+                keys = set(inventory.items)
+                covered = sum(
+                    key[1] in joined if key[0] == 'text' else key in keys
+                    for key in content_keys)
+                if covered / len(content_keys) >= _SPLIT_PART_COVERAGE_LIMIT:
+                    raise StructureSafetyError('split_not_partitioned')
     return True
 
 
@@ -435,10 +453,18 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
                 for part_index in range(count):
                     part_title = f'{title} - الجزء {part_index + 1} من {count}'
                     instruction = (
-                        f'قسّم المحتوى الأصلي بالترتيب إلى {count} أجزاء غير متداخلة. '
-                        f'أعد الجزء {part_index + 1} فقط. انقل النصوص والأرقام وصفوف الجداول '
-                        'وروابط الصور والخرائط وخصائص البيانات حرفياً دون حذف أو تلخيص أو اختراع. '
-                        'كل عنصر أصلي يجب أن يظهر في أحد الأجزاء. لا تخف محتوى ولا تضعه في تعليق. '
+                        f'هذه «عملية تقسيم شريحة»: محتوى الشريحة الأصلية يُوزَّع على {count} '
+                        'شرائح تحل محلها — وليس نسخ الشريحة أو تكرارها. رتّب عناصرها المرئية '
+                        '(العناوين الفرعية وما يليها من فقرات وجداول وبطاقات وقوائم وصور) إلى '
+                        f'مجموعات متعاقبة غير متداخلة، فيأخذ كل جزء مجموعة واحدة بالترتيب. '
+                        f'أنت تنتج الجزء {part_index + 1} من {count}: ضع فيه عناصر مجموعته '
+                        'وحدها، واحذف منه كل ما يخص الأجزاء الأخرى، ولا تُخرج الشريحة كاملة '
+                        'مهما كان. الجدول الأطول من شريحة واحدة تُوزّع صفوفه بالترتيب على '
+                        'الأجزاء المتتابعة مع تكرار رأسه فقط. انقل النصوص والأرقام وصفوف '
+                        'الجداول وروابط الصور والخرائط وخصائص البيانات حرفياً دون حذف أو '
+                        'تلخيص أو اختراع؛ عنوان الشريحة وإطارها العام (هيدر/فوتر/شعار) وحده '
+                        'ما يتكرر في كل جزء، وكل عنصر محتوى يظهر في جزء واحد بالضبط. '
+                        'لا تخف محتوى ولا تضعه في تعليق. '
                         f'طلب المستخدم: {params.get("instruction") or message}'
                     )
                     html, reply = edit_slide(source_html, part_title, instruction, index + part_index,

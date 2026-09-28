@@ -133,6 +133,34 @@ class StructureSafetyTests(unittest.TestCase):
         for outputs in ([(a, 'done'), (a, 'done')], [(a, 'done'), (b, 'done')]):
             self.assert_failed_unchanged('split_slide', {'slide_number': 1, 'parts': 2}, [copy.deepcopy(source)], outputs)
 
+    def test_split_rejects_relabeled_full_copies(self):
+        # A provider answer that re-renders the whole slide under a «الجزء N»
+        # label dodges multiset equality (the heading and rebuilt markup make
+        # each part's inventory differ), yet every part still covers ~all the
+        # source — a duplicate, not a partition.
+        body = ('<h1>تحليل الموقع</h1><section><h2>الوصول</h2>A 123</section>'
+                '<section><h2>المعالم</h2>B 456</section><img src="/b.png">')
+        source = slide(body)
+        part = lambda n: slide(
+            f'<h1>تحليل الموقع - الجزء {n} من 2</h1><div><section><h2>الوصول</h2>A 123</section>'
+            '<section><h2>المعالم</h2>B 456</section><img src="/b.png"></div>')['html']
+        with self.assertRaises(safety.StructureSafetyError) as dup:
+            safety.require_preserved([source['html']], [part(1), part(2)], 2)
+        self.assertEqual(str(dup.exception), 'split_not_partitioned')
+        _, editor = self.assert_failed_unchanged(
+            'split_slide', {'slide_number': 1, 'parts': 2},
+            [copy.deepcopy(source)], [(part(1), 'done'), (part(2), 'done')])
+        self.assertEqual(editor.call_count, 2)
+
+    def test_split_allows_shared_frame_when_content_is_distributed(self):
+        # The coverage guard only trips on ~full copies: shared chrome (the
+        # slide heading) may repeat while each part keeps its own slice.
+        source = slide('<h1>العنوان</h1><p>نص أول 100</p><p>نص ثان 200</p>'
+                       '<p>نص ثالث 300</p><p>نص رابع 400</p>')['html']
+        first = slide('<h1>العنوان</h1><p>نص أول 100</p><p>نص ثان 200</p>')['html']
+        second = slide('<h1>العنوان</h1><p>نص ثالث 300</p><p>نص رابع 400</p>')['html']
+        self.assertTrue(safety.require_preserved([source], [first, second], 2))
+
     def test_split_single_dense_paragraph_partitions_verbatim_without_provider(self):
         sentences = [f'الجملة التجريبية رقم {index} تحمل محتوى مختلفا تماما عن باقي الجمل.'
                      for index in range(40)]

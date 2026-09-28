@@ -161,7 +161,7 @@ def instruction_for(task, style_brief=''):
         return (raw or 'أعد صياغة نص هذه الشريحة بشكل أوضح.') + (
             f'\nالموجز العام: {brief}' if brief else '')
     if op == 'split':
-        return (raw or 'قسّم محتوى هذه الشريحة مع الحفاظ على كل شيء.') + (
+        return (raw or 'قسّم محتوى هذه الشريحة إلى أجزاء بتوزيع عناصرها عليها — لا تنسخها.') + (
             f'\nالموجز العام: {brief}' if brief else '')
     if op == 'create':
         title = task.get('title') or params.get('title') or ''
@@ -372,7 +372,11 @@ def retry_feedback(reason, before_htmls=None, measure_report=None):
                 label = '، '.join(_FACT_KIND_TEXT.get(k, k) for k in kinds.split('+') if k)
                 notes.append(f'المحاولة السابقة أسقطت عناصر من المصدر ({label}): {sample[:300]}'
                              ' — أعد كل عنصر منها كما ورد.')
-        elif code in ('content_not_preserved', 'split_not_partitioned'):
+        elif code == 'split_not_partitioned':
+            notes.append('المحاولة السابقة أعادت الشريحة نفسها (أو معظمها) في أكثر من جزء — '
+                         'التقسيم يعني توزيع العناصر على الأجزاء لا تكرارها: كل جزء يحمل حصته '
+                         'وحدها ولا يعيد الشريحة كاملة.')
+        elif code == 'content_not_preserved':
             notes.append('المحاولة السابقة لم تنقل كل نصوص المصدر وصفوفه وصوره مرة واحدة دون تكرار'
                          ' — انقل كل عنصر حرفيًا إلى موضع واحد فقط.')
         elif code in ('unchanged', 'no_material_change'):
