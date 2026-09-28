@@ -179,22 +179,3 @@ def get_latest_approved_recharge(tenant_id):
         return dict(row) if row else None
     except Exception:
         return None
-
-
-def get_wallet_consumed_since(tenant_id, since_iso):
-    """Wallet riyals spent since ``since_iso`` — debits and holds turned
-    debits. ``None`` means since the beginning of the account."""
-    try:
-        conn = get_db()
-        where = "tenant_id = ? AND kind = 'debit'"
-        params = [str(tenant_id)]
-        if since_iso:
-            where += " AND REPLACE(created_at, 'T', ' ') >= ?"
-            params.append(str(since_iso).replace('T', ' ')[:19])
-        row = conn.execute(
-            'SELECT COALESCE(SUM(COALESCE(amount_sar, amount_usd)), 0) AS total '
-            'FROM tenant_ledger WHERE ' + where, params,
-        ).fetchone()
-        return float(dict(row).get('total') or 0.0)
-    except Exception:
-        return 0.0

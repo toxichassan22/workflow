@@ -241,21 +241,21 @@ def api_client_overview():
         if package is None:
             # A bare wallet has no package cap; its limit is everything the
             # platform ever credited, and what left since is the consumed
-            # share. The latest approved recharge names the cycle the client
-            # is spending through.
+            # share. Consumed = credited - balance: debits, live holds and
+            # clawbacks all already cut the balance, so the bar can never sit
+            # empty while money is gone. The latest approved recharge names
+            # the wallet's funding source.
             credited_sar = db.get_tenant_wallet_credited(g.tenant_id)
             if balance_sar > 0 or credited_sar > 0:
                 cycle = db.get_latest_approved_recharge(g.tenant_id)
-                cycle_start = (cycle or {}).get('reviewed_at')
-                consumed_sar = db.get_wallet_consumed_since(g.tenant_id, cycle_start)
                 package = {
                     'id': 'wallet',
                     'name': (cycle or {}).get('package_name') or 'رصيد المحفظة',
-                    'credit_sar': (cycle or {}).get('amount_sar') or credited_sar,
-                    'consumed_sar': round(consumed_sar, 2),
+                    'credit_sar': round(max(credited_sar, balance_sar), 2),
+                    'consumed_sar': round(max(0.0, credited_sar - balance_sar), 2),
                     'remaining_sar': round(balance_sar, 2),
                     'status': 'active' if balance_sar > 0 else 'expired',
-                    'assigned_at': cycle_start,
+                    'assigned_at': (cycle or {}).get('reviewed_at'),
                 }
         reserved_sar = db.get_active_hold_total_sar(g.tenant_id)
         if not _landloom_can('billing'):

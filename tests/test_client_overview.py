@@ -136,6 +136,57 @@ class ClientOverviewTests(unittest.TestCase):
         self.assertAlmostEqual(body['lifetime']['consumed_usd'], 3.0)
         self.assertAlmostEqual(body['lifetime']['consumed_sar'], 11.25)
 
+    # ── Bare wallet: consumed is everything that left it ────────────────
+
+    def test_wallet_card_counts_every_outflow_not_just_debits(self):
+        """Holds and clawbacks already cut the balance — counting only
+        'debit' rows made the bar read empty while money was gone."""
+        tenant_id, token = self._fresh_client('Wallet Co', 'wallet-ov@example.test', 'wallet-ov')
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE tenants SET credit_balance = 95.0 WHERE id = ?', (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('cred-ov-1', ?, 'credit', 150.0, 40.0)", (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('deb-ov-1', ?, 'debit', 30.0, 8.0)", (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('hold-ov-1', ?, 'hold', 25.0, 6.7)", (tenant_id,))
+            conn.commit()
+        body = self._overview(token)
+        pkg = body['package']
+        self.assertIsNotNone(pkg)
+        self.assertEqual(pkg['id'], 'wallet')
+        self.assertEqual(pkg['name'], 'رصيد المحفظة')
+        self.assertAlmostEqual(pkg['credit_sar'], 150.0)
+        self.assertAlmostEqual(pkg['consumed_sar'], 55.0)
+        self.assertAlmostEqual(pkg['remaining_sar'], 95.0)
+
+    def test_wallet_credit_is_lifetime_funding_not_last_recharge(self):
+        """A fresh recharge must not reset the card: the denominator is
+        everything the platform ever credited, not the latest request."""
+        tenant_id, token = self._fresh_client('Cycle Co', 'cycle-ov@example.test', 'cycle-ov')
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE tenants SET credit_balance = 445.0 WHERE id = ?', (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('cred-ov-2a', ?, 'credit', 500.0, 134.0)", (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('deb-ov-2a', ?, 'debit', 400.0, 107.0)", (tenant_id,))
+            conn.execute(
+                "INSERT INTO tenant_ledger (id, tenant_id, kind, amount_sar, amount_usd) "
+                "VALUES ('cred-ov-2b', ?, 'credit', 345.0, 92.0)", (tenant_id,))
+            conn.commit()
+        body = self._overview(token)
+        pkg = body['package']
+        self.assertAlmostEqual(pkg['credit_sar'], 845.0)
+        self.assertAlmostEqual(pkg['consumed_sar'], 400.0)
+        self.assertAlmostEqual(pkg['remaining_sar'], 445.0)
+
     # ── Totals count work ──────────────────────────────────────────────
 
     def test_totals_count_projects_and_presentations(self):
