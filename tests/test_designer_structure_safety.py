@@ -86,6 +86,23 @@ class StructureSafetyTests(unittest.TestCase):
             with self.assertRaises(safety.StructureSafetyError):
                 safety.require_preserved(sources, [output], 1)
 
+    def test_merge_may_summarize_prose_but_keeps_facts(self):
+        # Condensed wording is acceptable on a merge; the facts may not shrink.
+        sources = [slide('<h1>أول</h1><p>وصف طويل مفصل للمشروع الأول بمساحة 12000 م2</p>'),
+                   slide('<h1>ثان</h1><p>تفاصيل مالية واسعة للمشروع بإيراد 5,000,000 ريال</p>'
+                         '<img src="/c.png">')]
+        merged = slide('<h1>أول و ثان</h1><p>مشروع بمساحة 12000 م2 وإيراد 5,000,000 ريال</p>'
+                       '<img src="/c.png">')
+        workspace = [copy.deepcopy(item) for item in sources]
+        result, _, _, _ = self.run_action('merge_slides', {'slide_numbers': [1, 2]},
+                                          workspace, [(merged['html'], 'done')])
+        self.assertEqual(result['status'], 'success', result)
+        self.assertEqual(len(workspace), 1)
+        no_number = merged['html'].replace('5,000,000', '')
+        self.assert_failed_unchanged('merge_slides', {'slide_numbers': [1, 2]},
+                                     [copy.deepcopy(item) for item in sources],
+                                     [(no_number, 'done')])
+
     def test_split_honors_requested_table_parts_and_preserves_metadata(self):
         rows = ''.join(f'<tr><td>Row {i}</td><td>{i * 100}</td></tr>' for i in range(9))
         source = slide('<h1>Table</h1><table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>' + rows + '</tbody></table>')
@@ -160,6 +177,67 @@ class StructureSafetyTests(unittest.TestCase):
         first = slide('<h1>العنوان</h1><p>نص أول 100</p><p>نص ثان 200</p>')['html']
         second = slide('<h1>العنوان</h1><p>نص ثالث 300</p><p>نص رابع 400</p>')['html']
         self.assertTrue(safety.require_preserved([source], [first, second], 2))
+
+    def test_split_accepts_summarized_prose_when_facts_survive(self):
+        # The owner allows condensed wording on a split — numbers, entity
+        # names and media must survive, the phrasing need not.
+        source = slide(
+            '<h1>تحليل الموقع</h1>'
+            '<section><h2>الوصول</h2><p>تقع الأرض على طريق الملك فهد بمساحة '
+            'إجمالية تبلغ 15000 م2 ويخدمها ثلاثة محاور رئيسية</p></section>'
+            '<section><h2>المؤشرات</h2><p>بلغ العائد المتوقع 18% لمشروع '
+            'Vision Gate خلال عام 2027</p></section><img src="/map.png">')['html']
+        first = slide(
+            '<h1>تحليل الموقع - الجزء 1 من 2</h1>'
+            '<section><h2>الوصول</h2><p>الموقع على طريق الملك فهد — '
+            '15000 م2</p></section>')['html']
+        second = slide(
+            '<h1>تحليل الموقع - الجزء 2 من 2</h1>'
+            '<section><h2>المؤشرات</h2><p>عائد 18% لمشروع Vision Gate — '
+            '2027</p></section><img src="/map.png">')['html']
+        self.assertTrue(
+            safety.require_preserved([source], [first, second], 2, summarize_ok=True))
+        # The same result still fails the literal-preservation contract.
+        with self.assertRaises(safety.StructureSafetyError):
+            safety.require_preserved([source], [first, second], 2)
+
+    def test_split_summarize_still_rejects_dropped_facts_and_copies(self):
+        source = slide(
+            '<section><h2>الوصول</h2><p>نص طويل يشرح الوصول للموقع بمساحة 15000 م2</p></section>'
+            '<section><h2>المؤشرات</h2><p>العائد المتوقع 18% لمشروع Vision Gate</p></section>'
+            '<img src="/map.png">')['html']
+        first = slide('<section><h2>الوصول</h2><p>الموقع بمساحة 15000 م2</p></section>')['html']
+        # Summarized prose is fine; summarizing a NUMBER away is a lost fact.
+        second = slide('<section><h2>المؤشرات</h2><p>عائد جيد لمشروع Vision Gate</p></section>'
+                       '<img src="/map.png">')['html']
+        with self.assertRaises(safety.StructureSafetyError) as dropped:
+            safety.require_preserved([source], [first, second], 2, summarize_ok=True)
+        self.assertTrue(str(dropped.exception).startswith('facts_not_preserved'))
+        # …and identical summarized parts are a copy, not a partition.
+        same = slide('<section><p>الموقع بمساحة 15000 م2 وعائد 18% — Vision Gate</p></section>'
+                     '<img src="/map.png">')['html']
+        with self.assertRaises(safety.StructureSafetyError) as dup:
+            safety.require_preserved([source], [same, same], 2, summarize_ok=True)
+        self.assertEqual(str(dup.exception), 'split_not_partitioned')
+
+    def test_split_provider_may_summarize_prose_but_not_facts(self):
+        # Bare section text keeps the deterministic splitters from intercepting,
+        # so the provider path (not a verbatim slice) is what gets verified.
+        source = slide('<h1>تحليل الموقع</h1>'
+                       '<section>فقرة طويلة تصف الوصول للموقع بمساحة 15000 م2 بالتفصيل</section>'
+                       '<section>فقرة طويلة تصف مؤشرات المشروع بعائد متوقع 18% بالتفصيل</section>')
+        first = slide('<h1>تحليل الموقع - الجزء 1 من 2</h1>'
+                      '<section><p>الوصول — 15000 م2</p></section>')['html']
+        second = slide('<h1>تحليل الموقع - الجزء 2 من 2</h1>'
+                       '<section><p>المؤشرات — عائد 18%</p></section>')['html']
+        result, _, _, _ = self.run_action('split_slide', {'slide_number': 1, 'parts': 2},
+                                          [copy.deepcopy(source)],
+                                          [(first, 'done'), (second, 'done')])
+        self.assertEqual(result['status'], 'success', result)
+        dropped = second.replace('18', '')
+        self.assert_failed_unchanged('split_slide', {'slide_number': 1, 'parts': 2},
+                                     [copy.deepcopy(source)],
+                                     [(first, 'done'), (dropped, 'done')])
 
     def test_split_single_dense_paragraph_partitions_verbatim_without_provider(self):
         sentences = [f'الجملة التجريبية رقم {index} تحمل محتوى مختلفا تماما عن باقي الجمل.'

@@ -147,6 +147,8 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     source_htmls = [s.get('html', '') for s in sources]
     brief = task.get('style_brief') or ''
     instruction = task['_instruction'] + (f'\nالموجز الأسلوبي: {brief}' if brief else '')
+    instruction += ('\nالنص النثري يجوز تلخيصه بشرط ألا يسقط معلومة أو معنى؛ '
+                    'الأرقام والحقائق وصفوف الجداول والوسائط وخصائص البيانات تُحفظ كاملة.')
     try:
         produced, error = _agent_worker_restructure(
             ctx, sources, target, instruction, feedback)
@@ -176,7 +178,10 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
             # impossible by construction — facts must survive instead.
             designer_chat_safety.require_facts_preserved(source_htmls, part_htmls)
         else:
-            designer_chat_safety.require_preserved(source_htmls, part_htmls, target)
+            # Growing/regrouping may also condense prose — the owner accepts
+            # summarized wording as long as the facts and the partition hold.
+            designer_chat_safety.require_preserved(source_htmls, part_htmls, target,
+                                                   summarize_ok=True)
     except designer_chat_safety.StructureSafetyError as exc:
         return False, None, str(exc), None
     replacements = []
