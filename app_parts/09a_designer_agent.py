@@ -709,8 +709,7 @@ def _designer_agent_finish(run, ctx):
     if run['cancelled']:
         response_text = f'أُلغي الطلب بعد إنجاز {len(succeeded)} من {len(tasks)} مهمة — بقيت التعديلات الناجحة.'
     elif run['billing_stopped']:
-        response_text = (f'توقف التنفيذ لاستنفاد رصيد شركتك — أُنجزت {len(succeeded)} من {len(tasks)} '
-                         'مهمة وبقيت محفوظة. اشحن المحفظة ثم أعد المحاولة.')
+        response_text = 'توقف التنفيذ لاستنفاد رصيد شركتك. اشحن المحفظة ثم أعد المحاولة.'
     elif succeeded:
         response_text = 'تم تطبيق التعديلات المطلوبة.'
         if failed:
