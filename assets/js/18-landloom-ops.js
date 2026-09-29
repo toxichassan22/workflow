@@ -85,7 +85,6 @@
 
       await Promise.all([
         llLoadTickets(),
-        llLoadPointsOverview(),
         llLoadRechargeRequests()
       ]);
     }
@@ -101,9 +100,6 @@
         return;
       }
       const items = data.notifications || [];
-      const unreadCount = items.filter(n => !n.read_at).length;
-      const noteStat = document.getElementById('llStatNotifications');
-      if (noteStat) noteStat.textContent = unreadCount;
       if (!items.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد تنبيهات.</p>';
         return;
@@ -132,10 +128,6 @@
         return;
       }
       const tickets = data.tickets || [];
-      const activeCount = tickets.filter(t => t.status !== 'closed' && t.status !== 'resolved').length;
-      const tStat = document.getElementById('llStatTickets');
-      if (tStat) tStat.textContent = activeCount;
-
       if (!tickets.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
         return;
@@ -256,31 +248,6 @@
       await llLoadTickets();
     }
 
-    // ── Wallet overview: the four riyal figures ───────────────────────────
-    async function llLoadPointsOverview() {
-      const box = document.getElementById('llPointsOverview');
-      if (!box) return;
-      if (!hasPermission('billing')) { box.innerHTML = ''; return; }
-      const data = await api('GET', '/api/client/overview').catch(() => null);
-      if (!data || !data.success) {
-        box.innerHTML = '';
-        return;
-      }
-      const fmt = (v) => (v == null ? '0' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }));
-      const cycleConsumed = (data.package && data.package.consumed_sar != null)
-        ? data.package.consumed_sar
-        : ((data.lifetime || {}).consumed_sar || 0);
-      const card = (label, value) =>
-        '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + llEscape(fmt(value)) +
-        ' <span style="font-size:12px;font-weight:400;color:#64748b;">ريال سعودي</span></h3></div>';
-      box.innerHTML = '<div class="tenant-dashboard-stats">' +
-        card('الرصيد الحالي', data.effective_balance_sar != null ? data.effective_balance_sar : data.balance_sar) +
-        card('المحجوز', data.reserved_sar) +
-        card('المستهلك', cycleConsumed) +
-        card('إجمالي المستهلك', (data.lifetime || {}).consumed_sar) +
-        '</div>';
-    }
-
     // ── Recharge requests (t33, d09) ──────────────────────────────────────
     async function llOpenRechargeAttachment(requestId, slot) {
       const token = getTenantToken();
@@ -310,10 +277,6 @@
         return;
       }
       const requests = data.requests || [];
-      const pendingCount = requests.filter(r => r.status === 'pending').length;
-      const rStat = document.getElementById('llStatRecharges');
-      if (rStat) rStat.textContent = pendingCount;
-
       if (!requests.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد طلبات شحن بعد.</p>';
         return;

@@ -139,7 +139,6 @@
           && document.getElementById('tenantNotificationsPage').classList.contains('active')) {
         renderNotificationsPage();
       }
-      if (document.getElementById('llNotificationsList')) llLoadNotifications();
     }
 
     // One delete per row, on every surface the feed renders on. The server
@@ -158,7 +157,6 @@
           && document.getElementById('tenantNotificationsPage').classList.contains('active')) {
         renderNotificationsPage();
       }
-      if (document.getElementById('llNotificationsList')) llLoadNotifications();
       if (document.getElementById('adminNotificationsList')) llLoadNotifications('adminNotificationsList');
     }
 
