@@ -93,14 +93,16 @@
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      const renderDraftCard = (d, recovery, projectCost) => {
+      const renderDraftRow = (d, recovery, projectCost) => {
         const title = d.title || 'مشروع بدون عنوان';
         const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
         const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
-        const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
+        const createdAt = (d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
+        const updatedAt = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
         const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
-        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_sar || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
-        const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
+        const totalCostCell = projectCost ? formatUsageCost(projectCost.cost_sar || 0) : '—';
+        const mapsCostCell = projectCost ? formatUsageCost(projectMapsCost) : '—';
+        const fieldsHtml = recovery ? '<div class="tenant-hint">' + recovery.fieldCount + ' <span>حقل ممتلئ</span></div>' : '';
         // Admins (approvals permission) approve directly whenever they want; employees
         // only send a request and the draft stays pending until an admin approves it.
         const canReview = hasPermission('approvals');
@@ -126,13 +128,22 @@
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
             approveBtn +
             '<button class="btn small ghost danger" onclick="archiveProposalById(\'' + d.id + '\')">أرشفة</button>';
-        return '<div class="tenant-presentation-card" data-draft-id="' + d.id + '" style="background:' + (isArchived ? '#f1f5f9' : '#f8fafc') + ';border:1px solid ' +
-          (isArchived ? '#94a3b8' : (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1')) + ';margin-bottom:12px">' +
-          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusBadgeHtml + ' | ' + escapeHtml(date) +
-          (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div></div><div class="tenant-actions">' +
-          actionsHtml +
-          '</div></div>';
+        const rowCls = isArchived ? 'll-row-archived' : (recovery && recovery.isEmpty ? 'll-draft-empty' : '');
+        return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
+          '<td style="font-weight:700">' + escapeHtml(title) + fieldsHtml + '</td>' +
+          '<td>' + statusBadgeHtml + '</td>' +
+          '<td>' + totalCostCell + '</td>' +
+          '<td>' + mapsCostCell + '</td>' +
+          '<td>' + escapeHtml(createdAt) + '</td>' +
+          '<td>' + escapeHtml(updatedAt) + '</td>' +
+          '<td><div class="tenant-actions" style="flex-wrap:wrap">' + actionsHtml + '</div></td>' +
+          '</tr>';
       };
+      const draftTableHtml = (rowsHtml) =>
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th>اسم المشروع</th><th>حالة المشروع</th><th>التكلفة الإجمالية</th><th>تكلفة الخرائط</th>' +
+        '<th>تاريخ الإنشاء</th><th>تاريخ آخر تعديل</th><th>الإجراءات</th>' +
+        '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
       showInlineLoader(list, 'جاري تحميل المشاريع...');
       const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
       list.dataset.archiveStamp = stamp;
@@ -158,7 +169,7 @@
         }
         return;
       }
-      list.innerHTML = drafts.map(d => renderDraftCard(d, null, null)).join('');
+      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null, null)).join(''));
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       if (!projectIds.length) return;
       const [recoveryData, totalsData] = await Promise.all([
@@ -178,7 +189,7 @@
         const node = list.querySelector('[data-draft-id="' + d.id + '"]');
         if (!node) return;
         const projectCost = costByProject[d.id];
-        const next = renderDraftCard(d, recoveryByDraft[d.id] || null, projectCost);
+        const next = renderDraftRow(d, recoveryByDraft[d.id] || null, projectCost);
         if (node.outerHTML !== next) { node.outerHTML = next; patched = true; }
       });
       if (patched || recoveryData?.success || totalsData?.success) {

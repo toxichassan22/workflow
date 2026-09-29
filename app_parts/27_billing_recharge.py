@@ -60,7 +60,7 @@ def api_list_recharge_requests():
     except Exception as exc:
         app.logger.exception('list_recharge_requests failed for tenant %s', g.tenant_id)
         return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
-    return jsonify({'success': True, 'requests': rows})
+    return jsonify({'success': True, 'requests': rows, 'taxRate': db.TAX_RATE_SAR})
 
 
 @app.route('/api/admin/recharge-requests', methods=['GET'])
@@ -71,7 +71,7 @@ def api_admin_list_recharge_requests():
     except Exception as exc:
         app.logger.exception('admin list_recharge_requests failed')
         return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
-    return jsonify({'success': True, 'requests': rows})
+    return jsonify({'success': True, 'requests': rows, 'taxRate': db.TAX_RATE_SAR})
 
 
 @app.route('/api/recharge-requests/<request_id>/attachment/<slot>', methods=['GET'])

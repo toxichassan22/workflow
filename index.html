@@ -1522,7 +1522,6 @@
           <button type="button" class="btn primary small" id="llTicketNewBtn" data-permission="support_tickets" onclick="openLlModal('llTicketModal')">تذكرة دعم جديدة</button>
         </div>
         <div id="llTicketsList" style="margin-bottom:24px"></div>
-        <div id="llTicketDetail" style="display:none;margin-top:16px;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px"></div>
       </div>
 
       <!-- Modal 2: Recharge Request -->
@@ -1600,6 +1599,17 @@
             <button type="button" class="btn ghost" onclick="closeLlModal('llTicketModal')">إلغاء</button>
             <button type="button" class="btn primary" onclick="llCreateTicket()">إرسال التذكرة</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Modal 3b: ticket conversation (opens from a tickets-table row) -->
+      <div id="llTicketViewModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llTicketViewModal')">
+        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llTicketViewTitle">
+          <div class="sag-modal-head">
+            <h2 id="llTicketViewTitle">التذكرة</h2>
+            <button type="button" class="btn ghost small" onclick="closeLlModal('llTicketViewModal')">إغلاق</button>
+          </div>
+          <div id="llTicketViewBody"></div>
         </div>
       </div>
 

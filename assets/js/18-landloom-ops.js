@@ -140,26 +140,37 @@
         box.innerHTML = '<p class="tenant-hint">لا توجد تذاكر دعم.</p>';
         return;
       }
-      box.innerHTML = tickets.map(t => {
-        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="llOpenTicket(\'' + t.id + '\')">' +
-          '<div><h3>#' + llEscape(t.number) + ' ' + llEscape(t.subject) + '</h3>' +
-          '<div class="meta"><span>' + llStatus(t.status) + '</span>' +
-          (t.attachment_count ? ' | <span>' + llEscape(WFT('tickets.has_attachment', 'يحتوي مرفقًا')) + '</span>' : '') +
-          '</div></div></div>';
-      }).join('');
+      box.innerHTML =
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th>اسم التذكرة</th><th>التاريخ</th><th>الحالة</th>' +
+        '</tr></thead><tbody>' +
+        tickets.map(t => {
+          const date = (t.created_at || t.updated_at || '').slice(0, 16).replace('T', ' ');
+          return '<tr role="button" tabindex="0" style="cursor:pointer" onclick="llOpenTicket(\'' + t.id + '\')">' +
+            '<td style="font-weight:700">#' + llEscape(t.number) + ' ' + llEscape(t.subject) +
+            (t.attachment_count ? ' <span class="tenant-hint">(' + llEscape(WFT('tickets.has_attachment', 'يحتوي مرفقًا')) + ')</span>' : '') +
+            '</td><td>' + llEscape(date) + '</td><td>' + llStatus(t.status) + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div>';
     }
 
+    // Row click opens the conversation in a popup — the list stays a compact
+    // three-column register and the whole thread lives in the modal.
     async function llOpenTicket(id) {
-      const detail = document.getElementById('llTicketDetail');
-      if (!detail) return;
-      detail.style.display = 'block';
-      detail.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      const modal = document.getElementById('llTicketViewModal');
+      const body = document.getElementById('llTicketViewBody');
+      const titleEl = document.getElementById('llTicketViewTitle');
+      if (!modal || !body || !titleEl) return;
+      titleEl.textContent = 'التذكرة';
+      body.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
+      if (modal.style.display !== 'flex') openLlModal('llTicketViewModal');
       const data = await api('GET', '/api/support/tickets/' + id).catch(() => null);
       if (!data || !data.success) {
-        detail.innerHTML = '<p class="tenant-hint">تعذر فتح التذكرة.</p>';
+        body.innerHTML = '<p class="tenant-hint">تعذر فتح التذكرة.</p>';
         return;
       }
       const t = data.ticket || {};
+      titleEl.textContent = '#' + t.number + ' ' + (t.subject || '');
       const messages = (t.messages || []).map(m =>
         '<div style="border-top:1px solid var(--line);padding:8px 0">' +
         '<strong style="font-size:12px">' + llEscape(m.author_name) + '</strong> ' +
@@ -169,10 +180,8 @@
       const attachments = (t.attachments || []).map(a =>
         '<button type="button" class="btn small ghost" onclick="llOpenTicketAttachment(\'' + id + '\',\'' + a.file_id + '\')">' +
         llEscape(a.original_name || WFT('tickets.attachment', 'مرفق')) + '</button>').join('');
-      detail.innerHTML =
-        '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        '<h3 style="margin:0">#' + llEscape(t.number) + ' ' + llEscape(t.subject) + ' — <span>' + llStatus(t.status) + '</span></h3>' +
-        '<button class="btn ghost" onclick="document.getElementById(\'llTicketDetail\').style.display=\'none\'">إغلاق</button></div>' +
+      body.innerHTML =
+        '<div class="meta" style="color:var(--muted);font-size:12px"><span>' + llStatus(t.status) + '</span></div>' +
         (attachments ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + attachments + '</div>' : '') +
         '<div style="margin:12px 0">' + (messages || '<p class="tenant-hint">لا رسائل.</p>') + '</div>' +
         (t.status !== 'closed'
@@ -309,30 +318,57 @@
         box.innerHTML = '<p class="tenant-hint">لا توجد طلبات شحن بعد.</p>';
         return;
       }
-      box.innerHTML = requests.map(r => {
+      const taxRate = Number.isFinite(Number(data.taxRate)) ? Number(data.taxRate) : 0.15;
+      const rowsHtml = requests.map(r => {
         const date = (r.requested_at || r.created_at || '').slice(0, 16).replace('T', ' ');
-        const tenantInfo = (isAdmin && (r.tenant_name || r.company_name)) ? ('<span>الشركة:</span> ' + llEscape(r.tenant_name || r.company_name) + ' | ') : '';
-        const ref = r.transfer_reference ? (' | <span>المرجع البنكي:</span> ' + llEscape(r.transfer_reference)) : '';
-        const inv = r.reference_number ? (' | <span style="color:#1c7a2e;font-weight:600;">سند مالي:</span> ' + llEscape(r.reference_number)) : '';
-        const receiptLink = r.receipt_file_id
-          ? ' | <a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'receipt\');return false;">إيصال التحويل</a>' : '';
-        const invoiceLink = r.invoice_file_id
-          ? ' | <a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'invoice\');return false;">الفاتورة</a>' : '';
-        const note = (r.status === 'rejected' && r.decision_note)
-          ? '<div class="meta" style="color:var(--danger,#c0392b);margin-top:4px"><span>سبب الرفض:</span> ' + llEscape(r.decision_note) + '</div>' : '';
-        const actions = (isAdmin && r.status === 'pending')
-          ? '<div style="display:flex;gap:6px;margin-top:6px;">' +
-            '<button type="button" class="btn small green" onclick="llDecideRecharge(\'' + r.id + '\', \'approved\')">اعتماد الطلب</button>' +
-            '<button type="button" class="btn small danger" onclick="llDecideRecharge(\'' + r.id + '\', \'rejected\')">رفض</button>' +
-            '</div>'
+        // «التكلفة» on a request means what the client actually pays: the
+        // catalog price plus VAT — the same total the top-up receipt books.
+        const subtotal = (r.price_sar != null && r.price_sar !== '') ? Number(r.price_sar) : null;
+        const costCell = (subtotal != null && Number.isFinite(subtotal))
+          ? llMoney(Math.round(subtotal * (1 + taxRate) * 100) / 100) + ' <span>ريال سعودي</span>'
+          : (r.amount_sar != null ? llMoney(r.amount_sar) + ' <span>ريال سعودي</span>' : '—');
+        const refCell = (r.transfer_reference ? llEscape(r.transfer_reference) : '—') +
+          (r.reference_number
+            ? '<div class="tenant-hint"><span>سند مالي:</span> ' + llEscape(r.reference_number) + '</div>' : '');
+        const receiptCell = r.receipt_file_id
+          ? '<a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'receipt\');return false;">إيصال التحويل</a>' : '—';
+        const invoiceCell = r.invoice_file_id
+          ? '<a href="#" onclick="llOpenRechargeAttachment(\'' + r.id + '\', \'invoice\');return false;">الفاتورة</a>' : '—';
+        const statusCell = llStatus(r.status) +
+          ((r.status === 'rejected' && r.decision_note)
+            ? '<div class="tenant-hint" style="color:var(--danger,#c0392b)"><span>سبب الرفض:</span> ' + llEscape(r.decision_note) + '</div>' : '');
+        const companyCell = isAdmin
+          ? '<td>' + llEscape(r.tenant_name || r.company_name || '—') + '</td>' : '';
+        const actionsCell = isAdmin
+          ? '<td>' + (r.status === 'pending'
+              ? '<div class="tenant-actions" style="flex-wrap:wrap">' +
+                '<button type="button" class="btn small green" onclick="llDecideRecharge(\'' + r.id + '\', \'approved\')">اعتماد الطلب</button>' +
+                '<button type="button" class="btn small danger" onclick="llDecideRecharge(\'' + r.id + '\', \'rejected\')">رفض</button>' +
+                '</div>'
+              : '—') + '</td>'
           : '';
-        return '<div class="tenant-presentation-card">' +
-          '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + (llMoney(r.price_sar != null ? r.price_sar : r.amount_sar) + ' <span>ريال سعودي</span>') + '</h3>' +
-          '<div class="meta">' + tenantInfo + '<span>' + llStatus(r.status) + '</span> | <span>' + llEscape(date) + '</span>' + ref + inv + receiptLink + invoiceLink + '</div>' +
-          note +
-          actions +
-          '</div></div>';
+        return '<tr>' + companyCell +
+          '<td style="font-weight:700">' + llEscape(r.package_name) + '</td>' +
+          '<td>' + costCell + '</td>' +
+          '<td>' + llEscape(date) + '</td>' +
+          '<td>' + refCell + '</td>' +
+          '<td>' + receiptCell + '</td>' +
+          '<td>' + statusCell + '</td>' +
+          '<td>' + invoiceCell + '</td>' +
+          actionsCell + '</tr>';
       }).join('');
+      box.innerHTML =
+        '<div class="table-wrap"><table><thead><tr>' +
+        (isAdmin ? '<th>الشركة</th>' : '') +
+        '<th>اسم الباقة</th>' +
+        '<th>التكلفة (شامل ضريبة القيمة المضافة 15%)</th>' +
+        '<th>تاريخ الطلب</th>' +
+        '<th>المرجع البنكي</th>' +
+        '<th>إيصال التحويل</th>' +
+        '<th>حالة الطلب</th>' +
+        '<th>الفاتورة</th>' +
+        (isAdmin ? '<th>الإجراءات</th>' : '') +
+        '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
     }
 
     let llRechargePackages = [];
@@ -590,14 +626,20 @@
         return;
       }
       const priorityLabels = { urgent: 'حرجة', high: 'عاجلة', normal: 'عادية', low: 'منخفضة' };
-      box.innerHTML = tickets.map(t => {
-        return '<div class="tenant-presentation-card" style="cursor:pointer" role="button" tabindex="0" onclick="adminOpenTicket(\'' + t.id + '\')">' +
-          '<div><h3>#' + llEscape(t.number) + ' ' + llEscape(t.subject) + '</h3>' +
-          '<div class="meta"><span style="font-weight:700">' + llEscape(t.tenant_name || 'شركة') + '</span>' +
-          ' | <span>' + llStatus(t.status) + '</span>' +
-          ' | <span>الأولوية:</span> <span>' + llEscape(priorityLabels[t.priority] || t.priority) + '</span>' +
-          '</div></div></div>';
-      }).join('');
+      box.innerHTML =
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th>اسم التذكرة</th><th>الشركة</th><th>الأولوية</th><th>الحالة</th><th>التاريخ</th>' +
+        '</tr></thead><tbody>' +
+        tickets.map(t => {
+          const date = (t.updated_at || t.created_at || '').slice(0, 16).replace('T', ' ');
+          return '<tr role="button" tabindex="0" style="cursor:pointer" onclick="adminOpenTicket(\'' + t.id + '\')">' +
+            '<td style="font-weight:700">#' + llEscape(t.number) + ' ' + llEscape(t.subject) + '</td>' +
+            '<td>' + llEscape(t.tenant_name || 'شركة') + '</td>' +
+            '<td>' + llEscape(priorityLabels[t.priority] || t.priority || '') + '</td>' +
+            '<td>' + llStatus(t.status) + '</td>' +
+            '<td>' + llEscape(date) + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div>';
     }
 
     async function adminOpenTicket(id) {
