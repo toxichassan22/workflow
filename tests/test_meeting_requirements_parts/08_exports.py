@@ -457,8 +457,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(final['status'], 'sections_approved')
 
         index_source = read_frontend_text()
-        self.assertIn('async function approveProjectDraftById(draftId)', index_source)
-        self.assertIn("'/api/project-draft/review'", index_source)
+        # Approval requests still leave the project form, and decisions land in
+        # the approvals inbox — the projects list itself no longer decides.
+        self.assertIn("'/api/project-draft/request-approval'", index_source)
+        self.assertIn('/api/approvals/', index_source)
 
     def test_training_entries_are_tenant_isolated_and_not_public_uploads(self):
         client = self.app.test_client()

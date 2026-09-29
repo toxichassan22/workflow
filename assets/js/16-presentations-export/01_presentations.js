@@ -102,15 +102,6 @@
         const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
         const totalCostCell = projectCost ? formatUsageCost(projectCost.cost_sar || 0) : '—';
         const mapsCostCell = projectCost ? formatUsageCost(projectMapsCost) : '—';
-        // Admins (approvals permission) approve directly whenever they want; employees
-        // only send a request and the draft stays pending until an admin approves it.
-        const canReview = hasPermission('approvals');
-        const isApproved = d.status === 'approved' || d.status === 'sections_approved';
-        const isPending = d.status === 'pending_approval' || d.status === 'section_approval_pending' || d.status === 'generation_approval_pending' || d.status === 'final_approval_pending';
-        const approveBtn = (isApproved || (isPending && !canReview)) ? ''
-          : '<button class="btn small green" onclick="' +
-          (canReview ? 'approveProjectDraftById' : 'requestProjectDraftApprovalById') +
-          '(\'' + d.id + '\')">اعتماد</button>';
         const isArchived = d.status === 'archived';
         const archiveBadge = isArchived
           ? '<span class="proposal-status-badge status-archived" title="محفوظ لمدة 365 يوماً وفق سياسة الحفظ">أرشيف (محفوظ 365 يوماً)</span>'
@@ -119,13 +110,21 @@
         const copyBtn = hasPermission('copy_presentation')
           ? '<button class="btn small ghost" onclick="copyProjectDraftById(\'' + d.id + '\')">نسخ العرض</button>'
           : '';
+        // Final delete is a company-admin-only cleanup: the server also refuses
+        // drafts that already carry approval history.
+        const canDelete = Boolean(tenantUser && tenantUser.isAdmin) ||
+          ((tenantUser || {})._userRole || 'company_admin') === 'company_admin';
+        const deleteBtn = canDelete
+          ? '<button class="btn small ghost danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف</button>'
+          : '';
         const actionsHtml = isArchived
           ? '<button class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">استعادة</button>' +
-            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>'
+            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
+            deleteBtn
           : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
             copyBtn +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-            approveBtn;
+            deleteBtn;
         const rowCls = isArchived ? 'll-row-archived' : '';
         return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
           '<td style="font-weight:700">' + escapeHtml(title) + '</td>' +
@@ -201,32 +200,6 @@
       }
       toast('تم استرجاع ' + resp.restoredCount + ' حقلًا');
       await openProjectDraftById(draftId);
-    }
-
-    async function requestProjectDraftApprovalById(draftId) {
-      if (!draftId) return;
-      const result = await api('POST', '/api/project-draft/request-approval', { draftId });
-      if (!result || !result.success) {
-        toast(result && result.error_code === 'SECTIONS_NOT_APPROVED'
-          ? 'يجب اعتماد جميع أقسام المشروع قبل طلب الاعتماد'
-          : ((result && result.error) || 'تعذر إرسال طلب الاعتماد'));
-        return;
-      }
-      tenantArchiveCache = null;
-      toast('تم إرسال المسودة للاعتماد');
-      await openTenantPresentations(true);
-    }
-
-    async function approveProjectDraftById(draftId) {
-      if (!draftId) return;
-      const result = await api('POST', '/api/project-draft/review', { draftId, status: 'approved' });
-      if (!result || !result.success) {
-        toast((result && result.error) || 'تعذر اعتماد المشروع');
-        return;
-      }
-      tenantArchiveCache = null;
-      toast(WFT('admin.project_approved', 'تم اعتماد المشروع'));
-      await openTenantPresentations(true);
     }
 
     async function openProjectDraftById(draftId) {
