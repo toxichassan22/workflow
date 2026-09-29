@@ -99,6 +99,52 @@ class AuditAgentFlowTests(unittest.TestCase):
         folder = os.path.join(self.module.UPLOADS_DIR, '.designer_agent_failures', self.tenant)
         return set(os.listdir(folder)) if os.path.isdir(folder) else set()
 
+    def test_failed_task_is_journaled_for_the_platform_admin(self):
+        slides = [slide('<p>الإيراد 120,000</p>')]
+        turn = {'kind': 'plan', 'ops': [
+            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
+
+        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
+            # Unchanged output is a hard failure — content drift alone now
+            # applies with a warning instead of reaching the journal.
+            return slide_['html'], 'تم'
+
+        before = self.journal_files()
+        body = self.run_with_worker(slides, turn, worker, message='عدل الشريحة')
+        self.assertEqual(body['tasks'][0]['status'], 'failed')
+        new = self.journal_files() - before
+        self.assertEqual(len(new), 1)
+        failure_id = next(iter(new))[:-len('.json')]
+
+        client = self.app.test_client()
+        company = {'Authorization': 'Bearer ' + self.token}
+        platform = {'Authorization': 'Bearer ' + self.platform_token}
+        self.assertEqual(client.get('/api/admin/designer-failures', headers=company).status_code, 403)
+        listing = client.get(f'/api/admin/designer-failures?tenantId={self.tenant}', headers=platform)
+        self.assertEqual(listing.status_code, 200, listing.get_json())
+        payload = listing.get_json()
+        row = next(f for f in payload['failures'] if f['id'] == failure_id)
+        self.assertEqual(row['reasonCodes'], ['unchanged'])
+        self.assertEqual(row['attempts'], 2)
+        self.assertEqual(row['tenantName'], 'AgentAudit')
+        self.assertGreaterEqual(payload['byReason']['unchanged'], 1)
+
+        detail = client.get(f'/api/admin/designer-failures/{self.tenant}/{failure_id}', headers=platform)
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        record = detail.get_json()['failure']
+        self.assertIn('120,000', record['sourceHtml'][0])
+        self.assertEqual(record['attempts'][0]['feedback'], '')
+        self.assertIn('دون تغيير', record['attempts'][1]['feedback'])
+        # Unchanged output carries no result HTML — the slide never moved.
+        self.assertEqual(record['attempts'][1]['resultHtml'], [])
+        # No result HTML was produced, so there is nothing to replay.
+        self.assertIsNone(detail.get_json()['replay'])
+
+        self.assertEqual(client.get(
+            f'/api/admin/designer-failures/{self.tenant}/0000000000000-000000',
+            headers=platform).status_code, 404)
+        self.assertIsNone(self.module._agent_failure_dir('../outside'))
+
     # ── Audit ops: duplicate / find_replace / font / ui / unsupported ────────
 
     def test_duplicate_op_clones_after_the_source(self):

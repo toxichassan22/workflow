@@ -123,6 +123,8 @@ def _agent_exec_split(task, ctx, session, feedback=''):
     ok = record.get('status') == 'success'
     after = [slides[j].get('html', '') for j in (record.get('indexes') or []) if j < len(slides)] if ok else None
     reason = record.get('reason')
+    if ok and record.get('warnings'):
+        task['_warnings'] = list(record['warnings'])
     if not ok and ctx.get('agent_last_worker_reason'):
         reason = str(reason or '') + ':' + ctx['agent_last_worker_reason']
     return ok, status, reason, after
@@ -170,20 +172,6 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     except Exception as exc:
         return False, None, f'finalize_failed:{exc}', None
     part_htmls = [p['html'] for p in finalized]
-    try:
-        for html in part_htmls:
-            designer_chat_safety.validate_single_slide(html)
-        if target < len(sources):
-            # Shrinking must summarize prose, so literal preservation is
-            # impossible by construction — facts must survive instead.
-            designer_chat_safety.require_facts_preserved(source_htmls, part_htmls)
-        else:
-            # Growing/regrouping may also condense prose — the owner accepts
-            # summarized wording as long as the facts and the partition hold.
-            designer_chat_safety.require_preserved(source_htmls, part_htmls, target,
-                                                   summarize_ok=True)
-    except designer_chat_safety.StructureSafetyError as exc:
-        return False, None, str(exc), None
     replacements = []
     for i, part in enumerate(finalized):
         replacement = copy.deepcopy(sources[0])
@@ -197,6 +185,22 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
     # Every source id except the position-first one's is gone from the deck —
     # the integrity check must not report them as silently dropped.
     task['_consumed_ids'] = [s.get('id') for s in sources[1:]]
+    try:
+        for html in part_htmls:
+            designer_chat_safety.validate_single_slide(html)
+        if target < len(sources):
+            # Shrinking must summarize prose, so literal preservation is
+            # impossible by construction — facts must survive instead.
+            designer_chat_safety.require_facts_preserved(source_htmls, part_htmls)
+        else:
+            # Growing/regrouping may also condense prose — the owner accepts
+            # summarized wording as long as the facts and the partition hold.
+            designer_chat_safety.require_preserved(source_htmls, part_htmls, target,
+                                                   summarize_ok=True)
+    except designer_chat_safety.StructureSafetyError as exc:
+        # The splice already stands in the deck — a warnable rejection lets the
+        # runner keep it (applied with a warning) once retries are spent.
+        return False, None, str(exc), part_htmls
     return True, f'أعيدت هيكلة {len(sources)} شريحة إلى {target}.', None, part_htmls
 
 
@@ -225,6 +229,8 @@ def _agent_exec_create(task, ctx, session, feedback=''):
     after = ([slides[record['index']].get('html', '')]
              if ok and isinstance(record.get('index'), int) and record['index'] < len(slides) else None)
     reason = record.get('reason')
+    if ok and record.get('warnings'):
+        task['_warnings'] = list(record['warnings'])
     if not ok and ctx.get('agent_last_worker_reason'):
         # Same as split: the worker's own failure (a provider or billing
         # error) hides behind execute_structure's generic incomplete_result.
@@ -588,20 +594,35 @@ def _designer_agent_run(tasks, ctx, session=None):
                     break
                 ok, rejected_by_check = False, True
                 reason = ';'.join(v_reasons) or 'verification_failed'
+            retry = (attempt + 1 < _AGENT_TASK_ATTEMPTS
+                     and designer_agent_ops.is_retryable_failure(op, reason, rejected_by_check)
+                     and not _is_billing_error_text(str(reason or '')))
+            if not retry:
+                # Give-up path: when every remaining finding is content drift
+                # the owner rule is apply + warn — the client sees the result
+                # and can undo or re-ask. Only a nothing/impossible result
+                # (empty, invalid, unchanged, wrong shape) still rejects.
+                codes = designer_agent_ops.reason_codes(reason)
+                if codes and all(designer_agent_ops.reason_is_warning(c) for c in codes):
+                    task['warnings'] = (task.get('warnings') or []) + [
+                        part for part in str(reason or '').split(';') if part.strip()]
+                    ok = True
+                    break
             slides[:] = deck_backup
             attempts_log.append({'attempt': attempt + 1, 'reason': str(reason or '')[:400],
                                  'feedback': feedback, 'resultHtml': after_htmls or []})
             # Every worker op retries what the model can repair or a transient
             # provider failure — once, with feedback that names the defect.
-            if (attempt + 1 < _AGENT_TASK_ATTEMPTS
-                    and designer_agent_ops.is_retryable_failure(op, reason, rejected_by_check)
-                    and not _is_billing_error_text(str(reason or ''))):
+            if retry:
                 feedback = designer_agent_ops.retry_feedback(reason, before_htmls, measure_report)
                 continue
             break
 
         if ok:
             task['status'] = 'success'
+            executor_notes = task.pop('_warnings', []) or []
+            if executor_notes:
+                task['warnings'] = executor_notes + list(task.get('warnings') or [])
             executed.append({'tool': f'agent_{op}', 'status': 'success', 'task': n,
                              'indexes': sorted(task.get('_indexes') or [])})
             if reply:

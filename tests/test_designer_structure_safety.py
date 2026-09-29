@@ -51,15 +51,29 @@ class StructureSafetyTests(unittest.TestCase):
 
     def test_merge_failure_empty_malformed_and_incomplete_do_not_delete(self):
         sources = [slide('<p>A 123</p><img src="/a.png">'), slide('<p>B 456</p><img src="/b.png">')]
-        for output in ('', sources[0]['html'], '<div class="slide"><p>A 123</p>',
-                       slide('<p>A 123</p><p>B 456</p><img src="/a.png">')['html'],
-                       slide('<p>A 123</p><img src="/a.png"><!-- B 456 --><img src="/b.png">')['html'],
-                       slide('<p>A 123</p><img src="/a.png"><p hidden>B 456</p><img src="/b.png">')['html']):
+        for output in ('', sources[0]['html']):
             with self.subTest(output=output):
                 self.assert_failed_unchanged('merge_slides', {'slide_numbers': [1, 2]},
                                              copy.deepcopy(sources), [(output, 'done')])
         self.assert_failed_unchanged('merge_slides', {'slide_numbers': [1, 2]},
                                      sources, [RuntimeError('provider down')])
+
+    def test_merge_applies_content_drift_with_a_warning(self):
+        # A merge that lost facts used to be vetoed outright — the owner rule
+        # now applies it and reports the caveat (the client can undo/re-ask).
+        sources = [slide('<p>A 123</p><img src="/a.png">'), slide('<p>B 456</p><img src="/b.png">')]
+        for output in ('<div class="slide"><p>A 123</p></div>',
+                       slide('<p>A 123</p><p>B 456</p><img src="/a.png">')['html'],
+                       slide('<p>A 123</p><img src="/a.png"><!-- B 456 --><img src="/b.png">')['html'],
+                       slide('<p>A 123</p><img src="/a.png"><p hidden>B 456</p><img src="/b.png">')['html']):
+            with self.subTest(output=output):
+                workspace = copy.deepcopy(sources)
+                result, status, _, _ = self.run_action(
+                    'merge_slides', {'slide_numbers': [1, 2]}, workspace, [(output, 'done')])
+                self.assertEqual(result['status'], 'success', result)
+                self.assertTrue(result.get('warnings'), result)
+                self.assertEqual(len(workspace), 1)
+                self.assertIn('تنبيه', status)
 
     def test_merge_passes_full_sources_and_keeps_unrelated_slides_exact(self):
         first = slide('<h1>First</h1><p>Exact first text 100.5</p><img src="/a.png">')
@@ -98,10 +112,15 @@ class StructureSafetyTests(unittest.TestCase):
                                           workspace, [(merged['html'], 'done')])
         self.assertEqual(result['status'], 'success', result)
         self.assertEqual(len(workspace), 1)
+        # A dropped number no longer vetoes — it lands with a warning.
         no_number = merged['html'].replace('5,000,000', '')
-        self.assert_failed_unchanged('merge_slides', {'slide_numbers': [1, 2]},
-                                     [copy.deepcopy(item) for item in sources],
-                                     [(no_number, 'done')])
+        workspace = [copy.deepcopy(item) for item in sources]
+        result, status, _, _ = self.run_action(
+            'merge_slides', {'slide_numbers': [1, 2]}, workspace, [(no_number, 'done')])
+        self.assertEqual(result['status'], 'success', result)
+        self.assertTrue(result.get('warnings'), result)
+        self.assertEqual(len(workspace), 1)
+        self.assertIn('تنبيه', status)
 
     def test_split_honors_requested_table_parts_and_preserves_metadata(self):
         rows = ''.join(f'<tr><td>Row {i}</td><td>{i * 100}</td></tr>' for i in range(9))
@@ -143,12 +162,20 @@ class StructureSafetyTests(unittest.TestCase):
         self.assertEqual(editor.call_count, 2)
         self.assertEqual([item['html'] for item in workspace], [a, b])
 
-    def test_split_missing_content_or_duplicate_parts_fail(self):
+    def test_split_missing_or_duplicate_parts_apply_with_warnings(self):
+        # Content drift no longer vetoes the split — the parts land and the
+        # checklist/report carries what the check found (undo stays available).
         source = slide('<section>A 123</section><section>B 456</section><img src="/b.png">')
         a = slide('<section>A 123</section>')['html']
         b = slide('<section>B 456</section>')['html']
         for outputs in ([(a, 'done'), (a, 'done')], [(a, 'done'), (b, 'done')]):
-            self.assert_failed_unchanged('split_slide', {'slide_number': 1, 'parts': 2}, [copy.deepcopy(source)], outputs)
+            with self.subTest(outputs=outputs):
+                workspace = [copy.deepcopy(source)]
+                result, _, _, _ = self.run_action(
+                    'split_slide', {'slide_number': 1, 'parts': 2}, workspace, outputs)
+                self.assertEqual(result['status'], 'success', result)
+                self.assertTrue(result.get('warnings'), result)
+                self.assertEqual(len(workspace), 2)
 
     def test_split_rejects_relabeled_full_copies(self):
         # A provider answer that re-renders the whole slide under a «الجزء N»
@@ -164,9 +191,14 @@ class StructureSafetyTests(unittest.TestCase):
         with self.assertRaises(safety.StructureSafetyError) as dup:
             safety.require_preserved([source['html']], [part(1), part(2)], 2)
         self.assertEqual(str(dup.exception), 'split_not_partitioned')
-        _, editor = self.assert_failed_unchanged(
-            'split_slide', {'slide_number': 1, 'parts': 2},
-            [copy.deepcopy(source)], [(part(1), 'done'), (part(2), 'done')])
+        # End-to-end the same shape still applies — with the warning recorded.
+        workspace = [copy.deepcopy(source)]
+        result, _, _, editor = self.run_action(
+            'split_slide', {'slide_number': 1, 'parts': 2}, workspace,
+            [(part(1), 'done'), (part(2), 'done')])
+        self.assertEqual(result['status'], 'success', result)
+        self.assertTrue(result.get('warnings'), result)
+        self.assertEqual(len(workspace), 2)
         self.assertEqual(editor.call_count, 2)
 
     def test_split_allows_shared_frame_when_content_is_distributed(self):
@@ -234,10 +266,15 @@ class StructureSafetyTests(unittest.TestCase):
                                           [copy.deepcopy(source)],
                                           [(first, 'done'), (second, 'done')])
         self.assertEqual(result['status'], 'success', result)
+        # A dropped number applies too — flagged on the record as a warning.
         dropped = second.replace('18', '')
-        self.assert_failed_unchanged('split_slide', {'slide_number': 1, 'parts': 2},
-                                     [copy.deepcopy(source)],
-                                     [(first, 'done'), (dropped, 'done')])
+        workspace = [copy.deepcopy(source)]
+        result, _, _, _ = self.run_action(
+            'split_slide', {'slide_number': 1, 'parts': 2}, workspace,
+            [(first, 'done'), (dropped, 'done')])
+        self.assertEqual(result['status'], 'success', result)
+        self.assertTrue(result.get('warnings'), result)
+        self.assertEqual(len(workspace), 2)
 
     def test_split_single_dense_paragraph_partitions_verbatim_without_provider(self):
         sentences = [f'الجملة التجريبية رقم {index} تحمل محتوى مختلفا تماما عن باقي الجمل.'

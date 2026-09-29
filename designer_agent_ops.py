@@ -148,6 +148,8 @@ def public_task(task):
         'status': task.get('status', 'pending'),
         'failureReason': (failure_reason_text(task.get('failureReason'))
                           if task.get('failureReason') else None),
+        'warnings': ([warning_reason_text(w) for w in task.get('warnings') or []]
+                     or None),
         'instruction': task.get('instruction') or '',
         'style_brief': task.get('style_brief') or '',
         'params': dict(task.get('params') or {}),
@@ -432,16 +434,34 @@ def _excused_missing_numbers(missing, before_htmls, after_htmls,
     return [] if len(residual) <= len(mandated) else residual
 
 
+# Content-drift findings describe a result that happened but lost something
+# on the way — the owner rule is «apply it anyway; the client can undo or
+# re-ask», so these report as warnings. What still vetoes is a result that
+# is nothing (empty/invalid markup/unchanged) or cannot be applied at all.
+_WARNABLE_REASON_CODES = frozenset({
+    'missing_numbers', 'dropped_text', 'dropped_media', 'dropped_rows',
+    'dropped_tokens', 'dropped_data_attrs', 'dropped_boundary_data',
+    'exact_text_missing', 'image_not_placed', 'clipped', 'measured_overflow',
+    'facts_not_preserved', 'content_not_preserved', 'split_not_partitioned',
+})
+
+
+def reason_is_warning(reason):
+    """True when a single reason part (``code`` or ``code:detail``) describes
+    applied-with-warning drift rather than a task that never happened."""
+    return str(reason or '').partition(':')[0].strip() in _WARNABLE_REASON_CODES
+
+
 def verify_task_result(op, before_htmls, after_htmls,
                        allowed_numbers=None, request_text='', exact_text=None):
-    """Post-task check. Returns ``(ok, reasons)``.
+    """Post-task check. Returns ``(ok, findings)``.
 
     ``before_htmls``/``after_htmls`` are the slide HTMLs touched by the task.
-    Verification fails closed: unverifiable HTML, dropped numbers or an
-    unchanged result on an edit op all count as failure. ``allowed_numbers``
-    and ``request_text`` mark the drops a value-update is authorized to make.
-    ``exact_text`` is content the user demanded verbatim — its absence from
-    the result is a failure no excuse lifts.
+    ``ok`` is False on any finding; callers classify severity with
+    ``reason_is_warning`` — content drift applies with a warning once retries
+    are spent, while a result that is nothing (empty/invalid/unchanged) or
+    structurally impossible still rejects. ``allowed_numbers`` and
+    ``request_text`` mark the drops a value-update is authorized to make.
     """
     reasons = []
     for html in after_htmls:
@@ -453,7 +473,7 @@ def verify_task_result(op, before_htmls, after_htmls,
             return False, [f'invalid_html:{exc}']
     # Restructure/split already ran their own preservation gate inside the
     # executor (require_facts_preserved/require_preserved). Recounting
-    # occurrences here would reject a legitimate merge that deduplicates
+    # occurrences here would flag a legitimate merge that deduplicates
     # repeated figures — the executor check is the authority for those ops.
     excused_numbers = set()
     if op in EDIT_OPS or op in ('create', 'financial_chart'):
@@ -472,7 +492,8 @@ def verify_task_result(op, before_htmls, after_htmls,
             reasons.append('table_unchanged')
     # An edit must not silently lose pictures, table rows, data-* hooks or
     # sentences — the runner used to check numbers only, so a rewrite that
-    # dropped «الصورة والجدول» reported success.
+    # dropped «الصورة والجدول» reported success. The findings now apply with
+    # a visible warning instead of a veto.
     if op in EDIT_OPS or op == 'financial_chart':
         for before, after in zip(before_htmls or [], after_htmls or []):
             if isinstance(before, str) and before.strip() and isinstance(after, str):
@@ -530,8 +551,9 @@ def is_retryable_failure(op, reason, rejected_by_check=False):
     return bool(codes) and set(codes) <= _RETRYABLE_CODES
 
 
-_FACT_KIND_TEXT = {'row': 'صفوف جداول', 'media': 'صور أو خرائط', 'data': 'روابط فهرس',
-                   'entities': 'أسماء جهات أو مشاريع'}
+_FACT_KIND_TEXT = {'row': 'صفوف جداول', 'rows': 'صفوف جداول', 'media': 'صور أو خرائط',
+                   'data': 'بيانات وصفية', 'entities': 'أسماء جهات أو مشاريع',
+                   'numbers': 'أرقام'}
 
 
 def _missing_numbers_note(atoms, before_htmls):
@@ -765,9 +787,62 @@ def failure_reason_text(reason):
     return ' '.join(out) or _FAILURE_REASON_FALLBACK
 
 
+# The same findings phrased for a result that was applied anyway — the owner
+# rule is «never veto a usable slide; show the caveat and let the client undo
+# or re-ask». Base text mirrors _FAILURE_REASON_TEXT minus the rejection tail.
+_WARN_BASE_TEXT = {
+    'missing_numbers': 'النتيجة أسقطت أرقامًا من المحتوى الأصلي',
+    'dropped_text': 'النتيجة أسقطت جزءًا من نص الشريحة الأصلي',
+    'dropped_media': 'النتيجة أزالت صورة أو وسيطًا كان في الشريحة',
+    'dropped_rows': 'النتيجة حذفت صفوفًا من الجدول',
+    'dropped_data_attrs': 'النتيجة أسقطت خصائص data- من الشريحة',
+    'dropped_tokens': 'النتيجة فقدت عناصر محجوزة كانت في الشريحة',
+    'dropped_boundary_data': 'النتيجة أسقطت أطوال حدود موثقة',
+    'exact_text_missing': 'النص المطلوب حرفيًا غير موجود في النتيجة',
+    'image_not_placed': 'الصورة المولّدة لم تُدرج في الشريحة',
+    'clipped': 'عناصر في النتيجة خرجت عن إطار الشريحة',
+    'measured_overflow': 'النتيجة تجاوزت حدود إطار الشريحة',
+    'facts_not_preserved': 'النتيجة لم تحتفظ بكل حقائق المحتوى الأصلي',
+    'content_not_preserved': 'النتيجة لم تحتفظ بكامل محتوى الأصل',
+    'split_not_partitioned': 'الأجزاء الناتجة متشابهة أو غير منفصلة',
+}
+_WARN_SUFFIX = ' — طُبّق التعديل ويمكن التراجع عنه أو إعادة الطلب.'
+
+
+def _warning_reason_part_text(part):
+    code, _, detail = part.partition(':')
+    code = code.strip()
+    base = _WARN_BASE_TEXT.get(code)
+    if base is None:
+        base = part.rstrip('.') if _ARABIC_TEXT_RE.search(part) else 'النتيجة اختلفت عن المتوقع'
+    if code == 'missing_numbers' and detail.strip():
+        base += ' (' + '، '.join(n for n in detail.split(',') if n.strip())[:120] + ')'
+    elif code == 'facts_not_preserved':
+        kinds, _, sample = detail.partition(':')
+        names = ' و'.join(_FACT_KIND_TEXT.get(k.strip(), k.strip())
+                          for k in kinds.split('+') if k.strip())
+        if names:
+            base += ' — ' + names
+        if sample.strip():
+            base += f' مثل «{sample.strip()[:60]}»'
+    return base + _WARN_SUFFIX
+
+
+def warning_reason_text(reason):
+    """Arabic display text for apply-with-warning findings."""
+    out = []
+    for chunk in str(reason or '').split(';'):
+        if not chunk.strip():
+            continue
+        text = _warning_reason_part_text(chunk)
+        if text not in out:
+            out.append(text)
+    return ' '.join(out)
+
+
 __all__ = [
     'ALL_OPS', 'CODE_OPS', 'CONFIRM_OPS', 'EDIT_OPS', 'OP_LABELS', 'STRUCTURE_OPS',
     'failure_reason_text', 'instruction_for', 'is_retryable_failure', 'needs_confirmation',
-    'public_task', 'reason_codes', 'resolve_selector', 'retry_feedback', 'slide_id_set',
-    'verify_deck_integrity', 'verify_task_result',
+    'public_task', 'reason_codes', 'reason_is_warning', 'resolve_selector', 'retry_feedback',
+    'slide_id_set', 'verify_deck_integrity', 'verify_task_result', 'warning_reason_text',
 ]

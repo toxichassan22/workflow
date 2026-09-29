@@ -199,7 +199,9 @@ class AgentFlowTests(unittest.TestCase):
         self.assertIn('<p>ب</p>', body['slidesData'][1]['html'])
         self.assertIn('<p>+</p>', body['slidesData'][2]['html'])
 
-    def test_failed_task_reason_is_arabic_not_a_code(self):
+    def test_dropped_content_applies_with_warning_not_veto(self):
+        # Owner rule: a coherent result applies even when the check finds a
+        # dropped fact — the task reports a warning, the client can undo.
         slides = [slide('<p>الإيراد 120,000</p>')]
         turn = {'kind': 'plan', 'ops': [
             {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
@@ -214,11 +216,17 @@ class AgentFlowTests(unittest.TestCase):
                                   'projectData': {}, 'slideIndex': 0})
         self.assertEqual(response.status_code, 200, response.get_json())
         body = response.get_json()['data']
+        task = body['tasks'][0]
+        self.assertEqual(task['status'], 'success')
+        self.assertIsNone(task.get('failureReason'))
+        # The warning names the dropped value in Arabic — never the raw code.
+        self.assertTrue(task.get('warnings'))
+        self.assertNotIn('missing_numbers', task['warnings'][0])
+        self.assertIn('120000', task['warnings'][0])
         self.assertNotIn('missing_numbers', body['response'])
         self.assertIn('120000', body['response'])
-        self.assertNotIn('missing_numbers', body['tasks'][0]['failureReason'])
-        # The machine field keeps the raw code for client logic and logs.
-        self.assertIn('missing_numbers', body['failureReason'])
+        # The edit still landed — nothing was rolled back.
+        self.assertNotIn('120,000', body['slidesData'][0]['html'])
 
     def test_renumber_op_rewrites_counters(self):
         counter = '<span data-slide-counter="1" dir="ltr">07 — 03</span>'
@@ -463,7 +471,7 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(len(ctx['slides']), 2)
         self.assertEqual(ctx['slides'][1]['title'], 'خارج')
 
-    def test_condensing_restructure_rejects_dropped_number(self):
+    def test_condensing_restructure_reports_dropped_number_to_runner(self):
         slides = [
             slide('<p>إيراد 7,500,000 ريال</p>', title='أ'),
             slide('<p>تفاصيل</p>', title='ب'),
@@ -477,9 +485,11 @@ class AgentFlowTests(unittest.TestCase):
         with patch.object(self.module, '_agent_worker_restructure', return_value=(produced, None)), \
                 patch.object(self.module, '_agent_worker_finalize', side_effect=lambda out, *a, **k: out):
             ok, reply, reason, after = self.module._agent_exec_restructure(task, ctx, None)
+        # The executor still flags the drop — but the splice stays in place so
+        # the runner's warnable path can apply it with a warning.
         self.assertFalse(ok)
         self.assertIn('facts_not_preserved', reason)
-        self.assertEqual(len(ctx['slides']), 2)
+        self.assertEqual(len(ctx['slides']), 1)
 
     def test_restructure_retries_once_with_drop_feedback(self):
         # A facts-check rejection must reach the worker as feedback so the next
@@ -723,8 +733,9 @@ class AgentFlowTests(unittest.TestCase):
 
         body = self.run_with_worker(slides, turn, worker, message='عدل الكل')
         self.assertFalse(body['agent']['billingStopped'])
-        self.assertEqual([t['status'] for t in body['tasks']], ['failed', 'success'])
-        self.assertIn('14020', body['tasks'][0]['failureReason'])
+        # The drift now applies with a warning — and the next task still runs.
+        self.assertEqual([t['status'] for t in body['tasks']], ['success', 'success'])
+        self.assertIn('14020', body['tasks'][0]['warnings'][0])
         self.assertNotIn('اشحن', body['response'])
 
     def test_billing_detection_reads_provider_failures_only(self):
@@ -821,55 +832,6 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(worker_calls, [])
         self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
         self.assertIn('#0000ff', body['slidesData'][0]['html'].lower())
-
-    def test_failed_task_is_journaled_for_the_platform_admin(self):
-        slides = [slide('<p>الإيراد 120,000</p>')]
-        turn = {'kind': 'plan', 'ops': [
-            {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
-
-        def worker(ctx, slide_, index, instruction, total, session=None, feedback='', style_brief='', **k):
-            return slide('<p>الإيراد</p>')['html'], 'تم'
-
-        before = self.journal_files()
-        body = self.run_with_worker(slides, turn, worker, message='عدل الشريحة')
-        self.assertEqual(body['tasks'][0]['status'], 'failed')
-        new = self.journal_files() - before
-        self.assertEqual(len(new), 1)
-        failure_id = next(iter(new))[:-len('.json')]
-
-        client = self.app.test_client()
-        company = {'Authorization': 'Bearer ' + self.token}
-        platform = {'Authorization': 'Bearer ' + self.platform_token}
-        self.assertEqual(client.get('/api/admin/designer-failures', headers=company).status_code, 403)
-        listing = client.get(f'/api/admin/designer-failures?tenantId={self.tenant}', headers=platform)
-        self.assertEqual(listing.status_code, 200, listing.get_json())
-        payload = listing.get_json()
-        row = next(f for f in payload['failures'] if f['id'] == failure_id)
-        # The worker dropped the numeric «120,000» and the visible text with it —
-        # both preservation checks fire and land in the journal's reason codes.
-        self.assertEqual(sorted(row['reasonCodes']), ['dropped_text', 'missing_numbers'])
-        self.assertEqual(row['attempts'], 2)
-        self.assertEqual(row['tenantName'], 'Agent')
-        self.assertGreaterEqual(payload['byReason']['missing_numbers'], 1)
-
-        detail = client.get(f'/api/admin/designer-failures/{self.tenant}/{failure_id}', headers=platform)
-        self.assertEqual(detail.status_code, 200, detail.get_json())
-        record = detail.get_json()['failure']
-        self.assertIn('120,000', record['sourceHtml'][0])
-        self.assertEqual(record['attempts'][0]['feedback'], '')
-        self.assertIn('«120000»', record['attempts'][1]['feedback'])
-        self.assertIn('<p>الإيراد</p>', record['attempts'][1]['resultHtml'][0])
-        # Replayed with this build's checks: still a genuine drop.
-        replay = detail.get_json()['replay']
-        self.assertFalse(replay['ok'])
-        self.assertEqual(sorted(replay['reasons']),
-                         ['dropped_text:الإيراد 120,000', 'missing_numbers:120000'])
-
-        self.assertEqual(client.get(
-            f'/api/admin/designer-failures/{self.tenant}/0000000000000-000000',
-            headers=platform).status_code, 404)
-        self.assertIsNone(self.module._agent_failure_dir('../outside'))
-
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):

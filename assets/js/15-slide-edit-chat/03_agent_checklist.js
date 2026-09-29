@@ -64,12 +64,18 @@
         ? '<div class="tenant-designer-task-changes">' + task.changes
             .map(item => escapeHtml(String(item).slice(0, 80))).join(' • ') + '</div>'
         : '';
+      // Applied-with-caveat findings — the slide did apply; these name what the
+      // result dropped so the client can undo or ask for a fix.
+      const warnings = Array.isArray(task?.warnings) && task.warnings.length
+        ? '<div class="tenant-designer-task-warnings">' + task.warnings
+            .map(item => escapeHtml(String(item).slice(0, 140))).join(' • ') + '</div>'
+        : '';
       return '<div class="tenant-designer-task is-' + escapeHtml(status) + '">' +
         '<div class="tenant-designer-task-head">' +
         '<span class="tenant-designer-task-n">' + n + '</span>' +
         '<span class="tenant-designer-task-label">' + escapeHtml(label) + target + '</span>' +
         '<span class="tenant-designer-task-status">' + designerTaskStatusLabel(status) + '</span>' +
-        '</div>' + reason + changes + '</div>';
+        '</div>' + reason + changes + warnings + '</div>';
     }
 
     function renderDesignerChecklist(liveTasks = null) {

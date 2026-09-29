@@ -497,12 +497,26 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
                     replacement['id'] = designer_agent_ids.new_slide_id()
                     replacement['split_from'] = source.get('id')
                 replacements.append(replacement)
-            require_preserved([source_html], [part['html'] for part in replacements],
-                              count, summarize_ok=True)
+            warnings = []
+            try:
+                require_preserved([source_html], [part['html'] for part in replacements],
+                                  count, summarize_ok=True)
+            except StructureSafetyError as exc:
+                # Content drift applies with a warning — the owner rule is to
+                # show the client the result and let them undo or re-ask rather
+                # than vetoing it. Structural impossibility still rejects.
+                if not _is_soft_structure_reason(exc):
+                    raise
+                warnings = [str(exc)]
             slides[index:index + 1] = replacements
-            return ({'tool': tool, 'status': 'success', 'split_index': index, 'parts': count,
-                     'indexes': list(range(index, index + count))},
-                    f'تم تقسيم الشريحة رقم {index + 1} إلى {count} شرائح مع الحفاظ على المحتوى.')
+            record = {'tool': tool, 'status': 'success', 'split_index': index, 'parts': count,
+                      'indexes': list(range(index, index + count))}
+            message = f'تم تقسيم الشريحة رقم {index + 1} إلى {count} شرائح مع الحفاظ على المحتوى.'
+            if warnings:
+                record['warnings'] = warnings
+                message = (f'تم تقسيم الشريحة رقم {index + 1} إلى {count} شرائح — '
+                           f'مع تنبيه: {_soft_hint(warnings[0])}.')
+            return record, message
         if tool in ('merge_slides', 'combine_slides'):
             first, second = merge_indexes(params, len(slides))
             slide1, slide2 = slides[first], slides[second]
@@ -526,16 +540,27 @@ def execute_structure(tool, params, slides, message, *, edit_slide, reliability,
             if not reliability.materially_changed(sources[0], html, reply):
                 raise StructureSafetyError('incomplete_result')
             html = carry_watermark(sources[0], html)
-            require_preserved(sources, [html], 1, summarize_ok=True)
+            warnings = []
+            try:
+                require_preserved(sources, [html], 1, summarize_ok=True)
+            except StructureSafetyError as exc:
+                if not _is_soft_structure_reason(exc):
+                    raise
+                warnings = [str(exc)]
             replacement = copy.deepcopy(slide1)
             replacement.update(html=html, title=title, _designer_keep_html=True, is_custom=True)
             replacement['merged_sources'] = [copy.deepcopy(slide1), copy.deepcopy(slide2)]
             replacement['merged_from'] = [slide1.get('id'), slide2.get('id')]
             slide1.update(replacement)
             slides.pop(second)
-            return ({'tool': tool, 'status': 'success', 'merged_index': first,
-                     'removed_index': second, 'index': first},
-                    f'تم دمج الشريحتين {first + 1} و {second + 1} مع الحفاظ على محتواهما.')
+            record = {'tool': tool, 'status': 'success', 'merged_index': first,
+                      'removed_index': second, 'index': first}
+            message = f'تم دمج الشريحتين {first + 1} و {second + 1} مع الحفاظ على محتواهما.'
+            if warnings:
+                record['warnings'] = warnings
+                message = (f'تم دمج الشريحتين {first + 1} و {second + 1} — '
+                           f'مع تنبيه: {_soft_hint(warnings[0])}.')
+            return record, message
         if tool in ('create_slide', 'create_design_slide'):
             index = insertion_index(params, len(slides))
             title = str(params.get('title') or 'شريحة جديدة')
@@ -582,6 +607,25 @@ _FACT_HINT_KINDS = {
     'numbers': 'أرقامًا', 'entities': 'أسماء', 'rows': 'صفوف جداول',
     'media': 'وسائط', 'data': 'بيانات وصفية',
 }
+
+# Content-drift codes: a structurally valid result that lost or reshuffled
+# content is applied with a warning instead of rejected (the client can undo
+# or re-ask). Codes not listed here — invalid markup, wrong part count,
+# unchanged output, bad params — still reject.
+_SOFT_STRUCTURE_CODES = ('content_not_preserved', 'facts_not_preserved',
+                         'split_not_partitioned')
+
+
+def _is_soft_structure_reason(exc):
+    return isinstance(exc, StructureSafetyError) and str(exc).startswith(_SOFT_STRUCTURE_CODES)
+
+
+def _soft_hint(reason):
+    """Arabic caveat text appended to an applied-with-warning status."""
+    code = str(reason).split(':', 1)[0]
+    if code == 'facts_not_preserved':
+        return _facts_hint(reason)
+    return _FAILURE_HINTS.get(code, 'تحقق من النتيجة قبل اعتمادها')
 
 
 def _facts_hint(reason):

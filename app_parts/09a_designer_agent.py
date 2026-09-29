@@ -541,6 +541,7 @@ def _designer_agent_turn(ctx):
             for t in clean:
                 t['status'] = 'pending'
                 t.pop('failureReason', None)
+                t.pop('warnings', None)
             block = _agent_balance_preflight(ctx, clean)
             if block is not None:
                 return block
@@ -722,6 +723,10 @@ def _designer_agent_finish(run, ctx):
     if succeeded and slide_changes:
         shown = [line for line in slide_changes[:8] if str(line).strip()]
         response_text += '\nما تغيّر: ' + ' — '.join(str(line)[:140] for line in shown)
+    task_warnings = [w for t in succeeded for w in (t.get('warnings') or [])]
+    if task_warnings:
+        shown_warnings = [designer_agent_ops.warning_reason_text(w) for w in task_warnings[:4]]
+        response_text += '\nتنبيه: ' + ' '.join(shown_warnings)
     if ctx.get('plan_warnings'):
         response_text += '\nتنبيه: ' + '؛ '.join(ctx['plan_warnings'])
 

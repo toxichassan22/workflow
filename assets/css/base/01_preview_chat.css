@@ -1683,6 +1683,13 @@
       line-height: 1.5;
     }
 
+    .tenant-designer-task-warnings {
+      margin-top: 4px;
+      font-size: 10px;
+      color: #8a5a00;
+      line-height: 1.5;
+    }
+
     .tenant-designer-checklist-actions {
       display: flex;
       gap: 8px;
