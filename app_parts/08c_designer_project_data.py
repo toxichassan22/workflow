@@ -109,6 +109,37 @@ def _merge_superseded_numbers(ctx, values):
         ctx['superseded_numbers'] = set(ctx.get('superseded_numbers') or ()) | tokens
 
 
+def _landmark_tool_annotation(key, merged):
+    """Names of the map-approved landmark rows for a landmarks-related field.
+
+    The plain ``nearby_landmarks`` text carries no selection flags, so a planner
+    reading it sees every row and cannot tell which are checked. The structured
+    mirror resolves the same approved set the map renders (all checked rows, or
+    the first seven when nothing is checked).
+    """
+    rows = []
+    try:
+        if key in ('nearby_landmarks', 'nearby_landmarks_data', 'landmarks_matrix'):
+            rows = slide_engine._project_landmark_rows(
+                merged, 'nearby_landmarks_data', 'landmarks_matrix')
+            if not rows:
+                text = merged.get('nearby_landmarks')
+                if isinstance(text, str) and text.strip():
+                    rows = maps_service._parse_landmarks_text(text)[:7]
+        elif key in ('city_landmarks', 'city_landmarks_data'):
+            rows = slide_engine._project_landmark_rows(merged, 'city_landmarks_data')
+            if not rows:
+                text = merged.get('city_landmarks')
+                if isinstance(text, str) and text.strip():
+                    rows = maps_service._parse_landmarks_text(text)[:7]
+    except Exception:
+        return None
+    names = [str(r.get('name') or r.get('title') or r.get('landmark') or '').strip()
+             for r in rows if isinstance(r, dict)]
+    names = [name for name in names if name]
+    return names or None
+
+
 def _designer_project_data_tool_result(args, ctx):
     """Serve the planner the project's CURRENT saved data, scoped to what it asked for.
 
@@ -226,7 +257,13 @@ def _designer_project_data_tool_result(args, ctx):
             truncated = True
             break
         total += len(text)
-        fields.append({'key': key, 'label': label_of(key), 'value': text})
+        field = {'key': key, 'label': label_of(key), 'value': text}
+        approved_names = _landmark_tool_annotation(key, merged)
+        if approved_names:
+            field['approved_for_map'] = approved_names
+            field['value'] = (text + '\nالمعتمد للعرض على الخريطة والجدول بنفس الترتيب: '
+                              + '، '.join(approved_names))
+        fields.append(field)
 
     if isinstance(ctx.get('project_data'), dict):
         for key in selected:

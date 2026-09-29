@@ -346,6 +346,14 @@ def api_designer_chat():
         if table_failure_note:
             _slim_brief = (str(_slim_brief or '') + "\n\n## نتيجة الفحص الحتمي للجدول (لا تعيد اختراعها)\n"
                            + table_failure_note)[:42000]
+        try:
+            _landmark_slim = _designer_landmark_facts_note(project_data)
+        except Exception:
+            _landmark_slim = ''
+        if str(_landmark_slim or '').strip():
+            # build_project_facts skips nearby_landmarks_data (it is covered
+            # elsewhere) — the slim prompt must still carry the approved set.
+            _slim_brief += _landmark_slim
         planner_prompt = _build_designer_slim_planner_prompt(
             branding, training_note, watermark_note, summary,
             _slim_snippets, _slim_brief, all_note, memory_note,

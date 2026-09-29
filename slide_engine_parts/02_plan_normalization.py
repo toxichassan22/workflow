@@ -1608,6 +1608,9 @@ EXTRA_FIELD_LABELS = {
     'timeline_start_date': 'تاريخ بداية المشروع',
     'timeline_start_year': 'سنة بداية المشروع',
     'timeline_years': 'عدد سنوات المشروع',
+    'nearby_landmarks_data': 'جدول المعالم القريبة',
+    'city_landmarks_data': 'جدول معالم المدينة',
+    'landmarks_matrix': 'مصفوفة المعالم',
 }
 
 # A single field cannot flood the brief, and the brief cannot flood the request.

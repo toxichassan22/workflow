@@ -285,6 +285,39 @@ class AuditAgentFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertIn('Land Plot Alpha', seen['system'])
 
+    def test_agent_planner_sees_approved_landmark_rows(self):
+        """The planner's system prompt must list the checked landmarks — the
+        reported failure was the model answering «لا يظهر تحديد الـ14» because
+        the agent prompt carried no landmark context at all."""
+        rows = [{'name': f'معلم قريب {i}', 'category': 'تجاري',
+                 'distance_km': str(i), 'duration_minutes': str(i),
+                 'show_on_map': i <= 14} for i in range(1, 21)]
+
+        seen = {}
+
+        def planner(messages, **kwargs):
+            seen['system'] = messages[0].get('content') if messages else ''
+            return planner_reply({'kind': 'reply', 'message': 'تم'})
+
+        with patch.object(self.module, 'DESIGNER_AGENT', True), \
+                patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
+                patch.object(self.module, 'call_openrouter_messages', side_effect=planner), \
+                patch.object(self.module.designer_chat_reliability,
+                             '_auto_heal_workspace_slides',
+                             side_effect=lambda s, *a: s):
+            response = self.post({'message': 'حدّث جدول المعالم على المختارين',
+                                  'slidesData': [slide('<p>أ</p>')],
+                                  'projectData': {'nearby_landmarks_data': rows},
+                                  'slideIndex': 0})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        prompt = seen['system']
+        # All 14 checked rows are named in table order; unchecked rows are absent.
+        self.assertIn('معلم قريب 1', prompt)
+        self.assertIn('معلم قريب 14', prompt)
+        self.assertNotIn('معلم قريب 15', prompt)
+        self.assertLess(prompt.index('معلم قريب 1'), prompt.index('معلم قريب 14'))
+        self.assertIn('نفس صفوف الخريطة', prompt)
+
     def test_extra_worker_parts_are_reported(self):
         slides = [slide('<p>أ</p>')]
         turn = {'kind': 'plan', 'ops': [

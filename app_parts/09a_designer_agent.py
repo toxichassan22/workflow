@@ -413,6 +413,15 @@ def _designer_agent_plan(ctx, session=None):
                    + '\nاستخدم محتواها عند الحاجة — ممنوع إدراجها كصورة في الشريحة.')
     if ctx.get('training_context'):
         system += f"\n\n## قواعد الشركة الملزمة\n{ctx['training_context'][:4000]}"
+    try:
+        landmark_note = _designer_landmark_facts_note(ctx.get('project_data'))
+    except Exception:
+        landmark_note = ''
+    if str(landmark_note or '').strip():
+        # Without this the planner only sees a slide outline — a «حدّث جدول
+        # المعالم لما اخترته» turn otherwise dead-ends on get_project_data's raw
+        # dump, where the selection flags sit buried per row.
+        system += landmark_note.strip()
 
     user_content = ctx['message'][:4000]
     if ctx.get('user_image_refs'):
