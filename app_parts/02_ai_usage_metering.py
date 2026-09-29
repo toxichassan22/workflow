@@ -789,8 +789,8 @@ def api_billing_checkout():
         entry = result.get('entry') or {}
         _notify_tenant_billing(
             g.tenant_id, 'خُصم من المحفظة',
-            f'{float(entry.get("amount_sar") or 0.0):.2f} ريال — الرصيد الحالي '
-            f'{float(result.get("balance_sar") or 0.0):.2f} ريال',
+            f'{float(entry.get("amount_sar") or 0.0):.2f} ريال سعودي — الرصيد الحالي '
+            f'{float(result.get("balance_sar") or 0.0):.2f} ريال سعودي',
             entity_type='wallet', entity_id='debit:' + str(entry.get('id') or ''))
     except Exception:
         pass

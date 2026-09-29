@@ -263,7 +263,7 @@
         : ((data.lifetime || {}).consumed_sar || 0);
       const card = (label, value) =>
         '<div class="tenant-dash-card stat"><p>' + label + '</p><h3>' + llEscape(fmt(value)) +
-        ' <span style="font-size:12px;font-weight:400;color:#64748b;">ريال</span></h3></div>';
+        ' <span style="font-size:12px;font-weight:400;color:#64748b;">ريال سعودي</span></h3></div>';
       box.innerHTML = '<div class="tenant-dashboard-stats">' +
         card('الرصيد الحالي', data.effective_balance_sar != null ? data.effective_balance_sar : data.balance_sar) +
         card('المحجوز', data.reserved_sar) +
@@ -327,7 +327,7 @@
             '</div>'
           : '';
         return '<div class="tenant-presentation-card">' +
-          '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + (llMoney(r.price_sar != null ? r.price_sar : r.amount_sar) + ' <span>ريال</span>') + '</h3>' +
+          '<div><h3><span>' + llEscape(r.package_name) + '</span> — ' + (llMoney(r.price_sar != null ? r.price_sar : r.amount_sar) + ' <span>ريال سعودي</span>') + '</h3>' +
           '<div class="meta">' + tenantInfo + '<span>' + llStatus(r.status) + '</span> | <span>' + llEscape(date) + '</span>' + ref + inv + receiptLink + invoiceLink + '</div>' +
           note +
           actions +
@@ -350,8 +350,8 @@
       }
       select.innerHTML = llRechargePackages.map(p =>
         '<option value="' + llEscape(p.id) + '">' + llEscape(p.name) +
-        ' (' + llMoney(p.credit_sar) + ' <span>ريال</span>' +
-        (p.price_sar ? ' — ' + llMoney(p.price_sar) + ' <span>ريال</span>' : '') + ')</option>'
+        ' (' + llMoney(p.credit_sar) + ' <span>ريال سعودي</span>' +
+        (p.price_sar ? ' — ' + llMoney(p.price_sar) + ' <span>ريال سعودي</span>' : '') + ')</option>'
       ).join('');
       llShowPackageInfo();
     }
@@ -854,12 +854,12 @@
       }
       box.innerHTML = llAdminPackages.map(p => {
         const cost = (p.est_cost_sar != null)
-          ? ' | <span>التكلفة التقديرية: ' + llEscape(llMoney(p.est_cost_sar)) + ' <span>ريال</span></span>' : '';
+          ? ' | <span>التكلفة التقديرية: ' + llEscape(llMoney(p.est_cost_sar)) + ' <span>ريال سعودي</span></span>' : '';
         const margin = (p.est_margin_sar != null)
-          ? ' | <span>الربح التقديري: ' + llEscape(llMoney(p.est_margin_sar)) + ' <span>ريال</span></span>' : '';
+          ? ' | <span>الربح التقديري: ' + llEscape(llMoney(p.est_margin_sar)) + ' <span>ريال سعودي</span></span>' : '';
         return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + llEscape(p.name) + '</h3>' +
-          '<div class="meta"><span>' + (p.price_sar != null ? llEscape(llMoney(p.price_sar)) + ' <span>ريال</span>' : 'بلا سعر') + '</span>' +
-          ' | <span>' + llEscape(llMoney(p.credit_sar)) + ' <span>ريال رصيد</span></span>' + cost + margin +
+          '<div class="meta"><span>' + (p.price_sar != null ? llEscape(llMoney(p.price_sar)) + ' <span>ريال سعودي</span>' : 'بلا سعر') + '</span>' +
+          ' | <span>' + llEscape(llMoney(p.credit_sar)) + ' <span>رصيد بالريال السعودي</span></span>' + cost + margin +
           ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' + llEscape(p.id) + '\')">تعديل</button>' +

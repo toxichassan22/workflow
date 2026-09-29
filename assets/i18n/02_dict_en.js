@@ -28,7 +28,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "nav.logout": "Log out",
   "nav.management": "Management",
   "nav.menu": "Menu",
-  "nav.new_proposal": "New proposal",
+  "nav.new_proposal": "New project",
   "nav.platform": "Platform",
   "nav.projects": "Projects",
   "nav.staff": "Staff",

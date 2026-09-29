@@ -233,8 +233,8 @@ def _fmt_money(value):
     if not math.isfinite(num) or num <= 0:
         return ''
     if num >= 1_000_000:
-        return f"{num / 1_000_000:,.1f} مليون ريال"
-    return f"{num:,.0f} ريال"
+        return f"{num / 1_000_000:,.1f} مليون ريال سعودي"
+    return f"{num:,.0f} ريال سعودي"
 
 
 def _fmt_area(value):

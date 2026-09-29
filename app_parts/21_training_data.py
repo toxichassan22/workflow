@@ -469,7 +469,7 @@ def api_training_chat():
 ```action
 {{"tool": "delete_team_entity", "params": {{"name": "الاسم أو المعرف"}}}}
 ```
-- المكتبة مشتركة بين كل ملفات المشاريع، فأي تعديل هنا يظهر في كل عرض جديد.
+- المكتبة مشتركة بين كل ملفات المشاريع، فأي تعديل هنا يظهر في كل مشروع جديد.
 - الاستبعاد لملف واحد فقط يتم من صفحة فريق العمل داخل المشروع، لا من هنا.
 
 ### 28. قواعد التوليد الخاصة بالشركة (تُضاف إلى برومبت توليد الشرائح):
@@ -489,7 +489,7 @@ def api_training_chat():
 {{"tool": "ask", "params": {{"question": "سؤال عربي واحد قصير"}}}}
 ```
 
-## سير العمل الكامل لإنشاء عرض جديد من المحادثة:
+## سير العمل الكامل لإنشاء مشروع جديد من المحادثة:
 1. اجمع بيانات المشروع من كلام المستخدم (اسم المشروع، النوع، الموقع، المساحات، الميزانية...) ونفّذ `update_workspace`
 2. نفّذ `generate_slide_plan` لإنشاء خطة الشرائح
 3. نفّذ `generate_workspace` لتوليد الشرائح فعلياً
@@ -846,9 +846,9 @@ def _build_agent_system_state(tenant_id):
 {chr(10).join(team_lines) if team_lines else '  لا توجد جهات في المكتبة.'}
 
 ###  رصيد الشركة:
-- رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} ريال
-- المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} ريال
-- المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} ريال
+- رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} ريال سعودي
+- المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} ريال سعودي
+- المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} ريال سعودي
 
 ###  إعدادات الخرائط:
 - نوع الخريطة الافتراضي: {branding.get('default_map_type', 'satellite')}

@@ -407,7 +407,7 @@
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
           planBadge + ' | ' + statusBadge + keyBadge + ' | <span>رصيد</span> ' +
-          Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US') + ' <span>ريال</span>' +
+          Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US') + ' <span>ريال سعودي</span>' +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
@@ -763,7 +763,7 @@
         '<div class="tenant-field"><label for="sagDetailSlug">رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailPackage">الباقة</label><select id="sagDetailPackage" data-current="' + escapeHtml(currentPackageId) + '">' +
         packageOptions + '</select></div>' +
-        '<div class="tenant-field"><label>الرصيد الحالي (ريال)</label><p style="margin:0;font-weight:700">' + Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
+        '<div class="tenant-field"><label>الرصيد الحالي (ريال سعودي)</label><p style="margin:0;font-weight:700">' + Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
@@ -783,7 +783,7 @@
         '<option value="correction">تصحيح</option>' +
         '<option value="refund">استرداد</option>' +
         '<option value="expiry">انتهاء صلاحية</option></select></div>' +
-        '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (ريال)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (ريال سعودي)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
         '<div class="tenant-field full"><label for="sagAdjNote">ملاحظة</label><input id="sagAdjNote" maxlength="300"></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الحركة</button></div></form>' +
         (t.isAdmin ? '' :
@@ -1232,7 +1232,7 @@
       const text = (value >= 1
         ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : value.toFixed(digits));
-      return '<span dir="ltr">' + text + '</span> <span>ريال</span>';
+      return '<span dir="ltr">' + text + '</span> <span>ريال سعودي</span>';
     }
 
     function aiReconcileStatusText(entry) {
@@ -1457,7 +1457,7 @@
     function sagFmtMoney(v) {
       const n = Number(v || 0);
       const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
-      return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال';
+      return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال سعودي';
     }
 
     function sagDeltaChip(d) {

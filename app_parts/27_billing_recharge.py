@@ -43,7 +43,7 @@ def api_create_recharge_request():
     _notify_super_admins(
         'طلب شحن جديد',
         f'{(g.tenant or {}).get("company_name") or "شركة"} — {row.get("package_name") or ""}'
-        f' — {row.get("price_sar") or row.get("amount_sar") or ""} ريال',
+        f' — {row.get("price_sar") or row.get("amount_sar") or ""} ريال سعودي',
         entity_type='recharge_request', entity_id=row['id'], category='recharge')
     return jsonify({'success': True, 'request': row})
 
@@ -194,7 +194,7 @@ def api_admin_decide_recharge_request(request_id):
         _notify_tenant_billing(
             row['tenant_id'],
             'تم شحن الرصيد' if approved else 'رُفض طلب الشحن',
-            f'{row.get("package_name") or ""} — {amount} ريال'
+            f'{row.get("package_name") or ""} — {amount} ريال سعودي'
             + (f' — {row.get("decision_note")}' if row.get('decision_note') else ''),
             entity_type='recharge_request', entity_id=row['id'])
     except Exception:

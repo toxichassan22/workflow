@@ -194,7 +194,7 @@
     let editingUserPermissions = null;
     const PERMISSION_LABELS = {
       dashboard: 'الرئيسية',
-      create_presentation: 'إنشاء عرض جديد',
+      create_presentation: 'إنشاء مشروع جديد',
       view_presentations: 'عرض العروض السابقة',
       generate_images: 'توليد الصور',
       generate_maps: 'توليد الخرائط',
