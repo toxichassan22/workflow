@@ -469,6 +469,70 @@ def _is_land_boundary_diagram_slide(title=None, content_source=None, html=None):
     return False
 
 
+def _is_landmark_map_slide(slide):
+    """True when the slide renders the nearby-landmarks map/table."""
+    if not isinstance(slide, dict):
+        return False
+    source = str(slide.get('content_source') or slide.get('contentSource') or '')
+    if slide.get('type') == 'map_landmarks' or source in ('nearby_landmarks', 'landmarks_matrix'):
+        return True
+    html = str(slide.get('html') or '')
+    return '##MAP_LANDMARKS##' in html or 'data-canonical-map="landmarks"' in html
+
+
+def _is_catchment_map_slide(slide):
+    """True when the slide renders the catchment/city-landmarks map/table."""
+    if not isinstance(slide, dict):
+        return False
+    source = str(slide.get('content_source') or slide.get('contentSource') or '')
+    if slide.get('type') == 'map_catchment' or source in ('catchment_areas', 'city_landmarks'):
+        return True
+    html = str(slide.get('html') or '')
+    return '##MAP_CATCHMENT##' in html or 'data-canonical-map="catchment"' in html
+
+
+def _designer_landmark_facts_note(project_data):
+    """Render the approved landmark sets for the designer-chat prompt.
+
+    The map numbers its pins in the approved table order, so the chat lists the
+    same rows in the same order — row N on the slide is pin N on the map.
+    """
+    source = project_data if isinstance(project_data, dict) else {}
+    sections = []
+    nearby = slide_engine._project_landmark_rows(source, 'nearby_landmarks_data', 'landmarks_matrix')
+    city = slide_engine._project_landmark_rows(source, 'city_landmarks_data')
+    for title, rows in (('المعالم القريبة', nearby), ('معالم المدينة / نطاق التأثير', city)):
+        if not rows:
+            continue
+        lines = []
+        for index, item in enumerate(rows, 1):
+            name = str(item.get('name') or item.get('title') or item.get('landmark') or '').strip() or 'معلم'
+            category = str(item.get('category') or item.get('type') or '').strip()
+            distance = item.get('distance_km')
+            if distance in (None, ''):
+                distance = item.get('distance_text') or item.get('distance') or 'غير موثقة'
+            duration = item.get('duration_minutes')
+            if duration in (None, ''):
+                duration = item.get('duration_min') or item.get('duration') or item.get('duration_text') or 'غير موثقة'
+            line = f'- {index}. {name}'
+            if category:
+                line += f' — {category}'
+            line += f' — المسافة {distance} — مدة القيادة {duration}'
+            lines.append(line)
+        sections.append(f'### {title}\n' + '\n'.join(lines))
+    if not sections:
+        return ''
+    return (
+        "\n\n## المعالم المعتمدة للعرض (نفس صفوف الخريطة وترتيب دبابيسها — ممنوع الاختراع)\n"
+        + '\n\n'.join(sections)
+        + "\nقواعد ملزمة عند تعديل شريحة معالم أو جدولها:"
+        + "\n- اعرض هذه الصفوف كلها كما هي وبنفس الترتيب — رقم كل صف يطابق رقم دبوسه على الخريطة."
+        + "\n- المسافة ومدة القيادة تُنقل كما هي؛ ممنوع تعديل الأرقام أو حذف صف أو إضافة معلم غير مدرج."
+        + "\n- إن طلب المستخدم معلمًا غير موجود في القائمة، نفّذ ما يمكن من تنسيق"
+        + " واذكر في الرد صراحة أنه غير معتمد في بيانات المشروع."
+    )
+
+
 def _designer_boundary_facts_note(project_data):
     """Render the documented boundary facts for the designer-chat prompt."""
     try:
@@ -518,6 +582,7 @@ def _designer_project_context(project_data, creative_images=None, tenant_id=None
     ]
     for note in (
         _designer_boundary_facts_note(source),
+        _designer_landmark_facts_note(source),
         slide_engine._timeline_data_note(source),
         slide_engine._financial_data_note(source),
     ):

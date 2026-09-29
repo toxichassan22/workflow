@@ -1049,75 +1049,6 @@ def _repair_slide_text_contrast(html):
     return html
 
 
-def _landmark_distance_sort_key(row):
-    """Numeric km so landmark tables list nearest first; unknown distance sinks."""
-    if not isinstance(row, dict):
-        return float('inf')
-    for key in ('distance_km', 'distance'):
-        try:
-            value = float(row.get(key))
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(value):
-            return value
-    distance_text = row.get('distance_text') or row.get('distance_str')
-    if distance_text:
-        match = re.search(r'(\d+(?:\.\d+)?)', str(distance_text).replace(',', ''))
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                pass
-    try:
-        meters = float(row.get('distance_meters'))
-    except (TypeError, ValueError):
-        meters = None
-    if meters is not None and math.isfinite(meters):
-        return meters / 1000.0
-    return float('inf')
-
-
-def _nearby_landmark_table_rows(project_data, limit=7):
-    """Return the same four visible columns used by the nearby-landmarks table."""
-    source = project_data if isinstance(project_data, dict) else {}
-    canonical = source.get('nearby_landmarks_data')
-    legacy = source.get('landmarks_matrix')
-    rows = canonical if isinstance(canonical, list) and canonical else legacy
-    if not isinstance(rows, list):
-        return []
-    rows = [row for row in rows if isinstance(row, dict)]
-
-    def is_selected(row):
-        value = row.get('show_on_map', row.get('selected'))
-        return value is True or str(value or '').strip().lower() in {'true', '1', 'yes'}
-
-    selected = [row for row in rows if is_selected(row)]
-    rows = selected if selected else rows
-    rows = sorted(rows, key=_landmark_distance_sort_key)
-
-    def first_value(row, *keys):
-        for key in keys:
-            value = row.get(key)
-            if value not in (None, '', []):
-                return value
-        return ''
-
-    result = []
-    for row in rows:
-        name = first_value(row, 'name', 'title', 'landmark', 'displayName')
-        if name in (None, ''):
-            continue
-        result.append([
-            name,
-            first_value(row, 'category', 'type'),
-            first_value(row, 'distance_km', 'distance', 'distance_text'),
-            first_value(row, 'duration_minutes', 'duration_min', 'duration', 'minutes', 'duration_text'),
-        ])
-        if limit is not None and len(result) >= limit:
-            break
-    return result
-
-
 def _required_slide_texts(slide, project_data):
     content_sources = (slide or {}).get('content_sources') if isinstance(slide, dict) else None
     if isinstance(content_sources, list) and content_sources:
@@ -1157,6 +1088,10 @@ def _required_slide_texts(slide, project_data):
                 for value in row
                 if str(value or '').strip()
             ))
+        if isinstance(project_data.get('nearby_landmarks_data'), list):
+            # An explicit structured table is authoritative — empty means the map
+            # carries no landmarks either, so nothing is required on the slide.
+            return []
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return [item.strip() for item in re.split(r'[\n|]', value) if item.strip()]
     if str(source or '').startswith('site_analysis'):

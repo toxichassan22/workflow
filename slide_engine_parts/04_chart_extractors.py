@@ -33,16 +33,27 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
         return 'شبكة الطرق ومداخل المشروع كما هي دون حذف:\n' + roads_text if roads_text else ''
     if (slide or {}).get('type') == 'map_catchment' or source in ('catchment_areas', 'city_landmarks'):
         city_data = project_data.get('city_landmarks_data')
-        if isinstance(city_data, list) and city_data:
-            city_data = sorted(city_data, key=_landmark_distance_sort_key)
-            return 'جدول نطاق التأثير الجغرافي ومعالم المدينة وأوقات القيادة كما هو دون حذف أو اختلاق:\n' + json.dumps(city_data, ensure_ascii=False, indent=2)
+        if isinstance(city_data, list):
+            approved = _approved_landmark_rows(city_data)
+            if approved:
+                return ('جدول معالم المدينة المعتمدة لخريطة النطاق — نفس صفوف الخريطة وترتيب دبابيسها؛'
+                        ' اعرضها كلها كما هي دون حذف أو إضافة أو إعادة ترتيب:\n'
+                        + json.dumps(approved, ensure_ascii=False, indent=2))
+            return 'لا توجد معالم مدينة معتمدة للعرض — اترك الجدول فارغًا ولا تخترع معالم.'
         catchment_text = str(project_data.get('catchment_areas') or project_data.get('city_landmarks') or '').strip()
         return 'نطاق التأثير ومعالم المدينة كما هي دون حذف:\n' + catchment_text if catchment_text else ''
     if (slide or {}).get('type') == 'map_landmarks' or source in ('nearby_landmarks', 'landmarks_matrix'):
-        nearby_data = project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix')
-        if isinstance(nearby_data, list) and nearby_data:
-            nearby_data = sorted(nearby_data, key=_landmark_distance_sort_key)
-            return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(nearby_data, ensure_ascii=False, indent=2)
+        nearby_data = project_data.get('nearby_landmarks_data')
+        if isinstance(nearby_data, list):
+            approved = _approved_landmark_rows(nearby_data)
+            if approved:
+                return ('جدول المعالم القريبة المعتمدة للعرض — نفس صفوف خريطة المعالم وترتيب دبابيسها؛'
+                        ' اعرضها كلها كما هي دون حذف أو إضافة أو إعادة ترتيب:\n'
+                        + json.dumps(approved, ensure_ascii=False, indent=2))
+            return 'لا توجد معالم قريبة معتمدة للعرض — اترك الجدول فارغًا ولا تخترع معالم.'
+        matrix = project_data.get('landmarks_matrix')
+        if isinstance(matrix, list) and matrix:
+            return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(matrix, ensure_ascii=False, indent=2)
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return 'المعالم والمسافات وأوقات القيادة كما هي دون حذف:\n' + value if value else ''
     if source in {

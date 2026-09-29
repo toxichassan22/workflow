@@ -893,13 +893,14 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     design_rules = build_design_rules(branding)
     project_json = build_project_facts(project_data, branding.get('tenant_id'))
 
-    landmarks_matrix = project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix')
+    landmarks_matrix = _project_landmark_rows(project_data, 'nearby_landmarks_data', 'landmarks_matrix')
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (
             "إرشادات هامة لعرض المعالم:\n"
             "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
-            "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
+            "القائمة التالية هي المعالم المعتمدة فقط — نفس صفوف خريطة المعالم وترتيب دبابيسها. "
+            "اعرضها كلها كما هي؛ ممنوع إضافة معلم غير مدرج أو حذف مدرج أو تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
     timeline_note = _timeline_data_note(project_data)

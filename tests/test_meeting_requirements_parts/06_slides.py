@@ -1089,6 +1089,71 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('def recompose_landmarks_map(', maps_source)
         self.assertIn("project_data.get('landmark_label_positions')", maps_source)
 
+    def test_landmarks_table_matches_the_map_selection_exactly(self):
+        """The table renders the same approved rows, in pin order, as the map."""
+        engine = self.application_module.slide_engine
+        service = self.application_module.maps_service
+
+        rows = [{'name': f'معلم {index}', 'distance_km': index * 0.5,
+                 'duration_minutes': index * 2, 'category': 'خدمات',
+                 'show_on_map': index in (3, 9, 11)} for index in range(1, 15)]
+        project = {'nearby_landmarks_data': rows}
+        map_names = [row['name'] for row in service.select_map_landmark_rows(rows)]
+        table_rows = engine._nearby_landmark_table_rows(project)
+        self.assertEqual([row[0] for row in table_rows], map_names)
+        self.assertEqual(map_names, ['معلم 3', 'معلم 9', 'معلم 11'])
+
+        # The client picks the count — fourteen checked rows render fourteen
+        # table rows, matching the fourteen numbered map pins. Unchecked rows
+        # never reach the table.
+        all_selected = [{'name': f'معلم {index}', 'show_on_map': True}
+                        for index in range(1, 15)] + [{'name': 'خارج الاختيار', 'show_on_map': False}]
+        project = {'nearby_landmarks_data': all_selected}
+        map_names = [row['name'] for row in service.select_map_landmark_rows(all_selected)]
+        table_rows = engine._nearby_landmark_table_rows(project)
+        self.assertEqual(len(map_names), 14)
+        self.assertEqual([row[0] for row in table_rows], map_names)
+        self.assertNotIn('خارج الاختيار', [row[0] for row in table_rows])
+
+        # No selection falls back to the same first seven the map draws.
+        plain = [{'name': f'معلم {index}'} for index in range(1, 12)]
+        project = {'nearby_landmarks_data': plain}
+        self.assertEqual(
+            [row[0] for row in engine._nearby_landmark_table_rows(project)],
+            [row['name'] for row in service.select_map_landmark_rows(plain)])
+        self.assertEqual(len(engine._nearby_landmark_table_rows(project)), 7)
+
+        # An explicit empty table is authoritative — the map shows nothing and
+        # the table must not resurrect rows from an old drive matrix.
+        project = {'nearby_landmarks_data': [], 'landmarks_matrix': [{'name': 'قديم'}]}
+        self.assertEqual(engine._nearby_landmark_table_rows(project), [])
+
+        # The generation prompt note must list only the approved rows — an
+        # unchecked landmark must never leak into the model's table.
+        note = engine._slide_source_data_note({'type': 'map_landmarks'}, {
+            'nearby_landmarks_data': [
+                {'name': 'معتمد', 'show_on_map': True, 'distance_km': 1.2, 'duration_minutes': 4},
+                {'name': 'غير معتمد', 'show_on_map': False, 'distance_km': 2.0, 'duration_minutes': 6},
+            ]})
+        self.assertIn('معتمد', note)
+        self.assertNotIn('غير معتمد', note)
+        empty_note = engine._slide_source_data_note(
+            {'type': 'map_landmarks'}, {'nearby_landmarks_data': []})
+        self.assertIn('لا توجد معالم', empty_note)
+
+        # String flags from older drafts count as checked on both sides.
+        flagged = [{'name': 'محدد', 'show_on_map': 'true'}, {'name': 'لا'}]
+        self.assertEqual(
+            [row['name'] for row in service.select_map_landmark_rows(flagged)],
+            [row[0] for row in engine._nearby_landmark_table_rows({'nearby_landmarks_data': flagged})])
+
+        # The city/catchment table follows the same approved-set contract.
+        city = [{'name': f'مدينة {index}', 'show_on_map': index == 2} for index in range(1, 6)]
+        note = engine._slide_source_data_note({'type': 'map_catchment'},
+                                              {'city_landmarks_data': city})
+        self.assertIn('مدينة 2', note)
+        self.assertNotIn('مدينة 4', note)
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = read_frontend_text()
         self.assertNotIn('lt-location-input', source)

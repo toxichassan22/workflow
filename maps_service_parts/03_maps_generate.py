@@ -1397,6 +1397,19 @@ def _parse_landmarks_text(text):
     return landmarks
 
 
+def _landmark_row_selected(item):
+    """Twin of slide_engine._landmark_row_selected — keep both in sync.
+
+    Tolerant of string flags from older drafts («true», «1», «yes»); a checked
+    row must render however it was stored.
+    """
+    for key in ('show_on_map', 'selected'):
+        value = (item or {}).get(key)
+        if value is True or str(value or '').strip().lower() in {'true', '1', 'yes'}:
+            return True
+    return False
+
+
 def select_map_landmark_rows(structured, limit=7):
     """Return the approved landmark rows for a map without changing their input order.
 
@@ -1412,10 +1425,7 @@ def select_map_landmark_rows(structured, limit=7):
         return []
 
     rows = [dict(item) for item in structured if isinstance(item, dict)]
-    selected = [
-        item for item in rows
-        if item.get('show_on_map') is True or item.get('selected') is True
-    ]
+    selected = [item for item in rows if _landmark_row_selected(item)]
     try:
         row_limit = max(0, min(7, int(limit)))
     except (TypeError, ValueError):

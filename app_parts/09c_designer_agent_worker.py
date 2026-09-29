@@ -57,6 +57,11 @@ def _agent_worker_facts(ctx, slide=None):
         boundary = _designer_boundary_facts_note(ctx['project_data'])
         if str(boundary or '').strip():
             parts.append(boundary.strip())
+    if isinstance(slide, dict) and (
+            _is_landmark_map_slide(slide) or _is_catchment_map_slide(slide)):
+        landmark_note = _designer_landmark_facts_note(ctx['project_data'])
+        if str(landmark_note or '').strip():
+            parts.append(landmark_note.strip())
     team_note = _designer_team_logo_context(ctx['creative_images'])
     parts.append(
         '## شعارات فريق العمل\n' + team_note +

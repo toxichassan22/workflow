@@ -914,6 +914,47 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('رابط Google Maps', maps_response)
         self.assertNotIn('تم الحفاظ على تصميم الشريحة', maps_response)
 
+    def test_designer_chat_lists_only_the_approved_landmarks(self):
+        """Chat context must name the exact map-approved set, not the raw table."""
+        module = self.application_module
+        rows = [{'name': f'معلم {index}', 'distance_km': index, 'duration_minutes': index * 3,
+                 'category': 'خدمة', 'show_on_map': index in (2, 5)}
+                for index in range(1, 9)]
+        project_data = {'nearby_landmarks_data': rows}
+
+        note = module._designer_landmark_facts_note(project_data)
+        self.assertIn('معلم 2', note)
+        self.assertIn('معلم 5', note)
+        self.assertNotIn('معلم 3', note)
+        self.assertIn('ممنوع الاختراع', note)
+
+        # Fourteen checked rows all reach the note — the map has no cap either.
+        many = [{'name': f'معلم {index}', 'show_on_map': True} for index in range(1, 15)]
+        note = module._designer_landmark_facts_note({'nearby_landmarks_data': many})
+        self.assertIn('معلم 14', note)
+
+        # No selection -> the same first-seven default the map renders.
+        note = module._designer_landmark_facts_note(
+            {'nearby_landmarks_data': [{'name': f'معلم {index}'} for index in range(1, 10)]})
+        self.assertIn('معلم 7', note)
+        self.assertNotIn('معلم 8', note)
+
+        # No landmark data at all -> no fabricated section.
+        self.assertEqual(module._designer_landmark_facts_note({}), '')
+
+        # Slide detection covers type, content_source and the rendered token.
+        self.assertTrue(module._is_landmark_map_slide({'type': 'map_landmarks'}))
+        self.assertTrue(module._is_landmark_map_slide({'content_source': 'nearby_landmarks'}))
+        self.assertTrue(module._is_landmark_map_slide({'html': '<img src="##MAP_LANDMARKS##">'}))
+        self.assertFalse(module._is_landmark_map_slide({'type': 'content', 'html': '<div></div>'}))
+        self.assertTrue(module._is_catchment_map_slide({'type': 'map_catchment'}))
+
+        # The note reaches the planner's project context.
+        context = module._designer_project_context(project_data)
+        self.assertIn('المعالم المعتمدة للعرض', context)
+        self.assertIn('معلم 2', context)
+        self.assertNotIn('معلم 3 — خدمة', context)
+
     def test_designer_chat_job_polling_is_recoverable_and_result_is_fetched_once(self):
         module = self.application_module
         client = self.app.test_client()
