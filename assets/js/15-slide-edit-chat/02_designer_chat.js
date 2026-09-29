@@ -5,6 +5,9 @@
           role: 'assistant',
           content: (data && data.error) || 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.'
         });
+        // A failed/stale/cancelled job is terminal too — drop the checklist
+        // instead of leaving its last in-flight snapshot on screen.
+        if (typeof clearDesignerChecklist === 'function') clearDesignerChecklist();
         tenantProjectData.designerChat = designerChatPersistence();
         renderTenantDesignerChat();
         triggerAutoSaveDraft();
@@ -32,6 +35,9 @@
         return true;
       }
       if (typeof applyDesignerRunTasks === 'function') applyDesignerRunTasks(reply);
+      // Terminal reply — the message itself carries what changed and what
+      // failed, so the checklist must not linger until a refresh.
+      if (typeof clearDesignerChecklist === 'function') clearDesignerChecklist();
 
       // The designer asked instead of guessing: show the question, change nothing, keep the answer
       // in the input's turn. Guessing and then editing wrongly is worse than one question.
@@ -853,7 +859,8 @@
         workspaceSignature: String(metadata.workspaceSignature || ''),
         startedAt: Number(metadata.startedAt || Date.now()),
         updatedAt: Number(metadata.updatedAt || Date.now()),
-        status: String(metadata.status || 'queued')
+        status: String(metadata.status || 'queued'),
+        cancelRequested: !!metadata.cancelRequested
       };
       try {
         localStorage.setItem(T_DESIGNER_JOBS_KEY, JSON.stringify(jobs));

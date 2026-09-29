@@ -675,7 +675,7 @@
     function isTerminalDesignerChatJob(result) {
       const status = String(result?.status || '');
       return status === 'completed' || status === 'failed'
-        || status === 'not_found' || status === 'stale';
+        || status === 'not_found' || status === 'stale' || status === 'cancelled';
     }
 
     async function requestTenantDesignerChat(payload, indicator, resumedJob = null) {
@@ -789,6 +789,20 @@
         }
 
         const status = String(result?.status || '');
+        // The stop button sets cancelRequested on the local record — honor it
+        // immediately instead of waiting for the next task boundary: the UI
+        // releases now and the server-side marker still halts the runner.
+        const liveJob = currentTenantDesignerJob();
+        if (liveJob && String(liveJob.jobId) === String(metadata.jobId) && liveJob.cancelRequested
+            && status !== 'completed' && status !== 'failed') {
+          return {
+            success: false,
+            status: 'cancelled',
+            error: 'أُلغيت مهمة تعديل العرض — لم تُطبق المهام المتبقية.',
+            failureReason: 'cancelled',
+            _designerJob: metadata
+          };
+        }
         if (result?.stale && (status === 'queued' || status === 'running')) {
           return {
             ...(result || {}),

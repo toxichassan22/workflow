@@ -506,9 +506,10 @@ def _designer_agent_run(tasks, ctx, session=None):
     # the bounded pool.
     ctx['_is_cancelled'] = lambda: _agent_job_cancelled(ctx)
     ctx.setdefault('_session_lock', threading.Lock())
-    # A stale marker from an earlier turn must not kill this run; a fresh click
-    # during the run recreates it and is honored at the next task boundary.
-    _agent_job_clear_cancel(ctx)
+    # The marker file is scoped to this job id — only a click for THIS run can
+    # create it, and one written during the planning window must survive until
+    # the first task boundary. Do not clear it here: clearing would swallow a
+    # cancel that arrived while the planner was still thinking.
 
     for i, task in enumerate(tasks):
         n = task.get('n') or i + 1

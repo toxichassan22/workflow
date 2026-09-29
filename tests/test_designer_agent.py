@@ -359,6 +359,32 @@ class AgentFlowTests(unittest.TestCase):
             headers={'Authorization': 'Bearer ' + self.token})
         self.assertEqual(response.status_code, 409)
 
+    def test_cancel_marker_written_before_run_still_stops_it(self):
+        # A stop click during planning writes the marker before the run starts —
+        # clearing it at task one used to swallow the cancel entirely.
+        import app as app_module
+        job_id = 'agentjob03'
+        slides = [slide('<p>أ</p>')]
+        designer_agent_ids.ensure_slide_ids(slides)
+        ctx = {'job_id': job_id, 'tenant_id': self.tenant, 'slides': slides,
+               'current_index': 0, 'message': 'عدل',
+               'report_progress': lambda *a, **k: None}
+        with self.app.test_request_context():
+            app_module._write_job('.designer_chat_jobs', self.tenant, job_id, {
+                'status': 'running', 'success': True, 'progress': 10,
+                'payload': {'data': {}}})
+        self.assertTrue(app_module._agent_job_mark_cancelled(ctx))
+        tasks = [{'n': 1, 'op': 'edit', 'slides': [slides[0]['id']], 'instruction': 'عدل'}]
+        def editor(*a, **k):
+            raise AssertionError('worker ran despite the cancel marker')
+        with patch.object(self.module, '_agent_worker_edit_slide', side_effect=editor):
+            run = self.module._designer_agent_run(tasks, ctx, session=None)
+        self.assertTrue(run['cancelled'])
+        self.assertEqual(tasks[0]['status'], 'skipped')
+        self.assertEqual(tasks[0]['failureReason'], 'cancelled')
+        self.assertEqual(slides[0]['html'],
+                         '<div class="slide" style="width:1280px;height:720px;"><p>أ</p></div>')
+
     def test_job_resume_skips_planner(self):
         """A job carrying agentState resumes pending tasks without re-planning."""
         import app as app_module

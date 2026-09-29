@@ -92,6 +92,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "designer_agent.run_plan": "Run plan",
   "designer_agent.cancel": "Cancel",
   "designer_agent.stop_run": "Stop execution",
+  "designer_agent.cancelling": "Stopping execution...",
   "designer_agent.retry_failed": "Retry failed tasks ({n})",
   "designer_agent.busy_run": "Running design tasks...",
   "designer_agent.busy_confirm": "Running the confirmed plan...",

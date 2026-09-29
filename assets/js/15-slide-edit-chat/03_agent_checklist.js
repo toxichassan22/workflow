@@ -5,6 +5,7 @@
 
     let tenantDesignerPendingPlan = null;
     let tenantDesignerRunTasks = null;
+    let tenantDesignerCancelling = false;
 
     function designerAgentText(key, fallback, params) {
       return (typeof WFT === 'function') ? WFT(key, fallback, params) : fallback;
@@ -104,9 +105,11 @@
           '</div>';
       } else if (running) {
         actions = '<div class="tenant-designer-checklist-actions">' +
-          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerJob()">' +
-          designerAgentText('designer_agent.stop_run', 'إيقاف التنفيذ') + '</button>' +
-          '</div>';
+          '<button type="button" class="btn ghost tenant-designer-cancel" onclick="cancelDesignerJob()"' +
+          (tenantDesignerCancelling ? ' disabled' : '') + '>' +
+          designerAgentText(tenantDesignerCancelling ? 'designer_agent.cancelling' : 'designer_agent.stop_run',
+                            tenantDesignerCancelling ? 'جاري إيقاف التنفيذ...' : 'إيقاف التنفيذ') +
+          '</button></div>';
       } else if (failedCount) {
         actions = '<div class="tenant-designer-checklist-actions">' +
           '<button type="button" class="btn ghost tenant-designer-retry" onclick="retryDesignerTasks()">' +
@@ -127,6 +130,7 @@
     function clearDesignerChecklist() {
       tenantDesignerPendingPlan = null;
       tenantDesignerRunTasks = null;
+      tenantDesignerCancelling = false;
       renderDesignerChecklist();
     }
 
@@ -135,6 +139,7 @@
     function resetDesignerChecklistForNewTurn() {
       tenantDesignerPendingPlan = null;
       tenantDesignerRunTasks = null;
+      tenantDesignerCancelling = false;
       renderDesignerChecklist();
     }
 
@@ -262,12 +267,28 @@
 
     async function cancelDesignerJob() {
       const job = currentTenantDesignerJob();
-      if (!job || !job.jobId) return;
+      if (!job || !job.jobId || tenantDesignerCancelling) return;
+      // Flag the local record first — the poll loop releases the UI at once,
+      // even if the server job has not been claimed yet (a pre-registration
+      // click would otherwise 404 the cancel and then resubmit the request).
+      job.cancelRequested = true;
+      job.updatedAt = Date.now();
+      persistTenantDesignerJob(job);
+      tenantDesignerCancelling = true;
+      updateDesignerChatBusy(tenantDesignerChatBusy?.progress || 5,
+        designerAgentText('designer_agent.cancelling', 'جاري إيقاف التنفيذ...'));
+      renderDesignerChecklist();
+      const cancelPath = '/api/designer-chat/jobs/' + encodeURIComponent(String(job.jobId)) + '/cancel';
       try {
-        await apiWithTimeout(
-          'POST', '/api/designer-chat/jobs/' + encodeURIComponent(String(job.jobId)) + '/cancel',
-          null, 15000, designerAgentText('designer_agent.stop_send_failed', 'تعذر إرسال طلب الإيقاف.'));
+        await apiWithTimeout('POST', cancelPath, null, 15000,
+          designerAgentText('designer_agent.stop_send_failed', 'تعذر إرسال طلب الإيقاف.'));
       } catch (error) {
-        toast(error?.message || designerAgentText('designer_agent.stop_failed', 'تعذر إيقاف المهمة'));
+        // The job file may land a beat after the local claim — one silent
+        // retry covers the race; a real failure surfaces on the next attempt.
+        setTimeout(() => {
+          apiWithTimeout('POST', cancelPath, null, 15000,
+            designerAgentText('designer_agent.stop_send_failed', 'تعذر إرسال طلب الإيقاف.'))
+            .catch(() => {});
+        }, 1500);
       }
     }

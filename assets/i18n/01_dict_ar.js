@@ -92,6 +92,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "designer_agent.run_plan": "تنفيذ الخطة",
   "designer_agent.cancel": "إلغاء",
   "designer_agent.stop_run": "إيقاف التنفيذ",
+  "designer_agent.cancelling": "جاري إيقاف التنفيذ...",
   "designer_agent.retry_failed": "إعادة المهام المتعثرة ({n})",
   "designer_agent.busy_run": "جاري تنفيذ مهام التصميم...",
   "designer_agent.busy_confirm": "جاري تنفيذ الخطة المؤكدة...",
