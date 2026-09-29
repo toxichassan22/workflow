@@ -104,7 +104,7 @@
     const SAG_NO_PACKAGE = '__none__';
 
     // «الباقة» on a company is its assigned billing package (tenants.package_id
-    // → billing_packages) — the catalog the desk edits under platform settings.
+    // references billing_packages) — the catalog the desk edits under platform settings.
     function sagTenantPackageKey(t) {
       return (t && t.packageId) ? String(t.packageId) : SAG_NO_PACKAGE;
     }
