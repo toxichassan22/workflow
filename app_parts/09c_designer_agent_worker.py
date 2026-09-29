@@ -247,7 +247,7 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
         r'(?:اعد\s*تصميم|إعادة\s*تصميم|غير\s*تصميم|تصميم|تنسيق|شريحة|سلايد|redesign|layout|style)',
         str(instruction or ''), re.IGNORECASE))
     if (not is_slide_redesign and table_edit['handled']
-            and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request')):
+            and table_edit.get('reason') == 'would_empty_table'):
         reason_text = _TABLE_PRECHECK_ARABIC_REASONS.get(table_edit['reason'], table_edit['reason'])
         return None, _agent_worker_note_failure(ctx, f'table_precheck:{reason_text}')
     if color_request and designer_chat_colors.is_color_only_request(color_request):

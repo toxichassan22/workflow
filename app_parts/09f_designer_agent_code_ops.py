@@ -20,11 +20,13 @@ def _agent_exec_code(task, ctx, session, feedback=''):
             detection = designer_chat_reliability.detect_table_edit_request(request_text)
         except Exception:
             pass
-        # Blocks the grammar refuses on safety grounds (conditional wording,
-        # ambiguity, emptying the table) stay refusals — a worker rewrite
-        # must not smuggle the same delete past the gate.
+        # Blocks the grammar refuses on safety grounds (ambiguity, emptying
+        # the table, unsafe layouts) stay refusals — a worker rewrite must
+        # not smuggle the same delete past the gate. Negated/conditional
+        # wording is NOT a refusal: the worker reads the user's own phrasing
+        # and understands «لا تحذف» / «لو موجود» by itself.
         _TABLE_SAFETY_BLOCKS = {
-            'negated_or_conditional_request', 'would_empty_table',
+            'would_empty_table',
             'ambiguous_table_request', 'ambiguous_table_selector',
             'compound_table_request', 'missing_table_target',
             'malformed_table', 'nested_table_unsupported',

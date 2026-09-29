@@ -1,7 +1,10 @@
 """Offline, source-preserving table deletion regressions (no app/model imports)."""
+import os
 import unittest
 
 import designer_chat_reliability as reliability
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 PREFIX = '<div class="slide" dir="rtl"><style>.keep{color:#123456}</style>\n<h2>عنوان &amp; ثابت</h2><img src="/uploads/logo.png" data-x="a > b">\n'
@@ -357,6 +360,22 @@ class TableDeletionSafetyTests(unittest.TestCase):
                         'احذف الصف 2 ثم غير اللون', 'احذف الصف 2 واحذف العمود 1'):
             with self.subTest(command=command):
                 self.assert_blocked(slide(), command)
+
+    def test_negated_wording_routes_to_the_model_not_a_refusal(self):
+        # «لا تحذف» / «لو موجود» stay detected — the deterministic delete must
+        # never fire on them — but callers must not turn the flag into a
+        # refusal: the worker model reads the user's own wording and decides.
+        self.assert_blocked(slide(), 'لا تحذف الصف الثاني', 'negated_or_conditional_request')
+        for part in ('09f_designer_agent_code_ops.py', '09c_designer_agent_worker.py',
+                     '08b_designer_edit_slide.py'):
+            with open(os.path.join(ROOT, 'app_parts', part), encoding='utf-8') as fh:
+                self.assertNotIn('negated_or_conditional_request', fh.read(), part)
+
+    def test_preservation_clause_is_not_read_as_negation(self):
+        # «دون حذف …» limits the edit; it does not negate the request. Whatever
+        # it leaves unparsed is a name miss the worker handles, not a refusal.
+        result = reliability.apply_table_delete_request(slide(), 'احذف الصف الثاني دون حذف العنوان')
+        self.assertNotEqual(result['reason'], 'negated_or_conditional_request')
 
     def test_add_edit_cell_intent_is_blocked_until_supported(self):
         for command in ('أضف صف جديد', 'عدل الخلية الثانية', 'احذف محتوى الخلية',

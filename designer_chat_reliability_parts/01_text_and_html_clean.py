@@ -749,10 +749,13 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     if not handled:
         return result
     result["reason"] = "unsupported_table_edit"
-    if re.search(r"(?<!\w)(?:لا|لاتحذف|متشيلش|متمسحش|ليس|بدون|دون|not|never|don't)(?!\w)", masked):
+    # verbs_scan already had preservation clauses («دون حذف …», «بدون مسح …»)
+    # blanked, so a «دون/بدون» that only limits the edit does not read as a
+    # negation of the request itself.
+    if re.search(r"(?<!\w)(?:لا|لاتحذف|متشيلش|متمسحش|ليس|بدون|دون|not|never|don't)(?!\w)", verbs_scan):
         result["reason"] = "negated_or_conditional_request"
         return result
-    if re.search(r"(?<!\w)(?:اذا|لو(?!\s*(?:سمحت|تكرمت|ممكن|تفضلت|عليك امر))|if|unless)(?!\w)", masked):
+    if re.search(r"(?<!\w)(?:اذا|لو(?!\s*(?:سمحت|تكرمت|ممكن|تفضلت|عليك امر))|if|unless)(?!\w)", verbs_scan):
         result["reason"] = "negated_or_conditional_request"
         return result
     if not verbs or edit or cell:

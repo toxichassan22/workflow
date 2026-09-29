@@ -14,7 +14,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         str(instruction or ''),
         re.IGNORECASE
     ))
-    if not is_slide_redesign and table_edit['handled'] and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request'):
+    if not is_slide_redesign and table_edit['handled'] and table_edit.get('reason') == 'would_empty_table':
         reason_text = _TABLE_PRECHECK_ARABIC_REASONS.get(table_edit['reason'], table_edit['reason'])
         return html, (table_edit['description'] or f'تعذر تحديد تعديل الجدول بأمان: {reason_text}')
     if designer_chat_colors.is_color_only_request(instruction):
