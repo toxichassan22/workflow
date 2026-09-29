@@ -107,11 +107,14 @@
           designerAgentText('designer_agent.retry_failed', 'إعادة المهام المتعثرة ({n})', { n: failedCount }) + '</button>' +
           '</div>';
       }
+      // The rows scroll inside their own track so a long plan never pushes the
+      // confirm/cancel buttons below the fold — actions must stay reachable.
       box.innerHTML = '<div class="tenant-designer-checklist-card">' +
         '<div class="tenant-designer-checklist-title">' +
         (pending ? designerAgentText('designer_agent.pending_plan', 'خطة التنفيذ المقترحة')
                  : designerAgentText('designer_agent.run_tasks', 'مهام التنفيذ')) +
-        '</div>' + rows + actions + '</div>';
+        '</div><div class="tenant-designer-checklist-rows">' + rows +
+        '</div>' + actions + '</div>';
       box.hidden = false;
     }
 

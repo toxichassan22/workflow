@@ -44,6 +44,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "auth.sign_in": "تسجيل الدخول",
   "chrome.platform": "إدارة المنصة",
   "chrome.workspace": "مساحة العمل",
+  "chat.attachment_unsupported_type": "نوع الملف غير مدعوم — أرفق صورة أو PDF",
+  "chat.attachment_read_failed": "تعذر قراءة الملف المرفق",
   "role.company_admin": "أدمن الشركة",
   "role.employee": "موظف",
   "role.super_admin": "سوبر أدمن",

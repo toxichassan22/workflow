@@ -582,7 +582,7 @@
           continue;
         }
         if (!String(file.type || '').startsWith('image/')) {
-          toast('نوع الملف غير مدعوم — أرفق صورة أو PDF');
+          toast(WFT('chat.attachment_unsupported_type', 'نوع الملف غير مدعوم — أرفق صورة أو PDF'));
           clearTenantChatAttachment();
           return;
         }
@@ -606,7 +606,7 @@
           .filter(item => item && String(item.dataUri || '').startsWith('data:application/pdf'))
           .slice(0, TENANT_CHAT_MAX_DOCS);
         if (!imageItems.length && !docItems.length) {
-          toast('تعذر قراءة الملف المرفق');
+          toast(WFT('chat.attachment_read_failed', 'تعذر قراءة الملف المرفق'));
           clearTenantChatAttachment();
           return;
         }

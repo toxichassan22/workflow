@@ -44,6 +44,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "auth.sign_in": "Sign in",
   "chrome.platform": "Platform management",
   "chrome.workspace": "Workspace",
+  "chat.attachment_unsupported_type": "Unsupported file type — attach an image or a PDF",
+  "chat.attachment_read_failed": "Could not read the attached file",
   "role.company_admin": "Company admin",
   "role.employee": "Employee",
   "role.super_admin": "Super admin",

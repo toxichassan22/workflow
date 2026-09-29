@@ -1619,6 +1619,17 @@
       color: var(--txt);
     }
 
+    /* Long plans scroll inside the card — the action row stays pinned below. */
+    .tenant-designer-checklist-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: min(300px, 38vh);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-left: 2px;
+    }
+
     .tenant-designer-task {
       border-radius: 8px;
       padding: 6px 8px;
