@@ -93,7 +93,7 @@
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      const renderDraftRow = (d, recovery, projectCost) => {
+      const renderDraftRow = (d, projectCost) => {
         const title = d.title || 'مشروع بدون عنوان';
         const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
         const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
@@ -102,7 +102,6 @@
         const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
         const totalCostCell = projectCost ? formatUsageCost(projectCost.cost_sar || 0) : '—';
         const mapsCostCell = projectCost ? formatUsageCost(projectMapsCost) : '—';
-        const fieldsHtml = recovery ? '<div class="tenant-hint">' + recovery.fieldCount + ' <span>حقل ممتلئ</span></div>' : '';
         // Admins (approvals permission) approve directly whenever they want; employees
         // only send a request and the draft stays pending until an admin approves it.
         const canReview = hasPermission('approvals');
@@ -126,11 +125,10 @@
           : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
             copyBtn +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-            approveBtn +
-            '<button class="btn small ghost danger" onclick="archiveProposalById(\'' + d.id + '\')">أرشفة</button>';
-        const rowCls = isArchived ? 'll-row-archived' : (recovery && recovery.isEmpty ? 'll-draft-empty' : '');
+            approveBtn;
+        const rowCls = isArchived ? 'll-row-archived' : '';
         return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
-          '<td style="font-weight:700">' + escapeHtml(title) + fieldsHtml + '</td>' +
+          '<td style="font-weight:700">' + escapeHtml(title) + '</td>' +
           '<td>' + statusBadgeHtml + '</td>' +
           '<td>' + totalCostCell + '</td>' +
           '<td>' + mapsCostCell + '</td>' +
@@ -148,10 +146,9 @@
       const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
       list.dataset.archiveStamp = stamp;
       // Render the list from the lightweight drafts query alone, then enrich each
-      // card with recovery and cost data in the background. Waiting for all three
-      // calls kept the spinner up for seconds on two rows because usage-totals
-      // held the response for a provider reconcile and recovery parsed every
-      // presentation payload of the tenant.
+      // row with cost data in the background. Waiting for both calls kept the
+      // spinner up for seconds on two rows because usage-totals holds the
+      // response for a provider reconcile.
       const draftsData = await apiWithTimeout('GET', '/api/project-drafts?' + query.toString(), null, 25000).catch(() => ({ success: false }));
       if (!draftsData || !draftsData.success) {
         if (list.dataset.archiveStamp === stamp) {
@@ -169,19 +166,12 @@
         }
         return;
       }
-      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null, null)).join(''));
+      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null)).join(''));
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       if (!projectIds.length) return;
-      const [recoveryData, totalsData] = await Promise.all([
-        api('GET', '/api/project-drafts/recovery?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => ({ success: false })),
-        apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(',')), null, 25000).catch(() => null)
-      ]);
+      const totalsData = await apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(',')), null, 25000).catch(() => null);
       if (list.dataset.archiveStamp !== stamp) return;
       if (!document.contains(list) || !list.querySelector('[data-draft-id]')) return;
-      const recoveryByDraft = {};
-      if (recoveryData?.success) {
-        (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
-      }
       let costByProject = {};
       if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
       let patched = false;
@@ -189,10 +179,10 @@
         const node = list.querySelector('[data-draft-id="' + d.id + '"]');
         if (!node) return;
         const projectCost = costByProject[d.id];
-        const next = renderDraftRow(d, recoveryByDraft[d.id] || null, projectCost);
+        const next = renderDraftRow(d, projectCost);
         if (node.outerHTML !== next) { node.outerHTML = next; patched = true; }
       });
-      if (patched || recoveryData?.success || totalsData?.success) {
+      if (patched || totalsData?.success) {
         tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       }
     }
@@ -362,22 +352,6 @@
         openTenantPresentations(true);
       } else {
         toast(res?.error || 'فشل نسخ العرض');
-      }
-    }
-
-    async function archiveProposalById(draftId) {
-      if (!draftId) return;
-      if (!confirm(WFT('proposal.archive_confirm', 'هل تريد أرشفة هذا العرض؟ سيتم حفظه في الأرشيف لمدة 365 يوماً مع إمكانية استعادته.'))) return;
-      const res = await api('POST', '/api/project-draft/' + encodeURIComponent(draftId) + '/transition-status', {
-        targetStatus: 'archived',
-        reason: 'أرشفة العرض من قائمة المشاريع'
-      });
-      if (res && res.success) {
-        toast(WFT('proposal.archived', 'تم نقل العرض إلى الأرشيف'));
-        tenantArchiveCache = null;
-        openTenantPresentations(true);
-      } else {
-        toast(res?.error || 'فشل أرشفة العرض');
       }
     }
 

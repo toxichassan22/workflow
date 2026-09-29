@@ -917,14 +917,10 @@
       background: var(--surface-subtle);
     }
 
-    /* Projects-table row states: the archive tint and the recoverable-draft
-       warning that used to ride on the card border. */
+    /* Projects-table row state: the archive tint that used to ride on the
+       card border. */
     .table-wrap tr.ll-row-archived td {
       background: #f1f5f9;
-    }
-
-    .table-wrap tr.ll-draft-empty td {
-      background: #fffbeb;
     }
 
     .tenant-presentation-card {

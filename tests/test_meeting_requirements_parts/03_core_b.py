@@ -1472,9 +1472,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         self.assertEqual(cross.status_code, 404)
 
         index_source = read_frontend_text()
-        self.assertIn('/api/project-drafts/recovery', index_source)
         self.assertIn('async function restoreProjectDraft(draftId, presentationId)', index_source)
-        self.assertIn('حقل ممتلئ', index_source)
 
     def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
         """Every number has to come from the project, and plans are uploaded images only."""
