@@ -690,32 +690,11 @@
       setValue('settingsAccentColor', b.accent_color || '#6DA3C3');
       setValue('settingsBackgroundColor', b.background_color || '#F4F9FC');
       setValue('settingsTextColor', b.text_color || '#333333');
-      setValue('settingsFontFamily', b.font_family || 'The Sans Arabic');
-      setValue('settingsDesignTemplate', b.design_template || 'modern');
-      setValue('settingsCardStyle', b.card_style || 'bordered');
-      setValue('settingsSlideRatio', b.slide_ratio || '16:9');
-      setChecked('settingsHeaderEnabled', b.header_enabled);
-      setChecked('settingsFooterEnabled', b.footer_enabled);
-      setValue('settingsHeaderHeight', b.header_height || 56);
-      setValue('settingsFooterHeight', b.footer_height || 36);
-      setValue('settingsMinSlides', b.min_slides || 8);
-      setValue('settingsDefaultSlideCount', b.default_slide_count || 16);
-      setChecked('settingsLockSlideCount', b.lock_slide_count !== 0);
-      setValue('settingsMoodboardCount', b.moodboard_count || 4);
-      setValue('settingsDefaultMapType', b.default_map_type || 'auto');
-      setValue('settingsMapStyleOverview', b.map_style_overview || 'auto');
-      setValue('settingsMapStyleLandmarks', b.map_style_landmarks || 'auto');
-      setValue('settingsMapStyleAccess', b.map_style_access || 'auto');
-      setValue('settingsMapStyleCatchment', b.map_style_catchment || 'auto');
-      setChecked('settingsDrawCompass', b.draw_compass !== 0);
-      setChecked('settingsDrawInset', b.draw_inset !== 0);
       refreshSettingsColorFields();
       // previews
       const logoPreview = document.getElementById('settingsLogoPreview');
       if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
       renderSettingsWatermarkPreview(b);
-      const refPreview = document.getElementById('settingsRefPreview');
-      if (refPreview) refPreview.textContent = b.reference_image_path ? 'تم رفع صورة مرجعية' : 'اضغط لرفع صورة مرجعية للاستيل التصميمي';
       await loadTenantFonts();
     }
 
@@ -735,15 +714,11 @@
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
     function getValue(id) { const el = document.getElementById(id); return el ? el.value : ''; }
-    function setChecked(id, v) { const el = document.getElementById(id); if (el) el.checked = Boolean(v); }
-    function getChecked(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 
+    // The page only exposes the brand fields below; layout/map/slide-count
+    // keys stay on the stored branding row and are managed elsewhere.
     function collectSettings() {
-      const fontFamily = getValue('settingsFontFamily');
-      const isCustomFont = fontFamily === 'custom';
-      const storedFontName = (tenantBranding && tenantBranding.font_family) || 'The Sans Arabic';
-      const fontToSave = isCustomFont ? storedFontName : fontFamily;
-      const settings = {
+      return {
         company_name: getValue('settingsCompanyName'),
         tagline: getValue('settingsTagline'),
         primary_color: getValue('settingsPrimaryColor'),
@@ -751,36 +726,7 @@
         accent_color: getValue('settingsAccentColor'),
         background_color: getValue('settingsBackgroundColor'),
         text_color: getValue('settingsTextColor'),
-        font_family: fontToSave,
-        font_arabic: fontToSave,
-        design_template: getValue('settingsDesignTemplate'),
-        card_style: getValue('settingsCardStyle'),
-        slide_ratio: getValue('settingsSlideRatio'),
-        header_enabled: getChecked('settingsHeaderEnabled') ? 1 : 0,
-        footer_enabled: getChecked('settingsFooterEnabled') ? 1 : 0,
-        header_height: parseInt(getValue('settingsHeaderHeight') || '56', 10),
-        footer_height: parseInt(getValue('settingsFooterHeight') || '36', 10),
-        min_slides: parseInt(getValue('settingsMinSlides') || '8', 10),
-        default_slide_count: parseInt(getValue('settingsDefaultSlideCount') || '16', 10),
-        lock_slide_count: getChecked('settingsLockSlideCount') ? 1 : 0,
-        moodboard_count: parseInt(getValue('settingsMoodboardCount') || '4', 10),
-        default_map_type: getValue('settingsDefaultMapType') || 'auto',
-        map_style_overview: getValue('settingsMapStyleOverview') || 'auto',
-        map_style_landmarks: getValue('settingsMapStyleLandmarks') || 'auto',
-        map_style_access: getValue('settingsMapStyleAccess') || 'auto',
-        map_style_catchment: getValue('settingsMapStyleCatchment') || 'auto',
-        draw_compass: getChecked('settingsDrawCompass') ? 1 : 0,
-        draw_inset: getChecked('settingsDrawInset') ? 1 : 0,
       };
-      // Only keep custom uploaded font when 'custom' is selected; otherwise clear the file path.
-      if (isCustomFont) {
-        if (tenantBranding && tenantBranding.font_file_path) {
-          settings.font_file_path = tenantBranding.font_file_path;
-        }
-      } else {
-        settings.font_file_path = null;
-      }
-      return settings;
     }
 
     async function saveTenantSettings() {
@@ -793,18 +739,6 @@
         toast('تم حفظ إعدادات الشركة');
       } else {
         showTenantError('settingsError', data.error || 'فشل الحفظ');
-      }
-    }
-
-    async function applyTemplateToSettings() {
-      const template = getValue('settingsDesignTemplate');
-      const data = await api('POST', '/api/branding/template', { template });
-      if (data.success) {
-        tenantBranding = data.branding;
-        openTenantSettings();
-        toast('تم تطبيق القالب');
-      } else {
-        toast(data.error || 'فشل تطبيق القالب');
       }
     }
 
@@ -896,67 +830,6 @@
       } finally {
         setWatermarkSettingsBusy(false);
         hideLoader(completion);
-      }
-    }
-
-    async function handleRefUpload(input) {
-      if (!input.files || !input.files[0]) return;
-      const form = new FormData();
-      form.append('file', input.files[0]);
-      const data = await api('POST', '/api/upload/reference-image', form, true);
-      if (data.success) {
-        const preview = document.getElementById('settingsRefPreview');
-        if (preview) preview.textContent = 'تم رفع الصورة المرجعية';
-        toast('تم رفع الصورة المرجعية');
-      } else {
-        toast(data.error || 'فشل رفع الصورة');
-      }
-    }
-
-    async function handleFontUpload(input) {
-      if (!input.files || !input.files[0]) return;
-      const file = input.files[0];
-      const ext = file.name.split('.').pop().toLowerCase();
-      if (!['ttf', 'otf', 'woff', 'woff2'].includes(ext)) {
-        toast('الصيغة غير مدعومة. استخدم TTF أو OTF أو WOFF');
-        return;
-      }
-      const form = new FormData();
-      form.append('font', file);
-      const data = await api('POST', '/api/branding/font', form, true);
-      if (data.success) {
-        tenantBranding.font_file_path = data.font_file_path || data.font_url;
-        tenantBranding.font_family = data.font_name;
-        setValue('settingsFontFamily', 'custom');
-        const preview = document.getElementById('settingsFontPreview');
-        if (preview) preview.innerHTML = '<span>تم رفع الخط:</span> ' + escapeHtml(file.name);
-        await loadTenantFontCss();
-        toast('تم رفع الخط بنجاح');
-      } else {
-        toast(data.error || 'فشل رفع الخط');
-      }
-    }
-
-    function toggleFontUpload(value) {
-      const uploadInput = document.getElementById('settingsFontUpload');
-      const preview = document.getElementById('settingsFontPreview');
-      if (uploadInput) {
-        uploadInput.style.display = value === 'custom' ? 'block' : 'none';
-      }
-      if (preview && value !== 'custom') {
-        preview.textContent = '';
-      }
-    }
-
-    async function analyzeReferenceImage() {
-      toast('جاري تحليل الصورة المرجعية...');
-      const data = await api('POST', '/api/branding/analyze-reference', {});
-      if (data.success) {
-        tenantBranding = data.branding;
-        openTenantSettings();
-        toast('تم تحليل الصورة وتطبيق الألوان');
-      } else {
-        toast(data.error || 'فشل التحليل');
       }
     }
 

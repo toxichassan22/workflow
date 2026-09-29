@@ -321,120 +321,9 @@
               <span class="tenant-color-value" data-color-for="settingsTextColor" dir="ltr"></span>
             </div>
           </div>
-          <div class="tenant-field" style="display:none;">
-            <select id="settingsFontFamily">
-              <option value="The Sans Arabic">The Sans Arabic</option>
-              <option value="Arial">Arial</option>
-              <option value="Tahoma">Tahoma</option>
-            </select>
-            <div id="settingsFontPreview"></div>
-          </div>
           <div class="tenant-field full" data-permission="company_settings">
             <label>إدارة أوزان وخطوط العرض</label>
             <div id="tenantFontSelections" style="display:grid;gap:8px;margin-top:6px;"></div>
-          </div>
-          <div class="tenant-field">
-            <label>قالب التصميم</label>
-            <select id="settingsDesignTemplate">
-              <option value="modern">عصري</option>
-              <option value="classic">كلاسيكي</option>
-              <option value="minimal">بسيط</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>نوع البطاقات</label>
-            <select id="settingsCardStyle">
-              <option value="bordered">بحدود</option>
-              <option value="shadow">ظلال</option>
-              <option value="flat">مسطح</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>نسبة العرض</label>
-            <select id="settingsSlideRatio">
-              <option value="16:9">16:9</option>
-              <option value="4:3">4:3</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>تفعيل الهيدر</label>
-            <input type="checkbox" id="settingsHeaderEnabled">
-          </div>
-          <div class="tenant-field">
-            <label>تفعيل الفوتر</label>
-            <input type="checkbox" id="settingsFooterEnabled">
-          </div>
-          <div class="tenant-field">
-            <label>ارتفاع الهيدر</label>
-            <input type="number" id="settingsHeaderHeight" value="56">
-          </div>
-          <div class="tenant-field">
-            <label>ارتفاع الفوتر</label>
-            <input type="number" id="settingsFooterHeight" value="36">
-          </div>
-          <div class="tenant-field">
-            <label>أقل عدد شرائح</label>
-            <input type="number" id="settingsMinSlides" value="8">
-          </div>
-          <div class="tenant-field">
-            <label>عدد الشرائح الافتراضي</label>
-            <input type="number" id="settingsDefaultSlideCount" value="16">
-          </div>
-          <div class="tenant-field" style="align-items:flex-start;justify-content:center">
-            <label>قفل عدد الشرائح</label>
-            <input type="checkbox" id="settingsLockSlideCount" style="width:20px;height:20px;margin-top:4px">
-          </div>
-          <div class="tenant-field">
-            <label>عدد صور المود بورد (Moodboard)</label>
-            <input type="number" id="settingsMoodboardCount" value="4" min="1" max="16">
-          </div>
-        </div>
-
-        <h3 style="margin-top:20px; margin-bottom:12px; color:var(--p); font-size:15px; font-weight:700;">إعدادات الخرائط
-        </h3>
-        <div class="tenant-grid">
-          <div class="tenant-field">
-            <label>النمط الافتراضي للخرائط</label>
-            <select id="settingsDefaultMapType">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>ستايل خريطة الأرض / المبنى</label>
-            <select id="settingsMapStyleOverview">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>ستايل خريطة المعالم</label>
-            <select id="settingsMapStyleLandmarks">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>ستايل خريطة الطرق الرئيسية</label>
-            <select id="settingsMapStyleAccess">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>ستايل خريطة المنطقة</label>
-            <select id="settingsMapStyleCatchment">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label>إظهار البوصلة</label>
-            <input type="checkbox" id="settingsDrawCompass">
-          </div>
-          <div class="tenant-field">
-            <label>إظهار الخريطة المصغرة</label>
-            <input type="checkbox" id="settingsDrawInset">
           </div>
         </div>
 
@@ -462,7 +351,6 @@
 
         <div class="tenant-btns">
           <button class="btn primary" onclick="saveTenantSettings()">حفظ الإعدادات</button>
-          <button class="btn ghost" onclick="applyTemplateToSettings()">تطبيق القالب</button>
         </div>
       </div>
     </section>
