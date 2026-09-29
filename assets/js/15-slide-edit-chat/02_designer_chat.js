@@ -112,6 +112,23 @@
       if (JSON.stringify(tenantSlidesData) !== undoSlidesBefore && typeof tenantPresentationProvenance !== 'undefined') {
         tenantPresentationProvenance = data.provenance || reply.provenance || tenantPresentationProvenance;
       }
+      // UI actions the agent requested instead of touching slides: run them in order.
+      if (Array.isArray(reply.uiActions) && reply.uiActions.length) {
+        for (const action of reply.uiActions) {
+          try {
+            if (action?.action === 'goto' && Number.isInteger(Number(action.index))) {
+              selectTenantSlide(Math.max(0, Math.min(Number(action.index), tenantSlidesData.length - 1)));
+            } else if (action?.action === 'undo' && typeof undoPresentationChange === 'function') {
+              undoPresentationChange();
+            } else if (action?.action === 'save' && typeof saveTenantPresentation === 'function') {
+              void saveTenantPresentation();
+            } else if (action?.action === 'export' && typeof exportTenantSlides === 'function') {
+              void exportTenantSlides('pdf');
+            }
+          } catch (uiErr) { console.warn('[DESIGNER-CHAT] ui action failed', uiErr); }
+        }
+        renderTenantSlides();
+      }
       if (reply.creativeImages && typeof reply.creativeImages === 'object') {
         tenantCreativeImages = reply.creativeImages;
         tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
@@ -265,6 +282,8 @@
       // Send the untouched message and conversation. A number is not a client-side
       // command, and even a slide reference does not authorize an edit or navigation.
       const targetScope = tenantChatSlideScope === 'all' ? 'all' : 'auto';
+      // The client sends the message untouched — a number is data, not a slide
+      // reference; the server's reply reports which slides the turn touched.
       const target1BasedIndexes = [];
 
       tenantDesignerMessages.push({
@@ -307,7 +326,8 @@
         projectData: buildDesignerChatProjectData(tenantProjectData),
         creativeImages: buildPresentationGenerationImages(),
         attachedImage: attachedImage ? attachedImage.dataUri : '',
-        attachedImages: attachedGallery.map(item => item.dataUri)
+        attachedImages: attachedGallery.map(item => item.dataUri),
+        attachedDocs: (tenantChatAttachedDocs || []).map(item => ({ name: item.name, dataUri: item.dataUri }))
       };
       // Once the workspace is dirty, send the in-memory copy as the source for the next turn.
       // The server must not reload the last saved presentation and discard an earlier unsaved

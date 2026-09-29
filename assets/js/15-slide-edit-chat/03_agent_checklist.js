@@ -58,12 +58,18 @@
       const reason = status === 'failed' && task?.failureReason
         ? '<div class="tenant-designer-task-reason">' + escapeHtml(String(task.failureReason).slice(0, 140)) + '</div>'
         : '';
+      // What actually changed on each slide — the finish payload carries these
+      // so a completed task reads as «done + what it did», not just «done».
+      const changes = Array.isArray(task?.changes) && task.changes.length
+        ? '<div class="tenant-designer-task-changes">' + task.changes
+            .map(item => escapeHtml(String(item).slice(0, 80))).join(' • ') + '</div>'
+        : '';
       return '<div class="tenant-designer-task is-' + escapeHtml(status) + '">' +
         '<div class="tenant-designer-task-head">' +
         '<span class="tenant-designer-task-n">' + n + '</span>' +
         '<span class="tenant-designer-task-label">' + escapeHtml(label) + target + '</span>' +
         '<span class="tenant-designer-task-status">' + designerTaskStatusLabel(status) + '</span>' +
-        '</div>' + reason + '</div>';
+        '</div>' + reason + changes + '</div>';
     }
 
     function renderDesignerChecklist(liveTasks = null) {

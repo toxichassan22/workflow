@@ -20,10 +20,12 @@ import designer_numbers
 _OP_PRIORITY = {
     'delete': 100, 'restructure': 90, 'split': 80, 'redesign': 70, 'edit': 60,
 }
-_WORKER_OPS = {'edit', 'redesign', 'split', 'restructure', 'create', 'generate_image'}
+_WORKER_OPS = {'edit', 'redesign', 'split', 'restructure', 'create', 'generate_image',
+               'financial_chart'}
 _CODE_OPS = {'delete', 'move', 'table_edit', 'color_edit', 'watermark',
              'insert_map', 'update_image', 'insert_attached_image',
-             'image_descriptions', 'team_logo', 'company_logo_panel', 'renumber'}
+             'image_descriptions', 'team_logo', 'company_logo_panel', 'renumber',
+             'duplicate', 'find_replace', 'font_edit', 'ui'}
 
 _TAG_RE = re.compile(r'<[^>]+>', re.DOTALL)
 _WS_RE = re.compile(r'\s+')
@@ -147,8 +149,33 @@ def _resolve_select(select, slides, current_index=None):
     index_by_id = designer_agent_ids.index_by_id(slides)
     missing = []
 
+    def except_ids(raw):
+        """«كل الشرائح ما عدا الغلاف» — ids, positions, or a nested selector."""
+        if not raw:
+            return [], []
+        if isinstance(raw, dict):
+            return _resolve_select(raw, slides, current_index=current_index)
+        raw = raw if isinstance(raw, list) else [raw]
+        ids, miss = [], []
+        for value in raw:
+            sid = str(value or '')
+            if sid in index_by_id:
+                ids.append(sid)
+                continue
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                miss.append(sid)
+                continue
+            if 1 <= n <= len(all_ids):
+                ids.append(all_ids[n - 1])
+            else:
+                miss.append(sid)
+        return list(dict.fromkeys(ids)), miss
+
     if select.get('all') is True or select.get('target') == 'all':
-        return list(all_ids), missing
+        excluded, exc_missing = except_ids(select.get('except'))
+        return [sid for sid in all_ids if sid not in set(excluded)], exc_missing
     if select.get('current') is True:
         if isinstance(current_index, int) and 0 <= current_index < len(all_ids):
             return [all_ids[current_index]], missing
@@ -265,6 +292,11 @@ def expand_plan(plan, slides, current_index=None):
             # Deterministic code ops stay grouped: one task, many slides.
             standalone.append({'seq': seq, 'op': op, 'raw': raw, 'ids': ids,
                                'instruction': instruction})
+            continue
+        if op not in _WORKER_OPS and op not in _OP_PRIORITY:
+            # Admission, not approximation: an op outside the catalogue is
+            # reported instead of being merged into a nearby task's intent.
+            errors.append({'error': 'unsupported_op', 'op_index': seq, 'op': op})
             continue
         # Content ops (edit/redesign/split/restructure/delete): one winner per slide.
         for sid in ids:

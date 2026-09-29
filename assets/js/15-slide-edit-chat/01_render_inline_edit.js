@@ -519,20 +519,23 @@
 
     let tenantChatAttachedImage = null;
     let tenantChatAttachedImages = [];
+    let tenantChatAttachedDocs = [];
     const TENANT_CHAT_IMAGE_LIMIT = 4 * 1024 * 1024;
     const TENANT_CHAT_MAX_IMAGES = 3;
+    const TENANT_CHAT_MAX_DOCS = 2;
 
     function renderTenantChatAttachment() {
       const box = document.getElementById('tenantChatAttachment');
       const name = document.getElementById('tenantChatAttachmentName');
       if (!box) return;
       const list = tenantChatAttachedImages.length ? tenantChatAttachedImages : (tenantChatAttachedImage ? [tenantChatAttachedImage] : []);
-      box.hidden = !list.length;
-      if (!list.length) {
+      const all = list.concat(tenantChatAttachedDocs);
+      box.hidden = !all.length;
+      if (!all.length) {
         if (name) name.textContent = '';
         return;
       }
-      if (name) name.textContent = list.map(item => item.name).join('، ');
+      if (name) name.textContent = all.map(item => item.name).join('، ');
     }
 
     function openTenantChatImagePreview(src) {
@@ -555,6 +558,7 @@
     function clearTenantChatAttachment() {
       tenantChatAttachedImage = null;
       tenantChatAttachedImages = [];
+      tenantChatAttachedDocs = [];
       const input = document.getElementById('tenantChatImageFile');
       if (input) input.value = '';
       renderTenantChatAttachment();
@@ -565,9 +569,20 @@
     function attachTenantChatImage(input) {
       const picked = input && input.files ? Array.from(input.files).slice(0, TENANT_CHAT_MAX_IMAGES) : [];
       if (!picked.length) return;
+      const images = [];
+      const docs = [];
       for (const file of picked) {
+        if (String(file.type || '') === 'application/pdf') {
+          if (file.size > TENANT_CHAT_IMAGE_LIMIT) {
+            toast('حجم الملف أكبر من 4 م.ب');
+            clearTenantChatAttachment();
+            return;
+          }
+          docs.push(file);
+          continue;
+        }
         if (!String(file.type || '').startsWith('image/')) {
-          toast('الملف ليس صورة');
+          toast('نوع الملف غير مدعوم — أرفق صورة أو PDF');
           clearTenantChatAttachment();
           return;
         }
@@ -576,22 +591,28 @@
           clearTenantChatAttachment();
           return;
         }
+        images.push(file);
       }
-      const reads = picked.map(file => new Promise(resolve => {
+      const readFile = file => new Promise(resolve => {
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, dataUri: String(reader.result || '') });
         reader.onerror = () => resolve(null);
         reader.readAsDataURL(file);
-      }));
-      Promise.all(reads).then(results => {
-        const valid = results.filter(item => item && String(item.dataUri || '').startsWith('data:image/'));
-        if (!valid.length) {
-          toast('تعذر قراءة الصورة');
+      });
+      Promise.all(images.concat(docs).map(readFile)).then(results => {
+        const imageItems = results.slice(0, images.length)
+          .filter(item => item && String(item.dataUri || '').startsWith('data:image/'));
+        const docItems = results.slice(images.length)
+          .filter(item => item && String(item.dataUri || '').startsWith('data:application/pdf'))
+          .slice(0, TENANT_CHAT_MAX_DOCS);
+        if (!imageItems.length && !docItems.length) {
+          toast('تعذر قراءة الملف المرفق');
           clearTenantChatAttachment();
           return;
         }
-        tenantChatAttachedImages = valid.slice(0, TENANT_CHAT_MAX_IMAGES);
+        tenantChatAttachedImages = imageItems.slice(0, TENANT_CHAT_MAX_IMAGES);
         tenantChatAttachedImage = tenantChatAttachedImages[0] || null;
+        tenantChatAttachedDocs = docItems;
         renderTenantChatAttachment();
       });
     }
@@ -689,7 +710,9 @@
       }
 
       const jobPath = '/api/designer-chat/jobs/' + encodeURIComponent(metadata.jobId);
-      const queuePayload = payload ? { ...payload, requestId: metadata.jobId } : null;
+      // A resumed job must never resubmit: a 404 means the job file is gone,
+      // not that the request should re-plan and re-execute the whole edit.
+      const queuePayload = (!resumedJob && payload) ? { ...payload, requestId: metadata.jobId } : null;
       persistTenantDesignerJob(metadata);
       if (!resumedJob) {
         // localStorage is shared by tabs. A short settle window lets the last workspace claim win,

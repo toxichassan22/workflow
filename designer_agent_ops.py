@@ -7,8 +7,6 @@ it can be unit-tested without the app context.
 """
 
 import re
-from html.parser import HTMLParser
-
 from collections import Counter
 
 import designer_numbers
@@ -19,15 +17,16 @@ from designer_chat_safety import StructureSafetyError, validate_single_slide
 # ── Ops ─────────────────────────────────────────────────────────────────────
 
 EDIT_OPS = ('edit', 'redesign', 'rewrite')
-STRUCTURE_OPS = ('split', 'restructure', 'delete', 'move', 'create')
+STRUCTURE_OPS = ('split', 'restructure', 'delete', 'move', 'create', 'duplicate')
 CODE_OPS = ('table_edit', 'color_edit', 'watermark', 'insert_attached_image',
             'insert_map', 'update_image', 'generate_image', 'image_descriptions',
-            'team_logo', 'company_logo_panel', 'renumber')
+            'team_logo', 'company_logo_panel', 'renumber', 'duplicate',
+            'find_replace', 'font_edit', 'financial_chart', 'ui')
 ALL_OPS = EDIT_OPS + STRUCTURE_OPS + CODE_OPS
 
 # Ops that change slide count or order — they must be confirmed by the user
 # and they invalidate later positions, so the runner applies them last.
-CONFIRM_OPS = {'split', 'restructure', 'delete', 'create', 'move'}
+CONFIRM_OPS = {'split', 'restructure', 'delete', 'create', 'move', 'duplicate'}
 
 OP_LABELS = {
     'edit': 'تعديل محتوى',
@@ -49,6 +48,11 @@ OP_LABELS = {
     'team_logo': 'شعار الفريق',
     'company_logo_panel': 'شعار الشركة',
     'renumber': 'ترقيم الشرائح',
+    'duplicate': 'تكرار شريحة',
+    'find_replace': 'استبدال نص في العرض',
+    'font_edit': 'تغيير الخط',
+    'financial_chart': 'إدراج مخطط مالي',
+    'ui': 'إجراء في واجهة العرض',
 }
 
 
@@ -82,8 +86,26 @@ def resolve_selector(select, slides, current_index=0):
                 out.append(idx)
         return sorted(set(out)), missing
 
+    def except_indexes(raw):
+        """«كل الشرائح ما عدا …» — the exclusion may be ids, positions or a
+        nested selector dict."""
+        if not raw:
+            return []
+        if isinstance(raw, dict):
+            indexes, _ = resolve_selector(raw, slides, current_index)
+            return indexes
+        if not isinstance(raw, list):
+            raw = [raw]
+        indexes = [id_to_index[str(v)] for v in raw
+                   if str(v) in id_to_index]
+        indexes += [int(v) - 1 for v in raw
+                    if isinstance(v, int) and 1 <= v <= len(slides)
+                    and str(v) not in id_to_index]
+        return sorted(set(indexes))
+
     if select.get('all'):
-        return list(range(len(slides))), []
+        excluded = set(except_indexes(select.get('except')))
+        return [i for i in range(len(slides)) if i not in excluded], []
     if select.get('current'):
         idx = min(max(int(current_index or 0), 0), max(len(slides) - 1, 0))
         return ([idx] if slides else []), []
@@ -188,6 +210,21 @@ def instruction_for(task, style_brief=''):
         return raw or task.get('label') or OP_LABELS.get(op, op)
     if op == 'renumber':
         return raw or 'صحّح رقم الصفحة الظاهر على الشرائح المحددة لتطابق ترتيبها الحالي.'
+    if op == 'financial_chart':
+        chart_type = params.get('chart_type') or params.get('chart') or 'waterfall'
+        kind_label = ('شلالي (waterfall)' if str(chart_type).lower() in ('waterfall', 'شلالي')
+                      else f'مالي من نوع {chart_type}')
+        return (raw or f'أنشئ في هذه الشريحة مخططًا {kind_label} من بيانات المشروع المالية '
+                       'مع الحفاظ على كل محتوى الشريحة.') + (
+            f'\nالموجز العام: {brief}' if brief else '')
+    if op == 'find_replace':
+        return f'استبدل «{params.get("from") or params.get("find") or ""}» بـ «{params.get("to") or params.get("replace") or ""}»'
+    if op == 'font_edit':
+        return f'غيّر خط الشريحة إلى {params.get("font") or "الخط المطلوب"}'
+    if op == 'ui':
+        return raw or params.get('action') or ''
+    if op == 'duplicate':
+        return raw or 'كرر الشريحة.'
     # edit — explicit change on otherwise untouched content
     parts = [raw or task.get('label') or 'طبّق التعديل المطلوب على هذه الشريحة.']
     if task.get('exact_text'):
@@ -199,26 +236,168 @@ def instruction_for(task, style_brief=''):
 
 # ── Verification ────────────────────────────────────────────────────────────
 
-class _OverflowGauge(HTMLParser):
-    """Counts table rows / card-like blocks that fell out of the slide box.
+_MANAGED_DATA_ATTRS = re.compile(
+    r'^data-(slide-|landloom-|agent-|designer-|footer|counter)', re.IGNORECASE)
+_MEDIA_SRC_RE = re.compile(
+    r'<(?:img|source|video|iframe)\b[^>]*?\b(?:src|poster)\s*=\s*["\']([^"\']+)',
+    re.IGNORECASE | re.DOTALL)
+_MEDIA_CSS_RE = re.compile(r'url\(\s*["\']?([^)"\']+)["\']?\s*\)', re.IGNORECASE)
+_DATA_ATTR_RE = re.compile(r'\b(data-[\w:-]+)\s*=', re.IGNORECASE)
+_TR_RE = re.compile(r'<tr\b', re.IGNORECASE)
+_TOKEN_RE = re.compile(r'##[A-Z][A-Z0-9_-]{2,}##')
+# Requests that explicitly authorize losing content — «احذف الصورة» may drop an
+# image, «استبدل النص» may drop sentences. Numbers stay checked regardless.
+_TEXT_CHANGE_INTENT_RE = re.compile(
+    r'استبدل|بدّل|بدل|غيّر\s+(?:النص|العنوان|الكلام)|أعد\s+صياغ|لخّص|اختصر|قصّر|'
+    r'احذف|امسح|شيل|أزل|ترجمة|ترجم|replace|rewrite|summari[sz]e|translate|rephrase',
+    re.IGNORECASE)
+_MEDIA_REMOVE_INTENT_RE = re.compile(
+    r'احذف|امسح|شيل|أزل|إزالة|حذف|remove|delete', re.IGNORECASE)
+_MEDIA_KIND_WORDS_RE = re.compile(
+    r'صور|صورة|الصور|خريطة|خرائط|الخريطة|خلفي|أيقون|شعار|فيديو|'
+    r'image|images|picture|map|maps|background|logo|video|icon', re.IGNORECASE)
 
-    Cheap static check — the authoritative measurement is the render session's
-    DOM probe; this catches code-op results without launching a browser.
-    """
 
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.rows = 0
-        self.cards = 0
+def _media_key(url):
+    url = str(url or '').strip()
+    if not url or url.startswith('#') or url.startswith('javascript:'):
+        return ''
+    if url.startswith('data:'):
+        # A base64 payload cannot be diffed literally — fingerprint it so a
+        # byte-identical carry-over matches while a swapped asset does not.
+        head, _, payload = url.partition(',')
+        mime = head[5:].split(';')[0] or 'bin'
+        return f'data:{mime}:{len(payload)}'
+    return url.split('#')[0].split('?')[0]
 
-    def handle_starttag(self, tag, attrs):
-        if tag == 'tr':
-            self.rows += 1
-        elif tag in ('div', 'section', 'article', 'li'):
-            style = dict(attrs).get('style') or ''
-            cls = dict(attrs).get('class') or ''
-            if 'card' in cls or re.search(r'\bborder(-radius)?\b', style):
-                self.cards += 1
+
+def _media_profile(html):
+    """Multiset of visible media references (images, css urls, video, iframe)."""
+    profile = Counter()
+    for url in _MEDIA_SRC_RE.findall(html or ''):
+        key = _media_key(url)
+        if key:
+            profile[key] += 1
+    for url in _MEDIA_CSS_RE.findall(html or ''):
+        key = _media_key(url)
+        if key and not key.startswith('data:'):
+            profile[key] += 1
+        elif key:
+            profile[key] += 1
+    return profile
+
+
+def _token_profile(html):
+    """##MAP_1## / ##TEAM_LOGO_2## / ##PRESERVED_BASE64_3## style placeholders."""
+    return Counter(_TOKEN_RE.findall(html or ''))
+
+
+def _data_attr_profile(html):
+    return Counter(
+        name.lower() for name in _DATA_ATTR_RE.findall(html or '')
+        if not _MANAGED_DATA_ATTRS.match(name))
+
+
+def _text_items(html):
+    """Logical text units — block-level items, not raw parser nodes."""
+    try:
+        from designer_chat_safety import _Inventory
+        inventory = _Inventory(html)
+        return [item for item in inventory.text_items if str(item).strip()]
+    except Exception:
+        return [part for part in re.split(r'\s{2,}|\n+', slide_text(html) or '')
+                if part.strip()]
+
+
+def _norm_text(text):
+    return re.sub(r'\s+', ' ', str(text or '')).strip()
+
+
+# Ops where the markup structure itself must survive: edit ops and the
+# deterministic insert/annotate ops all promise «change nothing else». A
+# redesign/restructure/split owns the markup and is exempt from the row count —
+# the text/number/media checks above still cover real content loss.
+_ROW_STRICT_OPS = {
+    'edit', 'generate_image', 'update_image', 'watermark', 'insert_map',
+    'insert_attached_image', 'image_descriptions', 'team_logo',
+    'company_logo_panel', 'font_edit', 'renumber', 'rewrite',
+}
+
+
+def _edit_preservation_reasons(op, before_html, after_html, request_text,
+                               excused_numbers=None):
+    """Content a worker rewrite must keep: media, table rows, data-* hooks,
+    reserved tokens and (unless the request retires it) every text item."""
+    reasons = []
+    request_text = str(request_text or '')
+    text_may_change = op == 'rewrite' or bool(_TEXT_CHANGE_INTENT_RE.search(request_text))
+    media_may_drop = bool(
+        _MEDIA_REMOVE_INTENT_RE.search(request_text)
+        and _MEDIA_KIND_WORDS_RE.search(request_text))
+
+    before_media, after_media = _media_profile(before_html), _media_profile(after_html)
+    dropped_media = before_media - after_media
+    if dropped_media and not media_may_drop:
+        sample = next(iter(dropped_media))
+        if sample.startswith('data:'):
+            sample = sample[:60]
+        reasons.append(f'dropped_media:{sample[:80]}')
+
+    before_tokens, after_tokens = _token_profile(before_html), _token_profile(after_html)
+    dropped_tokens = before_tokens - after_tokens
+    if dropped_tokens:
+        # A resolved token is fine — the placeholder may have turned into a
+        # real asset — as long as new media appeared to take its place.
+        new_media = after_media - before_media
+        if len(dropped_tokens) > sum(new_media.values()):
+            reasons.append('dropped_tokens:' + ','.join(list(dropped_tokens)[:5]))
+
+    before_rows = len(_TR_RE.findall(before_html or ''))
+    after_rows = len(_TR_RE.findall(after_html or ''))
+    # Row strictness applies to surgical ops only — a «redesign» may legitimately
+    # turn a table into cards, and a deterministic table_edit decides rows itself.
+    if op in _ROW_STRICT_OPS and before_rows > after_rows and not media_may_drop:
+        reasons.append(f'dropped_rows:{before_rows - after_rows}')
+
+    dropped_attrs = _data_attr_profile(before_html) - _data_attr_profile(after_html)
+    if dropped_attrs:
+        reasons.append('dropped_data_attrs:' + ','.join(list(dropped_attrs)[:5]))
+
+    if not text_may_change:
+        after_text = _norm_text(slide_text(after_html))
+        # Compare digit-normalized so a reformatted «120,000»→«120000» is not a drop.
+        after_flat = re.sub(r'[,\s]', '', after_text)
+        # A number the missing-numbers check already excused — or one the
+        # request itself named — may retire with the words carrying it.
+        allowed_flat = {re.sub(r'[,\s]', '', str(n)) for n in (excused_numbers or set())}
+        allowed_flat.update(re.sub(r'[,\s]', '', w)
+                            for w in re.findall(r'\d[\d,.]*', request_text))
+        dropped = []
+        for item in _text_items(before_html):
+            item = _norm_text(item)
+            if len(item) < 12:
+                continue
+            if item in after_text or re.sub(r'[,\s]', '', item) in after_flat:
+                continue
+            words = item.split()
+            missing_idx = [i for i, w in enumerate(words)
+                           if re.sub(r',', '', w) not in after_flat]
+            if not missing_idx:
+                continue
+            # An excused number and the label words next to it retire together —
+            # «الهاتف 0111»→«الهاتف 0222» is a sanctioned update, not a lost
+            # sentence. Anything else missing flags the item as dropped.
+            excused = set()
+            for i in missing_idx:
+                if re.sub(r'[,\s]', '', words[i]) in allowed_flat:
+                    excused.update({i - 1, i, i + 1})
+            if [words[i] for i in missing_idx if i not in excused]:
+                dropped.append(item[:60])
+                if len(dropped) >= 3:
+                    break
+        if dropped:
+            reasons.append('dropped_text:' + '،'.join(dropped))
+    return reasons
 
 
 def _excused_missing_numbers(missing, before_htmls, after_htmls,
@@ -254,13 +433,15 @@ def _excused_missing_numbers(missing, before_htmls, after_htmls,
 
 
 def verify_task_result(op, before_htmls, after_htmls,
-                       allowed_numbers=None, request_text=''):
+                       allowed_numbers=None, request_text='', exact_text=None):
     """Post-task check. Returns ``(ok, reasons)``.
 
     ``before_htmls``/``after_htmls`` are the slide HTMLs touched by the task.
     Verification fails closed: unverifiable HTML, dropped numbers or an
     unchanged result on an edit op all count as failure. ``allowed_numbers``
     and ``request_text`` mark the drops a value-update is authorized to make.
+    ``exact_text`` is content the user demanded verbatim — its absence from
+    the result is a failure no excuse lifts.
     """
     reasons = []
     for html in after_htmls:
@@ -274,11 +455,13 @@ def verify_task_result(op, before_htmls, after_htmls,
     # executor (require_facts_preserved/require_preserved). Recounting
     # occurrences here would reject a legitimate merge that deduplicates
     # repeated figures — the executor check is the authority for those ops.
-    if op in EDIT_OPS or op == 'create':
-        missing = missing_numbers(before_htmls, after_htmls)
-        if missing:
-            missing = _excused_missing_numbers(
-                missing, before_htmls, after_htmls, allowed_numbers, request_text)
+    excused_numbers = set()
+    if op in EDIT_OPS or op in ('create', 'financial_chart'):
+        raw_missing = missing_numbers(before_htmls, after_htmls)
+        missing = _excused_missing_numbers(
+            raw_missing, before_htmls, after_htmls, allowed_numbers, request_text) \
+            if raw_missing else []
+        excused_numbers = set(raw_missing or []) - set(missing or [])
         if missing:
             reasons.append('missing_numbers:' + ','.join(missing[:8]))
     if op in EDIT_OPS:
@@ -287,6 +470,19 @@ def verify_task_result(op, before_htmls, after_htmls,
     if op == 'table_edit' and before_htmls and after_htmls:
         if all(b == a for b, a in zip(before_htmls, after_htmls)):
             reasons.append('table_unchanged')
+    # An edit must not silently lose pictures, table rows, data-* hooks or
+    # sentences — the runner used to check numbers only, so a rewrite that
+    # dropped «الصورة والجدول» reported success.
+    if op in EDIT_OPS or op == 'financial_chart':
+        for before, after in zip(before_htmls or [], after_htmls or []):
+            if isinstance(before, str) and before.strip() and isinstance(after, str):
+                reasons.extend(_edit_preservation_reasons(
+                    op, before, after, request_text, excused_numbers=excused_numbers))
+    if exact_text and str(exact_text).strip():
+        wanted = _norm_text(exact_text)
+        joined = ' '.join(_norm_text(slide_text(html)) for html in after_htmls or [])
+        if wanted and wanted not in joined:
+            reasons.append('exact_text_missing')
     return (not reasons), reasons
 
 
@@ -298,14 +494,17 @@ def verify_task_result(op, before_htmls, after_htmls,
 # and billing errors must stop the run (the runner checks those separately).
 
 _WORKER_TASK_OPS = frozenset(EDIT_OPS + ('split', 'restructure', 'create',
-                                         'team_logo', 'company_logo_panel'))
+                                         'team_logo', 'company_logo_panel',
+                                         'financial_chart'))
 _RETRYABLE_CODES = frozenset({
     'missing_numbers', 'facts_not_preserved', 'content_not_preserved',
     'split_not_partitioned', 'incomplete_result', 'invalid_slide_html',
     'invalid_html', 'empty_result', 'empty_worker_result', 'unchanged',
     'no_material_change', 'measured_overflow', 'clipped', 'verification_failed',
     'provider_error', 'exception', 'finalize_failed', 'generation_failed',
-    'worker_failed',
+    'worker_failed', 'dropped_text', 'dropped_media', 'dropped_rows',
+    'dropped_data_attrs', 'dropped_tokens', 'exact_text_missing',
+    'image_not_placed',
 })
 
 
@@ -396,6 +595,26 @@ def retry_feedback(reason, before_htmls=None, measure_report=None):
         elif code in ('invalid_html', 'invalid_slide_html', 'empty_result', 'empty_worker_result'):
             notes.append('المحاولة السابقة لم تُرجع شريحة HTML صالحة — أعد JSON صحيحًا فيه شريحة واحدة'
                          ' بجذر <div class="slide"> وكل الوسوم مغلقة ومتوازنة.')
+        elif code == 'dropped_text':
+            notes.append(f'المحاولة السابقة أسقطت نصوصًا كانت موجودة في الشريحة الأصلية: «{detail[:180]}»'
+                         ' — أعد كل نص ورد في الأصل ما لم يطلب المستخدم تغييره صراحة.')
+        elif code == 'dropped_media':
+            notes.append('المحاولة السابقة أزالت صورة أو وسيطًا كان موجودًا في الشريحة الأصلية'
+                         ' — أبقِ كل الصور والخرائط والوسائط كما هي وأدرجها في الناتج.')
+        elif code == 'dropped_rows':
+            notes.append(f'المحاولة السابقة حذفت {detail} من صفوف الجدول الأصلية'
+                         ' — أبقِ كل الصفوف كما وردت ما لم يطلب المستخدم حذفها صراحة.')
+        elif code == 'dropped_data_attrs':
+            notes.append(f'المحاولة السابقة أسقطت خصائص data-* كانت في الشريحة ({detail[:120]})'
+                         ' — أعدها على العناصر نفسها في الناتج.')
+        elif code == 'dropped_tokens':
+            notes.append(f'المحاولة السابقة حذفت عناصر محجوزة في الشريحة ({detail[:120]})'
+                         ' — أبقِ الرموز ##…## كما هي في مواضعها دون تغيير.')
+        elif code == 'exact_text_missing':
+            notes.append('النص الذي طلبه المستخدم حرفيًا غير موجود في النتيجة — أدرجه بنصه كما طلب.')
+        elif code == 'image_not_placed':
+            notes.append('الصورة المولّدة لم تدخل في HTML الشريحة — أدرج رابط الصورة المرفق في عنصر '
+                         '<img> أو خلفية داخل الشريحة.')
         elif code in ('provider_error', 'exception', 'finalize_failed', 'generation_failed',
                       'worker_failed', 'verification_failed'):
             continue
@@ -406,10 +625,11 @@ def retry_feedback(reason, before_htmls=None, measure_report=None):
     return ' '.join(dict.fromkeys(note for note in notes if note))
 
 
-def verify_deck_integrity(slides, before_ids=None):
+def verify_deck_integrity(slides, before_ids=None, removed_ok=None):
     """Whole-deck checks after a run: every slide valid, every id present,
     no duplicated ids, and (when before_ids given) no id silently dropped
-    other than by delete/restructure tasks the runner already recorded.
+    other than the ones delete/restructure tasks legitimately consumed —
+    the runner passes those in ``removed_ok``.
     """
     reasons = []
     seen = set()
@@ -429,8 +649,10 @@ def verify_deck_integrity(slides, before_ids=None):
         except StructureSafetyError as exc:
             reasons.append(f'slide_{index}_invalid:{exc}')
     if before_ids:
+        removed_ok = set(removed_ok or ())
         for sid in before_ids:
-            pass  # ids removed by delete/restructure are legitimate; runner tracks those
+            if sid and sid not in seen and sid not in removed_ok:
+                reasons.append(f'dropped_id:{sid}')
     return reasons
 
 
@@ -493,6 +715,17 @@ _FAILURE_REASON_TEXT = {
     'image_generation_failed': 'تعذر توليد الصورة حاليًا.',
     'exception': 'حدث خطأ أثناء تنفيذ المهمة.',
     'unknown': 'تعذر تنفيذ المهمة.',
+    'dropped_text': 'النتيجة أسقطت جزءًا من نص الشريحة الأصلي فرُفضت.',
+    'dropped_media': 'النتيجة أزالت صورة أو وسيطًا كان في الشريحة فرُفضت.',
+    'dropped_rows': 'النتيجة حذفت صفوفًا من الجدول دون طلب فرُفضت.',
+    'dropped_data_attrs': 'النتيجة أسقطت خصائص data- المطلوبة في الشريحة فرُفضت.',
+    'dropped_tokens': 'النتيجة فقدت عناصر محجوزة كانت في الشريحة فرُفضت.',
+    'exact_text_missing': 'النص المطلوب حرفيًا غير موجود في النتيجة.',
+    'image_not_placed': 'الصورة المولّدة لم تُدرج في الشريحة.',
+    'find_replace_not_found': 'النص المطلوب استبداله غير موجود في الشرائح المحددة.',
+    'font_unchanged': 'لم يتغير خط الشريحة.',
+    'missing_replace_target': 'لم يُحدد الطلب النص المطلوب استبداله.',
+    'unsupported_op': 'هذه العملية غير مدعومة حاليًا في المصمم.',
 }
 
 _FAILURE_REASON_FALLBACK = 'تعذر تنفيذ المهمة — أعد المحاولة بعد قليل.'

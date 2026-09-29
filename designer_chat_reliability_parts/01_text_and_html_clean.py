@@ -832,10 +832,28 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
             return result
         targets = [_table_selector(piece) for piece in pieces if _TABLE_QUOTES_RE.fullmatch(piece)]
     else:
-        # Numeric lists only; an unquoted name containing 'و' remains one label.
-        number_list = re.split(r"\s*(?:,|،|\s+و\s*|\s+and\s+)\s*", tail)
-        parsed = [_table_selector(piece) for piece in number_list]
-        targets = parsed if all(item and item["by"] == "number" for item in parsed) else [_table_selector(tail)]
+        # «الصفوف من 2 لـ 5» — an inclusive range, and only with the explicit
+        # من…إلى frame: a bare «1-2» stays ambiguous (a typo, not a range).
+        range_match = re.fullmatch(
+            r'من\s+(\d{1,4})\s*(?:إلى|الى|لـ|ل|حتى|to)\s*(\d{1,4})', tail)
+        if range_match and 0 < int(range_match.group(2)) - int(range_match.group(1)) <= 30:
+            targets = [{"by": "number", "number": n}
+                       for n in range(int(range_match.group(1)),
+                                      int(range_match.group(2)) + 1)]
+        else:
+            number_list = re.split(r"\s*(?:,|،|\s+و\s*|\s+and\s+)\s*", tail)
+            parsed = [_table_selector(piece) for piece in number_list]
+            if all(item and item["by"] == "number" for item in parsed):
+                targets = parsed
+            elif len(number_list) > 1 and all(parsed):
+                # «السعر و المساحة» — unquoted labels joined by و. The compound
+                # tail stays on the request as a fallback: it can also be ONE
+                # header that legitimately contains و («المصدر والملاحظات»),
+                # and apply time prefers it when a piece matches no cell.
+                targets = parsed
+                request["compound_name"] = tail
+            else:
+                targets = [_table_selector(tail)]
     if not targets or any(target is None for target in targets):
         result["reason"] = "ambiguous_table_target"
         return result

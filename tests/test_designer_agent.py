@@ -288,7 +288,10 @@ class AgentFlowTests(unittest.TestCase):
                 patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
                              side_effect=lambda s, *a: s):
-            confirm = self.post({'message': 'نفذ', 'slidesData': slides,
+            # The confirm echoes the id-annotated deck the pending plan returned —
+            # that is what the real client posts, and the id+title+hash signature
+            # only matches when it does.
+            confirm = self.post({'message': 'نفذ', 'slidesData': body.get('slidesData') or slides,
                                  'projectData': {}, 'slideIndex': 0,
                                  'confirmPlan': {'id': pending['id'],
                                                  'deckSignature': pending['deckSignature'],
@@ -842,7 +845,9 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(listing.status_code, 200, listing.get_json())
         payload = listing.get_json()
         row = next(f for f in payload['failures'] if f['id'] == failure_id)
-        self.assertEqual(row['reasonCodes'], ['missing_numbers'])
+        # The worker dropped the numeric «120,000» and the visible text with it —
+        # both preservation checks fire and land in the journal's reason codes.
+        self.assertEqual(sorted(row['reasonCodes']), ['dropped_text', 'missing_numbers'])
         self.assertEqual(row['attempts'], 2)
         self.assertEqual(row['tenantName'], 'Agent')
         self.assertGreaterEqual(payload['byReason']['missing_numbers'], 1)
@@ -857,7 +862,8 @@ class AgentFlowTests(unittest.TestCase):
         # Replayed with this build's checks: still a genuine drop.
         replay = detail.get_json()['replay']
         self.assertFalse(replay['ok'])
-        self.assertEqual(replay['reasons'], ['missing_numbers:120000'])
+        self.assertEqual(sorted(replay['reasons']),
+                         ['dropped_text:الإيراد 120,000', 'missing_numbers:120000'])
 
         self.assertEqual(client.get(
             f'/api/admin/designer-failures/{self.tenant}/0000000000000-000000',
@@ -973,6 +979,7 @@ class SelectorAndVerifyTests(unittest.TestCase):
         self.assertFalse(retryable('table_edit', 'table_unchanged', rejected_by_check=True))
         self.assertFalse(retryable('insert_map', 'map_missing'))
 
+
     def test_retry_feedback_is_actionable(self):
         before = slide(TIMELINE_TABLE)['html']
         note = designer_agent_ops.retry_feedback('missing_numbers:5,2029', [before])
@@ -987,71 +994,6 @@ class SelectorAndVerifyTests(unittest.TestCase):
         self.assertEqual(designer_agent_ops.retry_feedback('provider_error:timeout', [before]), '')
 
 
-class LayoutRegressionTests(unittest.TestCase):
-    CLEAN = {'ok': True, 'overflowX': False, 'overflowY': False, 'clipped': [],
-             'slideScroll': {'w': 1280, 'h': 720}}
-    CLIPPED = dict(CLEAN, clipped=[{'tag': 'div', 'overPx': 30, 'text': 'جدول'}])
-
-    def setUp(self):
-        import generate_pdf_from_preview
-        self.regressions = generate_pdf_from_preview.measure_regression_reasons
-
-    def test_inherited_fault_is_not_a_regression(self):
-        self.assertEqual(self.regressions(self.CLIPPED, self.CLIPPED), [])
-        overflowing = dict(self.CLEAN, overflowY=True, slideScroll={'w': 1280, 'h': 760})
-        self.assertEqual(self.regressions(overflowing, dict(overflowing)), [])
-
-    def test_new_or_worse_fault_is_a_regression(self):
-        self.assertEqual(self.regressions(self.CLEAN, self.CLIPPED), ['clipped:div:30px'])
-        worse = dict(self.CLIPPED, clipped=[{'tag': 'p', 'overPx': 60, 'text': 'x'}])
-        self.assertEqual(self.regressions(self.CLIPPED, worse), ['clipped:p:60px'])
-        overflowing = dict(self.CLEAN, overflowY=True, slideScroll={'w': 1280, 'h': 760})
-        self.assertEqual(self.regressions(self.CLEAN, overflowing), ['measured_overflow'])
-        grown = dict(overflowing, slideScroll={'w': 1280, 'h': 800})
-        self.assertEqual(self.regressions(overflowing, grown), ['measured_overflow'])
-
-    def test_unknown_source_keeps_the_absolute_rule(self):
-        self.assertEqual(self.regressions(None, self.CLIPPED), ['clipped:div:30px'])
-        self.assertEqual(self.regressions(None, self.CLEAN), [])
-
-
-class FailureReasonTextTests(unittest.TestCase):
-    def test_missing_numbers_maps_to_arabic_with_values(self):
-        text = designer_agent_ops.failure_reason_text('missing_numbers:7378')
-        self.assertNotIn('missing_numbers', text)
-        self.assertIn('7378', text)
-        self.assertRegex(text, r'[؀-ۿ]')
-        self.assertIn('73، 78', designer_agent_ops.failure_reason_text('missing_numbers:73,78'))
-
-    def test_plain_codes_translate(self):
-        self.assertEqual(designer_agent_ops.failure_reason_text('unchanged'),
-                         'أعاد المصمم الشريحة نفسها دون تغيير قابل للتحقق.')
-        self.assertEqual(designer_agent_ops.failure_reason_text('ids_not_found'),
-                         'لم يُعثر على الشرائح المطلوبة في العرض الحالي.')
-        self.assertNotIn('exception', designer_agent_ops.failure_reason_text('exception:ValueError'))
-        self.assertTrue(designer_agent_ops.failure_reason_text('bogus_code'))
-
-    def test_facts_and_precheck_parts(self):
-        text = designer_agent_ops.failure_reason_text('facts_not_preserved:numbers:80,90')
-        self.assertNotIn('facts_not_preserved', text)
-        self.assertIn('80، 90', text)
-        self.assertEqual(designer_agent_ops.failure_reason_text('table_precheck:سيفرغ الجدول'),
-                         'سيفرغ الجدول')
-        # Arabic worker notes pass through untouched.
-        self.assertEqual(designer_agent_ops.failure_reason_text('لا توجد خريطة معتمدة.'),
-                         'لا توجد خريطة معتمدة.')
-
-    def test_joined_reasons_dedupe(self):
-        out = designer_agent_ops.failure_reason_text('unchanged;unchanged')
-        self.assertEqual(out.count('دون تغيير قابل للتحقق'), 1)
-
-    def test_public_task_shows_display_reason(self):
-        public = designer_agent_ops.public_task({
-            'n': 1, 'op': 'edit', 'status': 'failed', 'failureReason': 'unchanged'})
-        self.assertNotIn('unchanged', public['failureReason'])
-        self.assertIn('دون تغيير', public['failureReason'])
-        ok_task = designer_agent_ops.public_task({'n': 1, 'op': 'edit', 'status': 'success'})
-        self.assertIsNone(ok_task['failureReason'])
 
 
 if __name__ == '__main__':

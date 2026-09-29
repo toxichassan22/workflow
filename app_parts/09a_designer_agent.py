@@ -21,6 +21,9 @@ import designer_chat_safety
 _AGENT_JOB_NS = '.designer_chat_jobs'
 _AGENT_TOOL_ROUNDS = 6
 _AGENT_TASK_ATTEMPTS = 2
+# A conversation that keeps asking instead of deciding stalls the user; after
+# two clarifying questions the planner's next «ask» becomes a plain statement.
+_AGENT_MAX_ASK_STREAK = 2
 # Plans at or above this many tasks — or any deck-shape op — ask the user to
 # confirm the checklist before anything executes.
 _AGENT_CONFIRM_TASK_THRESHOLD = 5
@@ -51,6 +54,10 @@ _DESIGNER_AGENT_TOOLS = [
                         'description': 'مفتاح القسم أو اسمه: basic|location|land_croquis|contact|section-timeline|section-financial-calc|section-team|section-market-study|section-visual-concept|section-executive-content'},
             'keys': {'type': 'array', 'items': {'type': 'string'},
                      'description': 'مفاتيح حقول محددة مثل contact_phone'}}}}},
+    {'type': 'function', 'function': {
+        'name': 'recent_failures',
+        'description': 'آخر مهام فشل تنفيذها في هذا العرض مع السبب — استخدمه عندما يسأل المستخدم لماذا فشل تعديل سابق أو «لماذا لم ينجح».',
+        'parameters': {'type': 'object', 'properties': {}}}},
 ]
 
 _AGENT_PLAN_SCHEMA = {
@@ -107,6 +114,7 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 
 ## أشكال select
 {{"ids":["id1","id2"]}} | {{"range":[fromId,toId]}} | {{"section":"key"}} | {{"all":true}} | {{"current":true}}
+- «كل الشرائح ما عدا …»: {{"all":true,"except":[ids أو أرقام شرائح أو محدد متداخل]}}.
 
 ## العمليات (op)
 - edit: تعديل محدد على محتوى الشريحة مع الحفاظ على بنيتها.
@@ -115,8 +123,13 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 - split: تقسيم شريحة واحدة إلى parts أجزاء بتوزيع محتواها بالترتيب بينها — توزيع عناصر لا نسخ الشريحة (params.parts أو "auto").
 - restructure: إعادة هيكلة مجموعة شرائح متجاورة إلى target_count شريحة (أقل أو أكثر) — لطلبات «قلل الصفحات/ادمج هذه الصفحات في N».
 - delete / move / create: حذف أو نقل أو إنشاء صريح. move وcreate يأخذان after = معرف شريحة أو "start" أو "end".
+- duplicate: نسخ شريحة كما هي في الموضع التالي لها — لطلبات «كرر/انسخ الشريحة».
 - table_edit: حذف صف أو عمود من جدول — params {{"column":"اسم العمود"}} أو {{"row":رقم}} — تنفيذ كودي حتمي.
 - color_edit: استبدال لون — params {{"from":"#hex","to":"#hex"}}.
+- find_replace: استبدال نص في كل الشرائح المحددة — params {{"from":"النص القديم","to":"النص الجديد"}} — لطلبات «استبدل كلمة X بـ Y في العرض».
+- font_edit: تغيير خط الشرائح المحددة — params {{"font":"اسم الخط"}}.
+- financial_chart: مخطط مالي (شلالي/waterfall أو أعمدة) من بيانات المشروع — params {{"chart_type":"waterfall"}}.
+- ui: إجراء واجهة لا يمس المحتوى — params {{"action":"undo|save|export|goto"}} — «تراجع»=undo، «احفظ»=save، «صدّر PDF»=export، «افتح/انتقل لشريحة»=goto مع select على الشريحة.
 - watermark: علامة مائية — params {{"action":"apply|remove|show|hide","opacity":0.045,"width_px":480,"only_white":false}}.
 - insert_attached_image: صورة أرفقها المستخدم في هذه الرسالة — params {{"image_index":1,"position":"separate_slide|inline|background|watermark|logo","title":"","caption":"","opacity":0.12,"width_px":480}}.
 - insert_map: خريطة معتمدة — params {{"map_type":"overview|access|catchment|landmarks","refresh":false}}.
@@ -126,12 +139,20 @@ _AGENT_PLANNER_RULES = """أنت «المخطط» لمساعد تصميم الع
 - team_logo / company_logo_panel: شعار الفريق أو شعار الشركة.
 - renumber: تصحيح رقم الصفحة الظاهر على الشرائح المحددة ليطابق ترتيبها — تنفيذ كودي حتمي لطلبات «أعد ترقيم/رقّم الشرائح» ولا يغيّر أي محتوى.
 
+## ما لا تستطيع فعله — اعترف به بصراحة (kind=reply)
+- تغيير نمط الخريطة (قمر صناعي/satellite/تضاريس) أو توليد خريطة جديدة — المتاح insert_map بأنواعها المعتمدة الأربعة فقط.
+- مرفقات غير الصور أو PDF — المستندات الأخرى غير مدعومة.
+- استدعاء بيانات خارجية أو تنفيذ عمليات خارج هذا العرض.
+عند طلب شيء منها لا تحوّله إلى أقرب عملية مدعومة ولا تنفّذ تعديلاً بدلاً منه — أخبر المستخدم أنه غير مدعوم حاليًا بجملة واضحة.
+
 ## قواعد
 - لا تخمّن معرفات غير موجودة في المخطط — عند شك في الهدف اسأل بدل التخمين.
 - «أعد تصميم/حسّن الشكل» تعني redesign؛ «غيّر/عدّل شيئاً محدداً» تعني edit؛ «أعد الصياغة» تعني rewrite؛ «أعد ترقيم/رقّم الشرائح» تعني renumber — لا تحوّلها إلى edit فالعدّاد يُدار كودياً.
 - الافتراضي عند غياب تحديد هو current (الشريحة المعروضة)، إلا إذا كان الطلب جمعاً واضحاً فاختر all أو ids.
 - كل مهمة وظيفة واحدة: لا تخلط إعادة تصميم وتقسيم على نفس الشريحة في op واحد — أنشئ op لكل مقصود وستُدمج تلقائياً على الأقوى.
 - طلب «حدّث/زامن من بيانات المشروع» (تواصل، أسعار، مساحات، موقع، فريق عمل، جداول) يستوجب استدعاء get_project_data أولاً على القسم المعني ثم نقل القيم المرجعة حرفيًا داخل instruction المهمة — ممنوع الاكتفاء بعبارة «حدّث من البيانات» وممنوع نسخ القيم من HTML الشريحة فقد يكون قديمًا.
+- أرقام الشرائح في سجل المحادثة مواضع قديمة قد تغيّرت بعد حذف أو نقل — استخدم المعرفات والعناوين لا الأرقام المسجلة.
+- عند سؤال المستخدم «لماذا فشل/لم يتغير شيء» استدعِ recent_failures قبل الرد.
 - نبّه في message عندما تحتاج الخطة لتأكيد المستخدم (تغيير عدد الشرائح أو مهام كثيرة)."""
 
 
@@ -141,16 +162,42 @@ def _agent_usage_ctx(ctx, kind='designer_chat'):
 
 
 def _agent_deck_signature(slides):
-    """Sign the deck by content, not ids: a pending plan stays valid only while
-    the slides it targeted are byte-identical — any user edit between plan and
-    confirm forces a re-plan (ids alone would miss content edits, and the
+    """Sign the deck by identity + title + content: a pending plan stays
+    valid only while the slides it targeted are byte-identical — any edit,
+    retitle or reorder between plan and confirm forces a re-plan (the
     plan_pending response intentionally doesn't return slidesData)."""
-    body = '\x00'.join(str(s.get('html') or '') for s in slides if isinstance(s, dict))
-    return hashlib.sha1(body.encode('utf-8')).hexdigest()[:16]
+    return designer_agent_ids.deck_signature(slides)
 
 
 def _agent_error_turn(text):
     return {'kind': 'reply', 'message': text}
+
+
+def _agent_expand_warnings(expand_errors):
+    """Partial-plan notices in Arabic — which part of the request never became
+    a task. Surfaced instead of the old silent «success with fewer ops»."""
+    labels = {
+        'unknown_ids': 'تعذر تحديد بعض الشرائح المطلوبة فتجاوزتها الخطة',
+        'ids_not_found': 'تعذر تحديد بعض الشرائح المطلوبة فتجاوزتها الخطة',
+        'invalid_op': 'جزء من الخطة لم يُفهم فتُجاهل',
+        'missing_op': 'جزء من الطلب بلا عملية واضحة فتُجاهل',
+        'unsupported_op': 'جزء من الطلب عملية غير مدعومة حاليًا فلم تُنفَّذ',
+        'invalid_plan': 'صيغة الخطة غير صالحة',
+        'plan_without_ops': 'الخطة بلا عمليات',
+    }
+    out = []
+    for error in expand_errors or []:
+        if isinstance(error, dict):
+            text = labels.get(error.get('error'))
+            detail = error.get('ids')
+            if text:
+                if isinstance(detail, list) and detail:
+                    out.append(text + f' ({len(detail)} موضع)')
+                elif isinstance(error.get('op'), str) and error['op']:
+                    out.append(text + f' ({error["op"]})')
+                else:
+                    out.append(text)
+    return list(dict.fromkeys(out))[:4]
 
 
 # Only a provider failure can mean the wallet ran dry. A reason string also
@@ -239,13 +286,20 @@ def _agent_tool_result(name, args, ctx, session):
     if name == 'get_slides':
         ids = [str(i) for i in (args.get('ids') or [])][:6]
         found = []
+        inlined = 0
         for sid in ids:
             slide = by_id.get(sid)
             if slide is None:
                 continue
+            # Raw base64 payloads blow the tool result past the context cap
+            # and tell the planner nothing — the placeholders mark their spots.
+            html, base64_map = _agent_preserve_base64(str(slide.get('html') or ''))
+            inlined += len(base64_map)
             found.append({'id': sid, 'title': str(slide.get('title') or ''),
-                          'html': str(slide.get('html') or '')[:60000]})
-        return json.dumps({'slides': found, 'requested': len(ids), 'found': len(found)},
+                          'html': html[:60000]})
+        return json.dumps({'slides': found, 'requested': len(ids), 'found': len(found),
+                           'inlineImages': inlined,
+                           'note': '##PRESERVED_BASE64_*## tokens are the slide\'s inline images'},
                           ensure_ascii=False), None
     if name == 'density':
         ids = [str(i) for i in (args.get('ids') or [])]
@@ -269,7 +323,64 @@ def _agent_tool_result(name, args, ctx, session):
         except Exception as exc:
             return json.dumps({'error': f'project_data_failed:{exc}'},
                               ensure_ascii=False), None
+    if name == 'recent_failures':
+        records = _agent_recent_failures(ctx, limit=4)
+        return json.dumps({'failures': records, 'count': len(records)},
+                          ensure_ascii=False), None
     return json.dumps({'error': f'unknown_tool:{name}'}, ensure_ascii=False), None
+
+
+def _agent_recent_failures(ctx, limit=4):
+    """Latest journaled task failures for this tenant — the planner's answer
+    to «ليه التعديل فشل؟»."""
+    folder = _agent_failure_dir(ctx.get('tenant_id'))
+    if not folder:
+        return []
+    try:
+        names = sorted((n for n in os.listdir(folder) if n.endswith('.json')),
+                       reverse=True)
+    except OSError:
+        return []
+    entries = []
+    for name in names[:25]:
+        try:
+            with open(os.path.join(folder, name), encoding='utf-8') as fh:
+                rec = json.load(fh)
+        except Exception:
+            continue
+        if ctx.get('presentation_id') and rec.get('presentationId') not in (
+                None, ctx['presentation_id']):
+            continue
+        task = rec.get('task') if isinstance(rec.get('task'), dict) else {}
+        entries.append({
+            'op': task.get('op'),
+            'titles': task.get('titles'),
+            'reason': str(rec.get('reasonText') or '')[:200],
+            'at': rec.get('at'),
+            'request': str(rec.get('message') or '')[:160],
+        })
+        if len(entries) >= limit:
+            break
+    return entries
+
+
+def _agent_ask_streak(ctx):
+    """Consecutive assistant questions already asked — the loop-cap counter."""
+    streak = 0
+    history = [m for m in (ctx.get('history_for_turn') or []) if isinstance(m, dict)]
+    for msg in reversed(history):
+        if msg.get('role') == 'user':
+            if not streak:
+                continue  # the current request sits last — look behind it
+            break
+        if msg.get('role') != 'assistant':
+            break
+        content = str(msg.get('content') or '').strip()
+        if content.endswith(('؟', '?')):
+            streak += 1
+            continue
+        break
+    return streak
 
 
 # ── Planner ──────────────────────────────────────────────────────────────────
@@ -292,13 +403,33 @@ def _designer_agent_plan(ctx, session=None):
         focus=notes['focus'], scope=notes['scope'])
     if ctx.get('attached_uris'):
         system += (f"\n\n## صور مرفقة في هذه الرسالة: {len(ctx['attached_uris'])}\n"
-                   'استخدم op="insert_attached_image" حصراً لإدراج أي منها.')
+                   'استخدم op="insert_attached_image" حصراً لإدراج أي منها، أو عاملها '
+                   'كمرجع أسلوبي/بصري إن طلب المستخدم ذلك.')
+    if ctx.get('attached_docs'):
+        doc_note = '\n'.join(
+            f"### {doc['name']}\n{doc['text'] or '(تعذر استخراج نص المستند)'}"
+            for doc in ctx['attached_docs'])
+        system += ('\n\n## مستندات مرفقة في هذه الرسالة (نص مستخرج)\n' + doc_note
+                   + '\nاستخدم محتواها عند الحاجة — ممنوع إدراجها كصورة في الشريحة.')
     if ctx.get('training_context'):
         system += f"\n\n## قواعد الشركة الملزمة\n{ctx['training_context'][:4000]}"
 
+    user_content = ctx['message'][:4000]
+    if ctx.get('user_image_refs'):
+        # The planner used to see only an attachment COUNT — it could not
+        # tell a style reference from an image to insert. The raw data URIs
+        # ride as vision parts so the plan is made on what the images show.
+        user_content = [{'type': 'text', 'text': user_content}]
+        for ref in ctx['user_image_refs'][:4]:
+            uri = ref.get('data_uri') if isinstance(ref, dict) else None
+            if uri:
+                user_content.append({'type': 'image_url', 'image_url': {'url': uri}})
+        user_content.append({'type': 'text', 'text':
+            'الصور المرفقة أعلاه أرسلها المستخدم مع هذا الطلب — عاملها كما يصف الطلب '
+            '(مرجع أسلوب أو صورة للإدراج).'})
     messages = [
         {'role': 'system', 'content': system},
-        {'role': 'user', 'content': ctx['message'][:4000]},
+        {'role': 'user', 'content': user_content},
     ]
     errors = []
     for _round in range(_AGENT_TOOL_ROUNDS):
@@ -376,6 +507,7 @@ def _designer_agent_turn(ctx):
     # are what code ops embed into slide HTML.
     raw_uris = _normalize_designer_attached_images(data)
     ctx['user_image_refs'] = [{'data_uri': uri} for uri in raw_uris] or None
+    ctx['attached_docs'] = _normalize_designer_attached_docs(data)
     if raw_uris:
         try:
             ctx['attached_uris'] = _persist_designer_attached_images(raw_uris, tenant_id)
@@ -390,8 +522,9 @@ def _designer_agent_turn(ctx):
     agent_state = job.get('agentState') if isinstance(job, dict) else None
     if isinstance(agent_state, dict) and agent_state.get('tasks'):
         pending = [t for t in agent_state['tasks'] if t.get('status') in ('pending', 'failed')]
-        if pending and isinstance(agent_state.get('slides'), list):
-            ctx['slides'] = slides = agent_state['slides']
+        state_slides = _unpack_state_slides(agent_state)
+        if pending and isinstance(state_slides, list) and state_slides:
+            ctx['slides'] = slides = state_slides
             ctx['plan_id'] = agent_state.get('planId')
             block = _agent_balance_preflight(ctx, agent_state['tasks'])
             if block is not None:
@@ -420,7 +553,7 @@ def _designer_agent_turn(ctx):
     confirm = data.get('confirmPlan') if isinstance(data.get('confirmPlan'), dict) else None
     if confirm:
         if confirm.get('deckSignature') != _agent_deck_signature(slides):
-            return _agent_chat_response(ctx, 'تغيّر ترتيب العرض بعد إعداد الخطة — أعد الطلب لأخطط على النسخة الحالية.', kind='ask')
+            return _agent_chat_response(ctx, 'تغيّر محتوى العرض بعد إعداد الخطة — أعد الطلب لأخطط على النسخة الحالية.', kind='ask')
         tasks, _errs = designer_agent_plan.expand_plan(
             {'ops': confirm.get('ops') or [], 'style_brief': confirm.get('style_brief') or ''},
             slides, current_index=ctx['current_index'])
@@ -438,6 +571,13 @@ def _designer_agent_turn(ctx):
 
     with _agent_render_session(ctx['branding'], tenant_id) as session:
         turn, _messages, errors = _designer_agent_plan(ctx, session)
+        if (turn.get('kind') == 'ask'
+                and _agent_ask_streak(ctx) >= _AGENT_MAX_ASK_STREAK):
+            # Two clarifying questions is the cap — a third ask becomes a
+            # straight answer instead of another round-trip.
+            turn = {'kind': 'reply',
+                    'message': ('لم أستطع تحديد التعديل المطلوب بعد سؤالين — '
+                                'صف ما تريد تغييره مع رقم أو عنوان الشريحة بوضوح.')}
         if turn.get('kind') != 'plan':
             return _agent_chat_response(ctx, turn.get('message') or 'لم أستطع تحديد طلبك.',
                                         kind=turn.get('kind') or 'reply')
@@ -461,6 +601,10 @@ def _designer_agent_turn(ctx):
             return _agent_chat_response(
                 ctx, 'لم أستطع تحويل الطلب إلى مهام صالحة على الشرائح الحالية' + note,
                 kind='ask')
+        if expand_errors:
+            # A partial plan used to report full success — the dropped ops
+            # are surfaced as warnings on the pending plan and the reply.
+            ctx['plan_warnings'] = _agent_expand_warnings(expand_errors)
 
         block = _agent_balance_preflight(ctx, tasks)
         if block is not None:
@@ -476,7 +620,11 @@ def _designer_agent_turn(ctx):
                 'ops': turn.get('ops') or [],
                 'tasks': [designer_agent_ops.public_task(t) for t in tasks],
             }
+            if ctx.get('plan_warnings'):
+                pending['warnings'] = ctx['plan_warnings']
             summary = turn.get('message') or f'أعددت خطة من {len(tasks)} مهمة على العرض.'
+            if ctx.get('plan_warnings'):
+                summary += ' — تنبيه: ' + '؛ '.join(ctx['plan_warnings'])
             return _agent_chat_response(
                 ctx, summary, kind='plan_pending', pending_plan=pending, tasks=tasks,
                 slides=slides)
@@ -567,7 +715,19 @@ def _designer_agent_finish(run, ctx):
                             if _is_billing_error_text(raw_reason)
                             else designer_agent_ops.failure_reason_text(raw_reason))
             response_text += f' السبب: {first_reason[:200]}'
+    extra_parts = int(ctx.get('agent_extra_parts') or 0)
+    if succeeded and extra_parts:
+        # parts[0] was applied — the rest of the worker's slides went nowhere.
+        response_text += f' (تنبيه: أنتج المصمم {extra_parts} شريحة إضافية لم تُطبّق.)'
+    if succeeded and slide_changes:
+        shown = [line for line in slide_changes[:8] if str(line).strip()]
+        response_text += '\nما تغيّر: ' + ' — '.join(str(line)[:140] for line in shown)
+    if ctx.get('plan_warnings'):
+        response_text += '\nتنبيه: ' + '؛ '.join(ctx['plan_warnings'])
 
+    # The turn record marks the slides it actually touched — the client shows
+    # them as the message's slide badges, not the focus the request carried in.
+    ctx['preferred_indexes'] = turn_focus[:]
     persisted = _normalize_designer_chat_messages(ctx['history_for_turn'])[-DESIGNER_CHAT_STORED_TURNS * 2:]
     if not persisted or persisted[-1].get('content') != ctx['message'] or persisted[-1].get('role') != 'user':
         persisted.append({'role': 'user', 'content': ctx['message'][:2000],
@@ -599,6 +759,30 @@ def _designer_agent_finish(run, ctx):
             'cancelled': run['cancelled'], 'billingStopped': run['billing_stopped'],
         },
     }
+    if not run.get('measure'):
+        # No Playwright session — overflow/clip checks never ran this turn.
+        response_data['agent']['render'] = 'unavailable'
+    if ctx.get('agent_extra_parts'):
+        response_data['agent']['extraWorkerParts'] = ctx['agent_extra_parts']
+    if ctx.get('plan_warnings'):
+        response_data['planWarnings'] = ctx['plan_warnings']
+    if slide_changes:
+        response_data['slideChanges'] = slide_changes[:40]
+    ui_actions = [t['_ui'] for t in succeeded if isinstance(t.get('_ui'), dict)]
+    if ui_actions:
+        response_data['uiActions'] = ui_actions
+    try:
+        before_ids = [s.get('id') for s in (ctx.get('slides_before') or [])
+                      if isinstance(s, dict)]
+        consumed = {cid for t in succeeded
+                    for cid in (t.get('_consumed_ids') or [])}
+        deck_warnings = designer_agent_ops.verify_deck_integrity(
+            slides, before_ids=before_ids or None, removed_ok=consumed)
+        if deck_warnings:
+            print(f"[DESIGNER-AGENT] deck integrity warnings: {deck_warnings}")
+            response_data['agent']['deckWarnings'] = deck_warnings[:10]
+    except Exception as exc:
+        print(f"[DESIGNER-AGENT] deck integrity check failed: {exc}")
     if succeeded and slide_changes:
         response_data['changeSource'] = 'ai'
         response_data['provenance'] = _issue_presentation_provenance(

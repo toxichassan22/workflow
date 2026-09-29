@@ -310,51 +310,68 @@ def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
         result["reason"] = "ambiguous_table"
         return result
     matches = []
-    for target in targets:
-        hits = []
-        for table_index, table in candidates:
-            safety = _table_safety_reason(table, kind)
-            # Do not silently ignore an unsafe table and select another one.
-            if safety:
-                result["reason"] = safety
-                return result
-            info = _table_edit_info(table, source)
-            rows = info["data_rows"]
-            width = len(table["rows"][0]["cells"]) if table["rows"] else 0
-            if target["by"] == "number":
-                count = len(rows) if kind == "row" else width
-                index = count - 1 if target["number"] == "last" else target["number"] - 1
-                if 0 <= index < count:
-                    hits.append((table_index, table, info, index))
-            else:
-                needle = _normalize_table_edit_text(target.get("text") or target.get("name"))
-                if kind == "row":
-                    clean_needle = _normalize_table_edit_text(_strip_table_units(needle))
-                    for index, row in enumerate(rows):
-                        labels = [_table_node_text(cell) for cell in row["cells"]]
-                        contains = target.get("contains") and re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", " ".join(labels))
-                        clean_labels = [_normalize_table_edit_text(_strip_table_units(cell_text)) for cell_text in labels]
-                        if needle and (needle in labels or contains or needle in clean_labels or (clean_needle and clean_needle in clean_labels)):
-                            hits.append((table_index, table, info, index))
+    # A و-joined name list may also be ONE compound header («المصدر والملاحظات»):
+    # try the split targets first, then the unsplit name when a piece misses.
+    target_sets = [targets]
+    compound = request.get("compound_name")
+    if compound:
+        compound_key = "text" if kind == "row" else "name"
+        target_sets.append([{"by": compound_key, compound_key: compound,
+                             "contains": bool(request.get("contains"))}])
+    resolve_error = None
+    for attempt_targets in target_sets:
+        matches = []
+        resolve_error = None
+        for target in attempt_targets:
+            hits = []
+            for table_index, table in candidates:
+                safety = _table_safety_reason(table, kind)
+                # Do not silently ignore an unsafe table and select another one.
+                if safety:
+                    result["reason"] = safety
+                    return result
+                info = _table_edit_info(table, source)
+                rows = info["data_rows"]
+                width = len(table["rows"][0]["cells"]) if table["rows"] else 0
+                if target["by"] == "number":
+                    count = len(rows) if kind == "row" else width
+                    index = count - 1 if target["number"] == "last" else target["number"] - 1
+                    if 0 <= index < count:
+                        hits.append((table_index, table, info, index))
                 else:
-                    indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
-                               if needle and _table_node_text(cell) == needle}
-                    if not indexes and needle:
+                    needle = _normalize_table_edit_text(target.get("text") or target.get("name"))
+                    if kind == "row":
                         clean_needle = _normalize_table_edit_text(_strip_table_units(needle))
+                        for index, row in enumerate(rows):
+                            labels = [_table_node_text(cell) for cell in row["cells"]]
+                            contains = target.get("contains") and re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", " ".join(labels))
+                            clean_labels = [_normalize_table_edit_text(_strip_table_units(cell_text)) for cell_text in labels]
+                            if needle and (needle in labels or contains or needle in clean_labels or (clean_needle and clean_needle in clean_labels)):
+                                hits.append((table_index, table, info, index))
+                    else:
                         indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
-                                   if _normalize_table_edit_text(_strip_table_units(_table_node_text(cell))) in (needle, clean_needle)}
-                    if not indexes and needle:
-                        no_al_needle = _strip_definite_article(needle)
-                        no_al_clean = _strip_definite_article(_normalize_table_edit_text(_strip_table_units(needle)))
-                        indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
-                                   if _strip_definite_article(_table_node_text(cell)) == no_al_needle
-                                   or _strip_definite_article(_normalize_table_edit_text(_strip_table_units(_table_node_text(cell)))) in (no_al_needle, no_al_clean)}
-                    hits.extend((table_index, table, info, index) for index in sorted(indexes))
-        if len(hits) != 1:
-            result["reason"] = "ambiguous_table_target" if hits else (
-                f"{kind}_number_out_of_range" if target["by"] == "number" else f"{kind}_name_not_found")
-            return result
-        matches.append(hits[0])
+                                   if needle and _table_node_text(cell) == needle}
+                        if not indexes and needle:
+                            clean_needle = _normalize_table_edit_text(_strip_table_units(needle))
+                            indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
+                                       if _normalize_table_edit_text(_strip_table_units(_table_node_text(cell))) in (needle, clean_needle)}
+                        if not indexes and needle:
+                            no_al_needle = _strip_definite_article(needle)
+                            no_al_clean = _strip_definite_article(_normalize_table_edit_text(_strip_table_units(needle)))
+                            indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
+                                       if _strip_definite_article(_table_node_text(cell)) == no_al_needle
+                                       or _strip_definite_article(_normalize_table_edit_text(_strip_table_units(_table_node_text(cell)))) in (no_al_needle, no_al_clean)}
+                        hits.extend((table_index, table, info, index) for index in sorted(indexes))
+            if len(hits) != 1:
+                resolve_error = "ambiguous_table_target" if hits else (
+                    f"{kind}_number_out_of_range" if target["by"] == "number" else f"{kind}_name_not_found")
+                break
+            matches.append(hits[0])
+        if resolve_error is None:
+            break
+    if resolve_error is not None:
+        result["reason"] = resolve_error
+        return result
     if len({match[0] for match in matches}) != 1:
         result["reason"] = "ambiguous_table"
         return result
@@ -852,9 +869,6 @@ def install(app, namespace: Dict[str, Any]) -> None:
     if not original:
         raise RuntimeError("api_designer_chat route is not registered")
     require_auth = namespace["require_auth"]
-    write_job = namespace["_write_job"]
-    read_job = namespace["_read_job"]
-    job_path = namespace["_job_path"]
 
     @wraps(original)
     def reliable_designer_chat():
@@ -876,226 +890,5 @@ def install(app, namespace: Dict[str, Any]) -> None:
     secured_designer_chat = require_auth(reliable_designer_chat)
     app.view_functions["api_designer_chat"] = secured_designer_chat
 
-    def job_context(payload):
-        project_data = payload.get("projectData") if isinstance(payload.get("projectData"), dict) else {}
-        context = {
-            "presentationId": payload.get("presentationId") or None,
-            "draftId": project_data.get("draftId") or project_data.get("draft_id") or None,
-        }
-        # The retry key is valid only for the exact AI request. Hashing the complete payload
-        # prevents a stale tab from reusing an old result after slides, facts, images, history or
-        # attachments have changed, without storing a second copy of that large request on disk.
-        identity = {
-            key: value for key, value in payload.items()
-            if key not in {"requestId", "_job_id"}
-        }
-        encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        context["requestHash"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-        return context
-
-    def claim_job(tenant_id, job_id, initial_payload):
-        """Create one queued record across Gunicorn workers before starting the AI thread."""
-        path = job_path(".designer_chat_jobs", tenant_id, job_id)
-        claim_path = path + ".claim"
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            try:
-                descriptor = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                existing = read_job(".designer_chat_jobs", tenant_id, job_id)
-                if existing:
-                    return False, existing
-                try:
-                    if time.time() - os.path.getmtime(claim_path) > 30:
-                        os.unlink(claim_path)
-                        continue
-                except OSError:
-                    pass
-                time.sleep(0.025)
-                continue
-            try:
-                existing = read_job(".designer_chat_jobs", tenant_id, job_id)
-                if existing:
-                    return False, existing
-                write_job(".designer_chat_jobs", tenant_id, job_id, initial_payload)
-                return True, initial_payload
-            finally:
-                os.close(descriptor)
-                try:
-                    os.unlink(claim_path)
-                except OSError:
-                    pass
-        existing = read_job(".designer_chat_jobs", tenant_id, job_id)
-        if existing:
-            return False, existing
-        raise RuntimeError("Designer chat job registration lock timed out")
-
-    def run_job(flask_app, tenant_id, payload, job_id, authorization):
-        payload_with_job = dict(payload)
-        payload_with_job["_job_id"] = job_id
-        job_record_context = job_context(payload)
-        heartbeat_stop = threading.Event()
-
-        def heartbeat():
-            # Touching the published file does not race with its JSON contents. The status route
-            # reads the mtime as a heartbeat, so a killed worker is distinguishable from a model
-            # call that is still legitimately taking several minutes.
-            path = job_path(".designer_chat_jobs", tenant_id, job_id)
-            while not heartbeat_stop.wait(15):
-                try:
-                    os.utime(path, None)
-                except OSError:
-                    pass
-
-        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
-        heartbeat_thread.start()
-        with flask_app.test_request_context(
-            "/api/designer-chat",
-            method="POST",
-            json=payload_with_job,
-            headers={
-                "Authorization": authorization,
-                "X-Designer-Job-Id": job_id,
-            },
-        ):
-            try:
-                write_job(".designer_chat_jobs", tenant_id, job_id, {
-                    **job_record_context,
-                    "status": "running", "success": True, "progress": 10,
-                    "message": "جاري تنفيذ وتطبيق التعديل...",
-                })
-                result = flask_app.view_functions["api_designer_chat"]()
-                response = result[0] if isinstance(result, tuple) else result
-                status_code = result[1] if isinstance(result, tuple) and len(result) > 1 else response.status_code
-                body = response.get_json(silent=True) or {}
-                succeeded = 200 <= int(status_code) < 300 and body.get("success")
-                response_data = body.get("data") if isinstance(body.get("data"), dict) else {}
-                failure_reason = body.get("failureReason") or response_data.get("failureReason")
-                final_payload = {
-                    **body,
-                    **job_record_context,
-                    "status": "completed" if succeeded else "failed",
-                    "success": bool(succeeded),
-                    "progress": 100,
-                    "message": "اكتمل تنفيذ تعديل العرض" if succeeded else body.get("error", "تعذر تعديل العرض"),
-                }
-                if failure_reason:
-                    final_payload["failureReason"] = failure_reason
-                write_job(".designer_chat_jobs", tenant_id, job_id, final_payload)
-            except Exception as error:
-                flask_app.logger.exception("Designer chat background job failed")
-                write_job(".designer_chat_jobs", tenant_id, job_id, {
-                    **job_record_context,
-                    "status": "failed", "success": False, "progress": 100,
-                    "error": f"تعذر تنفيذ تعديل العرض: {error}", "failureReason": "job_failed",
-                })
-            finally:
-                heartbeat_stop.set()
-
-    def queue_job():
-        from flask import current_app, g, jsonify, request
-
-        payload = request.get_json(silent=True) or {}
-        if not str(payload.get("message") or "").strip():
-            return jsonify({"success": False, "error": "الطلب فارغ"}), 400
-        requested_id = str(payload.get("requestId") or "").strip()
-        if requested_id and not re.fullmatch(r"[A-Za-z0-9-]{8,64}", requested_id):
-            return jsonify({"success": False, "error": "معرف الطلب غير صالح"}), 400
-        job_id = requested_id or str(uuid.uuid4())
-        queued_context = job_context(payload)
-        try:
-            created, existing = claim_job(g.tenant_id, job_id, {
-                **queued_context,
-                "status": "queued", "success": True, "progress": 1,
-                "message": "تم استلام طلب تعديل العرض",
-                "payload": {"data": payload},
-                "actor": {
-                    "user_id": getattr(g, "user_id", None),
-                    "user_name": getattr(g, "user_name", None),
-                    "user_role": getattr(g, "user_role", None),
-                },
-            })
-        except RuntimeError as error:
-            app.logger.error("Designer chat job registration failed: %s", error)
-            return jsonify({
-                "success": False,
-                "error": "تعذر تسجيل مهمة تعديل العرض مؤقتًا",
-                "failureReason": "job_registration_failed",
-            }), 503
-        if not created:
-            if existing.get("requestHash") and existing.get("requestHash") != queued_context["requestHash"]:
-                return jsonify({
-                    "success": False,
-                    "error": "معرف الطلب مستخدم لمهمة تعديل أخرى",
-                    "failureReason": "request_id_conflict",
-                }), 409
-            return jsonify({
-                "success": True,
-                "jobId": job_id,
-                "status": existing.get("status") or "queued",
-                "progress": existing.get("progress") or 1,
-                "message": existing.get("message") or "مهمة تعديل العرض مسجلة",
-                "reused": True,
-            }), 202
-        threading.Thread(
-            target=run_job,
-            args=(current_app._get_current_object(), g.tenant_id, payload, job_id, request.headers.get("Authorization", "")),
-            daemon=True,
-        ).start()
-        return jsonify({
-            "success": True, "jobId": job_id, "status": "queued", "progress": 1,
-            "message": "بدأ تعديل العرض في الخلفية",
-        }), 202
-
-    # The restart-resume sweep in app.py re-dispatches orphaned jobs through this worker.
-    namespace["_designer_chat_run_job"] = run_job
-
-    def job_status(job_id):
-        from flask import g, jsonify, request
-
-        if not re.fullmatch(r"[A-Za-z0-9-]{8,64}", str(job_id or "")):
-            return jsonify({"success": False, "error": "معرف مهمة غير صالح"}), 400
-        job = read_job(".designer_chat_jobs", g.tenant_id, job_id)
-        if not job:
-            return jsonify({
-                "success": False, "status": "not_found",
-                "error": "مهمة تعديل العرض غير موجودة أو انتهت صلاحيتها",
-                "failureReason": "job_not_found",
-            }), 404
-        try:
-            heartbeat_at = os.path.getmtime(job_path(".designer_chat_jobs", g.tenant_id, job_id))
-        except OSError:
-            heartbeat_at = float(job.get("updatedAt") or 0)
-        response_job = {k: v for k, v in job.items()
-                        if k not in ("payload", "actor", "pid")}
-        state = response_job.get("agentState")
-        if isinstance(state, dict) and "slides" in state:
-            # The checkpoint needs the in-flight deck for restart resume, but
-            # polling must never pay megabytes for it — task statuses suffice.
-            state = {k: v for k, v in state.items() if k != "slides"}
-            response_job["agentState"] = state
-        response_job["jobId"] = str(job_id)
-        response_job["heartbeatAt"] = heartbeat_at
-        if response_job.get("status") in {"queued", "running"} and heartbeat_at:
-            response_job["stale"] = time.time() - heartbeat_at > 90
-            if response_job["stale"]:
-                response_job["message"] = "توقفت تحديثات مهمة تعديل العرض على الخادم"
-        include_result = request.args.get("includeResult") == "1"
-        if not include_result:
-            response_job["resultReady"] = response_job.get("status") == "completed" and isinstance(response_job.get("data"), dict)
-            response_job.pop("data", None)
-        return jsonify(response_job)
-
-    app.add_url_rule(
-        "/api/designer-chat/jobs",
-        endpoint="api_designer_chat_reliability_job",
-        view_func=require_auth(queue_job),
-        methods=["POST"],
-    )
-    app.add_url_rule(
-        "/api/designer-chat/jobs/<job_id>",
-        endpoint="api_designer_chat_reliability_job_status",
-        view_func=require_auth(job_status),
-        methods=["GET"],
-    )
+    install_job_routes(app, namespace)
     app.extensions["designer_chat_reliability"] = True

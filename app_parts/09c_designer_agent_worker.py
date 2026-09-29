@@ -136,7 +136,13 @@ def _agent_worker_vision(ctx, slide_html, session):
     supplies both; the browser starts lazily on this first render call."""
     uri, report = (None, None)
     if session is not None and getattr(session, 'available', False):
-        uri, report = session.render(slide_html)
+        # The Playwright session is shared; parallel worker calls serialize here.
+        lock = ctx.get('_session_lock')
+        if lock is not None:
+            with lock:
+                uri, report = session.render(slide_html)
+        else:
+            uri, report = session.render(slide_html)
         _agent_remember_layout(ctx, slide_html, report)
     consistency = ctx.get('agent_style_ref_uri')
     note = ''
@@ -241,9 +247,13 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
         return None, _agent_worker_note_failure(ctx, f'table_precheck:{reason_text}')
     if color_request and designer_chat_colors.is_color_only_request(color_request):
         color_html, color_message = designer_chat_colors.apply_color_edit(html, color_request)
-        if color_html and color_html != html:
-            return color_html, color_message
-        return None, _agent_worker_note_failure(ctx, 'color_unchanged')
+        if color_html is not None:
+            if color_html != html:
+                return color_html, color_message
+            return None, _agent_worker_note_failure(ctx, 'color_unchanged')
+        # (None, refusal): the grammar cannot express this change («غمّق
+        # الأزرق شوية») — fall through to the model instead of reporting
+        # color_unchanged for a request it never tried.
 
     # The boundary diagram is rebuilt from documented facts — the legacy
     # deterministic editor owns that slide type.
@@ -284,6 +294,10 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
         return None, _agent_worker_note_failure(ctx, f'provider_error:{exc}')
     if error or not parts:
         return None, _agent_worker_note_failure(ctx, error or 'empty_worker_result')
+    if len(parts) > 1:
+        # Only parts[0] is applied — count what the model produced and the
+        # run silently dropped, so finish can surface it.
+        ctx['agent_extra_parts'] = int(ctx.get('agent_extra_parts') or 0) + len(parts) - 1
     output = str(parts[0].get('html') or '')
     if not output or 'slide' not in output or '<div' not in output:
         return None, _agent_worker_note_failure(ctx, 'invalid_html')
@@ -336,14 +350,37 @@ def _agent_worker_restructure(ctx, sources, target, instruction, feedback=''):
     user = json.dumps({'sources': [{'title': s.get('title', ''), 'html': s.get('html', '')}
                                    for s in sources],
                        'instruction': instruction}, ensure_ascii=False)
-    response = call_openrouter_messages(
-        [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-        response_format=_AGENT_WORKER_SCHEMA, model=DESIGNER_AGENT_WORKER_MODEL,
-        max_tokens=DESIGNER_EDIT_MAX_TOKENS * 2, temperature=0.35,
-        usage_ctx=_agent_usage_ctx(ctx))
-    result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')
-    payload = _designer_json_response(result['content'])
+    try:
+        response = call_openrouter_messages(
+            [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+            response_format=_AGENT_WORKER_SCHEMA, model=DESIGNER_AGENT_WORKER_MODEL,
+            max_tokens=DESIGNER_EDIT_MAX_TOKENS * 2, temperature=0.35,
+            usage_ctx=_agent_usage_ctx(ctx))
+        result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')
+        payload = _designer_json_response(result['content'])
+    except Exception:
+        payload = None
     produced = payload.get('slides') if isinstance(payload, dict) else None
-    if not isinstance(produced, list) or len(produced) != target:
-        return None, 'incomplete_result'
+    if isinstance(produced, list) and len(produced) == target:
+        return produced, None
+    # A joint answer of `target` full slides can exceed the token cap on dense
+    # sources — retry one slide per call so each response stays small.
+    produced = []
+    for number in range(1, target + 1):
+        part_system = (system + f'\nأنتج الآن الشريحة رقم {number} من {target} فقط '
+                                '— شريحة واحدة مكتملة لا كل المجموعة.')
+        try:
+            response = call_openrouter_messages(
+                [{'role': 'system', 'content': part_system}, {'role': 'user', 'content': user}],
+                response_format=_AGENT_WORKER_SCHEMA, model=DESIGNER_AGENT_WORKER_MODEL,
+                max_tokens=DESIGNER_EDIT_MAX_TOKENS, temperature=0.35,
+                usage_ctx=_agent_usage_ctx(ctx))
+            result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')
+            part_payload = _designer_json_response(result['content'])
+        except Exception:
+            return None, 'incomplete_result'
+        part_slides = part_payload.get('slides') if isinstance(part_payload, dict) else None
+        if not isinstance(part_slides, list) or not part_slides:
+            return None, 'incomplete_result'
+        produced.append(part_slides[0])
     return produced, None

@@ -8,20 +8,65 @@
 
 def _agent_exec_edit(task, ctx, session, feedback='', color_request=None):
     """One scoped worker call per slide — partial success inside the task is
-    kept and reported, a fully failed task returns the last worker reason."""
+    kept and reported, a fully failed task returns the last worker reason.
+
+    Slides inside one task are independent, so they run in a small bounded
+    pool (vision renders stay serialized on ``ctx['_session_lock']`` — the
+    Playwright session is not thread-safe). The cancel flag is honored
+    between slide indexes, not only between tasks.
+    """
     indexes = task['_indexes']
     changed, replies, last_reason = [], [], None
-    for idx in indexes:
+    cancelled = ctx.get('_is_cancelled') or (lambda: False)
+
+    def work(idx):
+        if cancelled():
+            return idx, '', None, 'cancelled'
         slide = slides_at(ctx, idx)
         if slide is None:
-            continue
+            return idx, '', None, 'missing_slide'
         before = slide.get('html', '')
         html, reply = _agent_worker_edit_slide(
             ctx, slide, idx, task['_instruction'], len(ctx['slides']),
             session, feedback, task.get('style_brief') or '',
             color_request=color_request)
-        if html is None:
-            last_reason = reply or ctx.get('agent_last_worker_reason') or 'worker_failed'
+        return idx, before, html, reply
+
+    workers = min(3, len(indexes))
+    if workers <= 1:
+        results = [work(idx) for idx in indexes]
+    else:
+        import concurrent.futures
+        try:
+            from flask import current_app, g
+            flask_app = current_app._get_current_object()
+        except Exception:
+            flask_app = None
+        tenant_id = ctx.get('tenant_id')
+
+        def run_one(idx):
+            if flask_app is None:
+                return work(idx)
+            with flask_app.app_context():
+                from flask import g as thread_g
+                thread_g.tenant_id = tenant_id
+                return work(idx)
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(run_one, idx): idx for idx in indexes}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append((futures[future], '', None, f'exception:{type(exc).__name__}'))
+        results.sort(key=lambda item: indexes.index(item[0]))
+
+    for idx, before, html, reply in results:
+        slide = slides_at(ctx, idx)
+        if slide is None or html is None:
+            if reply != 'cancelled':
+                last_reason = reply or ctx.get('agent_last_worker_reason') or last_reason
             continue
         if reply:
             replies.append(reply)
@@ -34,6 +79,8 @@ def _agent_exec_edit(task, ctx, session, feedback='', color_request=None):
                 slide['captions'] = extracted
             changed.append(idx)
     if not changed:
+        if all(r[3] == 'cancelled' for r in results) and results:
+            return False, None, 'cancelled', None
         return False, None, last_reason or 'unchanged', None
     note = ' '.join(dict.fromkeys(r for r in replies if r)) or None
     if last_reason and note:
@@ -142,6 +189,9 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
             replacement['restructured_from'] = [s.get('id') for s in sources]
         replacements.append(replacement)
     slides[lo:max(indexes) + 1] = replacements
+    # Every source id except the position-first one's is gone from the deck —
+    # the integrity check must not report them as silently dropped.
+    task['_consumed_ids'] = [s.get('id') for s in sources[1:]]
     return True, f'أعيدت هيكلة {len(sources)} شريحة إلى {target}.', None, part_htmls
 
 
@@ -182,6 +232,8 @@ def _agent_exec_delete(task, ctx, session, feedback=''):
     indexes = sorted(task['_indexes'], reverse=True)
     if len(slides) - len(indexes) < 1:
         return False, None, 'cannot_delete_all', None
+    task['_consumed_ids'] = [slides[i].get('id') for i in indexes
+                             if isinstance(slides[i], dict)]
     for idx in indexes:
         slides.pop(idx)
     return True, f'حُذفت {len(indexes)} شريحة.', None, []
@@ -204,203 +256,6 @@ def _agent_exec_move(task, ctx, session, feedback=''):
         slides.append(slide)
     return True, 'نُقلت الشريحة.', None, []
 
-
-def _agent_exec_code(task, ctx, session, feedback=''):
-    """Deterministic ops that never call the worker model."""
-    slides = ctx['slides']
-    op = task['op']
-    params = task.get('params') or {}
-    indexes = task.get('_indexes') or []
-    changed, note = [], None
-
-    if op == 'table_edit':
-        note = None
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            res = designer_chat_reliability.apply_table_delete_request(
-                slide.get('html', ''), task['_instruction'] or ctx['message'])
-            if isinstance(res, dict) and res.get('description'):
-                note = res['description']
-            if res.get('applied') and res.get('html'):
-                slide['html'] = res['html']
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), note, 'table_unchanged' if not changed else None, None)
-
-    if op == 'color_edit':
-        request_text = task['_instruction'] or ctx['message']
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            res = designer_chat_colors.apply_color_edit(slide.get('html', ''), request_text)
-            new_html = res.get('html') if isinstance(res, dict) else res
-            if isinstance(new_html, str) and new_html != slide.get('html', ''):
-                slide['html'] = new_html
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), None, 'color_unchanged' if not changed else None, None)
-
-    if op == 'watermark':
-        action = str(params.get('action') or 'apply').lower()
-        watermark_url = str(ctx['branding'].get('watermark_path') or '').strip()
-        if action == 'apply' and not watermark_url:
-            return False, 'لا توجد علامة مائية مرفوعة في إعدادات الشركة.', 'watermark_missing', None
-        only_white = bool(params.get('only_white'))
-        try:
-            opacity = float(params.get('opacity', 0.045))
-        except (TypeError, ValueError):
-            opacity = 0.045
-        try:
-            width = int(params.get('width_px', 480))
-        except (TypeError, ValueError):
-            width = 480
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            if only_white and not _is_white_or_light_slide(slide):
-                continue
-            html = slide.get('html', '')
-            if action == 'remove':
-                new_html = _remove_slide_watermark(html)
-            elif action in ('show', 'hide'):
-                new_html = _set_slide_watermark_visible(html, action == 'show', logo_url=watermark_url)
-            else:
-                new_html = _apply_slide_watermark(html, watermark_url, opacity=opacity, width_px=width)
-            if new_html != html:
-                slide['html'] = new_html
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), None, 'watermark_unchanged' if not changed else None, None)
-
-    if op == 'insert_attached_image':
-        uris = ctx.get('attached_uris') or []
-        try:
-            image_index = int(params.get('image_index') or params.get('imageIndex') or 1)
-        except (TypeError, ValueError):
-            image_index = 1
-        if not uris or image_index < 1 or image_index > len(uris):
-            return False, 'لا توجد صورة مرفقة بهذه الرسالة بالترتيب المطلوب.', 'attached_image_missing', None
-        image_url = uris[image_index - 1]
-        position = _designer_attached_image_position(ctx['message'], params)
-        try:
-            opacity = float(params.get('opacity', 0.12 if position == 'watermark' else 1.0))
-        except (TypeError, ValueError):
-            opacity = 0.12 if position == 'watermark' else 1.0
-        try:
-            width = int(params.get('width_px', params.get('widthPx', 480 if position == 'watermark' else 140)))
-        except (TypeError, ValueError):
-            width = 480 if position == 'watermark' else 140
-        caption = str(params.get('caption') or '')[:160]
-        title = str(params.get('title') or 'صورة مرفقة')[:160]
-        if position == 'separate_slide':
-            insert_at = (max(indexes) + 1) if indexes else len(slides)
-            new_html = _build_designer_attached_slide_html(
-                image_url, title=title, caption=caption, branding=ctx['branding'])
-            try:
-                new_html = resolve_designer_chat_placeholders(
-                    new_html, ctx['project_data'], ctx['presentation_id'], ctx['tenant_id'],
-                    ctx['creative_images'])
-                new_html = slide_engine.finalize_designer_slide_html(
-                    new_html, 'content', ctx['project_data'], ctx['branding'],
-                    creative_images=ctx['creative_images'], tenant_id=ctx['tenant_id'],
-                    slide_num=insert_at + 1, slide_title=title,
-                    total_slides=len(slides) + 1, content_source='designer_attached_image',
-                    allow_all_maps=True)
-            except Exception as exc:
-                print(f"[DESIGNER-AGENT] attached slide finalize failed: {exc}")
-            slides.insert(min(insert_at, len(slides)), {
-                'id': designer_agent_ids.new_slide_id(),
-                'html': new_html, 'title': title, 'type': 'content',
-                'content_source': 'designer_attached_image', 'section_key': '',
-                '_designer_keep_html': True, 'is_custom': True})
-            return True, f'وُضعت الصورة المرفقة في شريحة جديدة رقم {insert_at + 1}.', None, None
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            slide['html'] = _insert_designer_attached_image(
-                slide.get('html', ''), image_url, position=position,
-                opacity=opacity, width_px=width, caption=caption)
-            slide['_designer_keep_html'] = True
-            slide['is_custom'] = True
-            changed.append(idx)
-        return (bool(changed), None, 'image_unchanged' if not changed else None, None)
-
-    if op == 'insert_map':
-        map_type = str(params.get('map_type') or 'overview').lower()
-        map_url = (_approved_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images'])
-                   or _latest_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images']))
-        if not map_url:
-            return False, 'لا توجد خريطة معتمدة من هذا النوع.', 'map_missing', None
-        _map_project = ctx.get('project_data') or {}
-        marks = _persisted_map_source_marks(
-            ctx['tenant_id'], presentation_id=ctx['presentation_id'],
-            draft_id=_map_project.get('draftId') or _map_project.get('draft_id'))
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            new_html, applied = _replace_slide_with_approved_map(
-                slide.get('html', ''), map_type, map_url, marks)
-            if applied:
-                slide['html'] = new_html
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), None, 'map_unchanged' if not changed else None, None)
-
-    if op == 'update_image':
-        token = str(params.get('asset') or '').strip()
-        assets = _designer_image_assets(ctx['creative_images'])
-        url = _designer_image_asset_url(token, assets)
-        if not url:
-            return False, 'الأصل البصري المطلوب غير موجود في المشروع.', 'asset_missing', None
-        image_index = params.get('image_index') or params.get('imageIndex')
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            new_html, applied = _replace_slide_image_with_asset(
-                slide.get('html', ''), url, token, image_index=image_index)
-            if applied:
-                slide['html'] = new_html
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), None, 'image_unchanged' if not changed else None, None)
-
-    if op == 'image_descriptions':
-        descriptions = designer_chat_reliability.collect_image_descriptions(
-            ctx['project_data'], ctx['creative_images'])
-        for idx in indexes:
-            slide = slides_at(ctx, idx)
-            if slide is None:
-                continue
-            updated, count, _added = designer_chat_reliability.add_missing_image_descriptions(
-                slide.get('html', ''), descriptions)
-            if count:
-                slide['html'] = updated
-                slide['_designer_keep_html'] = True
-                slide['is_custom'] = True
-                changed.append(idx)
-        return (bool(changed), None, 'no_missing_descriptions' if not changed else None, None)
-
-    if op == 'team_logo':
-        instruction = task['_instruction'] or 'أضف شعار الفريق إلى هذه الشريحة باستخدام توكن ##TEAM_LOGO_1##.'
-        return _agent_exec_edit(dict(task, op='edit', _instruction=instruction), ctx, session, feedback)
-
-    if op == 'company_logo_panel':
-        instruction = task['_instruction'] or 'أضف لوحة شعار الشركة باستخدام توكن ##LOGO## / ##PROJECT_LOGO## حسب المتاح.'
-        return _agent_exec_edit(dict(task, op='edit', _instruction=instruction), ctx, session, feedback)
-
-    return False, None, f'unknown_code_op:{op}', None
 
 
 def _agent_exec_generate_image(task, ctx, session, feedback=''):
@@ -468,6 +323,14 @@ def _agent_exec_generate_image(task, ctx, session, feedback=''):
             changed.append(idx)
     if not changed:
         return False, None, 'no_target_slide', None
+    # The generation succeeded, but the run only counts if the asset actually
+    # landed in slide HTML — a worker that described the image without an
+    # <img> or a url() used to pass as success.
+    placed = any(isinstance(slides_at(ctx, idx), dict)
+                 and image in slides_at(ctx, idx).get('html', '')
+                 for idx in (changed or indexes))
+    if not placed:
+        return False, 'تولّدت الصورة لكنها لم تُدرج في الشريحة.', 'image_not_placed', None
     if isinstance(ctx['creative_images'], dict):
         ctx['creative_images'].setdefault('generated', []).append(image)
     return True, None, None, None
@@ -516,13 +379,6 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
             [slides[j].get('html', '') for j in changed])
 
 
-_EXECUTORS = {
-    'edit': _agent_exec_content_edit, 'redesign': _agent_exec_edit, 'rewrite': _agent_exec_edit,
-    'split': _agent_exec_split, 'restructure': _agent_exec_restructure,
-    'create': _agent_exec_create, 'delete': _agent_exec_delete, 'move': _agent_exec_move,
-    'generate_image': _agent_exec_generate_image, 'renumber': _agent_exec_renumber,
-}
-
 
 # ── Runner ───────────────────────────────────────────────────────────────────
 
@@ -535,21 +391,53 @@ def _agent_job_get(ctx):
         return None
 
 
+def _pack_state_slides(slides):
+    """zlib-packed deck for checkpoints — a full-deck JSON copy per task was
+    writing megabytes to disk on every boundary."""
+    import zlib
+    try:
+        raw = json.dumps(slides, ensure_ascii=False, separators=(',', ':'))
+        return base64.b64encode(zlib.compress(raw.encode('utf-8'), 6)).decode('ascii')
+    except Exception:
+        return None
+
+
+def _unpack_state_slides(agent_state):
+    """Inverse of _pack_state_slides; older checkpoints stored 'slides' raw."""
+    slides = agent_state.get('slides')
+    if isinstance(slides, list) and slides:
+        return slides
+    packed = agent_state.get('slidesPacked')
+    if not isinstance(packed, str) or not packed:
+        return slides if isinstance(slides, list) else None
+    import zlib
+    try:
+        return json.loads(zlib.decompress(base64.b64decode(packed)).decode('utf-8'))
+    except Exception:
+        return slides if isinstance(slides, list) else None
+
+
 def _agent_job_checkpoint(ctx, tasks, slides):
     """Persist mid-run state so a process restart resumes instead of replanning."""
     if not ctx.get('job_id'):
         return
     try:
         job = _read_job(_AGENT_JOB_NS, ctx['tenant_id'], ctx['job_id']) or {}
-        job['agentState'] = {
+        state = {
             'planId': ctx.get('plan_id'),
             'deckSignature': _agent_deck_signature(slides),
             'tasks': [{k: t.get(k) for k in ('n', 'op', 'slides', 'titles', 'instruction',
                                            'style_brief', 'params', 'parts', 'target_count',
                                            'after', 'title', 'type', 'exact_text',
                                            'status', 'failureReason')} for t in tasks],
-            'slides': slides,
+            'slideCount': len(slides),
         }
+        packed = _pack_state_slides(slides)
+        if packed:
+            state['slidesPacked'] = packed
+        else:
+            state['slides'] = slides
+        job['agentState'] = state
         _write_job(_AGENT_JOB_NS, ctx['tenant_id'], ctx['job_id'], job)
     except Exception as exc:
         print(f"[DESIGNER-AGENT] checkpoint failed: {exc}")
@@ -602,6 +490,11 @@ def _designer_agent_run(tasks, ctx, session=None):
     total = len(tasks)
     measure = (session is not None and getattr(session, 'available', False))
     report = ctx['report_progress']
+    # Executors check this between slide indexes inside a task; the render
+    # lock serializes Playwright calls when per-slide worker calls run in
+    # the bounded pool.
+    ctx['_is_cancelled'] = lambda: _agent_job_cancelled(ctx)
+    ctx.setdefault('_session_lock', threading.Lock())
     # A stale marker from an earlier turn must not kill this run; a fresh click
     # during the run recreates it and is honored at the next task boundary.
     _agent_job_clear_cancel(ctx)
@@ -668,7 +561,8 @@ def _designer_agent_run(tasks, ctx, session=None):
                     allowed_numbers=ctx.get('superseded_numbers'),
                     request_text='\n'.join(str(part) for part in (
                         ctx.get('message'), task.get('_instruction'),
-                        task.get('exact_text')) if part))
+                        task.get('exact_text')) if part),
+                    exact_text=task.get('exact_text'))
                 if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
                     for j in sorted(task.get('_indexes') or indexes):
                         if j >= len(slides):
@@ -714,7 +608,16 @@ def _designer_agent_run(tasks, ctx, session=None):
                              'reason': task['failureReason']})
             if _is_billing_error_text(str(reason or '')) or _is_billing_error_text(str(reply or '')):
                 billing_stopped = True
-            _agent_record_failure(ctx, task, reason, before_htmls, attempts_log)
+            if 'cancelled' in designer_agent_ops.reason_codes(reason):
+                # An executor noticed the marker mid-task — remaining tasks
+                # take the cancelled branch instead of running to failure.
+                # A user-requested stop is not a journaled failure either.
+                cancelled = True
+                task['status'] = 'skipped'
+                task['failureReason'] = 'cancelled'
+                executed[-1]['status'] = 'skipped'
+            else:
+                _agent_record_failure(ctx, task, reason, before_htmls, attempts_log)
         _agent_job_checkpoint(ctx, tasks, slides)
         report(15 + int(70 * (i + 1) / max(1, total)),
                f"اكتملت المهمة {n}/{total} ({'نجاح' if ok else 'تعذّر'})",
@@ -722,7 +625,7 @@ def _designer_agent_run(tasks, ctx, session=None):
 
     _agent_job_clear_cancel(ctx)
     return {'tasks': tasks, 'executed': executed, 'cancelled': cancelled,
-            'billing_stopped': billing_stopped,
+            'billing_stopped': billing_stopped, 'measure': bool(measure),
             'all_failed': not any(t.get('status') == 'success' for t in tasks)}
 
 

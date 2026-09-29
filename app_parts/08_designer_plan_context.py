@@ -844,81 +844,38 @@ def _designer_chat_memory(history, memory, usage_ctx=None):
         return memory, recent
 
     older_text = '\n'.join(older_lines)
-    if len(memory) + len(older_text) <= DESIGNER_CHAT_MEMORY_CHARS:
-        merged = (memory + '\n' + older_text).strip() if memory else older_text
-        return merged[-DESIGNER_CHAT_MEMORY_CHARS:], recent
-
-    # No model summarization here: keep the newest older text within the cap.
     merged = (memory + '\n' + older_text).strip() if memory else older_text
-    return merged[-DESIGNER_CHAT_MEMORY_MAX:], recent
+    if len(memory) + len(older_text) <= DESIGNER_CHAT_MEMORY_CHARS:
+        return _text_tail(merged, DESIGNER_CHAT_MEMORY_CHARS), recent
+
+    # No model summarization here: keep the newest COMPLETE lines within the
+    # cap — a mid-sentence cut drops the slide reference the line carried.
+    return _text_tail(merged, DESIGNER_CHAT_MEMORY_MAX), recent
 
 
-DESIGNER_CHAT_MAX_ATTACHED_IMAGES = 3
-DESIGNER_CHAT_ATTACHED_IMAGE_LIMIT = 4 * 1024 * 1024
-
-
-def _normalize_designer_attached_images(data):
-    """Collect user-attached chat images as data URIs, newest protocol first.
-
-    Accepts the legacy ``attachedImage`` string plus the newer ``attachedImages`` list
-    (strings or {data_uri/url, name} dicts). Only PNG/JPEG/WEBP data URIs within the
-    size limit are kept, up to DESIGNER_CHAT_MAX_ATTACHED_IMAGES, so one oversized
-    attachment cannot blow up the planner prompt.
-    """
-    uris = []
-    if not isinstance(data, dict):
-        return uris
-
-    def _take(value):
-        if not isinstance(value, str):
-            return
-        text = value.strip()
-        if not text.startswith('data:image/'):
-            return
-        header = text.split(',', 1)[0].lower()
-        if ';base64,' not in text:
-            return
-        if not any(kind in header for kind in ('image/png', 'image/jpeg', 'image/jpg', 'image/webp')):
-            return
-        try:
-            raw = base64.b64decode(text.split(',', 1)[1], validate=True)
-        except Exception:
-            return
-        if len(raw) > DESIGNER_CHAT_ATTACHED_IMAGE_LIMIT or len(raw) == 0:
-            return
-        if text not in uris:
-            uris.append(text)
-
-    legacy = data.get('attachedImage')
-    _take(legacy if isinstance(legacy, str) else '')
-    newer = data.get('attachedImages')
-    if isinstance(newer, list):
-        for item in newer:
-            if isinstance(item, str):
-                _take(item)
-            elif isinstance(item, dict):
-                candidate = item.get('data_uri') or item.get('dataUri') or item.get('url') or ''
-                _take(candidate if isinstance(candidate, str) else '')
-            if len(uris) >= DESIGNER_CHAT_MAX_ATTACHED_IMAGES:
-                break
-    return uris[:DESIGNER_CHAT_MAX_ATTACHED_IMAGES]
-
-
-def _persist_designer_attached_images(data_uris, tenant_id):
-    """Store chat attachments on disk and return durable URLs for slide HTML.
-
-    Slides must reference a server URL, never a data URI: a data URI in saved HTML
-    bloats every later planner prompt and breaks on reload. Falls back to the data
-    URI itself only when persisting fails, so the turn can still show the image.
-    """
-    urls = []
-    for uri in data_uris or []:
-        try:
-            stored = persist_generated_image(uri, tenant_id)
-        except Exception:
-            stored = uri
-        urls.append(stored if isinstance(stored, str) and stored else uri)
-    return urls
+def _text_tail(text, cap):
+    """The newest whole lines of ``text`` that fit ``cap``, marked when cut."""
+    text = str(text or '')
+    if len(text) <= cap:
+        return text
+    lines = text.split('\n')
+    kept, total = [], 0
+    for line in reversed(lines):
+        cost = len(line) + 1
+        if kept and total + cost > cap:
+            break
+        if not kept and cost > cap:
+            # One line longer than the cap — keep its tail at a word edge.
+            cut = line[-cap:]
+            space = cut.find(' ')
+            kept.append(cut[space + 1:] if 0 < space < len(cut) - 40 else cut)
+            total += cap
+            break
+        kept.append(line)
+        total += cost
+    if len(kept) == len(lines):
+        return '\n'.join(reversed(kept))
+    return '…\n' + '\n'.join(reversed(kept))
 
 
 def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data=None):
