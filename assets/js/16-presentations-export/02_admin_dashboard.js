@@ -155,8 +155,8 @@
       if (statsEl) {
         const kpis = [
           { label: WFT('admin.kpi_companies', 'إجمالي الشركات'), value: sagFmtNum(tenants.companies != null ? tenants.companies : tenants.total || sagAllTenants.filter(t => !t.isAdmin).length), sub: WFT('admin.kpi_active', '{n} نشطة', { n: sagFmtNum(tenants.active_companies != null ? tenants.active_companies : tenants.active || 0) }), delta: deltas.companies, spark: trends.companies, color: 'var(--chart-1)' },
-          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoney(spend.month_sar != null ? spend.month_sar : spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_sar != null ? spend.total_sar : spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
-          { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoney(revenue.month_sar != null ? revenue.month_sar : revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_sar != null ? revenue.total_sar : revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue_sar || trends.revenue, color: 'var(--chart-5)' },
+          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoneyHtml(spend.month_sar != null ? spend.month_sar : spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_sar != null ? spend.total_sar : spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
+          { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoneyHtml(revenue.month_sar != null ? revenue.month_sar : revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_sar != null ? revenue.total_sar : revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue_sar || trends.revenue, color: 'var(--chart-5)' },
         ];
         statsEl.innerHTML = kpis.map(k =>
           '<div class="admin-kpi-card">' +
@@ -1458,6 +1458,14 @@
       const n = Number(v || 0);
       const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
       return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال سعودي';
+    }
+
+    function sagFmtMoneyHtml(v) {
+      const text = sagFmtMoney(v);
+      const unitIdx = text.lastIndexOf(' ريال');
+      return unitIdx > 0
+        ? escapeHtml(text.slice(0, unitIdx)) + ' <span class="money-currency">' + escapeHtml(text.slice(unitIdx + 1)) + '</span>'
+        : escapeHtml(text);
     }
 
     function sagDeltaChip(d) {

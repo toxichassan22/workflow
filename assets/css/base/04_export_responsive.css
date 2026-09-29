@@ -1471,6 +1471,15 @@
       margin: 0 !important;
     }
 
+    /* Currency unit inside a big money figure (balance card, KPI values):
+       smaller and softer so the number stays the headline. */
+    .money-currency {
+      font-size: .45em;
+      font-weight: 600;
+      opacity: .72;
+      white-space: nowrap;
+    }
+
     .tenant-balance-pill {
       max-width: 46%;
       padding: 3px 10px;

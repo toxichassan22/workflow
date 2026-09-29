@@ -872,7 +872,7 @@
       const credit = pkg ? Number((pkg.credit_sar ?? pkg.credit_usd) || 0) : remaining;
       const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;
       const valueEl = document.getElementById('dashBalanceValue');
-      if (valueEl) valueEl.textContent = sagFmtMoney(remaining);
+      if (valueEl) valueEl.innerHTML = sagFmtMoneyHtml(remaining);
       const pillEl = document.getElementById('dashBalancePill');
       if (pillEl) {
         const name = pkg && pkg.name ? String(pkg.name) : '';
