@@ -1,0 +1,94 @@
+    /* ── Designer run activity on the slide surface ─────────────────────────
+       The live designer-job task list is mirrored onto the deck: a frosted
+       veil over each card being edited, a dashed plan marker on queued
+       slides, and matching state chips on the sidebar thumbnails. */
+
+    .ge-slide-card[data-designer-state="pending"] {
+      border-style: dashed;
+      border-color: #c9b8ae;
+    }
+
+    .ge-slide-card[data-designer-state="success"] {
+      border-color: #7fb98a;
+    }
+
+    .ge-slide-card[data-designer-state="failed"],
+    .ge-slide-card[data-designer-state="skipped"] {
+      border-color: #c98a8a;
+    }
+
+    .designer-slide-veil {
+      position: absolute;
+      inset: 0;
+      z-index: 400;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .42);
+      backdrop-filter: blur(7px) saturate(.9);
+      -webkit-backdrop-filter: blur(7px) saturate(.9);
+      animation: designerSlideVeilPulse 2.4s ease-in-out infinite;
+      cursor: progress;
+    }
+
+    .designer-slide-veil-label {
+      background: rgba(255, 255, 255, .92);
+      border: 1px solid var(--p);
+      color: var(--p);
+      border-radius: 999px;
+      padding: 8px 20px;
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .12);
+      white-space: nowrap;
+    }
+
+    @keyframes designerSlideVeilPulse {
+      0%, 100% { background: rgba(255, 255, 255, .38); }
+      50% { background: rgba(255, 255, 255, .56); }
+    }
+
+    .ge-thumb[data-designer-state="running"] {
+      border-color: var(--p);
+      box-shadow: 0 0 0 2px rgba(122, 12, 12, .18);
+    }
+
+    .ge-thumb[data-designer-state="pending"] {
+      border-style: dashed;
+      border-color: #c9b8ae;
+    }
+
+    .ge-thumb[data-designer-state="success"] {
+      border-color: #7fb98a;
+    }
+
+    .ge-thumb[data-designer-state="failed"],
+    .ge-thumb[data-designer-state="skipped"] {
+      border-color: #c98a8a;
+    }
+
+    .ge-thumb-designer-state {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--p);
+      background: var(--soft);
+      border-radius: 999px;
+      padding: 1px 7px;
+      white-space: nowrap;
+    }
+
+    .ge-thumb[data-designer-state="pending"] .ge-thumb-designer-state {
+      color: #7a6a5a;
+    }
+
+    .ge-thumb[data-designer-state="success"] .ge-thumb-designer-state {
+      color: #1e7b34;
+      background: #eef7ee;
+    }
+
+    .ge-thumb[data-designer-state="failed"] .ge-thumb-designer-state,
+    .ge-thumb[data-designer-state="skipped"] .ge-thumb-designer-state {
+      color: #a32828;
+      background: #fff1f1;
+    }

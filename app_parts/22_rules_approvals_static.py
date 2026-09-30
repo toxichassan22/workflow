@@ -318,7 +318,7 @@ def spa_fallback(error):
 FRONTEND_CSS_ORDER = (
     'base/01_preview_chat.css', 'base/02_tenant_pages.css',
     'base/03_the_view_model.css', 'base/04_export_responsive.css',
-    'base/05_dashboard_viz.css',
+    'base/05_dashboard_viz.css', 'base/06_designer_activity.css',
     'project-form/01_sections_changelog.css',
     'project-form/02_fields_tables_rail.css',
 )
@@ -341,6 +341,7 @@ FRONTEND_JS_ORDER = (
     '15-slide-edit-chat/01_render_inline_edit.js',
     '15-slide-edit-chat/02_designer_chat.js',
     '15-slide-edit-chat/03_agent_checklist.js',
+    '15-slide-edit-chat/04_slide_activity.js',
     '16-presentations-export/01_presentations.js',
     '16-presentations-export/02_admin_dashboard.js',
     '16-presentations-export/03_export_delivery.js',

@@ -245,6 +245,7 @@
         }
       }
       renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
+      if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
     }
     function renderTenantSlidesDesignerChat() { renderTenantDesignerChat(); }
 
@@ -290,6 +291,7 @@
           '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + regenerateBtn + deleteBtn + '</div>';
         sidebar.appendChild(thumb);
       });
+      if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
     }
 
     let isProgrammaticScrolling = false;
@@ -839,6 +841,12 @@
           if (Array.isArray(result?.tasks) && result.tasks.length
             && typeof renderDesignerChecklist === 'function') {
             renderDesignerChecklist(result.tasks);
+          }
+          if (typeof updateDesignerSlideActivity === 'function') {
+            updateDesignerSlideActivity(
+              Array.isArray(result?.tasks) ? result.tasks : null,
+              (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex))
+                ? result.activeSlideIndex : null);
           }
           // Navigate only after the executor starts editing a model-selected slide.
           // Deduplicate polling events so manual scrolling is not constantly undone.

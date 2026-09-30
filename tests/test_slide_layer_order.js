@@ -23,6 +23,7 @@ const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding
   '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
   '15-slide-edit-chat/01_render_inline_edit.js',
   '15-slide-edit-chat/02_designer_chat.js',
+  '15-slide-edit-chat/04_slide_activity.js',
   '16-presentations-export/01_presentations.js',
   '16-presentations-export/02_admin_dashboard.js',
   '16-presentations-export/03_export_delivery.js',

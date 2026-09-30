@@ -789,6 +789,7 @@
       });
       const indicator = document.getElementById('tenantChatTypingIndicator');
       if (indicator) indicator.remove();
+      if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
       updateDesignerChatStatus();
     }
 

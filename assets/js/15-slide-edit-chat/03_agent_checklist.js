@@ -132,6 +132,7 @@
       tenantDesignerRunTasks = null;
       tenantDesignerCancelling = false;
       renderDesignerChecklist();
+      if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
     }
 
     // A fresh user message always starts a new turn: any stale checklist or
@@ -141,6 +142,7 @@
       tenantDesignerRunTasks = null;
       tenantDesignerCancelling = false;
       renderDesignerChecklist();
+      if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
     }
 
     function applyDesignerPlanPending(reply) {
@@ -162,6 +164,11 @@
         tenantProjectData.tenantSlidesData = tenantSlidesData;
       }
       renderDesignerChecklist();
+      // The plan footprint is knowable before it runs — mark its slides so the
+      // deck previews what «تنفيذ الخطة» will touch.
+      if (typeof updateDesignerSlideActivity === 'function') {
+        updateDesignerSlideActivity(tenantDesignerPendingPlan.tasks);
+      }
     }
 
     function applyDesignerRunTasks(reply) {
@@ -249,6 +256,7 @@
       });
       tenantProjectData.designerChat = designerChatPersistence();
       renderDesignerChecklist();
+      if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
     }
