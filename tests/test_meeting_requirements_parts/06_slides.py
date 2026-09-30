@@ -185,12 +185,16 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             )
 
         project_placeholders = project['tenantCreativeImages']['map_placeholders']
-        self.assertEqual(project_placeholders['##MAP_CATCHMENT##'], '/uploads/maps/current-marked.png')
+        self.assertTrue(project_placeholders['##MAP_CATCHMENT##'].endswith(os.path.basename(final_path)))
         self.assertTrue(project_placeholders['##MAP_CATCHMENT_EDITABLE##'].endswith(os.path.basename(editable_path)))
-        self.assertEqual(images['map_placeholders']['##MAP_CATCHMENT##'], '/uploads/maps/current-marked.png')
-        self.assertEqual(images['map_placeholders']['##MAP_CATCHMENT_EDITABLE##'], '/uploads/maps/current-marked.png')
+        self.assertTrue(images['map_placeholders']['##MAP_CATCHMENT##'].endswith(os.path.basename(final_path)))
+        self.assertTrue(images['map_placeholders']['##MAP_CATCHMENT_EDITABLE##'].endswith(os.path.basename(final_path)))
 
     def test_approved_request_map_beats_older_google_row(self):
+        # An approved request URL wins only for a placeholder no persisted row
+        # covers: every map file the browser can name came from a row-backed
+        # write, so a basename no row still references is an orphaned earlier
+        # render — never a fresher map than the newest persisted row.
         google_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_google.png', delete=False)
         google_path = google_file.name
         google_file.write(b'google-map')
@@ -216,6 +220,23 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 },
                 self.tenant_a,
                 presentation_id='pres-approved-map',
+            )
+
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(google_path)))
+        self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
+                         images['map_placeholders']['##MAP_OVERVIEW##'])
+
+    def test_approved_request_fills_placeholder_without_persisted_row(self):
+        with self.app.app_context():
+            project, images = self.application_module._hydrate_map_assets_for_request(
+                {'project_name': 'Saved'},
+                {
+                    'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/approved.png'},
+                    'maps_persisted': True,
+                    'map_approvals': {'overview': True},
+                },
+                self.tenant_a,
+                presentation_id='pres-no-map-rows',
             )
 
         self.assertEqual(images['map_placeholders']['##MAP_OVERVIEW##'], '/uploads/maps/approved.png')
@@ -340,6 +361,109 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
         self.assertTrue(images['map_placeholders']['##MAP_LANDMARKS##'].endswith(
             os.path.basename(edited_path)))
+
+    def test_hydration_rejects_orphaned_request_map_url(self):
+        # update_map_image repoints rows in place, so a file that once was the
+        # map keeps living on disk with no row referencing it.  A client holding
+        # that stored URL (stale snapshot, another tab, pre-edit copy) must not
+        # roll the hydrated placeholder back — only the newest persisted
+        # basename is a legitimate request echo.
+        module = self.application_module
+        maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        orphan_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_orphan.png', delete=False)
+        orphan_path = orphan_file.name
+        orphan_file.write(b'orphaned-earlier-map')
+        orphan_file.close()
+        overview_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_overview.png', delete=False)
+        overview_path = overview_file.name
+        overview_file.write(b'newest-overview-map')
+        overview_file.close()
+        access_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_access.png', delete=False)
+        access_path = access_file.name
+        access_file.write(b'newest-access-map')
+        access_file.close()
+        for path in (orphan_path, overview_path, access_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+        orphan_url = '/uploads/maps/' + os.path.basename(orphan_path)
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'overview', overview_path, '##MAP_OVERVIEW##',
+                             presentation_id='pres-orphan-map', metadata={})
+            db.add_map_image(self.tenant_a, 'access', access_path, '##MAP_ACCESS##',
+                             presentation_id='pres-orphan-map', metadata={})
+            _project, images = module._hydrate_map_assets_for_request(
+                {'project_name': 'x'},
+                {
+                    'map_placeholders': {
+                        '##MAP_OVERVIEW##': orphan_url,
+                        '##MAP_ACCESS##': orphan_url,
+                    },
+                    'maps_persisted': True,
+                    'map_approvals': {'overview': True, 'access': True},
+                },
+                self.tenant_a,
+                presentation_id='pres-orphan-map',
+            )
+
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(
+            os.path.basename(overview_path)))
+        self.assertTrue(images['map_placeholders']['##MAP_ACCESS##'].endswith(
+            os.path.basename(access_path)))
+
+    def test_hydration_keeps_live_request_map_approvals(self):
+        # map_approvals is a live workflow flag, not file metadata — a stored
+        # project copy (draft snapshot or frozen presentation) can lag the
+        # request and must not clobber the flags the browser just sent.
+        maps_dir = Path(self.application_module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        map_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='.png', delete=False)
+        map_path = map_file.name
+        map_file.write(b'access-map')
+        map_file.close()
+        self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'access', map_path, '##MAP_ACCESS##',
+                             presentation_id='pres-live-approvals', metadata={})
+            _project, images = self.application_module._hydrate_map_assets_for_request(
+                {'tenantCreativeImages': {'map_approvals': {'access': False, 'landmarks': True}}},
+                {'map_approvals': {'access': True, 'landmarks': False}},
+                self.tenant_a,
+                presentation_id='pres-live-approvals',
+            )
+
+        self.assertEqual(images['map_approvals'], {'access': True, 'landmarks': False})
+
+    def test_latest_map_refresh_rejects_orphaned_preferred_url(self):
+        # A preferred URL naming a file no canonical row still references is an
+        # orphaned earlier render — the newest persisted row wins instead.
+        module = self.application_module
+        maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        orphan_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_orphan.png', delete=False)
+        orphan_path = orphan_file.name
+        orphan_file.write(b'orphaned-earlier-map')
+        orphan_file.close()
+        newest_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='_newest.png', delete=False)
+        newest_path = newest_file.name
+        newest_file.write(b'newest-access-map')
+        newest_file.close()
+        for path in (orphan_path, newest_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+        orphan_url = '/uploads/maps/' + os.path.basename(orphan_path)
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'access', newest_path, '##MAP_ACCESS##',
+                             presentation_id='pres-latest-orphan', metadata={})
+            latest = module._latest_canonical_map_url(
+                'access', {}, {},
+                tenant_id=self.tenant_a,
+                presentation_id='pres-latest-orphan',
+                preferred_images=[{'map_placeholders': {'##MAP_ACCESS##': orphan_url}}],
+            )
+
+        self.assertEqual(latest, '/uploads/maps/' + os.path.basename(newest_path))
 
     def test_saved_legacy_map_file_is_not_wiped_by_renderer_version_change(self):
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
@@ -967,6 +1091,84 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('##MAP_LANDMARKS_EDITABLE##', composed['placeholders'])
         self.assertIn('##MAP_LANDMARKS##', composed['placeholders'])
         self.assertEqual([item['name'] for item in composed['landmark_map_items']], ['معلم أول'])
+
+    def test_overview_recompose_rebuilds_missing_sidecar_from_provider_base(self):
+        # The overview recompose used to have no editable-rebuild fallback at
+        # all: a map whose clean sidecar was missing or lived in the other scope
+        # answered «النسخة النظيفة غير متاحة» forever, so the designer chat and
+        # the section editor could never move past the old raster.
+        service = self.application_module.maps_service
+        from PIL import Image
+        marked_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        marked_path = marked_file.name
+        marked_file.close()
+        base_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        base_path = base_file.name
+        base_file.close()
+        self.addCleanup(lambda: os.path.exists(marked_path) and os.unlink(marked_path))
+        self.addCleanup(lambda: os.path.exists(base_path) and os.unlink(base_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(marked_path)
+        Image.new('RGB', (1280, 720), '#c8c2b8').save(base_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 15, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION,
+                    'highlight_site': True}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'overview', marked_path, '##MAP_OVERVIEW##',
+                             'draft_overview-legacy-sidecar', metadata)
+            with patch.object(service, 'get_static_map', return_value={'success': True, 'path': base_path}) as provider:
+                composed = service.recompose_overview_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'location_polygon': '23.9999,45.9999;23.9999,46.0001;24.0001,46.0001;24.0001,45.9999',
+                    'draw_inset': False,
+                }, self.tenant_a, draft_id='overview-legacy-sidecar', highlight_site=True)
+            provider.assert_called_once()
+        self.assertNotIn('error', composed)
+        self.assertIn('##MAP_OVERVIEW_EDITABLE##', composed['placeholders'])
+        self.assertIn('##MAP_OVERVIEW##', composed['placeholders'])
+
+    def test_recompose_reads_linked_draft_scope_maps_for_presentation(self):
+        # Map rows written while only the draft existed stay invisible to a
+        # presentation-scoped read, so edits under an open presentation used to
+        # fail with «النسخة النظيفة غير متاحة».  The recompose must see the
+        # union of the presentation scope and its linked draft scope — the same
+        # read shape the chat hydration and map refresh use.
+        service = self.application_module.maps_service
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
+        self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 16, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'access_roads_version': service.ACCESS_ROADS_RENDER_VERSION,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'access_editable', editable_path, '##MAP_ACCESS_EDITABLE##',
+                             'draft_union-scope-draft', metadata)
+            with patch.object(service, 'get_static_map') as provider, \
+                    patch.object(service, '_snap_to_roads') as roads_provider, \
+                    patch.object(service, '_google_directions_route') as directions_provider, \
+                    patch.object(service, '_unique_map_path', return_value=final_path):
+                composed = service.recompose_access_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'main_roads': 'شارع الاتحاد',
+                    'access_roads_data': [{'name': 'شارع الاتحاد', 'points': [[24.0, 45.9998], [24.0, 46.0002]]}],
+                }, self.tenant_a, presentation_id='pres-union-scope', draft_id='union-scope-draft')
+            provider.assert_not_called()
+            roads_provider.assert_not_called()
+            directions_provider.assert_not_called()
+            pres_rows = db.get_map_images(self.tenant_a, presentation_id='pres-union-scope')
+        self.assertNotIn('error', composed)
+        self.assertEqual(composed['placeholders']['##MAP_ACCESS##'], final_path)
+        self.assertTrue(any(row.get('image_type') == 'access' for row in pres_rows))
 
     def test_landmarks_map_editing_preserves_existing_selection_logic(self):
         service = self.application_module.maps_service

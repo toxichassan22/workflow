@@ -184,9 +184,9 @@ def _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant
     return fetched.get('path')
 
 
-def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site):
+def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site, draft_id=None):
     from db import add_map_image, get_map_images, update_map_image
-    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    rows = get_map_images(tenant_id, presentation_id=effective_id, draft_id=draft_id)
     by_type = {}
     for row in rows:
         if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
@@ -202,6 +202,65 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
     polygon = _overview_polygon(project_data, highlight_site)
+    map_styles = project_data.get('map_styles') or {}
+    if isinstance(map_styles, str):
+        try:
+            map_styles = json.loads(map_styles)
+        except (TypeError, ValueError):
+            map_styles = {}
+    draw_compass = project_data.get('draw_compass', True)
+    if isinstance(draw_compass, str):
+        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    draw_inset = project_data.get('draw_inset', True)
+    if isinstance(draw_inset, str):
+        draw_inset = draw_inset.lower() in {'true', '1', 'yes'}
+    elif not isinstance(draw_inset, bool):
+        draw_inset = True
+    # Same editable-sidecar rebuild the other three maps already had: a legacy or
+    # cross-scope overview map that kept only its marked row could never recompose,
+    # so the section edit overlay and the designer chat kept serving the old file.
+    for final_type, editable_type in (
+        ('overview', 'overview_editable'),
+        ('overview_satellite', 'overview_satellite_editable'),
+        ('overview_roadmap', 'overview_roadmap_editable'),
+    ):
+        final = by_type.get(final_type)
+        if not final or editable_type in by_type:
+            continue
+        try:
+            metadata = json.loads(final.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('overview') or project_data.get('map_type') or 'satellite')
+        if active_maptype in {'auto', 'both'}:
+            active_maptype = 'roadmap' if active_maptype == 'auto' else 'satellite'
+        styles = SATELLITE_WITH_LABELS_STYLES if active_maptype == 'satellite' else []
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        if not os.path.isfile(cached_base):
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            if not cached_base:
+                continue
+        editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
+        shutil.copyfile(cached_base, editable_path)
+        if active_maptype == 'satellite':
+            _apply_sepia_tone(editable_path, intensity=0.35)
+            _apply_map_overlay(editable_path, dark_factor=0.12)
+        if draw_compass:
+            _draw_compass(editable_path, position='top-right')
+        if draw_inset:
+            _draw_inset_map(editable_path, lat, lng, inset_size=180)
+        editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
+        editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
+        by_type[editable_type] = {
+            'id': editable_id,
+            'image_type': editable_type,
+            'file_path': editable_path,
+            'placeholder': editable_placeholder,
+            'metadata_json': json.dumps(metadata, ensure_ascii=False),
+        }
     placeholders = {}
     centers = {}
     zooms = {}
@@ -232,6 +291,7 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             add_map_image(tenant_id, final_type, final_path, final_placeholder, effective_id, next_metadata)
         update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
         placeholders[final_placeholder] = final_path
+        placeholders[editable['placeholder']] = editable['file_path']
         centers['overview'] = {'lat': center_lat, 'lng': center_lng}
         zooms['overview'] = zoom
     if not placeholders:
@@ -252,12 +312,13 @@ def recompose_overview_map(project_data, tenant_id, presentation_id=None, draft_
     with _MAP_GENERATION_LOCKS_GUARD:
         lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
     with lock:
-        return _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site)
+        return _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site,
+                                       draft_id=draft_id)
 
 
-def _recompose_access_map(project_data, tenant_id, effective_id):
+def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
     from db import add_map_image, get_map_images, update_map_image
-    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    rows = get_map_images(tenant_id, presentation_id=effective_id, draft_id=draft_id)
     by_type = {}
     for row in rows:
         if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
@@ -386,12 +447,13 @@ def recompose_access_map(project_data, tenant_id, presentation_id=None, draft_id
         scope_ctx = maps_usage_ctx('access', tenant_id=tenant_id,
                                    presentation_id=presentation_id, draft_id=draft_id)
         with maps_usage_scope(scope_ctx):
-            return _recompose_access_map(project_data, tenant_id, effective_id)
+            return _recompose_access_map(project_data, tenant_id, effective_id,
+                                         draft_id=draft_id)
 
 
-def _recompose_catchment_map(project_data, tenant_id, effective_id):
+def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=None):
     from db import add_map_image, get_map_images, update_map_image
-    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    rows = get_map_images(tenant_id, presentation_id=effective_id, draft_id=draft_id)
     by_type = {}
     for row in rows:
         if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
@@ -559,12 +621,13 @@ def recompose_catchment_map(project_data, tenant_id, presentation_id=None, draft
         scope_ctx = maps_usage_ctx('catchment', tenant_id=tenant_id,
                                    presentation_id=presentation_id, draft_id=draft_id)
         with maps_usage_scope(scope_ctx):
-            return _recompose_catchment_map(project_data, tenant_id, effective_id)
+            return _recompose_catchment_map(project_data, tenant_id, effective_id,
+                                            draft_id=draft_id)
 
 
-def _recompose_landmarks_map(project_data, tenant_id, effective_id):
+def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=None):
     from db import add_map_image, get_map_images, update_map_image
-    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    rows = get_map_images(tenant_id, presentation_id=effective_id, draft_id=draft_id)
     by_type = {}
     for row in rows:
         if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
@@ -694,7 +757,8 @@ def recompose_landmarks_map(project_data, tenant_id, presentation_id=None, draft
         scope_ctx = maps_usage_ctx('landmarks', tenant_id=tenant_id,
                                    presentation_id=presentation_id, draft_id=draft_id)
         with maps_usage_scope(scope_ctx):
-            return _recompose_landmarks_map(project_data, tenant_id, effective_id)
+            return _recompose_landmarks_map(project_data, tenant_id, effective_id,
+                                            draft_id=draft_id)
 
 
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True, usage_flow=None):

@@ -196,7 +196,9 @@ def _agent_exec_code(task, ctx, session, feedback=''):
     if op == 'insert_map':
         map_type = str(params.get('map_type') or 'overview').lower()
         map_url = (_approved_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images'])
-                   or _latest_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images']))
+                   or _latest_canonical_map_url(map_type, ctx['project_data'], ctx['creative_images'],
+                                                tenant_id=ctx['tenant_id'],
+                                                presentation_id=ctx['presentation_id']))
         if not map_url:
             return False, 'لا توجد خريطة معتمدة من هذا النوع.', 'map_missing', None
         _map_project = ctx.get('project_data') or {}

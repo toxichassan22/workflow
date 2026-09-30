@@ -407,7 +407,9 @@ def api_get_presentation(pres_id):
         return jsonify({'success': True, 'presentation': state})
     pres['revision'] = int(pres.get('revision') or 0)
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
-    pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
+    pres['projectData'] = _merge_persisted_map_assets(
+        pres['projectData'], g.tenant_id,
+        presentation_id=pres_id, draft_id=pres.get('draft_id'))
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
     branding = db.get_branding(g.tenant_id) or {}
     render_project_data = copy.deepcopy(pres['projectData'])

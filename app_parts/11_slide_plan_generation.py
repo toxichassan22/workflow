@@ -1146,13 +1146,15 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
                 if requested_canonical and str(path) == str(requested_canonical):
                     continue
             # Rows are newest-first, so index 0 is the saved file the section
-            # last approved.  A request quoting an older persisted file is a
-            # stale snapshot echo (a reopened presentation re-sending its own
-            # copy) and must not roll the hydrated URL back to that file.
+            # last approved.  A request quoting any other file is a stale
+            # snapshot echo and must not roll the hydrated URL back: every map
+            # file the browser can name was written by a row-backed path, so a
+            # basename no persisted row still references is an orphaned earlier
+            # render (update_map_image repoints rows in place), never a fresher
+            # map than the newest persisted one.
             persisted_files = persisted_files_by_placeholder.get(placeholder) or []
             request_basename = os.path.basename(urlsplit(str(path)).path)
-            if persisted_files and request_basename != persisted_files[0] \
-                    and request_basename in persisted_files:
+            if persisted_files and request_basename != persisted_files[0]:
                 continue
             placeholders[placeholder] = path
 
@@ -1179,12 +1181,18 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
     for key in (
         'map_zooms', 'map_centers', 'map_landmarks', 'map_access_roads',
         'map_catchment_landmarks', 'map_landmark_items', 'map_highlight_site',
-        'map_lat', 'map_lng', 'maps_persisted', 'map_approvals',
+        'map_lat', 'map_lng', 'maps_persisted',
     ):
         if persisted_file_records and key in creative:
             request_images[key] = creative[key]
         elif key not in request_images and key in creative:
             request_images[key] = creative[key]
+    # Approvals are a live workflow flag, not file metadata: map rows carry no
+    # approval column, so the stored copy can lag the request (the section keeps
+    # editing under the draft scope after the presentation froze its snapshot).
+    # The browser's current flags stay authoritative; storage only fills a gap.
+    if 'map_approvals' not in request_images and 'map_approvals' in creative:
+        request_images['map_approvals'] = creative['map_approvals']
     return source, request_images
 
 

@@ -67,11 +67,21 @@ def api_designer_chat():
         project_data, data.get('creativeImages', {}), g.tenant_id,
         presentation_id=presentation_id,
     )
+    # Persisted map rows are the source of truth for the files and render sets a
+    # chat turn must see. Hydration writes them onto project_data; the snapshot
+    # restore below would otherwise hand the model the stale merged copy again.
+    hydrated_map_state = {
+        key: project_data.get(key)
+        for key in ('tenantCreativeImages', 'access_roads_data',
+                    'landmark_map_items', 'catchment_map_landmarks')
+    }
     # Designer-chat requests must have the same selected team-logo manifest as full
     # presentation generation. Without this merge, the model can see a team name but
     # has no real image behind ##TEAM_LOGO_N## and falls back to the company logo.
     creative_images = _augment_generation_images(creative_images, project_data, g.tenant_id)
     project_data.update(authoritative_project_data)
+    project_data.update({key: value for key, value in hydrated_map_state.items()
+                         if value is not None})
 
     # Every designer turn is project spend: resolve the draft once so no model
     # call in this flow can land outside the project total. The client often

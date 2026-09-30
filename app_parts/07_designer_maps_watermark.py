@@ -423,17 +423,17 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         if row.get('image_type') in canonical_types and public_map_url(row.get('file_path'))
     ]
     newest_basename = os.path.basename(canonical_rows[0].get('file_path') or '') if canonical_rows else ''
-    older_basenames = {
-        os.path.basename(row.get('file_path') or '')
-        for row in canonical_rows[1:]
-    }
-    older_basenames.discard(newest_basename)
 
     def stale_echo(value):
-        """A preferred URL that resolves to a file an older persisted row still
-        references is a saved-snapshot echo, not the section's current map."""
+        """A preferred URL resolving to anything but the newest persisted row's
+        file is a saved-snapshot echo, not the section's current map.  Map rows
+        repoint in place on recompose, so a stale file's basename is not
+        necessarily still referenced by an older row — an unlisted basename is
+        stale the moment a newer persisted row exists."""
+        if not canonical_rows:
+            return False
         basename = os.path.basename(urlsplit(str(value or '')).path)
-        return bool(basename) and basename != newest_basename and basename in older_basenames
+        return bool(basename) and basename != newest_basename
 
     # The location section is the source of truth for the image the user has just
     # approved or edited.  It is sent separately from project_data by the browser,
