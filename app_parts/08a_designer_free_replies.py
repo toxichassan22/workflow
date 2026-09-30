@@ -185,6 +185,8 @@ def _designer_chat_free_reply(message, has_attachment=False, history=None,
 _COMPANY_CREDIT_EXHAUSTED_MSG = (
     'رصيد شركتك غير كافٍ لإكمال الطلب — اشحن المحفظة ثم أعد المحاولة.')
 
+_AI_BUSY_MSG = 'خدمة الذكاء الاصطناعي مشغولة حاليًا — أعد المحاولة بعد قليل.'
+
 
 def _is_company_credit_error(exc_or_text):
     """True when an AI failure is a spend-capacity failure (provider credits or
@@ -199,10 +201,23 @@ def _is_company_credit_error(exc_or_text):
 
 def _client_safe_llm_error(exc_or_text, fallback='تعذر تنفيذ الطلب الآن — أعد المحاولة بعد قليل.'):
     """Client-facing wording for an AI-call failure: credit/limit failures map to
-    the company-wallet message, and provider names are scrubbed from the rest."""
-    if _is_company_credit_error(exc_or_text):
+    the company-wallet message, upstream rate limits to a busy-service note, and
+    provider names are scrubbed from whatever clean text remains. Raw provider
+    payloads — a JSON ``{"error": ...}`` envelope or an internal ``[LABEL]``
+    raise — carry model slugs, key ids and upstream URLs, so they collapse to
+    the fallback instead of reaching the client."""
+    text = str(exc_or_text or '').strip()
+    if _is_company_credit_error(text):
         return _COMPANY_CREDIT_EXHAUSTED_MSG
-    cleaned = re.sub(r'(?i)openrouter', 'خدمة الذكاء الاصطناعي', str(exc_or_text or ''))
+    lowered = text.lower()
+    if any(m in lowered for m in ('rate_limit', 'rate limit', 'rate-limited',
+                                  'too many requests', '429')):
+        return _AI_BUSY_MSG
+    if (re.match(r'^\[[^\]]+\]', text) or text.startswith('{')
+            or '"error"' in lowered
+            or re.search(r'[a-z0-9_.-]+/[a-z0-9_.-]+', lowered)):
+        return fallback
+    cleaned = re.sub(r'(?i)openrouter', 'خدمة الذكاء الاصطناعي', text)
     cleaned = cleaned.replace('provider_error:', '').strip()
     return cleaned or fallback
 
