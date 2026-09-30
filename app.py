@@ -106,7 +106,12 @@ def compress_response(response):
 
 # Baseline security headers on every response. Routes that already set a header
 # (e.g. the strict download CSP in 19_versions_audit_uploads) keep their own.
-# script-src 'self' is safe because verify-frontend.js forbids inline scripts;
+# script-src 'self' still blocks <script> blocks and external scripts —
+# verify-frontend.js forbids them in the shell — but the SPA's pervasive
+# inline event-handler attributes (onclick=..., both in index.html and in
+# JS-built markup) are governed by script-src-attr under CSP3, so they get
+# their own 'unsafe-inline'; without it every click is a CSP violation.
+# Browsers without CSP3 ignore the directive and fall back to script-src.
 # 'unsafe-inline' in style-src covers the inline style attributes the SPA uses.
 SECURITY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
@@ -115,7 +120,7 @@ SECURITY_HEADERS = {
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     'Content-Security-Policy': (
-        "default-src 'self'; script-src 'self'; "
+        "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob: https:; connect-src 'self' blob:; "
