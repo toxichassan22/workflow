@@ -86,7 +86,7 @@ Management API ويُزامَن مع رصيد المحفظة؛ وعند غياب
 | النموذج | الثابت في الكود | الدور |
 |---|---|---|
 | `google/gemini-3.8-flash` | `GEMINI_TEXT_MODEL` (والأسماء القديمة `LUNA_TEXT_MODEL`/`GLM_MODEL`) | **النموذج النصي السريع الافتراضي** لكل ما لا يحتاج النموذج الكبير |
-| `openai/gpt-6-sol` | `SLIDE_TEXT_MODEL` (env) | توليد شرائح HTML، شات المصمم، وكيل الإدارة |
+| `openai/gpt-6.1-sol` | `SLIDE_TEXT_MODEL` (env) | توليد شرائح HTML، شات المصمم، وكيل الإدارة |
 | `openai/gpt-image-2.5-sunburst` | `IMAGE_MODEL` / `VISUAL_CONCEPT_IMAGE_MODEL` (env) | توليد الصور: الغلاف، الزوايا الخارجية، الداخلية |
 | `google/gemini-3.1-flash-image-preview` | `reference_analyzer.VISION_MODEL` | تحليل صور المرجع البصري التي يرفعها العميل |
 | `openrouter:web_search` (محرك `exa`) | أداة server-side | بحث ويب حي باستشهادات لدراسة السوق |
@@ -104,7 +104,7 @@ Management API ويُزامَن مع رصيد المحفظة؛ وعند غياب
   - كتل المحتوى التنفيذي (brief/opportunity/features/risks/summary) بـ
     `reasoning_effort='low'` وJSON mode.
   - تخطيط برومبتات صور التصور البصري.
-- **`gpt-6-sol` — الإنشاء الدقيق:**
+- **`gpt-6.1-sol` — الإنشاء الدقيق:**
   - توليد كل شريحة HTML على حدة (`/api/generate-slide-single`)، مع streaming
     وتنسيق أرقام وتحقق تباين.
   - شات المصمم `/api/designer-chat`: مخطط + محرر بذاكرة محادثة (10 أدوار حرفية

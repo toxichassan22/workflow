@@ -115,6 +115,15 @@ uneditable); never grow a giant file again.
 - If a file genuinely cannot fit under ~1,000 lines (e.g. a generated schema or a single-pass data
   blob), say why in the commit message and keep it as close to the limit as the structure allows.
 
+## AI model versions are owner-managed
+
+Hard owner rule. **No AI agent may change any model identifier or version** — `GEMINI_TEXT_MODEL`,
+`SLIDE_TEXT_MODEL`, `IMAGE_MODEL`, `VISUAL_CONCEPT_IMAGE_MODEL`, `LAND_ANALYSIS_MODEL`, the
+`*_MODEL`/`DESIGNER_AGENT_*_MODEL` env defaults, or a model slug in any file — without an explicit
+instruction in that turn. The owner edits them by hand. This includes staging-to-commit mechanics:
+when a pending local edit touches a model string, leave that hunk out of the commit instead of
+reverting the file — never rewrite a model line even temporarily.
+
 ## Stack
 
 - Backend: Flask. `app.py` (~380 lines) is only the loader: imports, the `Flask`
@@ -339,7 +348,7 @@ and stored one sentence such as «تعديل المحتوى»; it is still read 
 
 ## The admin agent (`/api/training-chat`)
 
-It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-6-sol`) with `reasoning_effort='medium'`, because it
+It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-6.1-sol`) with `reasoning_effort='medium'`, because it
 changes company settings; it used to run on the fast text model with 2,000 tokens and no reasoning.
 
 - **Every tool re-checks the caller's own permission.** The route gate is `training_data` only, so

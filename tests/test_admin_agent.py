@@ -435,7 +435,7 @@ class AdminAgentTests(unittest.TestCase):
         # This agent changes company settings, so it runs on the reasoning model.
         self.assertEqual(captured['kwargs']['model'], self.application_module.SLIDE_TEXT_MODEL)
         self.assertEqual(captured['kwargs']['reasoning_effort'], 'medium')
-        self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-6-sol')
+        self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-6.1-sol')
 
     def test_agent_prompt_states_every_new_capability(self):
         app_source = read_module_source('app.py')

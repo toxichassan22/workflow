@@ -365,7 +365,7 @@ GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
 GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
-SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6-sol')
+SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
 DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
 # Designer agent (chatplan): per-task planner/runner path behind a flag. When 0,
