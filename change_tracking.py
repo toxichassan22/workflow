@@ -12,6 +12,7 @@ import difflib
 import json
 import os
 import re
+from collections import Counter
 
 import db
 
@@ -20,8 +21,14 @@ import db
 _TAG_RE = re.compile(r'<[^>]+>')
 _WS_RE = re.compile(r'\s+')
 _STYLE_RE = re.compile(r'\sstyle\s*=\s*"[^"]*"', re.IGNORECASE)
-_IMG_SRC_RE = re.compile(r'<img[^>]+src\s*=\s*"([^"]+)"', re.IGNORECASE)
+_IMG_SRC_RE = re.compile(
+    r'<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.IGNORECASE)
 _BG_URL_RE = re.compile(r'url\(\s*[\'"]?([^\'")]+)', re.IGNORECASE)
+# url() references that are not photos: SVG paint servers (fill="url(#grad)" —
+# every chart bar emits one), font files and font data URIs. Counting them made
+# a rewritten chart look like «الصور: من N إلى M» on every chat turn.
+_NON_IMAGE_URL_RE = re.compile(
+    r'^(?:#|data:[^;,)]*font|.*\.(?:ttf|otf|woff2?|eot)(?:[?#].*)?$)', re.IGNORECASE)
 _PLACEHOLDER_RE = re.compile(r'##[A-Z0-9_]+##')
 _WATERMARK_RE = re.compile(
     r'<div\b[^>]*\b(?:data-slide-watermark=["\']true["\']|class=["\'][^"\']*\bslide-watermark\b)[^>]*>',

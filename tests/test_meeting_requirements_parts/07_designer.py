@@ -147,6 +147,29 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('أُضيفت الشريحة 4', joined)
         self.assertNotIn('تعديل المحتوى', joined)
 
+        # SVG paint-server refs (chart fills like url(#posBarGrad)) and font
+        # urls are not photos — a chart rewrite must never print
+        # «عدد الصور: من N إلى M».
+        chart_old = [{
+            'title': 'التدفقات',
+            'html': ('<div class="slide"><svg data-chart="combo">'
+                     '<rect fill="url(#posBarGrad)"/><rect fill="url(#negBarGrad)"/></svg>'
+                     "<style>@font-face{src:url('/fonts/a.ttf')}</style>"
+                     '<img src="/u/i.png"></div>'),
+        }]
+        chart_new = [{
+            'title': 'التدفقات',
+            'html': '<div class="slide"><p>نص بديل</p><img src="/u/i.png"></div>',
+        }]
+        chart_lines = tracking.describe_slide_changes(chart_old, chart_new)
+        self.assertFalse(any('الصور' in line for line in chart_lines), chart_lines)
+        # Single-quoted and unquoted img src count like double-quoted ones.
+        quote_old = [{'title': 's', 'html': "<div class=\"slide\"><p>t</p><img src='/u/i.png'></div>"}]
+        quote_new = [{'title': 's', 'html': '<div class="slide"><p>t</p><img src="/u/j.png"></div>'}]
+        quote_lines = tracking.describe_slide_changes(quote_old, quote_new)
+        self.assertIn('استُبدلت صورة أو خريطة', '\n'.join(quote_lines))
+        self.assertFalse(any('عدد الصور' in line for line in quote_lines), quote_lines)
+
         draft_lines = '\n'.join(tracking.detail_text(item) for item in tracking.describe_draft_changes(
             {'project_name': 'the view', 'city': 'جدة', 'financial_study_model': {'inputs': {'a': 1}}},
             {'project_name': 'THE VIEW', 'district': 'الشاطئ', 'financial_study_model': {'inputs': {'a': 2}}},
