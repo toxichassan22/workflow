@@ -175,8 +175,10 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         )
         site_slides = [s for s in plan['slides'] if str(s.get('content_source', '')).startswith('site_analysis')]
         self.assertEqual(len(site_slides), 2)
-        self.assertIn('(1/2)', site_slides[0]['title'])
-        self.assertIn('(2/2)', site_slides[1]['title'])
+        self.assertNotIn('(1/2)', site_slides[0]['title'])
+        self.assertNotIn('(2/2)', site_slides[1]['title'])
+        self.assertEqual(site_slides[0]['title'], 'ملخص الموقع الجغرافي')
+        self.assertEqual(site_slides[1]['title'], 'ملخص الموقع الجغرافي')
         self.assertTrue(site_slides[0].get('requires_image'))
         self.assertIn('##MAP_OVERVIEW##', site_slides[0].get('image_tokens', []))
         self.assertFalse(site_slides[1].get('requires_image'))

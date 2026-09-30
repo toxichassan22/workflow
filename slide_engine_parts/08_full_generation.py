@@ -1019,6 +1019,30 @@ def _strip_slide_counter_chrome(html):
         '', html, flags=re.IGNORECASE)
 
 
+def _strip_header_page_marker(html):
+    """Remove stray «N/M» group-page markers from a preserved slide header.
+
+    Older plans embedded internal group pagination in the title («… (1/7)») and
+    designer-authored headers sometimes split it into its own chip.  A leaf
+    element inside a header whose entire text is that shape is a page marker,
+    not content — designer_chat_safety classifies it the same way — so removing
+    it cannot drop facts, and it is the only delete that actually sticks.
+    """
+    if not html:
+        return html
+    leaf_re = re.compile(
+        r'<(?P<tag>span|div|p|b|strong|small|em|i|h[1-6])\b[^>]*>'
+        r'\s*\(?\s*\d{1,3}\s*/\s*\d{1,3}\s*\)?\s*'
+        r'</(?P=tag)\s*>', re.IGNORECASE)
+    suffix_re = re.compile(r'>\s*([^<>]*?)\s*\(\s*\d{1,3}\s*/\s*\d{1,3}\s*\)\s*<')
+
+    def clean(match):
+        block = leaf_re.sub('', match.group(0))
+        return suffix_re.sub(lambda m: '>' + m.group(1).rstrip() + '<', block)
+
+    return re.sub(r'<header\b[^>]*>[\s\S]*?</header\s*>', clean, html, flags=re.IGNORECASE)
+
+
 def _ensure_slide_counter(html, slide_num, total_slides):
     """Keep a live page counter on the closing slide like its siblings.
 
@@ -1458,7 +1482,9 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
     """
     lang = resolve_offer_lang(project_data if isinstance(project_data, dict) else None)
     if slide_title:
-        title = html_lib.escape(str(slide_title))
+        # Stored plans can still carry the generated « (N/M) » group-page
+        # suffix; it is internal pagination, not header text.
+        title = html_lib.escape(_strip_group_page_title_suffix(slide_title))
     elif lang == OFFER_LANG_ENGLISH:
         title = html_lib.escape(f'Slide {slide_num}' if slide_num else 'Title')
     else:

@@ -590,11 +590,9 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         comp_slides = [s for s in existing_market if str(s.get('content_source') or '').startswith('market_study_data.competitors')
                        or re.search(r'منافس|competitor', str(s.get('title') or ''), re.IGNORECASE)]
         if not comp_slides:
-            for chunk_idx, (start, end) in enumerate(comp_ranges):
+            for start, end in comp_ranges:
                 c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
                 c_source = 'market_study_data.competitors' if total_comp_pages == 1 else f'market_study_data.competitors:{start}:{end}'
-                if total_comp_pages > 1:
-                    c_title += f' ({chunk_idx + 1}/{total_comp_pages})'
                 add('market', {
                     'title': c_title,
                     'type': 'content',
@@ -653,11 +651,9 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         def exec_page_source(base, start, count, total_pages):
             return base if total_pages == 1 or start == 0 else f'{base}:{start}:{start + count}'
 
-        def exec_page_slide(base_slide, base, title_ar, title_en, start, rows, total_pages, index):
+        def exec_page_slide(base_slide, base, title_ar, title_en, start, rows, total_pages):
             page_slide = dict(base_slide)
             title = title_en if lang == OFFER_LANG_ENGLISH else title_ar
-            if total_pages > 1:
-                title += f' ({index}/{total_pages})'
             page_slide.update({
                 'title': title,
                 'type': 'content',
@@ -677,29 +673,29 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             opp_slide = existing_by_source.get('executive_content.opportunity') or {}
             opp_rows = [('', chunk) for chunk in _exec_text_chunks(str(executive.get('opportunity') or ''))]
             opp_pages = _budget_row_pages(opp_rows) or [(0, opp_rows)]
-            for index, (start, page_rows) in enumerate(opp_pages, 1):
+            for start, page_rows in opp_pages:
                 add('executive_summary', exec_page_slide(
                     opp_slide, 'executive_content.opportunity',
                     'الفرصة الاستثمارية', 'Investment Opportunity',
-                    start, page_rows, len(opp_pages), index))
+                    start, page_rows, len(opp_pages)))
         if has_feat:
             feat_slide = existing_by_source.get('executive_content.features') or {}
             feat_items = _executive_feature_items(source)
             feat_ranges = _balanced_row_ranges(len(feat_items), _executive_feature_page_size(feat_items)) or [(0, 0)]
-            for index, (start, end) in enumerate(feat_ranges, 1):
+            for start, end in feat_ranges:
                 add('executive_summary', exec_page_slide(
                     feat_slide, 'executive_content.features',
                     'المميزات وفرص الاستثمار', 'Project Features & Opportunities',
-                    start, feat_items[start:end], len(feat_ranges), index))
+                    start, feat_items[start:end], len(feat_ranges)))
         if has_sum or (not has_opp and not has_feat):
             summary_slide = existing_by_source.get('executive_content.summary') or (existing_exec[0] if existing_exec and not has_opp and not has_feat else {})
             summary_pages = _executive_summary_pages(source) or [(0, [])]
-            for index, (start, page_rows) in enumerate(summary_pages, 1):
+            for start, page_rows in summary_pages:
                 add('executive_summary', exec_page_slide(
                     summary_slide, 'executive_content.summary',
                     section_title('executive_summary', lang),
                     section_title('executive_summary', lang),
-                    start, page_rows, len(summary_pages), index))
+                    start, page_rows, len(summary_pages)))
 
     if lang == OFFER_LANG_ENGLISH:
         summaries = (
@@ -727,10 +723,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 paragraphs = [p.strip() for p in value.splitlines() if p.strip()] or [value]
             if len(paragraphs) >= 3 or len(value) > 600:
                 half = max(1, math.ceil(len(paragraphs) / 2))
-                title_1 = f'{title} (1/2)'
-                title_2 = f'{title} (2/2)'
                 slide_1 = {
-                    'title': title_1,
+                    'title': title,
                     'type': 'content',
                     'design_style': summary_style,
                     'content_density': 'medium',
@@ -741,7 +735,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     'section_key': 'location',
                 }
                 slide_2 = {
-                    'title': title_2,
+                    'title': title,
                     'type': 'content',
                     'design_style': 'editorial',
                     'content_density': 'medium',

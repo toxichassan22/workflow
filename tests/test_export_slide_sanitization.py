@@ -26,6 +26,7 @@ FRONTEND_JS_ORDER = (
     '14-slides-gen/02_element_editing.js', '14-slides-gen/03_slide_regeneration.js',
     '15-slide-edit-chat/01_render_inline_edit.js',
     '15-slide-edit-chat/02_designer_chat.js',
+    '15-slide-edit-chat/04_slide_activity.js',
     '16-presentations-export/01_presentations.js',
     '16-presentations-export/02_admin_dashboard.js',
     '16-presentations-export/03_export_delivery.js',
@@ -1006,6 +1007,78 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         kept = _unwrap_spurious_map_summary_cards(real_map_slide)
         self.assertIn('data-map-summary-card', kept)
         self.assertIn('data-map-summary-background', kept)
+
+    def test_renumbering_drops_group_page_suffix_from_title_and_header(self):
+        # Older plans baked the internal group counter (« (1/7) ») into the
+        # title, and every chrome rebuild re-stamped it into the header — so
+        # deleting it never lasted.  The real counter is the footer one only.
+        slide = {
+            'type': 'content',
+            'section_key': 'executive_summary',
+            'title': 'الملخص التنفيذي (1/7)',
+            'content_source': 'executive_content.summary',
+            'market_row_start': 0,
+            'market_row_end': 3,
+            'html': ('<div class="slide" dir="rtl" style="width:1280px;height:720px;'
+                     'position:relative;overflow:hidden;background:#fff;">'
+                     '<div style="padding-top:80px;">نص الملخص</div></div>'),
+        }
+        result = slide_engine.renumber_presentation_slides(
+            [slide], project_data={'project_name': 'مشروع الاختبار'})
+        self.assertEqual(len(result), 1)
+        out = result[0]
+        self.assertEqual(out['title'], 'الملخص التنفيذي')
+        self.assertNotIn('(1/7)', out['html'])
+        self.assertNotIn('1 / 7', out['html'])
+        self.assertIn('data-slide-header', out['html'])
+        self.assertIn('data-slide-counter', out['html'])
+        self.assertIn('01 — 01', out['html'])
+
+    def test_renumbering_strips_header_page_marker_from_preserved_slide(self):
+        # A designer-authored header chip showing only the group marker is page
+        # chrome, not content — it must not survive on a preserved slide either.
+        slide = {
+            'type': 'content',
+            'is_custom': True,
+            'title': 'الملخص التنفيذي (1/7)',
+            'content_source': 'executive_content.summary:0:3',
+            'html': ('<div class="slide" dir="rtl" style="width:1280px;height:720px;'
+                     'position:relative;overflow:hidden;background:#fff;">'
+                     '<header class="slide-header" data-slide-header="1" '
+                     'style="position:absolute;top:0;left:0;right:0;height:56px;display:flex;'
+                     'align-items:center;justify-content:space-between;padding:0 24px;">'
+                     '<div style="display:flex;gap:8px;align-items:center;">'
+                     '<span>ليأمرا</span><span>مشروع الرحاب | الملخص التنفيذي</span></div>'
+                     '<div style="font-weight:800;">1 / 7</div>'
+                     '</header>'
+                     '<div style="padding-top:80px;">نص الملخص</div></div>'),
+        }
+        result = slide_engine.renumber_presentation_slides(
+            [slide], project_data={'project_name': 'مشروع الاختبار'})
+        html = result[0]['html']
+        self.assertEqual(result[0]['title'], 'الملخص التنفيذي')
+        self.assertNotIn('1 / 7', html)
+        self.assertIn('ليأمرا', html)
+        self.assertIn('مشروع الرحاب | الملخص التنفيذي', html)
+        self.assertIn('نص الملخص', html)
+
+    def test_group_suffix_inside_preserved_header_title_is_cleaned(self):
+        slide = {
+            'type': 'content',
+            'is_custom': True,
+            'title': 'الملخص التنفيذي (3/7)',
+            'content_source': 'executive_content.summary:6:9',
+            'html': ('<div class="slide" dir="rtl" style="position:relative;width:1280px;height:720px;">'
+                     '<header class="slide-header" data-slide-header="1" '
+                     'style="position:absolute;top:0;left:0;right:0;height:56px;">'
+                     '<h1>الملخص التنفيذي (3/7)</h1></header>'
+                     '<div>محتوى</div></div>'),
+        }
+        result = slide_engine.renumber_presentation_slides(
+            [slide], project_data={'project_name': 'مشروع'})
+        html = result[0]['html']
+        self.assertIn('<h1>الملخص التنفيذي</h1>', html)
+        self.assertNotIn('(3/7)', html)
 
 
 if __name__ == '__main__':

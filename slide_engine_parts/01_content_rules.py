@@ -69,6 +69,37 @@ def offer_chrome(key, offer_lang=OFFER_LANG_ARABIC):
         return OFFER_CHROME_EN.get(key, OFFER_CHROME_AR.get(key, key))
     return OFFER_CHROME_AR.get(key, key)
 
+
+_GROUP_PAGE_TITLE_SUFFIX_RE = re.compile(r'\s*\(\s*\d{1,3}\s*/\s*\d{1,3}\s*\)\s*$')
+
+
+def _strip_group_page_title_suffix(title):
+    """Drop the generated « (N/M) » group-page suffix from a slide title.
+
+    Older plans encoded internal group pagination into the visible title
+    («الملخص التنفيذي (1/7)»).  That text becomes the managed header on every
+    chrome rebuild, so the marker reimposed itself whenever it was deleted.
+    Page position lives in content_source/row ranges; the title stays clean.
+    """
+    text = str(title or '').strip()
+    stripped = _GROUP_PAGE_TITLE_SUFFIX_RE.sub('', text).strip()
+    return stripped or text
+
+
+_GROUP_PAGE_CONTENT_SOURCE_RE = re.compile(r':\d+:\d*$')
+
+
+def _slide_carries_group_pagination(slide):
+    """True for generated multi-page group slides — the only slides whose
+    titles ever carried the « (N/M) » suffix.  Single-page slides keep any
+    look-alike tail in a hand-authored title untouched."""
+    slide = slide if isinstance(slide, dict) else {}
+    return bool(
+        _GROUP_PAGE_CONTENT_SOURCE_RE.search(str(slide.get('content_source') or ''))
+        or slide.get('market_row_start') is not None
+        or slide.get('competitor_start') is not None)
+
+
 _SECTION_KEY_ALIASES = {
     'project': 'overview', 'project_overview': 'overview', 'project_idea': 'overview',
     'project_components': 'components', 'land_analysis': 'land', 'site': 'location',
@@ -1747,11 +1778,10 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
     if named_competitors:
         comp_ranges = _market_competitor_ranges(len(named_competitors))
         total_comp_pages = len(comp_ranges)
-        for chunk_idx, (start, end) in enumerate(comp_ranges):
+        for start, end in comp_ranges:
             c_title = 'Competitor Comparison' if lang == OFFER_LANG_ENGLISH else 'مقارنة المنافسين'
             c_source = 'market_study_data.competitors'
             if total_comp_pages > 1:
-                c_title += f' ({chunk_idx + 1}/{total_comp_pages})'
                 c_source = f'market_study_data.competitors:{start}:{end}'
             competitor_slide = take(c_source, c_title, 'chart', 'competitors')
             competitor_slide.update({
@@ -1763,15 +1793,13 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
             result.append(competitor_slide)
 
     summary_pages = _market_summary_pages(market)
-    for page_index, (start, page_rows) in enumerate(summary_pages, 1):
+    for start, page_rows in summary_pages:
         if not page_rows:
             continue
         content_source = 'market_study_data.summary'
         title = section_title('market', lang)
-        if len(summary_pages) > 1:
-            if start:
-                content_source = f'market_study_data.summary:{start}:{start + len(page_rows)}'
-            title += f' ({page_index}/{len(summary_pages)})'
+        if len(summary_pages) > 1 and start:
+            content_source = f'market_study_data.summary:{start}:{start + len(page_rows)}'
         page_slide = take(content_source, title, 'editorial', 'market_summary')
         page_slide['market_row_start'] = start
         page_slide['market_row_end'] = start + len(page_rows)
@@ -1796,15 +1824,13 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
             result.append(take(content_source, title, 'text'))
 
     source_pages = _market_source_pages(market)
-    for page_index, (start, page_rows) in enumerate(source_pages, 1):
+    for start, page_rows in source_pages:
         if not page_rows:
             continue
         content_source = 'market_study_data.sources'
         title = 'Market Study Data Sources' if lang == OFFER_LANG_ENGLISH else 'مصادر دراسة السوق'
-        if len(source_pages) > 1:
-            if start:
-                content_source = f'market_study_data.sources:{start}:{start + len(page_rows)}'
-            title += f' ({page_index}/{len(source_pages)})'
+        if len(source_pages) > 1 and start:
+            content_source = f'market_study_data.sources:{start}:{start + len(page_rows)}'
         page_slide = take(content_source, title, 'editorial', 'market_sources')
         page_slide['market_row_start'] = start
         page_slide['market_row_end'] = start + len(page_rows)

@@ -880,10 +880,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         self.assertEqual(len(comp_slides), 2)
         self.assertEqual(comp_slides[0]['competitor_start'], 0)
         self.assertEqual(comp_slides[0]['competitor_end'], 3)
-        self.assertIn('(1/2)', comp_slides[0]['title'])
+        self.assertNotIn('(1/2)', comp_slides[0]['title'])
+        self.assertEqual(comp_slides[0]['content_source'], 'market_study_data.competitors:0:3')
         self.assertEqual(comp_slides[1]['competitor_start'], 3)
         self.assertEqual(comp_slides[1]['competitor_end'], 6)
-        self.assertIn('(2/2)', comp_slides[1]['title'])
+        self.assertNotIn('(2/2)', comp_slides[1]['title'])
+        self.assertEqual(comp_slides[1]['content_source'], 'market_study_data.competitors:3:6')
 
         # Verify rendering of slide 1 contains only the first 3 competitors
         html_1 = engine._build_structured_fallback_slide(comp_slides[0], draft6, {})
@@ -975,7 +977,11 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         for slide, (start, rows) in zip(summary_slides[1:], pages[1:]):
             self.assertEqual(slide.get('content_source'),
                              f'executive_content.summary:{start}:{start + len(rows)}')
-        self.assertIn('(1/', str(summary_slides[0].get('title') or ''))
+        # Internal group pagination lives in content_source/row ranges only —
+        # the visible title never carries a « (N/M) » counter look-alike.
+        for slide in summary_slides:
+            self.assertEqual(slide.get('title'), engine.section_title('executive_summary'))
+            self.assertNotRegex(str(slide.get('title') or ''), r'\(\s*\d+\s*/\s*\d+\s*\)')
         # Executive content is a text-only SOL section: no image or map tokens
         # are ever reserved on its slides.
         for slide in summary_slides:

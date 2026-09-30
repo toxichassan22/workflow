@@ -501,6 +501,7 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
         html = re.sub(r'(<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>)',
                       lambda m: m.group(0) + overlay, html, count=1, flags=re.IGNORECASE)
     html = _rewrite_preserved_counter(html, slide_type, slide_num, total_slides)
+    html = _strip_header_page_marker(html)
     # Existing header/footer markup is authoritative. Mark it without repainting.
     for tag, marker in [('header', 'data-slide-header'), ('footer', 'data-slide-footer')]:
         html = re.sub(rf'<{tag}\b[^>]*>', lambda m: _with_data_attribute(m.group(0), marker), html, flags=re.IGNORECASE)
@@ -709,6 +710,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         item = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
         slide_type = str(item.get('type') or '').strip().lower()
         title = str(item.get('title') or '').strip()
+        if _slide_carries_group_pagination(item):
+            # Older decks stored the group-page « (N/M) » marker inside the
+            # title; the real slide counter lives in the footer counter only.
+            # The gate keeps a hand-authored « (70/30) » tail intact.
+            title = _strip_group_page_title_suffix(title)
+            item['title'] = title
         html = str(item.get('html') or '')
         if not slide_type:
             if index == 0:
@@ -757,6 +764,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         slide_type = str(item.get('type') or 'content')
         if _designer_preserves_html(item):
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
+            html = _strip_header_page_marker(html)
             if slide_type == 'index':
                 if not re.search(r'data-index-(?:section|page)', html, re.IGNORECASE):
                     html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
