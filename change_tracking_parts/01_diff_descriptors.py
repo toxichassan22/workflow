@@ -25,31 +25,6 @@ def _text_of(html):
     return _WS_RE.sub(' ', text).strip()
 
 
-def _images_of(html):
-    source = str(html or '')
-    # The watermark overlay carries its own <img>; it is reported as a
-    # watermark line above, never as a generic photo count change.
-    source = re.sub(
-        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div\s*>',
-        '', source, flags=re.IGNORECASE,
-    )
-    source = re.sub(
-        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
-        '', source, flags=re.IGNORECASE,
-    )
-    img_srcs = [
-        match.group(1) or match.group(2) or match.group(3) or ''
-        for match in _IMG_SRC_RE.finditer(source)
-    ]
-    found = img_srcs + _BG_URL_RE.findall(source)
-    items = []
-    for item in found:
-        item = _URL_BUSTER_RE.sub('', item.strip())
-        if item and not _NON_IMAGE_URL_RE.match(item):
-            items.append(item)
-    return items
-
-
 def _shorten(text, limit=MAX_TEXT_IN_LINE):
     text = _WS_RE.sub(' ', str(text or '')).strip()
     return text if len(text) <= limit else text[:limit].rstrip() + '…'
@@ -154,14 +129,9 @@ def describe_slide_changes(old_slides, new_slides):
             old_text, new_text = _text_of(old_html), _text_of(new_html)
             if old_text != new_text:
                 slide_lines.extend(_text_difference_lines(old_text, new_text))
-            old_images, new_images = _images_of(old_html), _images_of(new_html)
-            # Multiset compare: the same photos re-ordered by a rewrite are not
-            # a photo change at all.
-            if Counter(old_images) != Counter(new_images):
-                if len(new_images) != len(old_images):
-                    slide_lines.append(f'عدد الصور: من {len(old_images)} إلى {len(new_images)}')
-                else:
-                    slide_lines.append('استُبدلت صورة أو خريطة')
+            # Photo changes are never counted here: the agent narrates its own
+            # edits, and a «من N إلى M» image counter only reads as noise. An
+            # image-only change still falls through to the layout line below.
             old_marks = set(_PLACEHOLDER_RE.findall(old_html))
             new_marks = set(_PLACEHOLDER_RE.findall(new_html))
             if new_marks - old_marks:

@@ -140,35 +140,31 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         joined = '\n'.join(lines)
         self.assertIn('عدد الشرائح: من 3 إلى 4', joined)
         self.assertIn('العنوان: من «الغلاف» إلى «الغلاف الرئيسي»', joined)
-        self.assertIn('استُبدلت صورة أو خريطة', joined)
         self.assertIn('تغيّر التنسيق والألوان بدون تغيير النص', joined)
         self.assertIn('تكلفة 480 مليون', joined)
         self.assertIn('تكلفة 500 مليون', joined)
         self.assertIn('أُضيفت الشريحة 4', joined)
         self.assertNotIn('تعديل المحتوى', joined)
+        # Owner rule: no photo counter or photo-diff lines — the designer
+        # narrates its own edits, so «من N إلى M» image lines are noise.
+        self.assertFalse(any('الصور' in line or 'صورة أو خريطة' in line
+                             for line in lines), lines)
 
-        # SVG paint-server refs (chart fills like url(#posBarGrad)) and font
-        # urls are not photos — a chart rewrite must never print
-        # «عدد الصور: من N إلى M».
-        chart_old = [{
+        # Even an image-only change stays out of the photo vocabulary.
+        image_old = [{
             'title': 'التدفقات',
             'html': ('<div class="slide"><svg data-chart="combo">'
                      '<rect fill="url(#posBarGrad)"/><rect fill="url(#negBarGrad)"/></svg>'
                      "<style>@font-face{src:url('/fonts/a.ttf')}</style>"
                      '<img src="/u/i.png"></div>'),
         }]
-        chart_new = [{
+        image_new = [{
             'title': 'التدفقات',
-            'html': '<div class="slide"><p>نص بديل</p><img src="/u/i.png"></div>',
+            'html': '<div class="slide"><p>نص</p><img src=\'/u/j.png\'></div>',
         }]
-        chart_lines = tracking.describe_slide_changes(chart_old, chart_new)
-        self.assertFalse(any('الصور' in line for line in chart_lines), chart_lines)
-        # Single-quoted and unquoted img src count like double-quoted ones.
-        quote_old = [{'title': 's', 'html': "<div class=\"slide\"><p>t</p><img src='/u/i.png'></div>"}]
-        quote_new = [{'title': 's', 'html': '<div class="slide"><p>t</p><img src="/u/j.png"></div>'}]
-        quote_lines = tracking.describe_slide_changes(quote_old, quote_new)
-        self.assertIn('استُبدلت صورة أو خريطة', '\n'.join(quote_lines))
-        self.assertFalse(any('عدد الصور' in line for line in quote_lines), quote_lines)
+        image_lines = tracking.describe_slide_changes(image_old, image_new)
+        self.assertFalse(any('الصور' in line or 'صورة أو خريطة' in line
+                             for line in image_lines), image_lines)
 
         draft_lines = '\n'.join(tracking.detail_text(item) for item in tracking.describe_draft_changes(
             {'project_name': 'the view', 'city': 'جدة', 'financial_study_model': {'inputs': {'a': 1}}},
