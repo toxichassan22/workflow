@@ -247,8 +247,19 @@ def commit_presentation_revision(tenant_id, presentation_id=None, *,
         revision = int(current.get('revision') or 0)
         if expected_revision is not None and expected_revision != revision:
             raise PresentationRevisionConflict(expected_revision, revision)
+        previous_id = current.get('current_revision_id') if not created else None
+        previous = (conn.execute('SELECT content_hash FROM presentation_revisions WHERE id = ?',
+                                 (previous_id,)).fetchone()) if previous_id else None
         if not created:
-            current = _transform_presentation_snapshot(current, snapshot_transform)
+            # Re-freezing the stored row walks every slide and re-reads/hashes
+            # every media file. When its content hash still equals the recorded
+            # revision hash the row already stores the frozen form, so the
+            # transform is a pure no-op to skip. Only a drifted, legacy, or
+            # never-baselined row is transformed (and baselined below).
+            current_hash = _presentation_content_hash(current)
+            if previous is None or previous['content_hash'] != current_hash or restore_version_id:
+                current = _transform_presentation_snapshot(current, snapshot_transform)
+                current_hash = _presentation_content_hash(current)
         target = None
         if restore_version_id:
             target = get_presentation_revision(presentation_id, restore_version_id, tenant_id)
@@ -276,16 +287,13 @@ def commit_presentation_revision(tenant_id, presentation_id=None, *,
         state = _transform_presentation_snapshot(state, snapshot_transform)
         slides = _presentation_json(state.get('slides_data'), 'slides_data', strict=True)
         state['slide_count'] = len(slides)
-        changed = created or bool(target) or _presentation_content_hash(current) != _presentation_content_hash(state)
+        changed = created or bool(target) or current_hash != _presentation_content_hash(state)
         if changed and not created and status is _PRESENTATION_UNSET and current.get('status') in ('approved', 'pending_approval'):
             state['status'] = 'draft'
-        previous_id = current.get('current_revision_id')
         if not created:
-            previous = conn.execute('SELECT content_hash FROM presentation_revisions WHERE id = ?',
-                                    (previous_id,)).fetchone() if previous_id else None
             # Preserve the actual current state even if an unmigrated legacy caller
             # changed it since the last revision-aware save. Never credit that to this actor.
-            if not previous or previous['content_hash'] != _presentation_content_hash(current):
+            if not previous or previous['content_hash'] != current_hash:
                 if previous:
                     revision += 1
                 previous_id = _insert_presentation_revision(

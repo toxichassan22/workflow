@@ -600,9 +600,12 @@
         while (attempts < 2) {
           attempts++;
           // api('POST', '/api/presentations'
+          // Slides travel once as slidesData; the server ignores the embedded
+          // copy inside projectData, so do not send it twice on the wire.
+          const { tenantSlidesData: _embeddedSlides, ...projectDataBody } = snapshot;
           const response = await api(presentationId ? 'PUT' : 'POST',
             '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
-              title, projectData: snapshot, slidesData: snapshot.tenantSlidesData,
+              title, projectData: projectDataBody, slidesData: snapshot.tenantSlidesData,
               slideCount: snapshot.tenantSlidesData.length,
               ...(presentationId ? { expectedRevision: currentRevision } : {}),
               changeSource: provenance ? 'ai' : 'manual', provenance,

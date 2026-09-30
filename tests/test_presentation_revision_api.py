@@ -89,7 +89,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
 
     def test_identical_save_is_not_a_duplicate_version_or_card(self):
         created = self.create()
-        response = self.put(created, title='Original title', slidesData=created['presentation']['slidesData'])
+        stored = self.client.get(f"/api/presentations/{created['presentationId']}",
+                                 headers=self.headers).get_json()['presentation']
+        response = self.put(created, title='Original title', slidesData=stored['slidesData'])
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertFalse(response.get_json()['changed'])
         self.assertEqual(response.get_json()['revision'], 1)
@@ -128,7 +130,10 @@ class PresentationRevisionApiTests(unittest.TestCase):
         self.assertEqual(restored['presentation']['title'], 'Original title')
         self.assertEqual(restored['presentation']['projectData']['city'], 'Original city')
         self.assertEqual(restored['presentation']['status'], 'draft')
-        self.assertEqual(restored['slidesData'], created['presentation']['slidesData'])
+        original = self.client.get(
+            f"/api/presentations/{created['presentationId']}/versions/{original_version}",
+            headers=self.headers).get_json()['version']
+        self.assertEqual(restored['slidesData'], original['snapshot']['slidesData'])
         self.assertEqual(self.versions(created)[0]['restored_from_revision_id'], original_version)
         with self.app.app_context():
             self.assertEqual(db.get_project_draft_by_id(self.tenant, draft_id)['draft_data']['project_name'], 'New draft facts')
@@ -151,7 +156,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
         restored = self.client.post(f"/api/presentations/{created['presentationId']}/versions/{legacy}/restore",
                                     headers=self.headers, json={'expectedRevision': 1}).get_json()
         self.assertEqual(restored['presentation']['title'], 'Original title')
-        self.assertEqual(restored['presentation']['projectData']['city'], 'Original city')
+        stored = self.client.get(f"/api/presentations/{created['presentationId']}",
+                                 headers=self.headers).get_json()['presentation']
+        self.assertEqual(stored['projectData']['city'], 'Original city')
         self.assertIn('Legacy', restored['slidesData'][0]['html'])
 
     def test_permission_and_tenant_scope_for_history_detail_compare_restore(self):
@@ -224,7 +231,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
         url = f'/uploads/creative/{self.tenant}/mutable.png'
         created = self.create(slidesData=[{'html': f'<div class="slide"><img src="{url}"></div>'}],
                               projectData={'cover': url})
-        snapshot_url = created['presentation']['projectData']['cover']
+        stored = self.client.get(f"/api/presentations/{created['presentationId']}",
+                                 headers=self.headers).get_json()['presentation']
+        snapshot_url = stored['projectData']['cover']
         self.assertIn('/revisions/', snapshot_url)
         # Responses sign uploads URLs (?s=…, expiring); the path is the identity.
         snapshot_path = snapshot_url.split('?', 1)[0]

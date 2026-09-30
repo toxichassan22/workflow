@@ -107,11 +107,24 @@ def _presentation_state(pres):
 
 
 def _presentation_revision_response(result):
+    # Save callers only need the new counters — echoing the full multi-megabyte
+    # snapshot back on every save doubled the wire cost for no reader.
+    saved = result['presentation']
     return {
         'success': True, 'presentationId': result['presentation_id'],
         'revision': result['revision'], 'versionId': result.get('version_id'),
         'changed': result.get('changed', True),
-        'presentation': _presentation_state(result['presentation']),
+        'presentation': {
+            'id': result['presentation_id'],
+            'title': saved.get('title'),
+            'revision': int(saved.get('revision') or 0),
+            'slide_count': saved.get('slide_count'),
+            'draft_id': saved.get('draft_id'),
+            'status': saved.get('status'),
+            'created_at': saved.get('created_at'),
+            'updated_at': saved.get('updated_at'),
+            'presentation_scope': saved.get('presentation_scope'),
+        },
     }
 
 
@@ -208,7 +221,6 @@ def _freeze_presentation_project_metadata(value, freeze):
 
 def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
     """All application content writes use the transactional version/history authority."""
-    from presentation_assets import freeze_presentation_assets
     root = os.path.dirname(__file__)
     authorized = {}
     for row in db.get_map_images(tenant_id):
@@ -238,18 +250,17 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
                 authorized[rel_pf] = storage_path
             except ValueError:
                 pass
+    # One freezer instance per save: its URL cache and authorization table used
+    # to be rebuilt for every string leaf in the snapshot, re-verifying the same
+    # map/logo/project-file paths hundreds of times per save.
+    freezer = presentation_assets._Freezer(
+        tenant_id, root, request.host_url.rstrip('/'), authorized,
+        uploads_root=UPLOADS_DIR, preserve_missing_uploads=True)
     def freeze(value):
-        if isinstance(value, dict):
-            return {key: freeze(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [freeze(item) for item in value]
         # Dangling historical uploads references (files absent from this
         # server) are preserved inside the freezer per-URL; every asset that
         # exists must pass its authorization and safety checks.
-        return freeze_presentation_assets(
-            value, tenant_id, authorized_paths=authorized,
-            allowed_origin=request.host_url.rstrip('/'),
-            uploads_root=UPLOADS_DIR, preserve_missing_uploads=True)
+        return freezer.walk(value)
     def freeze_snapshot(state):
         frozen = dict(state)
         parsed = _presentation_state(state)
@@ -313,6 +324,10 @@ def api_save_presentation():
         branding = db.get_branding(g.tenant_id) or {}
         render_project_data = copy.deepcopy(project_data)
         _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
+        # Slides live in slides_data — the embedded copy that used to ride
+        # inside projectData doubled every stored row and every snapshot;
+        # nothing reads it back (the client loads slidesData directly).
+        project_data.pop('tenantSlidesData', None)
         save_stage = 'renumber'
         slides_data = slide_engine.renumber_presentation_slides(
             slides_data, branding=branding, project_data=render_project_data,
@@ -381,6 +396,13 @@ def api_get_presentation(pres_id):
         # ISS-015: the stored projectData is a draft snapshot — hidden sections
         # stay server-side for this caller.
         state['projectData'] = _draft_data_for_response(state.get('projectData'))
+        if isinstance(state['projectData'], dict):
+            # Slides already travel in slidesData — the embedded snapshot copy
+            # is only kept in storage, never read back by the client.
+            state['projectData'].pop('tenantSlidesData', None)
+        # The parsed copies supersede the raw serialized columns on the wire.
+        state.pop('project_data', None)
+        state.pop('slides_data', None)
         state['draftRevision'] = draft_revision
         return jsonify({'success': True, 'presentation': state})
     pres['revision'] = int(pres.get('revision') or 0)
@@ -411,6 +433,10 @@ def api_get_presentation(pres_id):
     pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
     pres['projectData'] = _draft_data_for_response(pres.get('projectData'))
+    if isinstance(pres['projectData'], dict):
+        pres['projectData'].pop('tenantSlidesData', None)
+    pres.pop('project_data', None)
+    pres.pop('slides_data', None)
     pres['draftRevision'] = draft_revision
     return jsonify({'success': True, 'presentation': pres})
 
@@ -500,6 +526,12 @@ def api_update_presentation(pres_id):
             )
             updates['slide_count'] = len(updates['slides_data'])
 
+        if isinstance(updates.get('project_data'), dict):
+            # Slides live in slides_data — the embedded copy that used to ride
+            # inside projectData doubles every stored row; nothing reads it
+            # back (the client loads slidesData directly).
+            updates['project_data'].pop('tenantSlidesData', None)
+
         save_stage = 'history'
         details = []
         action = 'تعديل العرض'
@@ -510,6 +542,9 @@ def api_update_presentation(pres_id):
                 old_project_data = json.loads(pres.get('project_data') or '{}')
             except (TypeError, ValueError):
                 old_project_data = {}
+            # Rows saved before the dedup still embed the deck; comparing it
+            # against the stripped payload would log a phantom slide removal.
+            old_project_data.pop('tenantSlidesData', None)
             details.extend(change_tracking.describe_draft_changes(
                 old_project_data, updates['project_data'],
                 id_names=_draft_change_id_names()))

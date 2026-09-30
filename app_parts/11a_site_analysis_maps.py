@@ -843,6 +843,8 @@ def api_generate_single_map_image():
         if isinstance(old_creative, dict):
             old_placeholders.update(old_creative.get('map_placeholders') or {})
         updated_project = {**state['projectData'], **project_data}
+        # Slides live in slides_data — the embedded copy is storage waste.
+        updated_project.pop('tenantSlidesData', None)
         updated_project['map_placeholders'] = {**old_placeholders, **placeholders}
         updated_project['tenantCreativeImages'] = {
             **(old_creative if isinstance(old_creative, dict) else {}),

@@ -198,6 +198,35 @@ def _section_snapshot_slice(draft_data, section_key, section_map=None):
     return selected
 
 
+def _section_snapshot_slices(draft_data, section_map):
+    """All sections' snapshot slices in a single walk of the payload.
+
+    Checking several approved sections used to rescan every draft key once per
+    section; the slices are identical to calling _section_snapshot_slice per key.
+    """
+    data = draft_data if isinstance(draft_data, dict) else {}
+    section_map = section_map or {}
+    slices = {}
+    for key, value in data.items():
+        if key in SECTION_SNAPSHOT_EXCLUDED_KEYS:
+            continue
+        section_key = _draft_section_of_key(section_map, key)
+        if section_key:
+            slices.setdefault(section_key, {})[key] = change_tracking.strip_url_fetch_params(value)
+    for section_key, keys in SECTION_SNAPSHOT_BLOBS.items():
+        for key in keys:
+            if key in data:
+                slices.setdefault(section_key, {})[key] = change_tracking.strip_url_fetch_params(data[key])
+    for key in SECTION_SNAPSHOT_LOCATION_EXTRAS:
+        if key in data:
+            slices.setdefault('location', {})[key] = change_tracking.strip_url_fetch_params(data[key])
+    creative = data.get('tenantCreativeImages')
+    if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
+        slices.setdefault('location', {})['map_approvals'] = change_tracking.strip_url_fetch_params(
+            dict(creative.get('map_approvals')))
+    return slices
+
+
 def _section_version_label(section_key):
     return SECTION_VERSION_AR_LABELS.get(section_key, section_key)
 
@@ -312,17 +341,19 @@ def _section_required_missing_labels(tenant_id, section_key, snapshot):
     return missing
 
 
-def _section_version_readiness(draft, section_key, section_map=None):
+def _section_version_readiness(draft, section_key, section_map=None, overview=None, slices=None):
     """Readiness of one section against its latest snapshot.
 
     Returns (state, meta) where state is ok, not_approved, stale or expired.
     Sections without any version return (legacy, None) so the old toggle
-    keeps working.
+    keeps working. ``overview``/``slices`` let a caller that checks several
+    sections pass a single fetched overview and a single-pass slice set.
     """
-    try:
-        overview = db.section_versions_overview(g.tenant_id, (draft or {}).get('id'))
-    except Exception:
-        overview = {}
+    if overview is None:
+        try:
+            overview = db.section_versions_overview(g.tenant_id, (draft or {}).get('id'))
+        except Exception:
+            overview = {}
     meta = (overview or {}).get(section_key)
     if not meta:
         return 'legacy', None
@@ -332,6 +363,7 @@ def _section_version_readiness(draft, section_key, section_map=None):
         return 'expired', meta
     try:
         live_hash = db.section_snapshot_hash(
+            slices.get(section_key, {}) if slices is not None else
             _section_snapshot_slice((draft or {}).get('draft_data') or {}, section_key,
                                     section_map if section_map is not None else _draft_field_section_map(g.tenant_id)))
     except Exception:
@@ -341,19 +373,22 @@ def _section_version_readiness(draft, section_key, section_map=None):
     return 'ok', meta
 
 
-def _void_stale_section_approvals(tenant_id, draft_id, draft_data):
+def _void_stale_section_approvals(tenant_id, draft_id, draft_data, statuses=None):
     """Drop section statuses whose live content no longer matches the approved
     snapshot (t16): an edit on an approved section voids that approval and the
     section falls back to 'draft' until it is sent and decided again. Expired
-    approvals void the same way (d05)."""
-    draft = db.get_project_draft_by_id(tenant_id, draft_id)
-    if not draft:
-        return
-    statuses = draft.get('section_statuses') or {}
+    approvals void the same way (d05). The caller may pass the effective
+    ``statuses`` map so the just-saved row is not re-read and re-parsed."""
+    if statuses is None:
+        draft = db.get_project_draft_by_id(tenant_id, draft_id)
+        if not draft:
+            return
+        statuses = draft.get('section_statuses') or {}
     if not statuses:
         return
     overview = db.section_versions_overview(tenant_id, draft_id)
     section_map = _draft_field_section_map(tenant_id)
+    slices = None
     stale = {}
     for key, value in statuses.items():
         if value != 'approved':
@@ -361,8 +396,9 @@ def _void_stale_section_approvals(tenant_id, draft_id, draft_data):
         meta = overview.get(key)
         if not meta or meta.get('status') != 'approved':
             continue
-        live_hash = db.section_snapshot_hash(
-            _section_snapshot_slice(draft_data, key, section_map))
+        if slices is None:
+            slices = _section_snapshot_slices(draft_data, section_map)
+        live_hash = db.section_snapshot_hash(slices.get(key, {}))
         if live_hash != meta.get('snapshot_hash') or meta.get('is_expired'):
             stale[key] = 'draft'
     if stale:
@@ -498,6 +534,8 @@ def _sanitize_save_section_statuses(tenant_id, draft, incoming, stored_statuses)
     sanitized = dict(stored)
     blocked = []
     section_map = None
+    overview = None
+    slices = None
     draft_id = (draft or {}).get('id')
     for key, value in incoming.items():
         if not isinstance(key, str) or not key or value not in {'draft', 'approved'}:
@@ -513,7 +551,15 @@ def _sanitize_save_section_statuses(tenant_id, draft, incoming, stored_statuses)
             continue
         if section_map is None:
             section_map = _draft_field_section_map(tenant_id)
-        state, _meta = _section_version_readiness(draft, key, section_map)
+        if overview is None:
+            try:
+                overview = db.section_versions_overview(tenant_id, draft_id)
+            except Exception:
+                overview = {}
+        if slices is None:
+            slices = _section_snapshot_slices((draft or {}).get('draft_data') or {}, section_map)
+        state, _meta = _section_version_readiness(
+            draft, key, section_map, overview=overview, slices=slices)
         if state in {'not_approved', 'stale', 'expired'}:
             blocked.append(key)
             continue
@@ -662,6 +708,7 @@ def api_save_project_draft():
             draft_id=draft_data.get('draftId') or draft_data.get('draft_id'),
             allow_generating=allow_generating,
             expected_revision=expected_revision,
+            existing_row=previous,
         )
     except db.DraftRevisionConflict as conflict:
         return jsonify({
@@ -712,13 +759,18 @@ def api_save_project_draft():
     # approval — checkpoint saves of a running job never reach this.
     if not allow_generating:
         try:
-            _void_stale_section_approvals(g.tenant_id, draft_id, draft_data)
+            effective_statuses = (section_statuses if isinstance(section_statuses, dict) and section_statuses
+                                  else previous_statuses)
+            _void_stale_section_approvals(
+                g.tenant_id, draft_id, draft_data, statuses=effective_statuses)
         except Exception:
             pass
     saved_revision = None
-    saved_draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
-    if saved_draft:
-        saved_revision = int(saved_draft.get('revision') or 0)
+    saved_row = db.get_db().execute(
+        'SELECT revision FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        (draft_id, g.tenant_id)).fetchone()
+    if saved_row:
+        saved_revision = int(saved_row['revision'] or 0)
     return jsonify({'success': True, 'draftId': draft_id, 'revision': saved_revision})
 
 

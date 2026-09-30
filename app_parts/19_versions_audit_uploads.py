@@ -114,7 +114,11 @@ def api_restore_version(pres_id, version_id):
     except (LookupError, ValueError) as error:
         return jsonify({'error': str(error)}), 400
     payload = _presentation_revision_response(result)
-    payload['slidesData'] = payload['presentation']['slidesData']
+    # Restoring hands the workspace the whole stored deck to reload — keep the
+    # full presentation here even though plain save answers stay light.
+    restored_state = _presentation_state(result['presentation'])
+    payload['presentation'] = restored_state
+    payload['slidesData'] = restored_state['slidesData']
     return jsonify(payload)
 
 

@@ -1810,7 +1810,9 @@ HTML الحالي:
                 title = (params.get('title') or workspace.get('title') or
                          (workspace.get('projectData') or {}).get('project_name') or 'عرض بدون عنوان').strip()
                 slides = _workspace_slides(workspace)
-                project_data = workspace.get('projectData') if isinstance(workspace.get('projectData'), dict) else {}
+                project_data = dict(workspace.get('projectData')) if isinstance(workspace.get('projectData'), dict) else {}
+                # Slides live in slides_data — drop the embedded duplicate.
+                project_data.pop('tenantSlidesData', None)
                 slides = slide_engine.renumber_presentation_slides(
                     slides, branding=db.get_branding(tenant_id), project_data=project_data,
                     tenant_id=tenant_id,

@@ -281,7 +281,8 @@ def _clear_draft_approval_fields(conn, draft_id):
 
 
 def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft',
-                       draft_id=None, allow_generating=False, expected_revision=None):
+                       draft_id=None, allow_generating=False, expected_revision=None,
+                       existing_row=None):
     """Save one unified draft per tenant actor without losing section approvals.
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
@@ -298,7 +299,11 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     reset below may move it, and new drafts always start as ``draft``.
     """
     conn = get_db()
-    if draft_id:
+    if existing_row is not None:
+        # The route already hydrated this row for permission and history
+        # checks — re-reading it would parse a multi-megabyte draft_data twice.
+        existing = existing_row
+    elif draft_id:
         # ISS-029: a named draft identifies the tenant's row; the actor's scope
         # is enforced by the route before this call. Filtering by user_id here
         # made a shared draft look absent and the INSERT below die on a
@@ -392,7 +397,7 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
                   f'{sorted(stored_content - incoming_content)[:12]}')
 
         data_changed = save_data != old_data
-        statuses_changed = statuses_json != (existing['section_statuses'] or '{}')
+        statuses_changed = new_statuses != old_statuses
         old_overall_status = existing['status'] or 'draft'
 
         norm_old_status = normalize_proposal_status(old_overall_status)
@@ -420,6 +425,13 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             next_status = old_overall_status
             clear_approval = False
 
+        if not data_changed and not statuses_changed:
+            # A save that changes neither the payload nor the section map is a
+            # no-op: row, revision and timestamps stay exactly as they were, and
+            # a redundant save must not mint a new revision.
+            conn.commit()
+            return draft_id
+
         update_sql = '''UPDATE project_drafts
                SET title = ?, draft_data = ?, section_statuses = ?, status = ?,
                    revision = COALESCE(revision, 0) + 1, data_bytes = ?,
@@ -431,13 +443,16 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             update_sql += ' AND revision = ?'
             update_params.append(int(expected_revision))
         updated_row = conn.execute(update_sql, update_params)
-        if expected_revision is not None and updated_row.rowcount != 1:
+        if updated_row.rowcount != 1:
+            # With expected_revision this is the declared CAS; without it the
+            # row vanished or moved between the route's read and this write —
+            # either way the save must not silently land nowhere.
             current = conn.execute(
                 'SELECT revision FROM project_drafts WHERE id = ?', (existing['id'],)
             ).fetchone()
             raise DraftRevisionConflict(
-                existing['id'], int(expected_revision),
-                int((current or {}).get('revision') or 0) if current else 0)
+                existing['id'], int(expected_revision) if expected_revision is not None else 0,
+                int(current['revision'] or 0) if current else 0)
         if clear_approval:
             _clear_draft_approval_fields(conn, existing['id'])
         conn.commit()

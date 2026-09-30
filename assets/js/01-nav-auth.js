@@ -59,7 +59,7 @@
     // The server stores each chunk as its own {idx}.part file, so arrival order does not matter.
     // Sending them one at a time meant a few hundred sequential round trips for a draft carrying
     // slides and images, which is most of why saving felt like nothing was happening.
-    const CHUNK_CONCURRENCY = 6;
+    const CHUNK_CONCURRENCY = 12;
 
     async function chunkedPost(method, path, wire, isGzip, headers, signal, onProgress) {
       const buf = typeof wire === 'string' ? new TextEncoder().encode(wire) : new Uint8Array(wire);
@@ -78,15 +78,30 @@
         const part = buf.subarray(index * CHUNK_PART_BYTES, (index + 1) * CHUNK_PART_BYTES);
         let bin = '';
         for (let j = 0; j < part.length; j++) bin += String.fromCharCode(part[j]);
-        const res = await fetch('/api/body-chunk', {
-          method: 'POST',
-          headers: chunkHeaders,
-          body: JSON.stringify({ id, idx: index, total, data: btoa(bin) }),
-          signal,
-        });
-        if (!res.ok) throw new Error('Chunk upload failed (' + res.status + ')');
-        sent += 1;
-        if (onProgress) onProgress(sent, total);
+        const body = JSON.stringify({ id, idx: index, total, data: btoa(bin) });
+        // Chunks are idempotent ({idx}.part is rewritten with the same bytes),
+        // so retrying a flaky connection or a worker restart is safe.
+        const chunkSignal = signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+          ? AbortSignal.timeout(60000) : undefined);
+        let lastError = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await fetch('/api/body-chunk', {
+              method: 'POST',
+              headers: chunkHeaders,
+              body,
+              signal: chunkSignal,
+            });
+            if (!res.ok) throw new Error('Chunk upload failed (' + res.status + ')');
+            sent += 1;
+            if (onProgress) onProgress(sent, total);
+            return;
+          } catch (error) {
+            if (signal && signal.aborted) throw error;
+            lastError = error;
+          }
+        }
+        throw lastError;
       };
 
       let next = 0;
