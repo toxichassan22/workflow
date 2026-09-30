@@ -1,4 +1,5 @@
 DirectoryIndex disabled
+Options -Indexes
 
 RewriteEngine On
 

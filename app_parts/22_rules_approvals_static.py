@@ -685,15 +685,37 @@ def _build_fingerprint():
     return fingerprint
 
 
+def _diagnostic_request_is_admin():
+    """Bearer-token platform admin check for the diagnostic endpoints.
+
+    /health and /api/build must stay publicly reachable (watchdogs and the
+    deploy workflows poll them), so the verbose internals are only attached
+    when a platform-admin session token is supplied.
+    """
+    header = request.headers.get('Authorization', '')
+    if not header.startswith('Bearer '):
+        return False
+    payload = decode_token(header[7:].strip())
+    if not payload or not payload.get('sub'):
+        return False
+    tenant = db.get_tenant_by_id(payload['sub'])
+    if not tenant:
+        return False
+    return bool(_is_platform_admin_session(tenant, payload))
+
+
 @app.route('/api/build', methods=['GET'])
 def api_build():
     """Which build is actually live.
 
     «هل نزل الإصلاح؟» had no answer but guessing: the frontend could be checked by fetching the
-    page, and a server-side fix could not be checked at all.
+    page, and a server-side fix could not be checked at all. The per-file fingerprint map is
+    admin-only — it discloses the exact deployed revision of every source file.
     """
-    return jsonify({'commit': _build_commit(), 'startedAt': APP_STARTED_AT,
-                    'sources': _build_fingerprint()})
+    body = {'commit': _build_commit(), 'startedAt': APP_STARTED_AT}
+    if _diagnostic_request_is_admin():
+        body['sources'] = _build_fingerprint()
+    return jsonify(body)
 
 
 @app.route('/api/deploy-webhook', methods=['GET', 'POST'])
@@ -909,21 +931,28 @@ def _slide_vision_probe(force=False):
 @app.route('/health')
 def health():
     metadata = _read_deployment_metadata()
-    if request.args.get('vision'):
-        _slide_vision_probe(force=True)
-    return jsonify({
+    body = {
         'status': 'ok',
-        'slide_vision': dict(_SLIDE_VISION_STATE) or _deployed_vision_status(),
         'commit': metadata.get('commit', 'unknown'),
         'deployed_commit': metadata.get('deployed_commit', 'unknown'),
         'deployed_at': metadata.get('deployed_at'),
         'deployment_source': metadata.get('source'),
         'map_label_font': os.path.basename(maps_service.bundled_arabic_overlay_font_path() or ''),
-        'model': GLM_MODEL,
-        'image_model': IMAGE_MODEL,
-        'designer_agent': DESIGNER_AGENT,
-        'designer_agent_planner_model': DESIGNER_AGENT_PLANNER_MODEL if DESIGNER_AGENT else None,
-    })
+    }
+    # Model/config internals and the chromium probe stay behind a platform-admin
+    # token: public, they disclosed deployment config and let anyone trigger a
+    # CPU-heavy headless render via ?vision=1.
+    if _diagnostic_request_is_admin():
+        if request.args.get('vision'):
+            _slide_vision_probe(force=True)
+        body.update({
+            'slide_vision': dict(_SLIDE_VISION_STATE) or _deployed_vision_status(),
+            'model': GLM_MODEL,
+            'image_model': IMAGE_MODEL,
+            'designer_agent': DESIGNER_AGENT,
+            'designer_agent_planner_model': DESIGNER_AGENT_PLANNER_MODEL if DESIGNER_AGENT else None,
+        })
+    return jsonify(body)
 
 @app.route('/preview')
 def preview():

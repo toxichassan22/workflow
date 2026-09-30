@@ -104,6 +104,35 @@ def compress_response(response):
     return response
 
 
+# Baseline security headers on every response. Routes that already set a header
+# (e.g. the strict download CSP in 19_versions_audit_uploads) keep their own.
+# script-src 'self' is safe because verify-frontend.js forbids inline scripts;
+# 'unsafe-inline' in style-src covers the inline style attributes the SPA uses.
+SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    'Content-Security-Policy': (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https:; connect-src 'self' blob:; "
+        "frame-src 'self' blob:; worker-src 'self' blob:; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    ),
+}
+
+
+@app.after_request
+def security_headers(response):
+    for header, value in SECURITY_HEADERS.items():
+        if header not in response.headers:
+            response.headers[header] = value
+    return response
+
+
 @app.before_request
 def decompress_gzip_request_body():
     # The client gzips large JSON bodies because the hosting proxy corrupts
