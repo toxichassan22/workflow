@@ -425,13 +425,20 @@ def _refresh_preserved_index(html, entries, branding=None, project_data=None):
 
 def finalize_designer_slide_html(html, slide_type, project_data, branding, creative_images=None,
                                  map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
-                                 total_slides=None, content_source=None, allow_all_maps=False):
+                                 total_slides=None, content_source=None, allow_all_maps=False,
+                                 instruction=None, removed_elements=None):
     """Finalize a designer edit without regenerating its content or visual design.
 
     Safety and company/project logo compliance remain mandatory. Only logo
     images may receive policy backing/sizing; user surfaces, tables, numbers,
     media ownership and existing chrome are never normalized here. Save/export
     numbering must use the preservation branch, not call this helper again.
+
+    ``removed_elements`` is the list Sol declared in its JSON reply and
+    ``instruction`` the user's own wording — either one tells the managed heals
+    (logo overlay, counter/footer) that a missing element was removed on
+    purpose and must not be resurrected. Undeclared, unrequested absences heal
+    exactly as before.
     """
     if not html:
         return html
@@ -448,6 +455,11 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
     project_logo = _project_logo_reference(project_data)
     company_logo = resolve_logo_in_html('##LOGO##', tenant_id, _branding_cache=branding)
     company_sources = {company_logo, branding.get('logo_path'), branding.get('logo'), branding.get('logo_url'), '/assets/logo.png'}
+    suppressed = _designer_suppressed_chrome(removed_elements, instruction)
+    # When the project mark is the company image, every matching <img> satisfies
+    # both roles — tagging it 'project' alone kept 'company' missing forever and
+    # the overlay heal resurrected the very duplicate Sol had just removed.
+    shared_brand_logo = _shared_brand_logo(project_logo, branding, tenant_id)
     found = set()
     hero = slide_type in ('cover', 'closing', 'section_divider')
     size = 80 if hero else 40 if slide_type == 'moodboard' else 48
@@ -468,6 +480,8 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
         if not url:
             return ''
         found.add(role)
+        if shared_brand_logo:
+            found.update(('company', 'project'))
         tag = tag[:src_match.start(2)] + html_lib.escape(url, quote=True) + tag[src_match.end(2):]
         background = dark if str(tone).lower() == 'light' else '#ffffff'
         return _set_tag_style(tag, ('height', 'max-height', 'background', 'background-color', 'padding', 'border-radius', 'box-sizing', 'object-fit'),
@@ -477,7 +491,8 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
     html = re.sub(r'<img\b[^>]*>', compliant_logo, html, flags=re.IGNORECASE)
     missing = ''.join(f'<img src="{token}" alt="">' for role, token in
                       [('company', '##LOGO##'), ('project', '##PROJECT_LOGO##')]
-                      if role not in found and (role == 'company' or project_logo))
+                      if role not in found and f'{role}_logo' not in suppressed
+                      and (role == 'company' or (project_logo and not shared_brand_logo)))
     if missing:
         missing = re.sub(r'<img\b[^>]*>', compliant_logo, missing)
         overlay = ('<div data-designer-managed-logos="1" style="position:absolute;top:8px;left:24px;'
@@ -488,7 +503,9 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
     # Existing header/footer markup is authoritative. Mark it without repainting.
     for tag, marker in [('header', 'data-slide-header'), ('footer', 'data-slide-footer')]:
         html = re.sub(rf'<{tag}\b[^>]*>', lambda m: _with_data_attribute(m.group(0), marker), html, flags=re.IGNORECASE)
-    if slide_type not in ('cover', 'closing', 'moodboard') and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
+    if (slide_type not in ('cover', 'closing', 'moodboard')
+            and not ({'footer', 'counter'} & suppressed)
+            and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE)):
         counter = _slide_counter_text(slide_num, total_slides)
         if counter:
             counter_html = '<span data-slide-counter="1" dir="ltr">' + counter + '</span>'

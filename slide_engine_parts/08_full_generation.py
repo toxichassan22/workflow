@@ -1479,10 +1479,15 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
     project_title = html_lib.escape(str(
         project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
     ))
+    project_logo_ref = _project_logo_reference(project_source)
+    if _shared_brand_logo(project_logo_ref, branding, tenant_id):
+        # The project mark IS the company image — rendering both would show the
+        # same logo twice in the header.
+        project_logo_ref = ''
     header_html, footer_html = _presentation_chrome_html(
         title, project_title, html_lib.escape(str(company_name)), primary, accent,
         footer_background, footer_text, footer_accent, footer_number,
-        project_logo=bool(_project_logo_reference(project_source)),
+        project_logo=bool(project_logo_ref),
         slide_surface=_slide_root_surface(html),
         offer_lang=lang,
     )

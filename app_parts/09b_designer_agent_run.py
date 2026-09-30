@@ -167,7 +167,8 @@ def _agent_exec_restructure(task, ctx, session, feedback=''):
                 title=str(part.get('title') or sources[0].get('title') or ''),
                 total=len(slides) - len(sources) + target,
                 slide_type=sources[0].get('type', 'content'),
-                content_source=sources[0].get('content_source') or sources[0].get('contentSource'))
+                content_source=sources[0].get('content_source') or sources[0].get('contentSource'),
+                removed_elements=part.get('removed'))
             finalized.append({'title': str(part.get('title') or ''), 'html': out})
     except Exception as exc:
         return False, None, f'finalize_failed:{exc}', None

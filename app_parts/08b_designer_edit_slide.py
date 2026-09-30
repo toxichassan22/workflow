@@ -174,8 +174,12 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
      * شرائح الغلاف والخاتمة (Cover & Closing): كامل الحرية في إعادة توزيع العناصر وتنسيق المقدمة والخاتمة.
      * شرائح المحتوى، الخرائط، والتحليلات.
    - لا ترفض ولا تعتذر عن تعديل أي شريحة مهما كان نوعها، ونفّذ أي فكرة تصميمية يطلبها المستخدم بحرية مطلقة وإتقان واحترافية.
+8. الهيدر والفوتر والشعارات وترقيم الصفحة عناصر قابلة للتعديل والنقل والحذف (Editable Chrome):
+   - قد يصفها المستخدم بأي صيغة («أعلى الصفحة»، «الشريط العلوي»، «أسفل الشريحة»، «الشعار الزائد»...) — حدّد أنت العنصر المقصود من وصفه ونفّذ بلا رفض ولا اعتذار.
+   - عند حذف عنصر مُدار عمداً أعلنه في حقل "removed" داخل JSON حتى لا يعاد إدراجه آلياً: القيم المعتمدة "company_logo"، "project_logo"، "logo" (الشعاران معاً)، "header"، "footer"، "counter". ما لا تُعلنه ولم يُطلب حذفه يبقى محفوظاً — لا تحذفه من تلقاء نفسك.
 أعد JSON فقط بالشكل:
-{{"html":"<div class=\\"slide\\">...</div>","response":"شرح عربي موجز ودقيق لما قمت به جراحياً"}}
+{{"html":"<div class=\\"slide\\">...</div>","response":"شرح عربي موجز ودقيق لما قمت به جراحياً","removed":["project_logo"]}}
+(الحقل "removed" يُدرج فقط عند حذف عنصر مُدار فعلاً؛ غير ذلك أرسله قائمة فارغة أو احذفه.)
 عنوان الشريحة: {title}
 HTML الحالي:
 {clean_html}
@@ -232,7 +236,8 @@ HTML الحالي:
                     creative_images=creative_images, tenant_id=tenant_id,
                     slide_num=slide_index + 1, slide_title=title,
                     total_slides=total_slides or (slide_index + 1), content_source=content_source,
-                    allow_all_maps=True,
+                    allow_all_maps=True, instruction=instruction,
+                    removed_elements=parsed.get('removed') or parsed.get('removed_elements'),
                 )
                 output = _sanitize_designer_output(output)
                 # The model rebuilds the slide and drops the watermark overlay div.

@@ -23,11 +23,13 @@ _AGENT_WORKER_SCHEMA = {
                     'properties': {
                         'title': {'type': 'string'},
                         'html': {'type': 'string'},
+                        'removed': {'type': 'array', 'items': {'type': 'string'}},
                     },
                     'required': ['title', 'html'],
                     'additionalProperties': True,
                 }},
                 'summary': {'type': 'string'},
+                'removed': {'type': 'array', 'items': {'type': 'string'}},
             },
             'required': ['slides'],
             'additionalProperties': True,
@@ -92,6 +94,10 @@ def _agent_worker_system(ctx, slide_type, facts, style_brief):
 - الحفاظ حرفياً على كل نص ورقم وجدول وصورة ورابط وخريطة وخصائص البيانات (data-*) والتوكنات
   (##LOGO## و ##MAP_*## و ##TEAM_LOGO_*## و ##PRESERVED_*##) — بلا تلخيص أو حذف أو اختراع،
   ما لم تأمر التعليمات بعكس ذلك صراحة.
+- الهيدر والفوتر والشعارات وترقيم الصفحة عناصر عادية قابلة للتعديل والنقل والحذف متى طلب
+  المستخدم — فسّر وصفه بنفسك («أعلى الصفحة» قد تعني الهيدر مثلاً) ونفّذ بلا رفض.
+- حذف متعمد لعنصر مُدار؟ أعلنه في "removed" على عنصر الشريحة أو جذر JSON حتى لا يعاد
+  إدراجه: "company_logo"، "project_logo"، "logo" (الشعاران)، "header"، "footer"، "counter".
 - نبرة عقارية استثمارية رسمية. ممنوع أي إيموجي أو أيقونات أو رموز أسهم أو نص إرشادي.
 - مقاس الشريحة ثابت 1280x720 مع overflow:hidden وبلا أشرطة تمرير — وزّع المحتوى حتى لا يخرج عن الإطار.
 - أعد JSON فقط بالصيغة المطلوبة: {{"slides":[{{"title":"..","html":"<div class=\\"slide\\" style=\\"width:1280px;height:720px;position:relative;overflow:hidden;\\">...</div>"}}],"summary":"شرح عربي موجز"}}"""
@@ -124,12 +130,14 @@ def _agent_worker_call(ctx, user_content, *, slide_type='content', facts='',
     produced = parsed.get('slides') if isinstance(parsed, dict) else None
     if not isinstance(produced, list) or not produced:
         return None, None, 'empty_worker_result'
+    top_removed = (parsed.get('removed') or parsed.get('removed_elements')) if isinstance(parsed, dict) else None
     parts = []
     for item in produced:
         if not isinstance(item, dict):
             continue
         html = str(item.get('html') or item.get('content') or item.get('slide_html') or '')
-        parts.append({'title': str(item.get('title') or ''), 'html': html})
+        parts.append({'title': str(item.get('title') or ''), 'html': html,
+                      'removed': item.get('removed') or item.get('removed_elements') or top_removed})
     if not parts:
         return None, None, 'empty_worker_result'
     summary = (parsed.get('summary') or parsed.get('response') or '') if isinstance(parsed, dict) else ''
@@ -187,7 +195,8 @@ def _agent_preserve_base64(html):
 
 
 def _agent_worker_finalize(output, source_html, instruction, ctx, *,
-                           slide_num, title, total, slide_type, content_source):
+                           slide_num, title, total, slide_type, content_source,
+                           removed_elements=None):
     """The post-edit pipeline: tokens to assets, fresh map sources, finalize,
     sanitize, watermark carry-over."""
     output = resolve_designer_chat_placeholders(
@@ -205,7 +214,8 @@ def _agent_worker_finalize(output, source_html, instruction, ctx, *,
         creative_images=ctx['creative_images'], tenant_id=ctx['tenant_id'],
         slide_num=slide_num, slide_title=title,
         total_slides=total, content_source=content_source,
-        allow_all_maps=True)
+        allow_all_maps=True, instruction=instruction,
+        removed_elements=removed_elements)
     output = _sanitize_designer_output(output)
     if source_html and not _is_watermark_removal_instruction(instruction):
         output = _carry_slide_watermark(source_html, output)
@@ -312,7 +322,8 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
         output = _agent_worker_finalize(
             output, html, instruction, ctx,
             slide_num=index + 1, title=title,
-            total=total, slide_type=slide_type, content_source=content_source)
+            total=total, slide_type=slide_type, content_source=content_source,
+            removed_elements=parts[0].get('removed'))
     except Exception as exc:
         return None, _agent_worker_note_failure(ctx, f'finalize_failed:{exc}')
     return output, summary or ''
