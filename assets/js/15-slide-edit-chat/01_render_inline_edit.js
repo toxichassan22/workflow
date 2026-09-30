@@ -716,6 +716,9 @@
       // not that the request should re-plan and re-execute the whole edit.
       const queuePayload = (!resumedJob && payload) ? { ...payload, requestId: metadata.jobId } : null;
       persistTenantDesignerJob(metadata);
+      // Snapshot the deck before the run starts mutating it — one undo must
+      // roll the whole request back, not just the final apply.
+      if (!resumedJob && typeof designerNotePreRunDeck === 'function') designerNotePreRunDeck();
       if (!resumedJob) {
         // localStorage is shared by tabs. A short settle window lets the last workspace claim win,
         // so two simultaneous clicks do not launch two differently keyed AI jobs.
@@ -763,10 +766,11 @@
       let retryDelay = 2000;
       let queueRecoveryAttempts = 0;
       let lastExecutionTarget = '';
+      let appliedSeqCursor = Number(resumedJob?.appliedSeq) || 0;
       while (Date.now() - pollingStarted < maxWaitMs) {
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         const result = await apiWithTimeout(
-          'GET', jobPath + '?includeResult=0', null,
+          'GET', jobPath + '?includeResult=0&appliedSince=' + appliedSeqCursor, null,
           30000, 'تعذر تحديث حالة تعديل العرض مؤقتًا.'
         );
         if (isTransientDesignerChatResponse(result)) {
@@ -847,6 +851,28 @@
               Array.isArray(result?.tasks) ? result.tasks : null,
               (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex))
                 ? result.activeSlideIndex : null);
+          }
+          // Live apply: slides a finished task rewrote land on the deck now —
+          // the card re-renders and its veil lifts instead of the whole run.
+          let appliedAdvanced = false;
+          if (result?.applied && typeof applyDesignerLiveSlideUpdates === 'function'
+              && applyDesignerLiveSlideUpdates(result.applied) > 0) {
+            // Server-authored changes must not later read as local drift, so
+            // the apply-time signature baseline moves with each live apply.
+            metadata.workspaceSignature = designerChatWorkspaceSignature();
+            appliedAdvanced = true;
+          }
+          if (Number.isFinite(Number(result?.appliedSeq))) {
+            const nextSeq = Math.max(appliedSeqCursor, Number(result.appliedSeq));
+            if (nextSeq !== appliedSeqCursor) {
+              appliedSeqCursor = nextSeq;
+              appliedAdvanced = true;
+            }
+          }
+          if (appliedAdvanced) {
+            metadata.appliedSeq = appliedSeqCursor;
+            metadata.updatedAt = Date.now();
+            persistTenantDesignerJob(metadata);
           }
           // Navigate only after the executor starts editing a model-selected slide.
           // Deduplicate polling events so manual scrolling is not constantly undone.

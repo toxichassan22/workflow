@@ -137,3 +137,88 @@
       document.querySelectorAll('.designer-slide-veil').forEach(el => el.remove());
       document.querySelectorAll('.ge-thumb-designer-state').forEach(el => el.remove());
     }
+
+    // ── Live apply + whole-run undo baseline ─────────────────────────────────
+    // A completed task's slides land on the deck mid-run: the card re-renders
+    // in place and its veil lifts instead of waiting for the job to finish.
+    // designerPreRunDeckJson keeps the deck as it stood when the request was
+    // sent so a single undo rolls back the whole run, not one poll's worth.
+
+    let designerPreRunDeckJson = null;
+
+    function designerNotePreRunDeck() {
+      try {
+        designerPreRunDeckJson = JSON.stringify(
+          Array.isArray(tenantSlidesData) ? tenantSlidesData : []);
+      } catch (error) {
+        designerPreRunDeckJson = null;
+      }
+    }
+
+    function designerPreRunDeck() {
+      if (!designerPreRunDeckJson) return null;
+      try {
+        const parsed = JSON.parse(designerPreRunDeckJson);
+        return Array.isArray(parsed) ? parsed : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function clearDesignerPreRunDeck() {
+      designerPreRunDeckJson = null;
+    }
+
+    function applyDesignerLiveSlideUpdates(updates) {
+      if (!updates || typeof updates !== 'object') return 0;
+      const deck = Array.isArray(tenantSlidesData) ? tenantSlidesData : [];
+      const byId = new Map();
+      deck.forEach((slide, i) => {
+        if (slide && slide.id != null) byId.set(String(slide.id), i);
+      });
+      const thumbs = document.querySelectorAll('#tenantSlidesSidebar .ge-thumb');
+      let applied = 0;
+      Object.entries(updates).forEach(([slideId, patch]) => {
+        const index = byId.get(String(slideId));
+        if (index === undefined || !patch || typeof patch !== 'object') return;
+        // An open manual edit session owns the card — the final apply resolves it.
+        if (typeof getSlideEditSession === 'function' && getSlideEditSession(index)) return;
+        const slide = deck[index];
+        const nextHtml = typeof patch.html === 'string' ? patch.html : null;
+        const nextTitle = patch.title != null ? String(patch.title) : null;
+        if ((nextHtml === null || nextHtml === slide.html)
+            && (nextTitle === null || nextTitle === String(slide.title || ''))) return;
+        if (nextTitle !== null) slide.title = nextTitle;
+        if (nextHtml !== null) slide.html = nextHtml;
+        const card = document.getElementById('slide-card-' + index);
+        const stage = card && card.querySelector('.tenant-slide-stage');
+        if (stage && nextHtml !== null) {
+          const fallback = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' +
+            escapeHtml(slide.title || '') + '</div>';
+          stage.innerHTML = processSlideHtmlClient(slide.html, slide.type) || fallback;
+          if (!stage.querySelector('.slide')) stage.innerHTML = fallback;
+          autoFitSlideContent(stage);
+          repairSlideTextContrast(stage);
+          enableSlideInlineEditing(stage, index);
+          enableSlideElementDragging(stage, index);
+          restoreSlideEditSelection(stage, index);
+        }
+        const thumb = thumbs[index];
+        if (thumb && nextTitle !== null) {
+          const titleEl = thumb.querySelector('.ge-thumb-title');
+          if (titleEl) {
+            titleEl.textContent = nextTitle || 'شريحة بدون عنوان';
+            titleEl.setAttribute('title', nextTitle);
+          }
+        }
+        // Lifting the veil reads as "this slide is done" even if the checklist
+        // tick lands one poll later.
+        if (designerSlideActivityMap) {
+          designerSlideActivityMap.set(index, 'success');
+          designerSlideActivityDeck = tenantSlidesData;
+        }
+        applied++;
+      });
+      if (applied) applyDesignerSlideActivity();
+      return applied;
+    }

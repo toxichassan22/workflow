@@ -1004,6 +1004,42 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         result = result_response.get_json()
         self.assertEqual(result['data']['slidesData'][0]['title'], 'اختبار')
 
+        # The live-apply channel derives the finished-task slide delta from the
+        # checkpoint's agentState — appliedSeq rides every poll for free, and
+        # ?appliedSince=N ships only the slide payloads newer than that cursor.
+        live_job_id = 'designer-live-apply-job'
+        module._write_job('.designer_chat_jobs', self.tenant_a, live_job_id, {
+            'status': 'running', 'success': True, 'progress': 40,
+            'agentState': {
+                'planId': 'plan-live',
+                'tasks': [
+                    {'n': 1, 'op': 'edit', 'status': 'success', 'slides': ['slide-one']},
+                    {'n': 2, 'op': 'edit', 'status': 'running', 'slides': ['slide-two']},
+                    {'n': 3, 'op': 'edit', 'status': 'pending', 'slides': ['slide-three']},
+                ],
+                'slidesPacked': module._pack_state_slides([
+                    {'id': 'slide-one', 'title': 'عنوان معدل', 'html': '<div class="slide">١</div>'},
+                    {'id': 'slide-two', 'title': 'ق', 'html': '<div class="slide">٢</div>'},
+                ]),
+            },
+        })
+        live = client.get(
+            '/api/designer-chat/jobs/' + live_job_id + '?appliedSince=0', headers=headers
+        ).get_json()
+        self.assertEqual(live['appliedSeq'], 1)
+        self.assertEqual(live['applied']['slide-one']['title'], 'عنوان معدل')
+        self.assertEqual(live['applied']['slide-one']['seq'], 1)
+        self.assertNotIn('slide-two', live['applied'])
+        self.assertNotIn('slidesPacked', live.get('agentState') or {})
+
+        # A cursor at the published sequence returns no payload — the deck is
+        # never resent once the client holds it.
+        same = client.get(
+            '/api/designer-chat/jobs/' + live_job_id + '?appliedSince=1', headers=headers
+        ).get_json()
+        self.assertEqual(same['appliedSeq'], 1)
+        self.assertNotIn('applied', same)
+
         stale_job_id = 'designer-stale-heartbeat-job'
         module._write_job('.designer_chat_jobs', self.tenant_a, stale_job_id, {
             'status': 'running', 'success': True, 'progress': 40,
@@ -1051,7 +1087,10 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('T_DESIGNER_JOBS_KEY', index_source)
         self.assertIn('persistTenantDesignerJob(metadata)', poll_body)
         self.assertIn('requestId: metadata.jobId', poll_body)
-        self.assertIn('?includeResult=0', poll_body)
+        self.assertIn('?includeResult=0&appliedSince=', poll_body)
+        self.assertIn('applyDesignerLiveSlideUpdates(result.applied)', poll_body)
+        self.assertIn('metadata.workspaceSignature = designerChatWorkspaceSignature()', poll_body)
+        self.assertIn('metadata.appliedSeq = appliedSeqCursor', poll_body)
         self.assertIn('?includeResult=1', poll_body)
         self.assertNotIn('transientFailures < 5', poll_body)
         self.assertIn('async function resumeTenantDesignerChatJob()', index_source)
@@ -1064,6 +1103,10 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('requestTenantDesignerChat(recoveryPayload, indicator, resumeJob)', index_source)
         self.assertIn('function designerChatWorkspaceSignature()', index_source)
         self.assertIn('function tenantDesignerJobCanApply(metadata)', index_source)
+        self.assertIn('function applyDesignerLiveSlideUpdates(', index_source)
+        self.assertIn('function designerNotePreRunDeck(', index_source)
+        self.assertIn('function designerPreRunDeck(', index_source)
+        self.assertIn('tenantSlidesData = preRunDeck', index_source)
         self.assertIn('workspaceSignature: String(', index_source)
         self.assertIn('await new Promise(resolve => setTimeout(resolve, 80));', index_source)
 

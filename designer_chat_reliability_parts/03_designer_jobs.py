@@ -244,6 +244,53 @@ def install_job_routes(app, namespace):
             state = {k: v for k, v in state.items()
                      if k not in ("slides", "slidesPacked")}
             response_job["agentState"] = state
+        # Live-apply channel: the checkpoint's agentState already records which
+        # slide ids each task targeted plus the packed in-flight deck, so the
+        # "what finished" delta is derived on demand instead of stored twice.
+        # appliedSeq (max n among succeeded tasks) rides every poll for free;
+        # the heavier slide payloads ship only when a client sends appliedSince
+        # below it — i.e. once per task boundary, never per tick.
+        full_state = job.get("agentState") if isinstance(job.get("agentState"), dict) else {}
+        agent_tasks = full_state.get("tasks") if isinstance(full_state.get("tasks"), list) else []
+        applied_seq = 0
+        for task in agent_tasks:
+            if isinstance(task, dict) and task.get("status") == "success":
+                try:
+                    applied_seq = max(applied_seq, int(task.get("n") or 0))
+                except (TypeError, ValueError):
+                    continue
+        response_job["appliedSeq"] = applied_seq
+        applied_since = request.args.get("appliedSince")
+        if applied_since is not None and applied_seq:
+            try:
+                since_val = int(applied_since)
+            except (TypeError, ValueError):
+                since_val = 0
+            if applied_seq > since_val:
+                unpack = namespace.get("_unpack_state_slides")
+                state_slides = unpack(full_state) if unpack else None
+                by_id = {str(s.get("id")): s for s in (state_slides or [])
+                         if isinstance(s, dict) and s.get("id") is not None}
+                applied = {}
+                for task in agent_tasks:
+                    if not isinstance(task, dict) or task.get("status") != "success":
+                        continue
+                    try:
+                        task_seq = int(task.get("n") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if task_seq <= since_val:
+                        continue
+                    for sid in task.get("slides") or []:
+                        slide = by_id.get(str(sid))
+                        if slide is None:
+                            continue
+                        applied[str(sid)] = {
+                            "html": slide.get("html") or "",
+                            "title": slide.get("title") or "",
+                            "seq": task_seq,
+                        }
+                response_job["applied"] = applied
         response_job["jobId"] = str(job_id)
         response_job["heartbeatAt"] = heartbeat_at
         if response_job.get("status") in {"queued", "running"} and heartbeat_at:

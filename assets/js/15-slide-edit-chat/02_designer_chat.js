@@ -8,6 +8,18 @@
         // A failed/stale/cancelled job is terminal too — drop the checklist
         // instead of leaving its last in-flight snapshot on screen.
         if (typeof clearDesignerChecklist === 'function') clearDesignerChecklist();
+        // A failed run can still leave live-applied slides on the deck —
+        // anchor the undo baseline at the pre-run deck so one undo rolls the
+        // whole attempt back instead of a mid-run partial state.
+        const preRunFailed = (typeof designerPreRunDeck === 'function') ? designerPreRunDeck() : null;
+        if (preRunFailed) {
+          const liveDeckFailed = tenantSlidesData;
+          tenantSlidesData = preRunFailed;
+          checkpointPresentationUndo();
+          tenantSlidesData = liveDeckFailed;
+          checkpointPresentationUndo();
+          if (typeof clearDesignerPreRunDeck === 'function') clearDesignerPreRunDeck();
+        }
         tenantProjectData.designerChat = designerChatPersistence();
         renderTenantDesignerChat();
         triggerAutoSaveDraft();
@@ -56,8 +68,16 @@
         return true;
       }
 
+      // Live-applied tasks already mutated this deck mid-run; the run's undo
+      // baseline is the deck as it stood when the request was sent, so one
+      // undo rolls the whole turn back — not just the last poll's worth.
+      const preRunDeck = (typeof designerPreRunDeck === 'function') ? designerPreRunDeck() : null;
+      const liveDeckBeforeApply = tenantSlidesData;
+      if (preRunDeck) tenantSlidesData = preRunDeck;
       checkpointPresentationUndo();
-      const undoSlidesBefore = JSON.stringify(tenantSlidesData);
+      if (preRunDeck) tenantSlidesData = liveDeckBeforeApply;
+      if (typeof clearDesignerPreRunDeck === 'function') clearDesignerPreRunDeck();
+      const undoSlidesBefore = JSON.stringify(liveDeckBeforeApply);
       // The executor owns structural positions; do not reinterpret the message
       // and move its last slide a second time after applying the returned workspace.
       if (reply.action === 'add_slide' || reply.action === 'insert_slide') {
@@ -212,7 +232,10 @@
       try {
         const data = await promise;
         if (!tenantDesignerJobMatchesWorkspace(resumeJob)) return;
-        if (!tenantDesignerJobCanApply(resumeJob)) {
+        // The poll mutates its own metadata copy (live-apply moves the
+        // signature baseline); re-read the persisted record so the apply-time
+        // check compares the freshest baseline against the current deck.
+        if (!tenantDesignerJobCanApply(currentTenantDesignerJob() || resumeJob)) {
           applyTenantDesignerChatResult({
             success: false,
             status: 'failed',
@@ -861,6 +884,7 @@
         slideIndex: Number.isInteger(Number(metadata.slideIndex)) ? Number(metadata.slideIndex) : 0,
         hadAttachment: !!metadata.hadAttachment,
         workspaceSignature: String(metadata.workspaceSignature || ''),
+        appliedSeq: Number(metadata.appliedSeq) || 0,
         startedAt: Number(metadata.startedAt || Date.now()),
         updatedAt: Number(metadata.updatedAt || Date.now()),
         status: String(metadata.status || 'queued'),
