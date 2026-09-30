@@ -1,66 +1,108 @@
----
-title: Real Estate Proposal Generator
-emoji: 🏢
-colorFrom: red
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
+# Landloom — Real Estate Proposal Generator
 
-# Real Estate Proposal Generator (Landloom)
-AI-powered Presentation and Investment Proposal Generator platform.
+Multi-tenant, Arabic-first platform that turns land and project data into
+branded investment proposals, presentations and financial studies. Companies
+manage their own projects, branding, wallet balance and team permissions; a
+super admin owns the platform catalog and tenant keys.
 
-## Google Maps Setup
+## Stack
 
-To enable map slides (location overview, landmarks, access, catchment), you need a Google Cloud project with the following APIs restricted to one API key:
+- **Backend:** Flask. `app.py` is only the loader — routes and helpers live in
+  ordered part files under `app_parts/` that are `exec`'d into one shared
+  namespace. Same split applies to `db.py`/`db_parts/`,
+  `slide_engine.py`/`slide_engine_parts/` and `maps_service.py`/`maps_service_parts/`.
+- **Frontend:** one single-page app. `index.html` is a slim shell; scripts and
+  styles under `assets/js`, `assets/css` and `assets/i18n` are concatenated
+  into `/assets/app.bundle.{js,css}` at request time — no build step.
+- **Storage:** SQLite via `db.py` (`*.db` files are local-only). `DATABASE_URL`
+  switches to Postgres where supported.
+- **AI:** OpenRouter for all text and image generation (`OPENROUTER_KEY`).
+  Every call is metered per tenant in `ai_usage_events`.
+- **PDF:** PyMuPDF (`fitz`) + HTML render pipelines under `exports/`,
+  `pdf_generator*_parts/` and `generate_pdf_from_preview_parts/`.
+- **Maps:** Google Maps Static, Places (New), Distance Matrix and Street View
+  Static — one restricted key (`GOOGLE_MAPS_API_KEY`).
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create or select a project and enable billing
-3. Enable these 4 APIs only:
-   - **Maps Static API**
-   - **Places API (New)**
-   - **Distance Matrix API**
-   - **Street View Static API**
-4. Create an API key and restrict it to the 4 APIs above
-5. Copy the key into your `.env` file:
-   ```
-   GOOGLE_MAPS_API_KEY=your-key-here
-   ```
+## Repo layout
 
-## Map-Related API Endpoints
+| Path | What lives there |
+|---|---|
+| `app_parts/` | Flask routes and helpers, `exec`'d by `app.py` in name order |
+| `db_parts/` | Schema, billing ledger, drafts, presentations, tenants |
+| `slide_engine_parts/` | Deck model, layout, HTML render |
+| `maps_service_parts/` | Geocoding, static maps, overlays |
+| `assets/` | Frontend JS/CSS/i18n parts, served as two bundles |
+| `rules/` | Verified building-regulation digest consumed by the regulations path |
+| `clean*.md` | Verified Arabic transcriptions of the regulation PDFs |
+| `exports/` | PPTX/PDF exporters |
+| `scripts/` | Maintenance tooling (`verify-frontend.js`, backup, fonts bundle) |
+| `tests/` | unittest/pytest suites |
 
-- `POST /api/geocode` — convert address to lat/lng
-- `POST /api/nearby-landmarks` — get nearby places
-- `POST /api/generate-map-images` — generate all map images for a project
-- `POST /api/generate-slides` — automatically generates map images before creating slides
+## Setup
 
-## Large Request Bodies
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # or: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # fill in the keys below
+```
 
-The hosting edge corrupts request bodies above ~40KB (the app receives and answers them, but the client gets a fabricated 404/502). The frontend therefore gzips bodies and splits anything above 24KB wire size into small `POST /api/body-chunk` uploads, then sends a tiny `{"__chunked_body": {...}}` envelope that a `before_request` hook reassembles transparently. This is automatic for all JSON endpoints called through the `api()` helper.
+Minimum `.env`:
 
-## AI Rules Management
+| Variable | Purpose |
+|---|---|
+| `OPENROUTER_KEY` | Platform OpenRouter key (all AI generation) |
+| `GOOGLE_MAPS_API_KEY` | Maps/Places/Distance Matrix/Street View |
+| `JWT_SECRET` | Session signing — set explicitly in production |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeds the super-admin account |
+| `SMTP_*` | Outgoing mail (invites, approvals, receipts) |
+| `DEPLOY_WEBHOOK_SECRET` | Authenticates the cPanel deploy webhook |
 
-Company admins can manage AI design/content rules from the new **قواعد AI** page. Changes are classified by risk (green/yellow/red) and logged in the `ai_rules_log` table.
+Billing, metering and model defaults (`BILLING_*`, `MAPS_*`, `*_MODEL`) all
+have sane defaults in `.env.example`.
 
-## Deploy on Render
+## Run
 
-The repo includes a `render.yaml` Blueprint that deploys the Flask backend and the single-page frontend as one Docker Web Service, using Render PostgreSQL as the database.
+```bash
+gunicorn --bind 127.0.0.1:8000 --threads 8 app:app
+# or for local dev:
+flask --app app run --debug
+```
 
-1. Push the latest code to GitHub:
-   ```bash
-   git add .
-   git commit -m "Render deploy config"
-   git push origin main
-   ```
-2. In the Render Dashboard, create a **New Blueprint** and select your `toxichassan22/workflow` repo.
-3. Render will detect `render.yaml`. Open the new `landloom` Web Service and set the environment variables:
-   - `DATABASE_URL` — copy the **Internal Connection String** from your existing Render Postgres (`dpg-d9fmm13rjlhs73alaau0-a`)
-   - `ADMIN_EMAIL` — super-admin email address (e.g. `admin@yourdomain.com`)
-   - `ADMIN_PASSWORD` — strong password (12+ characters)
-   - `OPENROUTER_KEY` — your OpenRouter API key (all AI text/image generation)
-   - `GOOGLE_MAPS_API_KEY` — your Google Maps API key
-4. Save the environment variables and trigger a deploy.
-5. Once the deploy succeeds, open the service URL. The first request will create all Postgres tables and seed the admin account.
+## Tests
 
-If `DATABASE_URL` is not set, the service will fall back to a local SQLite file inside the container (data is lost on redeploy).
+```bash
+python -m pytest tests/
+node scripts/verify-frontend.js   # bundle order, orphans, i18n, syntax
+```
+
+## Deploy
+
+- **Staging** — every push to `lab` runs `deploy-staging.yml`, which calls the
+  webhook on `lab.landloom.ai` (`deploy-staging.sh` syncs, builds the venv,
+  restarts gunicorn, verifies `/health`).
+- **Production** — `deploy.yml` is manual (`workflow_dispatch`) and targets the
+  `landloom.ai` cPanel account once `PROD_BASE_URL` is set.
+- `render.yaml` remains as an alternative one-service Docker deploy
+  (`DATABASE_URL`, `JWT_SECRET`, `ADMIN_*`, `OPENROUTER_KEY`,
+  `GOOGLE_MAPS_API_KEY`); without `DATABASE_URL` it falls back to SQLite inside
+  the container.
+
+## Google Maps setup
+
+One Google Cloud project, billing enabled, and an API key restricted to exactly
+these four APIs: **Maps Static**, **Places (New)**, **Distance Matrix**,
+**Street View Static**. Set it as `GOOGLE_MAPS_API_KEY` in `.env`.
+
+## Large request bodies
+
+The hosting edge corrupts request bodies above ~40KB. The frontend gzips
+bodies and splits anything above 24KB wire size into `POST /api/body-chunk`
+uploads, then sends a `{"__chunked_body": ...}` envelope that a
+`before_request` hook reassembles transparently — automatic for all JSON
+endpoints called through the `api()` helper.
+
+## AI rules
+
+Company admins manage AI design/content rules from the **قواعد AI** page.
+Changes are classified by risk and logged in `ai_rules_log`.
