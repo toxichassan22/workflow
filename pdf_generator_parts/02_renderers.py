@@ -596,4 +596,4 @@ if __name__ == '__main__':
                                          {'type':'stripe','position':'top-left','width_mm':160,'depth_mm':200}]}}
     ]
     generate_pdf(test_slides, 'test_design', 'test_output.pdf')
-    print("Test PDF generated with GLM-driven designs!")
+    print("Test PDF generated with AI-driven designs!")

@@ -133,7 +133,7 @@ class AgentFlowTests(unittest.TestCase):
             {'tool': 'edit_slides', 'params': {'target': 'current', 'instruction': 'x'}}]}
         with patch.object(self.module, 'DESIGNER_AGENT', False), \
                 patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat',
+                patch.object(self.module, 'call_text_chat',
                              return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
                 patch.object(self.module, '_designer_edit_slide',
                              side_effect=lambda html, *a, **k: (html + 'x', 'تم')), \

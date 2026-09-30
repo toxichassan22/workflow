@@ -28,7 +28,7 @@ def _stringify_chat_part(value):
 
 
 def _get_chat_response_text(res):
-    """Safely extract string content from OpenAI/GLM/OpenRouter chat response dict."""
+    """Safely extract string content from an OpenRouter chat response dict."""
     if not isinstance(res, dict):
         return str(res) if res else ""
     if 'choices' in res and isinstance(res['choices'], list) and res['choices']:

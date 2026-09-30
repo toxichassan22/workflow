@@ -202,7 +202,7 @@
       custom_fields: 'الحقول المخصصة',
       manage_users: 'إدارة الموظفين',
       ai_rules: 'قواعد AI',
-      training_data: 'تدريب GLM',
+      training_data: 'تدريب النموذج',
       approvals: 'تعميد العروض',
       approve_generation: 'اعتماد بدء التوليد',
       approve_final_file: 'اعتماد الملف النهائي',

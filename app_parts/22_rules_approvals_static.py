@@ -948,7 +948,7 @@ def health():
             _slide_vision_probe(force=True)
         body.update({
             'slide_vision': dict(_SLIDE_VISION_STATE) or _deployed_vision_status(),
-            'model': GLM_MODEL,
+            'model': GEMINI_TEXT_MODEL,
             'image_model': IMAGE_MODEL,
             'designer_agent': DESIGNER_AGENT,
             'designer_agent_planner_model': DESIGNER_AGENT_PLANNER_MODEL if DESIGNER_AGENT else None,

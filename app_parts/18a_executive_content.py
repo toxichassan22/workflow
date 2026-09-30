@@ -53,7 +53,7 @@ def api_generate_executive_content():
     try:
         for attempt in range(3):
             try:
-                response = call_zai_chat(
+                response = call_text_chat(
                     system_prompt, prompt, temperature=0.2,
                     max_tokens=cap,
                     reasoning_effort='low',

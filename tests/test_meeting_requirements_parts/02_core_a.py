@@ -624,7 +624,7 @@ class MeetingRequirementsTestsPart01(MeetingRequirementsTests):
             'response': 'تمت الإضافة',
         }, ensure_ascii=False)}}]}
         with self.app.test_request_context(), \
-                patch.object(module, 'call_zai_chat', return_value=response), \
+                patch.object(module, 'call_text_chat', return_value=response), \
                 patch('generate_pdf_from_preview.render_slide_to_image_base64', return_value=None):
             module.g.tenant_id = self.tenant_a
             html, _message = module._designer_edit_slide(
@@ -890,7 +890,7 @@ class MeetingRequirementsTestsPart01(MeetingRequirementsTests):
             'subtitle': 'شراكة تجمع خبرة التطوير العقاري السعودي مع التصميم والهندسة العالمية.',
         }
 
-        # No model call: call_glm_fn must not be touched for a divider.
+        # No model call: call_text_fn must not be touched for a divider.
         def fail_if_called(*args, **kwargs):
             raise AssertionError('a section divider must not call the model')
 

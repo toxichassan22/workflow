@@ -665,7 +665,7 @@ def api_site_analysis():
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     try:
         try:
-            response = call_zai_chat(
+            response = call_text_chat(
                 system_prompt, prompt, max_tokens=SITE_ANALYSIS_MAX_TOKENS,
                 reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
             analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()

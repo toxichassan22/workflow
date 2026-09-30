@@ -113,7 +113,7 @@ class PartialApplyTests(unittest.TestCase):
             return html.replace('<p>أ</p>', '<p>أ+</p>').replace('<p>ج</p>', '<p>ج+</p>'), 'تم'
 
         with patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat',
+                patch.object(self.module, 'call_text_chat',
                              return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
                 patch.object(self.module, '_designer_edit_slide', side_effect=editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
@@ -140,7 +140,7 @@ class PartialApplyTests(unittest.TestCase):
             {'tool': 'edit_slides', 'params': {'target': 'indexes', 'indexes': [1, 2],
                                              'instruction': 'عدل'}}]}
         with patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat',
+                patch.object(self.module, 'call_text_chat',
                              return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
                 patch.object(self.module, '_designer_edit_slide',
                              side_effect=lambda html, *a, **k: (html, 'لم يتغير')), \

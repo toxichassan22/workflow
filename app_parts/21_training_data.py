@@ -1,7 +1,7 @@
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Training Data (per-tenant GLM training)
+# Training Data (per-tenant AI training)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.route('/api/training', methods=['GET'])
@@ -528,7 +528,7 @@ def api_training_chat():
     try:
         # This agent changes the company's settings, so it runs on the strong model with real
         # reasoning instead of the fast text model, and with room to plan several tool calls.
-        response = call_zai_chat(system_prompt, user_prompt, max_tokens=6000,
+        response = call_text_chat(system_prompt, user_prompt, max_tokens=6000,
                                  model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
                                  image_references=attachment_images or None,
                                  usage_ctx=_usage_ctx('training_chat', data))
@@ -1624,7 +1624,7 @@ html يجب أن يكون div class=\"slide\" واحداً كاملاً، بلا
 الطلب: {instruction}
 HTML الحالي:
 {current_html}"""
-                    response = call_zai_chat(edit_prompt, instruction, max_tokens=6000, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
+                    response = call_text_chat(edit_prompt, instruction, max_tokens=6000, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
                     raw = extract_chat_content(response, 'SUPER-AGENT-SLIDE-EDIT').strip()
                     raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw).strip()
                     parsed = None
@@ -1699,7 +1699,7 @@ HTML الحالي:
                 last_plan_err = None
                 for _attempt in range(3):
                     try:
-                        plan_resp = call_zai_chat_parallel(
+                        plan_resp = call_text_chat_parallel(
                             "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                             plan_prompt,
                             max_tokens=6000,
@@ -1743,12 +1743,12 @@ HTML الحالي:
                 branding = db.get_branding(tenant_id) or {}
                 _prepare_generation_logo_context(project_data, branding, tenant_id)
                 training_context = db.get_training_context(tenant_id) or ''
-                def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
+                def call_text_fn(sys_prompt, user_msg, max_tokens=6000):
                     if training_context:
                         sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-                    return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
+                    return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
                 htmls = generate_all_slides(
-                    slide_plan, project_data, branding, _get_images_info(images, project_data), call_glm_fn,
+                    slide_plan, project_data, branding, _get_images_info(images, project_data), call_text_fn,
                     map_placeholders=(images.get('map_placeholders', {}) if isinstance(images, dict) else {}),
                     creative_images=images,
                 )

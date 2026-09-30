@@ -1,5 +1,5 @@
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None, skip_vision=False, progress_callback=None):
-    """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
+    """Ask the slide model for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
             tenant_id = g.tenant_id
@@ -195,7 +195,7 @@ HTML الحالي:
             except Exception as progress_error:
                 app.logger.warning('[DESIGNER-EDIT] progress callback failed: %s', progress_error)
         try:
-            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
+            raw = extract_chat_content(call_text_chat(prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if not output and raw and '<div' in raw and 'slide' in raw:

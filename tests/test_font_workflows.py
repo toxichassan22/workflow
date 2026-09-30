@@ -459,7 +459,7 @@ class FontWorkflowTests(unittest.TestCase):
 
     def test_training_chat_font_intent_without_ai(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+        with patch.object(self.application_module, 'call_text_chat', side_effect=RuntimeError('AI down')):
             resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
                 'message': 'غيّر الخط إلى Cairo',
             })
@@ -478,7 +478,7 @@ class FontWorkflowTests(unittest.TestCase):
         with self.app.app_context():
             db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+        with patch.object(self.application_module, 'call_text_chat', side_effect=RuntimeError('AI down')):
             resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
                 'message': 'رجّع الخط الافتراضي',
             })
@@ -491,7 +491,7 @@ class FontWorkflowTests(unittest.TestCase):
     def test_training_chat_slide_plan_word_does_not_trigger_font_intent(self):
         """'خطة' contains the letters خط — it must never trigger the font fallback."""
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+        with patch.object(self.application_module, 'call_text_chat', side_effect=RuntimeError('AI down')):
             resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
                 'message': 'عدّل خطة الشرائح لو سمحت',
             })

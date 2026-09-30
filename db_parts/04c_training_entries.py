@@ -8,7 +8,7 @@
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Training Data (per-tenant GLM training)
+# Training Data (per-tenant AI training)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_training_data(tenant_id, active_only=False):

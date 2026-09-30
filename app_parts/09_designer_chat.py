@@ -474,7 +474,7 @@ def api_designer_chat():
         else:
             try:
                 planner_raw = extract_chat_content(
-                    call_zai_chat(planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                    call_text_chat(planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                     'DESIGNER-PLANNER')
             except Exception as _planner_exc:
                 if _is_company_credit_error(_planner_exc):
@@ -552,7 +552,7 @@ def api_designer_chat():
                             history_note, focus_note, explicit_scope_note)
                         print(f"[DESIGNER-CHAT] retrying planner slim ({len(slim_prompt)} chars, was {len(planner_prompt)} chars)")
                         planner_raw = extract_chat_content(
-                            call_zai_chat(slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                            call_text_chat(slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
                             'DESIGNER-PLANNER')
                     except Exception as _slim_exc:
                         if _is_company_credit_error(_slim_exc):
@@ -603,7 +603,7 @@ def api_project_data():
 @app.route('/api/generate-cover-prompt', methods=['POST'])
 @require_permission('generate_images')
 def api_generate_cover_prompt():
-    """Compatibility: Generate detailed cover image prompt using GLM"""
+    """Compatibility: Generate detailed cover image prompt using the text model"""
     data = request.json
     _billing_guard = _require_billing_balance('ai_text')
     if _billing_guard is not None:
@@ -617,7 +617,7 @@ def api_generate_cover_prompt():
     features = project_data.get('projectFeatures', [])
     features_text = ', '.join(features) if isinstance(features, list) else str(features)
 
-    glm_prompt = f"""أنت متخصص في كتابة prompts لتصوير معماري احترافي.
+    sys_prompt = f"""أنت متخصص في كتابة prompts لتصوير معماري احترافي.
 
 بيانات المشروع:
 - الاسم: {project_name}
@@ -639,7 +639,7 @@ def api_generate_cover_prompt():
 اكتب فقط البرومبت بدون أي شرح."""
 
     try:
-        response = call_zai_chat(glm_prompt, "اكتب البرومبت.", max_tokens=500, usage_ctx=_usage_ctx('image', data))
+        response = call_text_chat(sys_prompt, "اكتب البرومبت.", max_tokens=500, usage_ctx=_usage_ctx('image', data))
         prompt = extract_chat_content(response, "COVER-PROMPT").strip()
 
         # Clean up the prompt
@@ -653,5 +653,5 @@ def api_generate_cover_prompt():
     except Exception as e:
         # Fallback to basic prompt
         fallback = f"Professional architectural photography of a modern luxury {project_type} building in {location}, {project_name}. Elegant contemporary design with premium finishes, glass facade, warm golden hour lighting, landscaped surroundings. Shot from a low angle to emphasize grandeur. High resolution, no text, no watermarks, no people."
-        print(f"[COVER PROMPT] GLM failed, using fallback: {str(e)}")
+        print(f"[COVER PROMPT] model call failed, using fallback: {str(e)}")
         return jsonify({'success': True, 'prompt': fallback})

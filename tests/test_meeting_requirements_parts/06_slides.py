@@ -1846,7 +1846,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
     def test_slide_plan_falls_back_when_ai_provider_is_unavailable(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')) as planner:
+        with patch.object(self.application_module, 'call_text_chat_parallel', side_effect=RuntimeError('AI unavailable')) as planner:
             response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'}
             })
@@ -1878,7 +1878,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             + [{'title': f'محور {i}', 'type': 'content', 'bullets': ['1', '2', '3']} for i in range(117)]
             + [{'title': 'الختام', 'type': 'closing'}]
         )}
-        with patch.object(self.application_module, 'call_zai_chat_parallel', return_value={}), \
+        with patch.object(self.application_module, 'call_text_chat_parallel', return_value={}), \
                 patch.object(self.application_module, 'extract_chat_content', return_value='{}'), \
                 patch.object(self.application_module, 'parse_slide_plan', return_value=long_plan), \
                 self.application_module.app.test_request_context():

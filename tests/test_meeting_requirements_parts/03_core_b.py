@@ -1207,7 +1207,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             {'title': 'الخاتمة', 'type': 'closing'},
         ]}, ensure_ascii=False)
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat_parallel', return_value={
+        with patch.object(self.application_module, 'call_text_chat_parallel', return_value={
             'choices': [{'message': {'content': planner}}]
         }):
             response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
@@ -1225,7 +1225,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             {'cover', 'index', 'financial', 'closing'},
         )
         with self.app.app_context(), patch.object(
-                self.application_module, 'call_zai_chat_parallel', return_value={
+                self.application_module, 'call_text_chat_parallel', return_value={
                     'choices': [{'message': {'content': planner}}]
                 }):
             branding = dict(db.get_branding(self.tenant_a) or {})

@@ -135,9 +135,9 @@ def api_company_export_report(report_name):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == '__main__':
     print("=" * 60)
-    print("  Real Estate Proposal Generator - GLM-First Architecture")
+    print("  Real Estate Proposal Generator - AI-First Architecture")
     print("=" * 60)
-    print(f"  GLM Model: {GLM_MODEL}")
+    print(f"  Text Model: {GEMINI_TEXT_MODEL}")
     print(f"  Image Model: {IMAGE_MODEL}")
     print(f"  Output Dir: {OUTPUT_DIR}")
     print("=" * 60)

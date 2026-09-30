@@ -59,7 +59,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             'response': 'أي شريحة تقصد؟',
             'actions': [{'tool': 'ask', 'params': {'question': 'أي شريحة تقصد؟'}}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat',
+        with patch.object(self.application_module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': plan}}]}):
             resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
                 'message': '5', 'slidesData': slides, 'slideIndex': 0,
@@ -83,7 +83,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             'response': 'تم الإلغاء.',
             'actions': [{'tool': 'chat_only', 'params': {}}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat',
+        with patch.object(self.application_module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': plan}}]}):
             resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
                 'message': 'لا شيء', 'slidesData': slides, 'slideIndex': 0,
@@ -104,7 +104,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             json.dumps({'response': 'ok'}, ensure_ascii=False),
             'not json at all',
         ]:
-            with patch.object(self.application_module, 'call_zai_chat',
+            with patch.object(self.application_module, 'call_text_chat',
                               return_value={'choices': [{'message': {'content': bad_plan}}]}):
                 resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
                     'message': 'عدل الشريحة', 'slidesData': slides, 'slideIndex': 0,
@@ -394,7 +394,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             'response': 'سأضيف العلامة المائية إلى كل الشرائح.',
             'actions': [{'tool': 'apply_watermark', 'params': {'target': 'all'}}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat', return_value={
+        with patch.object(self.application_module, 'call_text_chat', return_value={
             'choices': [{'message': {'content': apply_all_plan}}]
         }):
             applied = client.post('/api/designer-chat', headers=headers, json={
@@ -416,7 +416,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                 'target': 'indexes', 'indexes': [2],
             }}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat', return_value={
+        with patch.object(self.application_module, 'call_text_chat', return_value={
             'choices': [{'message': {'content': remove_selected_plan}}]
         }):
             removed = client.post('/api/designer-chat', headers=headers, json={
@@ -439,7 +439,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                 'target': 'indexes', 'indexes': [1, 3],
             }}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat', return_value={
+        with patch.object(self.application_module, 'call_text_chat', return_value={
             'choices': [{'message': {'content': apply_selected_plan}}]
         }):
             selected = client.post('/api/designer-chat', headers=headers, json={
@@ -465,7 +465,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             'actions': [{'tool': 'apply_watermark', 'params': {'target': 'current'}}],
         }, ensure_ascii=False)
         slide = {'title': 'شريحة', 'type': 'content', 'html': '<div class="slide"><h1>محتوى</h1></div>'}
-        with patch.object(self.application_module, 'call_zai_chat', return_value={
+        with patch.object(self.application_module, 'call_text_chat', return_value={
             'choices': [{'message': {'content': plan}}]
         }):
             response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={

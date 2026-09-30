@@ -1,5 +1,5 @@
 """
-PDF Design Engine — GLM decides the design, this code renders it.
+PDF Design Engine — the model decides the design, this code renders it.
 4 project images only, universal header/footer, decorative elements, icons.
 """
 

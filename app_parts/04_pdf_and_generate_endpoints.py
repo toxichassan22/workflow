@@ -128,7 +128,7 @@ def clean_project_data(data):
         return data
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# GLM Parallel Batch Prompt Builder
+# Slide Batch Prompt Builder
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -834,11 +834,11 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                     "ولا تتوقف قبل اكتماله. لا تكتب أي شرح أو markdown."
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=usage_ctx or _usage_ctx('slide'))
+            response = call_text_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=usage_ctx or _usage_ctx('slide'))
             if 'choices' not in response or not response.get('choices'):
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
-            html = extract_html_from_glm(response)
+            html = extract_html_from_response(response)
             html = postprocess_slide(html, slide_num, tenant_id=tenant_id, slide_title=slide_title, total_slides=total, slide_type='content')
             html = slide_engine.resolve_logo_in_html(html, tenant_id)
             count = html.count('class="slide"')
@@ -852,7 +852,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
     print(f"[SLIDE-{slide_num}] FAIL All attempts failed for {slide_title}")
     return ''
 
-def build_glm_prompt(project_data, images, branding=None):
+def build_slides_prompt(project_data, images, branding=None):
     """Legacy single-shot prompt builder (kept for /api/generate compatibility)."""
     project_data = clean_project_data(project_data)
     images_info = _get_images_info(images, project_data)
@@ -885,9 +885,9 @@ def build_glm_prompt(project_data, images, branding=None):
     )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Helper: Extract HTML from GLM response
+# Helper: Extract HTML from model response
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def extract_html_from_glm(raw_response):
+def extract_html_from_response(raw_response):
     content = raw_response.get('choices', [{}])[0].get('message', {}).get('content', '')
 
     # Try to extract from code block first
@@ -980,7 +980,7 @@ def _extract_json_from_text(text):
     return None
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ENDPOINT 1: Generate all slides HTML with GLM
+# ENDPOINT 1: Generate all slides HTML
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/generate', methods=['POST'])
 @require_permission('create_presentation')
@@ -994,16 +994,16 @@ def api_generate():
 
     print(f"\n[GENERATE] Starting generation for: {project_data.get('projectName', 'Unknown')}")
 
-    prompt = build_glm_prompt(project_data, images)
+    prompt = build_slides_prompt(project_data, images)
     print(f"[GENERATE] Prompt length: {len(prompt)} chars (4 batches)")
 
     try:
-        response = call_zai_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx_optional('slide', data))
+        response = call_text_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx_optional('slide', data))
 
         raw = extract_chat_content(response, "GENERATE")
-        print(f"[GENERATE] GLM response: {len(raw)} chars")
+        print(f"[GENERATE] model response: {len(raw)} chars")
 
-        html = extract_html_from_glm(response)
+        html = extract_html_from_response(response)
         html = validate_html(html)
 
         slide_count = html.count('class="slide"')

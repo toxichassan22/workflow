@@ -460,7 +460,7 @@ class AiUsageTests(unittest.TestCase):
 
         with self.app.app_context():
             with patch.object(module.requests, 'post', side_effect=_fake_post):
-                result = module.call_zai_chat_parallel(
+                result = module.call_text_chat_parallel(
                     'sys', 'hello', max_tokens=10, attempts=2,
                     usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-parallel',
                                'flow': 'slide'})
@@ -766,7 +766,7 @@ class AiUsageTests(unittest.TestCase):
                     'id': 'gen-designer-attr'}
 
         with self.app.app_context():
-            with patch.object(module, 'call_zai_chat', side_effect=_fake_chat):
+            with patch.object(module, 'call_text_chat', side_effect=_fake_chat):
                 response = client.post(
                     '/api/designer-chat',
                     json={'message': 'غير اللون',

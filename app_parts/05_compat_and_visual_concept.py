@@ -44,7 +44,7 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
 """
 
     try:
-        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000, usage_ctx=_usage_ctx_optional('slide_plan', request.json))
+        response = call_text_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000, usage_ctx=_usage_ctx_optional('slide_plan', request.json))
         raw = extract_chat_content(response, "OUTLINE")
 
         json_match = re.search(r'\{[\s\S]*"titles"[\s\S]*\}', raw)
@@ -175,7 +175,7 @@ def api_generate_image_single():
 @app.route('/api/get-image-prompts', methods=['POST'])
 @require_permission('generate_images')
 def api_get_image_prompts():
-    """Use GLM 5.1 to generate hyper-realistic, project-tailored architectural prompts for cover and moodboard images."""
+    """Use the text model to generate hyper-realistic, project-tailored architectural prompts for cover and moodboard images."""
     data = request.json or {}
     _billing_guard = _require_billing_balance('ai_text')
     if _billing_guard is not None:
@@ -214,7 +214,7 @@ def api_get_image_prompts():
     )
 
     try:
-        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500, usage_ctx=_usage_ctx_optional('image', data))
+        res = call_text_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500, usage_ctx=_usage_ctx_optional('image', data))
         if res and 'choices' in res and res['choices']:
             content = res['choices'][0]['message']['content'].strip()
             if '```json' in content:
@@ -231,10 +231,10 @@ def api_get_image_prompts():
                     'success': True,
                     'cover_prompt': parsed['cover_prompt'],
                     'moodboard_prompts': moodboard_prompts[:count],
-                    'engine': GLM_MODEL
+                    'engine': GEMINI_TEXT_MODEL
                 })
     except Exception as e:
-        print(f"[IMAGE PROMPTS GLM ERROR] {e}. Falling back to rich template generator...")
+        print(f"[IMAGE PROMPTS MODEL ERROR] {e}. Falling back to rich template generator...")
 
     # Rich fallback generator incorporating all available fields
     arch_style = project_data.get('architectural_style') or project_data.get('style') or 'حديث وعصري'

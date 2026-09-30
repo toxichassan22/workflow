@@ -910,7 +910,7 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
-    model_name = model or GLM_OPENROUTER_MODEL
+    model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
     if image_references:
@@ -988,7 +988,7 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         return {"error": {"message": str(exc)}}
 
 
-def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
+def call_text_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
                   reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None):
     """Compatibility wrapper: text/design work uses configured models through OpenRouter."""
     if not _has_any_openrouter_key(usage_ctx):
@@ -1007,9 +1007,9 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
     )
 
 
-def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None, usage_ctx=None):
+def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None, usage_ctx=None):
     """
-    Race multiple identical GLM calls in parallel and return the first valid response.
+    Race multiple identical model calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
     Every attempt is metered separately: the provider bills each one.
     """
@@ -1017,13 +1017,13 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
 
     def _attempt():
         try:
-            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references, usage_ctx=usage_ctx)
+            resp = call_text_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references, usage_ctx=usage_ctx)
             if not _has_chat_choices(resp):
                 return None
-            content = extract_chat_content(resp, 'GLM-PARALLEL')
+            content = extract_chat_content(resp, 'TEXT-PARALLEL')
             return resp if content.strip() else None
         except Exception as e:
-            print(f"[GLM PARALLEL] attempt failed: {e}")
+            print(f"[TEXT PARALLEL] attempt failed: {e}")
             return None
 
     executor = ThreadPoolExecutor(max_workers=max(1, attempts))
@@ -1034,12 +1034,12 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
             if result:
                 for pending in futures:
                     pending.cancel()
-                print(f"[GLM PARALLEL] Valid response received after racing {attempts} calls")
+                print(f"[TEXT PARALLEL] Valid response received after racing {attempts} calls")
                 return result
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
-    raise Exception(f"All {attempts} parallel GLM attempts failed")
+    raise Exception(f"All {attempts} parallel text attempts failed")
 
 
 def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None, on_token=None, read_timeout=60):
@@ -1060,7 +1060,7 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
-    model_name = model or GLM_OPENROUTER_MODEL
+    model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
     if image_references:
@@ -1215,8 +1215,8 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     return {"choices": [{"message": {"content": final_text}}], "usage": usage, "id": generation_id}
 
 
-def call_zai_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None, on_token=None):
-    """Streaming twin of call_zai_chat: same defaults, tokens via on_token."""
+def call_text_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None, on_token=None):
+    """Streaming twin of call_text_chat: same defaults, tokens via on_token."""
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
     return call_openrouter_chat_stream(

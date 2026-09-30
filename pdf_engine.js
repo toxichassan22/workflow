@@ -91,7 +91,7 @@ img { max-width: 100%; max-height: 100%; object-fit: cover; }
 }
 
 // Render a single slide's HTML into a PNG screenshot (base64 data URI).
-// Used by the designer-chat so GLM can "see" the current slide visually.
+// Used by the designer-chat so the model can "see" the current slide visually.
 // opts.scale controls resolution (default 2 for crisp text).
 async function renderSlideImage(slideHtml, opts) {
   opts = opts || {};

@@ -508,7 +508,7 @@ def api_ai_input_builder():
 """
 
     try:
-        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
+        response = call_text_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
         content = extract_chat_content(response, "AI-INPUT-BUILDER")
         suggestions = _parse_ai_fields_json(content)
 
@@ -606,7 +606,7 @@ def api_ai_build_fields():
 """
 
     try:
-        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
+        response = call_text_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
         content = extract_chat_content(response, "AI-BUILD-FIELDS")
         suggestions = _parse_ai_fields_json(content)
 

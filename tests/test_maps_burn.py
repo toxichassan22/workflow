@@ -192,7 +192,7 @@ class MapsBurnTests(unittest.TestCase):
             return ({'location_detail': 'عنوان الموقع'}, [], [], [], [], [], None, {})
 
         with patch.object(module, '_collect_site_fields', side_effect=fake_collect), \
-                patch.object(module, 'call_zai_chat', return_value={
+                patch.object(module, 'call_text_chat', return_value={
                     'choices': [{'message': {'content': 'تحليل'}}]
                 }):
             response = client.post('/api/site-analysis', headers=self._headers(), json={

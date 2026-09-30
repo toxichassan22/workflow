@@ -255,7 +255,7 @@ class AdminAgentTests(unittest.TestCase):
                 {'tool': 'list_users'},
                 {'tool': 'add_training', 'params': {'title': 'قاعدة', 'content': 'محتوى'}},
             ], text='نفذت كل المطلوب')
-            with patch.object(self.application_module, 'call_zai_chat', return_value=reply):
+            with patch.object(self.application_module, 'call_text_chat', return_value=reply):
                 response = client.post('/api/training-chat', headers=employee_headers,
                                        json={'message': 'نفذ'})
 
@@ -281,7 +281,7 @@ class AdminAgentTests(unittest.TestCase):
                                                 'password': 'strongpass1'}},
                 {'tool': 'update_branding', 'params': {'primary_color': '#000000'}},
             ])
-            with patch.object(self.application_module, 'call_zai_chat', return_value=reply2):
+            with patch.object(self.application_module, 'call_text_chat', return_value=reply2):
                 response2 = client.post('/api/training-chat', headers=employee_headers,
                                         json={'message': 'نفذ'})
             by_tool2 = {item.get('tool'): item for item in response2.get_json()['actions']}
@@ -389,7 +389,7 @@ class AdminAgentTests(unittest.TestCase):
         ], text='الطلب غير واضح')
         with self.app.app_context():
             before = db.get_branding(self.tenant)['primary_color']
-        with patch.object(self.application_module, 'call_zai_chat', return_value=reply):
+        with patch.object(self.application_module, 'call_text_chat', return_value=reply):
             response = client.post('/api/training-chat', headers=self._headers(),
                                    json={'message': 'عدّل الحقل'})
 
@@ -421,7 +421,7 @@ class AdminAgentTests(unittest.TestCase):
             captured['kwargs'] = kwargs
             return _reply_with([], text='قرأت الملف')
 
-        with patch.object(self.application_module, 'call_zai_chat', side_effect=fake_chat):
+        with patch.object(self.application_module, 'call_text_chat', side_effect=fake_chat):
             response = client.post('/api/training-chat', headers=self._headers(), json={
                 'message': 'اقرأ الاشتراطات المرفقة',
                 'attachedFile': {'name': 'اشتراطات.pdf', 'dataUri': pdf_uri},
@@ -468,7 +468,7 @@ class AdminAgentTests(unittest.TestCase):
         }
         with self.app.app_context():
             db.update_branding(self.tenant, logo_path=f'/tenant-assets/{self.tenant}/logo')
-            with patch.object(self.application_module, 'call_zai_chat', return_value=response) as mocked:
+            with patch.object(self.application_module, 'call_text_chat', return_value=response) as mocked:
                 result = self.application_module._execute_agent_action(
                     self.tenant,
                     {'tool': 'edit_workspace_slide', 'params': {
@@ -517,7 +517,7 @@ class AdminAgentTests(unittest.TestCase):
         with self.app.app_context():
             with patch.object(self.application_module, '_generation_project_image_url',
                               return_value='/uploads/creative/team-logo-1.png'), \
-                    patch.object(self.application_module, 'call_zai_chat', return_value=response) as mocked:
+                    patch.object(self.application_module, 'call_text_chat', return_value=response) as mocked:
                 result = self.application_module._execute_agent_action(
                     self.tenant,
                     {'tool': 'edit_workspace_slide', 'params': {
@@ -634,7 +634,7 @@ class AdminAgentTests(unittest.TestCase):
         reply = _reply_with([
             {'tool': 'add_training', 'params': {'title': 'قاعدة', 'content': 'محتوى القاعدة'}},
         ], text='أضفت القاعدة')
-        with patch.object(self.application_module, 'call_zai_chat', return_value=reply):
+        with patch.object(self.application_module, 'call_text_chat', return_value=reply):
             response = client.post('/api/training-chat', headers=self._headers(),
                                    json={'message': 'أضف قاعدة تدريب جديدة'})
         self.assertTrue(response.get_json()['success'], response.get_json())
@@ -652,7 +652,7 @@ class AdminAgentTests(unittest.TestCase):
         ask_reply = _reply_with([
             {'tool': 'ask', 'params': {'question': 'أي قسم تقصد؟'}},
         ], text='محتاج توضيح')
-        with patch.object(self.application_module, 'call_zai_chat', return_value=ask_reply):
+        with patch.object(self.application_module, 'call_text_chat', return_value=ask_reply):
             response = client.post('/api/training-chat', headers=self._headers(),
                                    json={'message': 'عدّل القسم'})
         self.assertTrue(response.get_json()['awaitingAnswer'])
@@ -663,7 +663,7 @@ class AdminAgentTests(unittest.TestCase):
         self.assertEqual(json.loads(turn['actions_json'])[0]['tool'], 'ask')
 
         # A log-write failure must never break the agent's own reply.
-        with patch.object(self.application_module, 'call_zai_chat', return_value=_reply_with([])), \
+        with patch.object(self.application_module, 'call_text_chat', return_value=_reply_with([])), \
                 patch.object(self.application_module.db, 'log_agent_chat',
                              side_effect=RuntimeError('db down')):
             response = client.post('/api/training-chat', headers=self._headers(),

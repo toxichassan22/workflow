@@ -513,7 +513,7 @@ class StructureDispatcherTests(unittest.TestCase):
         plan = {'response': 'تم', 'actions': [action]}
         with patch.object(self.module, 'DESIGNER_AGENT', False), \
                 patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
+                patch.object(self.module, 'call_text_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}), \
                 patch.object(self.module, '_designer_edit_slide', side_effect=editor), \
                 patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides', side_effect=lambda slides, *args: slides), \
                 patch.object(self.module.slide_engine, 'renumber_presentation_slides', side_effect=lambda slides, **kwargs: slides):

@@ -346,7 +346,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         }
         calls = []
 
-        def call_glm(*args, **kwargs):
+        def call_text(*args, **kwargs):
             calls.append((args, kwargs))
             return {'choices': [{'message': {'content': (
                 '<div class="slide" style="width:1280px;height:720px;">'
@@ -356,7 +356,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
 
         result = engine.generate_single_slide(
             'system', slide, 6, 10, {'primary_color': '#123456'},
-            call_glm, max_retries=0, project_data=project,
+            call_text, max_retries=0, project_data=project,
         )
         self.assertEqual(len(calls), 1)
         self.assertIn('data-sol-owned="1"', result)
@@ -376,7 +376,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
             'section_key': 'market', 'content_source': 'market_study_data.one_block_summary',
         }
 
-        def call_glm(*args, **kwargs):
+        def call_text(*args, **kwargs):
             return {'choices': [{'message': {'content': (
                 '<div class="slide" style="width:1280px;height:720px;">'
                 '<section data-sol-editorial="1">تكوين حر من SOL لم ينسخ النص المعتمد حرفياً.</section>'
@@ -385,7 +385,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
 
         result = engine.generate_single_slide(
             'system', slide, 6, 10, {'primary_color': '#123456'},
-            call_glm, max_retries=0, project_data=project,
+            call_text, max_retries=0, project_data=project,
         )
         self.assertIn('data-sol-editorial="1"', result)
         self.assertNotIn('data-market-work-summary', result)

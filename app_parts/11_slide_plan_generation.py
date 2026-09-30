@@ -4,7 +4,7 @@
 
 from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
-    generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
+    generate_all_slides, CONTENT_DISTRIBUTION_RULES,
     resolve_slide_bounds, build_fallback_plan, _suggest_design_style,
     _timeline_data_note, _financial_data_note,
 )
@@ -164,7 +164,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     max_attempts = 1
     for attempt in range(1, max_attempts + 1):
         try:
-            response = call_zai_chat_parallel(
+            response = call_text_chat_parallel(
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                 prompt,
                 # The outline is compact; a bounded fast-model request avoids the five-minute
@@ -725,7 +725,7 @@ def api_generate_slide_single():
 - {slide_engine.NO_STREET_VIEW_RULE}
 """
 
-    def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
+    def call_text_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
         # Inside a background slide job the worker streams the single call and
@@ -734,8 +734,8 @@ def api_generate_slide_single():
         # Direct (non-job) calls keep the previous raced behaviour byte for byte.
         stream_job = getattr(g, '_slide_stream_job', None)
         if isinstance(stream_job, dict) and stream_job.get('job_id'):
-            return call_zai_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+            return call_text_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
+        return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     # Apply the same ownership repair used by the full-plan normalizer before
     # rendering and before returning slide metadata. A single-slide retry can
@@ -749,7 +749,7 @@ def api_generate_slide_single():
     # (contrast, surface, readability), so extra attempts mostly re-design the
     # same slide while the meter runs. Exhausted attempts fall back to the
     # deterministic renderer inside generate_single_slide.
-    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=1, project_data=project_data)
+    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_text_fn, max_retries=1, project_data=project_data)
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.
@@ -928,15 +928,15 @@ def api_generate_slides():
 
     training_context = db.get_training_context(g.tenant_id)
 
-    # Define the GLM call function for the slide engine
-    def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
+    # Define the text-model call function for the slide engine
+    def call_text_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+        return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     try:
         htmls = generate_all_slides(
-            slide_plan, project_data, branding, images_info, call_glm_fn,
+            slide_plan, project_data, branding, images_info, call_text_fn,
             map_placeholders=map_placeholders, creative_images=images
         )
 

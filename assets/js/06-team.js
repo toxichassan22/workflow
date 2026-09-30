@@ -827,7 +827,7 @@
           fieldType: 'textarea',
           sectionKey: 'location',
           sortOrder: 99,
-          placeholder: 'اضغط «تحليل الموقع» لتشغيل GLM، ثم راجع النص واعتمده أو عدّله.'
+          placeholder: 'تحليل الموقع بالذكاء الاصطناعي'
         });
       }
       tenantFieldSections = (sectionsData && sectionsData.available) || [];

@@ -42,7 +42,7 @@ class DesignerIntegrationTests(unittest.TestCase):
 
     def call(self, actions, slides, message, project=None, **kwargs):
         plan = {'response': 'planned', 'actions': actions}
-        with patch.object(self.module, 'call_zai_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}) as model:
+        with patch.object(self.module, 'call_text_chat', return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}) as model:
             response = self.module.app.test_client().post('/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
                 json={'message': message, 'slidesData': slides, 'projectData': project or {'project_name': 'Test'}, **kwargs})
         return response, model
@@ -72,7 +72,7 @@ class DesignerIntegrationTests(unittest.TestCase):
             prompts.append(prompt)
             content = {'response': 'سؤال', 'actions': [{'tool': 'ask', 'params': {'question': 'أي عمود تقصد؟'}}]}
             return {'choices': [{'message': {'content': json.dumps(content)}}]}
-        with patch.object(self.module, 'call_zai_chat', side_effect=provider) as model:
+        with patch.object(self.module, 'call_text_chat', side_effect=provider) as model:
             response = self.module.app.test_client().post('/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
                 json={'message': 'احذف عمود مجهول في الشريحة 2', 'slidesData': slides, 'projectData': {'project_name': 'Test'}})
         self.assertEqual(response.status_code, 200, response.get_json())
@@ -120,7 +120,7 @@ class DesignerIntegrationTests(unittest.TestCase):
             else:
                 content = {'html': slides[1]['html'].replace('<p>Keep</p>', '<p>Keep</p><p>TAIL_FACT</p>'), 'response': 'تمت الإضافة'}
             return {'choices': [{'message': {'content': json.dumps(content)}}]}
-        with patch.object(self.module, 'call_zai_chat', side_effect=provider), patch('generate_pdf_from_preview.render_slide_to_image_base64', return_value=None):
+        with patch.object(self.module, 'call_text_chat', side_effect=provider), patch('generate_pdf_from_preview.render_slide_to_image_base64', return_value=None):
             response = self.module.app.test_client().post('/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token}, json={
                 'message': 'أضف النص للشريحة 2', 'slidesData': slides, 'projectData': project})
         self.assertEqual(response.status_code, 200, response.get_json())
@@ -190,7 +190,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         slides = self.slides()
         with patch.object(self.module, '_designer_available_sar', return_value=150.0), \
                 patch.object(self.module, '_designer_span_route') as router, \
-                patch.object(self.module, 'call_zai_chat') as model, \
+                patch.object(self.module, 'call_text_chat') as model, \
                 patch.object(self.module, 'call_openrouter_messages') as agent_model:
             response = self.module.app.test_client().post(
                 '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
@@ -215,7 +215,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         with patch.object(db, 'billing_enforcement_enabled', return_value=True), \
                 patch.object(db, 'get_tenant_balance', return_value=0.0), \
                 patch.object(db, 'get_package_remaining_sar', return_value=0.0), \
-                patch.object(self.module, 'call_zai_chat') as model:
+                patch.object(self.module, 'call_text_chat') as model:
             response = self.module.app.test_client().post(
                 '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
                 json={'message': 'كام رصيدي دلوقتي؟', 'slidesData': slides,
@@ -256,7 +256,7 @@ class DesignerIntegrationTests(unittest.TestCase):
     def test_router_local_route_answers_without_planner(self):
         slides = self.slides()
         with patch.object(self.module, '_designer_span_route', return_value='chat') as router, \
-                patch.object(self.module, 'call_zai_chat') as model:
+                patch.object(self.module, 'call_text_chat') as model:
             response = self.module.app.test_client().post(
                 '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
                 json={'message': 'إيه أخبارك النهاردة؟', 'slidesData': slides,
@@ -272,7 +272,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         slides = self.slides()
         with patch.object(self.module, '_designer_span_route', return_value='balance'), \
                 patch.object(self.module, '_designer_available_sar', return_value=200.0), \
-                patch.object(self.module, 'call_zai_chat') as model:
+                patch.object(self.module, 'call_text_chat') as model:
             response = self.module.app.test_client().post(
                 '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
                 json={'message': 'فاضل ايه في الحساب؟', 'slidesData': slides,
@@ -290,7 +290,7 @@ class DesignerIntegrationTests(unittest.TestCase):
                                              'instruction': 'حسّن الخط'}}]}
         with patch.object(self.module, '_designer_span_route', return_value='design') as router, \
                 patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat',
+                patch.object(self.module, 'call_text_chat',
                              return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}) as model, \
                 patch.object(self.module, '_designer_edit_slide',
                              side_effect=lambda html, *a, **k: (html + 'x', 'تم')), \
@@ -309,7 +309,7 @@ class DesignerIntegrationTests(unittest.TestCase):
         plan = {'response': 'تم', 'actions': []}
         with patch.object(self.module, '_designer_span_route', return_value='chat') as router, \
                 patch.object(self.module, '_designer_deterministic_plan', return_value=None), \
-                patch.object(self.module, 'call_zai_chat',
+                patch.object(self.module, 'call_text_chat',
                              return_value={'choices': [{'message': {'content': json.dumps(plan)}}]}):
             self.module.app.test_client().post(
                 '/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},

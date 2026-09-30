@@ -862,8 +862,8 @@ def api_billing_topup():
                     'error_code': 'package_only_funding'}), 403
 
 
-def extract_chat_content(response, label="GLM"):
-    """Safely extract text content from ZAI/GLM API response.
+def extract_chat_content(response, label="CHAT"):
+    """Safely extract text content from a chat-completions API response.
     Raises a descriptive exception if the response is malformed."""
     if not isinstance(response, dict):
         raise Exception(f"{label} returned an invalid response")

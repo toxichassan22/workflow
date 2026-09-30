@@ -899,7 +899,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     return normalized
 
 
-def generate_all_slides(slide_plan, project_data, branding, images_info, call_glm_fn, map_placeholders=None,
+def generate_all_slides(slide_plan, project_data, branding, images_info, call_text_fn, map_placeholders=None,
                         creative_images=None):
     """
     Generate all slides in parallel.
@@ -967,7 +967,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
         for i, slide in enumerate(slides):
             future = executor.submit(
                 generate_single_slide,
-                system_prompt, slide, i + 1, total, branding, call_glm_fn,
+                system_prompt, slide, i + 1, total, branding, call_text_fn,
                 project_data=project_data
             )
             future_to_idx[future] = i

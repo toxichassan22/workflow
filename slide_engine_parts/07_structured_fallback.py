@@ -318,10 +318,10 @@ def _validate_market_visual_design(html, slide):
     return None
 
 
-def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
+def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_text_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
-    call_glm_fn: function(system_prompt, user_msg, max_tokens) -> response_dict
+    call_text_fn: function(system_prompt, user_msg, max_tokens) -> response_dict
     """
     # A section divider is one fixed layout with different text, so it is rendered here instead of
     # being asked from the model on every deck: identical on every divider, and no call at all.
@@ -438,13 +438,13 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     for attempt in range(1, max_retries + 2):
         try:
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_glm_fn(system_prompt, user_msg + retry_note, max_tokens=6000)
+            response = call_text_fn(system_prompt, user_msg + retry_note, max_tokens=6000)
             if 'choices' not in response or not response['choices']:
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
 
             content = response['choices'][0].get('message', {}).get('content', '')
-            html = extract_html_from_glm(content)
+            html = extract_html_from_content(content)
             if not html:
                 print(f"[SLIDE-{slide_num}] ERROR: no HTML extracted (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
@@ -558,8 +558,8 @@ def _canonicalize_slide_root_class(html):
     return leading + match.group(1) + 'class="slide"' + stripped[match.end():]
 
 
-def extract_html_from_glm(content):
-    """Extract HTML from GLM response content."""
+def extract_html_from_content(content):
+    """Extract HTML from model response content."""
     if not content:
         return None
 

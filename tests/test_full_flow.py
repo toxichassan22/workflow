@@ -11,7 +11,7 @@ import db
 from app import app as flask_app
 
 
-def mock_call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, **kwargs):
+def mock_call_text_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, **kwargs):
     if max_tokens >= 10000:
         return {
             'choices': [
@@ -68,7 +68,7 @@ def test_flow():
 
 
 def _run_flow():
-    app.call_zai_chat = mock_call_zai_chat
+    app.call_text_chat = mock_call_text_chat
     # /api/slide-plan queues a background job outside TESTING; the script asserts
     # on the synchronous plan payload.
     flask_app.config['TESTING'] = True

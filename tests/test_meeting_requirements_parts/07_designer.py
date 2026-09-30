@@ -563,7 +563,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         plan = json.dumps({'response': 'تم', 'actions': [
             {'tool': 'edit_slides', 'params': {'target': 'current', 'instruction': 'أضف سطر الواجهة'}}]},
             ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat',
+        with patch.object(self.application_module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': plan}}]}), \
                 patch.object(self.application_module, '_designer_edit_slide',
                              return_value=(edited, 'تم تحديث الشريحة')):
@@ -612,7 +612,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
             'response': 'الطلب غير واضح',
             'actions': [{'tool': 'ask', 'params': {'question': 'أي شريحة تقصد؟'}}],
         }, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat',
+        with patch.object(self.application_module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': plan}}]}) as chat:
             response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
                 'message': 'حسّن الشريحة', 'slidesData': slides, 'slideIndex': 0,
@@ -783,7 +783,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         # A long conversation is truncated locally, never summarized by the model:
         # a hidden summarization call billed the tenant for work nobody requested.
         long_history = [{'role': 'user', 'content': 'ك' * 900, 'slides': [3]} for _ in range(20)]
-        with patch.object(module, 'call_zai_chat',
+        with patch.object(module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': 'ملخص: الحديث عن الشريحة 3.'}}]}) as chat:
             compressed, kept = module._designer_chat_memory(long_history, '')
         self.assertFalse(chat.called)
@@ -879,7 +879,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
                 return response
 
             with self.app.test_request_context(), \
-                    patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+                    patch.object(module, 'call_text_chat', side_effect=fake_chat):
                 module.g.tenant_id = self.tenant_a
                 return module._designer_edit_slide(
                     current_html, 'مخطط اتجاهي لحدود الأرض', request_instruction, 8,
@@ -1163,7 +1163,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
             captured.append(prompt)
             return planner_reply
 
-        with patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+        with patch.object(module, 'call_text_chat', side_effect=fake_chat):
             response = client.post('/api/designer-chat', headers=headers, json={
                 'presentationId': presentation_id,
                 'message': 'ما رابط جوجل ماب الموجود في بيانات المشروع؟',
@@ -1175,7 +1175,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertNotIn(stale_link, captured[-1])
 
         captured.clear()
-        with patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+        with patch.object(module, 'call_text_chat', side_effect=fake_chat):
             response = client.post('/api/designer-chat', headers=headers, json={
                 'presentationId': presentation_id,
                 'projectData': {'draftId': unrelated_draft_id, 'location_address': browser_link},
@@ -1206,7 +1206,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         plan = json.dumps({'response': 'تم', 'actions': [
             {'tool': 'edit_slides', 'params': {'target': 'current', 'instruction': 'غيّر العنوان'}},
         ]}, ensure_ascii=False)
-        with patch.object(self.application_module, 'call_zai_chat',
+        with patch.object(self.application_module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': plan}}]}), \
                 patch.object(self.application_module, '_designer_edit_slide',
                              return_value=(new_html, 'تم تحديث الشريحة')):

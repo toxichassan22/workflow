@@ -343,7 +343,7 @@
       });
       showLoader('تحليل الموقع بالذكاء الاصطناعي', 'جاري تجهيز بيانات الموقع...', 5);
       try {
-        updateLoaderProgress(35, 'جاري إرسال بيانات الموقع إلى GLM...');
+        updateLoaderProgress(35, 'جاري إرسال بيانات الموقع للتحليل...');
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};

@@ -492,7 +492,7 @@ def _default_design(slide_type):
     return d
 
 
-def _resolve_glm_html(slide, html, num, total):
+def _resolve_slide_html(slide, html, num, total):
     if not html:
         return ""
 
@@ -667,7 +667,7 @@ def generate_pdf(slides, project_name='project', output_path='output.pdf'):
     for i, slide in enumerate(slides):
         slide_html = slide.get('glm_html') or slide.get('html')
         if slide_html:
-            slide_html = _resolve_glm_html(slide, slide_html, i + 1, total)
+            slide_html = _resolve_slide_html(slide, slide_html, i + 1, total)
         else:
             design = slide.get('design', {})
             slide_type = slide.get('type', 'content')

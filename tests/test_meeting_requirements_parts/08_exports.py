@@ -190,7 +190,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
     def test_slide_plan_runs_as_a_polled_job_so_the_proxy_cannot_drop_it(self):
         """A full project needs minutes to plan, and the live proxy kills a request held that long."""
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')):
+        with patch.object(self.application_module, 'call_text_chat_parallel', side_effect=RuntimeError('AI unavailable')):
             queued = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'},
                 'background': True,
@@ -240,7 +240,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             'population_density': '4500 نسمة/كم²',
         }
         with patch.object(self.application_module, '_collect_site_fields', return_value=(enriched, [], [], [], [], [], None)), \
-                patch.object(self.application_module, 'call_zai_chat', return_value={
+                patch.object(self.application_module, 'call_text_chat', return_value={
             'choices': [{'message': {'content': 'تحليل عربي مختصر للموقع'}}]
         }) as call_ai:
             response = client.post('/api/site-analysis', headers=self._headers(self.token_a), json={
@@ -282,7 +282,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
 
     def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('primary AI unavailable')), \
+        with patch.object(self.application_module, 'call_text_chat', side_effect=RuntimeError('primary AI unavailable')), \
                 patch.object(self.application_module, 'OPENROUTER_KEY', 'test-openrouter-key'), \
                 patch.object(self.application_module, 'call_openrouter_chat', return_value={
                     'choices': [{'message': {'content': 'تحليل من النموذج الاحتياطي'}}]
@@ -1590,7 +1590,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(refused.status_code, 400, refused.get_json())
         self.assertIn('استكمل', refused.get_json()['error'])
 
-        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': '{"text":"نبذة من الفكرة فقط"}'}}]}), \
+        with patch.object(self.application_module, 'call_text_chat', return_value={'choices': [{'message': {'content': '{"text":"نبذة من الفكرة فقط"}'}}]}), \
              patch.object(self.application_module, 'extract_chat_content', return_value='{"text":"نبذة من الفكرة فقط"}'):
             generated = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
                 'block': 'brief',
@@ -1600,7 +1600,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(generated.get_json()['text'], 'نبذة من الفكرة فقط')
 
         summary_payload = '{"text":"البيانات الأساسية\\nمنتجع شاطئي\\n\\nالدراسة المالية\\nالعائد 12%"}'
-        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': summary_payload}}]}) as chat_call, \
+        with patch.object(self.application_module, 'call_text_chat', return_value={'choices': [{'message': {'content': summary_payload}}]}) as chat_call, \
              patch.object(self.application_module, 'extract_chat_content', return_value=summary_payload):
             summary = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
                 'block': 'summary',
@@ -1615,7 +1615,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('الموقع\nجدة', parsed_dict)
 
         raw_md = 'البيانات الأساسية\nمشروع ذا فيو في جدة\n\nالدراسة المالية\nعائد استثماري متميز'
-        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': raw_md}}]}), \
+        with patch.object(self.application_module, 'call_text_chat', return_value={'choices': [{'message': {'content': raw_md}}]}), \
              patch.object(self.application_module, 'extract_chat_content', return_value=raw_md):
             summary_raw = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
                 'block': 'summary',

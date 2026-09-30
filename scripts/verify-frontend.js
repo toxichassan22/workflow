@@ -57,7 +57,7 @@ if (!shell.includes('href="/assets/app.bundle.css"')) fail('shell must include <
 // 3. No inline code blocks left in the shell.
 const bareScripts = [...shell.matchAll(/^\s*<script>\s*$/gm)].map((m) => m[0]);
 if (bareScripts.length) fail(`shell still carries ${bareScripts.length} inline <script> block(s)`);
-for (const m of shell.matchAll(/<style(?![^>]*id="zai-global-styles")[^>]*>/g)) {
+for (const m of shell.matchAll(/<style[^>]*>/g)) {
   fail(`shell still carries an inline <style> block: ${m[0].slice(0, 60)}`);
 }
 

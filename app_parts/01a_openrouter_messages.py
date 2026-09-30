@@ -24,7 +24,7 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
-    model_name = model or GLM_OPENROUTER_MODEL
+    model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     payload = {
         "model": model_name,

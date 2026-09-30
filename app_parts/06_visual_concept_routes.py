@@ -711,7 +711,7 @@ def api_generate_content():
     prompt = f"اكتب محتوى للشريحة: {slide_data.get('title', '')}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب المحتوى.", max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', request.json))
+        response = call_text_chat(prompt, "اكتب المحتوى.", max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', request.json))
         content = extract_chat_content(response, "CONTENT")
         return jsonify({'success': True, 'content': content})
     except Exception as e:
@@ -766,9 +766,9 @@ def api_ai_edit_slide():
 أعد الشريحة بالـ HTML المعدّل."""
 
     try:
-        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs, usage_ctx=_usage_ctx_optional('slide', data, presentation_id=presentation_id))
+        response = call_text_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs, usage_ctx=_usage_ctx_optional('slide', data, presentation_id=presentation_id))
         html = extract_chat_content(response, "EDIT")
-        html = extract_html_from_glm({'choices': [{'message': {'content': html}}]})
+        html = extract_html_from_response({'choices': [{'message': {'content': html}}]})
         
         # Post-process and resolve placeholders
         # Preserve the actual slide semantics. In particular, a closing slide
@@ -817,7 +817,7 @@ def api_ai_chat():
 {{"action": "reply", "response": "نص الرد"}}"""
 
     try:
-        response = call_zai_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', data))
+        response = call_text_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', data))
         reply = extract_chat_content(response, "CHAT")
 
         parsed = _extract_json_from_text(reply)
@@ -863,7 +863,7 @@ def api_generate_bullets():
     prompt = f"اكتب 3-5 نقاط مختصرة للشريحة: {title}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000, usage_ctx=_usage_ctx_optional('slide', request.json))
+        response = call_text_chat(prompt, "اكتب النقاط.", max_tokens=1000, usage_ctx=_usage_ctx_optional('slide', request.json))
         content = extract_chat_content(response, "BULLETS")
         # Bullet glyphs are stripped from the model's output; written as escapes so the source
         # itself stays free of icon characters.

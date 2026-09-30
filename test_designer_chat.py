@@ -1,6 +1,6 @@
 import sys
 import json
-from app import app, db, build_design_rules, call_zai_chat, extract_chat_content
+from app import app, db, build_design_rules, call_text_chat, extract_chat_content
 from flask import g
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -57,8 +57,8 @@ with app.test_request_context():
     
     user_msg = f"الشريحة الحالية (مقدمة):\n\n{slide_html}\n\nالطلب: أضف نقطة جديدة تحت العنوان: 'هذه شريحة زرقاء'"
     
-    print("Calling GLM...")
-    response = call_zai_chat(system_prompt, user_msg, max_tokens=6000)
+    print("Calling text model...")
+    response = call_text_chat(system_prompt, user_msg, max_tokens=6000)
     print("\n--- RAW RESPONSE ---")
     print(json.dumps(response, ensure_ascii=False, indent=2))
     print("--------------------\n")
