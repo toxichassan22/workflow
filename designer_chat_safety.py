@@ -154,7 +154,8 @@ class _Inventory(HTMLParser):
         style = re.sub(r'\s+', '', attrs.get('style') or '').lower()
         hidden = parent_hidden or tag in ('script', 'style', 'template') or 'hidden' in attrs or attrs.get('aria-hidden') == 'true' or any(rule in style for rule in ('display:none', 'visibility:hidden', 'opacity:0;', 'font-size:0')) or style.endswith('opacity:0')
         classes = (attrs.get('class') or '').split()
-        managed = any(key in attrs for key in ('data-slide-footer', 'data-slide-counter'))
+        managed = any(key in attrs for key in ('data-slide-footer', 'data-slide-counter',
+                                               'data-slide-number', 'data-slide-total'))
         hidden = hidden or managed or bool({'slide-footer', 'slide-counter'} & set(classes))
         if 'slide' in classes:
             self.roots += 1
@@ -216,6 +217,11 @@ class _Inventory(HTMLParser):
             for url in _URL.findall(data):
                 self.items[('media', 'css', url.strip())] += 1
         if self.stack[-1][1]:
+            return
+        if re.fullmatch(r'\s*\d{1,3}\s*[/\-–—]\s*\d{1,4}\s*', data):
+            # A lone «NN — NN»/«N/N» leaf is a page-marker shape, not data —
+            # a stray or model-dropped counter must not count as a fact when a
+            # removal or restructure drops it.
             return
         self.text.append(data)
         self.nodes.append(data)
