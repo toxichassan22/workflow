@@ -948,6 +948,10 @@ def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
     html, replaced = marker.subn(lambda match: match.group(1) + counter + match.group(3), html)
     if replaced:
         return html
+    if {'counter', 'footer'} & _chrome_off_tokens(html):
+        # data-chrome-off: the counter/footer was deliberately removed — do not
+        # seat a fresh counter inside a legacy footer or divider remnant.
+        return html
     if slide_type == 'section_divider':
         legacy = re.compile(
             r'(<div\b(?=[^>]*bottom:\s*34px)(?=[^>]*left:\s*48px)[^>]*)>'
@@ -1063,6 +1067,10 @@ def _ensure_slide_counter(html, slide_num, total_slides):
 
     if re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
         html = _rewrite_preserved_counter(html, 'content', slide_num, total_slides)
+    if {'counter', 'footer'} & _chrome_off_tokens(html):
+        # Deliberately removed: never promote a number-shaped leaf back into a
+        # counter and never inject a fresh one on this slide.
+        return html
     html = separated.subn(_promote, html)[0]
     html = anchored.subn(_promote, html)[0]
     if re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
@@ -1484,6 +1492,9 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         # The project mark IS the company image — rendering both would show the
         # same logo twice in the header.
         project_logo_ref = ''
+    off = _chrome_off_tokens(html)
+    if 'project_logo' in off:
+        project_logo_ref = ''
     header_html, footer_html = _presentation_chrome_html(
         title, project_title, html_lib.escape(str(company_name)), primary, accent,
         footer_background, footer_text, footer_accent, footer_number,
@@ -1491,8 +1502,20 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         slide_surface=_slide_root_surface(html),
         offer_lang=lang,
     )
-    html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
-    html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+    if 'company_logo' in off:
+        header_html = re.sub(r'<img\b[^>]*\bsrc\s*=\s*["\']##LOGO##["\'][^>]*>', '', header_html,
+                             flags=re.IGNORECASE)
+    if 'counter' in off:
+        footer_html = re.sub(r'<span\b[^>]*\bdata-slide-counter\s*=[^>]*>[\s\S]*?</span\s*>', '',
+                             footer_html, flags=re.IGNORECASE)
+    if 'header' in off:
+        header_html = ''
+    if 'footer' in off:
+        footer_html = ''
+    if header_html:
+        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
+    if footer_html:
+        html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
     return html
 
 

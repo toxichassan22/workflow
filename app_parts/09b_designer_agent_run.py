@@ -355,7 +355,9 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
     request can never legitimately go through a worker edit: changing the
     digits trips missing_numbers, and leaving them trips unchanged. This op
     fixes the number deterministically to the slide's live position — and a
-    content slide that lost its counter gets the managed one back.
+    content slide that lost its counter gets the managed one back. An explicit
+    renumber request overrides a data-chrome-off stamp: the counter returns
+    and the stamp is reconciled to the slide's real state.
     """
     slides = ctx['slides']
     total = len(slides)
@@ -366,7 +368,11 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
             continue
         slide_type = str(slide.get('type') or 'content').strip().lower()
         before = str(slide.get('html') or '')
-        html = slide_engine._rewrite_preserved_counter(before, slide_type, idx + 1, total)
+        # An explicit renumber overrides the off-stamp for the number itself —
+        # drop 'counter' first so the closing-slide counter path can re-seat it.
+        html = slide_engine._stamp_chrome_off(
+            before, slide_engine._chrome_off_tokens(before) - {'counter'})
+        html = slide_engine._rewrite_preserved_counter(html, slide_type, idx + 1, total)
         if (slide_type not in ('cover', 'closing', 'moodboard')
                 and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE)):
             counter = slide_engine._slide_counter_text(idx + 1, total)
@@ -380,6 +386,7 @@ def _agent_exec_renumber(task, ctx, session, feedback=''):
                               'bottom:8px;left:24px;">' + counter_html + '</footer>')
                     html = re.sub(r'(</div>\s*)$', lambda m: footer + m.group(0),
                                   html, count=1, flags=re.IGNORECASE)
+        html = slide_engine._stamp_chrome_off(html, slide_engine._chrome_off_reconcile(html))
         if html != before:
             slide['html'] = html
             slide['_designer_keep_html'] = True

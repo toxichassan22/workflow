@@ -455,7 +455,8 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
     project_logo = _project_logo_reference(project_data)
     company_logo = resolve_logo_in_html('##LOGO##', tenant_id, _branding_cache=branding)
     company_sources = {company_logo, branding.get('logo_path'), branding.get('logo'), branding.get('logo_url'), '/assets/logo.png'}
-    suppressed = _designer_suppressed_chrome(removed_elements, instruction)
+    suppressed = (_designer_suppressed_chrome(removed_elements, instruction)
+                  | _chrome_off_tokens(html))
     # When the project mark is the company image, every matching <img> satisfies
     # both roles — tagging it 'project' alone kept 'company' missing forever and
     # the overlay heal resurrected the very duplicate Sol had just removed.
@@ -515,6 +516,11 @@ def finalize_designer_slide_html(html, slide_type, project_data, branding, creat
                 footer = ('<footer data-slide-footer="1" style="position:absolute;bottom:8px;left:24px;">'
                           + counter_html + '</footer>')
                 html = re.sub(r'(</div>\s*)$', lambda m: footer + m.group(0), html, count=1, flags=re.IGNORECASE)
+    # Persist deliberate chrome removals on the slide itself so later saves,
+    # renumbering and unrelated edits do not heal them back. Anything Sol
+    # brought back clears its token — the heals then protect it again.
+    present = {f'{role}_logo' for role in ('company', 'project') if role in found}
+    html = _stamp_chrome_off(html, _chrome_off_reconcile(html, present=present, suppressed=suppressed))
     return _drop_unresolved_image_placeholders(html)
 
 
