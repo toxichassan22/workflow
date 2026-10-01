@@ -689,10 +689,10 @@
           (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +
           '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
           '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>' + points + ' نقطة</strong></div>' +
-          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ريال سعودي</strong></div>' +
+          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ' + wfTr('ريال سعودي') + '</strong></div>' +
           (canSeeWallet && remainingSar !== null
             ? '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
-              '<span>الرصيد المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ريال سعودي</strong>' +
+              '<span>الرصيد المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ' + wfTr('ريال سعودي') + '</strong>' +
               '</div>'
             : '') +
           '</div>' +

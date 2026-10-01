@@ -1454,18 +1454,29 @@
       return Number(v || 0).toLocaleString('en-US');
     }
 
-    function sagFmtMoney(v) {
+    // The figure and its currency are computed apart on purpose. The currency
+    // label is language-dependent (ريال سعودي / SAR) and used to be glued into
+    // the number string and then split back out on the Arabic literal, so it
+    // could never reach English: the split found nothing and the whole line
+    // stayed Arabic. Numbers themselves never change with the language.
+    function sagFmtMoneyParts(v) {
       const n = Number(v || 0);
       const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
-      return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' ريال سعودي';
+      return {
+        number: n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }),
+        currency: wfTr('ريال سعودي')
+      };
+    }
+
+    function sagFmtMoney(v) {
+      const parts = sagFmtMoneyParts(v);
+      return parts.number + ' ' + parts.currency;
     }
 
     function sagFmtMoneyHtml(v) {
-      const text = sagFmtMoney(v);
-      const unitIdx = text.lastIndexOf(' ريال');
-      return unitIdx > 0
-        ? escapeHtml(text.slice(0, unitIdx)) + ' <span class="money-currency">' + escapeHtml(text.slice(unitIdx + 1)) + '</span>'
-        : escapeHtml(text);
+      const parts = sagFmtMoneyParts(v);
+      return '<span dir="ltr">' + escapeHtml(parts.number) + '</span>'
+        + ' <span class="money-currency">' + escapeHtml(parts.currency) + '</span>';
     }
 
     function sagDeltaChip(d) {

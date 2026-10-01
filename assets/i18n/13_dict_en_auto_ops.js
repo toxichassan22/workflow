@@ -132,5 +132,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "معطل:": "Disabled:",
   "تعذر تصفير الرصيد": "Could not zero the balance",
   "تجديد الباقة": "Renew package",
-  "إصدار مفتاح": "Issue a key"
+  "إصدار مفتاح": "Issue a key",
+  "التأسيس (الاسعار تشمل ضريبة القيمة المضافة)": "Foundation (prices include VAT)"
 }/*I18N_EN_AUTO_END*/);
