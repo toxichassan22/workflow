@@ -539,23 +539,50 @@
       if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       const presentationTitle = projectName + ' - ' + resolvedLabel;
-      showTenantPage('tenantSlidesPage');
-      clearTenantSlidesStage('جاري إعداد عرض ' + resolvedLabel);
-      setSlidesEditorInfo(presentationTitle, 0);
-      setLiveGenBanner(true, 'إعداد عرض ' + resolvedLabel, 'تحليل بيانات القسم وبناء الشرائح', 5);
+      // The approval gate opens before any page change or billable call — same
+      // order as the full-file run. It used to sit after the slides-page
+      // navigation and the AI plan request, so an empty wallet (402 on
+      // slide-plan) or a dead provider left the user stranded on the design
+      // page with the modal never appearing. The estimate prices the section's
+      // current slides when they exist; a first run falls back to the modal's
+      // own default count.
+      const plannerKeys = Object.keys(TENANT_SECTION_PLANNER_KEYS || {})
+        .filter(key => TENANT_SECTION_PLANNER_KEYS[key] === sectionKey);
+      const priorSectionSlides = plannerKeys.length && typeof tenantSectionPlanMatchesSection === 'function'
+        ? [tenantSlidesData, tenantSlidePlan && tenantSlidePlan.slides]
+          .map(list => (Array.isArray(list) ? list : [])
+            .filter(slide => plannerKeys.some(pk => tenantSectionPlanMatchesSection(slide, pk))).length)
+          .find(count => count > 0)
+        : 0;
+      const gateApproved = await showGenerationApprovalModal({
+        draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
+        slidesCount: priorSectionSlides || undefined,
+        projectName: presentationTitle,
+        sectionKey
+      });
+      if (!gateApproved) return;
 
-      const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-        setLiveGenBanner(true, 'إعداد عرض ' + resolvedLabel,
-          (job && job.message) || 'تحليل بيانات القسم وبناء الشرائح', 8);
-      }, sectionKey);
+      // The plan also runs before navigation: a planner failure keeps the
+      // project page in place with the error instead of a dead design stage.
+      showLoader('إعداد عرض ' + resolvedLabel, 'تحليل بيانات القسم وبناء الشرائح', 5);
+      let planResponse = null;
+      try {
+        planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
+          updateLoaderProgress(8, (job && job.message) || 'تحليل بيانات القسم وبناء الشرائح');
+        }, sectionKey);
+      } finally {
+        hideLoader();
+      }
       if (!planResponse?.success || !planResponse.plan) {
-        const errorMessage = planResponse?.error || 'تعذر إعداد عرض القسم';
-        setLiveGenBanner(true, 'تعذر إعداد عرض القسم', errorMessage, 5);
-        toast(errorMessage);
-        renderTenantSlides();
+        // The gate already escrowed its hold — release it like the full-file
+        // run does, or the points stay reserved and the draft stays locked.
+        await settleGenerationRun(false, 'تعذر إعداد خطة القسم');
+        toast(planResponse?.error || 'تعذر إعداد عرض القسم');
         return;
       }
 
+      clearTenantSlidesStage('جاري إعداد عرض ' + resolvedLabel);
+      setSlidesEditorInfo(presentationTitle, 0);
       tenantSlidePlan = planResponse.plan;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantPresentationTitle = presentationTitle;
@@ -564,7 +591,8 @@
         sectionLabel: resolvedLabel,
         presentationTitle,
         financialValidated: sectionKey === 'section-financial-calc',
-        markDraftDirty: false
+        markDraftDirty: false,
+        approvalGranted: true
       });
     }
 
@@ -665,12 +693,14 @@
       let remainingSar = null;
       let isBalanceSufficient = false;
       try {
-        const ov = await api('GET', '/api/client/overview');
+        const ov = await api('GET', '/api/client/overview?required_sar=' + encodeURIComponent(costSar));
         if (ov && ov.wallet_restricted) {
           isBalanceSufficient = Boolean(ov.funds_available);
         } else if (ov) {
           remainingSar = Number(ov.effective_balance_sar ?? ov.balance_sar ?? ov.balance_usd) || 0;
-          isBalanceSufficient = remainingSar >= costSar || remainingSar > 0;
+          // A short-but-positive wallet must fail this check — confirming used
+          // to survive on `remainingSar > 0` alone and then 402 at decision.
+          isBalanceSufficient = remainingSar >= costSar;
         }
       } catch (err) {
         console.warn('Overview fetch error:', err);
@@ -688,7 +718,8 @@
           '<div><span style="color:#64748b;">المشروع:</span> <strong>' + escapeHtml(projectName) + '</strong></div>' +
           (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +
           '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
-          '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>' + points + ' نقطة</strong></div>' +
+          '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>'
+          + WFT('gen.points_count', '{n} نقطة', { n: points }) + '</strong></div>' +
           '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ' + wfTr('ريال سعودي') + '</strong></div>' +
           (canSeeWallet && remainingSar !== null
             ? '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
@@ -815,22 +846,15 @@
       });
       if (!gateApproved) return;
 
-      // Navigate to the presentation page with the stage empty. Rendering the file's saved slides
-      // here showed the previous deck for the whole planning wait, so the reader watched an old
-      // presentation while a new one was being built.
-      showTenantPage('tenantSlidesPage');
-      clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
-      setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
-
       try {
-        // The plan is always rebuilt from the current project data. Reusing the saved plan meant a
-        // regenerated file kept the previous structure and slide count no matter how much the
-        // project had changed, which read as a fixed slide count that nobody had asked for.
-        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
+        // The plan finishes before the slides page opens: a failed planner or
+        // a dead provider keeps the user on this page with the error instead
+        // of stranding them on an empty design stage.
+        showLoader(WFT('gen.planning_structure', 'إعداد خطة وهيكل العرض الاستثماري'),
+        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), 5);
         const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-          setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
-            (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
-        });
+          updateLoaderProgress(8, (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب');
+        }).finally(() => hideLoader());
         if (planResponse.success && planResponse.plan) {
           tenantSlidePlan = planResponse.plan;
           tenantProjectData.tenantSlidePlan = tenantSlidePlan;
@@ -838,29 +862,21 @@
           // A fallback plan is a failed planner, not a proposal: it always has the same generic
           // titles and the same count, so it is stated instead of passing as the model's work.
           if (tenantSlidePlan.source === 'fallback') {
-            setLiveGenBanner(true, 'تعذر تحليل بيانات المشروع — هيكل عام',
-              planCount + ' شريحة بعناوين عامة لا تعبّر عن هذا المشروع', 12);
             toast('لم ينتج المحلل خطة لهذا المشروع، والهيكل المستخدم عام.');
-          } else {
-            setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
           }
           triggerAutoSaveDraft();
+          // Open the stage only now that a plan exists to render on it.
+          showTenantPage('tenantSlidesPage');
+          clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
+          setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
         } else {
           // The gate already escrowed the hold: a dead plan releases it and
           // returns the draft from 'generating' instead of stranding both.
-          if (window.currentGenerationApprovalId) {
-            api('POST', '/api/generation-approvals/' + encodeURIComponent(window.currentGenerationApprovalId) + '/settle', {
-              consumed: false,
-              jobId: window.currentGenerationJobId || undefined,
-              note: 'تعذر إعداد خطة الشرائح'
-            }).catch(err => console.warn('Settlement release error:', err));
-            window.currentGenerationApprovalId = null;
-          }
+          await settleGenerationRun(false, 'تعذر إعداد خطة الشرائح');
           const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
-          setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
           console.error('[SLIDE PLAN]', planResponse);
           toast(errorMessage);
-          renderTenantSlides();
           return;
         }
 

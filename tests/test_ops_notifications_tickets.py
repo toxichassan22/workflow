@@ -456,6 +456,21 @@ class OpsSectionTests(unittest.TestCase):
         self.assertIn('balance_sar', full)
         self.assertIn('package', full)
 
+    def test_client_overview_required_sar_gates_funds_available(self):
+        emp_token = self._employee_token('ov-req@x.test')
+        url = '/api/client/overview'
+        empty = self.client.get(url, headers=self.headers(emp_token)).get_json()
+        self.assertFalse(empty['funds_available'])
+        db.record_ledger_credit(self.tenant_id, 100, note='test topup', actor='test')
+        loose = self.client.get(url, headers=self.headers(emp_token)).get_json()
+        self.assertTrue(loose['funds_available'])
+        affordable = self.client.get(
+            url + '?required_sar=50', headers=self.headers(emp_token)).get_json()
+        self.assertTrue(affordable['funds_available'])
+        short = self.client.get(
+            url + '?required_sar=150', headers=self.headers(emp_token)).get_json()
+        self.assertFalse(short['funds_available'])
+
     def test_employee_feed_lists_no_wallet_support_or_task_categories(self):
         emp_token = self._employee_token('cats-ed@x.test')
         body = self.client.get(

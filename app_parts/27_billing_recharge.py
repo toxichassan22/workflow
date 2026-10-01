@@ -260,12 +260,18 @@ def api_client_overview():
         reserved_sar = db.get_active_hold_total_sar(g.tenant_id)
         if not _landloom_can('billing'):
             # Staff never see wallet figures: the generation gate only needs a
-            # sufficiency flag, and the totals carry no money fields.
+            # sufficiency flag, and the totals carry no money fields. The flag
+            # compares against the caller's estimate when it passes one — a
+            # positive balance short of the estimate is not "funds available".
             remaining = float((package or {}).get('remaining_sar') or balance_sar or 0.0)
+            try:
+                required_sar = float(request.args.get('required_sar') or 0.0)
+            except (TypeError, ValueError):
+                required_sar = 0.0
             return jsonify({
                 'success': True,
                 'wallet_restricted': True,
-                'funds_available': remaining > 0,
+                'funds_available': remaining >= required_sar if required_sar > 0 else remaining > 0,
                 'totals': {
                     'projects': view.get('projects'),
                     'presentations': view.get('presentations'),
