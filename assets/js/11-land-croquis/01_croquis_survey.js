@@ -463,6 +463,29 @@
           mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. <span>' + boundaryLabel + '</span>';
           mapHint.style.display = 'block';
         }
+        // A re-analysis on a different link voids every raster, approval, saved
+        // frame and boundary drawn for the previous site — maps_signature stores
+        // the link the maps were last rendered for. Coordinates alone cannot
+        // decide this: a confirmed pin legitimately moves location_lat/lng a few
+        // hundred metres off the link while the maps stay valid for that site.
+        try {
+          const renderedSig = JSON.parse((tenantCreativeImages && tenantCreativeImages.maps_signature) || 'null') || {};
+          const renderedAddr = String(renderedSig.addr || '').trim();
+          const analyzedAddr = String(tenantProjectData.location_address || '').trim();
+          let signatureDrifted = renderedAddr !== '' && renderedAddr !== analyzedAddr;
+          if (!signatureDrifted && renderedAddr === '') {
+            const renderedLat = Number(renderedSig.lat);
+            const renderedLng = Number(renderedSig.lng);
+            const siteLat = Number(data.lat);
+            const siteLng = Number(data.lng);
+            signatureDrifted = Number.isFinite(renderedLat) && Number.isFinite(renderedLng)
+              && Number.isFinite(siteLat) && Number.isFinite(siteLng)
+              && (Math.abs(renderedLat - siteLat) > 0.002 || Math.abs(renderedLng - siteLng) > 0.002);
+          }
+          if (signatureDrifted && typeof invalidateTenantMapAssets === 'function') {
+            invalidateTenantMapAssets();
+          }
+        } catch (sigError) { /* unparseable signature — nothing to compare */ }
         tenantProjectData = { ...tenantProjectData, ...fields };
         tenantProjectData.location_coordinates_confirmed = false;
         tenantProjectData.location_coordinates_source = data.source || 'site_analysis';

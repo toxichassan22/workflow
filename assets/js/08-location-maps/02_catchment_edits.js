@@ -622,6 +622,18 @@
                 if (latInput) latInput.value = '';
                 if (lngInput) lngInput.value = '';
                 tenantProjectData.location_analysis_approved = false;
+                // Every generated raster, approval, saved frame and drawn boundary
+                // belongs to the previous link — keep showing them and the new site
+                // could never regenerate (the approval gate rejects it), so the map
+                // state is invalidated the moment the link changes.
+                const creative = tenantCreativeImages || {};
+                const hasMapAssets =
+                  Object.keys(creative.map_placeholders || {}).length > 0 ||
+                  Object.values(creative.map_approvals || {}).some(Boolean) ||
+                  (tenantMapPolygonPoints && tenantMapPolygonPoints.length > 0);
+                if (hasMapAssets && typeof invalidateTenantMapAssets === 'function') {
+                  invalidateTenantMapAssets();
+                }
                 renderLocationWorkflowState();
               }
             });

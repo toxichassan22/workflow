@@ -407,8 +407,20 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     enrich_road_metrics(all_roads)
     roads = all_roads[:6]
 
+    # Editing the link input clears the stored coordinates before this runs, so a
+    # surviving polygon or city/district pair describes the previous site, not a
+    # manual edit — a moved site re-detects its boundary and gets the freshly
+    # resolved names. Same-site re-analysis keeps both instead.
+    stored_site_lat = maps_service._extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat'))
+    stored_site_lng = maps_service._extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng'))
+    site_moved = (
+        stored_site_lat is None or stored_site_lng is None
+        or maps_service._distance_meters(stored_site_lat, stored_site_lng, lat, lng) > 100
+    )
     polygon = None
-    raw_polygon = project_data.get('location_polygon')
+    raw_polygon = None if site_moved else project_data.get('location_polygon')
     if isinstance(raw_polygon, str):
         try:
             polygon = [
@@ -437,18 +449,6 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         'nearby_landmarks': landmark_lines(nearby_items),
         'city_landmarks': landmark_lines(city_items),
     }
-    # Editing the link input clears the stored coordinates before this runs, so a
-    # surviving city/district pair describes the previous site, not a manual edit —
-    # a moved site must get the freshly resolved names. Same-site re-analysis keeps
-    # any manual correction instead.
-    stored_site_lat = maps_service._extract_coordinate(
-        project_data.get('location_lat') or project_data.get('locationLat'))
-    stored_site_lng = maps_service._extract_coordinate(
-        project_data.get('location_lng') or project_data.get('locationLng'))
-    site_moved = (
-        stored_site_lat is None or stored_site_lng is None
-        or maps_service._distance_meters(stored_site_lat, stored_site_lng, lat, lng) > 100
-    )
     if place_names.get('city') and (site_moved or not str(project_data.get('city') or '').strip()):
         fields['city'] = place_names['city']
     if place_names.get('district') and (site_moved or not str(project_data.get('district') or '').strip()):
@@ -495,6 +495,16 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
 
     if polygon:
         fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+    # 'manual' only stands while the drawn boundary actually survived into this
+    # analysis: a moved site drops it above, and the returned polygon (if any) is
+    # a fresh detection, never the user's old drawing. 'cleared' is the user
+    # switching the highlight off — a preference, so it survives a site move.
+    fields['location_polygon_source'] = (
+        'manual' if project_data.get('location_polygon_source') == 'manual' and not site_moved and polygon
+        else 'cleared' if project_data.get('location_polygon_source') == 'cleared'
+        else 'auto' if polygon
+        else 'none'
+    )
 
     diagnostics = {
         'nearby_landmarks_error': nearby_error,
@@ -556,13 +566,7 @@ def api_analyze_site():
         fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
             project_data, g.tenant_id, lat, lng
         )
-    fields['location_polygon_source'] = (
-        'manual' if project_data.get('location_polygon_source') == 'manual'
-        # 'cleared' is the user switching the highlight off; it must survive a re-analysis.
-        else 'cleared' if project_data.get('location_polygon_source') == 'cleared'
-        else 'auto' if fields.get('location_polygon')
-        else 'none'
-    )
+    fields.setdefault('location_polygon_source', 'none')
 
     return jsonify({
         'success': True,
@@ -755,6 +759,43 @@ def api_generate_single_map_image():
         if isinstance(stored_project.get('tenantCreativeImages'), dict) else {}
     stored_map_approvals = stored_creative.get('map_approvals') \
         if isinstance(stored_creative.get('map_approvals'), dict) else {}
+    # An approval falls only when a persisted render proves it belongs to another
+    # site: map rows are metadata-tagged with the coordinates they were drawn at,
+    # so a location change can never hide behind a stale approval and regenerate
+    # nothing. No rows (or untagged rows) disprove nothing — the flag stands.
+    request_site_lat = maps_service._extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat'))
+    request_site_lng = maps_service._extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng'))
+
+    def _persisted_render_is_stale(*type_prefixes):
+        if request_site_lat is None or request_site_lng is None:
+            return False
+        try:
+            rows = db.get_map_images(
+                g.tenant_id, presentation_id=effective_id, draft_id=draft_id)
+        except Exception:
+            return False
+        saw_tagged_render = False
+        for row in rows or []:
+            image_type = str(row.get('image_type') or '')
+            if not any(image_type == prefix or image_type.startswith(prefix + '_')
+                       for prefix in type_prefixes):
+                continue
+            try:
+                meta = json.loads(row.get('metadata_json') or '{}')
+                rendered_lat = float(meta.get('lat'))
+                rendered_lng = float(meta.get('lng'))
+            except (TypeError, ValueError):
+                continue
+            saw_tagged_render = True
+            if abs(rendered_lat - request_site_lat) < 1e-4 \
+                    and abs(rendered_lng - request_site_lng) < 1e-4:
+                return False
+        return saw_tagged_render
+
+    overview_approved = stored_map_approvals.get('overview') is True \
+        and not _persisted_render_is_stale('overview')
     if not overlay_only and stored_project.get('location_analysis_approved') not in (True, 'true', 1):
         return jsonify({
             'success': False,
@@ -762,13 +803,13 @@ def api_generate_single_map_image():
             'error_code': 'LOCATION_ANALYSIS_NOT_APPROVED',
         }), 400
     if not overlay_only and map_type in {'landmarks', 'access', 'catchment'} \
-            and stored_map_approvals.get('overview') is not True:
+            and not overview_approved:
         return jsonify({
             'success': False,
             'error': 'يجب اعتماد خريطة الموقع العامة قبل إنشاء هذه الخريطة',
             'error_code': 'OVERVIEW_MAP_NOT_APPROVED',
         }), 400
-    if stored_map_approvals.get(map_type) is True:
+    if stored_map_approvals.get(map_type) is True and not _persisted_render_is_stale(map_type):
         return jsonify({
             'success': False,
             'error': 'يجب إلغاء اعتماد الخريطة قبل إعادة توليدها',

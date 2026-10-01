@@ -66,13 +66,29 @@
         map_centers: {},
         map_viewport_overrides: {},
         map_landmarks: [],
+        map_access_roads: [],
+        map_catchment_landmarks: [],
+        map_landmark_items: [],
         map_lat: null,
         map_lng: null,
         maps_signature: null,
         maps_persisted: false,
         map_approvals: {}
       };
+      // Rendered roads, resolved marker items, label placements and a manually
+      // drawn boundary are all pinned to the old site's coordinates — carrying
+      // them over draws them off-frame or blocks the next render with stale
+      // geometry.
       tenantProjectData.location_polygon_source = 'auto';
+      tenantProjectData.access_roads_data = [];
+      tenantProjectData.manual_road_paths = [];
+      tenantProjectData.catchment_map_landmarks = [];
+      tenantProjectData.landmark_map_items = [];
+      tenantProjectData.landmarks_matrix = [];
+      tenantProjectData.landmark_label_positions = {};
+      tenantProjectData.access_road_label_positions = {};
+      tenantProjectData.access_road_label_sizes = {};
+      tenantProjectData.catchment_label_positions = {};
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
       tenantMapDraftPolygonPoints = [];
@@ -284,7 +300,17 @@
       window.addEventListener('pointercancel', stop);
     }
 
+    // An overlay composes onto the raster that already exists for this map; after
+    // a location invalidation there is none, and posting anyway would stamp the
+    // old site's image with the new site's metadata.
+    function mapOverlayHasBase(mapType) {
+      const view = (typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS : [])
+        .find(v => v.mapType === mapType);
+      return !!(view && mapPreviewStoredUrl(view));
+    }
+
     async function applyOverviewMapEdits() {
+      if (!mapOverlayHasBase('overview')) return false;
       try {
         const payload = slimMapProjectData(tenantProjectData);
         payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
@@ -315,6 +341,7 @@
     }
 
     async function applyAccessMapEdits() {
+      if (!mapOverlayHasBase('access')) return false;
       try {
           const payload = slimMapProjectData(tenantProjectData);
           payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
@@ -374,6 +401,7 @@
     }
 
     function applyCatchmentMapEdits() {
+      if (!mapOverlayHasBase('catchment')) return Promise.resolve(false);
       return (async () => {
         try {
           const payload = slimMapProjectData(tenantProjectData);
@@ -419,6 +447,7 @@
     }
 
     function applyLandmarksMapEdits() {
+      if (!mapOverlayHasBase('landmarks')) return Promise.resolve(false);
       return (async () => {
         try {
           const payload = slimMapProjectData(tenantProjectData);

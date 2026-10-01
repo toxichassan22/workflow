@@ -881,6 +881,20 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         except Exception as e:
             print(f"[POLYGON PARSE ERROR] {e}")
 
+    if polygon_coords and len(polygon_coords) >= 3:
+        # A boundary saved for a previous site must not drive the frame: its
+        # centroid lands on the old location, the base fetch centres there and
+        # every overlay lands off-map. Legitimate plot boundaries sit within a
+        # few hundred metres of the pin.
+        nearest_vertex_m = min(
+            _distance_meters(lat, lng, point[0], point[1]) for point in polygon_coords)
+        centroid_lat = sum(point[0] for point in polygon_coords) / len(polygon_coords)
+        centroid_lng = sum(point[1] for point in polygon_coords) / len(polygon_coords)
+        if nearest_vertex_m > 500 and _distance_meters(lat, lng, centroid_lat, centroid_lng) > 500:
+            print('[POLYGON] Stored boundary sits far from the resolved site — discarded')
+            polygon_coords = None
+            user_polygon_used = False
+
     # Croquis coordinates are the real plot boundary, so they outrank any guess.
     if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
         survey_polygon = survey_polygon_from_project(project_data, lat, lng)
@@ -988,6 +1002,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         except (TypeError, ValueError):
             return fallback_lat, fallback_lng
         if not (-85 <= c_lat <= 85 and -180 <= c_lng <= 180):
+            return fallback_lat, fallback_lng
+        # A stored frame from a previous site is stale, not a manual pan —
+        # beyond ~3 km it cannot be a viewport adjustment of this map.
+        if _distance_meters(lat, lng, c_lat, c_lng) > 3000:
             return fallback_lat, fallback_lng
         return c_lat, c_lng
 

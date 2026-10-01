@@ -383,6 +383,14 @@
 
     function runMapTableRecompose(mapType) {
       delete tenantMapRecomposeTimers[mapType];
+      // A timer queued before a location invalidation must not fire after it —
+      // that overlay would stamp the stale raster with the new site's metadata.
+      const recomposeBase = MAP_RECOMPOSE_TOKENS[mapType];
+      if (!recomposeBase) return Promise.resolve();
+      const recomposePlaceholders = (tenantCreativeImages && tenantCreativeImages.map_placeholders) || {};
+      const recomposeStem = recomposeBase.slice(0, -2);
+      if (![recomposeBase, recomposeStem + '_SATELLITE##', recomposeStem + '_ROADMAP##']
+          .some(t => recomposePlaceholders[t])) return Promise.resolve();
       if (tenantMapRecomposeInflight[mapType]) {
         scheduleMapRecomposeType(mapType);
         return tenantMapRecomposeInflight[mapType];
