@@ -693,7 +693,51 @@
       toast('تم إلغاء اعتماد الخريطة');
     }
 
-    async function regenerateMapPreview(mapType) {
+    // A full regen must serialize over every other map write: a second regen
+    // click, a pan/zoom regen, or a table-edit recompose running in parallel all
+    // land on the same per-project server lock and their state merges interleave
+    // — the slower earlier response then overwrites the newer one. Calls queue
+    // here so each waits in the browser instead of parking a worker on the
+    // server, and identical repeats share one in-flight request.
+    let tenantMapRegenChain = Promise.resolve();
+    const tenantMapRegenInflight = {};
+
+    // Whatever the request payload will carry decides whether a repeat call is
+    // the same render or a new intent: a pan/zoom click mutates the viewport
+    // before calling, so its signature differs and it queues a fresh run while
+    // a plain double-click joins the running one.
+    function mapRegenRequestKey(mapType) {
+      const creative = tenantCreativeImages || {};
+      const zooms = creative.map_zooms || {};
+      const centers = creative.map_centers || {};
+      const overrides = creative.map_viewport_overrides || {};
+      return mapType + '|' + mapsSignature(tenantProjectData) + '|' +
+        JSON.stringify([zooms[mapType] || null, centers[mapType] || null, !!overrides[mapType]]);
+    }
+
+    function regenerateMapPreview(mapType) {
+      const key = mapRegenRequestKey(mapType);
+      const inflight = tenantMapRegenInflight[key];
+      if (inflight) return inflight;
+      const run = tenantMapRegenChain.then(() => regenerateMapPreviewOnce(mapType));
+      const tracked = run.finally(() => {
+        if (tenantMapRegenInflight[key] === tracked) delete tenantMapRegenInflight[key];
+      });
+      tenantMapRegenInflight[key] = tracked;
+      tenantMapRegenChain = tracked.catch(() => undefined);
+      return tracked;
+    }
+
+    // Table-edit recomposes (apply*MapEdits calls) append here too: a debounce
+    // firing while a regen runs must not post in parallel — its overlay would
+    // be drawn from pre-regen resolved items and could land last.
+    function enqueueTenantMapWrite(task) {
+      const run = tenantMapRegenChain.then(task);
+      tenantMapRegenChain = run.then(() => undefined, () => undefined);
+      return run;
+    }
+
+    async function regenerateMapPreviewOnce(mapType) {
       if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
       const approvals = tenantCreativeImages.map_approvals || {};
       if (!tenantProjectData.location_analysis_approved) { toast('اعتماد تحليل الموقع مطلوب قبل توليد الخرائط'); return false; }
@@ -701,6 +745,15 @@
       if (approvals[mapType]) { toast('ألغ اعتماد الخريطة قبل إعادة توليدها'); return false; }
       showLoader('جاري توليد الخريطة', '');
       try {
+        // A table edit may still have a debounced overlay recompose queued or in
+        // flight for this map. The regen re-serializes the same tables and
+        // redraws the raster, so a pending timer is superseded — cancel it —
+        // while an in-flight recompose must finish first: its writes landing
+        // after this regen would overwrite the fresh map state with the older one.
+        if (typeof settleMapRecomposeBeforeRegen === 'function') {
+          try { await settleMapRecomposeBeforeRegen(mapType); }
+          catch (recomposeError) { console.warn('[MAP RECOMPOSE SETTLE]', recomposeError); }
+        }
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         const formData = await collectTenantFormData();
         tenantProjectData = { ...tenantProjectData, ...formData };
@@ -720,7 +773,11 @@
         payload.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };
         const regenSeed = Date.now();
         payload.regen_seed = regenSeed;
-        const data = await api('POST', '/api/generate-map-image', {
+        // A regen can legitimately take minutes (geocoding, matrix, probes,
+        // static tiles) and used to wait without a timeout, so a stalled request
+        // left the loader up forever. 240s matches how long a cold full
+        // regeneration can actually take; the abort also frees the worker.
+        const data = await apiWithTimeout('POST', '/api/generate-map-image', {
           projectData: payload,
           mapType,
           presentationId: tenantPresentationId,
@@ -728,7 +785,7 @@
           overviewApproved: !!approvals.overview,
           mapApproved: !!approvals[mapType],
           regenSeed
-        });
+        }, 240000, 'استغرق توليد الخريطة وقتًا أطول من المتوقع؛ أعد المحاولة.');
         if (!data.success) {
           toast(data.error || 'تعذر إعادة توليد الخريطة');
           return false;
@@ -799,6 +856,10 @@
         selectMapPreviewView(mapType);
         toast('تم توليد الخريطة وأصبحت في انتظار الاعتماد');
         return true;
+      } catch (error) {
+        console.error('[MAP REGEN]', error);
+        toast('حدث خطأ أثناء توليد الخريطة');
+        return false;
       } finally {
         hideLoader();
       }

@@ -846,10 +846,61 @@ def api_generate_single_map_image():
         # Slides live in slides_data — the embedded copy is storage waste.
         updated_project.pop('tenantSlidesData', None)
         updated_project['map_placeholders'] = {**old_placeholders, **placeholders}
-        updated_project['tenantCreativeImages'] = {
-            **(old_creative if isinstance(old_creative, dict) else {}),
-            'map_placeholders': updated_project['map_placeholders'],
+        # Persist the generated map's own frame, released approval and resolved
+        # items with it — the follow-up client save used to be the only writer,
+        # so a reload before it landed reopened the previous frame and the stale
+        # approval flag then re-blocked regeneration with MAP_ALREADY_APPROVED.
+        creative = dict(old_creative) if isinstance(old_creative, dict) else {}
+        creative['map_placeholders'] = updated_project['map_placeholders']
+        stored_approvals = creative.get('map_approvals')
+        creative['map_approvals'] = {
+            **(stored_approvals if isinstance(stored_approvals, dict) else {}),
+            map_type: False,
         }
+        if (result.get('zooms') or {}).get(map_type) is not None:
+            creative['map_zooms'] = {
+                **(creative.get('map_zooms') if isinstance(creative.get('map_zooms'), dict) else {}),
+                map_type: result['zooms'][map_type],
+            }
+        if isinstance((result.get('centers') or {}).get(map_type), dict):
+            creative['map_centers'] = {
+                **(creative.get('map_centers') if isinstance(creative.get('map_centers'), dict) else {}),
+                map_type: result['centers'][map_type],
+            }
+        if 'highlightSite' in data:
+            creative['map_highlight_site'] = bool(highlight_site)
+        creative['maps_persisted'] = True
+        # Recompose responses carry only their map's resolved key, so a missing
+        # key means "not redrawn" — never store the empty fallback over it.
+        if map_type == 'landmarks':
+            if 'landmark_map_items' in result or 'landmarks' in result:
+                landmark_items = result.get('landmark_map_items') or result.get('landmarks') or []
+                creative['map_landmark_items'] = landmark_items
+                updated_project['landmark_map_items'] = landmark_items
+            if 'landmarks_matrix' in result:
+                landmarks_matrix = result.get('landmarks_matrix') or []
+                creative['map_landmarks'] = landmarks_matrix
+                updated_project['landmarks_matrix'] = landmarks_matrix
+        elif map_type == 'access' and 'access_roads' in result:
+            access_roads = result.get('access_roads') or []
+            creative['map_access_roads'] = access_roads
+            updated_project['access_roads_data'] = access_roads
+        elif map_type == 'catchment' and 'catchment_landmarks' in result:
+            catchment_landmarks = result.get('catchment_landmarks') or []
+            creative['map_catchment_landmarks'] = catchment_landmarks
+            updated_project['catchment_map_landmarks'] = catchment_landmarks
+        elif map_type == 'overview' and result.get('site_polygon') \
+                and project_data.get('location_polygon_source') not in ('manual', 'cleared'):
+            # The regenerated boundary feeds the client's polygon too; a drawn
+            # or cleared boundary keeps the version the client sent.
+            polygon_text = ';'.join(
+                f"{point[0]},{point[1]}" for point in result['site_polygon']
+                if isinstance(point, (list, tuple)) and len(point) >= 2
+            )
+            if polygon_text:
+                updated_project['location_polygon'] = polygon_text
+                updated_project['location_polygon_source'] = 'auto'
+        updated_project['tenantCreativeImages'] = creative
         slides = state['slidesData']
         for slide in slides:
             if isinstance(slide, dict) and isinstance(slide.get('html'), str):

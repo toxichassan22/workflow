@@ -355,6 +355,11 @@
     // extra steps or warnings.
     const tenantMapRecomposeTimers = {};
     const tenantMapRecomposeInflight = {};
+    // mapType -> promise that resolves once a recompose's server request ends.
+    // Set inside the enqueued task, so a recompose merely queued on the shared
+    // map-write chain is not "applying" yet — and a running regen must never
+    // wait on it (it waits on the regen's own chain slot).
+    const tenantMapRecomposeApplying = {};
     const MAP_RECOMPOSE_TOKENS = {
       access: '##MAP_ACCESS##', catchment: '##MAP_CATCHMENT##', landmarks: '##MAP_LANDMARKS##'
     };
@@ -393,7 +398,22 @@
           // Persist the released approval before recomposing, or the stored
           // flag rejects the overlay with MAP_ALREADY_APPROVED.
           if (typeof saveMapPreviewState === 'function') await saveMapPreviewState();
-          await apply();
+          // Run on the shared map-write chain — a recompose posting while a
+          // full regen is in flight can land after it and overwrite the fresh
+          // map state with the pre-regen one.
+          const applyTask = () => {
+            let done;
+            tenantMapRecomposeApplying[mapType] = new Promise(resolve => { done = resolve; });
+            return Promise.resolve().then(apply).finally(() => {
+              delete tenantMapRecomposeApplying[mapType];
+              done();
+            });
+          };
+          if (typeof enqueueTenantMapWrite === 'function') {
+            await enqueueTenantMapWrite(applyTask);
+          } else {
+            await applyTask();
+          }
         } finally {
           delete tenantMapRecomposeInflight[mapType];
         }
@@ -409,6 +429,23 @@
       // An apply already in flight still leaves the outgoing payload one
       // raster behind — wait for those alongside the freshly scheduled runs.
       await Promise.all([...runs, ...Object.values(tenantMapRecomposeInflight)]);
+    }
+
+    // A full regen of mapType supersedes that map's queued table recompose: the
+    // regen serializes the same rows and redraws the raster from scratch, so a
+    // pending debounce would only repeat work — and landing after the regen
+    // response it would overwrite the fresh map state with the pre-regen one.
+    // Applies already running still get to finish: they may hold the
+    // server-side map lock and have started writing state. Recomposes only
+    // queued on the map-write chain stay queued — they run after this regen
+    // and overlay the fresh raster, which is the order the edits happened in.
+    async function settleMapRecomposeBeforeRegen(mapType) {
+      if (tenantMapRecomposeTimers[mapType]) {
+        clearTimeout(tenantMapRecomposeTimers[mapType]);
+        delete tenantMapRecomposeTimers[mapType];
+      }
+      const applying = Object.values(tenantMapRecomposeApplying);
+      if (applying.length) await Promise.allSettled(applying);
     }
 
     async function toggleLocationAnalysisApproval() {

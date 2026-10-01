@@ -303,6 +303,90 @@ class PresentationRevisionApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404, response.get_json())
             provider.assert_not_called()
 
+    def test_map_regen_persists_fresh_state_and_releases_approval(self):
+        # The route commit must carry the regenerated map's own frame, released
+        # approval and resolved items — otherwise a reload before the client's
+        # follow-up save reopens the previous frame and re-blocks regen.
+        created = self.create(projectData={
+            'location_analysis_approved': True,
+            'map_placeholders': {'##MAP_OVERVIEW##': '/maps/old_overview.png'},
+            'tenantCreativeImages': {
+                'map_approvals': {'overview': True},
+                'map_placeholders': {'##MAP_OVERVIEW##': '/maps/old_overview.png'},
+                'map_landmark_items': [{'name': 'Old Mall', 'lat': 1.0, 'lng': 1.0}],
+                'maps_persisted': True,
+            },
+            'landmarks_matrix': [{'name': 'Old Mall'}],
+        })
+        # The route relpaths the image against the app dir — a tempfile on
+        # another drive raises, so keep the fixture under the repo root.
+        fresh_image = Path(self.module.__file__).resolve().parent / '_test_fresh_landmarks.png'
+        fresh_image.write_bytes(b'png')
+        self.addCleanup(fresh_image.unlink, missing_ok=True)
+        fresh_items = [{'name': 'New Mall', 'lat': 24.7, 'lng': 46.6}]
+        provider_result = {
+            'placeholders': {'##MAP_LANDMARKS##': str(fresh_image)},
+            'landmarks': [], 'landmarks_matrix': [{'name': 'New Mall'}],
+            'landmark_map_items': fresh_items,
+            'zooms': {'landmarks': 15}, 'centers': {'landmarks': {'lat': 24.7, 'lng': 46.6}},
+        }
+        payload = {'presentationId': created['presentationId'], 'mapType': 'landmarks',
+                   'projectData': {'draftId': 'regen-draft', 'landmark_map_items': fresh_items},
+                   'highlightSite': True, 'expectedRevision': created['revision']}
+        with patch.object(self.module.maps_service, 'generate_all_map_images',
+                          return_value=provider_result) as provider:
+            response = self.client.post('/api/generate-map-image', headers=self.headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(provider.called)
+        stored = self.client.get(f"/api/presentations/{created['presentationId']}",
+                                 headers=self.headers).get_json()['presentation']
+        creative = stored['projectData']['tenantCreativeImages']
+        self.assertFalse(creative['map_approvals']['landmarks'])
+        self.assertTrue(creative['map_approvals']['overview'])
+        self.assertEqual(creative['map_landmark_items'], fresh_items)
+        self.assertEqual(stored['projectData']['landmarks_matrix'], [{'name': 'New Mall'}])
+        self.assertEqual(stored['projectData']['landmark_map_items'], fresh_items)
+        self.assertEqual(creative['map_zooms']['landmarks'], 15)
+        self.assertEqual(creative['map_centers']['landmarks'], {'lat': 24.7, 'lng': 46.6})
+        self.assertEqual(creative['map_placeholders']['##MAP_OVERVIEW##'], '/maps/old_overview.png')
+        self.assertTrue(creative['map_placeholders']['##MAP_LANDMARKS##'].endswith('fresh_landmarks.png'))
+
+    def test_map_overlay_recompose_keeps_untouched_resolved_state(self):
+        # A landmarks overlay recompose returns landmark_map_items but no
+        # landmarks_matrix — the stored matrix must survive the merge instead
+        # of being overwritten with an empty fallback.
+        matrix = [{'name': 'Stored Mall'}]
+        items = [{'name': 'Stored Mall', 'lat': 24.7, 'lng': 46.6}]
+        created = self.create(projectData={
+            'location_analysis_approved': True,
+            'landmarks_matrix': matrix,
+            'landmark_map_items': items,
+            'tenantCreativeImages': {
+                'map_approvals': {'overview': True},
+                'map_landmarks': matrix,
+                'map_landmark_items': items,
+            },
+        })
+        fresh_image = Path(self.module.__file__).resolve().parent / '_test_overlay_landmarks.png'
+        fresh_image.write_bytes(b'png')
+        self.addCleanup(fresh_image.unlink, missing_ok=True)
+        provider_result = {
+            'placeholders': {'##MAP_LANDMARKS##': str(fresh_image)},
+            'centers': {}, 'zooms': {}, 'landmark_map_items': items,
+        }
+        payload = {'presentationId': created['presentationId'], 'mapType': 'landmarks',
+                   'projectData': {'draftId': 'overlay-draft', 'landmark_map_items': items},
+                   'overlayOnly': True, 'expectedRevision': created['revision']}
+        with patch.object(self.module.maps_service, 'recompose_landmarks_map',
+                          return_value=provider_result):
+            response = self.client.post('/api/generate-map-image', headers=self.headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        stored = self.client.get(f"/api/presentations/{created['presentationId']}",
+                                 headers=self.headers).get_json()['presentation']
+        self.assertEqual(stored['projectData']['landmarks_matrix'], matrix)
+        self.assertEqual(stored['projectData']['tenantCreativeImages']['map_landmarks'], matrix)
+        self.assertEqual(stored['projectData']['landmark_map_items'], items)
+
     def test_project_documents_image_in_metadata_allowed_without_authorization_error(self):
         project = {
             'project_name': 'Project With Croquis Image',
