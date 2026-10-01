@@ -437,9 +437,21 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         'nearby_landmarks': landmark_lines(nearby_items),
         'city_landmarks': landmark_lines(city_items),
     }
-    if place_names.get('city') and not str(project_data.get('city') or '').strip():
+    # Editing the link input clears the stored coordinates before this runs, so a
+    # surviving city/district pair describes the previous site, not a manual edit —
+    # a moved site must get the freshly resolved names. Same-site re-analysis keeps
+    # any manual correction instead.
+    stored_site_lat = maps_service._extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat'))
+    stored_site_lng = maps_service._extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng'))
+    site_moved = (
+        stored_site_lat is None or stored_site_lng is None
+        or maps_service._distance_meters(stored_site_lat, stored_site_lng, lat, lng) > 100
+    )
+    if place_names.get('city') and (site_moved or not str(project_data.get('city') or '').strip()):
         fields['city'] = place_names['city']
-    if place_names.get('district') and not str(project_data.get('district') or '').strip():
+    if place_names.get('district') and (site_moved or not str(project_data.get('district') or '').strip()):
         fields['district'] = place_names['district']
     if population.get('available'):
         fields['population_density'] = f"{population['value']} {population.get('unit', 'نسمة/كم²')}"
