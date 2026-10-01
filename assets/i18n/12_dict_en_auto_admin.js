@@ -450,5 +450,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تم اعتماد طلب التوليد": "The generation request was approved",
   "تم اعتماد الملف النهائي": "The final file was approved",
   "تم رفض الطلب": "The request was rejected",
-  "بانتظار قرار المعتمد": "Awaiting the approver decision"
+  "بانتظار قرار المعتمد": "Awaiting the approver decision",
+  "أُزيلت (كانت": "Cleared (was"
 }/*I18N_EN_AUTO_END*/);

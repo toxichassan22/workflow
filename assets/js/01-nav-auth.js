@@ -69,7 +69,7 @@
       delete chunkHeaders['Content-Encoding'];
       if (total > 1024) {
         // The server refuses more than 1024 parts; say so rather than failing on chunk 1025.
-        return { error: 'حجم البيانات أكبر من الحد المسموح للحفظ (' + (buf.length / 1048576).toFixed(1) + ' م.ب)' };
+        return { error: WFT('error.payload_too_large', 'حجم البيانات أكبر من الحد المسموح للحفظ ({size} م.ب)', { size: (buf.length / 1048576).toFixed(1) }) };
       }
 
       let sent = 0;

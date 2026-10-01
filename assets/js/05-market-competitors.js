@@ -185,7 +185,8 @@
       const warning = (!hasLogo && !busy) ? String(tr.dataset.logoImportWarning || '').trim() : '';
       const faviconHost = String(tr.dataset.logoFaviconHost || '').trim();
       const lowResNote = (hasLogo && !busy && tr.dataset.logoLowRes === '1')
-        ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">أيقونة ' + escapeHtml(faviconHost || 'الموقع الرسمي') + ' (دقة منخفضة)</div>'
+        ? '<div style="color:var(--muted);font-size:11px;margin-top:4px">'
+            + WFT('competitors.logo_low_res', 'أيقونة {host} (دقة منخفضة)', { host: escapeHtml(faviconHost || 'الموقع الرسمي') }) + '</div>'
         : '';
       const actions = hasLogo
         ? '<div class="market-logo-actions"><button type="button" class="btn ghost small" data-preview-competitor-logo>تكبير</button><button type="button" class="btn ghost small" data-remove-competitor-logo>حذف</button></div>'

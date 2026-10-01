@@ -191,5 +191,10 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "لم يتم تحديث أي حقل:": "No field was updated:",
   "6.8 سنة": "6.8 years",
   "قطعة 1234 / مخطط 4050 — حي النرجس": "Plot 1234 / Plan 4050 — Al Narjis District",
-  "مجمع سكني فاخر يتكون من 120 فيلا بتصميم معماري حديث في حي النرجس شمال الرياض. يتضمن المجمع مرافق ترفيهية متنوعة منها مسبح أولمبي ونادي صحي ومساحات خضراء واسعة.": "A luxury residential complex of 120 villas with contemporary architecture in Al Narjis, north Riyadh. The complex includes varied amenities such as an Olympic pool, a health club and extensive green areas."
+  "مجمع سكني فاخر يتكون من 120 فيلا بتصميم معماري حديث في حي النرجس شمال الرياض. يتضمن المجمع مرافق ترفيهية متنوعة منها مسبح أولمبي ونادي صحي ومساحات خضراء واسعة.": "A luxury residential complex of 120 villas with contemporary architecture in Al Narjis, north Riyadh. The complex includes varied amenities such as an Olympic pool, a health club and extensive green areas.",
+  "استغرق توليد الخريطة وقتًا أطول من المتوقع؛ أعد المحاولة.": "Map generation took longer than expected; please try again.",
+  "حدث خطأ أثناء توليد الخريطة": "An error occurred while generating the map",
+  "المدة (دقيقة)": "Duration (minutes)",
+  "طول الحد (م)": "Boundary length (m)",
+  "عرض الشارع (م)": "Street width (m)"
 }/*I18N_EN_AUTO_END*/);

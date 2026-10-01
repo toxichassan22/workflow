@@ -706,7 +706,8 @@
 
     async function savePresentationCopy() {
       if (!tenantSlidesData.length || tenantPresentationSavePromise || isGeneratingTenantSlides) return;
-      const name = prompt('اسم العرض المستقل', (tenantPresentationTitle || 'عرض') + ' - نسخة مستقلة');
+      const name = prompt(WFT('presentation.copy_name_prompt', 'اسم العرض المستقل'),
+    WFT('presentation.copy_default_name', '{title} - نسخة مستقلة', { title: tenantPresentationTitle || 'عرض' }));
       if (!name?.trim()) return;
       const original = { id: tenantPresentationId, revision: tenantPresentationRevision,
         title: tenantPresentationTitle, scope: tenantProjectData.presentation_scope };

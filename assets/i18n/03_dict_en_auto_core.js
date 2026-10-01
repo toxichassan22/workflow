@@ -882,5 +882,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "نشاط الشركة": "Company activity",
   "نشاط المنصة": "Platform activity",
   "نظرة عامة": "Overview",
-  "طلب مؤقت من مدير المنصة لعرض محتوى شركتك للقراءة فقط — لا يمنحه أي تحكم إداري في حسابك، والمحتوى لا يظهر له إلا بعد اعتمادك، وتنتهي صلاحية الإذن تلقائيًا": "Temporary request for the platform manager to read your company content — it grants no administrative control over your account, the content stays hidden until you approve it, and the permit expires automatically"
+  "طلب مؤقت من مدير المنصة لعرض محتوى شركتك للقراءة فقط — لا يمنحه أي تحكم إداري في حسابك، والمحتوى لا يظهر له إلا بعد اعتمادك، وتنتهي صلاحية الإذن تلقائيًا": "Temporary request for the platform manager to read your company content — it grants no administrative control over your account, the content stays hidden until you approve it, and the permit expires automatically",
+  "كلمة المرور (اختياري)": "Password (optional)"
 }/*I18N_EN_AUTO_END*/);

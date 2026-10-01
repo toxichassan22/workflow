@@ -472,5 +472,14 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "notif.package_expired": "انتهت باقتكم في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.",
   "notif.package_expiring": "باقتكم تنتهي في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.",
   "designer.task_cancelled": "أُلغيت مهمة تعديل العرض — لم تُطبق المهام المتبقية.",
-  "gen.section_regenerate_confirm": "سيتم إعادة تخطيط وتوليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟"
+  "gen.section_regenerate_confirm": "سيتم إعادة تخطيط وتوليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟",
+  "agent.title": "وكيل الإدارة الذكي",
+  "gen.points_count": "{n} نقطة",
+  "error.payload_too_large": "حجم البيانات أكبر من الحد المسموح للحفظ ({size} م.ب)",
+  "presentation.copy_name_prompt": "اسم العرض المستقل",
+  "presentation.copy_default_name": "{title} - نسخة مستقلة",
+  "competitors.logo_low_res": "أيقونة {host} (دقة منخفضة)",
+  "location.map_gen_failed": "حدث خطأ أثناء توليد الخريطة",
+  "gen.planning_structure": "إعداد خطة وهيكل العرض الاستثماري",
+  "gen.planning_structure_detail": "تحليل متطلبات المشروع والهيكل الأنسب"
 }/*I18N_AR_END*/;

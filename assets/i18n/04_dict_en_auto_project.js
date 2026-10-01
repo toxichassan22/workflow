@@ -167,5 +167,10 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "كود التنظيم": " zoning code",
   "نسب البناء والارتدادات": "Building ratios and setbacks",
   "نسب البناء والتغطية": "Building ratios and coverage",
-  "يظهر على الخريطة": "Show on map"
+  "يظهر على الخريطة": "Show on map",
+  "التصميم، الدراسات، التراخيص": "Design, studies, permits",
+  "تجهيز الموقع والأساسات والهيكل الإنشائي": "Site preparation, foundations and structure",
+  "استكمال الهيكل وأعمال الكهرباء والميكانيكا": "Structure completion, electrical and mechanical works",
+  "التشطيبات والأعمال الخارجية": "Finishes and external works",
+  "الاختبارات والتسليم والتسويق": "Testing, handover and marketing"
 }/*I18N_EN_AUTO_END*/);

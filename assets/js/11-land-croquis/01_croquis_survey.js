@@ -858,7 +858,7 @@
         return true;
       } catch (error) {
         console.error('[MAP REGEN]', error);
-        toast('حدث خطأ أثناء توليد الخريطة');
+        toast(WFT('location.map_gen_failed', 'حدث خطأ أثناء توليد الخريطة'));
         return false;
       } finally {
         hideLoader();

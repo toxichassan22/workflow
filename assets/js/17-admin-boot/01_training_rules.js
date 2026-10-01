@@ -315,7 +315,8 @@
       const log = document.getElementById('aiRulesChatLog');
       if (!log) return;
       if (!aiRulesChatHistory.length) {
-        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3></div>';
+        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">'
+           + WFT('agent.title', 'وكيل الإدارة الذكي') + '</h3></div>';
         return;
       }
       log.innerHTML = aiRulesChatHistory.map(m => {

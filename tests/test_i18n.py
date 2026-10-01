@@ -313,10 +313,12 @@ def extract_untranslated_units():
         if value in covered or CODEISH_RE.search(value):
             continue
         # A regex character class ('/[أ-ي]/') is code, not a string. It must
-        # actually contain a class character: an all-Arabic phrase would match
-        # the same character set and would otherwise be dropped silently.
+        # contain a bracket or a slash: an all-Arabic phrase matches the same
+        # character set, and parentheses are ordinary in a label
+        # ('كلمة المرور (اختياري)'), so requiring a class character alone would
+        # drop real strings.
         if (re.fullmatch(r'[\[\]/\-()\s\u0600-\u06FF,]+', value)
-                and re.search(r'[\[\]/\-()]', value)):
+                and re.search(r'[\[\]/]', value)):
             continue
         # A separator or one glyph is chrome punctuation the whole-text pass
         # can never own, so it is not a translatable string.

@@ -472,5 +472,14 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "notif.package_expired": "Your package expired on {date} — we would be glad to help you renew.",
   "notif.package_expiring": "Your package expires on {date} — we would be glad to help you renew.",
   "designer.task_cancelled": "The presentation edit task was cancelled — the remaining tasks were not applied.",
-  "gen.section_regenerate_confirm": "The section «{section}» will be replanned and regenerated from its current images and data. Its slide count may go up or down, leaving the rest of the presentation as it is. Continue?"
+  "gen.section_regenerate_confirm": "The section «{section}» will be replanned and regenerated from its current images and data. Its slide count may go up or down, leaving the rest of the presentation as it is. Continue?",
+  "agent.title": "Smart management agent",
+  "gen.points_count": "{n} points",
+  "error.payload_too_large": "The payload is larger than the allowed save size ({size} MB)",
+  "presentation.copy_name_prompt": "Name for the copy",
+  "presentation.copy_default_name": "{title} - independent copy",
+  "competitors.logo_low_res": "Logo from {host} (low resolution)",
+  "location.map_gen_failed": "An error occurred while generating the map",
+  "gen.planning_structure": "Preparing the proposal plan and structure",
+  "gen.planning_structure_detail": "Analysing the project requirements and the best-fit structure"
 }/*I18N_EN_END*/;
