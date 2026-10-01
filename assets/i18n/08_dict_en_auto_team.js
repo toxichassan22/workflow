@@ -50,5 +50,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "معطّل": "Disabled",
   "نبذة عن الجهة": "Entity Profile / Brief",
   "نص": "Text",
-  "نص طويل": "Long Text"
+  "نص طويل": "Long Text",
+  "اسم القسم:": "Section name:"
 }/*I18N_EN_AUTO_END*/);

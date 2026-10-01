@@ -475,5 +475,13 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "المساحة المتبقية المُدخلة": "Entered remaining area",
   "تتجاوز المساحة البيعية في بنود الإيرادات": "exceeds saleable area in revenue lines",
   "من إجمالي": "of gross",
-  "بعد تكاليف التخارج.": "after exit costs."
+  "بعد تكاليف التخارج.": "after exit costs.",
+  "الاستخدامات المسموحة تنظيميًا:": "Zoning-permitted uses:",
+  "التخارج البيعي في السنة": "Sale exit in year",
+  "التخارج التشغيلي في السنة": "Operating exit in year",
+  "خارج فترة IRR المختارة.": "outside the selected IRR period.",
+  "خارج فترة ROI، ولذلك لا يدخل في ROI.": "outside the ROI period, so it is not included in the ROI.",
+  "خطأ:": "Error:",
+  "0 ر.س": "0 SAR",
+  "0 م²": "0 m²"
 }/*I18N_EN_AUTO_END*/);

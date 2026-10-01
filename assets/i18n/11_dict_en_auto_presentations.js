@@ -71,5 +71,10 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "معتمد بواسطة": "Approved by",
   "معتمد نهائياً:": "Final approved:",
   "مكتبة التنزيلات وسجل الملفات المصدرة": "Downloads library & exported files log",
-  "يوجد طلب اعتماد قيد المراجعة مقدم من": "An approval request is already under review, submitted by"
+  "يوجد طلب اعتماد قيد المراجعة مقدم من": "An approval request is already under review, submitted by",
+  "اسم العرض الجديد:": "New presentation name:",
+  "بانتظار الاعتماد النهائي": "Awaiting final approval",
+  "تمت استعادة العرض من الأرشيف": "Presentation restored from the archive",
+  "معتمد — تم التحميل": "Approved — downloaded",
+  "معتمد — متاح للتحميل": "Approved — available for download"
 }/*I18N_EN_AUTO_END*/);

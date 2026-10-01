@@ -179,5 +179,17 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.": "Please enter the approved building coverage ratio according to zoning regulations.",
   "يرجى رفع الكروكي والرخصة وأي مستندات مساندة داخل الخانة أولًا": "Please upload the croquis, permit, and any supporting documents in the box first",
   "يمكن رفع": "Can upload",
-  "بانتظار اعتماد خريطة الأرض / المبنى": "Pending Plot & Site Map Approval"
+  "بانتظار اعتماد خريطة الأرض / المبنى": "Pending Plot & Site Map Approval",
+  "آخر تحديث للبيانات:": "Last data update:",
+  "بيانات تحليل الموقع غير مكتملة:": "Site analysis data is incomplete:",
+  "تعذر تشغيل تحليل AI للموقع:": "Could not run the site AI analysis:",
+  "تعذر حفظ التعديلات على الخريطة": "Could not save the edits on the map",
+  "تعذر حفظ حالة الخريطة على الخادم": "Could not save the map state on the server",
+  "تم اعتماد الإحداثيات:": "Coordinates approved:",
+  "حدث خطأ أثناء تحليل الملفات:": "An error occurred while analysing the files:",
+  "رسم مسار:": "Draw a path:",
+  "لم يتم تحديث أي حقل:": "No field was updated:",
+  "6.8 سنة": "6.8 years",
+  "قطعة 1234 / مخطط 4050 — حي النرجس": "Plot 1234 / Plan 4050 — Al Narjis District",
+  "مجمع سكني فاخر يتكون من 120 فيلا بتصميم معماري حديث في حي النرجس شمال الرياض. يتضمن المجمع مرافق ترفيهية متنوعة منها مسبح أولمبي ونادي صحي ومساحات خضراء واسعة.": "A luxury residential complex of 120 villas with contemporary architecture in Al Narjis, north Riyadh. The complex includes varied amenities such as an Olympic pool, a health club and extensive green areas."
 }/*I18N_EN_AUTO_END*/);
