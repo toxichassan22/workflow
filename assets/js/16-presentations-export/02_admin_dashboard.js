@@ -774,7 +774,7 @@
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
         '<div class="tenant-field"><label>التفعيل</label><p style="margin:0">' +
         (t.activatedAt ? ('فُعّلت في ' + escapeHtml(String(t.activatedAt).slice(0, 10)) + (t.activatedByName ? ' بواسطة ' + escapeHtml(t.activatedByName) : '')) : 'لم تُفعّل بعد') +
-        (t.deactivatedReason ? ' | سبب الإيقاف: ' + escapeHtml(t.deactivatedReason) : '') + '</p></div>' +
+        (t.deactivatedReason ? ' | ' + WFT('admin.suspension_reason', 'سبب الإيقاف:') + ' ' + escapeHtml(t.deactivatedReason) : '') + '</p></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
         '<h3 class="dash-section-title" style="margin-top:18px">تصحيح رصيد</h3>' +

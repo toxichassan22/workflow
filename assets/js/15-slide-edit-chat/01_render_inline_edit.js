@@ -259,7 +259,7 @@
       renderTenantSlides();
       selectTenantSlide(toIdx);
       triggerAutoSaveDraft();
-      toast('تم نقل الشريحة ' + (fromIdx + 1) + ' إلى الموقع ' + (toIdx + 1) + ' بنجاح');
+      toast(WFT('gen.slide_moved', 'تم نقل الشريحة {from} إلى الموقع {to} بنجاح', { from: fromIdx + 1, to: toIdx + 1 }));
     }
 
     function renderTenantSlidesSidebar(force) {

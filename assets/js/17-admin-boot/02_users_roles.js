@@ -588,9 +588,13 @@
       if (item.field) {
         const oldValue = String(item.old || '');
         const newValue = String(item.new || '');
+        // Each phrase interpolates a value, so no exact-match dictionary entry can
+        // ever cover it: the rendered text node carries the old/new value.
         const phrase = oldValue && newValue
-          ? 'من «' + oldValue + '» إلى «' + newValue + '»'
-          : newValue ? 'أُضيف «' + newValue + '»' : 'أُفرغ (كان «' + oldValue + '»)';
+          ? WFT('changelog.from_to', 'من «{old}» إلى «{new}»', { old: oldValue, 'new': newValue })
+          : newValue
+            ? WFT('changelog.added', 'أُضيف «{value}»', { value: newValue })
+            : WFT('changelog.cleared', 'أُفرغ (كان «{old}»)', { old: oldValue });
         return (head ? head + ': ' : '') + item.field + ': ' + phrase;
       }
       const text = String(item.text || '');

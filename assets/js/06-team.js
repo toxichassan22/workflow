@@ -313,7 +313,7 @@
 
     async function deleteTeamEntity(entityId) {
       const entity = tenantTeamEntities.find(item => item.id === entityId);
-      if (!confirm('حذف «' + (entity?.name || 'المطور') + '» من كل المشاريع؟')) return;
+      if (!confirm(WFT('team.entity_delete_confirm', 'حذف «{name}» من كل المشاريع؟', { name: entity?.name || 'المطور' }))) return;
       const response = await api('DELETE', '/api/team-entities/' + encodeURIComponent(entityId));
       if (!response?.success) { toast(response?.error || 'تعذر حذف المطور'); return; }
       toast('تم حذف المطور');
@@ -441,7 +441,7 @@
     }
 
     async function deleteCustomSection(key, label) {
-      if (!confirm('حذف قسم "' + label + '"؟ الحقول داخله ستنقل لقسم "عام".')) return;
+      if (!confirm(WFT('team.section_delete_confirm', 'حذف قسم "{label}"؟ الحقول داخله ستنقل لقسم "عام".', { label }))) return;
       const data = await api('DELETE', '/api/field-sections/custom/' + encodeURIComponent(key));
       if (data.success) {
         toast('تم حذف القسم');

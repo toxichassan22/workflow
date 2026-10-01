@@ -250,13 +250,13 @@
         toast('الشريحة غير موجودة');
         return;
       }
-      if (!confirm('سيتم إعادة توليد الشريحة «' + context.snapshot.title + '» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟')) return;
+      if (!confirm(WFT('gen.regenerate_slide_confirm', 'سيتم إعادة توليد الشريحة «{title}» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟', { title: context.snapshot.title }))) return;
 
       checkpointPresentationUndo();
       isRegeneratingTenantSlide = true;
       updatePresentationUndoButtons();
       renderTenantSlidesSidebar();
-      setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' من ' + tenantSlidesData.length,
+      setLiveGenBanner(true, WFT('gen.regenerating_slide_of_total', 'إعادة توليد الشريحة {n} من {total}', { n: context.slideIndex + 1, total: tenantSlidesData.length }),
         'لن تتأثر بقية الشرائح', 35);
       try {
         const previousHtml = tenantSlidesData[context.slideIndex] ? tenantSlidesData[context.slideIndex].html : '';
@@ -269,7 +269,7 @@
         renderTenantSlides();
         selectTenantSlide(context.slideIndex);
         triggerAutoSaveDraft();
-        toast('تم إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' فقط');
+        toast(WFT('gen.regenerated_slide_toast', 'تم إعادة توليد الشريحة {n} فقط', { n: context.slideIndex + 1 }));
       } catch (error) {
         console.error('[SLIDE REGENERATE]', error);
         toast(error?.message || 'تعذر إعادة توليد الشريحة');
@@ -331,7 +331,7 @@
         for (let position = 0; position < plannedSlides.length; position += 1) {
           const planSlide = { ...plannedSlides[position] };
           setLiveGenBanner(true, 'إعادة توليد قسم ' + sectionLabel,
-            'الشريحة ' + (position + 1) + ' من ' + plannedSlides.length, 20 + Math.round((position / plannedSlides.length) * 65));
+            WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: position + 1, total: plannedSlides.length }), 20 + Math.round((position / plannedSlides.length) * 65));
           replacements.push({
             slide: await generateTenantSlideFromSnapshot(
               planSlide, firstIndex + position, projectedTotal, generationImages, {})

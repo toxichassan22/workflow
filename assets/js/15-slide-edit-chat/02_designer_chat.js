@@ -600,7 +600,7 @@
     function deleteSlide(index) {
       if (!hasPermission('create_presentation')) return;
       if (tenantSlidesData.length <= 1) { toast('لا يمكن حذف آخر شريحة'); return; }
-      if (!confirm('حذف الشريحة ' + (index + 1) + '؟')) return;
+      if (!confirm(WFT('gen.slide_delete_confirm', 'حذف الشريحة {n}؟', { n: index + 1 }))) return;
       beginPresentationUndoChange();
       tenantSlidesData.splice(index, 1);
       activeSlideIndex = Math.min(activeSlideIndex, tenantSlidesData.length - 1);

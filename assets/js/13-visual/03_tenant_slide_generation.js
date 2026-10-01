@@ -305,7 +305,7 @@
               ? processSlideHtmlClient(tenantSlidesData[i].html, tenantSlidesData[i].type)
               : '';
             stage.innerHTML = savedSlide || ('<div class="slide live-gen-skeleton-stage" id="slide-stage-inner-' + i + '">' +
-              '<div style="font-size:12px;font-weight:700;color:#94a3b8;letter-spacing:1px">الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
+              '<div style="font-size:12px;font-weight:700;color:#94a3b8;letter-spacing:1px">' + WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: i + 1, total: totalSlides }) + '</div>' +
               '<div style="font-size:22px;font-weight:700;color:#1e293b;margin:6px 0">' + escapeHtml(plan.title || ('شريحة ' + (i + 1))) + '</div>' +
               '<div style="font-size:13px;color:#64748b;background:#f1f5f9;padding:6px 16px;border-radius:20px">قيد الانتظار للتوليد</div>' +
               '</div>');
@@ -420,11 +420,11 @@
             const stageInner = document.getElementById('slide-stage-inner-' + i);
             if (stageInner) {
               stageInner.className = 'slide live-gen-skeleton-stage live-gen-skeleton-pulse';
-              stageInner.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--p);letter-spacing:1px">جاري توليد الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
+              stageInner.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--p);letter-spacing:1px">' + WFT('gen.generating_slide_of_total', 'جاري توليد الشريحة {n} من {total}', { n: i + 1, total: totalSlides }) + '</div>' +
                 '<div style="font-size:24px;font-weight:700;color:var(--pd);margin:8px 0">' + escapeHtml(plan.title || '') + '</div>' +
                 '<div style="font-size:14px;color:var(--p);font-weight:600;display:flex;align-items:center;gap:8px">' +
                 '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--p);animation:pulseDot 1s infinite alternate"></span>' +
-                'جاري صياغة المحتوى وبناء التصميم...' +
+                WFT('loader.writing_content', 'جاري صياغة المحتوى وبناء التصميم...') +
                 '</div>';
             }
           }
@@ -534,14 +534,14 @@
           generationFailure = { index: i, error: lastError || '' };
           const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError, generationProjectData);
           const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
-          setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
+          setLiveGenBanner(true, WFT('gen.paused_at_slide', 'توقف التوليد مؤقتًا عند الشريحة {n}', { n: i + 1 }),
             (lastError ? lastError + ' — ' : '') + (checkpointSaved
-              ? 'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.'
-              : 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.'), slidePct);
+              ? WFT('gen.checkpoint_saved_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
+              : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
           renderTenantSlidesSidebar(true);
           toast(lastError || (checkpointSaved
-            ? 'تم حفظ نقطة التوقف عند الشريحة ' + (i + 1)
-            : 'تعذر حفظ نقطة التوقف على الخادم'));
+            ? WFT('gen.checkpoint_saved_toast', 'تم حفظ نقطة التوقف عند الشريحة {n}', { n: i + 1 })
+            : WFT('gen.checkpoint_missing_toast', 'تعذر حفظ نقطة التوقف على الخادم')));
           if (typeof finishResolve === 'function') finishResolve();
         }
 
