@@ -999,15 +999,21 @@ def get_billing_package(package_id):
         return None
 
 
-def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True):
+def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
+                           name_en=None):
     """Create a package. credit_sar may be zero (prepaid, topped up later).
 
     The wallet credit is riyal-denominated; ``credit_usd`` on the row keeps
-    the dollar equivalent for provider-side audit only.
+    the dollar equivalent for provider-side audit only. ``name_en`` is the
+    English catalog label; it is optional and the client falls back to the
+    Arabic ``name`` when it is empty.
     """
     label = str(name or '').strip()
     if not label or len(label) > 120:
         raise ValueError('Invalid package name')
+    label_en = str(name_en or '').strip()
+    if len(label_en) > 120:
+        raise ValueError('Invalid package name_en')
     try:
         credit = round(float(credit_sar or 0.0) + 1e-9, 2)
     except (TypeError, ValueError):
@@ -1025,16 +1031,17 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True)
     conn = get_db()
     package_id = str(uuid.uuid4())
     conn.execute(
-        'INSERT INTO billing_packages (id, name, credit_usd, credit_sar, price_sar, is_active, is_custom) '
-        'VALUES (?, ?, ?, ?, ?, 1, ?)',
-        (package_id, label, sar_to_usd(credit), credit, price, 1 if is_custom else 0)
+        'INSERT INTO billing_packages (id, name, name_en, credit_usd, credit_sar, '
+        'price_sar, is_active, is_custom) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+        (package_id, label, label_en or None, sar_to_usd(credit), credit, price,
+         1 if is_custom else 0)
     )
     conn.commit()
     return get_billing_package(package_id)
 
 
 def update_billing_package(package_id, name=None, credit_sar=None, price_sar=None,
-                           is_active=None):
+                           is_active=None, name_en=None):
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
@@ -1048,6 +1055,12 @@ def update_billing_package(package_id, name=None, credit_sar=None, price_sar=Non
             raise ValueError('Invalid package name')
         assignments.append('name = ?')
         params.append(label)
+    if name_en is not None:
+        label_en = str(name_en or '').strip()
+        if len(label_en) > 120:
+            raise ValueError('Invalid package name_en')
+        assignments.append('name_en = ?')
+        params.append(label_en or None)
     if credit_sar is not None:
         try:
             credit = round(float(credit_sar) + 1e-9, 2)

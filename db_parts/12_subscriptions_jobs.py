@@ -7,9 +7,11 @@
 
 def create_package_version(package_id, name=None, credit_sar=None, price_sar=None,
                            duration_days=None, limits=None, features=None,
-                           actor_id=None, actor_name=None):
+                           actor_id=None, actor_name=None, name_en=None):
     """Snapshot a package into an immutable version row (next version number).
-    The credit figure is wallet riyals; the row also keeps the USD audit twin."""
+    The credit figure is wallet riyals; the row also keeps the USD audit twin.
+    name_en is snapshotted with the Arabic label so a purchase made today is
+    still named in English later, even after the catalog label is renamed."""
     conn = get_db()
     package = conn.execute(
         'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),),
@@ -30,11 +32,12 @@ def create_package_version(package_id, name=None, credit_sar=None, price_sar=Non
     version_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO billing_package_versions
-           (id, package_id, version, name, credit_usd, credit_sar, price_sar, duration_days,
+           (id, package_id, version, name, name_en, credit_usd, credit_sar, price_sar, duration_days,
             limits_json, features_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (version_id, str(package_id), version,
          name if name is not None else package.get('name'),
+         name_en if name_en is not None else package.get('name_en'),
          sar_to_usd(credit_sar), credit_sar,
          price_sar if price_sar is not None else package.get('price_sar'),
          duration_days,

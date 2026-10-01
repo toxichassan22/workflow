@@ -481,5 +481,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "competitors.logo_low_res": "أيقونة {host} (دقة منخفضة)",
   "location.map_gen_failed": "حدث خطأ أثناء توليد الخريطة",
   "gen.planning_structure": "إعداد خطة وهيكل العرض الاستثماري",
-  "gen.planning_structure_detail": "تحليل متطلبات المشروع والهيكل الأنسب"
+  "gen.planning_structure_detail": "تحليل متطلبات المشروع والهيكل الأنسب",
+  "admin.package_name_en": "اسم الباقة بالإنجليزية",
+  "company.name_en_field": "اسم الشركة بالإنجليزية",
+  "company.name_en_placeholder": "اسم الشركة"
 }/*I18N_AR_END*/;

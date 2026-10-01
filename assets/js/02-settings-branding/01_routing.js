@@ -875,7 +875,7 @@
       if (valueEl) valueEl.innerHTML = sagFmtMoneyHtml(remaining);
       const pillEl = document.getElementById('dashBalancePill');
       if (pillEl) {
-        const name = pkg && pkg.name ? String(pkg.name) : '';
+        const name = wfBilingual(pkg && pkg.name, pkg && (pkg.name_en || pkg.nameEn));
         pillEl.textContent = name;
         pillEl.hidden = !name;
       }

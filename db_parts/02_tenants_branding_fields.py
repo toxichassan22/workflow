@@ -129,7 +129,8 @@ def update_tenant(tenant_id, **fields):
     """Update tenant fields dynamically."""
     conn = get_db()
     allowed = {
-        'company_name', 'account_manager_name', 'username', 'phone', 'subdomain',
+        'company_name', 'company_name_en', 'account_manager_name', 'username',
+        'phone', 'subdomain',
         'domain', 'email', 'password_hash', 'plan', 'credit_balance', 'is_active',
         'primary_user_id', 'require_password_change', 'settings_json', 'package_id',
         'legal_name', 'commercial_name', 'tax_number', 'cr_number',
@@ -155,13 +156,16 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
                               password_hash, plan='free', credit_balance=0,
                               is_active=True, require_password_change=False,
                               profile=None, slug=None, package_id=None,
-                              trial_days=None):
+                              trial_days=None, company_name_en=None):
     """Create a company, its workspace, and its primary company administrator atomically.
 
     The whole opening file lands in one transaction (t50-05): tenant row with
     the legal profile, the URL slug, branding, default fields, the admin user,
     and the package subscription/trial window.
     A failure anywhere rolls everything back so no half-opened company exists.
+
+    ``company_name_en`` is the English display name. It is optional; the client
+    falls back to the Arabic name when it is empty.
     """
     conn = get_db()
     profile = dict(profile or {})
@@ -188,6 +192,9 @@ def create_company_with_admin(company_name, manager_name, email, username, phone
         if normalized_slug:
             columns.append('slug')
             values.append(normalized_slug)
+        if company_name_en:
+            columns.append('company_name_en')
+            values.append(str(company_name_en).strip() or None)
         if package_id:
             columns.append('package_id')
             values.append(str(package_id))

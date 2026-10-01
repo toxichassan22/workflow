@@ -335,11 +335,14 @@ def _tenant_package_brief(tenant):
     """Assigned billing-package summary for tenant payloads. Never raises."""
     package_id = (tenant or {}).get('package_id')
     name = None
+    name_en = None
     if package_id:
         package = db.get_billing_package(package_id)
         if package:
             name = package.get('name')
-    return {'packageId': package_id, 'packageName': name}
+            name_en = package.get('name_en')
+    return {'packageId': package_id, 'packageName': name,
+            'packageNameEn': name_en}
 
 
 def _company_payload(tenant):
@@ -349,6 +352,7 @@ def _company_payload(tenant):
     return {
         'id': tenant['id'],
         'companyName': tenant['company_name'],
+        'companyNameEn': tenant.get('company_name_en'),
         'accountManagerName': tenant.get('account_manager_name'),
         'username': tenant.get('username'),
         'phone': tenant.get('phone'),

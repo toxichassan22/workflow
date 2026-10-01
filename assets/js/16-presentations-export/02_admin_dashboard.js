@@ -112,7 +112,8 @@
     function sagPackageLabel(key) {
       if (key === SAG_NO_PACKAGE) return WFT('admin.no_package', 'بدون باقة');
       const hit = (sagAllTenants || []).find(t => String(t.packageId || '') === String(key) && t.packageName);
-      return hit ? hit.packageName : String(key);
+      return hit ? wfBilingual(hit.packageName,
+      hit.packageNameEn || hit.package_name_en) : String(key);
     }
 
     function sagSortedPlans(plans) {
@@ -395,7 +396,8 @@
       if (!tenants.length) { list.innerHTML = '<p class="tenant-hint">لا توجد شركات</p>'; return; }
       list.innerHTML = tenants.map(t => {
         const planBadge = t.packageName
-          ? '<span style="color:var(--p)">' + escapeHtml(t.packageName) + '</span>'
+          ? '<span style="color:var(--p)">' + escapeHtml(wfBilingual(t.packageName,
+        t.packageNameEn || t.package_name_en)) + '</span>'
           : '<span style="color:var(--muted)">' + escapeHtml(WFT('admin.no_package', 'بدون باقة')) + '</span>';
         const statusBadge = t.isActive ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         const adminBadge = t.isAdmin ? ' | <span style="color:#7c3aed;font-weight:600">SAG Admin</span>' : '';
@@ -718,11 +720,13 @@
       let packageOptions = '<option value="">' + escapeHtml(WFT('admin.no_package', 'بدون باقة')) + '</option>' +
         sagPackages.map(p =>
           '<option value="' + escapeHtml(p.id) + '"' + (String(p.id) === currentPackageId ? ' selected' : '') + '>' +
-          escapeHtml(p.name) + (p.is_active ? '' : ' — ' + escapeHtml(WFT('admin.package_inactive', 'موقوفة'))) +
+          escapeHtml(wfBilingual(p.name, p.name_en)) + (p.is_active ? '' : ' — ' +
+        escapeHtml(WFT('admin.package_inactive', 'موقوفة'))) +
           '</option>').join('');
       if (currentPackageId && !sagPackages.some(p => String(p.id) === currentPackageId)) {
         packageOptions += '<option value="' + escapeHtml(currentPackageId) + '" selected>' +
-          escapeHtml(t.packageName || currentPackageId) + '</option>';
+          escapeHtml(wfBilingual(t.packageName, t.packageNameEn || t.package_name_en)
+        || currentPackageId) + '</option>';
       }
       const c = data.counts;
       const users = data.users || [];

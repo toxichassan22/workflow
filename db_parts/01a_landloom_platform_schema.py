@@ -351,6 +351,7 @@ def _create_platform_tables(conn):
         package_id TEXT NOT NULL REFERENCES billing_packages(id) ON DELETE CASCADE,
         version INTEGER NOT NULL DEFAULT 1,
         name TEXT NOT NULL,
+        name_en TEXT,
         credit_usd REAL NOT NULL DEFAULT 0,
         credit_sar REAL,
         price_sar REAL,
@@ -362,6 +363,16 @@ def _create_platform_tables(conn):
         created_at TEXT DEFAULT (datetime('now'))
     )''')
     conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_package_version ON billing_package_versions(package_id, version)')
+    # An install created before the bilingual catalog has no name_en on the
+    # version snapshot. CREATE TABLE IF NOT EXISTS is a no-op there, so the
+    # column is added explicitly — this migration has to live next to the table
+    # it owns, because the shared ALTER pass in 01_schema_and_init runs before
+    # this table exists on a fresh database.
+    _pkgv_cols = [row['name'] for row in
+                  conn.execute('PRAGMA table_info(billing_package_versions)').fetchall()]
+    if 'name_en' not in _pkgv_cols:
+        conn.execute('ALTER TABLE billing_package_versions ADD COLUMN name_en TEXT')
+        print('[DB] Migration: added name_en column to billing_package_versions')
 
     conn.execute('''CREATE TABLE IF NOT EXISTS tenant_subscriptions (
         id TEXT PRIMARY KEY,

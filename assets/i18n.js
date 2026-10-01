@@ -491,6 +491,21 @@
     return str;
   }
 
+  // wfBilingual(arabic, english): the display label for a record the owner
+  // fills in twice.
+  //
+  // Company names and platform package names are entered in both languages, so
+  // the stored pair has to be resolved at render time rather than translated:
+  // this is the owner's data, not chrome, and the dictionary must never see
+  // it. The Arabic side stays the fallback in both directions, so a record
+  // with no English name never renders blank.
+  function bilingual(arabic, english) {
+    var ar = (arabic === undefined || arabic === null) ? '' : String(arabic);
+    var en = (english === undefined || english === null) ? '' : String(english);
+    if (isEn()) return en || ar;
+    return ar || en;
+  }
+
   // wfTrSentence(template, params): the replacement for Arabic sentences that
   // interpolate a value. WFT() fills {name} placeholders; wfTrThen() lets a
   // caller translate an already-built sentence as a fallback.
@@ -531,6 +546,7 @@
     timeString: timeString,
     tr: tr,
     trSentence: trSentence,
+    bilingual: bilingual,
     supported: SUPPORTED.slice(),
     defaultLang: DEFAULT_LANG,
     storageKey: STORAGE_KEY
@@ -544,6 +560,7 @@
   window.wfDate = dateString;
   window.wfTime = timeString;
   window.wfTr = tr;
+  window.wfBilingual = bilingual;
 
   // WFT(key, fallback, params): the single safe global for application code.
   // "WFT" has no other meaning anywhere in the shell, so unlike a bare t() it

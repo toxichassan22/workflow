@@ -409,9 +409,12 @@
 
     function updateTenantTopbar() {
       if (!tenantUser) return;
-      document.getElementById('tenantName').textContent = tenantUser.companyName || 'الشركة';
+      document.getElementById('tenantName').textContent =
+      wfBilingual(tenantUser.companyName,
+        tenantUser.companyNameEn || tenantUser.company_name_en) || 'الشركة';
       const planBadgeEl = document.getElementById('tenantPlan');
-      const packageLabel = tenantUser.packageName || '';
+      const packageLabel = wfBilingual(tenantUser.packageName,
+      tenantUser.packageNameEn || tenantUser.package_name_en) || '';
       planBadgeEl.textContent = packageLabel;
       planBadgeEl.style.display = packageLabel ? '' : 'none';
       updateTenantLogoMark();
@@ -684,6 +687,7 @@
       tenantBranding = data.branding;
       const b = data.branding;
       setValue('settingsCompanyName', b.company_name || '');
+    setValue('settingsCompanyNameEn', b.company_name_en || '');
       setValue('settingsTagline', b.tagline || '');
       setValue('settingsPrimaryColor', b.primary_color || '#07182C');
       setValue('settingsSecondaryColor', b.secondary_color || '#03E1CE');
@@ -720,6 +724,7 @@
     function collectSettings() {
       return {
         company_name: getValue('settingsCompanyName'),
+      company_name_en: getValue('settingsCompanyNameEn'),
         tagline: getValue('settingsTagline'),
         primary_color: getValue('settingsPrimaryColor'),
         secondary_color: getValue('settingsSecondaryColor'),

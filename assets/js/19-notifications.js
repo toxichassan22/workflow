@@ -267,7 +267,9 @@
       const current = sel.value;
       sel.innerHTML = '<option value="all">' + llEscape(WFT('admin.announce_all', 'كل الشركات')) + '</option>' +
         list.filter(t => !t.is_admin).map(t =>
-          '<option value="' + llEscape(t.id) + '">' + llEscape(t.company_name || t.name || t.email || t.id) + '</option>').join('');
+          '<option value="' + llEscape(t.id) + '">' +
+        llEscape(wfBilingual(t.company_name || t.name, t.company_name_en) || t.email || t.id) +
+        '</option>').join('');
       if (current) sel.value = current;
     }
 

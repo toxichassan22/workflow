@@ -18,6 +18,7 @@ def api_admin_tenants():
     if request.method == 'POST':
         data = request.json or {}
         company_name = (data.get('companyName') or '').strip()
+        company_name_en = (data.get('companyNameEn') or '').strip()
         manager_name = (data.get('accountManagerName') or '').strip()
         email = (data.get('email') or '').strip().lower()
         username = (data.get('username') or '').strip().lower()
@@ -36,6 +37,8 @@ def api_admin_tenants():
             return jsonify({'error': 'All company and account fields are required'}), 400
         if len(company_name) > 120 or len(manager_name) > 120:
             return jsonify({'error': 'Company or account manager name is too long'}), 400
+        if len(company_name_en) > 120:
+            return jsonify({'error': 'Company name (English) is too long'}), 400
         if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
             return jsonify({'error': 'Invalid email address'}), 400
         if not USERNAME_RE.fullmatch(username):
@@ -83,7 +86,7 @@ def api_admin_tenants():
                 hash_password(password), plan=plan, credit_balance=credit_balance,
                 is_active=is_active, require_password_change=require_password_change,
                 profile=profile, slug=slug, package_id=package_id,
-                trial_days=trial_days,
+                trial_days=trial_days, company_name_en=company_name_en,
             )
         except db_driver.IntegrityError:
             return jsonify({'error': 'Email or username already registered'}), 409
@@ -139,6 +142,7 @@ def api_admin_update_tenant(tenant_id):
     account_fields = {}
     key_map = {
         'companyName': 'company_name',
+        'companyNameEn': 'company_name_en',
         'accountManagerName': 'account_manager_name',
         'username': 'username',
         'phone': 'phone',
@@ -149,8 +153,8 @@ def api_admin_update_tenant(tenant_id):
     for input_key, db_key in key_map.items():
         if input_key in data:
             company_fields[db_key] = data[input_key]
-    for db_key in ['company_name', 'account_manager_name', 'username', 'phone', 'email',
-                   'plan', 'is_active']:
+    for db_key in ['company_name', 'company_name_en', 'account_manager_name',
+                   'username', 'phone', 'email', 'plan', 'is_active']:
         if db_key in data:
             company_fields[db_key] = data[db_key]
     for input_key, db_key in _COMPANY_PROFILE_KEY_MAP.items():
@@ -168,6 +172,11 @@ def api_admin_update_tenant(tenant_id):
         company_fields['company_name'] = str(company_fields['company_name'] or '').strip()
         if not company_fields['company_name'] or len(company_fields['company_name']) > 120:
             return jsonify({'error': 'Invalid company name'}), 400
+    if 'company_name_en' in company_fields:
+        company_fields['company_name_en'] = str(
+            company_fields['company_name_en'] or '').strip()
+        if len(company_fields['company_name_en']) > 120:
+            return jsonify({'error': 'Invalid company name_en'}), 400
     if 'account_manager_name' in company_fields:
         company_fields['account_manager_name'] = str(
             company_fields['account_manager_name'] or ''

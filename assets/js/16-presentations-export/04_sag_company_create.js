@@ -20,7 +20,8 @@
         api('GET', '/api/admin/packages').then(d => {
           const items = ((d && d.success && d.packages) || []).filter(p => p.is_active);
           pkgSel.innerHTML = empty + items.map(p =>
-            '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('');
+            '<option value="' + escapeHtml(p.id) + '">' +
+        escapeHtml(wfBilingual(p.name, p.name_en)) + '</option>').join('');
         }).catch(() => {});
       }
       document.getElementById('sagCreateStatus').value = 'active';
@@ -148,6 +149,8 @@
       const trialDaysEl = document.getElementById('sagCreateTrialDays');
       const payload = {
         companyName: document.getElementById('sagCreateCompanyName').value.trim(),
+      companyNameEn: (document.getElementById('sagCreateCompanyNameEn') || {}).value
+        ? document.getElementById('sagCreateCompanyNameEn').value.trim() : '',
         accountManagerName: document.getElementById('sagCreateManagerName').value.trim(),
         email: document.getElementById('sagCreateEmail').value.trim().toLowerCase(),
         phone: document.getElementById('sagCreatePhone').value.trim(),

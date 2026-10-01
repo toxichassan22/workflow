@@ -88,6 +88,7 @@ def _create_tables(conn):
     CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
         company_name TEXT NOT NULL,
+        company_name_en TEXT,
         account_manager_name TEXT,
         username TEXT,
         phone TEXT,
@@ -585,6 +586,7 @@ def _create_tables(conn):
     CREATE TABLE IF NOT EXISTS billing_packages (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        name_en TEXT,
         credit_usd REAL NOT NULL DEFAULT 0,
         credit_sar REAL,
         price_sar REAL,
@@ -699,10 +701,25 @@ def _create_tables(conn):
         ('require_password_change', 'INTEGER DEFAULT 0'),
         ('package_id', 'TEXT'),
         ('session_version', 'INTEGER DEFAULT 0'),
+        # The company's English name. A tenant entered only an Arabic name
+        # before the UI was bilingual, so this is nullable and the client falls
+        # back to the Arabic one whenever it is empty — an English UI never
+        # shows a blank company name.
+        ('company_name_en', 'TEXT'),
     ):
         if column not in cols:
             conn.execute(f'ALTER TABLE tenants ADD COLUMN {column} {definition}')
             print(f'[DB] Migration: added {column} column to tenants')
+
+    # Same rule for the platform package catalog: name is Arabic, name_en is
+    # the English label an English client sees.
+    _pkg_cols = [row['name'] for row in
+                 conn.execute('PRAGMA table_info(billing_packages)').fetchall()]
+    if 'name_en' not in _pkg_cols:
+        conn.execute('ALTER TABLE billing_packages ADD COLUMN name_en TEXT')
+        print('[DB] Migration: added name_en column to billing_packages')
+    # billing_package_versions is created later, by 01a_landloom_platform_schema,
+    # so its name_en migration lives next to that table's CREATE.
 
     user_cols = [row['name'] for row in conn.execute('PRAGMA table_info(users)').fetchall()]
     for column, definition in (

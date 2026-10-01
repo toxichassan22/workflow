@@ -481,5 +481,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "competitors.logo_low_res": "Logo from {host} (low resolution)",
   "location.map_gen_failed": "An error occurred while generating the map",
   "gen.planning_structure": "Preparing the proposal plan and structure",
-  "gen.planning_structure_detail": "Analysing the project requirements and the best-fit structure"
+  "gen.planning_structure_detail": "Analysing the project requirements and the best-fit structure",
+  "admin.package_name_en": "Package name (English)",
+  "company.name_en_field": "Company name in English",
+  "company.name_en_placeholder": "Company name"
 }/*I18N_EN_END*/;

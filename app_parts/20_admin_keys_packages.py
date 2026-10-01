@@ -523,6 +523,7 @@ def api_admin_packages_create():
             credit_sar if credit_sar is not None else 0,
             data.get('priceSar', data.get('price_sar')),
             is_custom=bool(data.get('isCustom', data.get('is_custom', True))),
+            name_en=data.get('nameEn', data.get('name_en')),
         )
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -537,6 +538,8 @@ def api_admin_package_update(package_id):
     kwargs = {}
     if 'name' in data:
         kwargs['name'] = data.get('name')
+    if 'nameEn' in data or 'name_en' in data:
+        kwargs['name_en'] = data.get('nameEn', data.get('name_en'))
     if 'creditSar' in data or 'credit_sar' in data:
         kwargs['credit_sar'] = data.get('creditSar', data.get('credit_sar'))
     elif 'creditUsd' in data or 'credit_usd' in data:

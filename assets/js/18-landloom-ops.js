@@ -348,7 +348,7 @@
         return;
       }
       select.innerHTML = llRechargePackages.map(p =>
-        '<option value="' + llEscape(p.id) + '">' + llEscape(p.name) +
+        '<option value="' + llEscape(p.id) + '">' + llEscape(wfBilingual(p.name, p.name_en)) +
         ' (' + llMoney(p.credit_sar) + ' <span>ريال سعودي</span>' +
         (p.price_sar ? ' — ' + llMoney(p.price_sar) + ' <span>ريال سعودي</span>' : '') + ')</option>'
       ).join('');
@@ -862,7 +862,8 @@
           ? ' | <span>التكلفة التقديرية: ' + llEscape(llMoney(p.est_cost_sar)) + ' <span>ريال سعودي</span></span>' : '';
         const margin = (p.est_margin_sar != null)
           ? ' | <span>الربح التقديري: ' + llEscape(llMoney(p.est_margin_sar)) + ' <span>ريال سعودي</span></span>' : '';
-        return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>' + llEscape(p.name) + '</h3>' +
+        return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>'
+        + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
           '<div class="meta"><span>' + (p.price_sar != null ? llEscape(llMoney(p.price_sar)) + ' <span>ريال سعودي</span>' : 'بلا سعر') + '</span>' +
           ' | <span>' + llEscape(llMoney(p.credit_sar)) + ' <span>رصيد بالريال السعودي</span></span>' + cost + margin +
           ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
@@ -882,6 +883,8 @@
       llEditingPackageId = packageId;
       const llRound2 = (v) => (v == null ? '' : Math.round(Number(v) * 100) / 100);
       document.getElementById('adminPackageName').value = p.name || '';
+      const nameEnEl = document.getElementById('adminPackageNameEn');
+      if (nameEnEl) nameEnEl.value = p.name_en || '';
       document.getElementById('adminPackagePrice').value = llRound2(p.price_sar);
       document.getElementById('adminPackageCredit').value = llRound2(p.credit_sar);
       const submit = document.getElementById('adminPackageSubmit');
@@ -894,6 +897,8 @@
     function adminCancelPackageEdit() {
       llEditingPackageId = null;
       document.getElementById('adminPackageName').value = '';
+      const nameEnEl = document.getElementById('adminPackageNameEn');
+      if (nameEnEl) nameEnEl.value = '';
       document.getElementById('adminPackagePrice').value = '';
       document.getElementById('adminPackageCredit').value = '';
       const submit = document.getElementById('adminPackageSubmit');
@@ -906,6 +911,8 @@
       event.preventDefault();
       const payload = {
         name: document.getElementById('adminPackageName').value.trim(),
+        nameEn: (document.getElementById('adminPackageNameEn') || {}).value
+          ? document.getElementById('adminPackageNameEn').value.trim() : '',
         priceSar: Number(document.getElementById('adminPackagePrice').value),
         creditSar: Number(document.getElementById('adminPackageCredit').value)
       };

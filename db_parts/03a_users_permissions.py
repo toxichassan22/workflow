@@ -35,7 +35,8 @@ def get_user_by_email(email):
     """Fetch a user by email (for login). Returns user dict with tenant info."""
     conn = get_db()
     row = conn.execute(
-        'SELECT u.*, t.company_name, t.is_active as tenant_active, t.is_admin as tenant_is_admin '
+        'SELECT u.*, t.company_name, t.company_name_en, '
+        't.is_active as tenant_active, t.is_admin as tenant_is_admin '
         'FROM users u JOIN tenants t ON u.tenant_id = t.id '
         'WHERE u.email = ?', (email.lower(),)
     ).fetchone()
@@ -46,7 +47,8 @@ def get_user_by_username(username):
     """Fetch a user by username with tenant account state."""
     conn = get_db()
     row = conn.execute(
-        '''SELECT u.*, t.company_name, t.is_active AS tenant_active,
+        '''SELECT u.*, t.company_name, t.company_name_en,
+                  t.is_active AS tenant_active,
                   t.is_admin AS tenant_is_admin
            FROM users u JOIN tenants t ON u.tenant_id = t.id
            WHERE LOWER(u.username) = LOWER(?)''',
