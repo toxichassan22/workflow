@@ -804,7 +804,7 @@
           return {
             success: false,
             status: 'cancelled',
-            error: 'أُلغيت مهمة تعديل العرض — لم تُطبق المهام المتبقية.',
+            error: WFT('designer.task_cancelled', 'أُلغيت مهمة تعديل العرض — لم تُطبق المهام المتبقية.'),
             failureReason: 'cancelled',
             _designerJob: metadata
           };

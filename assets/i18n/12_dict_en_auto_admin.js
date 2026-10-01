@@ -439,5 +439,16 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "يونيو": "June",
   "— تعذر إرسال البريد": "— could not send the email",
   "سبب الإيقاف:": "Suspension reason:",
-  "نطاق": "Range"
+  "نطاق": "Range",
+  "تعميد عرض — طلب بواسطة:": "Offer approval — requested by:",
+  "اعتماد الملف النهائي — طلب بواسطة:": "Final file approval — requested by:",
+  "— طلب بواسطة:": "— requested by:",
+  "تقرير المستخدمين:": "Users report:",
+  "مدعو:": "Invited:",
+  "طلب اعتماد توليد": "Generation approval request",
+  "طلب اعتماد ملف نهائي": "Final file approval request",
+  "تم اعتماد طلب التوليد": "The generation request was approved",
+  "تم اعتماد الملف النهائي": "The final file was approved",
+  "تم رفض الطلب": "The request was rejected",
+  "بانتظار قرار المعتمد": "Awaiting the approver decision"
 }/*I18N_EN_AUTO_END*/);

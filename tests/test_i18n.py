@@ -214,6 +214,128 @@ def load_baseline():
         BASELINE.read_text(encoding='utf-8').splitlines() if line.strip())
 
 
+COVERAGE = Path(__file__).resolve().parent / 'i18n_uncovered_baseline.txt'
+
+AR_RE = re.compile(r'[\u0600-\u06FF]')
+# Concatenation glue the browser never sees: `'...\'">' + name + '"'` renders as
+# `name`, and an attribute name stays glued to its value ('selected>لا').
+GLUE_RE = re.compile(r"^[)\]}>\"'`\\\s]+")
+ATTR_GLUE_RE = re.compile(r'^(?:selected|hidden|checked|disabled)\s*>\s*')
+CODEISH_RE = re.compile(
+    r'(=>|===|!==|\|\||&&|\$\{|const |let |var |return |function |'
+    r'\.(?=[a-zA-Z_$])|;[^\u0600-\u06FF]|[a-zA-Z_$]\s*=)')
+
+
+def _deglue(value):
+    previous = None
+    while previous != value:
+        previous = value
+        value = value.replace("\\'", "'").replace('\\"', '"')
+        value = GLUE_RE.sub('', value)
+        value = ATTR_GLUE_RE.sub('', value)
+        value = _normalize(value)
+    return value
+
+
+def _markup_units(markup):
+    """Text nodes and chrome attribute values, as the DOM pass would see them."""
+    body = re.sub(r'<!--[\s\S]*?-->', '', markup)
+    found = set()
+    for chunk in re.split(r'<[^>]+>', body):
+        value = _deglue(chunk)
+        if value and AR_RE.search(value):
+            found.add(value)
+    for tag in re.findall(r'<[^>]*>', body):
+        for m in re.finditer(r'([a-zA-Z-]+)\s*=\s*"([^"]*)"', tag):
+            if m.group(1).lower() in ('placeholder', 'title', 'aria-label',
+                                      'alt', 'value'):
+                value = _normalize(m.group(2))
+                if value and AR_RE.search(value):
+                    found.add(value)
+    return found
+
+
+def _js_literals(source):
+    """Quoted string literals, backticks included, honouring escapes."""
+    source = re.sub(r'//[^\n]*', '', source)
+    out, i, n = [], 0, len(source)
+    while i < n:
+        ch = source[i]
+        if ch in '\'"`':
+            quote = ch
+            j, buf = i + 1, []
+            while j < n:
+                c = source[j]
+                if c == '\\':
+                    buf.append(c)
+                    j += 2
+                    continue
+                if c == quote:
+                    break
+                buf.append(c)
+                j += 1
+            out.append(''.join(buf))
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def extract_untranslated_units():
+    """Every Arabic UI unit the client can render that English cannot resolve.
+
+    Covered means: an EN_AUTO key, a dotted-dictionary value, or a WFT
+    fallback (all three are translated). What is left is either a real gap or a
+    deliberate exception listed in the coverage baseline.
+    """
+    dicts = read_dicts()
+    covered = set(read_en_auto())
+    covered |= {_normalize(v) for v in dicts['ar'].values()}
+    covered |= {_normalize(v) for v in dicts['en'].values()}
+
+    units = set()
+    for name in FRONTEND_JS_ORDER:
+        source = (ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8')
+        source = re.sub(r'/\*[\s\S]*?\*/', '', source)
+        for literal in _js_literals(source):
+            if not AR_RE.search(literal):
+                continue
+            if '<' in literal:
+                units |= _markup_units(literal)
+            else:
+                value = _normalize(literal)
+                if value:
+                    units.add(value)
+    units |= _markup_units(read_shell())
+
+    out = []
+    for value in units:
+        if value in covered or CODEISH_RE.search(value):
+            continue
+        # A regex character class ('/[أ-ي]/') is code, not a string. It must
+        # actually contain a class character: an all-Arabic phrase would match
+        # the same character set and would otherwise be dropped silently.
+        if (re.fullmatch(r'[\[\]/\-()\s\u0600-\u06FF,]+', value)
+                and re.search(r'[\[\]/\-()]', value)):
+            continue
+        # A separator or one glyph is chrome punctuation the whole-text pass
+        # can never own, so it is not a translatable string.
+        if len(value) <= 2:
+            continue
+        out.append(value)
+    return sorted(out)
+
+
+def load_coverage_baseline():
+    if not COVERAGE.exists():
+        return None
+    return {
+        line.split('\t', 1)[1]
+        for line in COVERAGE.read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.startswith('#') and '\t' in line
+    }
+
+
 class I18nFoundationTests(unittest.TestCase):
     def test_i18n_file_exists_and_shell_loads_it_first(self):
         self.assertTrue(I18N_JS.exists(), 'assets/i18n.js is missing')
@@ -384,6 +506,54 @@ class I18nFoundationTests(unittest.TestCase):
         self.assertIn("isEn() ? 'en-US' : 'ar-SA'", runtime,
                       'wfLocale() must keep ar-SA for Arabic and use en-US for English')
 
+    def test_untranslated_ui_stays_frozen_at_the_baseline(self):
+        """A NEW Arabic string with no English must fail.
+
+        The exact-match DOM pass only rewrites a text node whose full text is a
+        known key, so an untranslated string is easy to add and invisible in
+        review. This ratchet closes that: every remaining unit is listed in
+        tests/i18n_uncovered_baseline.txt with a reason, and the list only ever
+        shrinks.
+        """
+        baseline = load_coverage_baseline()
+        self.assertIsNotNone(
+            baseline,
+            'coverage baseline missing: %s (regenerate deliberately with '
+            'python tests/test_i18n.py --rebuild-coverage)' % COVERAGE)
+        current = set(extract_untranslated_units())
+        fresh = sorted(current - baseline)
+        self.assertEqual(
+            fresh, [],
+            'NEW untranslated Arabic UI strings. Add an EN_AUTO entry to the '
+            'assets/i18n part that owns its screen, or wrap the call in '
+            'WFT(key, fallback, params):\n' + '\n'.join(fresh))
+        stale = sorted(baseline - current)
+        self.assertEqual(
+            stale, [],
+            'these baseline entries are now translated; drop them from %s:\n%s'
+            % (COVERAGE.name, '\n'.join(stale)))
+
+    def test_every_wft_key_exists_in_the_dicts(self):
+        """A WFT call whose key is absent renders its Arabic fallback in BOTH
+        languages.
+
+        This is invisible: nothing errors, the English UI just keeps showing
+        Arabic. Seventeen keys were in that state (sectionver.*, plans.*,
+        packages.update) and the only reason it was found is that the coverage
+        ratchet below reported their Arabic text as untranslated. A missing key
+        now fails here instead.
+        """
+        dicts = read_dicts()
+        text = read_frontend_text()
+        used = set(re.findall(r"WFT\(\s*['\"]([a-z0-9_.]+)['\"]\s*,", text))
+        self.assertTrue(used, 'no WFT call sites found')
+        unknown = sorted(k for k in used if k not in dicts['ar'])
+        self.assertEqual(
+            unknown, [],
+            'WFT keys missing from assets/i18n/*.js — they render Arabic in '
+            'English too. Add them to 01_dict_ar.js and 02_dict_en.js:\n'
+            + '\n'.join(unknown))
+
     def test_no_new_hardcoded_ui_strings(self):
         baseline = load_baseline()
         self.assertIsNotNone(
@@ -444,8 +614,36 @@ def _rebuild_baseline():
     print('baseline rewritten: %d entries -> %s' % (len(current), BASELINE))
 
 
+def _rebuild_coverage():
+    units = extract_untranslated_units()
+    header = [
+        '# Untranslated UI units that are intentionally left Arabic.',
+        '# Each line is "<reason>\\t<unit>". A NEW uncovered string fails',
+        '# tests/test_i18n.py; this file only ever shrinks.',
+        '# Regenerate deliberately with: python tests/test_i18n.py --rebuild-coverage',
+        '#',
+        '#   sample   = demo seed data for the fill-sample-project action; it is',
+        '#              project content, not UI chrome',
+        '#   fragment = the tail of a sentence already migrated to WFT(params)',
+        '#   artifact = extraction glue; the real text node is already translated',
+    ]
+
+    def reason_for(text):
+        if text.startswith((', \\approved', ', \\rejected')) or '\\)"' in text:
+            return 'artifact'
+        if text.startswith(')') or text.startswith('»'):
+            return 'fragment'
+        return 'sample'
+
+    lines = header + ['%s\t%s' % (reason_for(u), u) for u in units]
+    COVERAGE.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    print('coverage baseline rewritten: %d entries -> %s' % (len(units), COVERAGE))
+
+
 if __name__ == '__main__':
     if '--rebuild-baseline' in sys.argv:
         _rebuild_baseline()
+    elif '--rebuild-coverage' in sys.argv:
+        _rebuild_coverage()
     else:
         unittest.main()

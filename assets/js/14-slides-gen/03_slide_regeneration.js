@@ -310,7 +310,7 @@
       const targetNumbers = targetIndexes.map(index => index + 1).join('، ');
       if (sectionKey === 'financial' && typeof validateFinancialStudyBeforeProceed === 'function'
         && !(await validateFinancialStudyBeforeProceed())) return false;
-      if (!confirm('سيتم إعادة تخطيط وتوليد قسم «' + sectionLabel + '» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟')) return false;
+      if (!confirm(WFT('gen.section_regenerate_confirm', 'سيتم إعادة تخطيط وتوليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟', { section: sectionLabel }))) return false;
 
       const previousSlides = tenantSlidesData.slice();
       const previousPlan = tenantSlidePlan;

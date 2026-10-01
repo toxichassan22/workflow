@@ -571,7 +571,7 @@
       const presHtml = approvals.map(a =>
         '<div class="tenant-presentation-card">' +
         '<div><h3>' + escapeHtml(a.pres_title || 'عرض') + '</h3>' +
-        '<div class="meta"><span>تعميد عرض — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') + ' | <span>' + (a.slide_count || 0) + '</span> <span>شريحة</span> | ' + escapeHtml(a.created_at || '') + '</div></div>' +
+        '<div class="meta"><span>' + WFT('admin.offer_approval_requested_by', 'تعميد عرض — طلب بواسطة:') + '</span> ' + escapeHtml(a.requested_by_name || '') + ' | <span>' + (a.slide_count || 0) + '</span> <span>شريحة</span> | ' + escapeHtml(a.created_at || '') + '</div></div>' +
         '<div class="tenant-actions">' +
         '<button class="btn small primary" onclick="openExistingPresentation(\'' + a.presentation_id + '\')">معاينة</button>' +
         (hasPermission('approvals')
@@ -584,8 +584,10 @@
         '<div class="tenant-presentation-card">' +
         '<div><h3>' + escapeHtml(a.draft_title || 'طلب اعتماد توليد') + '</h3>' +
         '<div class="meta"><span>' + (a.section_key
-          ? 'اعتماد توليد قسم «' + escapeHtml((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[a.section_key]) || a.section_key) + '»'
-          : 'اعتماد بدء التوليد') + ' — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') +
+          ? WFT('admin.section_gen_approval', 'اعتماد توليد قسم «{section}»', {
+              section: escapeHtml((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[a.section_key]) || a.section_key)
+            })
+          : WFT('admin.generation_start_approval', 'اعتماد بدء التوليد')) + ' — ' + WFT('admin.requested_by_suffix', 'طلب بواسطة:') + '</span> ' + escapeHtml(a.requested_by_name || '') +
         ' | <span>' + (a.estimated_points || 0) + '</span> <span>نقطة</span> | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
         '<div class="tenant-actions">' +
         (a.draft_id ? '<button class="btn small primary" onclick="openProjectDraftById(\'' + a.draft_id + '\')">فتح المشروع</button>' : '') +
@@ -594,7 +596,7 @@
       const finHtml = finApprovals.map(a =>
         '<div class="tenant-presentation-card">' +
         '<div><h3>' + escapeHtml(a.presentation_title || 'طلب اعتماد ملف نهائي') + '</h3>' +
-        '<div class="meta"><span>اعتماد الملف النهائي — طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') +
+        '<div class="meta"><span>' + WFT('admin.final_file_approval_requested_by', 'اعتماد الملف النهائي — طلب بواسطة:') + '</span> ' + escapeHtml(a.requested_by_name || '') +
         ' | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
         '<div class="tenant-actions">' + decideBtns('reviewFinalFileApproval', a.id, a.requested_by, 'approve_final_file') + '</div></div>'
       ).join('');

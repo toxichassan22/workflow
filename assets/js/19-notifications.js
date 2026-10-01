@@ -284,8 +284,8 @@
       const body = document.getElementById('notifAnnounceBody');
       if (body && !body.value && parts[2]) {
         body.value = parts[1] === 'expired'
-          ? 'انتهت باقتكم في ' + parts[2] + ' — إن رغبتم في التجديد يسعدنا تواصلكم معنا.'
-          : 'باقتكم تنتهي في ' + parts[2] + ' — إن رغبتم في التجديد يسعدنا تواصلكم معنا.';
+          ? WFT('notif.package_expired', 'انتهت باقتكم في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.', { date: parts[2] })
+          : WFT('notif.package_expiring', 'باقتكم تنتهي في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.', { date: parts[2] });
       }
     }
 
@@ -346,3 +346,6 @@
         renderNotificationPrefs();
       }
     });
+
+
+

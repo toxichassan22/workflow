@@ -125,5 +125,12 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "مهام التوليد": "Generation jobs",
   "يحتوي مرفقًا": "Has an attachment",
   "يومًا": "days",
-  "— المصدر:": "— Source:"
+  "— المصدر:": "— Source:",
+  "الإجمالي:": "Total:",
+  "سبب الرفض (اختياري):": "Rejection reason (optional):",
+  "نشط:": "Active:",
+  "معطل:": "Disabled:",
+  "تعذر تصفير الرصيد": "Could not zero the balance",
+  "تجديد الباقة": "Renew package",
+  "إصدار مفتاح": "Issue a key"
 }/*I18N_EN_AUTO_END*/);
