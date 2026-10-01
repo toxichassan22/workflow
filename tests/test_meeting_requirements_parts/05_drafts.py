@@ -1477,7 +1477,11 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('نص هذا الجدول يُستخرج بترتيب معكوس', source)
         self.assertIn('نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين', source)
 
-    @unittest.skipUnless((ROOT / 'اشتراطات1.pdf').exists(), 'regulation PDFs not present')
+    # Only deploys that ship every regulation PDF can assert zero warnings: a
+    # missing sibling file is reported by search_official_regulations_evidence.
+    @unittest.skipUnless(
+        all((ROOT / name).exists() for name in ('اشتراطات1.pdf', 'اشتراطات2.pdf')),
+        'regulation PDFs not present')
     def test_regulation_lookup_returns_real_condition_pages(self):
         context, table_pages, warnings = self.application_module.search_official_regulations_pdf('ت ر1 تجاري سكني')
         self.assertEqual(warnings, [])

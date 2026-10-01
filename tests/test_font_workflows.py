@@ -75,6 +75,7 @@ class FontWorkflowTests(unittest.TestCase):
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
         # Uploaded font files written by this suite stay in the temporary folder.
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
 
         with cls.app.app_context():
@@ -95,6 +96,7 @@ class FontWorkflowTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

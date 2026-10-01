@@ -180,6 +180,7 @@ class SectionVersionApiTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
 
         with cls.app.app_context():
@@ -191,6 +192,7 @@ class SectionVersionApiTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
 
     def headers(self):
@@ -417,6 +419,7 @@ class SectionVersionDiffApiTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
 
         with cls.app.app_context():
@@ -431,6 +434,7 @@ class SectionVersionDiffApiTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         with cls.app.app_context():
             db.close_db()
         db.DB_PATH = cls.original_db_path

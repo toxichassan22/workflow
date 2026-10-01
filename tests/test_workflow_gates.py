@@ -601,6 +601,7 @@ class ExportDownloadGateTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_outputs = application_module.OUTPUT_DIR
         cls.application_module.OUTPUT_DIR = os.path.join(cls.temp_dir.name, 'outputs')
 
         with cls.app.app_context():
@@ -614,6 +615,7 @@ class ExportDownloadGateTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.application_module.OUTPUT_DIR = cls.previous_outputs
         cls.temp_dir.cleanup()
 
     def headers(self):

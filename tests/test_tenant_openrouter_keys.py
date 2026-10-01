@@ -43,6 +43,7 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
         # Auto-provisioning must never touch the network in tests.
         cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
@@ -70,6 +71,7 @@ class TenantOpenRouterKeyTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
         cls.application_module.OPENROUTER_KEY = cls._orig_global_key
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

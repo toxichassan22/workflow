@@ -32,6 +32,7 @@ class ClientOverviewTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
         cls.application_module.OPENROUTER_MANAGEMENT_KEY = None
 
@@ -52,6 +53,7 @@ class ClientOverviewTests(unittest.TestCase):
         for thread in threading.enumerate():
             if thread.name.startswith(('usage-bill-', 'cap-sync-')):
                 thread.join(timeout=10)
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

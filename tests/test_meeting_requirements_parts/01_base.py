@@ -11,6 +11,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
         # Training-image bytes written by this suite stay in the temporary folder.
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
 
         with cls.app.app_context():
@@ -35,6 +36,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.agent_flag_off.stop()
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
 
     @staticmethod

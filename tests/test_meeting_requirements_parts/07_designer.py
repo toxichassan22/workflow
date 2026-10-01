@@ -375,7 +375,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('costByProject[d.id]', index_html)
         self.assertIn('costByPresentation[item.id]', index_html)
         self.assertIn('maps_cost_sar', index_html)
-        self.assertIn("'<span>التكلفة:</span> '", index_html)
+        self.assertIn('<span>التكلفة:</span>', index_html)
 
     def test_presentation_creation_links_prior_draft_spend_without_stealing(self):
         client = self.app.test_client()

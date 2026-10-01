@@ -252,8 +252,15 @@ class _Freezer:
 
     def check_source_scope(self, path, url, *, explicit):
         path = self.checked_path(path, url)
+        # Most specific base first: an uploads root nested under the app root
+        # (a temp dir in tests, an env override like <root>/var/uploads) must
+        # still classify as uploads/… — a plain root-relative match would
+        # produce the nested dir's name and be rejected below.
+        bases = sorted(
+            ((self.root, ()), (self.uploads_root, ('uploads',))),
+            key=lambda entry: len(entry[0].parts), reverse=True)
         relative = None
-        for base, prefix in ((self.root, ()), (self.uploads_root, ('uploads',))):
+        for base, prefix in bases:
             try:
                 relative = prefix + path.relative_to(base).parts
                 break

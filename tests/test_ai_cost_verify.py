@@ -44,6 +44,7 @@ class AiCostVerifyTests(unittest.TestCase):
         cls.application_module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
         cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
 
         with cls.app.app_context():
@@ -57,6 +58,7 @@ class AiCostVerifyTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
         cls.temp_dir.cleanup()
         cls.uploads_temp.cleanup()
 

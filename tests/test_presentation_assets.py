@@ -356,6 +356,21 @@ class PresentationAssetsTests(unittest.TestCase):
         with self.assertRaisesRegex(PresentationAssetError, 'hash'):
             self.freeze(revision, preserve_missing_uploads=True)
 
+    def test_uploads_root_nested_under_root_keeps_the_uploads_classification(self):
+        # An UPLOADS_DIR override that lives inside the app root without being
+        # named 'uploads' (a suite temp dir, <root>/var/uploads in a deploy)
+        # must not defeat the creative-scope check: root-relative matching
+        # would yield the nested dir's name and wrongly reject the tenant file.
+        nested = self.root / 'tmp-store' / 'uploads'
+        source = nested / 'creative' / self.tenant / 'cover.png'
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b'nested uploads bytes')
+        frozen = freeze_presentation_assets(
+            self.url, self.tenant, root=self.root, uploads_root=nested)
+        self.assertEqual(frozen, self.revision(b'nested uploads bytes'))
+        self.assertTrue((nested / 'creative' / self.tenant / 'revisions' /
+                         frozen.rsplit('/', 1)[-1]).is_file())
+
 
 if __name__ == '__main__':
     unittest.main()
