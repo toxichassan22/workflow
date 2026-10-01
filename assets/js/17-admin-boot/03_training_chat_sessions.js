@@ -8,6 +8,16 @@
     let activeTrainingSessionId = null;
     let activeAIRulesSessionId = null;
 
+    // Sessions saved before createdAtMs existed still carry a formatted
+    // Arabic string; they are shown as stored rather than guessed at.
+    function sessionTime(session) {
+      if (!session) return '';
+      if (session.createdAtMs) {
+        return wfTime(session.createdAtMs, { hour: '2-digit', minute: '2-digit' });
+      }
+      return session.createdAt || '';
+    }
+
     function getSessionStorageKey(type) {
       const tenantId = (window.currentUser && window.currentUser.tenant_id) || (window.currentTenant && window.currentTenant.id) || 'default';
       return 'sag_sessions_' + type + '_' + tenantId;
@@ -39,7 +49,10 @@
       const newSession = {
         id: 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
         title: 'محادثة جديدة',
-        createdAt: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+        // Epoch, not a formatted string: a stored "١٤:٣٢" can never follow the
+        // UI language, and the sidebar renders it on every language switch.
+        createdAtMs: Date.now(),
+        createdAt: wfTime(Date.now(), { hour: '2-digit', minute: '2-digit' }),
         messages: []
       };
       sessions.unshift(newSession);
@@ -131,7 +144,8 @@
         session = {
           id: 'sess_' + Date.now(),
           title: autoTitle || 'محادثة جديدة',
-          createdAt: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+          createdAtMs: Date.now(),
+          createdAt: wfTime(Date.now(), { hour: '2-digit', minute: '2-digit' }),
           messages: cleanMessages
         };
         sessions.unshift(session);
@@ -172,7 +186,7 @@
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${s.createdAt || ''}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${sessionTime(s)}</div>
             </div>
             <button onclick="deleteChatSession('training', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>
@@ -200,7 +214,7 @@
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${s.createdAt || ''}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${sessionTime(s)}</div>
             </div>
             <button onclick="deleteChatSession('ai_rules', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>

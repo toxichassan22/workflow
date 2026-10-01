@@ -42,15 +42,9 @@
 
     // Fragment translator for chrome/data composites (option labels, card metas):
     // exact-match auto-translate cannot split them, so chrome fragments are
-    // resolved at build time from the shared EN_AUTO map. Data stays untouched.
+    // resolved at build time from the shared map. Data stays untouched.
     function trDynamicI18n(text) {
-      try {
-        if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
-          const dict = window.WFI18n.autoDict || {};
-          if (text && dict[text]) return dict[text];
-        }
-      } catch (e) { /* ignore */ }
-      return text;
+      return wfTr(text);
     }
 
     function addMarketStudySection(form, before) {
@@ -267,8 +261,8 @@
       if (!host) return;
       const choices = (options || []).map(String);
       const selectedValues = Array.isArray(selected) ? selected.map(String) : [];
-      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
-      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const isEn = wfIsEn();
+      const trVal = (val) => wfTr(val);
       const formatSummary = (vals) => vals.length ? (isEn ? vals.map(trVal).join(', ') : vals.join('، ')) : trVal(placeholder);
       const signature = JSON.stringify({ choices, selectedValues, placeholder, closeAfterSelection, lang: isEn ? 'en' : 'ar' });
       const existing = host.querySelector('details.project-multi-select');
@@ -419,15 +413,15 @@
         host.dataset.subtypeSignature = '';
         return;
       }
-      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
-      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const isEn = wfIsEn();
+      const trVal = (val) => wfTr(val);
       const showSubtypeLabels = groups.length > 1;
       const signature = JSON.stringify({ groups: groups.map(group => group.main), lang: isEn ? 'en' : 'ar' });
       if (host.dataset.subtypeSignature !== signature) {
         host.dataset.subtypeSignature = signature;
         host.innerHTML = groups.map((group, index) => {
           const rawLbl = MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main);
-          const lbl = isEn ? (WFI18N_EN_AUTO[rawLbl] || (trVal(group.main) + ' Subtypes')) : rawLbl;
+          const lbl = isEn ? (wfTr(rawLbl) || (trVal(group.main) + ' Subtypes')) : rawLbl;
           return '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? lbl : '') +
             '</label><div data-subtype-group-index="' + index + '"></div></div>';
         }).join('');
@@ -538,15 +532,15 @@
       if (Object.keys(normalized).length && JSON.stringify(current) !== JSON.stringify(normalized)) {
         persistGroupedChoiceValue(hidden, normalized, false);
       }
-      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
-      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const isEn = wfIsEn();
+      const trVal = (val) => wfTr(val);
       const signature = JSON.stringify({ groups: groups.map(group => group.key), lang: isEn ? 'en' : 'ar' });
       if (host.dataset.audienceSignature !== signature) {
         host.dataset.audienceSignature = signature;
         host.innerHTML = groups.map((group, index) => {
           const subtypeText = group.subtypes.length ? (' (' + (isEn ? group.subtypes.map(trVal).join(', ') : group.subtypes.join('، ')) + ')') : '';
           const rawLabel = MARKET_AUDIENCE_LABELS[group.kind] || ('الفئة المستهدفة ل' + group.kind);
-          const label = isEn ? (WFI18N_EN_AUTO[rawLabel] || (trVal(group.kind) + ' Target Audience')) : rawLabel;
+          const label = isEn ? (wfTr(rawLabel) || (trVal(group.kind) + ' Target Audience')) : rawLabel;
           return '<div style="margin-top:10px"><label>' + label + subtypeText +
             '</label><div data-audience-group-index="' + index + '"></div></div>';
         }).join('');
@@ -601,8 +595,8 @@
       const host = document.getElementById('projectActivityClassFields');
       const groups = classificationGroupsForProject(mains, isOther, kinds);
       classInput.style.display = 'none';
-      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
-      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const isEn = wfIsEn();
+      const trVal = (val) => wfTr(val);
       if (wrap) {
         wrap.style.display = groups.length ? '' : 'none';
         const fieldLabel = wrap.querySelector(':scope > label');
@@ -708,38 +702,37 @@
           try { syncProjectClassificationFields(); } catch (e) { /* ignore */ }
           try { renderLocationWorkflowState(); } catch (e) { /* ignore */ }
           try {
-            const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
-            const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+            const isEn = wfIsEn();
             document.querySelectorAll('#tenantProjectForm label[data-ar-label]').forEach(lblEl => {
               const raw = lblEl.dataset.arLabel;
               const req = lblEl.dataset.isRequired === '1' ? ' *' : '';
               const badge = lblEl.querySelector('.tenant-client-required-badge');
               let text = raw;
-              if (isEn && dict) {
-                text = dict[raw] || (raw.indexOf('²') !== -1 && dict[raw.replace(/²/g, '2')]) || (raw.indexOf('2') !== -1 && dict[raw.replace(/2/g, '²')]) || raw;
-              }
+              // wfTr already knows the m²/2 superscript twin, which this
+              // lookup used to re-implement inline.
+              if (isEn) text = wfTr(raw);
               lblEl.textContent = text + req;
               if (badge) {
-                badge.textContent = isEn ? 'Client-Entered Only' : 'إدخال العميل';
+                badge.textContent = WFT('form.client_entered_only', 'إدخال العميل');
                 lblEl.appendChild(badge);
               }
             });
             document.querySelectorAll('.tenant-section-title').forEach(st => {
               const secLbl = st.querySelector('.project-section-title-label');
               if (secLbl && secLbl.dataset.arText) {
-                secLbl.textContent = isEn && dict && dict[secLbl.dataset.arText] ? dict[secLbl.dataset.arText] : secLbl.dataset.arText;
+                secLbl.textContent = wfTr(secLbl.dataset.arText);
               }
               const b = st.querySelector('.section-status-badge');
               if (b && b.dataset.arText) {
-                b.textContent = isEn && dict && dict[b.dataset.arText] ? dict[b.dataset.arText] : b.dataset.arText;
+                b.textContent = wfTr(b.dataset.arText);
               }
               const genBtn = st.querySelector('.section-presentation-btn');
               if (genBtn && genBtn.dataset.arText) {
-                genBtn.textContent = isEn && dict && dict[genBtn.dataset.arText] ? dict[genBtn.dataset.arText] : genBtn.dataset.arText;
+                genBtn.textContent = wfTr(genBtn.dataset.arText);
               }
               const lockBtn = st.querySelector('.section-approve-btn:not(.section-presentation-btn)');
               if (lockBtn && lockBtn.dataset.arText) {
-                lockBtn.textContent = isEn && dict && dict[lockBtn.dataset.arText] ? dict[lockBtn.dataset.arText] : lockBtn.dataset.arText;
+                lockBtn.textContent = wfTr(lockBtn.dataset.arText);
               }
             });
             const formEl = document.getElementById('tenantProjectForm');

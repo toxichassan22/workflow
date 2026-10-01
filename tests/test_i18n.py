@@ -182,6 +182,30 @@ def read_dicts():
     return dicts
 
 
+def read_en_auto():
+    """Every I18N_EN_AUTO block across the dictionary parts, merged.
+
+    The map is split by screen so no part approaches the file-size limit, and
+    each part merges itself into window.__WFI18N_EN_AUTO at load time. Every
+    block is therefore parsed here and combined, and the merge is checked for
+    duplicate keys below: two parts claiming one Arabic string would make the
+    winner depend on load order.
+    """
+    src = read_dict_source()
+    blocks = re.findall(
+        r'/\*I18N_EN_AUTO_BEGIN\*/(.*?)/\*I18N_EN_AUTO_END\*/', src, re.S)
+    if not blocks:
+        raise AssertionError('assets/i18n lost its I18N_EN_AUTO markers')
+    merged = {}
+    for block in blocks:
+        for key, value in json.loads(block).items():
+            if key in merged and merged[key] != value:
+                raise AssertionError(
+                    'EN_AUTO key declared twice with different English: %r' % key)
+            merged[key] = value
+    return merged
+
+
 def load_baseline():
     if not BASELINE.exists():
         return None
@@ -202,18 +226,20 @@ class I18nFoundationTests(unittest.TestCase):
         # relative assets/... URL against the deep link and 404.
         self.assertIn('src="/assets/i18n.js"', html)
         # The dictionaries ship as assets/i18n/*.js and must load before the
-        # runtime that reads window.__WFI18N_*.
+        # runtime that reads window.__WFI18N_*. They arrive as one bundle for
+        # the same reason the app bundle exists: the map is split by screen, and
+        # eighteen blocking part requests per page view is not shippable.
         dict_files = sorted(p.name for p in I18N_DICT_DIR.glob('*.js'))
         self.assertTrue(dict_files, 'assets/i18n/ dictionary files are missing')
-        prev = -1
+        self.assertIn('src="/assets/i18n.bundle.js"', html)
+        self.assertLess(
+            html.find('src="/assets/i18n.bundle.js"'), tag,
+            'assets/i18n.bundle.js must load before i18n.js')
         for name in dict_files:
-            pos = html.find('src="/assets/i18n/%s"' % name)
-            self.assertNotEqual(
-                pos, -1, 'index.html must load /assets/i18n/%s' % name)
-            self.assertLess(
-                pos, tag, 'assets/i18n/%s must load before i18n.js' % name)
-            self.assertGreater(pos, prev, 'dictionary order must match the sorted names')
-            prev = pos
+            self.assertNotIn(
+                '/assets/i18n/%s' % name, html,
+                'index.html must not reference dictionary part %s directly; '
+                'use /assets/i18n.bundle.js' % name)
         # The old single inline <script> block is gone: code ships as ordered
         # classic scripts sharing one global scope (no async, no modules).
         bare_scripts = [
@@ -253,6 +279,10 @@ class I18nFoundationTests(unittest.TestCase):
         self.assertEqual(
             _order('FRONTEND_CSS_ORDER'), FRONTEND_CSS_ORDER,
             'app.py bundle order drifted from the pinned FRONTEND_CSS_ORDER')
+        self.assertEqual(
+            _order('FRONTEND_I18N_ORDER'), tuple(dict_files),
+            'app.py FRONTEND_I18N_ORDER must list every assets/i18n part in '
+            'sorted order, or the bundle silently drops one')
         for name in FRONTEND_CSS_ORDER:
             self.assertTrue(
                 (ROOT / 'assets' / 'css' / name).exists(),
@@ -318,6 +348,42 @@ class I18nFoundationTests(unittest.TestCase):
             unknown, [],
             'data-i18n keys missing from assets/i18n.js: %s' % unknown)
 
+    def test_no_hardcoded_ui_locale(self):
+        """A date or time must be built with the UI language's locale.
+
+        The financial report, the timeline save badge and the training-chat
+        session list each pinned 'ar-SA', so an English UI still printed Arabic
+        month names and Arabic-Indic digits. Figures are deliberately NOT
+        covered: money and areas format through Intl.NumberFormat('en-US') on
+        both sides, because Latin digits with comma grouping are required for
+        every financial figure.
+        """
+        src = read_frontend_text()
+        pattern = re.compile(
+            r"(?:toLocale(?:Date|Time)String|Intl\.DateTimeFormat)\s*\("
+            r"\s*['\"]ar(?:-SA)?['\"]")
+        offenders = sorted(set(
+            '%s|%s' % (name, pattern.search(text).group(0))
+            for name, text in (
+                (p.name, p.read_text(encoding='utf-8'))
+                for p in [I18N_JS] + list(I18N_DICT_DIR.glob('*.js')) +
+                [ROOT / 'assets' / 'js' / n for n in FRONTEND_JS_ORDER] +
+                [INDEX])
+            if pattern.search(text)))
+        self.assertEqual(
+            offenders, [],
+            'date/time locale is pinned to Arabic; use wfDate()/wfTime() from '
+            'assets/i18n.js so it follows the UI language:\n'
+            + '\n'.join(offenders))
+        # The sanctioned helpers must exist and keep the Arabic default.
+        runtime = I18N_JS.read_text(encoding='utf-8')
+        for token in ('wfIsEn', 'wfLocale', 'wfDate', 'wfTime', 'wfTr',
+                      'lookupAuto'):
+            self.assertIn(token, runtime,
+                          'assets/i18n.js must expose the shared %s helper' % token)
+        self.assertIn("isEn() ? 'en-US' : 'ar-SA'", runtime,
+                      'wfLocale() must keep ar-SA for Arabic and use en-US for English')
+
     def test_no_new_hardcoded_ui_strings(self):
         baseline = load_baseline()
         self.assertIsNotNone(
@@ -333,12 +399,7 @@ class I18nFoundationTests(unittest.TestCase):
             + '\n'.join(fresh))
 
     def test_auto_map_is_real_and_safe(self):
-        src = read_dict_source()
-        match = re.search(
-            r'/\*I18N_EN_AUTO_BEGIN\*/(.*?)/\*I18N_EN_AUTO_END\*/', src, re.S)
-        self.assertIsNotNone(
-            match, 'assets/i18n.js lost its I18N_EN_AUTO markers')
-        auto = json.loads(match.group(1))
+        auto = read_en_auto()
         self.assertGreaterEqual(
             len(auto), 1000,
             'EN_AUTO map shrank unexpectedly: %d entries' % len(auto))

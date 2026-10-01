@@ -451,10 +451,12 @@
           if (stillCurrent) {
             if (!slideCheckpoint) tenantDraftDirty = false;
             if (badge) {
-              const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+              const timeStr = wfTime(Date.now(), { hour: '2-digit', minute: '2-digit' });
               badge.style.background = '#dcfce7';
               badge.style.color = '#166534';
-              badge.innerHTML = 'محفوظ (' + timeStr + ')';
+              // A sentence carrying a time can never be matched by the exact-match DOM
+              // pass, so it is built from the dictionary instead.
+              badge.innerHTML = WFT('timeline.saved_at', 'محفوظ ({time})', { time: timeStr });
             }
           }
           tenantArchiveCache = null;

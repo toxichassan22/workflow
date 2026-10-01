@@ -27,7 +27,7 @@ const fail = (msg) => failures.push(msg);
 const shell = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 
 // 1. i18n runtime loads first (absolute path: client routes would 404 a relative one),
-// preceded by its dictionary part files under assets/i18n/.
+// preceded by its dictionary bundle (/assets/i18n.bundle.js).
 if (!shell.includes('src="/assets/i18n.js"')) fail('shell must include <script src="/assets/i18n.js">');
 const i18nPos = shell.indexOf('/assets/i18n.js');
 const bundleJsPos = shell.indexOf('/assets/app.bundle.js');
@@ -36,13 +36,34 @@ if (i18nPos > bundleJsPos && bundleJsPos >= 0) fail('assets/i18n.js must load BE
 const i18nDictDir = path.join(ROOT, 'assets', 'i18n');
 const i18nDictFiles = fs.existsSync(i18nDictDir)
   ? fs.readdirSync(i18nDictDir).filter((f) => f.endsWith('.js')).sort() : [];
-let prevDictPos = -1;
+if (!i18nDictFiles.length) fail('assets/i18n/ dictionary parts are missing');
+const i18nBundlePos = shell.indexOf('src="/assets/i18n.bundle.js"');
+if (i18nBundlePos < 0) fail('shell must load /assets/i18n.bundle.js before i18n.js');
+else if (i18nBundlePos > i18nPos) fail('assets/i18n.bundle.js must load BEFORE i18n.js');
+// The shell references the bundle, never the parts: eighteen blocking requests
+// per page view is what the bundle exists to prevent.
 for (const name of i18nDictFiles) {
-  const pos = shell.indexOf(`src="/assets/i18n/${name}"`);
-  if (pos < 0) fail(`shell must load dictionary part /assets/i18n/${name} before i18n.js`);
-  else if (pos > i18nPos) fail(`assets/i18n/${name} must load BEFORE i18n.js`);
-  else if (pos < prevDictPos) fail('assets/i18n dictionary order must match the sorted names');
-  prevDictPos = pos;
+  if (shell.includes(`/assets/i18n/${name}`)) {
+    fail(`shell must not reference dictionary part /assets/i18n/${name} directly; use /assets/i18n.bundle.js`);
+  }
+}
+// The bundle order authority is app.py (FRONTEND_I18N_ORDER) and must match
+// the on-disk set exactly, so no part is silently dropped from the bundle.
+const appPartsDir2 = path.join(ROOT, 'app_parts');
+const appSource2 = ['app.py'].concat(
+  fs.existsSync(appPartsDir2) ? fs.readdirSync(appPartsDir2).filter((f) => f.endsWith('.py')).sort().map((f) => 'app_parts/' + f) : []
+).map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+const i18nOrder = readOrderTuple(appSource2, 'FRONTEND_I18N_ORDER');
+if (!i18nOrder || !i18nOrder.length) fail('app.py must define FRONTEND_I18N_ORDER');
+if (i18nOrder) {
+  for (const name of i18nOrder) {
+    if (!fs.existsSync(path.join(i18nDictDir, name))) fail(`assets/i18n/${name} is listed in FRONTEND_I18N_ORDER but missing on disk`);
+  }
+  const orphans = i18nDictFiles.filter((f) => !i18nOrder.includes(f));
+  if (orphans.length) fail(`assets/i18n parts not in FRONTEND_I18N_ORDER (never loaded): ${orphans.join(', ')}`);
+  if ([...i18nOrder].sort().join() !== i18nDictFiles.join()) {
+    fail('FRONTEND_I18N_ORDER must match the sorted dictionary part names');
+  }
 }
 
 // 2. The shell references bundles, never part files.
@@ -105,6 +126,17 @@ const checkJs = (target, label) => {
 checkJs(path.join(ROOT, 'assets', 'i18n.js'), 'assets/i18n.js');
 for (const name of i18nDictFiles) {
   checkJs(path.join(i18nDictDir, name), `assets/i18n/${name}`);
+}
+// The dictionary parts merge into one global, so the concatenated bundle must
+// parse as a single script too.
+if (i18nOrder && i18nOrder.length) {
+  const os0 = require('node:os');
+  const tmpI18n = path.join(os0.tmpdir(), 'verify-frontend-i18n-bundle.js');
+  fs.writeFileSync(tmpI18n, i18nOrder.map((name) => {
+    const content = fs.readFileSync(path.join(i18nDictDir, name), 'utf8');
+    return '\n;\n/*__PART:' + name + '*/\n' + content;
+  }).join(''));
+  checkJs(tmpI18n, 'concatenated i18n.bundle.js');
 }
 for (const name of jsOrder || []) {
   checkJs(path.join(ROOT, 'assets', 'js', name), `assets/js/${name}`);

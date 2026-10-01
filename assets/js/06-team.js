@@ -833,10 +833,10 @@
       tenantFieldSections = (sectionsData && sectionsData.available) || [];
       tenantAllowedFieldSections = (sectionsData && sectionsData.allowed) || {};
       renderTenantProjectForm(tenantFields);
-      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
-        const formEl = document.getElementById('tenantProjectForm');
-        if (formEl) window.WFI18n.autoTranslate(formEl);
-      }
+      // autoTranslate() is a no-op unless the UI language is English, so the
+      // manual language check each screen used to repeat is not needed.
+      const formEl = document.getElementById('tenantProjectForm');
+      if (typeof window.WFI18n !== 'undefined') window.WFI18n.autoTranslate(formEl);
       return true;
     }
 
@@ -946,7 +946,7 @@
         graceRevenueSelect.value = savedGraceRevenue;
         calculateAll();
       }
-      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && financialRoot) {
+      if (typeof window.WFI18n !== 'undefined' && financialRoot) {
         window.WFI18n.autoTranslate(financialRoot);
       }
     }

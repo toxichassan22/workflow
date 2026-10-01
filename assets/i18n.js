@@ -7,7 +7,10 @@
  *      data-i18n="section.key" in static HTML (data-i18n-ph for placeholders,
  *      data-i18n-title for titles, data-i18n-aria for aria-labels).
  *      Exact-matchable legacy chrome also gets an entry in WFI18N_EN_AUTO
- *      (Arabic text as key) so the DOM pass below can translate it.
+ *      (Arabic text as key) so the DOM pass below can translate it. Those live
+ *      in assets/i18n/NN_dict_en_auto_<area>.js, one part per screen area, so
+ *      no part approaches the file-size limit; add the string to the part that
+ *      owns its screen. They ship as one /assets/i18n.bundle.js.
  *   2. Never add a new hardcoded Arabic UI literal to toast() / confirm() /
  *      placeholder="" / showLoader() / hideLoader() / updateLoaderProgress().
  *      The suite keeps a baseline of the legacy literals and fails when a new
@@ -16,6 +19,12 @@
  *   3. Static HTML keeps its Arabic text content as the fallback, so the page
  *      still reads correctly if this file ever fails to load, and
  *      WFT(key, fallback) always renders the fallback when the key is absent.
+ *   4. Use the shared helpers below — wfIsEn(), wfLocale(), wfDate(), wfTime(),
+ *      wfTr() — instead of a screen's own language check. The DOM pass can only
+ *      rewrite a text node whose FULL text is a known string, so an Arabic
+ *      sentence carrying a number, a label that arrives from the API, or a
+ *      value built by concatenation never matches it. wfTr() translates a
+ *      finished string, and WFT(key, fallback, params) builds one.
  *
  * Loading: index.html includes this file with an ABSOLUTE path
  * (<script src="/assets/i18n.js">) BEFORE the main inline script, so WFI18n
@@ -149,6 +158,43 @@
     return String(raw).replace(/\s+/g, ' ').trim();
   }
 
+  // The one EN_AUTO lookup, shared by the DOM pass, the select pass and the
+  // wfTr() value translator. It used to be written out three times, and the
+  // copies had already drifted. Returns null when nothing matches so callers
+  // keep the original string untouched.
+  //
+  // Order: exact match, then the ²/2 superscript twin (financial labels are
+  // written both ways), then the same string minus leading/trailing bullets and
+  // separators, which is how button rows like ") حذف" reach a node whose real
+  // text is just "حذف".
+  var AUTO_TRIM_RE = /^([\s*•:\-–—]+)?(.*?)([\s*•:\-–—]+)?$/;
+  function lookupAuto(raw) {
+    if (!raw) return null;
+    var key = autoNorm(raw);
+    if (!key) return null;
+    var en = WFI18N_EN_AUTO[key];
+    if (en) return { en: en, prefix: '', suffix: '' };
+    var twin = key.indexOf('²') !== -1 ? key.replace(/²/g, '2')
+      : (key.indexOf('2') !== -1 ? key.replace(/2/g, '²') : null);
+    if (twin && WFI18N_EN_AUTO[twin]) {
+      return { en: WFI18N_EN_AUTO[twin], prefix: '', suffix: '' };
+    }
+    var m = key.match(AUTO_TRIM_RE);
+    if (m && m[2] && m[2] !== key) {
+      var coreKey = autoNorm(m[2]);
+      if (coreKey) {
+        en = WFI18N_EN_AUTO[coreKey];
+        if (!en) {
+          var coreTwin = coreKey.indexOf('²') !== -1 ? coreKey.replace(/²/g, '2')
+            : (coreKey.indexOf('2') !== -1 ? coreKey.replace(/2/g, '²') : null);
+          if (coreTwin) en = WFI18N_EN_AUTO[coreTwin];
+        }
+        if (en) return { en: en, prefix: m[1] || '', suffix: m[3] || '' };
+      }
+    }
+    return null;
+  }
+
   function autoSwapAttr(el, attr) {
     var raw;
     try { raw = el.getAttribute(attr); } catch (e) { return; }
@@ -183,31 +229,11 @@
       var p = tn.parentElement;
       if (!p || autoSkipped(p, false)) continue;
 
-      var en = WFI18N_EN_AUTO[key];
-      var prefix = '';
-      var suffix = '';
-      if (!en) {
-        var altKey = key.indexOf('²') !== -1 ? key.replace(/²/g, '2') : (key.indexOf('2') !== -1 ? key.replace(/2/g, '²') : null);
-        if (altKey && WFI18N_EN_AUTO[altKey]) en = WFI18N_EN_AUTO[altKey];
-      }
-      if (!en) {
-        var m = key.match(/^([\s*•:\-–—]+)?(.*?)([\s*•:\-–—]+)?$/);
-        if (m && m[2] && m[2] !== key) {
-          var coreKey = autoNorm(m[2]);
-          if (coreKey) {
-            en = WFI18N_EN_AUTO[coreKey];
-            if (!en) {
-              var altCore = coreKey.indexOf('²') !== -1 ? coreKey.replace(/²/g, '2') : (coreKey.indexOf('2') !== -1 ? coreKey.replace(/2/g, '²') : null);
-              if (altCore && WFI18N_EN_AUTO[altCore]) en = WFI18N_EN_AUTO[altCore];
-            }
-            if (en) {
-              prefix = m[1] || '';
-              suffix = m[3] || '';
-            }
-          }
-        }
-      }
-      if (en === undefined || en === null || en === '') continue;
+      var hit = lookupAuto(key);
+      if (!hit) continue;
+      var en = hit.en;
+      var prefix = hit.prefix;
+      var suffix = hit.suffix;
 
       var lead = (raw.match(/^\s+/) || [''])[0];
       var trail = (raw.match(/\s+$/) || [''])[0];
@@ -264,35 +290,12 @@
           if (!raw || !AR_RE.test(raw)) continue;
           var norm = autoNorm(raw);
           if (!norm) continue;
-          var en = WFI18N_EN_AUTO[norm];
-          var prefix = '';
-          var suffix = '';
-          if (!en) {
-            var altKey = norm.indexOf('²') !== -1 ? norm.replace(/²/g, '2') : (norm.indexOf('2') !== -1 ? norm.replace(/2/g, '²') : null);
-            if (altKey && WFI18N_EN_AUTO[altKey]) en = WFI18N_EN_AUTO[altKey];
-          }
-          if (!en) {
-            var m = norm.match(/^([\s*•:\-–—]+)?(.*?)([\s*•:\-–—]+)?$/);
-            if (m && m[2] && m[2] !== norm) {
-              var coreKey = autoNorm(m[2]);
-              if (coreKey) {
-                en = WFI18N_EN_AUTO[coreKey];
-                if (!en) {
-                  var altCore = coreKey.indexOf('²') !== -1 ? coreKey.replace(/²/g, '2') : (coreKey.indexOf('2') !== -1 ? coreKey.replace(/2/g, '²') : null);
-                  if (altCore && WFI18N_EN_AUTO[altCore]) en = WFI18N_EN_AUTO[altCore];
-                }
-                if (en) {
-                  prefix = m[1] || '';
-                  suffix = m[3] || '';
-                }
-              }
-            }
-          }
-          if (en) {
+          var hit = lookupAuto(norm);
+          if (hit) {
             if (!opt.hasAttribute('value')) {
               opt.setAttribute('value', raw);
             }
-            opt.textContent = prefix + en + suffix;
+            opt.textContent = hit.prefix + hit.en + hit.suffix;
           }
         }
       }
@@ -428,6 +431,73 @@
     return setLang(getLang() === 'ar' ? 'en' : 'ar');
   }
 
+  // ---------------------------------------------------------------------------
+  // Shared helpers for application code. One mechanism, one place.
+  //
+  // Several screens had grown their own private "const isEn = ...getLang() ===
+  // 'en'" plus a private EN_AUTO lookup. That is how the English UI ended up
+  // half-translated: each copy knew about a different subset of the problem.
+  // Everything below is the sanctioned entry point; new code uses these.
+  // ---------------------------------------------------------------------------
+
+  function isEn() {
+    return getLang() === 'en';
+  }
+
+  // The locale every date/time string must be built with. Arabic keeps the
+  // exact 'ar-SA' output it has always had (changing that would alter what
+  // users see in their own language); English gets 'en-US' so an English UI
+  // stops printing Arabic month names and Arabic-Indic digits.
+  function locale() {
+    return isEn() ? 'en-US' : 'ar-SA';
+  }
+
+  function dateString(value, opts) {
+    try {
+      return new Date(value === undefined ? Date.now() : value)
+        .toLocaleDateString(locale(), opts);
+    } catch (e) { return ''; }
+  }
+
+  function timeString(value, opts) {
+    try {
+      return new Date(value === undefined ? Date.now() : value)
+        .toLocaleTimeString(locale(), opts);
+    } catch (e) { return ''; }
+  }
+
+  // wfTr(value): translate one string outside the DOM pass.
+  //
+  // The DOM pass can only rewrite a text node whose FULL text is a known string,
+  // so three real categories never reached it: labels that arrive from the API
+  // (field labels, section names, statuses, option lists), values built by
+  // concatenation, and anything inside a sentence carrying a number. Callers
+  // use wfTr on the finished string instead.
+  //
+  // Multi-select values are stored as "kind::value" and the readable half is
+  // what the dictionary knows, so both halves are tried.
+  function tr(value) {
+    if (value === undefined || value === null || value === '') return value;
+    var str = String(value);
+    if (!isEn() || !AR_RE.test(str)) return str;
+    var hit = lookupAuto(str);
+    if (hit) return hit.prefix + hit.en + hit.suffix;
+    var sep = str.indexOf('::');
+    if (sep !== -1) {
+      var tail = str.slice(sep + 2);
+      var tailHit = lookupAuto(tail);
+      if (tailHit) return str.slice(0, sep) + '::' + tailHit.prefix + tailHit.en + tailHit.suffix;
+    }
+    return str;
+  }
+
+  // wfTrSentence(template, params): the replacement for Arabic sentences that
+  // interpolate a value. WFT() fills {name} placeholders; wfTrThen() lets a
+  // caller translate an already-built sentence as a fallback.
+  function trSentence(text) {
+    return tr(text);
+  }
+
   function boot() {
     applyI18nToDOM(document);
     if (getLang() === 'en') {
@@ -455,11 +525,25 @@
     autoTranslate: autoTranslateSubtree,
     autoRestore: autoRestore,
     autoDict: WFI18N_EN_AUTO,
+    isEn: isEn,
+    locale: locale,
+    dateString: dateString,
+    timeString: timeString,
+    tr: tr,
+    trSentence: trSentence,
     supported: SUPPORTED.slice(),
     defaultLang: DEFAULT_LANG,
     storageKey: STORAGE_KEY
   };
   window.toggleAppLanguage = toggleAppLanguage;
+
+  // Globals for the one shared script scope. Each name is prefixed so it
+  // cannot collide with a local, the same reason WFT exists instead of t().
+  window.wfIsEn = isEn;
+  window.wfLocale = locale;
+  window.wfDate = dateString;
+  window.wfTime = timeString;
+  window.wfTr = tr;
 
   // WFT(key, fallback, params): the single safe global for application code.
   // "WFT" has no other meaning anywhere in the shell, so unlike a bare t() it

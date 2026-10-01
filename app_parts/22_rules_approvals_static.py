@@ -354,6 +354,23 @@ FRONTEND_JS_ORDER = (
 
 _FRONTEND_BUNDLE_CACHE = {}
 
+# The EN_AUTO exact-match map is split by screen so no single dictionary part
+# approaches the 1,000-line limit, and pinned here because the shell must load
+# the whole set before i18n.js reads window.__WFI18N_EN_AUTO. It ships as its own
+# bundle for the same reason the app bundle does: eighteen blocking part
+# requests on every page view is exactly what the bundle removed once.
+FRONTEND_I18N_ORDER = (
+    '01_dict_ar.js', '02_dict_en.js',
+    '03_dict_en_auto_core.js', '04_dict_en_auto_project.js',
+    '05_dict_en_auto_financial.js', '06_dict_en_auto_location.js',
+    '07_dict_en_auto_market.js', '08_dict_en_auto_team.js',
+    '09_dict_en_auto_files.js', '10_dict_en_auto_slides.js',
+    '11_dict_en_auto_presentations.js', '12_dict_en_auto_admin.js',
+    '13_dict_en_auto_ops.js', '14_dict_en_auto_backend_fields.js',
+    '15_dict_en_auto_backend_deck.js', '16_dict_en_auto_backend_changes.js',
+    '17_dict_en_auto_backend_market.js', '18_dict_en_auto_backend_platform.js',
+)
+
 
 def _build_frontend_bundle(kind):
     """Concatenate part files in load order with markers, cached by content.
@@ -367,6 +384,8 @@ def _build_frontend_bundle(kind):
     root = os.path.dirname(os.path.abspath(__file__))
     if kind == 'js':
         names, subdir, content_type = FRONTEND_JS_ORDER, 'js', 'application/javascript'
+    elif kind == 'i18n':
+        names, subdir, content_type = FRONTEND_I18N_ORDER, 'i18n', 'application/javascript'
     else:
         names, subdir, content_type = FRONTEND_CSS_ORDER, 'css', 'text/css'
     paths = [os.path.join(root, 'assets', subdir, name) for name in names]
@@ -382,7 +401,7 @@ def _build_frontend_bundle(kind):
     for name, path in zip(names, paths):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
-        if kind == 'js':
+        if kind in ('js', 'i18n'):
             # A leading semicolon keeps a file ending without one from merging
             # into the next file's first expression. The marker names the part
             # for stack traces and for the bundle-composition checks.
@@ -422,6 +441,11 @@ def _serve_frontend_bundle(kind):
 @app.route('/assets/app.bundle.js')
 def frontend_js_bundle():
     return _serve_frontend_bundle('js')
+
+
+@app.route('/assets/i18n.bundle.js')
+def frontend_i18n_bundle():
+    return _serve_frontend_bundle('i18n')
 
 
 @app.route('/assets/app.bundle.css')

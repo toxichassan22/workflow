@@ -312,7 +312,7 @@
       const pd = (typeof tenantProjectData !== 'undefined' && tenantProjectData) || {};
       const projectName = String(pd.project_name || pd.projectName || val('projectName') || 'المشروع').trim();
       const safeTitle = projectName.replace(/[\\/:*?"<>|]+/g, '-');
-      const generatedAt = new Date().toLocaleDateString('ar-SA', { year: 'numeric', month: 'long', day: 'numeric' });
+      const generatedAt = wfDate(Date.now(), { year: 'numeric', month: 'long', day: 'numeric' });
       const reportWindow = window.open('', 'financialStudyReport', 'width=1280,height=900');
       if (!reportWindow) { toast('يرجى السماح بالنوافذ المنبثقة لطباعة التقرير'); return }
 
