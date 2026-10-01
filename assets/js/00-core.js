@@ -381,9 +381,8 @@
       return !!mapPreviewStoredUrl(view);
     }
 
-    function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {}) {
-      if (!tenantProjectData?.location_analysis_approved) return false;
-      return view?.mapType === 'overview' || !!approvals.overview;
+    function mapPreviewIsVisible(view) {
+      return !!mapPreviewStoredUrl(view);
     }
 
     function hasStoredMaps(highlightSite) {
@@ -422,7 +421,7 @@
       'enabled_maps', 'landmark_label_positions', 'landmark_map_items', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
-      'access_road_label_positions', 'access_road_label_sizes', 'access_roads_data', 'location_analysis_approved', 'location_coordinates_confirmed',
+      'access_road_label_positions', 'access_road_label_sizes', 'access_roads_data', 'location_coordinates_confirmed',
       'main_roads', 'main_roads_data', 'manual_road_paths', 'map_styles', 'map_type', 'maps_link',
       'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'city_landmarks_data', 'regen_seed',
       'refresh_maps',

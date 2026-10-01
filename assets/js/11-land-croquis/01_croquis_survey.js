@@ -422,10 +422,6 @@
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
-      const currentAddress = (tenantProjectData.location_address || '').trim();
-      if (window._lastAnalyzedAddress && window._lastAnalyzedAddress !== currentAddress) {
-        tenantProjectData.location_analysis_approved = false;
-      }
       const locationLink = [tenantProjectData.location_address, tenantProjectData.location_maps_link, tenantProjectData.maps_link]
         .find(value => isGoogleMapsUrl(value)) || '';
       if (!locationLink) {
@@ -463,8 +459,8 @@
           mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. <span>' + boundaryLabel + '</span>';
           mapHint.style.display = 'block';
         }
-        // A re-analysis on a different link voids every raster, approval, saved
-        // frame and boundary drawn for the previous site — maps_signature stores
+        // A re-analysis on a different link voids every raster, saved frame and
+        // boundary drawn for the previous site — maps_signature stores
         // the link the maps were last rendered for. Coordinates alone cannot
         // decide this: a confirmed pin legitimately moves location_lat/lng a few
         // hundred metres off the link while the maps stay valid for that site.
@@ -489,9 +485,7 @@
         tenantProjectData = { ...tenantProjectData, ...fields };
         tenantProjectData.location_coordinates_confirmed = false;
         tenantProjectData.location_coordinates_source = data.source || 'site_analysis';
-        tenantProjectData.location_analysis_approved = false;
         releaseLocationSectionApproval();
-        tenantProjectData.location_analysis_approved_at = '';
         setLocationDataFetchedAt();
         Object.entries(fields).forEach(([key, value]) => {
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
@@ -551,7 +545,6 @@
       const forceFull = arguments[0] === true;
       const gallery = document.getElementById('mapPreviewGallery');
       if (!gallery) return;
-      const approvals = tenantCreativeImages.map_approvals || {};
       const views = MAP_PREVIEW_VIEW_DEFS;
       const existingCards = gallery.querySelectorAll('.tenant-map-preview-card');
       if (!forceFull && existingCards.length === views.length) {
@@ -562,13 +555,8 @@
       }
       const cards = views.map(view => {
         const url = mapPreviewStoredUrl(view);
-        const visible = mapPreviewIsVisible(view, approvals);
-        const approvedWithoutFile = !!approvals[view.mapType] && !url;
-        const status = !visible
-          ? (tenantProjectData?.location_analysis_approved
-            ? 'بانتظار اعتماد خريطة الأرض / المبنى'
-            : 'بانتظار اعتماد تحليل الموقع')
-          : (approvals[view.mapType] ? (approvedWithoutFile ? 'معتمدة بدون ملف' : 'معتمدة') : (url ? 'بانتظار الاعتماد' : 'غير مولدة'));
+        const visible = mapPreviewIsVisible(view);
+        const status = url ? 'مولدة' : 'غير مولدة';
         const preview = visible && url
           ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
           : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(status === 'غير مولدة' ? 'لم تُولد الخريطة' : status) + '</div>';
@@ -695,27 +683,6 @@
       }
     }
 
-    async function approveMapPreview(mapType) {
-      const approvals = tenantCreativeImages.map_approvals || {};
-      if (!tenantProjectData.location_analysis_approved) { toast('اعتماد تحليل الموقع مطلوب قبل اعتماد الخريطة'); return; }
-      if (mapType !== 'overview' && !approvals.overview) { toast('اعتماد خريطة الأرض مطلوب أولًا'); return; }
-      tenantCreativeImages.map_approvals = { ...approvals, [mapType]: true };
-      await saveMapPreviewState();
-      renderMapPreviewGallery(true);
-      renderLocationWorkflowState();
-      toast('تم اعتماد الخريطة');
-    }
-
-    async function unapproveMapPreview(mapType) {
-      const approvals = tenantCreativeImages.map_approvals || {};
-      tenantCreativeImages.map_approvals = { ...approvals, [mapType]: false };
-      releaseLocationSectionApproval();
-      await saveMapPreviewState();
-      renderMapPreviewGallery(true);
-      renderLocationWorkflowState();
-      toast('تم إلغاء اعتماد الخريطة');
-    }
-
     // A full regen must serialize over every other map write: a second regen
     // click, a pan/zoom regen, or a table-edit recompose running in parallel all
     // land on the same per-project server lock and their state merges interleave
@@ -762,10 +729,11 @@
 
     async function regenerateMapPreviewOnce(mapType) {
       if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
-      const approvals = tenantCreativeImages.map_approvals || {};
-      if (!tenantProjectData.location_analysis_approved) { toast('اعتماد تحليل الموقع مطلوب قبل توليد الخرائط'); return false; }
-      if (mapType !== 'overview' && !approvals.overview) { toast('اعتماد خريطة الأرض مطلوب أولًا'); return false; }
-      if (approvals[mapType]) { toast('ألغ اعتماد الخريطة قبل إعادة توليدها'); return false; }
+      if (!isUsableMapCoordinate(tenantProjectData.location_lat, true)
+          || !isUsableMapCoordinate(tenantProjectData.location_lng, false)) {
+        toast('حلل رابط الموقع أولًا قبل توليد الخرائط');
+        return false;
+      }
       showLoader('جاري توليد الخريطة', '');
       try {
         // A table edit may still have a debounced overlay recompose queued or in
@@ -780,10 +748,8 @@
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         const formData = await collectTenantFormData();
         tenantProjectData = { ...tenantProjectData, ...formData };
-        tenantProjectData.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
         if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
         const payload = slimMapProjectData(tenantProjectData);
-        payload.location_analysis_approved = tenantProjectData.location_analysis_approved;
         payload.enabled_maps = [mapType];
         payload.draftId = tenantProjectData.draftId;
         payload.refresh_maps = true;
@@ -805,8 +771,6 @@
           mapType,
           presentationId: tenantPresentationId,
           highlightSite: shouldHighlightTenantSite(),
-          overviewApproved: !!approvals.overview,
-          mapApproved: !!approvals[mapType],
           regenSeed
         }, 240000, 'استغرق توليد الخريطة وقتًا أطول من المتوقع؛ أعد المحاولة.');
         if (!data.success) {
@@ -870,14 +834,13 @@
         }
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
-        tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         setLocationDataFetchedAt();
         await saveMapPreviewState();
         renderMapPreviewGallery(true);
         renderLocationWorkflowState();
         selectMapPreviewView(mapType);
-        toast('تم توليد الخريطة وأصبحت في انتظار الاعتماد');
+        toast('تم توليد الخريطة');
         return true;
       } catch (error) {
         console.error('[MAP REGEN]', error);

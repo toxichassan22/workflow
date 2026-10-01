@@ -66,8 +66,6 @@
         selectInput.checked = !!(row.show_on_map || row.selected);
         selectInput.addEventListener('change', () => {
           serializeLocationTable(key);
-          if (key === 'city_landmarks') invalidateCatchmentMapApproval();
-          if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
           scheduleMapTableRecompose(key);
           if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
         });
@@ -92,11 +90,8 @@
             .filter(item => String(item?.name || '').trim() !== roadName);
         }
         serializeLocationTable(key);
-        if (cfg.road) invalidateAccessMapApproval();
-        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
-        if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
         scheduleMapTableRecompose(key);
-        invalidateLocationAnalysisApproval();
+        releaseLocationSectionApproval();
       });
       if (cfg.road) {
         const drawBtn = document.createElement('button');
@@ -121,11 +116,8 @@
 
       [nameInput, categoryInput, distInput, durInput].filter(Boolean).forEach(inp => inp.addEventListener('input', () => {
         serializeLocationTable(key);
-        if (cfg.road) invalidateAccessMapApproval();
-        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
-        if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
         scheduleMapTableRecompose(key);
-        invalidateLocationAnalysisApproval();
+        releaseLocationSectionApproval();
       }));
 
       tr.appendChild(nameTd);
@@ -230,10 +222,7 @@
       addBtn.textContent = '+ إضافة صف';
       addBtn.addEventListener('click', () => {
         addLocationTableRow(key, {});
-        if (key === 'main_roads') invalidateAccessMapApproval();
-        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
-        if (key === 'nearby_landmarks') invalidateLandmarksMapApproval();
-        invalidateLocationAnalysisApproval();
+        releaseLocationSectionApproval();
         const tbody = table.querySelector('tbody');
         const last = tbody.lastElementChild;
         if (last) last.querySelector('.lt-name-input').focus();
@@ -271,11 +260,6 @@
       return wrap;
     }
 
-    const LOCATION_ANALYSIS_KEYS = [
-      'location_address', 'location_lat', 'location_lng', 'city', 'district',
-      'main_roads', 'nearby_landmarks', 'city_landmarks', 'location_detail'
-    ];
-
     function locationTableRows(key) {
       const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
       if (!table) return [];
@@ -290,61 +274,10 @@
       })).filter(row => row.name);
     }
 
-    function validateLocationAnalysisApproval() {
-      Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
-      const missing = LOCATION_ANALYSIS_KEYS.filter(key => {
-        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-        return !String(input?.value || tenantProjectData[key] || '').trim();
-      });
-      for (const key of ('nearby_landmarks city_landmarks').split(' ')) {
-        const invalid = locationTableRows(key).find(row => row.rowSource === 'manual' && (
-          !row.category || !row.distance || !row.duration));
-        if (invalid) return { valid: false, message: 'بيانات المعلم اليدوي غير مكتملة: الاسم والنوع والمسافة والمدة مطلوبة.' };
-      }
-      return missing.length
-        ? { valid: false, message: 'بيانات تحليل الموقع غير مكتملة: ' + missing.join('، ') }
-        : { valid: true, message: '' };
-    }
-
     function releaseLocationSectionApproval() {
       if (tenantProjectSectionStatuses.location !== 'approved') return false;
       applySectionStatuses({ location: 'draft' });
       return true;
-    }
-
-    function invalidateAccessMapApproval() {
-      if (!tenantCreativeImages.map_approvals?.access) return;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
-      releaseLocationSectionApproval();
-      renderLocationWorkflowState();
-      triggerAutoSaveDraft();
-    }
-
-    function invalidateCatchmentMapApproval() {
-      if (!tenantCreativeImages.map_approvals?.catchment) return;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), catchment: false };
-      releaseLocationSectionApproval();
-      renderLocationWorkflowState();
-      triggerAutoSaveDraft();
-    }
-
-    function invalidateLandmarksMapApproval() {
-      if (!tenantCreativeImages.map_approvals?.landmarks) return;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), landmarks: false };
-      releaseLocationSectionApproval();
-      renderLocationWorkflowState();
-      triggerAutoSaveDraft();
-    }
-
-    function invalidateLocationAnalysisApproval() {
-      const changed = !!tenantProjectData.location_analysis_approved;
-      tenantProjectData.location_analysis_approved = false;
-      const sectionChanged = releaseLocationSectionApproval();
-      const input = document.getElementById('locationAnalysisApproved');
-      if (input) input.value = '';
-      if (!changed && !sectionChanged) return;
-      renderLocationWorkflowState();
-      triggerAutoSaveDraft();
     }
 
     // A table edit must reach the persisted raster on its own: the designer
@@ -403,8 +336,6 @@
       if (typeof apply !== 'function') return Promise.resolve();
       const run = (async () => {
         try {
-          // Persist the released approval before recomposing, or the stored
-          // flag rejects the overlay with MAP_ALREADY_APPROVED.
           if (typeof saveMapPreviewState === 'function') await saveMapPreviewState();
           // Run on the shared map-write chain — a recompose posting while a
           // full regen is in flight can land after it and overwrite the fresh
@@ -456,67 +387,30 @@
       if (applying.length) await Promise.allSettled(applying);
     }
 
-    async function toggleLocationAnalysisApproval() {
-      if (tenantProjectData.location_analysis_approved) {
-        tenantProjectData.location_analysis_approved = false;
-        releaseLocationSectionApproval();
-      } else {
-        const validation = validateLocationAnalysisApproval();
-        if (!validation.valid) { toast(validation.message); return; }
-        tenantProjectData.location_analysis_approved = true;
-        tenantProjectData.location_analysis_approved_at = new Date().toISOString();
-      }
-      const input = document.getElementById('locationAnalysisApproved');
-      if (input) input.value = tenantProjectData.location_analysis_approved ? 'true' : '';
-      await saveMapPreviewState();
-      renderLocationWorkflowState();
-    }
-
     function renderLocationWorkflowState() {
-      const approved = !!tenantProjectData.location_analysis_approved;
-      const approvalInput = document.getElementById('locationAnalysisApproved');
-      if (approvalInput) approvalInput.value = approved ? 'true' : '';
-      const button = document.getElementById('locationAnalysisApprovalButton');
-      if (button) button.textContent = approved ? 'إلغاء اعتماد تحليل الموقع' : 'اعتماد تحليل الموقع';
-      const status = document.getElementById('locationAnalysisApprovalStatus');
-      if (status) status.textContent = approved ? 'تحليل الموقع معتمد' : 'تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط';
       const overview = typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS[0] : null;
       const overviewGenerated = mapPreviewIsGenerated(overview);
       const generateOverviewButton = document.getElementById('generateOverviewMapButton');
-      if (generateOverviewButton) generateOverviewButton.disabled = !approved || overviewGenerated;
-      LOCATION_ANALYSIS_KEYS.forEach(key => {
-        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-        if (input && input.type !== 'hidden') input.disabled = approved;
-      });
+      const hasCoords = isUsableMapCoordinate(tenantProjectData.location_lat, true)
+        && isUsableMapCoordinate(tenantProjectData.location_lng, false);
+      if (generateOverviewButton) generateOverviewButton.disabled = !hasCoords || overviewGenerated;
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
         const roadModeLocked = key === 'main_roads' && (tenantRoadEditMode || !!tenantRoadDrawingTarget);
         const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
         const landmarksModeLocked = key === 'nearby_landmarks' && tenantLandmarksEditMode;
+        const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea')
-          .forEach(control => {
-            const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
-            // The map-select checkbox is map display config, not analysis content:
-            // it stays clickable after site-analysis approval so users can pick
-            // which landmarks render before (re)generating the map.
-            control.disabled = modeLocked || (approved && !control.classList.contains('lt-map-select'));
-          });
+          .forEach(control => { control.disabled = modeLocked; });
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] button')
-          .forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked || landmarksModeLocked; });
+          .forEach(control => { control.disabled = modeLocked; });
         const add = document.querySelector('#tenantProjectForm table[data-location-table="' + key + '"]')?.closest('.location-table-field')?.querySelector('.location-table-add');
-        if (add) add.disabled = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
+        if (add) add.disabled = modeLocked;
       });
       const controls = document.getElementById('locationMapGenerationControls');
       if (controls && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
-        const approvals = tenantCreativeImages.map_approvals || {};
         const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType) || MAP_PREVIEW_VIEW_DEFS[0];
         tenantSelectedMapType = view.mapType;
         const generated = mapPreviewIsGenerated(view);
-        const mapApproved = !!approvals[view.mapType];
-        const generationLocked = !approved || (view.mapType !== 'overview' && !approvals.overview) || mapApproved;
-        const approvalLocked = !approved || (view.mapType !== 'overview' && !approvals.overview);
-        const approvalButton = generated || mapApproved
-          ? '<button type="button" class="btn small ' + (mapApproved ? 'ghost' : 'primary') + '" data-section-lock-ignore="1" onclick="' + (mapApproved ? 'unapproveMapPreview' : 'approveMapPreview') + '(\'' + view.mapType + '\')" ' + (!mapApproved && approvalLocked ? 'disabled' : '') + '>' + (mapApproved ? 'إلغاء اعتماد الخريطة' : 'اعتماد الخريطة') + '</button>'
-          : '';
         let actions = '';
         if (view.mapType === 'overview' && tenantMapPolygonMode) {
           actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()">تراجع عن آخر نقطة</button>' +
@@ -528,51 +422,41 @@
             '<button type="button" class="btn primary small" data-section-lock-ignore="1" id="confirmTenantMapPinButton" onclick="confirmTenantMapPin()">اعتماد التعيين</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoTenantMapPinButton" onclick="undoTenantMapPin()">تراجع</button>';
         } else if (view.mapType === 'overview' && generated) {
-          actions = approvalButton +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', 1)" ' + (generationLocked ? 'disabled' : '') + '>تكبير</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', -1)" ' + (generationLocked ? 'disabled' : '') + '>تصغير</button>' +
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')">إعادة توليد الخريطة</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', 1)">تكبير</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', -1)">تصغير</button>' +
             ((tenantCreativeImages.map_viewport_overrides || {}).overview
-              ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'overview\')" ' + (generationLocked ? 'disabled' : '') + '>الإطار التلقائي</button>' : '') +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()" ' + (mapApproved ? 'disabled' : '') + '>رسم حدود الموقع</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()" ' + (mapApproved ? 'disabled' : '') + '>تعيين الموقع</button>';
+              ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'overview\')">الإطار التلقائي</button>' : '') +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()">تعيين الموقع</button>';
         } else if (view.mapType === 'catchment' && tenantCatchmentEditMode) {
           actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmCatchmentEdits()">اعتماد</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoCatchmentEditsButton" onclick="undoCatchmentEdits()">تراجع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelCatchmentEdits()">إلغاء</button>';
         } else if (view.mapType === 'catchment' && generated) {
-          // The edit entry stays live on an approved map: confirming the edits releases
-          // the approval, and cancelling leaves it untouched.
-          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            approvalButton +
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')">إعادة توليد الخريطة</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startCatchmentEditMode()">تعديل</button>';
         } else if (view.mapType === 'landmarks' && tenantLandmarksEditMode) {
           actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmLandmarksEdits()">اعتماد</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoLandmarksEditsButton" onclick="undoLandmarksEdits()">تراجع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelLandmarksEdits()">إلغاء</button>';
         } else if (view.mapType === 'landmarks' && generated) {
-          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'landmarks\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            approvalButton +
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'landmarks\')">إعادة توليد الخريطة</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startLandmarksEditMode()">تعديل</button>';
-        } else if (mapApproved) {
-          // Keep an inconsistent legacy state recoverable: approval can survive while its image
-          // reference is missing, and the user must be able to release it before regenerating.
-          actions = approvalButton;
         } else if (view.mapType === 'access' && tenantRoadEditMode) {
           actions = accessRoadEditControlsHtml();
         } else if (view.mapType === 'access' && tenantRoadDrawingTarget) {
           actions = manualRoadDrawingControlsHtml();
         } else if (view.mapType === 'access' && generated) {
-          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', 1)" ' + (generationLocked ? 'disabled' : '') + '>تكبير</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', -1)" ' + (generationLocked ? 'disabled' : '') + '>تصغير</button>' +
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')">إعادة توليد الخريطة</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', 1)">تكبير</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', -1)">تصغير</button>' +
             ((tenantCreativeImages.map_viewport_overrides || {}).access
-              ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'access\')" ' + (generationLocked ? 'disabled' : '') + '>الإطار التلقائي</button>' : '') +
-            approvalButton +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()" ' + (mapApproved ? 'disabled' : '') + '>إضافة / تعديل الطرق</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')" ' + (mapApproved ? 'disabled' : '') + '>رسم مسار الطرق</button>';
+              ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'access\')">الإطار التلقائي</button>' : '') +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()">إضافة / تعديل الطرق</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')">رسم مسار الطرق</button>';
         } else if (view.mapType !== 'overview') {
-          actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (generationLocked ? 'disabled' : '') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>' + approvalButton;
+          actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (hasCoords ? '' : 'disabled') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>';
         }
         controls.innerHTML = actions
           ? '<div class="map-active-controls"><div class="map-active-controls-title">' + escapeHtml(view.title) + '</div><div class="map-active-controls-actions">' + actions + '</div></div>'
@@ -585,7 +469,7 @@
       }
       renderMapPreviewGallery();
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
-        const panel = document.getElementById('locationAnalysisApprovalPanel');
+        const panel = document.getElementById('locationMapToolsPanel');
         const controlsEl = document.getElementById('locationMapGenerationControls');
         const galleryEl = document.getElementById('mapPreviewGallery');
         if (panel) window.WFI18n.autoTranslate(panel);
@@ -705,7 +589,6 @@
     }
 
     async function startAccessRoadEditMode() {
-      if (tenantCreativeImages.map_approvals?.access) { toast('خريطة الطرق معتمدة'); return; }
       if (!openLocationTableMap('access')) return;
       tenantRoadDrawingTarget = null;
       tenantRoadEditMode = true;
@@ -875,7 +758,6 @@
       tenantRoadEditDraft = null;
       tenantRoadEditHistory = [];
       tenantRoadEditSelectedIndex = -1;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
       releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
@@ -900,7 +782,6 @@
     }
 
     async function startManualRoadDrawing(name) {
-      if (tenantCreativeImages.map_approvals?.access) { toast('خريطة الطرق معتمدة'); return; }
       if (!openLocationTableMap('access')) return;
       const names = accessRoadRows().map(row => row.name);
       const requestedName = String(name || '').trim();
@@ -937,7 +818,6 @@
       const paths = Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [];
       tenantProjectData.manual_road_paths = paths.filter(item => accessRoadNameKey(item?.name) !== accessRoadNameKey(tenantRoadDrawingTarget.name))
         .concat([{ name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points }]);
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
       tenantRoadDrawingTarget = null;
       releaseLocationSectionApproval();
       renderLocationWorkflowState();

@@ -303,15 +303,13 @@ class PresentationRevisionApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404, response.get_json())
             provider.assert_not_called()
 
-    def test_map_regen_persists_fresh_state_and_releases_approval(self):
-        # The route commit must carry the regenerated map's own frame, released
-        # approval and resolved items — otherwise a reload before the client's
-        # follow-up save reopens the previous frame and re-blocks regen.
+    def test_map_regen_persists_fresh_state(self):
+        # The route commit must carry the regenerated map's own frame and
+        # resolved items — otherwise a reload before the client's follow-up
+        # save reopens the previous frame.
         created = self.create(projectData={
-            'location_analysis_approved': True,
             'map_placeholders': {'##MAP_OVERVIEW##': '/maps/old_overview.png'},
             'tenantCreativeImages': {
-                'map_approvals': {'overview': True},
                 'map_placeholders': {'##MAP_OVERVIEW##': '/maps/old_overview.png'},
                 'map_landmark_items': [{'name': 'Old Mall', 'lat': 1.0, 'lng': 1.0}],
                 'maps_persisted': True,
@@ -341,8 +339,6 @@ class PresentationRevisionApiTests(unittest.TestCase):
         stored = self.client.get(f"/api/presentations/{created['presentationId']}",
                                  headers=self.headers).get_json()['presentation']
         creative = stored['projectData']['tenantCreativeImages']
-        self.assertFalse(creative['map_approvals']['landmarks'])
-        self.assertTrue(creative['map_approvals']['overview'])
         self.assertEqual(creative['map_landmark_items'], fresh_items)
         self.assertEqual(stored['projectData']['landmarks_matrix'], [{'name': 'New Mall'}])
         self.assertEqual(stored['projectData']['landmark_map_items'], fresh_items)
@@ -358,11 +354,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
         matrix = [{'name': 'Stored Mall'}]
         items = [{'name': 'Stored Mall', 'lat': 24.7, 'lng': 46.6}]
         created = self.create(projectData={
-            'location_analysis_approved': True,
             'landmarks_matrix': matrix,
             'landmark_map_items': items,
             'tenantCreativeImages': {
-                'map_approvals': {'overview': True},
                 'map_landmarks': matrix,
                 'map_landmark_items': items,
             },

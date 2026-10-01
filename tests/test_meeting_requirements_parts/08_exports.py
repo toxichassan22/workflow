@@ -658,7 +658,6 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         for kept in (
             'لا توجد بنود مدخلة في هذا الجدول.',
             'زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.',
-            'تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط',
             'لم تُرفع صور للأرض.',
         ):
             self.assertIn(kept, index_source, kept)

@@ -337,13 +337,15 @@
           tenantProjectData.location
         );
         if (hasLocation && (!sectionKey || sectionKey === 'location')) {
-          if (!tenantProjectData.location_analysis_approved) {
-            throw new Error('اعتماد تحليل الموقع مطلوب قبل توليد العرض');
+          // Tier-1 approval covers the AI site analysis only; the four maps are
+          // Google renders — their presence is an asset check, not an approval.
+          if (!tenantProjectData.site_analysis_approved
+              || !String(tenantProjectData.site_analysis || '').trim()) {
+            throw new Error('اعتماد تحليل الموقع النصي مطلوب قبل توليد العرض');
           }
-          const mapApprovals = tenantCreativeImages.map_approvals || {};
-          const missingMaps = MAP_PREVIEW_VIEW_DEFS.filter(view => !mapApprovals[view.mapType]);
+          const missingMaps = MAP_PREVIEW_VIEW_DEFS.filter(view => !mapPreviewIsGenerated(view));
           if (missingMaps.length) {
-            throw new Error('اعتماد الخرائط الأربع مطلوب قبل توليد العرض');
+            throw new Error('توليد الخرائط الأربع مطلوب قبل توليد العرض');
           }
           if (tenantCreativeImages.map_landmarks && tenantCreativeImages.map_landmarks.length) {
             tenantProjectData.landmarks_matrix = tenantCreativeImages.map_landmarks;

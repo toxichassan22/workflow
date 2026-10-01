@@ -1134,7 +1134,10 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
     requested_placeholders = request_images.get('map_placeholders')
     if isinstance(requested_placeholders, dict):
         for placeholder, path in requested_placeholders.items():
-            if not path or not _request_map_is_approved(request_images, placeholder):
+            # Maps carry no approval state — maps_persisted marks a client that
+            # already generated rasters, and the newest-row basename check below
+            # rejects any URL older than the persisted truth.
+            if not path or request_images.get('maps_persisted') is not True:
                 continue
             # The browser may already have received the generation-only alias
             # below, where an editable sidecar points at the marked canonical
@@ -1187,31 +1190,4 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
             request_images[key] = creative[key]
         elif key not in request_images and key in creative:
             request_images[key] = creative[key]
-    # Approvals are a live workflow flag, not file metadata: map rows carry no
-    # approval column, so the stored copy can lag the request (the section keeps
-    # editing under the draft scope after the presentation froze its snapshot).
-    # The browser's current flags stay authoritative; storage only fills a gap.
-    if 'map_approvals' not in request_images and 'map_approvals' in creative:
-        request_images['map_approvals'] = creative['map_approvals']
     return source, request_images
-
-
-def _map_approval_key(value):
-    """Return the logical map name for a canonical or editable placeholder."""
-    key = str(value or '').strip()
-    key = key.replace('##MAP_', '').replace('_EDITABLE##', '').replace('##', '')
-    for suffix in ('_SATELLITE', '_ROADMAP'):
-        if key.endswith(suffix):
-            key = key[:-len(suffix)]
-    return key.lower()
-
-
-def _request_map_is_approved(request_images, placeholder):
-    """Whether the caller is sending its current, user-approved map version."""
-    if not isinstance(request_images, dict) or request_images.get('maps_persisted') is not True:
-        return False
-    approvals = request_images.get('map_approvals')
-    if not isinstance(approvals, dict):
-        return False
-    value = approvals.get(_map_approval_key(placeholder))
-    return value is True or (isinstance(value, str) and value.strip().lower() in {'true', '1', 'yes'})

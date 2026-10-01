@@ -1317,8 +1317,11 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertNotIn('/uploads/maps/duplicate.png', replaced)
         self.assertIn('data-canonical-map="catchment"', replaced)
 
-        creative['map_approvals']['catchment'] = False
-        self.assertEqual(module._approved_canonical_map_url('catchment', {}, creative), '')
+        # A persisted map carries no approval flag — an old flag (or its
+        # absence) never hides it from the designer refresh.
+        creative['map_approvals'] = {'catchment': False}
+        self.assertEqual(module._approved_canonical_map_url('catchment', {}, creative),
+                         '/uploads/maps/approved.png')
 
     def test_explicit_map_refresh_falls_back_to_latest_saved_map_when_section_image_is_missing(self):
         module = self.application_module

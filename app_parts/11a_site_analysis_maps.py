@@ -736,85 +736,17 @@ def api_generate_single_map_image():
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
     if not effective_id:
         return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
-    # ISS-025: workflow approvals are read from the stored project, never the
-    # request payload — a flag the caller types in is not the ceremony.
-    stored_project = {}
+    # Maps are Google-rendered data, not AI content: no approval gates here.
+    # Scope checks stay — the caller must still own the presentation/draft.
     presentation = None
     if presentation_id:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
         if not presentation or not _presentation_in_scope(presentation):
             return jsonify({'error': 'Presentation not found'}), 404
-        try:
-            stored_project = json.loads(presentation.get('project_data') or '{}')
-        except (TypeError, ValueError):
-            stored_project = {}
     elif draft_id:
         stored_draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
         if stored_draft and not db.user_may_access_draft(g.user_id, stored_draft):
             return jsonify({'success': False, 'error': 'المشروع غير موجود'}), 404
-        stored_project = (stored_draft or {}).get('draft_data') or {}
-    if not isinstance(stored_project, dict):
-        stored_project = {}
-    stored_creative = stored_project.get('tenantCreativeImages') \
-        if isinstance(stored_project.get('tenantCreativeImages'), dict) else {}
-    stored_map_approvals = stored_creative.get('map_approvals') \
-        if isinstance(stored_creative.get('map_approvals'), dict) else {}
-    # An approval falls only when a persisted render proves it belongs to another
-    # site: map rows are metadata-tagged with the coordinates they were drawn at,
-    # so a location change can never hide behind a stale approval and regenerate
-    # nothing. No rows (or untagged rows) disprove nothing — the flag stands.
-    request_site_lat = maps_service._extract_coordinate(
-        project_data.get('location_lat') or project_data.get('locationLat'))
-    request_site_lng = maps_service._extract_coordinate(
-        project_data.get('location_lng') or project_data.get('locationLng'))
-
-    def _persisted_render_is_stale(*type_prefixes):
-        if request_site_lat is None or request_site_lng is None:
-            return False
-        try:
-            rows = db.get_map_images(
-                g.tenant_id, presentation_id=effective_id, draft_id=draft_id)
-        except Exception:
-            return False
-        saw_tagged_render = False
-        for row in rows or []:
-            image_type = str(row.get('image_type') or '')
-            if not any(image_type == prefix or image_type.startswith(prefix + '_')
-                       for prefix in type_prefixes):
-                continue
-            try:
-                meta = json.loads(row.get('metadata_json') or '{}')
-                rendered_lat = float(meta.get('lat'))
-                rendered_lng = float(meta.get('lng'))
-            except (TypeError, ValueError):
-                continue
-            saw_tagged_render = True
-            if abs(rendered_lat - request_site_lat) < 1e-4 \
-                    and abs(rendered_lng - request_site_lng) < 1e-4:
-                return False
-        return saw_tagged_render
-
-    overview_approved = stored_map_approvals.get('overview') is True \
-        and not _persisted_render_is_stale('overview')
-    if not overlay_only and stored_project.get('location_analysis_approved') not in (True, 'true', 1):
-        return jsonify({
-            'success': False,
-            'error': 'يجب اعتماد تحليل الموقع قبل إنشاء الخريطة',
-            'error_code': 'LOCATION_ANALYSIS_NOT_APPROVED',
-        }), 400
-    if not overlay_only and map_type in {'landmarks', 'access', 'catchment'} \
-            and not overview_approved:
-        return jsonify({
-            'success': False,
-            'error': 'يجب اعتماد خريطة الموقع العامة قبل إنشاء هذه الخريطة',
-            'error_code': 'OVERVIEW_MAP_NOT_APPROVED',
-        }), 400
-    if stored_map_approvals.get(map_type) is True and not _persisted_render_is_stale(map_type):
-        return jsonify({
-            'success': False,
-            'error': 'يجب إلغاء اعتماد الخريطة قبل إعادة توليدها',
-            'error_code': 'MAP_ALREADY_APPROVED',
-        }), 400
     highlight_site = data.get('highlightSite', True) is not False
     expected_revision = None
     if presentation:
@@ -899,17 +831,11 @@ def api_generate_single_map_image():
         # Slides live in slides_data — the embedded copy is storage waste.
         updated_project.pop('tenantSlidesData', None)
         updated_project['map_placeholders'] = {**old_placeholders, **placeholders}
-        # Persist the generated map's own frame, released approval and resolved
-        # items with it — the follow-up client save used to be the only writer,
-        # so a reload before it landed reopened the previous frame and the stale
-        # approval flag then re-blocked regeneration with MAP_ALREADY_APPROVED.
+        # Persist the generated map's own frame and resolved items with it —
+        # the follow-up client save used to be the only writer, so a reload
+        # before it landed reopened the previous frame.
         creative = dict(old_creative) if isinstance(old_creative, dict) else {}
         creative['map_placeholders'] = updated_project['map_placeholders']
-        stored_approvals = creative.get('map_approvals')
-        creative['map_approvals'] = {
-            **(stored_approvals if isinstance(stored_approvals, dict) else {}),
-            map_type: False,
-        }
         if (result.get('zooms') or {}).get(map_type) is not None:
             creative['map_zooms'] = {
                 **(creative.get('map_zooms') if isinstance(creative.get('map_zooms'), dict) else {}),

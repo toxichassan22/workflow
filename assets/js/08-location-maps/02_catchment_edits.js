@@ -130,12 +130,9 @@
       tenantCatchmentEditMode = false;
       tenantCatchmentEditDraft = null;
       tenantCatchmentEditHistory = [];
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), catchment: false };
       releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      // The released approval must reach the server before the recompose, or the
-      // stored flag rejects it with MAP_ALREADY_APPROVED.
       await saveMapPreviewState();
       const applied = await applyCatchmentMapEdits();
       toast(applied ? 'تم اعتماد تعديلات خريطة المنطقة' : WFT('map.edit_apply_failed', 'تعذر حفظ التعديلات على الخريطة'));
@@ -278,12 +275,9 @@
       tenantLandmarksEditMode = false;
       tenantLandmarksEditDraft = null;
       tenantLandmarksEditHistory = [];
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), landmarks: false };
       releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      // The released approval must reach the server before the recompose, or the
-      // stored flag rejects it with MAP_ALREADY_APPROVED.
       await saveMapPreviewState();
       const applied = await applyLandmarksMapEdits();
       toast(applied ? 'تم اعتماد تعديلات خريطة المعالم' : WFT('map.edit_apply_failed', 'تعذر حفظ التعديلات على الخريطة'));
@@ -294,6 +288,11 @@
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
+
+    const LOCATION_DATA_KEYS = new Set([
+      'location_address', 'location_lat', 'location_lng', 'city', 'district',
+      'main_roads', 'nearby_landmarks', 'city_landmarks', 'location_detail'
+    ]);
 
     const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'population_density', 'catchment_areas', 'location_data_fetched_at']);
     const TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio']);
@@ -621,19 +620,17 @@
                 tenantProjectData.location_coordinates_confirmed = false;
                 if (latInput) latInput.value = '';
                 if (lngInput) lngInput.value = '';
-                tenantProjectData.location_analysis_approved = false;
-                // Every generated raster, approval, saved frame and drawn boundary
-                // belongs to the previous link — keep showing them and the new site
-                // could never regenerate (the approval gate rejects it), so the map
-                // state is invalidated the moment the link changes.
+                // Every generated raster, saved frame and drawn boundary belongs to
+                // the previous link — the map state is invalidated the moment the
+                // link changes so the new site regenerates cleanly.
                 const creative = tenantCreativeImages || {};
                 const hasMapAssets =
                   Object.keys(creative.map_placeholders || {}).length > 0 ||
-                  Object.values(creative.map_approvals || {}).some(Boolean) ||
                   (tenantMapPolygonPoints && tenantMapPolygonPoints.length > 0);
                 if (hasMapAssets && typeof invalidateTenantMapAssets === 'function') {
                   invalidateTenantMapAssets();
                 }
+                releaseLocationSectionApproval();
                 renderLocationWorkflowState();
               }
             });
@@ -776,12 +773,9 @@
         previewDiv.id = 'tenantMapPreview';
         previewDiv.innerHTML = `
           <label>تحليل الموقع والخرائط</label>
-          <div id="locationAnalysisApprovalPanel" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
-            <button type="button" class="btn primary" id="locationAnalysisApprovalButton" data-section-lock-ignore="1" onclick="toggleLocationAnalysisApproval()">اعتماد تحليل الموقع</button>
-            <button type="button" class="btn ghost" id="generateOverviewMapButton" data-section-lock-ignore="1" onclick="generateOverviewMap()">توليد خريطة الأرض / المبنى</button>
-            <span id="locationAnalysisApprovalStatus" class="tenant-hint">تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط</span>
+          <div id="locationMapToolsPanel" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+            <button type="button" class="btn primary" id="generateOverviewMapButton" data-section-lock-ignore="1" onclick="generateOverviewMap()">توليد خريطة الأرض / المبنى</button>
           </div>
-          <input type="hidden" id="locationAnalysisApproved" data-key="location_analysis_approved" data-type="text" value="">
           <div id="locationMapGenerationControls"></div>
           <input type="hidden" id="tenantCoordinatesConfirmed" data-key="location_coordinates_confirmed" data-type="text" value="">
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
@@ -797,9 +791,9 @@
         `;
         (locationSection || form).appendChild(previewDiv);
         (locationSection || form).querySelectorAll('[data-key]').forEach(control => {
-          if (LOCATION_ANALYSIS_KEYS.includes(control.dataset.key)) {
-            control.addEventListener('input', invalidateLocationAnalysisApproval);
-            control.addEventListener('change', invalidateLocationAnalysisApproval);
+          if (LOCATION_DATA_KEYS.has(control.dataset.key)) {
+            control.addEventListener('input', releaseLocationSectionApproval);
+            control.addEventListener('change', releaseLocationSectionApproval);
           }
         });
         setTimeout(renderLocationWorkflowState, 0);

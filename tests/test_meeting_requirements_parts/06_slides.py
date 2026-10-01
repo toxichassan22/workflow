@@ -411,10 +411,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertTrue(images['map_placeholders']['##MAP_ACCESS##'].endswith(
             os.path.basename(access_path)))
 
-    def test_hydration_keeps_live_request_map_approvals(self):
-        # map_approvals is a live workflow flag, not file metadata — a stored
-        # project copy (draft snapshot or frozen presentation) can lag the
-        # request and must not clobber the flags the browser just sent.
+    def test_hydration_fills_uncovered_placeholder_from_current_request(self):
+        # maps_persisted marks a client with generated rasters — a request URL
+        # covering a placeholder no persisted row names is adopted, while the
+        # newest-row basename check still rejects stale echoes.
         maps_dir = Path(self.application_module.UPLOADS_DIR) / 'maps'
         maps_dir.mkdir(parents=True, exist_ok=True)
         map_file = tempfile.NamedTemporaryFile(dir=maps_dir, suffix='.png', delete=False)
@@ -424,16 +424,16 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
 
         with self.app.app_context():
-            db.add_map_image(self.tenant_a, 'access', map_path, '##MAP_ACCESS##',
-                             presentation_id='pres-live-approvals', metadata={})
             _project, images = self.application_module._hydrate_map_assets_for_request(
-                {'tenantCreativeImages': {'map_approvals': {'access': False, 'landmarks': True}}},
-                {'map_approvals': {'access': True, 'landmarks': False}},
+                {'tenantCreativeImages': {}},
+                {'map_placeholders': {'##MAP_ACCESS##': '/uploads/maps/' + os.path.basename(map_path)},
+                 'maps_persisted': True},
                 self.tenant_a,
                 presentation_id='pres-live-approvals',
             )
 
-        self.assertEqual(images['map_approvals'], {'access': True, 'landmarks': False})
+        self.assertEqual(images['map_placeholders']['##MAP_ACCESS##'],
+                         '/uploads/maps/' + os.path.basename(map_path))
 
     def test_latest_map_refresh_rejects_orphaned_preferred_url(self):
         # A preferred URL naming a file no canonical row still references is an
@@ -534,49 +534,45 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertEqual(generated_project['regen_seed'], 17)
         self.assertFalse(generate_maps.call_args.kwargs.get('force'))
 
-    def test_location_analysis_approval_gates_individual_map_generation(self):
+    def test_location_maps_generate_without_approval_gates(self):
         client = self.app.test_client()
         base = {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'approval-map'}
-        # The gates read approval from the stored draft; the payload cannot mint it.
         with self.app.app_context():
             db.save_project_draft(self.tenant_a, 'owner',
                                   {'project_name': 'Approval map', 'location_lat': 24.0,
                                    'location_lng': 46.0},
                                   {'basic': 'draft'}, 'draft', draft_id='approval-map')
-        response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
-            'projectData': base, 'mapType': 'overview'})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error_code'], 'LOCATION_ANALYSIS_NOT_APPROVED')
+        # Maps are Google renders, not AI content: all four generate in any
+        # order with no analysis approval and no overview-first rule.
+        result = {'placeholders': {}, 'landmarks': [], 'zooms': {}, 'centers': {}}
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images',
+                          return_value=result) as generate_maps, \
+                patch.object(self.application_module.db, 'get_branding', return_value={}):
+            for map_type in ('overview', 'landmarks', 'access', 'catchment'):
+                response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                    'projectData': base, 'mapType': map_type})
+                self.assertEqual(response.status_code, 200, (map_type, response.get_json()))
+        self.assertEqual(generate_maps.call_count, 4)
+        # Section approval keeps the two-tier contract: the AI site analysis
+        # text is approved, and all four map rasters are persisted artifacts.
         with self.app.app_context():
-            db.save_project_draft(self.tenant_a, 'owner',
-                                  {'project_name': 'Approval map', 'location_lat': 24.0,
-                                   'location_lng': 46.0, 'location_analysis_approved': True},
-                                  {'basic': 'draft'}, 'draft', draft_id='approval-map')
-        response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
-            'projectData': {**base, 'location_analysis_approved': True}, 'mapType': 'access'})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error_code'], 'OVERVIEW_MAP_NOT_APPROVED')
-        with self.app.app_context():
-            db.save_project_draft(self.tenant_a, 'owner',
-                                  {'project_name': 'Approval map', 'location_lat': 24.0,
-                                   'location_lng': 46.0, 'location_analysis_approved': True,
-                                   'tenantCreativeImages': {'map_approvals': {'overview': True}}},
-                                  {'basic': 'draft'}, 'draft', draft_id='approval-map')
-        with patch.object(self.application_module.db, 'delete_map_images') as delete_images:
-            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
-                'projectData': {**base, 'location_analysis_approved': True},
-                'mapType': 'overview',
-                'mapApproved': True,
-            })
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error_code'], 'MAP_ALREADY_APPROVED')
-        delete_images.assert_not_called()
-        self.assertFalse(self.application_module._location_workflow_complete({'draft_data': {}}))
-        self.assertTrue(self.application_module._location_workflow_complete({'draft_data': {
-            'location_analysis_approved': True,
-            'tenantCreativeImages': {'map_approvals': {
-                'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
-        }}))
+            draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
+            self.assertFalse(self.application_module._location_workflow_complete(draft_row))
+            state = dict(draft_row['draft_data'] or {})
+            state['site_analysis'] = 'تحليل نصي'
+            state['site_analysis_approved'] = True
+            db.get_db().execute(
+                'UPDATE project_drafts SET draft_data = ? WHERE id = ?',
+                (json.dumps(state, ensure_ascii=False), 'approval-map'))
+            db.get_db().commit()
+            draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
+            self.assertFalse(self.application_module._location_workflow_complete(draft_row))
+            for map_type in ('overview', 'access', 'catchment', 'landmarks'):
+                db.add_map_image(self.tenant_a, map_type, '/tmp/map.png',
+                                 f'##MAP_{map_type.upper()}##',
+                                 presentation_id='draft_approval-map', metadata={})
+            draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
+            self.assertTrue(self.application_module._location_workflow_complete(draft_row))
         rows = [{'name': f'معلم {index}', 'show_on_map': index in (2, 4)} for index in range(1, 10)]
         self.assertEqual([row['name'] for row in self.application_module.maps_service.select_map_landmark_rows(rows)],
                          ['معلم 2', 'معلم 4'])
@@ -586,15 +582,17 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         analyze_body = source.split('async function analyzeTenantSiteOnce()', 1)[1].split('const MAP_PREVIEW_VIEW_DEFS', 1)[0]
         self.assertIn('generateMaps: false', analyze_body)
         self.assertNotIn('await previewProjectMap(', analyze_body)
-        self.assertIn('location_analysis_approved', source)
-        self.assertIn('function toggleLocationAnalysisApproval()', source)
+        # The only approval surface in this section is the AI site analysis.
+        self.assertNotIn('location_analysis_approved', source)
+        self.assertIn('function approveTenantSiteAnalysis()', source)
         self.assertIn('function startManualRoadDrawing(name)', source)
         self.assertIn('function startLandmarkPlacement(key, tr)', source)
         self.assertIn('main_roads_data', source)
-        self.assertIn("overviewApproved: !!approvals.overview", source)
-        self.assertIn("mapApproved: !!approvals[mapType]", source)
-        self.assertIn("if (mapType !== 'overview' && !approvals.overview)", source)
-        self.assertIn('اعتماد الخرائط الأربع مطلوب قبل توليد العرض', source)
+        self.assertNotIn('map_approvals', source)
+        self.assertNotIn('overviewApproved', source)
+        self.assertNotIn('mapApproved', source)
+        self.assertNotIn('approvals.overview', source)
+        self.assertIn('توليد الخرائط الأربع مطلوب قبل توليد العرض', source)
         self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة'", source)
         self.assertNotIn("secondary_roads: { nameLabel:", source)
         self.assertIn('tenantProjectData.location_lat = latValue', source)
@@ -618,25 +616,23 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
-    def test_map_gallery_respects_approval_stages_and_editable_saved_maps(self):
+    def test_map_gallery_shows_generated_maps_without_approval_stages(self):
         source = read_frontend_text()
         self.assertIn('function mapPreviewStoredUrl(view)', source)
         self.assertIn("...(view.editableKeys || [])", source)
-        self.assertIn('function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {})', source)
-        self.assertIn("'بانتظار اعتماد خريطة الأرض / المبنى'", source)
-        self.assertIn("'بانتظار اعتماد تحليل الموقع'", source)
-        self.assertIn("'معتمدة بدون ملف'", source)
-        self.assertIn('const approvalButton = generated || mapApproved', source)
-        self.assertIn('} else if (mapApproved) {', source)
+        self.assertIn('function mapPreviewIsVisible(view)', source)
+        self.assertNotIn('map_approvals', source)
+        self.assertNotIn('approvalButton', source)
         gallery_body = source.split('function renderMapPreviewGallery()', 1)[1].split('function withCacheBust', 1)[0]
-        self.assertIn('const visible = mapPreviewIsVisible(view, approvals);', gallery_body)
+        self.assertIn('const visible = mapPreviewIsVisible(view);', gallery_body)
         self.assertIn('visible && url', gallery_body)
+        self.assertIn("'مولدة'", gallery_body)
         self.assertIn('const overviewGenerated = mapPreviewIsGenerated(overview);', source)
         self.assertIn('const generated = mapPreviewIsGenerated(view);', source)
 
     def test_overview_map_has_dedicated_generation_and_edit_modes(self):
         index_source = read_frontend_text()
-        approval_panel = index_source.split('id="locationAnalysisApprovalPanel"', 1)[1].split('</div>', 1)[0]
+        approval_panel = index_source.split('id="locationMapToolsPanel"', 1)[1].split('</div>', 1)[0]
         self.assertIn('id="generateOverviewMapButton"', approval_panel)
         self.assertIn('onclick="generateOverviewMap()"', approval_panel)
         workflow_body = index_source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
@@ -663,7 +659,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn(">تكبير</button>", workflow_body)
         self.assertIn(">تصغير</button>", workflow_body)
         self.assertIn("return mapType === 'overview' || mapType === 'access';", index_source)
-        regen_body = index_source.split('async function regenerateMapPreview(mapType)', 1)[1].split('let tenantMapPreviewRequest', 1)[0]
+        regen_body = index_source.split('async function regenerateMapPreviewOnce(mapType)', 1)[1].split('function ', 1)[0]
         self.assertIn('payload.map_zooms', regen_body)
         self.assertIn('payload.map_centers', regen_body)
         self.assertIn('payload.map_viewport_overrides', regen_body)
@@ -822,7 +818,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
         source = read_frontend_text()
         workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
-        for label in ('إعادة توليد الخريطة', 'اعتماد الخريطة', 'إضافة / تعديل الطرق', 'رسم مسار الطرق'):
+        for label in ('إعادة توليد الخريطة', 'إضافة / تعديل الطرق', 'رسم مسار الطرق'):
             self.assertIn(label, workflow)
         for label in ('اختيار الطريق', 'اعتماد المسارات', 'تراجع', 'إلغاء'):
             self.assertIn(label, source)
@@ -859,7 +855,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('tenantProjectData.main_roads = hidden.value;', source)
         self.assertIn('const allowedRoadKeys = new Set(rows.map(row => accessRoadNameKey(row.name)));', source)
         self.assertIn('.filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)))', source)
-        self.assertIn('function invalidateAccessMapApproval()', source)
+        self.assertIn('function releaseLocationSectionApproval()', source)
 
         maps_source = read_module_source('maps_service.py')
         self.assertIn('def recompose_access_map(', maps_source)
@@ -942,7 +938,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("view.mapType === 'catchment' && tenantCatchmentEditMode", workflow)
         self.assertIn("view.mapType === 'catchment' && generated", workflow)
         self.assertIn('إعادة توليد الخريطة', workflow)
-        self.assertIn('اعتماد الخريطة', workflow)
+        self.assertNotIn('اعتماد الخريطة', workflow)
         self.assertIn('>تعديل</button>', workflow)
         for function_name in ('startCatchmentEditMode', 'startCatchmentLabelDrag', 'undoCatchmentEdits',
                               'confirmCatchmentEdits', 'cancelCatchmentEdits', 'applyCatchmentMapEdits'):
@@ -1369,7 +1365,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("drawBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("placeBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("addBtn.dataset.sectionLockIgnore = '1';", source)
-        self.assertIn(".forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked || landmarksModeLocked; });", source)
+        self.assertIn(".forEach(control => { control.disabled = modeLocked; });", source)
         self.assertIn('function releaseLocationSectionApproval()', source)
         self.assertIn("applySectionStatuses({ location: 'draft' });", source)
         self.assertIn("document.createElement(cfg.road ? 'textarea' : 'input')", source)
@@ -1560,12 +1556,15 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         with self.app.app_context():
             draft_row = db.get_project_draft_by_id(self.tenant_a, 'parallel-approval')
             draft_state = dict(draft_row['draft_data'] or {})
-            draft_state['location_analysis_approved'] = True
-            draft_state['tenantCreativeImages'] = {'map_approvals': {
-                'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
+            draft_state['site_analysis'] = 'تحليل نصي للموقع'
+            draft_state['site_analysis_approved'] = True
             db.get_db().execute(
                 'UPDATE project_drafts SET draft_data = ? WHERE id = ? AND tenant_id = ?',
                 (json.dumps(draft_state, ensure_ascii=False), 'parallel-approval', self.tenant_a))
+            for map_type in ('overview', 'access', 'catchment', 'landmarks'):
+                db.add_map_image(self.tenant_a, map_type, '/tmp/map.png',
+                                 f'##MAP_{map_type.upper()}##',
+                                 presentation_id='draft_parallel-approval', metadata={})
             db.get_db().commit()
 
         # One merged call must store every section.
@@ -1762,8 +1761,8 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('def find_place_near(', source)
         # Appending the project address made Google return the site itself for every landmark.
         self.assertNotIn("query = f\"{lm['name']}, {location_context}\"", source)
-        self.assertIn('async function unapproveMapPreview(mapType)', index_source)
-        self.assertIn("(approved ? 'unapprove' : 'approve')", index_source)
+        self.assertNotIn('unapproveMapPreview', index_source)
+        self.assertNotIn('approveMapPreview', index_source)
 
     def test_map_label_font_never_reapplies_bidi(self):
         from PIL import ImageFont

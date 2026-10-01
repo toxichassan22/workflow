@@ -335,11 +335,6 @@ def _approved_canonical_map_url(map_type, project_data, creative_images=None):
         return ''
     creative = _designer_creative_images(project_data, creative_images)
     placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
-    approvals = creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}
-    if map_type in approvals:
-        approved = approvals.get(map_type)
-        if not (approved is True or (isinstance(approved, str) and approved.strip().lower() in {'true', '1', 'yes'})):
-            return ''
     base = token[:-2]
     for candidate in (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##'):
         value = placeholders.get(candidate)

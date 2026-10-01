@@ -72,8 +72,7 @@
         map_lat: null,
         map_lng: null,
         maps_signature: null,
-        maps_persisted: false,
-        map_approvals: {}
+        maps_persisted: false
       };
       // Rendered roads, resolved marker items, label placements and a manually
       // drawn boundary are all pinned to the old site's coordinates — carrying
@@ -164,7 +163,7 @@
         serializeLocationTable(tenantLandmarkPlacementTarget.key);
         scheduleMapTableRecompose(tenantLandmarkPlacementTarget.key);
         tenantLandmarkPlacementTarget = null;
-        invalidateLocationAnalysisApproval();
+        releaseLocationSectionApproval();
         triggerAutoSaveDraft();
         toast('تم حفظ موقع المعلم');
       }
@@ -178,7 +177,7 @@
       const pinConfirmButton = document.getElementById('confirmTenantMapPinButton');
       const overview = MAP_PREVIEW_VIEW_DEFS.find(view => view.mapType === 'overview');
       const overviewGenerated = mapPreviewIsGenerated(overview);
-      const locked = !overviewGenerated || !!tenantCreativeImages.map_approvals?.overview;
+      const locked = !overviewGenerated;
       if (undoButton) undoButton.disabled = locked || !tenantMapDraftPolygonPoints.length;
       if (confirmButton) confirmButton.disabled = locked || tenantMapDraftPolygonPoints.length < 3;
       if (clearButton) clearButton.disabled = locked || !tenantMapDraftPolygonPoints.length;
@@ -217,10 +216,9 @@
     }
 
     // Drag-to-pan is only safe on a frame we can convert clicks against: a known
-    // zoom and centre. Approved maps and every drawing/editing mode keep priority.
+    // zoom and centre. Every drawing/editing mode keeps priority.
     function mapViewportPanAllowed() {
       if (!mapViewportAdjustable(tenantSelectedMapType)) return false;
-      if (tenantCreativeImages.map_approvals?.[tenantSelectedMapType]) return false;
       if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
       return !!(tenantMapPreviewState && tenantMapPreviewState.frameAccurate);
     }
@@ -313,14 +311,12 @@
       if (!mapOverlayHasBase('overview')) return false;
       try {
         const payload = slimMapProjectData(tenantProjectData);
-        payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
         payload.draftId = tenantProjectData.draftId;
         const data = await api('POST', '/api/generate-map-image', {
           projectData: payload,
           mapType: 'overview',
           presentationId: tenantPresentationId,
           highlightSite: shouldHighlightTenantSite(),
-          mapApproved: false,
           overlayOnly: true
         });
         if (!data.success) return false;
@@ -344,14 +340,11 @@
       if (!mapOverlayHasBase('access')) return false;
       try {
           const payload = slimMapProjectData(tenantProjectData);
-          payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
           payload.draftId = tenantProjectData.draftId;
           const data = await api('POST', '/api/generate-map-image', {
             projectData: payload,
             mapType: 'access',
             presentationId: tenantPresentationId,
-            overviewApproved: true,
-            mapApproved: false,
             overlayOnly: true
           });
           if (!data.success) return false;
@@ -388,18 +381,6 @@
       return selectMapPreviewView('access');
     }
 
-    // Edit mode may open on an approved map: the approval then has to lift before
-    // the server recompose below, or the stored flag rejects it. Lifting it here —
-    // only when the clean sidecar is missing and a recompose is actually needed —
-    // keeps cancel-without-changes free for approved maps.
-    async function releaseMapApprovalForEdit(mapType) {
-      if (!tenantCreativeImages.map_approvals?.[mapType]) return;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
-      releaseLocationSectionApproval();
-      renderMapPreviewGallery(true);
-      await saveMapPreviewState();
-    }
-
     function applyCatchmentMapEdits() {
       if (!mapOverlayHasBase('catchment')) return Promise.resolve(false);
       return (async () => {
@@ -410,7 +391,6 @@
             projectData: payload,
             mapType: 'catchment',
             presentationId: tenantPresentationId,
-            mapApproved: false,
             overlayOnly: true
           });
           if (!data.success) return false;
@@ -441,7 +421,6 @@
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('catchment');
       if (tenantMapPreviewState?.usesEditableBase) return true;
-      await releaseMapApprovalForEdit('catchment');
       if (!(await applyCatchmentMapEdits())) return false;
       return selectMapPreviewView('catchment');
     }
@@ -456,7 +435,6 @@
             projectData: payload,
             mapType: 'landmarks',
             presentationId: tenantPresentationId,
-            mapApproved: false,
             overlayOnly: true
           });
           if (!data.success) return false;
@@ -487,13 +465,11 @@
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('landmarks');
       if (tenantMapPreviewState?.usesEditableBase) return true;
-      await releaseMapApprovalForEdit('landmarks');
       if (!(await applyLandmarksMapEdits())) return false;
       return selectMapPreviewView('landmarks');
     }
 
     async function toggleTenantPolygonMode() {
-      if (tenantCreativeImages.map_approvals?.overview) { toast('خريطة الأرض معتمدة'); return; }
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
       tenantMapPinMode = false;
@@ -525,6 +501,7 @@
       tenantProjectData.location_polygon_source = 'manual';
       tenantCreativeImages.map_highlight_site = null;
       syncTenantLocationPolygon();
+      releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       triggerAutoSaveDraft();
@@ -533,7 +510,6 @@
     }
 
     async function startTenantMapPinMode() {
-      if (tenantCreativeImages.map_approvals?.overview) { toast('خريطة الأرض معتمدة'); return; }
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
       const lat = Number(tenantProjectData.location_lat);
@@ -578,9 +554,9 @@
       tenantProjectData.location_coordinates_source = 'manual_map';
       tenantCreativeImages.map_lat = lat;
       tenantCreativeImages.map_lng = lng;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), overview: false };
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
+      releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       triggerAutoSaveDraft();

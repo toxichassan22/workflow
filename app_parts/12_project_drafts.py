@@ -152,7 +152,7 @@ SECTION_SNAPSHOT_BLOBS = {
     'section-executive-content': ['executive_content'],
 }
 SECTION_SNAPSHOT_LOCATION_EXTRAS = [
-    'location_analysis_approved',
+    'site_analysis_approved',
     'location_data_fetched_at',
     'location_polygon_source',
 ]
@@ -191,10 +191,6 @@ def _section_snapshot_slice(draft_data, section_key, section_map=None):
         for key in SECTION_SNAPSHOT_LOCATION_EXTRAS:
             if key in data:
                 selected[key] = change_tracking.strip_url_fetch_params(data[key])
-        creative = data.get('tenantCreativeImages')
-        if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
-            selected['map_approvals'] = change_tracking.strip_url_fetch_params(
-                dict(creative.get('map_approvals')))
     return selected
 
 
@@ -220,10 +216,6 @@ def _section_snapshot_slices(draft_data, section_map):
     for key in SECTION_SNAPSHOT_LOCATION_EXTRAS:
         if key in data:
             slices.setdefault('location', {})[key] = change_tracking.strip_url_fetch_params(data[key])
-    creative = data.get('tenantCreativeImages')
-    if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
-        slices.setdefault('location', {})['map_approvals'] = change_tracking.strip_url_fetch_params(
-            dict(creative.get('map_approvals')))
     return slices
 
 
@@ -966,37 +958,30 @@ def api_delete_project_draft_by_id(draft_id):
 
 
 def _location_workflow_complete(draft):
+    """Location section approval needs the AI site analysis approved plus the
+    four generated map rasters — the maps are Google renders, so they carry no
+    approval flags of their own."""
     project = (draft or {}).get('draft_data') if isinstance(draft, dict) else {}
     if isinstance(project, str):
         try:
             project = json.loads(project)
         except (TypeError, ValueError):
             project = {}
-    if not isinstance(project, dict) or project.get('location_analysis_approved') not in (True, 'true', 1):
+    if not isinstance(project, dict):
         return False
-    creative = project.get('tenantCreativeImages') if isinstance(project.get('tenantCreativeImages'), dict) else {}
-    approvals = creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}
-    return all(approvals.get(key) is True for key in ('overview', 'access', 'catchment', 'landmarks'))
-
-
-# Mirrors LOCATION_ANALYSIS_KEYS on the client: the analysis approval exists to
-# confirm a complete location input set, so the server requires the same set.
-_LOCATION_ANALYSIS_REQUIRED_KEYS = (
-    'location_address', 'location_lat', 'location_lng', 'city', 'district',
-    'main_roads', 'nearby_landmarks', 'city_landmarks', 'location_detail')
-_MAP_APPROVAL_TYPES = ('overview', 'access', 'catchment', 'landmarks')
-
-
-def _location_analysis_approvable(project_data):
-    """Whether the location analysis approval may stand: full inputs present."""
-    if not isinstance(project_data, dict):
+    if project.get('site_analysis_approved') not in (True, 'true', 1) \
+            or not str(project.get('site_analysis') or '').strip():
         return False
-    for key in _LOCATION_ANALYSIS_REQUIRED_KEYS:
-        value = project_data.get(key)
-        if value is None or value == [] or value == {} \
-                or (isinstance(value, str) and not value.strip()):
-            return False
-    return True
+    draft_id = (draft or {}).get('id')
+    tenant_id = (draft or {}).get('tenant_id') or getattr(g, 'tenant_id', None)
+    if not tenant_id:
+        return False
+    return all(
+        _map_image_artifact(tenant_id, map_type, draft_id=draft_id)
+        for map_type in _LOCATION_MAP_TYPES)
+
+
+_LOCATION_MAP_TYPES = ('overview', 'access', 'catchment', 'landmarks')
 
 
 def _map_image_artifact(tenant_id, map_type, draft_id=None, presentation_id=None):
@@ -1028,37 +1013,23 @@ def _map_image_artifact(tenant_id, map_type, draft_id=None, presentation_id=None
 def _sanitize_save_workflow_claims(tenant_id, draft_id, draft_data, stored_data):
     """ISS-025: workflow-lock claims must be backed by server artifacts.
 
-    Approval flags can always be cleared, and may only be set when the artifact
-    they claim exists: analysis approval needs the complete location input set;
-    a map approval needs a generated map recorded under this project. A bare
-    claim written into draftData does not survive — the stored value stands.
+    The only generated-content approval in the location section is the AI site
+    analysis text, and an approval claim may only be set when that text exists.
+    A bare claim written into draftData does not survive — the stored value
+    stands.
     """
     if not isinstance(draft_data, dict):
         return draft_data
     stored = stored_data if isinstance(stored_data, dict) else {}
     truthy = lambda v: v in (True, 'true', 1)
-    if truthy(draft_data.get('location_analysis_approved')) \
-            and not truthy(stored.get('location_analysis_approved')) \
-            and not _location_analysis_approvable(draft_data):
-        draft_data['location_analysis_approved'] = \
-            stored.get('location_analysis_approved') or False
+    if truthy(draft_data.get('site_analysis_approved')) \
+            and not truthy(stored.get('site_analysis_approved')) \
+            and not str(draft_data.get('site_analysis') or '').strip():
+        draft_data['site_analysis_approved'] = \
+            stored.get('site_analysis_approved') or False
         app.logger.warning(
-            '[DRAFT SAVE] Refused unbacked location analysis approval: tenant=%s draft=%s',
+            '[DRAFT SAVE] Refused unbacked site analysis approval: tenant=%s draft=%s',
             tenant_id, draft_id)
-    creative = draft_data.get('tenantCreativeImages')
-    stored_creative = stored.get('tenantCreativeImages')
-    if isinstance(creative, dict) and isinstance(creative.get('map_approvals'), dict):
-        incoming = creative['map_approvals']
-        stored_approvals = (stored_creative.get('map_approvals')
-                            if isinstance(stored_creative, dict) else {}) or {}
-        for key, value in list(incoming.items()):
-            if truthy(value) and not truthy(stored_approvals.get(key)) \
-                    and key in _MAP_APPROVAL_TYPES \
-                    and not _map_image_artifact(tenant_id, key, draft_id=draft_id):
-                incoming[key] = False
-                app.logger.warning(
-                    '[DRAFT SAVE] Refused map approval without a generated map: '
-                    'tenant=%s draft=%s map=%s', tenant_id, draft_id, key)
     return draft_data
 
 
@@ -1103,7 +1074,7 @@ def api_update_section_status():
             return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
                             'error_code': 'SECTION_FORBIDDEN'}), 403
         if bulk.get('location') == 'approved' and not _location_workflow_complete(before):
-            return jsonify({'error': 'Location analysis and all four maps must be approved first',
+            return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                             'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
         if draft_id:
             blocked = db.pending_section_versions(g.tenant_id, draft_id, list(bulk))
@@ -1146,7 +1117,7 @@ def api_update_section_status():
         return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
                         'error_code': 'SECTION_FORBIDDEN'}), 403
     if section_key == 'location' and section_status == 'approved' and not _location_workflow_complete(before):
-        return jsonify({'error': 'Location analysis and all four maps must be approved first',
+        return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
     if draft_id and db.pending_section_versions(g.tenant_id, draft_id, [section_key]):
         return jsonify({'error': 'This section awaits a version decision; decide on the sent version first',
@@ -1193,7 +1164,7 @@ def api_send_section_for_approval():
         return jsonify({'error': 'قسم غير متاح لهذا المستخدم',
                         'error_code': 'SECTION_FORBIDDEN'}), 403
     if section_key == 'location' and not _location_workflow_complete(draft):
-        return jsonify({'error': 'Location analysis and all four maps must be approved first',
+        return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
     stored = draft.get('draft_data') or {}
     section_map = _draft_field_section_map(g.tenant_id)
@@ -1525,18 +1496,8 @@ def api_restore_section_version():
     for key in _section_snapshot_slice(live, version['section_key'], section_map):
         live.pop(key, None)
     snapshot = dict(version.get('snapshot') or {})
-    map_approvals = snapshot.pop('map_approvals', None)
+    snapshot.pop('map_approvals', None)
     live.update(snapshot)
-    if version['section_key'] == 'location' and isinstance(map_approvals, dict):
-        raw_creative = live.get('tenantCreativeImages')
-        if isinstance(raw_creative, str):
-            try:
-                raw_creative = json.loads(raw_creative)
-            except Exception:
-                raw_creative = {}
-        creative = dict(raw_creative) if isinstance(raw_creative, dict) else {}
-        creative['map_approvals'] = map_approvals
-        live['tenantCreativeImages'] = creative
     try:
         db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), live,

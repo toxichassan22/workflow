@@ -123,40 +123,34 @@ class WorkflowClaimTests(ScopeTestBase):
             return self.client.post('/api/generate-map-image', headers=self.admin_headers,
                                     json={'projectData': project, 'mapType': map_type})
 
-    def test_map_gate_reads_approval_from_storage_not_payload(self):
-        # The payload claims every approval under the sun; the stored draft has
-        # none, so generation is refused at the first gate.
+    def test_map_generation_has_no_approval_gates(self):
+        # Maps are Google renders, not AI content: no approval flags gate them —
+        # payload claims and stored flags alike are ignored.
         draft_id = self._draft('wfc-map-claims')
         response = self._generate_map(draft_id, 'overview', {
             'location_analysis_approved': True,
             'locationAnalysisApproved': True,
             'tenantCreativeImages': {'map_approvals': {'overview': True}},
         })
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error_code'], 'LOCATION_ANALYSIS_NOT_APPROVED')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
 
-    def test_dependent_maps_need_the_stored_overview_approval(self):
-        draft_id = self._draft('wfc-map-overview', {'location_analysis_approved': True})
+    def test_dependent_maps_generate_without_overview_first(self):
+        draft_id = self._draft('wfc-map-overview')
         for map_type in ('landmarks', 'access', 'catchment'):
             response = self._generate_map(draft_id, map_type)
-            self.assertEqual(response.status_code, 400, map_type)
-            self.assertEqual(response.get_json()['error_code'], 'OVERVIEW_MAP_NOT_APPROVED',
-                             map_type)
+            self.assertEqual(response.status_code, 200, map_type)
 
-    def test_approved_map_cannot_be_regenerated_by_flagging_it(self):
+    def test_generated_map_can_be_regenerated(self):
         draft_id = self._draft('wfc-map-done', {
-            'location_analysis_approved': True,
             'tenantCreativeImages': {'map_approvals': {'overview': True}},
         })
         response = self._generate_map(draft_id, 'overview')
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error_code'], 'MAP_ALREADY_APPROVED')
-
-    def test_stored_approval_lets_generation_through(self):
-        draft_id = self._draft('wfc-map-ok', {'location_analysis_approved': True})
-        response = self._generate_map(draft_id, 'overview')
         self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertTrue(response.get_json()['success'])
+
+    def test_map_generation_needs_a_draft_scope(self):
+        response = self._generate_map(None, 'overview')
+        self.assertEqual(response.status_code, 400)
 
     def test_checkpoint_flag_without_a_live_run_stays_locked(self):
         # The flag claims a running generation; parked at the approval gate the
@@ -204,16 +198,23 @@ class WorkflowClaimTests(ScopeTestBase):
         self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')
 
     def test_unbacked_approval_claims_are_stripped_on_save(self):
+        # The only location approval left is the AI site analysis text — a claim
+        # with no analysis text behind it does not survive the save.
         draft_id = self._draft('wfc-strip')
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام',
-                          'location_analysis_approved': True,
-                          'tenantCreativeImages': {'map_approvals': {'overview': True}}}})
+                          'site_analysis_approved': True}})
         self.assertEqual(response.status_code, 200, response.get_json())
         stored = self._stored_draft_data(draft_id)
-        self.assertNotIn(stored.get('location_analysis_approved'), (True, 'true', 1))
-        approvals = (stored.get('tenantCreativeImages') or {}).get('map_approvals') or {}
-        self.assertNotEqual(approvals.get('overview'), True)
+        self.assertNotIn(stored.get('site_analysis_approved'), (True, 'true', 1))
+
+        response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
+            'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام',
+                          'site_analysis': 'تحليل نصي للموقع',
+                          'site_analysis_approved': True}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        stored = self._stored_draft_data(draft_id)
+        self.assertEqual(stored.get('site_analysis_approved'), True)
 
 
 class VersionRestoreGateTests(ScopeTestBase):
