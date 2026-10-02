@@ -136,10 +136,14 @@
           triggerAutoSaveDraft();
           return false;
         }
-        // Merge by slide id: slides the run never touched keep the user's
-        // mid-run edits; drift on a slide the run owns stays a refusal.
+        // Merge by slide id: the task lists pin which slides the run owns —
+        // everything else keeps the user's mid-run version, and drift on a
+        // slide the run owns stays a refusal.
+        const ownedIds = (typeof designerChatJobOwnedSlideIds === 'function')
+          ? designerChatJobOwnedSlideIds(reply, (data && data._designerJob) || null)
+          : null;
         const mergeResult = (typeof designerChatMergeJobSlides === 'function')
-          ? designerChatMergeJobSlides(jobMeta, incoming)
+          ? designerChatMergeJobSlides(jobMeta, incoming, ownedIds)
           : { conflict: false, slides: incoming };
         if (mergeResult.conflict) {
           tenantDesignerMessages.push({

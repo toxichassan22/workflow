@@ -330,11 +330,33 @@
       });
     }
 
+    // The task lists pin which slide ids the run may rewrite or remove — every
+    // other slide is the user's no matter how server-side normalization
+    // (renumber, section keys, watermark ink) rewrote its echo. Returns a Set
+    // of owned ids, or null when no task info exists (legacy replies fall back
+    // to diffing the echo against the baseline).
+    function designerChatJobOwnedSlideIds(reply, jobRecord) {
+      const owned = new Set();
+      let sawTasks = false;
+      const collect = tasks => {
+        if (!Array.isArray(tasks)) return;
+        sawTasks = true;
+        tasks.forEach(task => {
+          (Array.isArray(task && task.slides) ? task.slides : []).forEach(id => {
+            if (id !== null && id !== undefined && id !== '') owned.add(String(id));
+          });
+        });
+      };
+      collect(reply && reply.tasks);
+      collect(jobRecord && jobRecord.agentState && jobRecord.agentState.tasks);
+      return sawTasks ? owned : null;
+    }
+
     // Merge the returned deck over the live one by slide id. A slide the run
     // left untouched keeps the user's mid-run version; a slide the run rewrote
     // or removed while its content drifted from the last designer-written
     // state is a real conflict and keeps the old refuse behavior.
-    function designerChatMergeJobSlides(jobMeta, incoming) {
+    function designerChatMergeJobSlides(jobMeta, incoming, ownedIds) {
       const deck = Array.isArray(tenantSlidesData) ? tenantSlidesData : [];
       const signatures = jobMeta && jobMeta.slideSignatures;
       const wholeDeckConflict = () => !!(jobMeta && jobMeta.workspaceSignature
@@ -362,12 +384,16 @@
         // The id spaces diverged entirely — nothing to key the merge against.
         return { conflict: wholeDeckConflict(), slides: incoming };
       }
-      const jobChangedIds = new Set();
+      // ownedIds === null means no task metadata — fall back to treating every
+      // baseline slide as potentially job-owned (the old diff behavior).
+      const owns = ownedIds instanceof Set ? id => ownedIds.has(id) : () => true;
+      const jobTouchedIds = new Set();
       for (const id of baselineIds) {
         const base = signatures[id];
         const inc = incomingById.get(id);
-        if (inc && designerChatSlideSignature(inc) === base) continue;
-        jobChangedIds.add(id);  // the run rewrote it or removed it
+        const touched = !inc || designerChatSlideSignature(inc) !== base;
+        if (!touched || !owns(id)) continue;
+        jobTouchedIds.add(id);  // the run rewrote it or removed it
         const current = currentById.get(id);
         if (!inc && !current) continue;  // both sides removed it — nothing to fight over
         const drifted = !current
@@ -397,13 +423,13 @@
           conflict: false,
           slides: deck.map(slide => {
             const id = slide && slide.id;
-            return (typeof id === 'string' && id && jobChangedIds.has(id))
+            return (typeof id === 'string' && id && jobTouchedIds.has(id))
               ? incomingById.get(id) : slide;
           })
         };
       }
-      // Structural runs: the returned order is the run's intent, but untouched
-      // slides still merge the user's version back in by id.
+      // Structural runs: the returned order is the run's intent, but slides the
+      // run didn't own — or owned without changing — keep the user's version.
       const merged = [];
       incoming.forEach(inc => {
         const id = inc && inc.id;
@@ -411,19 +437,20 @@
         if (keyed && signatures[id] !== undefined) {
           const current = currentById.get(id);
           if (!current) return;  // the user deleted it; the run only echoed it
-          if (designerChatSlideSignature(inc) === signatures[id]) {
+          if (!owns(id) || designerChatSlideSignature(inc) === signatures[id]) {
             merged.push(current);
             return;
           }
         }
         merged.push(inc);
       });
-      // Slides the user added mid-run exist in neither the baseline nor the
-      // result — reinsert them where they sit now.
+      // Slides the user added mid-run — or baseline slides outside the run's
+      // ownership that vanished from the result — reinsert where they sit now.
       deck.forEach((slide, index) => {
         const id = slide && slide.id;
         const keyed = typeof id === 'string' && id;
-        if (keyed && (signatures[id] !== undefined || incomingIds.has(id))) return;
+        if (keyed && incomingIds.has(id)) return;
+        if (keyed && signatures[id] !== undefined && owns(id)) return;  // the run dropped it
         merged.splice(Math.min(index, merged.length), 0, slide);
       });
       return { conflict: false, slides: merged };
