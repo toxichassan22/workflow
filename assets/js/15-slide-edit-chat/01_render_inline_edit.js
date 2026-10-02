@@ -683,6 +683,9 @@
     async function requestTenantDesignerChat(payload, indicator, resumedJob = null) {
       const workspaceKey = resumedJob?.workspaceKey || designerChatWorkspaceKey();
       const requestId = resumedJob?.jobId || newTenantDesignerRequestId();
+      // The per-slide baselines are keyed by slide id — hand them out before
+      // the snapshot so a fresh deck without ids falls back, not corrupts.
+      if (!resumedJob && typeof ensureSlideIds === 'function') ensureSlideIds(tenantSlidesData);
       const metadata = {
         jobId: String(requestId),
         workspaceKey: String(workspaceKey || ''),
@@ -697,6 +700,8 @@
         hadAttachment: !!(resumedJob?.hadAttachment || payload?.attachedImage || (Array.isArray(payload?.attachedImages) && payload.attachedImages.length)),
         workspaceSignature: String(
           resumedJob?.workspaceSignature || designerChatWorkspaceSignature()),
+        slideSignatures: resumedJob?.slideSignatures || designerChatSlideSignatures(),
+        creativeSignatures: resumedJob?.creativeSignatures || designerChatCreativeSignatures(),
         startedAt: Number(resumedJob?.startedAt || Date.now()),
         updatedAt: Date.now(),
         status: String(resumedJob?.status || 'queued')
@@ -860,6 +865,9 @@
             // Server-authored changes must not later read as local drift, so
             // the apply-time signature baseline moves with each live apply.
             metadata.workspaceSignature = designerChatWorkspaceSignature();
+            if (typeof designerChatAdvanceSlideBaselines === 'function') {
+              designerChatAdvanceSlideBaselines(metadata, result.applied);
+            }
             appliedAdvanced = true;
           }
           if (Number.isFinite(Number(result?.appliedSeq))) {

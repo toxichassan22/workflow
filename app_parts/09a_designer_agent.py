@@ -169,6 +169,27 @@ def _agent_deck_signature(slides):
     return designer_agent_ids.deck_signature(slides)
 
 
+def _agent_plan_slide_signatures(tasks, slides):
+    """Per-slide signatures for the slides a plan's tasks touch. A pending
+    plan stays valid while those slides are unchanged — edits elsewhere in
+    the deck are none of the plan's business and never force a re-plan."""
+    task_ids = []
+    for task in tasks if isinstance(tasks, list) else []:
+        for sid in (task.get('slides') or []) if isinstance(task, dict) else []:
+            task_ids.append(sid)
+    return designer_agent_ids.slide_signatures(slides, task_ids)
+
+
+def _agent_confirm_deck_changed(confirm, slides):
+    """True when the deck drifted where the pending plan actually works."""
+    plan_sigs = confirm.get('slideSignatures')
+    if isinstance(plan_sigs, dict):
+        current = designer_agent_ids.slide_signatures(slides)
+        return any(current.get(str(sid)) != sig for sid, sig in plan_sigs.items())
+    # Older clients only echo the whole-deck signature.
+    return confirm.get('deckSignature') != _agent_deck_signature(slides)
+
+
 def _agent_error_turn(text):
     return {'kind': 'reply', 'message': text}
 
@@ -558,11 +579,12 @@ def _designer_agent_turn(ctx):
                 run = _designer_agent_run(clean, ctx, session)
             return _designer_agent_finish(run, ctx)
 
-    # Pending-plan confirmation: client echoes the plan back; the deck
-    # signature proves nothing shuffled while the user was deciding.
+    # Pending-plan confirmation: client echoes the plan back; the per-slide
+    # signatures prove the slides it touches did not change while the user was
+    # deciding (the whole-deck signature remains the fallback for old echoes).
     confirm = data.get('confirmPlan') if isinstance(data.get('confirmPlan'), dict) else None
     if confirm:
-        if confirm.get('deckSignature') != _agent_deck_signature(slides):
+        if _agent_confirm_deck_changed(confirm, slides):
             return _agent_chat_response(ctx, 'تغيّر محتوى العرض بعد إعداد الخطة — أعد الطلب لأخطط على النسخة الحالية.', kind='ask')
         tasks, _errs = designer_agent_plan.expand_plan(
             {'ops': confirm.get('ops') or [], 'style_brief': confirm.get('style_brief') or ''},
@@ -626,6 +648,7 @@ def _designer_agent_turn(ctx):
             pending = {
                 'id': plan_id,
                 'deckSignature': _agent_deck_signature(slides),
+                'slideSignatures': _agent_plan_slide_signatures(tasks, slides),
                 'style_brief': turn.get('style_brief') or '',
                 'ops': turn.get('ops') or [],
                 'tasks': [designer_agent_ops.public_task(t) for t in tasks],

@@ -72,3 +72,36 @@ def deck_signature(slides):
     return hashlib.sha256(
         json.dumps(rows, ensure_ascii=False, sort_keys=True).encode('utf-8')
     ).hexdigest()[:24]
+
+
+def slide_signature(slide):
+    """Fingerprint of one slide's mutable content.
+
+    Same fields as the per-slide row in :func:`deck_signature` so a pending
+    plan can guard only the slides its tasks touch — an edit anywhere else in
+    the deck is none of the plan's business.
+    """
+    slide = slide if isinstance(slide, dict) else {}
+    html = str(slide.get('html') or '')
+    payload = {
+        'title': str(slide.get('title') or ''),
+        'h': hashlib.sha1(html.encode('utf-8')).hexdigest()[:12],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode('utf-8')
+    ).hexdigest()[:24]
+
+
+def slide_signatures(slides, ids=None):
+    """``{slide_id: slide_signature}`` for the given ids (all keyed slides by
+    default). Missing or unkeyed slides are simply absent from the map."""
+    wanted = {str(sid) for sid in ids} if ids is not None else None
+    out = {}
+    for slide in slides if isinstance(slides, list) else []:
+        if not isinstance(slide, dict) or not _valid_id(slide.get('id')):
+            continue
+        sid = str(slide['id'])
+        if wanted is not None and sid not in wanted:
+            continue
+        out[sid] = slide_signature(slide)
+    return out

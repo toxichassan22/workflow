@@ -150,6 +150,9 @@
       tenantDesignerPendingPlan = {
         id: String(reply.pendingPlan.id || ''),
         deckSignature: String(reply.pendingPlan.deckSignature || ''),
+        slideSignatures: (reply.pendingPlan.slideSignatures
+            && typeof reply.pendingPlan.slideSignatures === 'object')
+          ? { ...reply.pendingPlan.slideSignatures } : null,
         style_brief: String(reply.pendingPlan.style_brief || ''),
         ops: Array.isArray(reply.pendingPlan.ops) ? reply.pendingPlan.ops : [],
         tasks: Array.isArray(reply.pendingPlan.tasks) ? reply.pendingPlan.tasks : []
@@ -243,6 +246,7 @@
       const payload = designerAgentBasePayload(designerAgentText('designer_agent.confirm_message', 'نفّذ الخطة المعروضة'));
       payload.confirmPlan = {
         id: plan.id, deckSignature: plan.deckSignature,
+        slideSignatures: plan.slideSignatures || null,
         style_brief: plan.style_brief, ops: plan.ops
       };
       await sendDesignerAgentRequest(payload, designerAgentText('designer_agent.busy_confirm', 'جاري تنفيذ الخطة المؤكدة...'));

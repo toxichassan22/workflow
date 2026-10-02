@@ -1,5 +1,10 @@
     function applyTenantDesignerChatResult(data, message, input = null) {
       const reply = data && data.data ? data.data : null;
+      // The job record that produced this reply carries the per-slide baselines
+      // the merge scopes drift checks to; freshly polled metadata wins over the
+      // persisted copy.
+      const jobMeta = (data && data._designerJob)
+        || (typeof currentTenantDesignerJob === 'function' ? currentTenantDesignerJob() : null);
       if (!data?.success || !reply) {
         tenantDesignerMessages.push({
           role: 'assistant',
@@ -116,10 +121,14 @@
           triggerAutoSaveDraft();
           return false;
         }
-        if (incoming.length < oldLength && !deleteIntent) {
+        // The drop guard compares against the deck the run started from —
+        // slides the user added mid-run were never the result's to drop.
+        const baselineCount = (jobMeta && jobMeta.slideSignatures)
+          ? Object.keys(jobMeta.slideSignatures).length : oldLength;
+        if (incoming.length < baselineCount && !deleteIntent) {
           tenantDesignerMessages.push({
             role: 'assistant',
-            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (oldLength - incoming.length) + ' من ' + oldLength + ' شريحة.',
+            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (baselineCount - incoming.length) + ' من ' + baselineCount + ' شريحة.',
             slides: tenantChatFocusIndexes.slice()
           });
           tenantProjectData.designerChat = designerChatPersistence();
@@ -127,7 +136,23 @@
           triggerAutoSaveDraft();
           return false;
         }
-        tenantSlidesData = incoming;
+        // Merge by slide id: slides the run never touched keep the user's
+        // mid-run edits; drift on a slide the run owns stays a refusal.
+        const mergeResult = (typeof designerChatMergeJobSlides === 'function')
+          ? designerChatMergeJobSlides(jobMeta, incoming)
+          : { conflict: false, slides: incoming };
+        if (mergeResult.conflict) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: 'لم تُطبق النتيجة لأن العرض تغير أثناء تنفيذ المهمة.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+          tenantProjectData.designerChat = designerChatPersistence();
+          renderTenantDesignerChat();
+          triggerAutoSaveDraft();
+          return false;
+        }
+        tenantSlidesData = mergeResult.slides;
         ensureSlideIds(tenantSlidesData);
         if (tenantSlidesData.length < oldLength) {
           activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
@@ -156,7 +181,9 @@
         renderTenantSlides();
       }
       if (reply.creativeImages && typeof reply.creativeImages === 'object') {
-        tenantCreativeImages = reply.creativeImages;
+        tenantCreativeImages = (typeof designerChatMergeCreativeImages === 'function')
+          ? designerChatMergeCreativeImages(jobMeta, reply.creativeImages)
+          : reply.creativeImages;
         tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
       }
       if (!Array.isArray(reply.chatHistory)) {
@@ -192,9 +219,12 @@
         tenantProjectData.designerChat = designerChatPersistence();
         triggerAutoSaveDraft();
       }
+      if (typeof ensureSlideIds === 'function') ensureSlideIds(tenantSlidesData);
       const resumeJob = {
         ...job,
         workspaceSignature: designerChatWorkspaceSignature(),
+        slideSignatures: designerChatSlideSignatures(),
+        creativeSignatures: designerChatCreativeSignatures(),
         updatedAt: Date.now()
       };
       persistTenantDesignerJob(resumeJob);
@@ -235,7 +265,8 @@
         // The poll mutates its own metadata copy (live-apply moves the
         // signature baseline); re-read the persisted record so the apply-time
         // check compares the freshest baseline against the current deck.
-        if (!tenantDesignerJobCanApply(currentTenantDesignerJob() || resumeJob)) {
+        const liveJobRecord = currentTenantDesignerJob() || resumeJob;
+        if (!tenantDesignerJobCanApply(liveJobRecord)) {
           applyTenantDesignerChatResult({
             success: false,
             status: 'failed',
@@ -885,6 +916,10 @@
         slideIndex: Number.isInteger(Number(metadata.slideIndex)) ? Number(metadata.slideIndex) : 0,
         hadAttachment: !!metadata.hadAttachment,
         workspaceSignature: String(metadata.workspaceSignature || ''),
+        slideSignatures: (metadata.slideSignatures && typeof metadata.slideSignatures === 'object')
+          ? { ...metadata.slideSignatures } : null,
+        creativeSignatures: (metadata.creativeSignatures && typeof metadata.creativeSignatures === 'object')
+          ? { ...metadata.creativeSignatures } : null,
         appliedSeq: Number(metadata.appliedSeq) || 0,
         startedAt: Number(metadata.startedAt || Date.now()),
         updatedAt: Number(metadata.updatedAt || Date.now()),
@@ -932,6 +967,9 @@
     }
 
     function tenantDesignerJobCanApply(metadata) {
+      // A job keyed by slide id defers drift handling to the merge at apply
+      // time — an edit on a slide the run never touched must not fail it.
+      if (metadata?.slideSignatures) return true;
       return !metadata?.workspaceSignature
         || metadata.workspaceSignature === designerChatWorkspaceSignature();
     }

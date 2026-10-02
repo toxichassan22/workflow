@@ -233,3 +233,194 @@
       if (applied) applyDesignerSlideActivity();
       return applied;
     }
+
+    // ── Per-slide drift baselines ────────────────────────────────────────────
+    // The workspace signature used to cover the whole deck, so a manual edit
+    // on a slide the run never touched failed the apply with «العرض تغير أثناء
+    // تنفيذ المهمة». Baselines are per slide id instead: at apply time only a
+    // slide the run rewrote or removed counts as a conflict, and edits on any
+    // other slide merge back into the returned deck.
+
+    function designerChatStableSerialize(value) {
+      if (Array.isArray(value)) {
+        return '[' + value.map(designerChatStableSerialize).join(',') + ']';
+      }
+      if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort()
+          .map(key => JSON.stringify(key) + ':' + designerChatStableSerialize(value[key]))
+          .join(',') + '}';
+      }
+      return JSON.stringify(value === undefined ? null : value);
+    }
+
+    function designerChatHashSignature(value) {
+      const serialized = designerChatStableSerialize(value);
+      let hash = 2166136261;
+      for (let index = 0; index < serialized.length; index++) {
+        hash ^= serialized.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      return serialized.length + ':' + (hash >>> 0).toString(16);
+    }
+
+    // {slideId: signature} in deck order — null when a slide cannot be keyed,
+    // which sends the apply path back to the whole-deck signature check.
+    function designerChatSlideSignatures(slides = tenantSlidesData) {
+      const source = Array.isArray(slides) ? slides : [];
+      const signatures = {};
+      for (const slide of source) {
+        const id = slide && slide.id;
+        if (typeof id !== 'string' || !id) return null;
+        signatures[id] = designerChatHashSignature(slide);
+      }
+      return signatures;
+    }
+
+    function designerChatCreativeSignatures() {
+      const source = (typeof tenantCreativeImages !== 'undefined'
+          && tenantCreativeImages && typeof tenantCreativeImages === 'object'
+          && !Array.isArray(tenantCreativeImages)) ? tenantCreativeImages : {};
+      const signatures = {};
+      Object.keys(source).forEach(key => {
+        signatures[key] = designerChatHashSignature(source[key]);
+      });
+      return signatures;
+    }
+
+    // A live-applied task rewrote these slides on this deck — move their
+    // baselines forward so the run's own writes never read as drift. A slide
+    // an open edit session owns kept its content, so its baseline stays and a
+    // later conflict is still detected.
+    function designerChatAdvanceSlideBaselines(metadata, applied) {
+      const signatures = metadata && metadata.slideSignatures;
+      if (!signatures || typeof signatures !== 'object' || !applied || typeof applied !== 'object') return;
+      const deck = Array.isArray(tenantSlidesData) ? tenantSlidesData : [];
+      Object.keys(applied).forEach(slideId => {
+        const patch = applied[slideId];
+        const slide = deck.find(item => String(item && item.id) === String(slideId));
+        const patchHtml = patch && typeof patch.html === 'string' ? patch.html : null;
+        const patchTitle = patch && patch.title != null ? String(patch.title) : null;
+        if (!slide || (patchHtml !== null && slide.html !== patchHtml)
+            || (patchTitle !== null && String(slide.title || '') !== patchTitle)) return;
+        signatures[String(slideId)] = designerChatHashSignature(slide);
+      });
+    }
+
+    // Merge the returned deck over the live one by slide id. A slide the run
+    // left untouched keeps the user's mid-run version; a slide the run rewrote
+    // or removed while its content drifted from the last designer-written
+    // state is a real conflict and keeps the old refuse behavior.
+    function designerChatMergeJobSlides(jobMeta, incoming) {
+      const deck = Array.isArray(tenantSlidesData) ? tenantSlidesData : [];
+      const signatures = jobMeta && jobMeta.slideSignatures;
+      const wholeDeckConflict = () => !!(jobMeta && jobMeta.workspaceSignature
+        && jobMeta.workspaceSignature !== designerChatWorkspaceSignature());
+      if (!signatures || typeof signatures !== 'object') {
+        return { conflict: wholeDeckConflict(), slides: incoming };
+      }
+      const currentById = new Map();
+      const currentIndexById = new Map();
+      deck.forEach((slide, index) => {
+        const id = slide && slide.id;
+        if (typeof id === 'string' && id && !currentById.has(id)) {
+          currentById.set(id, slide);
+          currentIndexById.set(id, index);
+        }
+      });
+      const incomingById = new Map();
+      incoming.forEach(slide => {
+        const id = slide && slide.id;
+        if (typeof id === 'string' && id) incomingById.set(id, slide);
+      });
+      const baselineIds = Object.keys(signatures);
+      if (baselineIds.length && incoming.length
+          && !incoming.some(slide => slide && signatures[String(slide.id)] !== undefined)) {
+        // The id spaces diverged entirely — nothing to key the merge against.
+        return { conflict: wholeDeckConflict(), slides: incoming };
+      }
+      const jobChangedIds = new Set();
+      for (const id of baselineIds) {
+        const base = signatures[id];
+        const inc = incomingById.get(id);
+        if (inc && designerChatHashSignature(inc) === base) continue;
+        jobChangedIds.add(id);  // the run rewrote it or removed it
+        const current = currentById.get(id);
+        if (!inc && !current) continue;  // both sides removed it — nothing to fight over
+        const drifted = !current
+          || designerChatHashSignature(current) !== base
+          || (typeof getSlideEditSession === 'function'
+              && !!getSlideEditSession(currentIndexById.get(id)));
+        if (drifted) return { conflict: true, slides: deck };
+      }
+      const incomingIds = new Set();
+      incoming.forEach(slide => {
+        const id = slide && slide.id;
+        if (typeof id === 'string' && id) incomingIds.add(id);
+      });
+      const jobAdded = incoming.some(slide => {
+        const id = slide && slide.id;
+        return !(typeof id === 'string' && id) || signatures[id] === undefined;
+      });
+      const sharedBaselineOrder = baselineIds.filter(id => incomingIds.has(id));
+      const sharedIncomingOrder = incoming
+        .map(slide => slide && slide.id)
+        .filter(id => typeof id === 'string' && signatures[id] !== undefined);
+      const structural = jobAdded || sharedBaselineOrder.length !== baselineIds.length
+        || sharedBaselineOrder.some((id, index) => id !== sharedIncomingOrder[index]);
+      if (!structural) {
+        // Pure content edits: the user's deck order stays authoritative.
+        return {
+          conflict: false,
+          slides: deck.map(slide => {
+            const id = slide && slide.id;
+            return (typeof id === 'string' && id && jobChangedIds.has(id))
+              ? incomingById.get(id) : slide;
+          })
+        };
+      }
+      // Structural runs: the returned order is the run's intent, but untouched
+      // slides still merge the user's version back in by id.
+      const merged = [];
+      incoming.forEach(inc => {
+        const id = inc && inc.id;
+        const keyed = typeof id === 'string' && id;
+        if (keyed && signatures[id] !== undefined) {
+          const current = currentById.get(id);
+          if (!current) return;  // the user deleted it; the run only echoed it
+          if (designerChatHashSignature(inc) === signatures[id]) {
+            merged.push(current);
+            return;
+          }
+        }
+        merged.push(inc);
+      });
+      // Slides the user added mid-run exist in neither the baseline nor the
+      // result — reinsert them where they sit now.
+      deck.forEach((slide, index) => {
+        const id = slide && slide.id;
+        const keyed = typeof id === 'string' && id;
+        if (keyed && (signatures[id] !== undefined || incomingIds.has(id))) return;
+        merged.splice(Math.min(index, merged.length), 0, slide);
+      });
+      return { conflict: false, slides: merged };
+    }
+
+    // creativeImages is keyed like the deck: the run's new and updated keys
+    // land, but a key the user changed or added mid-run keeps the user value.
+    function designerChatMergeCreativeImages(jobMeta, incoming) {
+      if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
+      const baseline = jobMeta && jobMeta.creativeSignatures;
+      const current = (typeof tenantCreativeImages !== 'undefined'
+          && tenantCreativeImages && typeof tenantCreativeImages === 'object'
+          && !Array.isArray(tenantCreativeImages)) ? tenantCreativeImages : {};
+      if (!baseline || typeof baseline !== 'object') return incoming;
+      const merged = { ...incoming };
+      Object.keys(current).forEach(key => {
+        if (!Object.prototype.hasOwnProperty.call(baseline, key)) {
+          if (!Object.prototype.hasOwnProperty.call(merged, key)) merged[key] = current[key];
+          return;
+        }
+        if (designerChatHashSignature(current[key]) !== baseline[key]) merged[key] = current[key];
+      });
+      return merged;
+    }
