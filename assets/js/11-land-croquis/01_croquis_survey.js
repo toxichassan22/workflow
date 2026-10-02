@@ -362,7 +362,7 @@
           tenantProjectData.site_analysis = data.analysis;
           tenantProjectData.site_analysis_approved = false;
           input.value = data.analysis;
-          input.readOnly = false;
+          refreshSiteAnalysisApprovalUI();
           triggerAutoSaveDraft();
           updateLoaderProgress(100, 'اكتمل تحليل الموقع. راجعه ثم اعتمده أو عدّله.');
         } else if (data.error) {
@@ -376,6 +376,19 @@
       }
     }
 
+    function refreshSiteAnalysisApprovalUI() {
+      const input = document.querySelector('#tenantProjectForm [data-key="site_analysis"]');
+      const analyzeButton = document.getElementById('siteAnalysisGenerateButton');
+      const approveButton = document.getElementById('siteAnalysisApproveButton');
+      const approved = tenantProjectData && tenantProjectData.site_analysis_approved === true;
+      if (input) input.readOnly = approved || !(tenantProjectData && tenantProjectData.site_analysis);
+      if (analyzeButton) analyzeButton.style.display = approved ? 'none' : '';
+      if (approveButton) {
+        approveButton.textContent = approved ? 'الغاء الاعتماد' : 'اعتماد التحليل';
+        approveButton.dataset.arText = approved ? 'الغاء الاعتماد' : 'اعتماد التحليل';
+      }
+    }
+
     async function approveTenantSiteAnalysis() {
       const input = document.querySelector('#tenantProjectForm [data-key="site_analysis"]');
       const value = (input?.value || '').trim();
@@ -385,9 +398,25 @@
       }
       tenantProjectData.site_analysis = value;
       tenantProjectData.site_analysis_approved = true;
-      if (input) input.readOnly = false;
+      refreshSiteAnalysisApprovalUI();
       await saveProjectAsDraft(true);
       toast('تم اعتماد تحليل الموقع');
+    }
+
+    async function unapproveTenantSiteAnalysis() {
+      tenantProjectData.site_analysis_approved = false;
+      releaseLocationSectionApproval();
+      refreshSiteAnalysisApprovalUI();
+      await saveProjectAsDraft(true);
+      toast('تم إلغاء اعتماد تحليل الموقع');
+    }
+
+    function toggleTenantSiteAnalysisApproval() {
+      if (tenantProjectData && tenantProjectData.site_analysis_approved === true) {
+        void unapproveTenantSiteAnalysis();
+      } else {
+        void approveTenantSiteAnalysis();
+      }
     }
 
     let tenantSiteAnalysisRequest = null;

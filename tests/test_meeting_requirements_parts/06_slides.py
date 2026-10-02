@@ -585,6 +585,14 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         # The only approval surface in this section is the AI site analysis.
         self.assertNotIn('location_analysis_approved', source)
         self.assertIn('function approveTenantSiteAnalysis()', source)
+        # The analysis approval is a two-state toggle: approved hides the
+        # generate button, flips the label and locks the textarea.
+        self.assertIn('function toggleTenantSiteAnalysisApproval()', source)
+        self.assertIn('function unapproveTenantSiteAnalysis()', source)
+        self.assertIn('id = \'siteAnalysisGenerateButton\'', source)
+        self.assertIn('id = \'siteAnalysisApproveButton\'', source)
+        self.assertIn("approveButton.textContent = approved ? 'الغاء الاعتماد' : 'اعتماد التحليل'", source)
+        self.assertIn("input.readOnly = approved", source)
         self.assertIn('function startManualRoadDrawing(name)', source)
         self.assertIn('function startLandmarkPlacement(key, tr)', source)
         self.assertIn('main_roads_data', source)

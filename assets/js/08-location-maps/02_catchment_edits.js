@@ -644,21 +644,30 @@
             analysisActions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;';
             const analyzeButton = document.createElement('button');
             analyzeButton.type = 'button';
+            analyzeButton.id = 'siteAnalysisGenerateButton';
             analyzeButton.className = 'btn primary small';
             analyzeButton.textContent = 'تحليل الموقع';
+            analyzeButton.dataset.arText = 'تحليل الموقع';
             analyzeButton.onclick = () => generateTenantSiteAnalysis();
             const approveButton = document.createElement('button');
             approveButton.type = 'button';
+            approveButton.id = 'siteAnalysisApproveButton';
             approveButton.className = 'btn ghost small';
             approveButton.textContent = 'اعتماد التحليل';
-            approveButton.onclick = () => approveTenantSiteAnalysis();
+            approveButton.dataset.arText = 'اعتماد التحليل';
+            approveButton.onclick = () => toggleTenantSiteAnalysisApproval();
             analysisActions.appendChild(analyzeButton);
             analysisActions.appendChild(approveButton);
             div.appendChild(analysisActions);
             input.addEventListener('input', () => {
               tenantProjectData.site_analysis = input.value;
-              tenantProjectData.site_analysis_approved = false;
+              if (tenantProjectData.site_analysis_approved) {
+                tenantProjectData.site_analysis_approved = false;
+                releaseLocationSectionApproval();
+              }
+              refreshSiteAnalysisApprovalUI();
             });
+            refreshSiteAnalysisApprovalUI();
           }
           div.appendChild(input);
           if (f.fieldKey === 'allowed_uses') {
