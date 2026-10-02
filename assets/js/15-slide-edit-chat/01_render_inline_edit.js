@@ -59,6 +59,16 @@
     }
 
     function commitSlideInlineEdit(stage, index, editedEl) {
+      // The deck may have been reordered/rebuilt since this card was rendered
+      // (e.g. a designer merge inserting slides) — follow the slide's id to its
+      // current index instead of trusting the render-time position.
+      const card = stage && stage.closest ? stage.closest('.ge-slide-card') : null;
+      const slideId = card && card.dataset ? String(card.dataset.slideId || '') : '';
+      if (slideId) {
+        const byId = tenantSlidesData.findIndex(s => s && String(s.id || '') === slideId);
+        if (byId === -1) return;  // the slide was deleted while editing
+        index = byId;
+      }
       const slide = stage.querySelector('.slide');
       const slideData = tenantSlidesData[index];
       if (!slide || !slideData || !slideData.html) return;
@@ -185,6 +195,7 @@
         const container = document.createElement('div');
         container.className = 'ge-slide-card' + (i === activeSlideIndex ? ' active-slide' : '');
         container.id = 'slide-card-' + i;
+        container.dataset.slideId = s && s.id ? String(s.id) : '';
         container.style.cssText = 'margin-bottom:24px; position:relative;';
         container.onclick = () => selectTenantSlide(i);
         if (hasPermission('create_presentation')) {

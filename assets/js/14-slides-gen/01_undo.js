@@ -518,6 +518,7 @@
       const container = document.createElement('div');
       container.className = 'ge-slide-card' + (index === activeSlideIndex ? ' active-slide' : '');
       container.id = 'slide-card-' + index;
+      container.dataset.slideId = slide.id ? String(slide.id) : '';
       container.style.cssText = 'margin-bottom:24px; position:relative;';
       container.onclick = () => selectTenantSlide(index);
       if (hasPermission('create_presentation')) {

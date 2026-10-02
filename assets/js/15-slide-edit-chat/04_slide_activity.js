@@ -429,6 +429,41 @@
       return { conflict: false, slides: merged };
     }
 
+    // Editor state is keyed by numeric position (edit sessions, the inline/
+    // element edit flags, the active/chat slide). A structural merge can move
+    // a slide to a new index, so re-key that state by slide id — otherwise an
+    // open edit session ends up parked on whichever slide took its old spot.
+    function designerChatRemapSlideState(prevSlides, nextSlides) {
+      const prevIds = (Array.isArray(prevSlides) ? prevSlides : []).map(s => s && s.id);
+      const nextIndexById = {};
+      (Array.isArray(nextSlides) ? nextSlides : []).forEach((slide, i) => {
+        const id = slide && slide.id;
+        if (id && nextIndexById[id] === undefined) nextIndexById[id] = i;
+      });
+      const nextIndexFor = oldIndex => {
+        const id = prevIds[oldIndex];
+        return id !== undefined && id !== null ? nextIndexById[id] : undefined;
+      };
+      const remapTable = table => {
+        if (!table || typeof table !== 'object') return;
+        const entries = Object.keys(table).map(k => [Number(k), table[k]]);
+        Object.keys(table).forEach(k => { delete table[k]; });
+        entries.forEach(([oldIndex, value]) => {
+          const nextIndex = nextIndexFor(oldIndex);
+          if (nextIndex !== undefined) table[nextIndex] = value;
+        });
+      };
+      if (typeof slideEditSessions === 'object') remapTable(slideEditSessions);
+      if (typeof slideInlineEditStates === 'object') remapTable(slideInlineEditStates);
+      if (typeof slideElementEditStates === 'object') remapTable(slideElementEditStates);
+      const nextActive = nextIndexFor(activeSlideIndex);
+      if (nextActive !== undefined) activeSlideIndex = nextActive;
+      if (typeof tenantChatSlideIndex !== 'undefined') {
+        const nextChat = nextIndexFor(tenantChatSlideIndex);
+        if (nextChat !== undefined) tenantChatSlideIndex = nextChat;
+      }
+    }
+
     // creativeImages is keyed like the deck: the run's new and updated keys
     // land, but a key the user changed or added mid-run keeps the user value.
     function designerChatMergeCreativeImages(jobMeta, incoming) {
