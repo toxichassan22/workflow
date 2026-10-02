@@ -1305,7 +1305,6 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
 
         creative = {
             'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/approved.png'},
-            'map_approvals': {'catchment': True},
         }
         approved = module._approved_canonical_map_url('catchment', {}, creative)
         self.assertEqual(approved, '/uploads/maps/approved.png')
@@ -1497,7 +1496,6 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
             ],
             'creativeImages': {
                 'map_placeholders': {'##MAP_CATCHMENT##': project_map},
-                'map_approvals': {'catchment': False},
                 'team_members': [{
                     'name': 'Vision Gate', 'role': 'التطوير',
                     'logo': '/uploads/creative/team-logo-1.png',

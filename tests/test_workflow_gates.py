@@ -407,7 +407,7 @@ class WorkflowGateDbTests(unittest.TestCase):
                 'draftId': 'draft-1',
                 'sectionStatuses': {'basic': 'approved'},
                 'tenantSlidesData': [{'html': 'x'}],
-                'location_analysis_approved': True,
+                'site_analysis_approved': True,
                 'study_file': 'file-1',
                 'visual_concept': {'slots': {'cover': {'approved': True, 'imageUrl': 'u'}}},
             }, ensure_ascii=False), 'draft-1'))
@@ -422,7 +422,7 @@ class WorkflowGateDbTests(unittest.TestCase):
         self.assertEqual(copied['section_statuses'], {})
         data = copied['draft_data']
         self.assertEqual(data['project_name'], 'برج المشرق')
-        for key in ('sectionStatuses', 'tenantSlidesData', 'location_analysis_approved'):
+        for key in ('sectionStatuses', 'tenantSlidesData', 'site_analysis_approved'):
             self.assertNotIn(key, data)
         self.assertEqual(data['draftId'], result['draft_id'])
         self.assertNotEqual(data['study_file'], 'file-1')

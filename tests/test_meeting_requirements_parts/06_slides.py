@@ -178,7 +178,6 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                         '##MAP_CATCHMENT_EDITABLE##': '/uploads/maps/current-marked.png',
                     },
                     'maps_persisted': True,
-                    'map_approvals': {'catchment': True},
                 },
                 self.tenant_a,
                 presentation_id='pres-clean-sidecar',
@@ -190,11 +189,11 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertTrue(images['map_placeholders']['##MAP_CATCHMENT##'].endswith(os.path.basename(final_path)))
         self.assertTrue(images['map_placeholders']['##MAP_CATCHMENT_EDITABLE##'].endswith(os.path.basename(final_path)))
 
-    def test_approved_request_map_beats_older_google_row(self):
-        # An approved request URL wins only for a placeholder no persisted row
-        # covers: every map file the browser can name came from a row-backed
-        # write, so a basename no row still references is an orphaned earlier
-        # render — never a fresher map than the newest persisted row.
+    def test_persisted_request_map_beats_older_google_row(self):
+        # A request URL wins only for a placeholder no persisted row covers:
+        # every map file the browser can name came from a row-backed write, so
+        # a basename no row still references is an orphaned earlier render —
+        # never a fresher map than the newest persisted row.
         google_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_google.png', delete=False)
         google_path = google_file.name
         google_file.write(b'google-map')
@@ -216,7 +215,6 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 {
                     'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/approved.png'},
                     'maps_persisted': True,
-                    'map_approvals': {'overview': True},
                 },
                 self.tenant_a,
                 presentation_id='pres-approved-map',
@@ -226,14 +224,13 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
                          images['map_placeholders']['##MAP_OVERVIEW##'])
 
-    def test_approved_request_fills_placeholder_without_persisted_row(self):
+    def test_persisted_request_fills_placeholder_without_persisted_row(self):
         with self.app.app_context():
             project, images = self.application_module._hydrate_map_assets_for_request(
                 {'project_name': 'Saved'},
                 {
                     'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/approved.png'},
                     'maps_persisted': True,
-                    'map_approvals': {'overview': True},
                 },
                 self.tenant_a,
                 presentation_id='pres-no-map-rows',
@@ -353,7 +350,6 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 {
                     'map_placeholders': {'##MAP_LANDMARKS##': old_url},
                     'maps_persisted': True,
-                    'map_approvals': {'landmarks': True},
                 },
                 self.tenant_a,
                 presentation_id='pres-echo-hydrate',
@@ -400,7 +396,6 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                         '##MAP_ACCESS##': orphan_url,
                     },
                     'maps_persisted': True,
-                    'map_approvals': {'overview': True, 'access': True},
                 },
                 self.tenant_a,
                 presentation_id='pres-orphan-map',
@@ -496,7 +491,6 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                     'draftId': 'maps-draft',
-                    'location_analysis_approved': True,
                 }
             })
 
@@ -506,12 +500,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
     def test_single_map_regeneration_bypasses_cached_assets(self):
         client = self.app.test_client()
-        # The map gates read approval from the stored draft, never the payload.
         with self.app.app_context():
             db.save_project_draft(self.tenant_a, 'owner',
                                   {'project_name': 'One map', 'location_lat': 24.0,
-                                   'location_lng': 46.0, 'location_analysis_approved': True,
-                                   'tenantCreativeImages': {'map_approvals': {'overview': True}}},
+                                   'location_lng': 46.0},
                                   {'basic': 'draft'}, 'draft', draft_id='one-map')
         with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
             'placeholders': {'##MAP_ACCESS##': '/uploads/maps/access.png'},
@@ -520,10 +512,8 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             'zooms': {'access': 16},
         }) as generate_maps:
             response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
-                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'one-map',
-                                'location_analysis_approved': True},
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'one-map'},
                 'mapType': 'access',
-                'overviewApproved': True,
                 'regenSeed': 17,
             })
 
@@ -711,7 +701,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 patch.object(self.application_module.db, 'delete_map_images') as delete_images:
             response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
                 'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-overview',
-                                'location_analysis_approved': True, 'location_coordinates_confirmed': True},
+                                'location_coordinates_confirmed': True},
                 'mapType': 'overview',
                 'overlayOnly': True,
             })
@@ -777,7 +767,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 patch.object(self.application_module.db, 'delete_map_images') as delete_images:
             response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
                 'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-access',
-                                'location_analysis_approved': False, 'location_coordinates_confirmed': True},
+                                'location_coordinates_confirmed': True},
                 'mapType': 'access',
                 'overlayOnly': True,
             })
@@ -1185,14 +1175,11 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         ])), 13)
 
         client = self.app.test_client()
-        # The map gates read approval from the stored draft, never the payload.
         with self.app.app_context():
             db.save_project_draft(
                 self.tenant_a, 'owner', {
                     'project_name': 'Quick landmarks',
                     'location_lat': 24.0, 'location_lng': 46.0,
-                    'location_analysis_approved': True,
-                    'tenantCreativeImages': {'map_approvals': {'overview': True}},
                 }, {'basic': 'approved'}, 'draft', draft_id='quick-landmarks')
         result = {'placeholders': {}, 'zooms': {'landmarks': 14}, 'centers': {'landmarks': {'lat': 24.0, 'lng': 46.0}}, 'landmark_map_items': []}
         with patch.object(service, 'recompose_landmarks_map', return_value=result) as recompose, \
@@ -1218,13 +1205,12 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             regenerated = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
                 'projectData': {
                     'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-landmarks',
-                    'location_analysis_approved': True,
                     'nearby_landmarks_data': [
                         {'name': 'محدد', 'lat': 24.01, 'lng': 46.01, 'show_on_map': True},
                         {'name': 'غير محدد', 'lat': 24.02, 'lng': 46.02, 'show_on_map': False},
                     ],
                 },
-                'mapType': 'landmarks', 'overviewApproved': True, 'regenSeed': 123,
+                'mapType': 'landmarks', 'regenSeed': 123,
             })
         self.assertEqual(regenerated.status_code, 200, regenerated.get_json())
         generate_maps.assert_called_once()
