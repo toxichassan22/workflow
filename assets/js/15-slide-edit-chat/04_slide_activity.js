@@ -263,6 +263,30 @@
       return serialized.length + ':' + (hash >>> 0).toString(16);
     }
 
+    // A slide signature ignores what a renumber pass rewrites mechanically —
+    // the footer counter element, index entries and the server-side preserve
+    // flags — or an insert that only shifts a slide would read as the run
+    // owning it and a user edit there would falsely conflict.
+    const DESIGNER_SLIDE_VOLATILE_KEYS = new Set([
+      'index_entries', 'is_custom', 'keep_html', 'custom_html', 'number', 'position', 'page'
+    ]);
+
+    function designerChatSlideSignature(slide) {
+      if (!slide || typeof slide !== 'object') return designerChatHashSignature(slide);
+      const stable = {};
+      Object.keys(slide).forEach(key => {
+        if (key.charAt(0) === '_' || DESIGNER_SLIDE_VOLATILE_KEYS.has(key)) return;
+        let value = slide[key];
+        if (key === 'html' && typeof value === 'string') {
+          value = value.replace(
+            /<([a-z][\w:-]*)\b[^>]*\bdata-slide-counter\s*=\s*["'][^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+            '');
+        }
+        stable[key] = value;
+      });
+      return designerChatHashSignature(stable);
+    }
+
     // {slideId: signature} in deck order — null when a slide cannot be keyed,
     // which sends the apply path back to the whole-deck signature check.
     function designerChatSlideSignatures(slides = tenantSlidesData) {
@@ -271,7 +295,7 @@
       for (const slide of source) {
         const id = slide && slide.id;
         if (typeof id !== 'string' || !id) return null;
-        signatures[id] = designerChatHashSignature(slide);
+        signatures[id] = designerChatSlideSignature(slide);
       }
       return signatures;
     }
@@ -302,7 +326,7 @@
         const patchTitle = patch && patch.title != null ? String(patch.title) : null;
         if (!slide || (patchHtml !== null && slide.html !== patchHtml)
             || (patchTitle !== null && String(slide.title || '') !== patchTitle)) return;
-        signatures[String(slideId)] = designerChatHashSignature(slide);
+        signatures[String(slideId)] = designerChatSlideSignature(slide);
       });
     }
 
@@ -342,12 +366,12 @@
       for (const id of baselineIds) {
         const base = signatures[id];
         const inc = incomingById.get(id);
-        if (inc && designerChatHashSignature(inc) === base) continue;
+        if (inc && designerChatSlideSignature(inc) === base) continue;
         jobChangedIds.add(id);  // the run rewrote it or removed it
         const current = currentById.get(id);
         if (!inc && !current) continue;  // both sides removed it — nothing to fight over
         const drifted = !current
-          || designerChatHashSignature(current) !== base
+          || designerChatSlideSignature(current) !== base
           || (typeof getSlideEditSession === 'function'
               && !!getSlideEditSession(currentIndexById.get(id)));
         if (drifted) return { conflict: true, slides: deck };
@@ -387,7 +411,7 @@
         if (keyed && signatures[id] !== undefined) {
           const current = currentById.get(id);
           if (!current) return;  // the user deleted it; the run only echoed it
-          if (designerChatHashSignature(inc) === signatures[id]) {
+          if (designerChatSlideSignature(inc) === signatures[id]) {
             merged.push(current);
             return;
           }

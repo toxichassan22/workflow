@@ -154,6 +154,9 @@
         }
         tenantSlidesData = mergeResult.slides;
         ensureSlideIds(tenantSlidesData);
+        // Kept mid-run edits may carry counters/index entries baked for their
+        // old positions — normalize them on the merged deck.
+        renumberTenantSlides();
         if (tenantSlidesData.length < oldLength) {
           activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
           tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
