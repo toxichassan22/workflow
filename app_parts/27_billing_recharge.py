@@ -181,6 +181,20 @@ def api_admin_ledger_adjust():
 def api_admin_decide_recharge_request(request_id):
     data = request.json or {}
     decision = data.get('decision')
+    # Desk contract: an approval carries the client invoice (the client's
+    # entitlement), a rejection carries a reason the client can read. The db
+    # layer stays lenient for internal callers; the desk gate is here. The
+    # pending check runs first so a settled request still reports its real
+    # state instead of a validation error.
+    existing = db.get_recharge_request(request_id)
+    pending = bool(existing) and existing.get('status') == 'pending'
+    if pending and decision == 'approved' and not str(
+            data.get('invoiceFileId') or data.get('invoice_file_id') or '').strip():
+        return jsonify({'error': 'فاتورة الشحن مطلوبة لاعتماد الطلب',
+                        'error_code': 'invoice_required'}), 400
+    if pending and decision == 'rejected' and not str(data.get('note') or '').strip():
+        return jsonify({'error': 'سبب الرفض مطلوب',
+                        'error_code': 'reason_required'}), 400
     row = db.decide_recharge_request(
         None, request_id, decision, _landloom_actor_id(), _landloom_actor_name(),
         note=data.get('note'), reference_number=data.get('transactionReference'),

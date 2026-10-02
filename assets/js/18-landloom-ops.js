@@ -420,10 +420,20 @@
       await llLoadRechargeRequests();
     }
 
-    // ── Recharge decision modal: approve (optional invoice) or reject (reason) ──
+    // ── Recharge decision modal: approve (mandatory invoice) or reject (reason) ──
+    const LL_RECHARGE_OTHER_REASON = '__other__';
     async function llDecideRecharge(requestId, decision) {
-      document.getElementById('llRechargeDecisionId').value = requestId;
-      document.getElementById('llRechargeDecisionKind').value = decision;
+      const idEl = document.getElementById('llRechargeDecisionId');
+      const kindEl = document.getElementById('llRechargeDecisionKind');
+      const modal = document.getElementById('llRechargeDecisionModal');
+      // A stale shell (an index.html from before this modal) used to swallow the
+      // click on a null lookup — fail loudly so the button never feels dead.
+      if (!idEl || !kindEl || !modal) {
+        toast(WFT('recharge.ui_stale', 'واجهة غير متزامنة — أعد تحميل الصفحة'));
+        return;
+      }
+      idEl.value = requestId;
+      kindEl.value = decision;
       const isApprove = decision === 'approved';
       document.getElementById('llRechargeDecisionTitle').textContent =
         isApprove ? 'اعتماد طلب الشحن' : 'رفض طلب الشحن';
@@ -436,14 +446,33 @@
       if (invoice) invoice.value = '';
       const note = document.getElementById('llRechargeNote');
       if (note) note.value = '';
+      // The modal opens before the reasons fetch so a slow settings read never
+      // looks like a dead button.
+      openLlModal('llRechargeDecisionModal');
       if (!isApprove) {
         const select = document.getElementById('llRechargeReason');
         const data = await api('GET', '/api/admin/settings/rejection-reasons').catch(() => null);
-        const reasons = (data && data.success && data.reasons) || [];
+        const reasons = (data && data.success && Array.isArray(data.reasons)) ? data.reasons : [];
         select.innerHTML = '<option value="">—</option>' +
-          reasons.map(r => '<option value="' + llEscape(r) + '">' + llEscape(r) + '</option>').join('');
+          reasons.map(r => '<option value="' + llEscape(r) + '">' + llEscape(r) + '</option>').join('') +
+          '<option value="' + LL_RECHARGE_OTHER_REASON + '">' +
+          llEscape(WFT('recharge.reason_other', 'أخرى')) + '</option>';
+        llRechargeReasonChanged();
       }
-      openLlModal('llRechargeDecisionModal');
+    }
+
+    // «أخرى» turns the note field into the free-text reason itself; a preset
+    // reason keeps it as an optional extra.
+    function llRechargeReasonChanged() {
+      const select = document.getElementById('llRechargeReason');
+      const label = document.getElementById('llRechargeNoteLabel');
+      const note = document.getElementById('llRechargeNote');
+      if (!select || !label || !note) return;
+      const custom = select.value === LL_RECHARGE_OTHER_REASON;
+      label.textContent = custom
+        ? WFT('recharge.reason_custom_label', 'سبب الرفض')
+        : WFT('recharge.note_optional', 'ملاحظة إضافية');
+      note.required = custom;
     }
 
     async function llSubmitRechargeDecision() {
@@ -455,21 +484,30 @@
       let note = '';
       if (decision === 'approved') {
         const input = document.getElementById('llRechargeInvoice');
-        if (input && input.files && input.files[0]) {
-          const form = new FormData();
-          form.append('file', input.files[0]);
-          form.append('fileType', 'recharge_invoice');
-          const up = await api('POST', '/api/project-files', form, true).catch(e => e);
-          if (!up || !up.success) {
-            if (errBox) errBox.textContent = (up && up.error) || 'تعذر رفع الفاتورة';
-            return;
-          }
-          invoiceFileId = up.file.id;
+        // The client's invoice is part of the approval itself — never optional.
+        if (!input || !input.files || !input.files[0]) {
+          if (errBox) errBox.textContent = WFT('recharge.invoice_required', 'فاتورة الشحن مطلوبة لاعتماد الطلب');
+          return;
         }
+        const form = new FormData();
+        form.append('file', input.files[0]);
+        form.append('fileType', 'recharge_invoice');
+        const up = await api('POST', '/api/project-files', form, true).catch(e => e);
+        if (!up || !up.success) {
+          if (errBox) errBox.textContent = (up && up.error) || 'تعذر رفع الفاتورة';
+          return;
+        }
+        invoiceFileId = up.file.id;
       } else {
         const reason = (document.getElementById('llRechargeReason') || {}).value || '';
         const extra = ((document.getElementById('llRechargeNote') || {}).value || '').trim();
-        note = reason && extra ? reason + ' — ' + extra : (reason || extra);
+        note = reason === LL_RECHARGE_OTHER_REASON
+          ? extra
+          : (reason && extra ? reason + ' — ' + extra : (reason || extra));
+        if (!note) {
+          if (errBox) errBox.textContent = WFT('recharge.reason_required', 'سبب الرفض مطلوب');
+          return;
+        }
       }
       const payload = { decision: decision };
       if (invoiceFileId) payload.invoiceFileId = invoiceFileId;

@@ -15,6 +15,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "التذكرة": "Ticket",
   "التكلفة (شامل ضريبة القيمة المضافة 15%)": "Cost (incl. 15% VAT)",
   "الفاتورة": "Invoice",
+  "الفاتورة (إجباري)": "Invoice (required)",
   "المرجع البنكي": "Bank reference",
   "انتهت مهلة الطلب؛ أعد المحاولة لاحقًا.": "Request timed out; retry later.",
   "تاريخ الطلب": "Request date",
