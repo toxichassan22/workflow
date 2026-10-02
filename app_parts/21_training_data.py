@@ -846,9 +846,9 @@ def _build_agent_system_state(tenant_id):
 {chr(10).join(team_lines) if team_lines else '  لا توجد جهات في المكتبة.'}
 
 ###  رصيد الشركة:
-- رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} ريال سعودي
-- المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} ريال سعودي
-- المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} ريال سعودي
+- رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} نقطة
+- المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} نقطة
+- المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} نقطة
 
 ###  إعدادات الخرائط:
 - نوع الخريطة الافتراضي: {branding.get('default_map_type', 'satellite')}

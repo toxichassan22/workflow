@@ -40,7 +40,7 @@
       const labels = trends.labels || [];
       const spendSeries = (trends.ai_spend_sar || trends.ai_spend || []).map((v, i) => v + (((trends.maps_spend_sar || trends.maps_spend) || [])[i] || 0));
       const series = [
-        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
+        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtPoints },
         { name: WFT('admin.legend_companies', 'شركات جديدة'), values: trends.companies || [], color: 'var(--chart-2)', fmt: sagFmtNum },
       ];
       const chart = sagLineChart(labels, series);
@@ -156,7 +156,7 @@
       if (statsEl) {
         const kpis = [
           { label: WFT('admin.kpi_companies', 'إجمالي الشركات'), value: sagFmtNum(tenants.companies != null ? tenants.companies : tenants.total || sagAllTenants.filter(t => !t.isAdmin).length), sub: WFT('admin.kpi_active', '{n} نشطة', { n: sagFmtNum(tenants.active_companies != null ? tenants.active_companies : tenants.active || 0) }), delta: deltas.companies, spark: trends.companies, color: 'var(--chart-1)' },
-          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtMoneyHtml(spend.month_sar != null ? spend.month_sar : spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtMoney(spend.total_sar != null ? spend.total_sar : spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
+          { label: WFT('admin.kpi_spend', 'استهلاك الشهر'), value: sagFmtPointsHtml(spend.month_sar != null ? spend.month_sar : spend.month_usd), sub: WFT('admin.kpi_spend_total', 'الإجمالي {n}', { n: sagFmtPoints(spend.total_sar != null ? spend.total_sar : spend.total_usd) }), delta: deltas.spend, spark: spendSeries, color: 'var(--chart-3)' },
           { label: WFT('admin.kpi_revenue', 'إيراد الشحن'), value: sagFmtMoneyHtml(revenue.month_sar != null ? revenue.month_sar : revenue.month_usd), sub: WFT('admin.kpi_revenue_total', 'الإجمالي {n}', { n: sagFmtMoney(revenue.total_sar != null ? revenue.total_sar : revenue.total_usd) }), delta: deltas.revenue, spark: trends.revenue_sar || trends.revenue, color: 'var(--chart-5)' },
         ];
         statsEl.innerHTML = kpis.map(k =>
@@ -409,7 +409,7 @@
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
           planBadge + ' | ' + statusBadge + keyBadge + ' | <span>رصيد</span> ' +
-          Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US') + ' <span>ريال سعودي</span>' +
+          Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US') + ' <span>نقطة</span>' +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
@@ -767,7 +767,7 @@
         '<div class="tenant-field"><label for="sagDetailSlug">رابط الشركة (slug)</label><input id="sagDetailSlug" dir="ltr" maxlength="60" value="' + escapeHtml(t.slug || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailPackage">الباقة</label><select id="sagDetailPackage" data-current="' + escapeHtml(currentPackageId) + '">' +
         packageOptions + '</select></div>' +
-        '<div class="tenant-field"><label>الرصيد الحالي (ريال سعودي)</label><p style="margin:0;font-weight:700">' + Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
+        '<div class="tenant-field"><label>الرصيد الحالي (نقاط)</label><p style="margin:0;font-weight:700">' + Number(t.effectiveBalanceSar != null ? t.effectiveBalanceSar : (t.creditBalanceSar != null ? t.creditBalanceSar : (t.creditBalance || 0))).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</p></div>' +
         '<div class="tenant-field"><label for="sagDetailLegalName">الاسم القانوني</label><input id="sagDetailLegalName" maxlength="160" value="' + escapeHtml(t.legalName || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailTaxNumber">الرقم الضريبي</label><input id="sagDetailTaxNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.taxNumber || '') + '"></div>' +
         '<div class="tenant-field"><label for="sagDetailCrNumber">السجل التجاري</label><input id="sagDetailCrNumber" dir="ltr" maxlength="40" value="' + escapeHtml(t.crNumber || '') + '"></div>' +
@@ -787,7 +787,7 @@
         '<option value="correction">تصحيح</option>' +
         '<option value="refund">استرداد</option>' +
         '<option value="expiry">انتهاء صلاحية</option></select></div>' +
-        '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (ريال سعودي)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
+        '<div class="tenant-field"><label for="sagAdjAmount">المبلغ (نقاط)</label><input type="number" id="sagAdjAmount" step="0.01" required dir="ltr"></div>' +
         '<div class="tenant-field full"><label for="sagAdjNote">ملاحظة</label><input id="sagAdjNote" maxlength="300"></div>' +
         '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">تسجيل الحركة</button></div></form>' +
         (t.isAdmin ? '' :
@@ -1236,7 +1236,7 @@
       const text = (value >= 1
         ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : value.toFixed(digits));
-      return '<span dir="ltr">' + text + '</span> <span>ريال سعودي</span>';
+      return '<span dir="ltr">' + text + '</span> <span>نقطة</span>';
     }
 
     function aiReconcileStatusText(entry) {
@@ -1479,6 +1479,25 @@
 
     function sagFmtMoneyHtml(v) {
       const parts = sagFmtMoneyParts(v);
+      return '<span dir="ltr">' + escapeHtml(parts.number) + '</span>'
+        + ' <span class="money-currency">' + escapeHtml(parts.currency) + '</span>';
+    }
+
+    // Wallet figures render as points — the client never sees a currency unit
+    // on its balance, only the counting unit the platform bills in.
+    function sagFmtPointsParts(v) {
+      const parts = sagFmtMoneyParts(v);
+      parts.currency = wfTr('نقطة');
+      return parts;
+    }
+
+    function sagFmtPoints(v) {
+      const parts = sagFmtPointsParts(v);
+      return parts.number + ' ' + parts.currency;
+    }
+
+    function sagFmtPointsHtml(v) {
+      const parts = sagFmtPointsParts(v);
       return '<span dir="ltr">' + escapeHtml(parts.number) + '</span>'
         + ' <span class="money-currency">' + escapeHtml(parts.currency) + '</span>';
     }

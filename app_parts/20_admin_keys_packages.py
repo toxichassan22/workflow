@@ -505,9 +505,10 @@ def api_admin_packages():
 def api_admin_packages_create():
     """Create a package (custom by default). credit_sar may be zero.
 
-    The desk keys the wallet credit in riyals (``creditSar``); the row keeps
-    the dollar equivalent for provider-side audit. ``creditUsd`` stays
-    accepted for old callers and converts at the active rate.
+    The desk keys the wallet credit in points (``creditSar``) — one point is
+    one wallet SAR unit; the row keeps the dollar equivalent for
+    provider-side audit. ``creditUsd`` stays accepted for old callers and
+    converts at the active rate.
     """
     data = request.json or {}
     credit_usd = data.get('creditUsd', data.get('credit_usd'))

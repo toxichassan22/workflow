@@ -671,7 +671,9 @@
         toast('تعذر فتح طلب اعتماد التوليد');
         return null;
       }
-      const points = estimate.estimated_points ?? 500;
+      // The wallet bills in points: the estimate and the remaining balance
+      // are wallet points, never a currency figure — the client watches the
+      // counter move, not the exchange rate behind it.
       const costSar = Number(estimate.estimated_cost_sar ?? ((estimate.estimated_cost_usd ?? 0) * 3.75) ?? 0);
       const sectionLabel = sectionKey
         ? ((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[sectionKey]) || sectionKey)
@@ -719,11 +721,10 @@
           (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +
           '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
           '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>'
-          + WFT('gen.points_count', '{n} نقطة', { n: points }) + '</strong></div>' +
-          '<div><span style="color:#64748b;">التكلفة التقديرية:</span> <strong>' + costSar.toFixed(2) + ' ' + wfTr('ريال سعودي') + '</strong></div>' +
+          + WFT('gen.points_count', '{n} نقطة', { n: llMoney(costSar) }) + '</strong></div>' +
           (canSeeWallet && remainingSar !== null
             ? '<div style="grid-column:1/-1;border-top:1px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between;">' +
-              '<span>الرصيد المتاح:</span><strong>' + remainingSar.toFixed(2) + ' ' + wfTr('ريال سعودي') + '</strong>' +
+              '<span>الرصيد المتاح:</span><strong>' + llMoney(remainingSar) + ' ' + wfTr('نقطة') + '</strong>' +
               '</div>'
             : '') +
           '</div>' +

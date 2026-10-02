@@ -589,7 +589,7 @@
               section: escapeHtml((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[a.section_key]) || a.section_key)
             })
           : WFT('admin.generation_start_approval', 'اعتماد بدء التوليد')) + ' — ' + WFT('admin.requested_by_suffix', 'طلب بواسطة:') + '</span> ' + escapeHtml(a.requested_by_name || '') +
-        ' | <span>' + (a.estimated_points || 0) + '</span> <span>نقطة</span> | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
+        ' | <span>' + formatUsageCost((Number(a.estimated_cost_usd) || 0) * 3.75) + '</span> | ' + escapeHtml((a.requested_at || '').slice(0, 16).replace('T', ' ')) + '</div></div>' +
         '<div class="tenant-actions">' +
         (a.draft_id ? '<button class="btn small primary" onclick="openProjectDraftById(\'' + a.draft_id + '\')">فتح المشروع</button>' : '') +
         decideBtns('reviewGenerationApproval', a.id, a.requested_by, 'approve_generation') + '</div></div>'

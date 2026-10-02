@@ -293,8 +293,8 @@ def _agent_balance_preflight(ctx, tasks):
         return None
     return _agent_chat_response(
         ctx,
-        f'رصيد شركتك المتاح حاليًا ~{available:.2f} ريال سعودي، والتكلفة التقديرية '
-        f'لهذا الطلب ~{need_sar:.2f} ريال سعودي — اشحن المحفظة ثم أعد المحاولة.',
+        f'رصيد شركتك المتاح حاليًا ~{available:.2f} نقطة، والتكلفة التقديرية '
+        f'لهذا الطلب ~{need_sar:.2f} نقطة — اشحن المحفظة ثم أعد المحاولة.',
         kind='reply')
 
 

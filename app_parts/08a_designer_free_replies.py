@@ -68,7 +68,7 @@ def _designer_balance_reply_text(available_sar):
         available = 0.0
     if available <= 0:
         return (
-            'رصيد شركتك الحالي 0 ريال سعودي — المحفظة تحتاج شحنًا قبل أي تعديل جديد. '
+            'رصيد شركتك الحالي 0 نقطة — المحفظة تحتاج شحنًا قبل أي تعديل جديد. '
             'هذه الرسالة لم تستهلك أي رصيد.'
         )
     try:
@@ -79,7 +79,7 @@ def _designer_balance_reply_text(available_sar):
     capacity_note = (
         f' — تكفي تقريبًا لتعديل {_slide_capacity} شريحة.' if _slide_capacity > 0 else '.')
     return (
-        f'رصيد شركتك المتاح حاليًا ~{available:.2f} ريال سعودي{capacity_note} '
+        f'رصيد شركتك المتاح حاليًا ~{available:.2f} نقطة{capacity_note} '
         'هذه الرسالة لم تستهلك أي رصيد.'
     )
 

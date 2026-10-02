@@ -454,7 +454,7 @@ def ledger_report_rows(tenant_id=None, from_date=None, to_date=None, kind=None, 
     query += ' ORDER BY l.created_at DESC LIMIT ?'
     params.append(int(limit))
     rows = conn.execute(query, params).fetchall()
-    headers = ['التاريخ', 'الشركة', 'النوع', 'المبلغ (ريال سعودي)', 'التكلفة الخام (ريال سعودي)', 'المضاعف',
+    headers = ['التاريخ', 'الشركة', 'النوع', 'المبلغ (نقاط)', 'التكلفة الخام (نقاط)', 'المضاعف',
                'أحداث AI', 'أحداث الخرائط', 'مرجع عدم التكرار', 'ملاحظة']
     body = [[r['created_at'], r['company_name'], r['kind'], usd_to_sar(r['amount_usd']),
              usd_to_sar(r['raw_cost_usd']), r['multiplier'], r['ai_events_count'],

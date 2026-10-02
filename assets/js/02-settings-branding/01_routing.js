@@ -872,7 +872,7 @@
       const credit = pkg ? Number((pkg.credit_sar ?? pkg.credit_usd) || 0) : remaining;
       const pct = credit > 0 ? Math.max(0, Math.min(100, (consumed / credit) * 100)) : 0;
       const valueEl = document.getElementById('dashBalanceValue');
-      if (valueEl) valueEl.innerHTML = sagFmtMoneyHtml(remaining);
+      if (valueEl) valueEl.innerHTML = sagFmtPointsHtml(remaining);
       const pillEl = document.getElementById('dashBalancePill');
       if (pillEl) {
         const name = wfBilingual(pkg && pkg.name, pkg && (pkg.name_en || pkg.nameEn));
@@ -884,7 +884,7 @@
       const subEl = document.getElementById('dashBalanceSub');
       if (subEl) {
         subEl.textContent = credit > 0
-          ? WFT('dashboard.consumed_of', 'مستهلك {used} من {total}', { used: sagFmtMoney(consumed), total: sagFmtMoney(credit) })
+          ? WFT('dashboard.consumed_of', 'مستهلك {used} من {total}', { used: sagFmtPoints(consumed), total: sagFmtPoints(credit) })
           : '';
       }
     }
@@ -901,7 +901,7 @@
       const labels = trends.labels || [];
       const spendSeries = (trends.ai_spend_sar || trends.ai_spend || []).map((v, i) => v + (((trends.maps_spend_sar || trends.maps_spend) || [])[i] || 0));
       const series = [
-        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtMoney },
+        { name: WFT('admin.legend_spend', 'المصروفات'), values: spendSeries, color: 'var(--chart-3)', fmt: sagFmtPoints },
         { name: WFT('dashboard.legend_presentations', 'عروض جديدة'), values: trends.presentations || [], color: 'var(--chart-2)', fmt: sagFmtNum },
       ];
       const chart = sagLineChart(labels, series);

@@ -184,7 +184,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "admin.packages_title": "Packages and pricing",
   "admin.package_name": "Package name",
   "admin.package_price_sar": "Price (SAR)",
-  "admin.package_credit_sar": "Credit (SAR)",
+  "admin.package_credit_sar": "Credit (points)",
   "admin.package_save": "Save package",
   "admin.file_types_title": "Approved file types registry",
   "admin.rejection_reasons_title": "Recharge rejection reasons",

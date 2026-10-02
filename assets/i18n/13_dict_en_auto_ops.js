@@ -78,7 +78,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "عامة": "General",
   "لا توجد باقات مسجلة.": "No packages registered.",
   "نشطة": "Active",
-  "رصيد بالريال السعودي": "SAR credit",
   "أدخل سعرًا صالحًا": "Enter a valid price",
   "اختر الباقة المطلوب شراؤها": "Select the package to buy",
   "اعتماد الأقسام": "Section approvals",

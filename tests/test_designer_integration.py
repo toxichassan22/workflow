@@ -222,7 +222,7 @@ class DesignerIntegrationTests(unittest.TestCase):
                       'projectData': {}})
         self.assertEqual(response.status_code, 200, response.get_json())
         body = response.get_json()['data']
-        self.assertIn('0 ريال', body['response'])
+        self.assertIn('0 نقطة', body['response'])
         self.assertIn('لم تستهلك أي رصيد', body['response'])
         self.assertEqual(body['ai_calls'], 0)
         self.assertEqual(model.call_count, 0)

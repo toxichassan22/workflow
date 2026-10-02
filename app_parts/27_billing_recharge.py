@@ -149,7 +149,8 @@ def api_admin_ledger_adjust():
     tenant_id = data.get('tenantId')
     if not tenant_id:
         return jsonify({'error': 'الشركة مطلوبة', 'error_code': 'tenant_required'}), 400
-    # The desk keys adjustments in riyals — the wallet books in SAR directly.
+    # The desk keys adjustments in points — the wallet's client-facing unit;
+    # a point books exactly one SAR unit inside the wallet.
     amount = data.get('amountSar', data.get('amount_sar'))
     if amount is None:
         # Legacy callers sent USD; convert at the active rate.
@@ -194,7 +195,7 @@ def api_admin_decide_recharge_request(request_id):
         _notify_tenant_billing(
             row['tenant_id'],
             'تم شحن الرصيد' if approved else 'رُفض طلب الشحن',
-            f'{row.get("package_name") or ""} — {amount} ريال سعودي'
+            f'{row.get("package_name") or ""} — {amount} نقطة'
             + (f' — {row.get("decision_note")}' if row.get('decision_note') else ''),
             entity_type='recharge_request', entity_id=row['id'])
     except Exception:

@@ -184,7 +184,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "admin.packages_title": "الباقات والأسعار",
   "admin.package_name": "اسم الباقة",
   "admin.package_price_sar": "السعر بالريال السعودي",
-  "admin.package_credit_sar": "الرصيد بالريال السعودي",
+  "admin.package_credit_sar": "الرصيد بالنقاط",
   "admin.package_save": "حفظ الباقة",
   "admin.file_types_title": "سجل أنواع الملفات المعتمدة",
   "admin.rejection_reasons_title": "أسباب رفض طلبات الشحن",

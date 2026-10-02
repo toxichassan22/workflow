@@ -890,7 +890,7 @@ def _maybe_notify_low_balance(tenant_id):
             return
         _notify_tenant_billing(
             tenant_id, 'رصيد المحفظة منخفض',
-            f'الرصيد الحالي {float(balance):.2f} ريال سعودي',
+            f'الرصيد الحالي {float(balance):.2f} نقطة',
             entity_type='wallet', entity_id='low-balance')
     except Exception as exc:
         print(f'[NOTIFY] low-balance check failed for {tenant_id}: {exc}')

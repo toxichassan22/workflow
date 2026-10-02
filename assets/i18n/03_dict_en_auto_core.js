@@ -817,7 +817,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الحساب الحالي": "Current account",
   "الحساب والصلاحيات": "Account and permissions",
   "الرصيد المتبقي": "Remaining balance",
-  "الرصيد بالريال السعودي": "Balance in Saudi Riyals",
+  "الرصيد بالنقاط": "Balance in points",
   "السبب": "Reason",
   "السعر بالريال السعودي": "Price in Saudi Riyals",
   "الشركات حسب الباقة": "Companies by package",
