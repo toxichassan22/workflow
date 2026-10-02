@@ -17,7 +17,7 @@
       const key = 'designer_agent.slide_' + (forCard ? 'veil' : 'state') + '_' + status;
       const fallbacks = {
         running: forCard ? 'المصمم يعمل على هذه الشريحة' : 'يُعدَّل',
-        pending: 'في خطة التنفيذ',
+        pending: forCard ? 'بانتظار تعديل المصمم' : 'في خطة التنفيذ',
         success: 'تم',
         failed: 'تعذّرت',
         skipped: 'تخطّى'
@@ -62,22 +62,33 @@
       // positions would mark the wrong slides.
       const map = (designerSlideActivityMap && designerSlideActivityDeck === tenantSlidesData)
         ? designerSlideActivityMap : new Map();
+      // A pending mark on a proposed plan is only a footprint preview — dashed
+      // border, slide stays inspectable. Once the run is live every slide the
+      // plan still owes work locks behind the same veil as the running one;
+      // only a resolved task reopens it for manual editing.
+      const planPreview = !!tenantDesignerPendingPlan;
       document.querySelectorAll('.ge-slide-card').forEach((card, index) => {
         const status = map.get(index) || '';
         if (status) card.dataset.designerState = status;
         else card.removeAttribute('data-designer-state');
+        const locked = status === 'running' || (status === 'pending' && !planPreview);
         let veil = card.querySelector(':scope > .designer-slide-veil');
-        if (status === 'running') {
+        if (locked) {
           if (!veil) {
             veil = document.createElement('div');
             veil.className = 'designer-slide-veil';
-            veil.innerHTML = '<span class="designer-slide-veil-label">' +
-              escapeHtml(designerSlideActivityLabel('running', true)) + '</span>';
             // The veil owns the card while the designer owns the slide — a
             // click through the frosted glass must not open an inline edit the
             // arriving result would silently overwrite.
             veil.addEventListener('click', event => event.stopPropagation());
             card.appendChild(veil);
+            const ae = document.activeElement;
+            if (ae && card.contains(ae) && ae.blur) ae.blur();
+          }
+          if (veil.dataset.state !== status) {
+            veil.dataset.state = status;
+            veil.innerHTML = '<span class="designer-slide-veil-label">' +
+              escapeHtml(designerSlideActivityLabel(status, true)) + '</span>';
           }
         } else if (veil) {
           veil.remove();

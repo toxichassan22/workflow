@@ -104,6 +104,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "designer_agent.plan_cancelled": "أُلغيت الخطة — لم يتغير العرض.",
   "designer_agent.stop_send_failed": "تعذر إرسال طلب الإيقاف.",
   "designer_agent.stop_failed": "تعذر إيقاف المهمة",
+  "designer_agent.slide_veil_pending": "بانتظار تعديل المصمم",
   "designer_agent.slide_veil_running": "المصمم يعمل على هذه الشريحة",
   "designer_agent.slide_state_running": "يُعدَّل",
   "designer_agent.slide_state_pending": "في خطة التنفيذ",

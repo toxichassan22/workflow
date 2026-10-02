@@ -104,6 +104,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "designer_agent.plan_cancelled": "Plan cancelled — the deck is unchanged.",
   "designer_agent.stop_send_failed": "Could not send the stop request.",
   "designer_agent.stop_failed": "Could not stop the task",
+  "designer_agent.slide_veil_pending": "Waiting for the designer",
   "designer_agent.slide_veil_running": "The designer is working on this slide",
   "designer_agent.slide_state_running": "Editing",
   "designer_agent.slide_state_pending": "In the plan",

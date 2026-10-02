@@ -237,6 +237,9 @@
       if (!plan) return;
       if (tenantDesignerChatBusy || currentTenantDesignerJob()) return;
       tenantDesignerPendingPlan = null;
+      // Queued slides lock at confirm — the first poll would only repaint the
+      // same marks a beat later.
+      if (typeof applyDesignerSlideActivity === 'function') applyDesignerSlideActivity();
       const payload = designerAgentBasePayload(designerAgentText('designer_agent.confirm_message', 'نفّذ الخطة المعروضة'));
       payload.confirmPlan = {
         id: plan.id, deckSignature: plan.deckSignature,
