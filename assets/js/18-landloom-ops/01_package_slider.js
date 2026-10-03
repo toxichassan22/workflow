@@ -373,21 +373,21 @@
         ? llEscape(llMoney(p.price_sar)) + ' <span>ريال سعودي</span>'
         : 'بلا سعر';
       const cost = p.est_cost_sar != null
-        ? '<div class="pkg-card-meta">التكلفة التقديرية: ' +
-          llEscape(llMoney(p.est_cost_sar)) + ' <span>نقطة</span></div>' : '';
+        ? '<div class="pkg-card-meta">' +
+          llEscape(WFT('pkg.est_cost', 'التكلفة التقديرية: {cost} نقطة', { cost: llMoney(p.est_cost_sar) })) + '</div>' : '';
       const margin = p.est_margin_sar != null
-        ? '<div class="pkg-card-meta">الربح التقديري: ' +
-          llEscape(llMoney(p.est_margin_sar)) + ' <span>نقطة</span></div>' : '';
+        ? '<div class="pkg-card-meta">' +
+          llEscape(WFT('pkg.est_margin', 'الربح التقديري: {margin} نقطة', { margin: llMoney(p.est_margin_sar) })) + '</div>' : '';
       const badge = p.badge || p.badge_en
         ? '<div class="pkg-card-meta">' + llEscape(wfBilingual(p.badge, p.badge_en)) + '</div>' : '';
       const pool = llPackageFeatureCatalog || [];
       const onCount = (Array.isArray(p.features) ? p.features : [])
         .filter(id => pool.some(f => f.id === id)).length;
       const featsMeta = pool.length
-        ? '<div class="pkg-card-meta">المزايا المتاحة: ' + onCount + ' / ' + pool.length + '</div>'
+        ? '<div class="pkg-card-meta">' + llEscape(WFT('pkg.features_count', 'المزايا المتاحة: {on} / {total}', { on: onCount, total: pool.length })) + '</div>'
         : '';
       const durMeta = p.duration_days
-        ? '<div class="pkg-card-meta">الصلاحية: ' + llEscape(p.duration_days) + ' يومًا</div>' : '';
+        ? '<div class="pkg-card-meta">' + llEscape(WFT('pkg.validity_days', 'الصلاحية: {days} يومًا', { days: p.duration_days })) + '</div>' : '';
       return '<div class="pkg-card">' +
         '<h3>' + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
         badge +

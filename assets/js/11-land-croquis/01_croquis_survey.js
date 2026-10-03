@@ -25,7 +25,7 @@
       const documents = (Array.isArray(uploaded) ? uploaded : []).map((file, index) => ({
         key: 'land_document',
         fileId: file.id,
-        filename: file.originalName || file.name || files[index]?.name || ('مستند ' + (index + 1)),
+        filename: file.originalName || file.name || files[index]?.name || WFT('files.document_n', 'مستند {n}', { n: index + 1 }),
         mimeType: file.mimeType || files[index]?.type || ''
       })).filter(document => document.fileId);
       if (!documents.length) {
@@ -97,7 +97,7 @@
           const documentProcessing = res.documentProcessing || data.document_processing || [];
           tenantProjectData.land_document_processing = documentProcessing;
           const renderedPdfCount = documentProcessing.filter(item => item.mode === 'pdf_rendered').length;
-          if (renderedPdfCount) toast('تم تجهيز ' + renderedPdfCount + ' ملف PDF بصريًا وإرساله إلى AI كصور صفحات.');
+          if (renderedPdfCount) toast(WFT('land.pdf_rendered', 'تم تجهيز {n} ملف PDF بصريًا وإرساله إلى AI كصور صفحات.', { n: renderedPdfCount }));
           const extractedFields = buildExtractedLandFieldData(data);
           Object.entries(extractedFields).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== '') {
@@ -111,7 +111,7 @@
           tenantProjectData.land_documents_analysis = data;
           tenantProjectData.land_documents_analysis_status = 'needs_review';
           if (Array.isArray(data.warnings) && data.warnings.length) {
-            toast('اكتمل التحليل مع ملاحظات: ' + data.warnings.join(' | '));
+            toast(WFT('land.analysis_warnings', 'اكتمل التحليل مع ملاحظات: {warnings}', { warnings: data.warnings.map(w => wfTr(w)).join(' | ') }));
           }
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
           tenantProjectData.directions_table = extractedFields.directions_table || data.directions_table || data.parcels?.[0]?.directions || {};
@@ -122,8 +122,8 @@
           refreshAllowedUsesStatusNote();
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
-          updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
-          toast('تم التحليل وتحديث ' + appliedCount + ' حقلًا. راجع النتائج قبل الاعتماد.');
+          updateLoaderProgress(100, WFT('land.analyzed_review', 'تم تحليل الملفات وتحديث {n} حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.', { n: appliedCount }));
+          toast(WFT('land.analyzed_done', 'تم التحليل وتحديث {n} حقلًا. راجع النتائج قبل الاعتماد.', { n: appliedCount }));
           clearLandAnalysisFailure();
           triggerAutoSaveDraft();
         } else {
@@ -133,12 +133,12 @@
           // why these failures were only ever visible in the browser console.
           const reason = res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة';
           showLandAnalysisFailure(reason, res.providerError);
-          updateLoaderProgress(100, 'لم يتم تحديث أي حقل: ' + reason);
+          updateLoaderProgress(100, WFT('land.no_fields_updated', 'لم يتم تحديث أي حقل: {reason}', { reason: wfTr(reason) }));
           toast('لم يتم تحديث أي حقل — التفصيل أسفل خانة الملفات');
           console.warn('[LAND ANALYSIS] rejected', res.failureReason || 'unknown', res);
         }
       } catch (err) {
-        const reason = 'حدث خطأ أثناء تحليل الملفات: ' + (err.message || err);
+        const reason = WFT('land.analysis_error', 'حدث خطأ أثناء تحليل الملفات: {err}', { err: wfTr(err.message || err) });
         showLandAnalysisFailure(reason);
         updateLoaderProgress(100, 'فشل التحليل ولم يتغير أي حقل.');
         toast(reason);
@@ -231,7 +231,7 @@
         const row = byDirection[direction] || {};
         const regulationText = row.regulation_text || row.regulation || row.text || '';
         const fallbackText = [
-          row.boundary_length_m ?? row.length_m ? 'بطول ' + (row.boundary_length_m ?? row.length_m) + 'م' : '',
+          row.boundary_length_m ?? row.length_m ? WFT('land.boundary_len', 'بطول {n}م', { n: row.boundary_length_m ?? row.length_m }) : '',
           row.street_name || row.street || row.boundary || '',
           row.uses || row.notes || ''
         ].filter(Boolean).join(' — ');
@@ -352,7 +352,7 @@
           const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors', 'approved_coverage_ratio']);
           const safeFilledFields = Object.fromEntries(Object.entries(filledFields).filter(([key]) => !clientOnlyFields.has(key)));
           if (Array.isArray(data.warnings) && data.warnings.length) {
-            toast('اكتمل التحليل، لكن تعذر جلب بعض المعالم: ' + data.warnings.join(' | '));
+            toast(WFT('land.landmarks_partial', 'اكتمل التحليل، لكن تعذر جلب بعض المعالم: {warnings}', { warnings: data.warnings.map(w => wfTr(w)).join(' | ') }));
           }
           tenantProjectData = { ...tenantProjectData, ...safeFilledFields };
           Object.entries(safeFilledFields).forEach(([key, value]) => {
@@ -410,7 +410,7 @@
       releaseLocationSectionApproval();
       refreshSiteAnalysisApprovalUI();
       await saveProjectAsDraft(true);
-      toast('تم إلغاء اعتماد تحليل الموقع');
+      toast(WFT('location.analysis_unapproved', 'تم إلغاء اعتماد تحليل الموقع'));
     }
 
     function toggleTenantSiteAnalysisApproval() {
@@ -587,10 +587,12 @@
       const cards = views.map(view => {
         const url = mapPreviewStoredUrl(view);
         const visible = mapPreviewIsVisible(view);
-        const status = url ? 'مولدة' : 'غير مولدة';
+        const status = url
+          ? WFT('location.map_status_generated', 'مولدة')
+          : WFT('location.map_status_not_generated', 'غير مولدة');
         const preview = visible && url
           ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
-          : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(status === 'غير مولدة' ? 'لم تُولد الخريطة' : status) + '</div>';
+          : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(url ? status : WFT('location.map_not_generated_hint', 'لم تُولد الخريطة')) + '</div>';
         return '<figure class="tenant-map-preview-card' + (tenantSelectedMapType === view.mapType ? ' active' : '') + '" data-map-select="' + escapeHtml(view.mapType) + '" style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
           '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
       }).join('');
@@ -762,7 +764,7 @@
       if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
       if (!isUsableMapCoordinate(tenantProjectData.location_lat, true)
           || !isUsableMapCoordinate(tenantProjectData.location_lng, false)) {
-        toast('حلل رابط الموقع أولًا قبل توليد الخرائط');
+        toast(WFT('location.analyze_link_first', 'حلل رابط الموقع أولًا قبل توليد الخرائط'));
         return false;
       }
       showLoader('جاري توليد الخريطة', '');
@@ -871,7 +873,7 @@
         renderMapPreviewGallery(true);
         renderLocationWorkflowState();
         selectMapPreviewView(mapType);
-        toast('تم توليد الخريطة');
+        toast(WFT('location.map_generated', 'تم توليد الخريطة'));
         return true;
       } catch (error) {
         console.error('[MAP REGEN]', error);

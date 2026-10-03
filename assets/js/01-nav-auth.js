@@ -36,11 +36,11 @@
       // chunkedPost can bail out with a plain {error} instead of a Response. Calling .json() on it
       // threw, and the generic network-error catch replaced the real reason with "Network error".
       if (!res || typeof res.json !== 'function') {
-        return Promise.resolve(res && typeof res === 'object' ? res : { error: 'فشل الطلب' });
+        return Promise.resolve(res && typeof res === 'object' ? res : { error: WFT('auth.request_failed', 'فشل الطلب') });
       }
       return res.json().catch(() => ({})).then(data => {
         data = data && typeof data === 'object' ? data : {};
-        if (!res.ok && !data.error) data.error = 'فشل الطلب (HTTP ' + res.status + ')';
+        if (!res.ok && !data.error) data.error = WFT('auth.request_failed_http', 'فشل الطلب (HTTP {code})', { code: res.status });
         if (res.status === 401) {
           removeTenantToken();
           showAuthPage();
@@ -322,20 +322,20 @@
     function getDeviceName() {
       try {
         const ua = navigator.userAgent || '';
-        let browser = 'المتصفح';
+        let browser = WFT('auth.device_browser', 'المتصفح');
         if (ua.includes('Chrome')) browser = 'Chrome';
         else if (ua.includes('Safari')) browser = 'Safari';
         else if (ua.includes('Firefox')) browser = 'Firefox';
         else if (ua.includes('Edge')) browser = 'Edge';
 
-        let os = 'جهاز';
+        let os = WFT('auth.device_generic', 'جهاز');
         if (ua.includes('Windows')) os = 'Windows';
         else if (ua.includes('Macintosh') || ua.includes('Mac OS')) os = 'macOS';
         else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
         else if (ua.includes('Android')) os = 'Android';
-        return browser + ' على ' + os;
+        return WFT('auth.device_name', '{browser} على {os}', { browser: browser, os: os });
       } catch (e) {
-        return 'متصفح ويب';
+        return WFT('auth.device_web', 'متصفح ويب');
       }
     }
 
@@ -449,7 +449,7 @@
         initOtpDigitBoxes();
         resetOtpBoxes();
         if (hint && data.maskedEmail) {
-          hint.textContent = 'رمز التحقق مرسل إلى ' + data.maskedEmail;
+          hint.textContent = WFT('auth.otp_hint_sent_to', 'رمز التحقق مرسل إلى {email}', { email: data.maskedEmail });
         }
         if (loginForm) loginForm.style.display = 'none';
         if (otpForm) otpForm.style.display = 'block';
@@ -505,7 +505,7 @@
       } else {
         let msg = (data && data.error) || WFT('auth.otp_invalid', 'رمز التحقق غير صحيح');
         if (data && typeof data.remainingAttempts === 'number' && data.remainingAttempts > 0) {
-          msg += ' (المحاولات المتبقية: ' + data.remainingAttempts + ')';
+          msg += WFT('auth.otp_attempts_suffix', ' (المحاولات المتبقية: {n})', { n: data.remainingAttempts });
         }
         showTenantError('loginError', msg);
         if (data && data.remainingAttempts === 0) {
@@ -529,7 +529,7 @@
         toast(WFT('auth.otp_resent', 'تم إرسال رمز تحقق جديد إلى بريدك'));
         startOtpResendCooldown(60);
       } else {
-        showTenantError('loginError', (data && data.error) || 'تعذر إعادة إرسال الرمز');
+        showTenantError('loginError', (data && data.error) || WFT('auth.otp_resend_failed', 'تعذر إعادة إرسال الرمز'));
       }
     }
 
@@ -539,15 +539,15 @@
       clearInterval(otpResendCooldownTimer);
       let remaining = seconds;
       resendBtn.disabled = true;
-      resendBtn.textContent = 'إعادة إرسال الرمز (' + remaining + ')';
+      resendBtn.textContent = WFT('auth.otp_resend_cooldown', 'إعادة إرسال الرمز ({n})', { n: remaining });
       otpResendCooldownTimer = setInterval(() => {
         remaining -= 1;
         if (remaining <= 0) {
           clearInterval(otpResendCooldownTimer);
           resendBtn.disabled = false;
-          resendBtn.textContent = 'إعادة إرسال الرمز';
+          resendBtn.textContent = WFT('auth.otp_resend', 'إعادة إرسال الرمز');
         } else {
-          resendBtn.textContent = 'إعادة إرسال الرمز (' + remaining + ')';
+          resendBtn.textContent = WFT('auth.otp_resend_cooldown', 'إعادة إرسال الرمز ({n})', { n: remaining });
         }
       }, 1000);
     }

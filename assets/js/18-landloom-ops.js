@@ -417,12 +417,12 @@
       const pkg = llRechargePackages.find(p => p.id === input.value);
       if (!pkg) { box.style.display = 'none'; box.textContent = ''; return; }
       const price = pkg.price_sar != null
-        ? ' — ' + llMoney(pkg.price_sar) + ' ريال سعودي' : '';
+        ? WFT('pkg.price_sar_suffix', ' — {price} ريال سعودي', { price: llMoney(pkg.price_sar) }) : '';
       const parts = [
-        wfBilingual(pkg.name, pkg.name_en) + ' — ' + llMoney(pkg.credit_sar) + ' نقطة' + price,
+        WFT('pkg.price_line', '{name} — {credit} نقطة{price}', { name: wfBilingual(pkg.name, pkg.name_en), credit: llMoney(pkg.credit_sar), price: price }),
         pkg.duration_days
-          ? 'الصلاحية: ' + pkg.duration_days + ' يومًا'
-          : 'الصلاحية: بلا انتهاء محدد'];
+          ? WFT('pkg.validity_days', 'الصلاحية: {days} يومًا', { days: pkg.duration_days })
+          : WFT('pkg.validity_open', 'الصلاحية: بلا انتهاء محدد')];
       (Array.isArray(pkg.features) ? pkg.features : []).forEach(f => {
         if (f) parts.push(String(f));
       });
@@ -823,7 +823,7 @@
       if (info) {
         const src = ({ manual: 'يدوي', auto: 'تلقائي', env: 'من إعدادات الخادم', default: 'افتراضي' })[fx.source] || fx.source || '';
         info.textContent = (fx.rate != null ? '1 USD = ' + llMoney(fx.rate) + ' SAR' : '') +
-          (src ? ' — المصدر: ' + src : '') +
+          (src ? WFT('admin.fx_source', ' — المصدر: {src}', { src: wfTr(src) }) : '') +
           (fx.updated_at ? ' — ' + String(fx.updated_at).slice(0, 16).replace('T', ' ') : '');
       }
     }
@@ -981,7 +981,7 @@
       if (!box) return;
       if (!llPackageFeatureCatalog.length) {
         box.innerHTML = '<p class="tenant-hint">' +
-          llEscape(WFT('admin.features_pool_empty', 'أضف مزايا من القايمة أدناه')) + '</p>';
+          llEscape(WFT('admin.features_pool_empty', 'لا توجد مزايا محددة')) + '</p>';
         return;
       }
       box.innerHTML = llPackageFeatureCatalog.map(f =>

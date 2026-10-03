@@ -475,7 +475,7 @@
     function visualConceptMissingMessage(response) {
       const missing = Array.isArray(response?.missingFields) ? response.missingFields : [];
       if (!missing.length) return response?.error || '';
-      return 'أكمل الحقول الناقصة: ' + missing.map(item => item.label || item.key).join('، ');
+      return WFT('vc.complete_missing', 'أكمل الحقول الناقصة: {fields}', { fields: missing.map(item => item.label || item.key).join('، ') });
     }
 
     async function collectVisualConceptPayload(slotId) {
@@ -634,7 +634,8 @@
       ids.forEach((fileId, index) => {
         const item = document.createElement('div');
         item.className = 'visual-concept-reference-item';
-        item.innerHTML = '<img alt="صورة مرجعية ' + (index + 1) + '"><span>' + escapeHtml(names[index] || ('صورة مرجعية ' + (index + 1))) + '</span>';
+        const refLabel = WFT('vc.reference_image', 'صورة مرجعية {n}', { n: index + 1 });
+        item.innerHTML = '<img alt="' + refLabel + '"><span>' + escapeHtml(names[index] || refLabel) + '</span>';
         list.appendChild(item);
         attachProjectFileThumbnail(item.querySelector('img'), fileId);
       });
@@ -674,7 +675,7 @@
       });
       const cards = viewIds.map((id, index) => renderVisualConceptSlot({
         id,
-        label: 'تصور داخلي: ' + (component?.name || 'المكون') + ' — صورة ' + (index + 1),
+        label: WFT('vc.internal_concept', 'تصور داخلي: {name} — صورة {n}', { name: component?.name || WFT('vc.component_fallback', 'المكون'), n: index + 1 }),
         group: 'internal'
       }, !coverApproved)).join('');
       const canAdd = viewIds.length < VISUAL_CONCEPT_MAX_INTERIOR_IMAGES;
@@ -847,7 +848,8 @@
       ids.forEach((fileId, index) => {
         const item = document.createElement('div');
         item.className = 'visual-concept-reference-item';
-        item.innerHTML = '<img alt="صورة مرجعية ' + (index + 1) + '"><span>' + escapeHtml(names[index] || ('صورة مرجعية ' + (index + 1))) + '</span>';
+        const refLabel = WFT('vc.reference_image', 'صورة مرجعية {n}', { n: index + 1 });
+        item.innerHTML = '<img alt="' + refLabel + '"><span>' + escapeHtml(names[index] || refLabel) + '</span>';
         list.appendChild(item);
         attachProjectFileThumbnail(item.querySelector('img'), fileId);
       });
@@ -882,7 +884,7 @@
         tenantVisualConceptState.styleReferenceName = limited[0]?.name || '';
         markVisualConceptDirty();
         renderVisualConceptStyleReference();
-        toast('تم حفظ ' + limited.length + ' صور مرجعية.');
+        toast(WFT('vc.refs_saved', 'تم حفظ {n} صور مرجعية.', { n: limited.length }));
       } catch (error) {
         toast(error.message || 'تعذر رفع الصور المرجعية');
       } finally {
@@ -1041,7 +1043,7 @@
         : (typeof value === 'number' ? String(Math.round(value * 100) / 100) : String(value));
       const rowsHtml = totals.map(item => {
         const deltas = [];
-        if (typeof item.delta_units === 'number' && item.delta_units) deltas.push('وحدات ' + (item.delta_units > 0 ? '+' : '') + item.delta_units);
+        if (typeof item.delta_units === 'number' && item.delta_units) deltas.push(WFT('vc.delta_units', 'وحدات {n}', { n: (item.delta_units > 0 ? '+' : '') + item.delta_units }));
         if (typeof item.delta_area === 'number' && item.delta_area) deltas.push('م² ' + (item.delta_area > 0 ? '+' : '') + item.delta_area);
         const hasRequired = typeof item.required_units === 'number' || typeof item.required_area === 'number';
         const deltaText = deltas.length ? deltas.join('، ') : (hasRequired ? 'مطابق للدراسة' : '—');
@@ -1251,7 +1253,7 @@
       const count = document.getElementById('visualConceptPlansCount');
       const input = document.getElementById('visualConceptPlansUploadInput');
       const plans = visualConceptPlans().filter(plan => !isVisualConceptWorkflowPlan(plan.id));
-      if (count) count.textContent = plans.length ? plans.length + ' مخطط مرفوع' : 'لا توجد مخططات مرفوعة.';
+      if (count) count.textContent = plans.length ? WFT('vc.plans_count', '{n} مخطط مرفوع', { n: plans.length }) : WFT('vc.plans_none', 'لا توجد مخططات مرفوعة.');
       if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
       if (!uploadHost) return;
       plans.forEach(plan => {
@@ -1560,7 +1562,7 @@
         input.value = '';
         return;
       }
-      showLoader('جاري رفع المخططات', 'يتم حفظ ' + Math.min(files.length, remaining) + ' مخطط...');
+      showLoader('جاري رفع المخططات', WFT('vc.plans_saving', 'يتم حفظ {n} مخطط...', { n: Math.min(files.length, remaining) }));
       input.disabled = true;
       try {
         input.dataset.projectFileType = 'visual_reference';
@@ -1584,7 +1586,7 @@
         }
         markVisualConceptDirty();
         renderVisualConceptPage();
-        toast('تم رفع ' + incoming.length + ' مخطط.');
+        toast(WFT('vc.plans_uploaded', 'تم رفع {n} مخطط.', { n: incoming.length }));
       } catch (error) {
         toast(error.message || 'تعذر رفع المخططات');
       } finally {

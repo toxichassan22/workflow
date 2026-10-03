@@ -76,5 +76,10 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "بانتظار الاعتماد النهائي": "Awaiting final approval",
   "تمت استعادة العرض من الأرشيف": "Presentation restored from the archive",
   "معتمد — تم التحميل": "Approved — downloaded",
-  "معتمد — متاح للتحميل": "Approved — available for download"
+  "معتمد — متاح للتحميل": "Approved — available for download",
+  "اسم العرض الجديد": "New presentation name",
+  "البصمة الرقمية": "Digital fingerprint",
+  "رقم الإصدار": "Version number",
+  "معتمد نهائياً": "Final approved",
+  "العرض الحالي": "Current presentation"
 }/*I18N_EN_AUTO_END*/);

@@ -258,10 +258,13 @@
         const label = marketSourceFieldLabel(item.field || '');
         const link = safeMarketUrl(item.source_url) ? ' <a href="' + escapeHtml(safeMarketUrl(item.source_url)) + '" target="_blank" rel="noopener noreferrer">المصدر الرسمي</a>' : '';
         if (item.field === 'distance_km') {
-          return '<div style="color:#92400e;margin-top:4px">' + escapeHtml(String(item.source || 'خارج نطاق المنافسين')) +
-            ': ' + escapeHtml(String(item.incoming || '')) + ' مقابل ' + escapeHtml(String(item.existing || '')) + '</div>';
+          return '<div style="color:#92400e;margin-top:4px">' + escapeHtml(WFT('market.conflict_vs', '{src}: {incoming} مقابل {existing}', {
+            src: String(item.source || WFT('market.outside_scope', 'خارج نطاق المنافسين')),
+            incoming: String(item.incoming || ''),
+            existing: String(item.existing || '')
+          })) + '</div>';
         }
-        return '<div style="color:#92400e;margin-top:4px">تعارض في ' + escapeHtml(label) + ': تم الإبقاء على القيمة الحالية.' + link + '</div>';
+        return '<div style="color:#92400e;margin-top:4px">' + escapeHtml(WFT('market.conflict_kept', 'تعارض في {label}: تم الإبقاء على القيمة الحالية.', { label: label })) + link + '</div>';
       }).join('') +
       (tr.dataset.sourcesUnverified
         ? '<div style="color:#92400e;margin-top:4px">روابط هذا الصف لم تُسترجع عبر البحث — معروضة للمراجعة وغير موثقة.</div>'
@@ -273,7 +276,7 @@
         ? '<div style="color:#b91c1c;margin-top:4px">تعذر تشغيل بحث التحقق لهذا المنافس — لم يرجع مزود البحث أي صفحة.</div>'
         : '') +
       (tr.dataset.verifyProviderError
-        ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">تفاصيل المزود: ' + escapeHtml(tr.dataset.verifyProviderError) + '</div>'
+        ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">' + escapeHtml(WFT('market.provider_detail', 'تفاصيل المزود: {err}', { err: tr.dataset.verifyProviderError })) + '</div>'
         : '');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
@@ -911,15 +914,15 @@
         const conflictCount = Array.isArray(res.conflictWarnings) ? res.conflictWarnings.length : 0;
         if (note) {
           note.textContent = (mode === 'fill'
-            ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس')
-            : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس')) +
-            (conflictCount ? ' — تم الإبقاء على ' + conflictCount + ' قيمة حالية متعارضة' : '') +
-            (res.searchVerified === false ? ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة' : '') +
-            ((res.outOfRadiusCount || 0) ? ' — ' + res.outOfRadiusCount + ' منافس خارج النطاق المحدد' : '') +
-            ((res.noEvidenceCount || 0) ? ' — ' + res.noEvidenceCount + ' منافس لم تظهر أسماؤهم في نتائج البحث' : '') +
-            ((res.searchNotRunCount || 0) ? ' — تعذر تنفيذ البحث عن ' + res.searchNotRunCount + ' منافس' : '') +
-            ((res.missingPriceCount || 0) ? ' — ' + res.missingPriceCount + ' منافس بلا سعر موثق' : '') +
-            (res.providerError ? ' — خطأ مزود البحث: ' + res.providerError : '') +
+            ? WFT('market.fill_done', 'أُكملت بيانات {n} منافس', { n: res.updated || 0 })
+            : WFT('market.table_replaced', 'تم استبدال الجدول بـ {n} منافس', { n: (res.competitors || []).length })) +
+            (conflictCount ? WFT('market.note_conflicts_kept', ' — تم الإبقاء على {n} قيمة حالية متعارضة', { n: conflictCount }) : '') +
+            (res.searchVerified === false ? WFT('market.note_search_not_run', ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة') : '') +
+            ((res.outOfRadiusCount || 0) ? WFT('market.note_out_of_radius', ' — {n} منافس خارج النطاق المحدد', { n: res.outOfRadiusCount }) : '') +
+            ((res.noEvidenceCount || 0) ? WFT('market.note_no_evidence', ' — {n} منافس لم تظهر أسماؤهم في نتائج البحث', { n: res.noEvidenceCount }) : '') +
+            ((res.searchNotRunCount || 0) ? WFT('market.note_search_failed', ' — تعذر تنفيذ البحث عن {n} منافس', { n: res.searchNotRunCount }) : '') +
+            ((res.missingPriceCount || 0) ? WFT('market.note_missing_price', ' — {n} منافس بلا سعر موثق', { n: res.missingPriceCount }) : '') +
+            (res.providerError ? WFT('market.note_provider_error', ' — خطأ مزود البحث: {err}', { err: res.providerError }) : '') +
             (extra ? ' — ' + extra : '');
         }
         toast(res.partial
@@ -1029,7 +1032,7 @@
           || currentOneBlock
           || Object.values(currentSwot).some(value => String(value || '').trim());
         const unverifiedNote = res.searchVerified === false
-          ? ' — مصادر الملخص غير موثقة: لم يعمل البحث في الويب أثناء التوليد'
+          ? WFT('market.note_sources_unverified', ' — مصادر الملخص غير موثقة: لم يعمل البحث في الويب أثناء التوليد')
           : '';
         marketSummaryPending = {
           summary: res.summary,
@@ -1041,7 +1044,7 @@
         };
         if (hasCurrent) {
           renderMarketSummaryCompare(currentSummary, res.summary, currentSwot, res.swot || {}, currentOneBlock, marketSummaryPending.oneBlockSummary);
-          toast('النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.' + unverifiedNote);
+          toast(WFT('market.two_versions_shown', 'النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.') + unverifiedNote);
         } else {
           const state = getMarketStudyState();
           state.summary = res.summary;
@@ -1055,7 +1058,7 @@
           state.one_block_summary = res.one_block_summary || res.oneBlockSummary || '';
           applyMarketStudyState(state);
           persistMarketStudyFromDom();
-          toast('تم توليد ملخص السوق وتحليل SWOT' + unverifiedNote);
+          toast(WFT('market.summary_generated', 'تم توليد ملخص السوق وتحليل SWOT') + unverifiedNote);
         }
         updateLoaderProgress(100, 'اكتمل ملخص السوق');
       } catch (error) {

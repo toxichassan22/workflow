@@ -417,7 +417,7 @@
       if (!label) { toast('اكتب اسم القسم'); return; }
       const data = await api('POST', '/api/field-sections/custom', { label });
       if (data.success) {
-        toast('تم إضافة القسم: ' + label);
+        toast(WFT('fields.section_added', 'تم إضافة القسم: {label}', { label }));
         document.getElementById('newSectionLabel').value = '';
         await openTenantFields();
       } else {
@@ -674,7 +674,7 @@
         toast(data.error || 'فشل البناء التلقائي');
         return;
       }
-      toast(`تم إنشاء ${data.count || 0} حقل تلقائياً`);
+      toast(WFT('fields.auto_created', 'تم إنشاء {n} حقل تلقائياً', { n: data.count || 0 }));
       await renderTenantFields();
       const sectionsData = await api('GET', '/api/field-sections');
       tenantFieldSections = sectionsData.available || [];
@@ -738,9 +738,9 @@
     function editAiField(index) {
       const s = aiFieldSuggestions[index];
       if (!s) return;
-      const newLabel = prompt('اسم الحقل:', s.fieldLabel);
+      const newLabel = prompt(WFT('fields.name_prompt', 'اسم الحقل:'), s.fieldLabel);
       if (newLabel === null) return;
-      const newType = prompt('نوع الحقل (text/textarea/number/select/date/image):', s.fieldType);
+      const newType = prompt(WFT('fields.type_prompt', 'نوع الحقل (text/textarea/number/select/date/image):'), s.fieldType);
       if (newType === null) return;
       if (newLabel) s.fieldLabel = newLabel.trim();
       if (newType) s.fieldType = newType.trim();
@@ -752,7 +752,7 @@
       const approved = aiFieldSuggestions.filter(s => s._approved);
       if (!approved.length) { toast('لا توجد حقول مقبولة للإضافة'); return; }
 
-      showLoader('جاري إضافة الحقول', `عدد الحقول: ${approved.length}`);
+      showLoader('جاري إضافة الحقول', WFT('fields.count_label', 'عدد الحقول: {n}', { n: approved.length }));
       let added = 0;
       for (const s of approved) {
         const payload = {
@@ -770,7 +770,7 @@
         if (res.success) added++;
       }
       hideLoader();
-      toast(`تم إضافة ${added} من ${approved.length} حقل`);
+      toast(WFT('fields.added_of', 'تم إضافة {added} من {total} حقل', { added, total: approved.length }));
       await renderTenantFields();
       clearAiFieldBuilder();
     }

@@ -702,10 +702,11 @@
     function formatLocationDataFetchedAt(value) {
       const date = new Date(value || '');
       if (!Number.isFinite(date.getTime())) return '';
-      return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
+      const formatted = new Intl.DateTimeFormat(wfLocale() + (wfIsEn() ? '' : '-u-ca-gregory'), {
         timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit'
-      }).format(date) + ' بتوقيت السعودية';
+      }).format(date);
+      return WFT('sectionver.time_tz', '{time} بتوقيت السعودية', { time: formatted });
     }
 
     function setLocationDataFetchedAt(value = new Date().toISOString()) {
@@ -713,7 +714,7 @@
       const input = document.getElementById('locationDataFetchedAt');
       if (input) input.value = value;
       const display = document.getElementById('locationDataFetchedAtDisplay');
-      if (display) display.textContent = value ? 'آخر تحديث للبيانات: ' + formatLocationDataFetchedAt(value) : '';
+      if (display) display.textContent = value ? WFT('sectionver.data_updated', 'آخر تحديث للبيانات: {time}', { time: formatLocationDataFetchedAt(value) }) : '';
     }
 
     function serializeLocationTable(key) {

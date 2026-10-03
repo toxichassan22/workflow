@@ -233,7 +233,7 @@
         const display = document.createElement('div');
         display.id = 'locationDataFetchedAtDisplay';
         display.className = 'location-table-hint';
-        display.textContent = fetchedAt ? 'آخر تحديث للبيانات: ' + formatLocationDataFetchedAt(fetchedAt) : '';
+        display.textContent = fetchedAt ? WFT('sectionver.data_updated', 'آخر تحديث للبيانات: {time}', { time: formatLocationDataFetchedAt(fetchedAt) }) : '';
         wrap.appendChild(display);
         const fetchedInput = document.createElement('input');
         fetchedInput.type = 'hidden';
@@ -499,7 +499,7 @@
       tenantMapPolygonMode = false;
       tenantLandmarkPlacementTarget = { key, tr };
       renderLocationWorkflowState();
-      toast('تم تفعيل تحديد موقع المعلم على ' + (mapType === 'landmarks' ? 'خريطة المعالم' : 'خريطة المنطقة'));
+      toast(WFT('maps.landmark_pick_on', 'تم تفعيل تحديد موقع المعلم على {map}', { map: wfTr(mapType === 'landmarks' ? 'خريطة المعالم' : 'خريطة المنطقة') }));
     }
 
     function accessRoadNameKey(name) {

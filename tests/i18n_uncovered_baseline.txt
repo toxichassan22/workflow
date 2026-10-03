@@ -7,8 +7,6 @@
 #              project content, not UI chrome
 #   fragment = the tail of a sentence already migrated to WFT(params)
 #   artifact = extraction glue; the real text node is already translated
-fragment	)، مع إبقاء باقي العرض كما هو.
-fragment	فقط (
 artifact	, \approved\)">اعتماد
 artifact	, \approved\)">اعتماد الطلب
 artifact	, \rejected\)">رفض

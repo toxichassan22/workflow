@@ -444,7 +444,7 @@
                 badge.style.color = '#991b1b';
                 badge.textContent = 'المسودة محفوظة؛ تعذر حفظ العرض';
               }
-              if (!silent) toast('حُفظت المسودة، لكن تعذر حفظ العرض: ' + (presErr?.message || presErr));
+              if (!silent) toast(WFT('draft.saved_pres_failed', 'حُفظت المسودة، لكن تعذر حفظ العرض: {err}', { err: wfTr(presErr?.message || presErr) }));
               return false;
             }
           }
@@ -481,7 +481,7 @@
           badge.style.color = '#991b1b';
           badge.innerHTML = 'لم يتم الحفظ — التغييرات غير محفوظة';
         }
-        if (!silent) toast('تعذر حفظ المسودة: ' + (e?.message || e));
+        if (!silent) toast(WFT('draft.save_failed', 'تعذر حفظ المسودة: {err}', { err: wfTr(e?.message || e) }));
         return false;
       }
     }
@@ -524,7 +524,7 @@
         tenantProjectData.location_coordinates_confirmed = false;
         if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, true);
         const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
-        toast('تم تحديد الموقع: ' + msg);
+        toast(WFT('location.detected', 'تم تحديد الموقع: {msg}', { msg: wfTr(msg) }));
         return true;
       }
       toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
@@ -757,7 +757,7 @@
       const uncertainConflicts = conflictTexts.filter(text =>
         uncertaintyMarkers.some(marker => text.includes(marker))
       ).slice(0, 3);
-      const issueTexts = [...missingTables.map(table => 'لم تُقرأ بيانات ' + table)];
+      const issueTexts = [...missingTables.map(table => WFT('report.table_unread', 'لم تُقرأ بيانات {table}', { table: wfTr(table) }))];
       if (!coordinateRows) issueTexts.push('جدول إحداثيات التنظيم فارغ أو غير مقروء');
       else if (completeCoordinateRows < coordinateRows) issueTexts.push('بعض صفوف الإحداثيات ناقصة أو غير واضحة');
       if (directionRows < 4) issueTexts.push('جدول الاتجاهات بموجب التنظيم ناقص أو غير واضح');

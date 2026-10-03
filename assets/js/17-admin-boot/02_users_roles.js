@@ -41,8 +41,8 @@
       if (pwError) { toast(pwError); return; }
       const data = await api('POST', '/api/users', { name, email, password, phone, responsibility, projects });
       if (data.success) {
-        toast('تم إضافة الموظف' + (data.emailSent === false ? ' — تعذر إرسال البريد' : '') +
-          (data.assignmentError ? ' — ' + assignmentErrorText(data.assignmentError) : ''));
+        toast(WFT('users.added', 'تم إضافة الموظف') + (data.emailSent === false ? WFT('users.added_email_failed', ' — تعذر إرسال البريد') : '') +
+          (data.assignmentError ? ' — ' + wfTr(assignmentErrorText(data.assignmentError)) : ''));
         resetForm();
         openTenantUsers();
       } else {
@@ -57,7 +57,7 @@
     }
 
     function assignmentErrorText(error) {
-      if (error === 'approver_exists') return 'للمشروع معتمد بالفعل';
+      if (error === 'approver_exists') return WFT('users.approver_exists', 'للمشروع معتمد بالفعل');
       if (error === 'too_many_editors') return WFT('users.assignment_editor_cap', 'المشروع يقبل خمسة محررين كحد أقصى');
       return error;
     }
@@ -69,7 +69,7 @@
     }
 
     async function deleteTenantUser(userId, userName) {
-      if (!confirm('حذف الموظف: ' + userName + '؟')) return;
+      if (!confirm(WFT('users.delete_confirm', 'حذف الموظف: {name}؟', { name: userName }))) return;
       const data = await api('DELETE', '/api/users/' + userId);
       if (data.success) { toast('تم الحذف'); openTenantUsers(); }
       else { toast(data.error || 'فشل الحذف'); }
@@ -767,7 +767,7 @@
           return;
         }
         if (data.title) {
-          overlay.querySelector('#changeLogPageTitle').textContent = 'سجل تعديلات المشروع — ' + data.title;
+          overlay.querySelector('#changeLogPageTitle').textContent = WFT('changelog.title', 'سجل تعديلات المشروع — {title}', { title: wfTr(data.title) });
         }
         changeLogEntries = data.log || [];
         renderChangeLogPageBody();

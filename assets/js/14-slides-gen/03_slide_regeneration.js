@@ -156,7 +156,7 @@
       const plannerKey = TENANT_SECTION_PLANNER_KEYS[sectionKey];
       if (!plannerKey) throw new Error('القسم غير مدعوم لإعادة التخطيط');
       const response = await requestTenantSlidePlan(tenantProjectData, job => {
-        setLiveGenBanner(true, 'إعادة تخطيط قسم ' + (TENANT_PRESENTATION_SECTION_TITLES[sectionKey] || sectionKey),
+        setLiveGenBanner(true, WFT('gen.replanning_section', 'إعادة تخطيط قسم {section}', { section: wfTr(TENANT_PRESENTATION_SECTION_TITLES[sectionKey] || sectionKey) }),
           (job && job.message) || 'تحليل الصور والبيانات وتحديد عدد الشرائح المناسب', 12);
       }, plannerKey);
       if (!response?.success || !response.plan) {
@@ -330,7 +330,7 @@
         const replacements = [];
         for (let position = 0; position < plannedSlides.length; position += 1) {
           const planSlide = { ...plannedSlides[position] };
-          setLiveGenBanner(true, 'إعادة توليد قسم ' + sectionLabel,
+          setLiveGenBanner(true, WFT('gen.regenerating_section', 'إعادة توليد قسم {section}', { section: wfTr(sectionLabel) }),
             WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: position + 1, total: plannedSlides.length }), 20 + Math.round((position / plannedSlides.length) * 65));
           replacements.push({
             slide: await generateTenantSlideFromSnapshot(
@@ -351,7 +351,7 @@
         triggerAutoSaveDraft();
         tenantDesignerMessages.push({
           role: 'assistant',
-          content: 'تم إعادة تخطيط وتوليد قسم ' + sectionLabel + ' فقط (' + plannedSlides.length + ' شرائح بدلًا من ' + targetIndexes.length + ')، مع إبقاء باقي العرض كما هو.',
+          content: WFT('gen.section_replanned', 'تم إعادة تخطيط وتوليد قسم {section} فقط ({new} شرائح بدلًا من {old})، مع إبقاء باقي العرض كما هو.', { section: wfTr(sectionLabel), new: plannedSlides.length, old: targetIndexes.length }),
           slides: Array.from({ length: plannedSlides.length }, (_, offset) => firstIndex + offset + 1)
         });
         renderTenantDesignerChat();

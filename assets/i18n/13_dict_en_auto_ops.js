@@ -82,6 +82,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الحد الأقصى 30 سببًا": "Maximum 30 reasons",
   "الربح التقديري:": "Estimated margin:",
   "السبب مسجل بالفعل": "The reason is already recorded",
+  "الصلاحية": "Validity",
   "الصلاحية:": "Validity:",
   "الصلاحية: بلا انتهاء محدد": "Validity: no set expiry",
   "المحفظة والفوترة": "Wallet and billing",

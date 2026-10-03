@@ -181,5 +181,19 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "في خطة التنفيذ": "In the execution plan",
   "لاتيني:": "Latin:",
   "محتويات العرض": "Presentation contents",
-  "يُعدَّل": "Being edited"
+  "يُعدَّل": "Being edited",
+  "أُغلقت صفحة التوليد قبل اكتمالها": "The generation page was closed before it completed",
+  "أُلغي اعتماد التوليد لبدء توليد جديد": "Generation approval revoked to start a new run",
+  "أُلغيت مهمة التوليد لبدء توليد جديد": "Generation job cancelled to start a new run",
+  "انتهت مهمة التوليد قبل اكتمالها": "The generation job ended before completion",
+  "اعتماد تحليل الموقع النصي مطلوب قبل توليد العرض": "Site analysis approval is required before generating the presentation",
+  "توليد الخرائط الأربع مطلوب قبل توليد العرض": "Generating the four maps is required before generating the presentation",
+  "تعذر حفظ العرض بعد التوليد": "Could not save the presentation after generation",
+  "جاري الصياغة والتصميم بالذكاء الاصطناعي...": "Drafting and designing with AI...",
+  "جاري توليد الشرائح": "Generating slides",
+  "خطأ في الحفظ": "Save error",
+  "خطأ في العرض": "Presentation error",
+  "فشل التوليد": "Generation failed",
+  "العنصر بالفعل في الخلف": "Element is already at the back",
+  "العنصر بالفعل في المقدمة": "Element is already at the front"
 }/*I18N_EN_AUTO_END*/);

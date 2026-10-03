@@ -71,7 +71,7 @@
       setSlidesEditorInfo(p.title || '', p.slideCount || tenantSlidesData.length);
       showTenantPage('tenantSlidesPage');
       refreshGlobalRail();
-      toast('تم فتح العرض: ' + (p.title || ''));
+      toast(WFT('pres.opened', 'تم فتح العرض: {title}', { title: p.title || '' }));
       void resumeTenantDesignerChatJob();
     }
 
@@ -198,7 +198,7 @@
         toast('لا توجد حقول ناقصة يمكن استرجاعها في هذه المسودة');
         return;
       }
-      toast('تم استرجاع ' + resp.restoredCount + ' حقلًا');
+      toast(WFT('pres.fields_restored', 'تم استرجاع {n} حقلًا', { n: resp.restoredCount }));
       await openProjectDraftById(draftId);
     }
 

@@ -43,7 +43,7 @@
         if (data.actions && data.actions.length) {
           const successCount = data.actions.filter(a => a.status === 'success').length;
           if (successCount) {
-            toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
+            toast(WFT('training.actions_done', 'تم تنفيذ {n} إجراء بنجاح', { n: successCount }));
             await applyAgentWorkspaceActions(data.actions);
             await loadTrainingList();
             await refreshSystemDataAfterAgentAction();
@@ -451,7 +451,7 @@
         if (data.actions && data.actions.length) {
           const successCount = data.actions.filter(a => a.status === 'success').length;
           if (successCount) {
-            toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
+            toast(WFT('training.actions_done', 'تم تنفيذ {n} إجراء بنجاح', { n: successCount }));
             await applyAgentWorkspaceActions(data.actions);
             await loadAIRules();
             await refreshSystemDataAfterAgentAction();

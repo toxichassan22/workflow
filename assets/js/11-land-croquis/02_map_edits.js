@@ -1004,7 +1004,7 @@
       // Trigger automatic draft save
       triggerAutoSaveDraft();
 
-      toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
+      toast(filled > 0 ? WFT('sample.filled', 'تم تعبئة {n} حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض', { n: filled }) : 'لا توجد حقول مطابقة');
     }
 
     // Object URLs for previewed documents, keyed by file id so repeat opens stay cheap.

@@ -503,7 +503,7 @@
                 const transfer = new DataTransfer();
                 Array.from(input.files).slice(0, LAND_PHOTOS_MAX).forEach(file => transfer.items.add(file));
                 input.files = transfer.files;
-                toast('يمكن رفع ' + LAND_PHOTOS_MAX + ' صور كحد أقصى للأرض');
+                toast(WFT('maps.land_photos_max', 'يمكن رفع {n} صور كحد أقصى للأرض', { n: LAND_PHOTOS_MAX }));
               }
               uploadLandPhotos(input);
             });

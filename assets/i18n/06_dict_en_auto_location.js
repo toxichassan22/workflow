@@ -196,5 +196,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "حدث خطأ أثناء توليد الخريطة": "An error occurred while generating the map",
   "المدة (دقيقة)": "Duration (minutes)",
   "طول الحد (م)": "Boundary length (m)",
-  "عرض الشارع (م)": "Street width (m)"
+  "عرض الشارع (م)": "Street width (m)",
+  "المعالم والمواقع المحسوبة للقيادة": "Landmarks & places with computed drive times",
+  "تعذر جلب المعالم": "Could not fetch landmarks"
 }/*I18N_EN_AUTO_END*/);

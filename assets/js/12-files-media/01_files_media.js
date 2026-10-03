@@ -171,7 +171,7 @@
           triggerAutoSaveDraft();
         }
       } catch (error) {
-        toast('تعذر رفع شعار المشروع: ' + (error.message || error));
+        toast(WFT('files.logo_upload_failed', 'تعذر رفع شعار المشروع: {err}', { err: wfTr(error.message || error) }));
         renderProjectLogoState(tenantProjectData.project_logo_file_meta || (tenantProjectData.project_logo ? { path: tenantProjectData.project_logo } : null));
       }
     }
@@ -247,7 +247,7 @@
         renderLandPhotos(merged);
         triggerAutoSaveDraft();
       } catch (error) {
-        toast('تعذر رفع صور الأرض: ' + (error.message || error));
+        toast(WFT('files.photos_upload_failed', 'تعذر رفع صور الأرض: {err}', { err: wfTr(error.message || error) }));
         renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
       }
     }
@@ -328,7 +328,7 @@
         renderLandDocumentsUploadState(Array.isArray(uploaded) ? uploaded : []);
         triggerAutoSaveDraft();
       } catch (error) {
-        toast('تعذر رفع الملفات: ' + (error.message || error));
+        toast(WFT('files.upload_failed', 'تعذر رفع الملفات: {err}', { err: wfTr(error.message || error) }));
         renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       }
     }
@@ -564,7 +564,7 @@
 
       // The plan also runs before navigation: a planner failure keeps the
       // project page in place with the error instead of a dead design stage.
-      showLoader('إعداد عرض ' + resolvedLabel, 'تحليل بيانات القسم وبناء الشرائح', 5);
+      showLoader(WFT('gen.preparing_presentation', 'إعداد عرض {label}', { label: wfTr(resolvedLabel) }), 'تحليل بيانات القسم وبناء الشرائح', 5);
       let planResponse = null;
       try {
         planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
@@ -581,7 +581,7 @@
         return;
       }
 
-      clearTenantSlidesStage('جاري إعداد عرض ' + resolvedLabel);
+      clearTenantSlidesStage(WFT('gen.preparing_presentation_progress', 'جاري إعداد عرض {label}', { label: wfTr(resolvedLabel) }));
       setSlidesEditorInfo(presentationTitle, 0);
       tenantSlidePlan = planResponse.plan;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
@@ -606,14 +606,14 @@
             const maxMb = Number(matched.max_size_mb) || 25;
             const fileSizeMb = file.size / (1024 * 1024);
             if (fileSizeMb > maxMb) {
-              toast('حجم الملف (' + fileSizeMb.toFixed(1) + ' ميجابايت) يتجاوز الحد المسموح (' + maxMb + ' ميجابايت)');
+              toast(WFT('files.size_too_large', 'حجم الملف ({size} ميجابايت) يتجاوز الحد المسموح ({max} ميجابايت)', { size: fileSizeMb.toFixed(1), max: maxMb }));
               return false;
             }
             if (matched.allowed_extensions) {
               const exts = matched.allowed_extensions.split(',').map(e => e.trim().toLowerCase().replace(/^\./, ''));
               const fileExt = (file.name.split('.').pop() || '').toLowerCase();
               if (exts.length && !exts.includes(fileExt)) {
-                toast('امتداد الملف (.' + fileExt + ') غير مدعوم');
+                toast(WFT('files.ext_unsupported', 'امتداد الملف (.{ext}) غير مدعوم', { ext: fileExt }));
                 return false;
               }
             }
@@ -719,7 +719,7 @@
           '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">' +
           '<div><span style="color:#64748b;">المشروع:</span> <strong>' + escapeHtml(projectName) + '</strong></div>' +
           (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +
-          '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + slidesCount + ' شريحة</strong></div>' +
+          '<div><span style="color:#64748b;">الشرائح المتوقعة:</span> <strong>' + WFT('gen.slides_count', '{n} شريحة', { n: slidesCount }) + '</strong></div>' +
           '<div><span style="color:#64748b;">النقاط التقديرية:</span> <strong>'
           + WFT('gen.points_count', '{n} نقطة', { n: llMoney(costSar) }) + '</strong></div>' +
           (canSeeWallet && remainingSar !== null
@@ -827,8 +827,7 @@
         && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
 
       const factCount = countProjectFacts(tenantProjectData);
-      if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
-        ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
+      if (factCount < GENERATION_MIN_FACTS && !confirm(WFT('gen.low_facts_confirm', 'بيانات المشروع المحفوظة {n} حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟', { n: factCount }))) return;
 
       if (!(await preparePresentationGenerationTarget('full'))) return;
 
@@ -870,7 +869,7 @@
           showTenantPage('tenantSlidesPage');
           clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
           setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 12);
         } else {
           // The gate already escrowed the hold: a dead plan releases it and
           // returns the draft from 'generating' instead of stranding both.

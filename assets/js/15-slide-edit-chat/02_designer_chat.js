@@ -128,7 +128,7 @@
         if (incoming.length < baselineCount && !deleteIntent) {
           tenantDesignerMessages.push({
             role: 'assistant',
-            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (baselineCount - incoming.length) + ' من ' + baselineCount + ' شريحة.',
+            content: WFT('designer.edit_dropped', 'لم يتم تطبيق التعديل لأن النتيجة أسقطت {dropped} من {total} شريحة.', { dropped: baselineCount - incoming.length, total: baselineCount }),
             slides: tenantChatFocusIndexes.slice()
           });
           tenantProjectData.designerChat = designerChatPersistence();

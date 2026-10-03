@@ -602,7 +602,7 @@
       if (val > maxAllowed + 0.0001) {
         input.value = input.dataset.lastValidValue || '0';
         const label = fieldName === 'costPct' ? 'نسبة تكلفة التطوير' : 'نسبة دفعة المطور';
-        schedulePercentExceededMessage = `تعذر قبول القيمة لأن مجموع ${label} تجاوز 100%.`;
+        schedulePercentExceededMessage = WFT('fin.pct_rejected', 'تعذر قبول القيمة لأن مجموع {label} تجاوز 100%.', { label: wfTr(label) });
         return;
       }
       input.dataset.lastValidValue = String(val);
@@ -630,8 +630,8 @@
       if (!rows.length) { note.hidden = true; note.textContent = ''; return; }
       const costLeft = 100 - costPct, devLeft = 100 - devPct;
       const parts = schedulePercentExceededMessage ? [schedulePercentExceededMessage] : [];
-      if (costLeft > 0.01) parts.push(`غير موزَّع من نسبة تكلفة التطوير: ${schedulePercentText(costLeft)}`);
-      if (devLeft > 0.01) parts.push(`غير موزَّع من نسبة دفعة المطور: ${schedulePercentText(devLeft)}`);
+      if (costLeft > 0.01) parts.push(WFT('fin.unallocated_cost', 'غير موزَّع من نسبة تكلفة التطوير: {pct}', { pct: schedulePercentText(costLeft) }));
+      if (devLeft > 0.01) parts.push(WFT('fin.unallocated_dev', 'غير موزَّع من نسبة دفعة المطور: {pct}', { pct: schedulePercentText(devLeft) }));
       note.hidden = parts.length === 0;
       note.textContent = parts.join(' — ');
       note.classList.toggle('error', !!schedulePercentExceededMessage);
@@ -745,7 +745,7 @@
       formula = String(formula || '').trim(); if (!formula) return 0;
       const allowedNames = ['A', 'B', 'C', 'D', 'E', 'F', 'max', 'min', 'round', 'abs', 'pow'];
       const words = formula.match(/[A-Za-z_]+/g) || [];
-      for (const w of words) { if (!allowedNames.includes(w)) throw new Error('متغير غير مسموح: ' + w); }
+      for (const w of words) { if (!allowedNames.includes(w)) throw new Error(WFT('fin.var_not_allowed', 'متغير غير مسموح: {var}', { var: w })); }
       if (!/^[0-9A-Za-z_+\-*/().,\s]+$/.test(formula)) throw new Error('الفورملا تحتوي رموز غير مسموحة');
       const A = Number(vars.A || 0), B = Number(vars.B || 0), C = Number(vars.C || 0), D = Number(vars.D || 0), E = Number(vars.E || 0), F = Number(vars.F || 0);
       const max = Math.max, min = Math.min, round = Math.round, abs = Math.abs, pow = Math.pow;

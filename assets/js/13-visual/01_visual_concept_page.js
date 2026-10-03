@@ -230,7 +230,7 @@
         tenantVisualConceptState.slots[slotId].prompt = response.prompt;
         markVisualConceptDirty();
         renderVisualConceptPage();
-        toast('تم تجهيز وصف ' + visualConceptSlotLabel(slotId));
+        toast(WFT('vc.prompt_ready', 'تم تجهيز وصف {slot}', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
       } catch (error) {
         hideLoader();
         toast(error.message || 'تعذر إنشاء الوصف');
@@ -255,7 +255,7 @@
       const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
       liveSlot().status = 'generating';
       renderVisualConceptPage();
-      showLoader('جاري توليد التصور البصري', 'يتم توليد ' + visualConceptSlotLabel(slotId) + '...');
+      showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
       try {
         const payload = await collectVisualConceptPayload(slotId);
         const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
@@ -297,7 +297,7 @@
       slot.status = 'approved';
       markVisualConceptDirty();
       renderVisualConceptPage();
-      toast('تم اعتماد ' + visualConceptSlotLabel(slotId));
+      toast(WFT('vc.slot_approved', 'تم اعتماد {slot}', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
     }
 
     function visualConceptSlotLabel(slotId) {
@@ -317,7 +317,7 @@
       if (slotId === 'cover' && tenantCreativeImages) tenantCreativeImages.cover = '';
       markVisualConceptDirty();
       renderVisualConceptPage();
-      toast('تم إلغاء اعتماد ' + visualConceptSlotLabel(slotId));
+      toast(WFT('vc.slot_unapproved', 'تم إلغاء اعتماد {slot}', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
     }
 
     function deleteVisualConceptInteriorField(slotId) {

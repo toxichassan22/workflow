@@ -431,7 +431,7 @@
         ? 'انتهت الفترة التجريبية للشركة وتوقف التوليد — تواصل مع الإدارة لتجديد الاشتراك'
         : (days <= 1 ? 'تنتهي الفترة التجريبية للشركة غدًا'
           : days === 2 ? 'تنتهي الفترة التجريبية للشركة خلال يومين'
-          : 'تنتهي الفترة التجريبية للشركة خلال ' + days + ' أيام');
+          : WFT('auth.trial_days_left', 'تنتهي الفترة التجريبية للشركة خلال {n} أيام', { n: days }));
       const topbar = document.querySelector('.tenant-topbar');
       if (topbar) topbar.insertAdjacentElement('afterend', banner);
     }
@@ -644,7 +644,7 @@
       await api('PUT', '/api/branding', { font_family: familyName, font_arabic: familyName });
       await loadTenantBranding();
       await loadTenantFonts();
-      toast('تم التعرف على الخط تلقائيًا: ' + familyName + ' — ' + (detected.weight || 'regular'));
+      toast(WFT('branding.font_detected', 'تم التعرف على الخط تلقائيًا: {name} — {weight}', { name: familyName, weight: detected.weight || 'regular' }));
     }
 
     async function setTenantFontSelection(script, weight, fontId, skipReload) {

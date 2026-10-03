@@ -68,8 +68,8 @@
           <button type="submit" class="auth-btn">دخول</button>
         </form>
         <form id="loginOtpForm" class="auth-form" onsubmit="handleLoginOtpVerify(event)" style="display:none">
-          <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:14px;text-align:center;color:#475569;font-weight:600">رمز التحقق مرسل إلى البريد الإلكتروني</p>
-          <label style="text-align:center;margin-bottom:8px">رمز التحقق</label>
+          <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:14px;text-align:center;color:#475569;font-weight:600" data-i18n="auth.otp_hint_generic">رمز التحقق مرسل إلى البريد الإلكتروني</p>
+          <label style="text-align:center;margin-bottom:8px" data-i18n="auth.otp_code_label">رمز التحقق</label>
 
           <div class="otp-boxes" dir="ltr" id="loginOtpBoxes">
             <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="0" autofocus>
@@ -81,10 +81,10 @@
           </div>
           <input type="hidden" id="loginOtpInput" name="otp" required>
 
-          <button type="submit" class="auth-btn" id="loginOtpSubmitBtn">تأكيد الرمز</button>
+          <button type="submit" class="auth-btn" id="loginOtpSubmitBtn" data-i18n="auth.otp_confirm">تأكيد الرمز</button>
           <div class="auth-secondary-actions">
-            <button type="button" class="btn ghost small" id="loginOtpResendBtn" onclick="handleLoginOtpResend()">إعادة إرسال الرمز</button>
-            <button type="button" class="btn ghost small" onclick="handleLoginOtpCancel()">الرجوع</button>
+            <button type="button" class="btn ghost small" id="loginOtpResendBtn" onclick="handleLoginOtpResend()" data-i18n="auth.otp_resend">إعادة إرسال الرمز</button>
+            <button type="button" class="btn ghost small" onclick="handleLoginOtpCancel()" data-i18n="auth.otp_back">الرجوع</button>
           </div>
         </form>
       </div>

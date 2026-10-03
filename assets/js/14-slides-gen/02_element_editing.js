@@ -518,7 +518,7 @@
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
       syncSlideElementToolbar(index);
-      toast('تم ضبط شفافية العنصر ' + clamped + '%');
+      toast(WFT('slide.opacity_set', 'تم ضبط شفافية العنصر {n}%', { n: clamped }));
     }
 
     function slideElementFontSizePx(el) {
@@ -574,7 +574,7 @@
       triggerAutoSaveDraft();
       const selPath = session.sel.path;
       selectSlideElement(stage, index, target, selPath);
-      toast('حجم النص ' + next + 'px');
+      toast(WFT('slide.font_size_set', 'حجم النص {n}px', { n: next }));
     }
 
     function applySlideElementBold(root, makeBold) {

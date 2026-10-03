@@ -299,7 +299,7 @@
         updateLoaderProgress(100, 'اكتمل تحميل الدراسة المالية');
         toast('تم تصدير الدراسة المالية وحفظها في سجل التصديرات');
       } catch (error) {
-        toast('تعذر تصدير الدراسة المالية: ' + (error?.message || 'خطأ في الاتصال'));
+        toast(WFT('financial.export_failed', 'تعذر تصدير الدراسة المالية: {err}', { err: wfTr(error?.message || 'خطأ في الاتصال') }));
       } finally {
         hideLoader();
       }
@@ -667,7 +667,7 @@
 
     function formatTimelineEnd(end) {
       if (!end) return '';
-      const relative = 'سنة ' + end.year + ' — الربع ' + (TIMELINE_QUARTERS.indexOf(end.quarter) + 1);
+      const relative = WFT('timeline.year_quarter', 'سنة {y} — الربع {q}', { y: end.year, q: TIMELINE_QUARTERS.indexOf(end.quarter) + 1 });
       const start = timelineProjectStart();
       return start && Number.isFinite(end.monthIndex)
         ? relative + ' (' + formatTimelineMonth(start.index + end.monthIndex) + ')'
@@ -696,7 +696,7 @@
 
     function timelineQuarterOptionsHtml(chosen) {
       return ['<option value="">—</option>'].concat(TIMELINE_QUARTERS.map(
-        (quarter, index) => '<option value="' + quarter + '"' + (String(chosen).trim() === quarter ? ' selected' : '') + '>الربع ' + (index + 1) + '</option>'
+        (quarter, index) => '<option value="' + quarter + '"' + (String(chosen).trim() === quarter ? ' selected' : '') + '>' + WFT('timeline.quarter_n', 'الربع {n}', { n: index + 1 }) + '</option>'
       )).join('');
     }
 
@@ -711,7 +711,7 @@
       Array.from(select.options).forEach(option => {
         const quarterIndex = TIMELINE_QUARTERS.indexOf(option.value);
         if (quarterIndex < 0) return;
-        let label = 'الربع ' + (quarterIndex + 1);
+        let label = WFT('timeline.quarter_n', 'الربع {n}', { n: quarterIndex + 1 });
         if (start && Number.isFinite(year)) {
           const first = start.index + (year - 1) * 12 + quarterIndex * 3;
           label += ' (' + formatTimelineMonth(first) + ' – ' + formatTimelineMonth(first + 2) + ')';

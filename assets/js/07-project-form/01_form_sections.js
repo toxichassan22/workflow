@@ -402,12 +402,12 @@
         // in this section; maps are Google renders and carry no approval state.
         if (!tenantProjectData.site_analysis_approved
             || !String(tenantProjectData.site_analysis || '').trim()) {
-          toast('اعتماد تحليل الموقع النصي مطلوب قبل اعتماد قسم الموقع');
+          toast(WFT('location.site_analysis_required', 'اعتماد تحليل الموقع النصي مطلوب قبل اعتماد قسم الموقع'));
           return;
         }
         if (typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined'
             && MAP_PREVIEW_VIEW_DEFS.some(view => !mapPreviewIsGenerated(view))) {
-          toast('توليد الخرائط الأربع مطلوب قبل اعتماد قسم الموقع');
+          toast(WFT('location.four_maps_required', 'توليد الخرائط الأربع مطلوب قبل اعتماد قسم الموقع'));
           return;
         }
       }

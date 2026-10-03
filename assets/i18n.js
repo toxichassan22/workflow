@@ -199,8 +199,14 @@
     var raw;
     try { raw = el.getAttribute(attr); } catch (e) { return; }
     if (!raw || !AR_RE.test(raw)) return;
-    var en = WFI18N_EN_AUTO[autoNorm(raw)];
-    if (en === undefined || en === null || en === '' || en === raw) return;
+    if (attr === 'value' &&
+        !(el.tagName === 'INPUT' && (el.type === 'button' || el.type === 'submit'))) {
+      return;
+    }
+    var hit = lookupAuto(raw);
+    if (!hit) return;
+    var en = hit.prefix + hit.en + hit.suffix;
+    if (en === raw) return;
     autoApplied.push({ el: el, attr: attr, ar: raw, en: en });
     try { el.setAttribute(attr, en); } catch (e) { /* ignore */ }
   }
@@ -406,7 +412,7 @@
     try {
       autoObserver.observe(document.documentElement, {
         childList: true, subtree: true, characterData: true, attributes: true,
-        attributeFilter: ['placeholder', 'title', 'aria-label', 'alt']
+        attributeFilter: ['placeholder', 'title', 'aria-label', 'alt', 'value']
       });
     } catch (e) { /* ignore */ }
   }

@@ -141,7 +141,7 @@
           : '') +
         (pendingApproval
           ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;color:#a67c00;">' +
-            'يوجد طلب اعتماد قيد المراجعة مقدم من ' + escapeHtml(pendingApproval.requested_by_name || '') +
+            escapeHtml(WFT('export.approval_pending', 'يوجد طلب اعتماد قيد المراجعة مقدم من {name}', { name: pendingApproval.requested_by_name || '' })) +
             '</div>'
           : '') +
         '</div>' +

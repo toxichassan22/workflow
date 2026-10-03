@@ -451,5 +451,19 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تم اعتماد الملف النهائي": "The final file was approved",
   "تم رفض الطلب": "The request was rejected",
   "بانتظار قرار المعتمد": "Awaiting the approver decision",
-  "أُزيلت (كانت": "Cleared (was"
+  "أُزيلت (كانت": "Cleared (was",
+  "اعتماد المحرر لقسمه (d01)": "Editor approval of own section (d01)",
+  "اعتماد مقدم طلب التوليد لطلبه (d02)": "Generation requester approval of own request (d02)",
+  "اعتماد الملف النهائي — طلب بواسطة": "Final file approval — requested by",
+  "تعميد عرض — طلب بواسطة": "Presentation endorsement — requested by",
+  "المعتمد الحالي": "Current approver",
+  "الرد": "Reply",
+  "سبب الإيقاف": "Suspension reason",
+  "المكلف": "Assignee",
+  "فريق المنصة": "Platform team",
+  "سند مالي": "Financial voucher",
+  "إجمالي التعميد الذاتي": "Total self-endorsements",
+  "ملف الشركة غير مكتمل": "Company profile is incomplete",
+  "مدعو": "Invited",
+  "تقرير المستخدمين": "Users report"
 }/*I18N_EN_AUTO_END*/);

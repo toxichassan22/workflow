@@ -284,7 +284,7 @@
         showTenantPage('tenantSlidesPage');
 
         // Set up live generation banner
-        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', 'إجمالي ' + totalSlides + ' شريحة', 10);
+        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 10);
 
         // Pre-render skeleton cards in main preview area
         const wrap = document.getElementById('tenantSlidesMain');
@@ -401,7 +401,7 @@
               if (plan.title) activeTitles.push((idx + 1) + '. ' + plan.title);
             }
           });
-          setLiveGenBanner(true, 'توليد الشرائح (' + done + ' من ' + totalSlides + ')',
+          setLiveGenBanner(true, WFT('gen.slides_progress', 'توليد الشرائح ({done} من {total})', { done: done, total: totalSlides }),
             activeTitles.length ? activeTitles.slice(0, 3).join(' | ') : 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
         }
 
@@ -655,7 +655,7 @@
         }
 
         await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete', '', generationProjectData);
-        setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
+        setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', WFT('gen.total_slides_approved', 'إجمالي {n} شريحة معتمدة', { n: totalSlides }), 100);
         renderTenantSlidesSidebar(true);
         renderTenantDesignerChat();
         // await saveTenantPresentation(options.presentationTitle)
@@ -671,8 +671,8 @@
         if (options.markDraftDirty !== false) triggerAutoSaveDraft();
         selectTenantSlide(0);
         const completedTitle = options.sectionLabel
-          ? 'تم توليد عرض ' + options.sectionLabel + ' وحفظه (' + totalSlides + ' شريحة)'
-          : 'تم توليد جميع الشرائح (' + totalSlides + ' شريحة) بنجاح';
+          ? WFT('gen.section_presentation_done', 'تم توليد عرض {section} وحفظه ({n} شريحة)', { section: wfTr(options.sectionLabel), n: totalSlides })
+          : WFT('gen.all_slides_done', 'تم توليد جميع الشرائح ({n} شريحة) بنجاح', { n: totalSlides });
         setSlidesEditorInfo(tenantPresentationTitle, totalSlides);
         toast(completedTitle);
         setTimeout(() => {

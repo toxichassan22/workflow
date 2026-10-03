@@ -481,8 +481,8 @@
         applyExecutiveContentState(state);
         persistExecutiveContentFromDom();
         if (note) note.textContent = 'تم التوليد.';
-        toast('تم توليد ' + spec.label);
-        updateLoaderProgress(100, 'اكتمل ' + spec.label);
+        toast(WFT('exec.generated', 'تم توليد {label}', { label: wfTr(spec.label) }));
+        updateLoaderProgress(100, WFT('exec.completed', 'اكتمل {label}', { label: wfTr(spec.label) }));
       } catch (error) {
         if (note) note.textContent = error.message || 'تعذر توليد النص';
         toast(error.message || 'تعذر توليد النص');

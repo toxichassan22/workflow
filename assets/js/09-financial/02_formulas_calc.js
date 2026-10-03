@@ -424,7 +424,7 @@
         const model = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
         if (model === 'sale') componentSaleArea += revenueArea;
         if (['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(model)) leasable += revenueArea;
-        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = { sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model] + ` | مبني ${money(builtArea)} م²`;
+        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT('fin.comp_result', '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
       });
 
       let operatingRevenueBase = 0, saleRevenueTotal = 0, saleAreaTotal = 0;
@@ -615,10 +615,10 @@
       const roi = roiOutflows > 0 ? (roiInflows - roiOutflows) / roiOutflows : null, roiScope = periodLabel(roiEndYear, developmentYears, totalYears), irrScope = periodLabel(irrEndYear, developmentYears, totalYears);
       const warnings = [];
       const warnT = (key, fallback, params) => (typeof WFT === 'function' ? WFT(key, fallback, params) : fallback);
-      if (saleExitMethod !== 'none' && saleExitYear > roiEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_roi', 'التخارج البيعي في السنة ' + saleExitYear + ' خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: saleExitYear }));
-      if (exitMethod !== 'none' && operatingExitYear > roiEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_roi', 'التخارج التشغيلي في السنة ' + operatingExitYear + ' خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: operatingExitYear }));
-      if (saleExitMethod !== 'none' && saleExitYear > irrEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_irr', 'التخارج البيعي في السنة ' + saleExitYear + ' خارج فترة IRR المختارة.', { year: saleExitYear }));
-      if (exitMethod !== 'none' && operatingExitYear > irrEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_irr', 'التخارج التشغيلي في السنة ' + operatingExitYear + ' خارج فترة IRR المختارة.', { year: operatingExitYear }));
+      if (saleExitMethod !== 'none' && saleExitYear > roiEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_roi', 'التخارج البيعي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: saleExitYear }));
+      if (exitMethod !== 'none' && operatingExitYear > roiEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_roi', 'التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: operatingExitYear }));
+      if (saleExitMethod !== 'none' && saleExitYear > irrEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_irr', 'التخارج البيعي في السنة {year} خارج فترة IRR المختارة.', { year: saleExitYear }));
+      if (exitMethod !== 'none' && operatingExitYear > irrEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_irr', 'التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة.', { year: operatingExitYear }));
       if (exitMethod === 'capRate' && operatingExitYear < operationStartYear) warnings.push('سنة التخارج التشغيلي تسبق بدء التشغيل؛ لا يوجد NOI صالح لتطبيق معدل الرسملة.');
       if (landCostIncluded > 0 && landContributionType === 'none') warnings.push('قيمة الأرض داخلة في تكلفة المشروع لكنها مستبعدة من التدفقات؛ قد يؤدي ذلك إلى تضخيم مؤشرات العائد.');
       if (projectIrr === null) warnings.push('لا يمكن حساب Project IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');

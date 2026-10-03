@@ -383,5 +383,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "— خطأ مزود البحث:": "— search provider error:",
   "— لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة": "— web search did not run; links are shown as undocumented for review",
   "— مصادر الملخص غير موثقة: لم يعمل البحث في الويب أثناء التوليد": "— summary sources are undocumented: web search did not run during generation",
-  ": تم الإبقاء على القيمة الحالية.": ": the current value was kept."
+  ": تم الإبقاء على القيمة الحالية.": ": the current value was kept.",
+  "تفاصيل المزود": "Provider details"
 }/*I18N_EN_AUTO_END*/);

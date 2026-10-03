@@ -51,5 +51,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "نبذة عن الجهة": "Entity Profile / Brief",
   "نص": "Text",
   "نص طويل": "Long Text",
-  "اسم القسم:": "Section name:"
+  "اسم القسم:": "Section name:",
+  "اسم الحقل:": "Field name:",
+  "نوع الحقل (text/textarea/number/select/date/image)": "Field type (text/textarea/number/select/date/image)"
 }/*I18N_EN_AUTO_END*/);

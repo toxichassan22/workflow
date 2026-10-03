@@ -174,5 +174,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تجهيز الموقع والأساسات والهيكل الإنشائي": "Site preparation, foundations and structure",
   "استكمال الهيكل وأعمال الكهرباء والميكانيكا": "Structure completion, electrical and mechanical works",
   "التشطيبات والأعمال الخارجية": "Finishes and external works",
-  "الاختبارات والتسليم والتسويق": "Testing, handover and marketing"
+  "الاختبارات والتسليم والتسويق": "Testing, handover and marketing",
+  "الحد/الاستخدام": "Limit / use"
 }/*I18N_EN_AUTO_END*/);

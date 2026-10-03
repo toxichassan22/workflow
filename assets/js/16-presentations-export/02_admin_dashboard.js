@@ -777,7 +777,7 @@
         '<option value="active"' + (t.isActive ? ' selected' : '') + '>نشط</option>' +
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
         '<div class="tenant-field"><label>التفعيل</label><p style="margin:0">' +
-        (t.activatedAt ? ('فُعّلت في ' + escapeHtml(String(t.activatedAt).slice(0, 10)) + (t.activatedByName ? ' بواسطة ' + escapeHtml(t.activatedByName) : '')) : 'لم تُفعّل بعد') +
+        (t.activatedAt ? escapeHtml(WFT('admin.activated_at', 'فُعّلت في {date}', { date: String(t.activatedAt).slice(0, 10) }) + (t.activatedByName ? WFT('admin.by_name', ' بواسطة {name}', { name: t.activatedByName }) : '')) : 'لم تُفعّل بعد') +
         (t.deactivatedReason ? ' | ' + WFT('admin.suspension_reason', 'سبب الإيقاف:') + ' ' + escapeHtml(t.deactivatedReason) : '') + '</p></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
