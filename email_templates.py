@@ -406,12 +406,38 @@ def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10
 # 2. Company Welcome & Onboarding (Cloudflare Hero + X Tiles Style)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_company_welcome_email(recipient, company_name, activation_url, initial_points=5000):
+def render_company_welcome_email(recipient, company_name, activation_url,
+                                 account_name=None, stats=None):
     """
     Cloudflare Hero + X style onboarding email for new company onboarding.
     Features: Vibrant gradient hero, account parameter metrics, and modular feature tiles.
+
+    ``stats`` is an optional list of ``{'label', 'value', 'color'}`` rows appended
+    to the account matrix — the caller passes only values that actually exist on
+    the new tenant so the card never announces a package or credit that was not
+    assigned yet.
     """
     safe_company = _html_lib.escape(company_name or 'شركتك')
+
+    rows = [{'label': 'المنشأة', 'value': company_name or 'شركتك', 'color': '#07182c'}]
+    if account_name:
+        rows.append({'label': 'مدير الحساب', 'value': account_name, 'color': '#07182c'})
+    for extra in stats or []:
+        if extra and extra.get('value') not in (None, ''):
+            rows.append(extra)
+
+    stats_rows_html = ''
+    for index, row in enumerate(rows):
+        border = 'border-top: 1px solid #edf2f7;' if index else ''
+        color = row.get('color') or '#07182c'
+        stats_rows_html += (
+            '<tr>'
+            f'<td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600; {border}">'
+            f'{_html_lib.escape(str(row.get("label") or ""))}</td>'
+            f'<td style="padding: 8px 12px; font-size: 14px; color: {color}; font-weight: 800; {border}">'
+            f'{_html_lib.escape(str(row.get("value") or ""))}</td>'
+            '</tr>'
+        )
 
     content = f'''
     <p style="margin: 0 0 18px 0; font-size: 15px; color: #334155; line-height: 1.8;">
@@ -420,18 +446,7 @@ def render_company_welcome_email(recipient, company_name, activation_url, initia
 
     <!-- Company Stats Matrix -->
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; margin: 20px 0;">
-      <tr>
-        <td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600;">المنشأة:</td>
-        <td style="padding: 8px 12px; font-size: 14px; color: #07182c; font-weight: 800;">{safe_company}</td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600; border-top: 1px solid #edf2f7;">الباقة المفعلة:</td>
-        <td style="padding: 8px 12px; font-size: 14px; color: #059669; font-weight: 800; border-top: 1px solid #edf2f7;">باقة الشركات المتقدمة (Pro Enterprise)</td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600; border-top: 1px solid #edf2f7;">الرصيد الافتتاحي:</td>
-        <td style="padding: 8px 12px; font-size: 14px; color: #07182c; font-weight: 800; border-top: 1px solid #edf2f7;">{initial_points:,} نقطة توليد فورية</td>
-      </tr>
+      {stats_rows_html}
     </table>
     '''
 
@@ -566,4 +581,71 @@ def render_user_invite_email(recipient, inviter_name, company_name, role_name, i
         cta_url=invite_url,
         cta_style='primary',
         secondary_note='هذه الدعوة صالحة لمدة 7 أيام مخصصة لعنوان البريد الإلكتروني المدعو فقط.',
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Employee Welcome Email (account created directly by the company admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_user_welcome_email(recipient, user_name, company_name, login_url):
+    """
+    Welcome mail for a directly-added employee: the account already exists and
+    the password arrives from the admin — never inside the email itself.
+    """
+    safe_name = _html_lib.escape(user_name or 'بك')
+    safe_company = _html_lib.escape(company_name or 'الشركة')
+    safe_email = _html_lib.escape(recipient or '')
+
+    content = f'''
+    <p style="margin: 0 0 18px 0; font-size: 15px; color: #334155; line-height: 1.8;">
+      مرحبًا <strong>{safe_name}</strong> — تم إنشاء حسابك في <strong>{safe_company}</strong> على منصة <strong>LandLoom AI</strong>.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; margin: 18px 0;">
+      <tr>
+        <td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600;">البريد الإلكتروني:</td>
+        <td style="padding: 8px 12px; font-size: 14px; color: #07182c; font-weight: 800; direction: ltr; text-align: right;">{safe_email}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 12px; font-size: 13px; color: #64748b; font-weight: 600; border-top: 1px solid #edf2f7;">كلمة المرور:</td>
+        <td style="padding: 8px 12px; font-size: 14px; color: #07182c; font-weight: 800; border-top: 1px solid #edf2f7;">تصلك من مدير حسابك</td>
+      </tr>
+    </table>
+    '''
+
+    return build_base_email(
+        title='تم إنشاء حسابك',
+        content_html=content,
+        user_pill={'name': user_name, 'email': recipient},
+        badge='حساب جديد',
+        preheader=f'حسابك في {safe_company} على منصة LandLoom AI جاهز',
+        cta_text='تسجيل الدخول',
+        cta_url=login_url,
+        cta_style='primary',
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Generic Notification Email (branded shell for outbox rows without html)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_notification_email(recipient, title, body):
+    """
+    Generic branded shell for notification/outbox mail: the subject becomes the
+    headline and the plain body lands inside the standard card, so every email
+    the platform sends arrives in the designed layout.
+    """
+    paragraphs = ''.join(
+        f'<p style="margin: 0 0 14px 0; font-size: 15px; color: #334155; line-height: 1.8;">'
+        f'{_html_lib.escape(line)}</p>'
+        for line in (body or '').split('\n') if line.strip()
+    ) or '<p style="margin: 0;">&nbsp;</p>'
+
+    return build_base_email(
+        title=title or 'إشعار',
+        content_html=paragraphs,
+        user_pill={'email': recipient},
+        badge='إشعار',
+        preheader=title,
     )

@@ -98,7 +98,8 @@ def api_admin_tenants():
         email_sent = False
         if send_welcome:
             email_sent = _send_company_welcome_email(
-                email, company_name, manager_name, username, setup_url
+                email, company_name, manager_name, username, setup_url,
+                trial_days=trial_days
             )
         # Best-effort managed OpenRouter key so the company spends on its own
         # dashboard-visible limit from day one. Never fails tenant creation —

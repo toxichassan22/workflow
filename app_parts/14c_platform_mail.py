@@ -89,6 +89,84 @@ def send_platform_email(recipient, subject, body, html=None):
         return False
 
 
+# ── Outbound senders ─────────────────────────────────────────────────────────
+# Every send renders the designed HTML part from email_templates.py and keeps
+# the plain body as the text/plain fallback — a render failure must never take
+# the email down with it, so it degrades to text-only.
+
+
+def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url,
+                                trial_days=None):
+    subject = f'مرحبًا بك في LandLoom AI - {company_name}'
+    body = (
+        f'مرحبًا {account_name}\n\n'
+        f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
+        f'البريد الإلكتروني: {recipient}\n'
+        f'رابط تعيين كلمة المرور: {setup_url}\n\n'
+        'هذا الرابط صالح للاستخدام مرة واحدة.'
+    )
+    stats = []
+    if trial_days:
+        stats.append({'label': 'الفترة التجريبية', 'value': f'{trial_days} يوم',
+                      'color': '#059669'})
+    try:
+        html = email_templates.render_company_welcome_email(
+            recipient, company_name, setup_url,
+            account_name=account_name, stats=stats)
+    except Exception:
+        html = None
+    return send_platform_email(recipient, subject, body, html=html)
+
+
+def _send_user_welcome_email(recipient, user_name, tenant):
+    """Welcome mail for a directly-added employee: account exists, sign in with
+    the email; the password itself is never sent — the admin hands it over."""
+    company_name = (tenant or {}).get('company_name') or 'الشركة'
+    base_url = _current_base_url().rstrip('/')
+    subject = f'تم إنشاء حسابك في {company_name}'
+    body = (
+        f'مرحبًا {user_name}\n\n'
+        f'تم إنشاء حسابك في {company_name} على منصة LandLoom AI.\n'
+        f'سجّل الدخول ببريدك الإلكتروني وكلمة المرور التي استلمتها من مديرك:\n{base_url}\n'
+    )
+    try:
+        html = email_templates.render_user_welcome_email(
+            recipient, user_name, company_name, base_url)
+    except Exception:
+        html = None
+    return send_platform_email(recipient, subject, body, html=html)
+
+
+def _send_invite_email(invite, tenant, email=None, responsibility=None):
+    """Deliver one invite email and record the outcome on the row (t21)."""
+    recipient = email or invite.get('email')
+    company_name = (tenant and tenant.get('company_name')) or 'الشركة'
+    base_url = _current_base_url().rstrip('/')
+    full_invite_url = f"{base_url}/invite/{invite['token']}"
+    subject = f'دعوة للانضمام إلى {company_name}'
+    body = (
+        'مرحبًا،\n\n'
+        f'تمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
+        f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
+        'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
+    )
+    resp = responsibility if responsibility is not None else invite.get('responsibility')
+    role_label = {'editor': 'محرر', 'approver': 'معتمد', 'admin': 'أدمن'}.get(resp) or 'موظف'
+    try:
+        inviter = getattr(g, 'user_name', None) or (tenant or {}).get('account_manager_name')
+    except Exception:
+        inviter = None
+    try:
+        html = email_templates.render_user_invite_email(
+            recipient, inviter, company_name, role_label, full_invite_url)
+    except Exception:
+        html = None
+    ok = send_platform_email(recipient, subject, body, html=html)
+    db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
+                         None if ok else (smtp_last_error() or 'smtp_send_failed'))
+    return ok
+
+
 @app.route('/api/admin/smtp-test', methods=['POST'])
 @require_admin
 def api_admin_smtp_test():

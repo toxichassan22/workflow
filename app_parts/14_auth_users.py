@@ -115,8 +115,18 @@ def _drain_email_outbox(limit=20):
     notification's delivery row."""
     sent = failed = 0
     for row in db.claim_due_emails(limit=limit):
+        # The outbox stores an optional HTML part; when a row only carries
+        # plain text it still leaves inside the branded shell so every email
+        # the platform sends arrives in the designed layout.
+        html = row.get('body_html')
+        if not html and row.get('body_text'):
+            try:
+                html = email_templates.render_notification_email(
+                    row.get('to_email'), row.get('subject'), row.get('body_text'))
+            except Exception:
+                html = None
         ok = send_platform_email(row.get('to_email'), row.get('subject'),
-                                 row.get('body_text') or '')
+                                 row.get('body_text') or '', html=html)
         if ok:
             db.mark_email_sent(row['id'])
             db.mark_email_delivery(row.get('notification_id'), 'sent')
@@ -289,16 +299,8 @@ def start_housekeeping_once():
     _ensure_housekeeping_started()
 
 
-def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url):
-    subject = f'مرحبًا بك في LandLoom AI - {company_name}'
-    body = (
-        f'مرحبًا {account_name}\n\n'
-        f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
-        f'البريد الإلكتروني: {recipient}\n'
-        f'رابط تعيين كلمة المرور: {setup_url}\n\n'
-        'هذا الرابط صالح للاستخدام مرة واحدة.'
-    )
-    return send_platform_email(recipient, subject, body)
+# The mail senders (_send_company_welcome_email, _send_user_welcome_email,
+# _send_invite_email) live in 14c_platform_mail.py next to the SMTP layer.
 
 
 def _tenant_package_brief(tenant):
@@ -1093,37 +1095,6 @@ def api_set_user_field_sections(user_id):
     return jsonify({'success': True, 'sections': sections})
 
 
-def _send_user_welcome_email(recipient, user_name, tenant):
-    """Welcome mail for a directly-added employee: account exists, sign in with
-    the email; the password itself is never sent — the admin hands it over."""
-    company_name = (tenant or {}).get('company_name') or 'الشركة'
-    base_url = _current_base_url().rstrip('/')
-    return send_platform_email(
-        recipient,
-        f'تم إنشاء حسابك في {company_name}',
-        f'مرحبًا {user_name}\n\n'
-        f'تم إنشاء حسابك في {company_name} على منصة LandLoom AI.\n'
-        f'سجّل الدخول ببريدك الإلكتروني وكلمة المرور التي استلمتها من مديرك:\n{base_url}\n'
-    )
-
-
-def _send_invite_email(invite, tenant, email=None):
-    """Deliver one invite email and record the outcome on the row (t21)."""
-    recipient = email or invite.get('email')
-    company_name = (tenant and tenant.get('company_name')) or 'الشركة'
-    base_url = _current_base_url().rstrip('/')
-    full_invite_url = f"{base_url}/invite/{invite['token']}"
-    ok = send_platform_email(
-        recipient,
-        f'دعوة للانضمام إلى {company_name}',
-        f'مرحبًا،\n\nتمت دعوتك للانضمام إلى فريق {company_name} في منصة LandLoom AI.\n'
-        f'لإكمال التسجيل وتعيين كلمة المرور، يرجى زيارة الرابط التالي:\n{full_invite_url}\n\n'
-        'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
-    )
-    db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
-                         None if ok else (smtp_last_error() or 'smtp_send_failed'))
-    return ok
-
 
 @app.route('/api/invites', methods=['POST'])
 @require_permission('manage_users')
@@ -1148,7 +1119,7 @@ def api_create_invite():
         responsibility=responsibility,
     )
     tenant = db.get_tenant_by_id(g.tenant_id)
-    email_sent = _send_invite_email(invite, tenant, email)
+    email_sent = _send_invite_email(invite, tenant, email, responsibility=responsibility)
     invite_url = f"/invite/{invite['token']}"
     _record_audit_event('invite.created', 'invite_link', invite['id'], entity_name=email,
                         metadata={'role': role, 'email_sent': email_sent})
