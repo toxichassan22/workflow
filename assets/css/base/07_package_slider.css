@@ -205,3 +205,54 @@
       background: var(--sidebar-bg);
       border-color: var(--sidebar-accent);
     }
+
+    /* ── Buy footer + «باقة مخصصة» ──────────────────────────────────────
+       The CTA pins to the card bottom so uneven feature lists keep the
+       buttons level; the custom card carries an amount input instead of
+       a fixed price. */
+
+    .pkg-card-foot {
+      display: flex;
+      margin-top: auto;
+      padding-top: 10px;
+    }
+
+    .pkg-buy {
+      width: 100%;
+      justify-content: center;
+      font-weight: 800;
+    }
+
+    .pkg-card--custom {
+      border-style: dashed;
+      border-width: 2px;
+      border-color: var(--ui-border-strong);
+    }
+
+    .pkg-card--custom.selected {
+      border-style: solid;
+      border-color: var(--p);
+      background: var(--p-soft);
+    }
+
+    .pkg-custom-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--ui-border);
+      border-radius: 10px;
+      background: var(--surface-subtle);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .pkg-custom-input:focus {
+      outline: none;
+      border-color: var(--p);
+      box-shadow: 0 0 0 3px var(--p-soft);
+    }
+
+    .pkg-card--featured .pkg-buy {
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    }

@@ -2,14 +2,16 @@
 
 def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=None,
                             transfer_reference=None, requested_by=None, requested_by_name=None,
-                            package_id=None, receipt_file_id=None):
+                            package_id=None, receipt_file_id=None, amount_sar=None):
     """File a package purchase request (t33).
 
     When a ``package_id`` is supplied the amount and price come from the
     catalog row, not the client; a bank-transfer reference may only back one
     request so the same receipt cannot be submitted twice. Every request must
     carry proof of the transfer: the bank reference number or an uploaded
-    receipt (either one suffices).
+    receipt (either one suffices). ``amount_sar`` carries the caller-computed
+    wallet credit for package-less rows (the «باقة مخصصة» flow) — the API
+    layer derives it from the paid price, never from client input.
     """
     transfer_reference = str(transfer_reference or '').strip() or None
     if not transfer_reference and not str(receipt_file_id or '').strip():
@@ -37,8 +39,6 @@ def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=Non
         if amount_sar is None:
             amount_sar = usd_to_sar(amount_usd)
         price_sar = package.get('price_sar')
-    else:
-        amount_sar = None
     if not str(package_name or '').strip():
         return {'error': 'package_name_required'}
     row_id = str(uuid.uuid4())

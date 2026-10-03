@@ -1290,6 +1290,13 @@
           <h3 class="dash-section-title" data-i18n="admin.packages_title">الباقات والأسعار</h3>
         </div>
         <div id="adminPackagesList"></div>
+        <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:14px 0 0">
+          <div class="tenant-field" style="margin:0">
+            <label data-i18n="admin.package_tax_rate">نسبة الضريبة %</label>
+            <input type="number" id="adminPackageTaxRate" min="0" max="99" step="0.01" dir="ltr" style="max-width:140px">
+          </div>
+          <button type="button" class="btn ghost small" id="adminTaxRateSave" onclick="adminSaveTaxRate()" data-i18n="admin.package_tax_save">حفظ النسبة</button>
+        </div>
         <form onsubmit="adminSavePackage(event)" style="margin-top:12px"><div class="tenant-grid">
           <div class="tenant-field">
             <label data-i18n="admin.package_name">اسم الباقة</label>
@@ -1305,7 +1312,11 @@
           </div>
           <div class="tenant-field">
             <label data-i18n="admin.package_credit_sar">الرصيد بالنقاط</label>
-            <input type="number" id="adminPackageCredit" min="0" step="0.01" required dir="ltr">
+            <input type="number" id="adminPackageCredit" min="0" step="0.01" readonly dir="ltr">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_duration">الصلاحية (أيام)</label>
+            <input type="number" id="adminPackageDuration" min="0" step="1" dir="ltr">
           </div>
           <div class="tenant-field">
             <label data-i18n="admin.package_badge">الشارة</label>
@@ -1326,6 +1337,10 @@
           <div class="tenant-field">
             <label data-i18n="admin.package_featured">باقة مميزة</label>
             <input type="checkbox" id="adminPackageFeatured" style="width:auto">
+          </div>
+          <div class="tenant-field full">
+            <label data-i18n="admin.package_features">المزايا</label>
+            <textarea id="adminPackageFeatures" rows="3" maxlength="2000"></textarea>
           </div>
         </div><div class="sag-modal-actions">
           <button type="submit" class="btn primary" id="adminPackageSubmit" data-i18n="admin.package_save">حفظ الباقة</button>

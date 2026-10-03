@@ -497,7 +497,8 @@ def api_admin_packages():
             package['est_margin_usd'] = round(margin_sar / fx_rate, 2) if fx_rate > 0 else None
     return jsonify({'success': True, 'packages': packages,
                     'billingMultiplier': multiplier,
-                    'fxRate': fx_rate or None})
+                    'fxRate': fx_rate or None,
+                    'taxRatePct': round(db.get_package_tax_rate() * 100, 4)})
 
 
 @app.route('/api/admin/packages', methods=['POST'])
@@ -518,6 +519,15 @@ def api_admin_packages_create():
             credit_sar = db.usd_to_sar(credit_usd)
         except (TypeError, ValueError):
             return jsonify({'error': 'Invalid credit_usd'}), 400
+    if credit_sar is None:
+        # Points derive from the price: the desk sets only the riyal figure
+        # and the configured tax rate shaves it into wallet points.
+        try:
+            credit_sar = round(
+                float(data.get('priceSar', data.get('price_sar')))
+                * (1 - db.get_package_tax_rate()), 2)
+        except (TypeError, ValueError):
+            credit_sar = None
     try:
         package = db.create_billing_package(
             data.get('name'),
@@ -530,6 +540,8 @@ def api_admin_packages_create():
             tagline=data.get('tagline'),
             tagline_en=data.get('taglineEn', data.get('tagline_en')),
             is_featured=bool(data.get('isFeatured', data.get('is_featured'))),
+            duration_days=data.get('durationDays', data.get('duration_days')),
+            features=data.get('features'),
         )
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -555,6 +567,15 @@ def api_admin_package_update(package_id):
             return jsonify({'error': 'Invalid credit_usd'}), 400
     if 'priceSar' in data or 'price_sar' in data:
         kwargs['price_sar'] = data.get('priceSar', data.get('price_sar'))
+        # A price re-key also re-derives the points unless the caller
+        # explicitly sent a credit figure in the same payload.
+        if 'creditSar' not in data and 'credit_sar' not in data \
+                and 'creditUsd' not in data and 'credit_usd' not in data:
+            try:
+                kwargs['credit_sar'] = round(
+                    float(kwargs['price_sar']) * (1 - db.get_package_tax_rate()), 2)
+            except (TypeError, ValueError):
+                pass
     if 'isActive' in data or 'is_active' in data:
         kwargs['is_active'] = data.get('isActive', data.get('is_active'))
     if 'badge' in data:
@@ -567,6 +588,10 @@ def api_admin_package_update(package_id):
         kwargs['tagline_en'] = data.get('taglineEn', data.get('tagline_en'))
     if 'isFeatured' in data or 'is_featured' in data:
         kwargs['is_featured'] = data.get('isFeatured', data.get('is_featured'))
+    if 'durationDays' in data or 'duration_days' in data:
+        kwargs['duration_days'] = data.get('durationDays', data.get('duration_days'))
+    if 'features' in data:
+        kwargs['features'] = data.get('features')
     try:
         package = db.update_billing_package(package_id, **kwargs)
     except ValueError as exc:
@@ -583,6 +608,21 @@ def api_admin_package_delete(package_id):
     if not db.delete_billing_package(package_id):
         return jsonify({'error': 'Package not found'}), 404
     return jsonify({'success': True})
+
+
+@app.route('/api/admin/package-tax-rate', methods=['PUT'])
+@require_admin
+def api_admin_package_tax_rate():
+    """The «ضريبة» percentage the desk shaves off every package price to get
+    wallet points — and the VAT rate printed on top-up receipts."""
+    data = request.json or {}
+    try:
+        rate = db.set_package_tax_rate_pct(data.get('ratePct', data.get('rate')))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    _record_audit_event('settings.package_tax_rate', 'platform_settings',
+                        'package_tax_rate', metadata={'rate': rate})
+    return jsonify({'success': True, 'ratePct': round(rate * 100, 4)})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/package', methods=['GET'])

@@ -134,5 +134,12 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تعذر تصفير الرصيد": "Could not zero the balance",
   "تجديد الباقة": "Renew package",
   "إصدار مفتاح": "Issue a key",
-  "التأسيس (الاسعار تشمل ضريبة القيمة المضافة)": "Foundation (prices include VAT)"
+  "التأسيس (الاسعار تشمل ضريبة القيمة المضافة)": "Foundation (prices include VAT)",
+  "على مقاسك": "Tailored to you",
+  "باقة مخصصة": "Custom package",
+  "المبلغ بالريال السعودي": "Amount (SAR)",
+  "اطلب الآن": "Order now",
+  "أدخل مبلغًا صالحًا": "Enter a valid amount",
+  "أدخل اسمًا وسعرًا صالحًا": "Enter a valid name and price",
+  "مبلغ غير صالح": "Invalid amount"
 }/*I18N_EN_AUTO_END*/);

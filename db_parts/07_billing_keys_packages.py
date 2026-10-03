@@ -1001,7 +1001,8 @@ def get_billing_package(package_id):
 
 def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
                            name_en=None, badge=None, badge_en=None,
-                           tagline=None, tagline_en=None, is_featured=False):
+                           tagline=None, tagline_en=None, is_featured=False,
+                           duration_days=None, features=None):
     """Create a package. credit_sar may be zero (prepaid, topped up later).
 
     The wallet credit is riyal-denominated; ``credit_usd`` on the row keeps
@@ -1055,12 +1056,21 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
          1 if is_featured else 0, 1 if is_custom else 0)
     )
     conn.commit()
+    if duration_days is not None or features is not None:
+        set_package_terms(package_id, duration_days=duration_days,
+                          features=features)
     return get_billing_package(package_id)
+
+
+# ``_UNSET`` marks "leave alone" for update kwargs where None is a real value
+# (a NULL duration means «بلا انتهاء», an empty list clears the features).
+_PKG_TERMS_UNSET = object()
 
 
 def update_billing_package(package_id, name=None, credit_sar=None, price_sar=None,
                            is_active=None, name_en=None, badge=None, badge_en=None,
-                           tagline=None, tagline_en=None, is_featured=None):
+                           tagline=None, tagline_en=None, is_featured=None,
+                           duration_days=_PKG_TERMS_UNSET, features=_PKG_TERMS_UNSET):
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
@@ -1130,14 +1140,70 @@ def update_billing_package(package_id, name=None, credit_sar=None, price_sar=Non
     if is_active is not None:
         assignments.append('is_active = ?')
         params.append(1 if is_active else 0)
-    if not assignments:
-        return dict(row)
-    assignments.append("updated_at = datetime('now')")
-    params.append(str(package_id))
-    conn.execute(
-        'UPDATE billing_packages SET ' + ', '.join(assignments) + ' WHERE id = ?',
-        tuple(params)
-    )
+    if assignments:
+        assignments.append("updated_at = datetime('now')")
+        params.append(str(package_id))
+        conn.execute(
+            'UPDATE billing_packages SET ' + ', '.join(assignments) + ' WHERE id = ?',
+            tuple(params)
+        )
+        conn.commit()
+    terms = {}
+    if duration_days is not _PKG_TERMS_UNSET:
+        terms['duration_days'] = duration_days
+    if features is not _PKG_TERMS_UNSET:
+        terms['features'] = features
+    if terms:
+        set_package_terms(package_id, **terms)
+    return get_billing_package(package_id)
+
+
+def set_package_terms(package_id, **terms):
+    """Write the catalog terms the purchase screen shows onto the ACTIVE
+    version row — ``duration_days`` (None clears to «بلا انتهاء») and the
+    ``features`` list. Packages that predate the versions table get v1
+    seeded from the package row so the join starts serving the terms."""
+    conn = get_db()
+    clean_dur = None
+    if 'duration_days' in terms and terms['duration_days'] not in (None, ''):
+        try:
+            clean_dur = int(terms['duration_days'])
+        except (TypeError, ValueError):
+            raise ValueError('Invalid duration_days')
+        if clean_dur < 0 or clean_dur > 36500:
+            raise ValueError('Invalid duration_days')
+    clean_feats = None
+    if 'features' in terms:
+        feats = terms['features']
+        if feats is None:
+            feats = []
+        if not isinstance(feats, (list, tuple)):
+            raise ValueError('Invalid features')
+        clean_feats = [str(f).strip() for f in feats if str(f).strip()][:30]
+    ver = conn.execute(
+        'SELECT id FROM billing_package_versions WHERE package_id = ? AND is_active = 1 '
+        'ORDER BY version DESC LIMIT 1', (str(package_id),)).fetchone()
+    if ver is None:
+        return create_package_version(
+            package_id,
+            duration_days=clean_dur if 'duration_days' in terms else None,
+            features=clean_feats if 'features' in terms else None)
+    sets = []
+    params = []
+    if 'duration_days' in terms:
+        if clean_dur is None:
+            sets.append('duration_days = NULL')
+        else:
+            sets.append('duration_days = ?')
+            params.append(clean_dur)
+    if 'features' in terms:
+        sets.append('features_json = ?')
+        params.append(json.dumps(clean_feats or [], ensure_ascii=False))
+    if not sets:
+        return get_billing_package(package_id)
+    params.append(ver['id'])
+    conn.execute('UPDATE billing_package_versions SET ' + ', '.join(sets) +
+                 ' WHERE id = ?', tuple(params))
     conn.commit()
     return get_billing_package(package_id)
 
@@ -1415,6 +1481,33 @@ def set_platform_setting(key, value):
     )
     conn.commit()
     return get_platform_setting(key)
+
+
+def get_package_tax_rate():
+    """The desk-set «ضريبة» percentage for price→points conversion, as a
+    fraction (0.15 = 15%). The stored platform setting wins; the
+    ``TOPUP_TAX_RATE`` env default keeps installs working before the knob
+    is first saved. The same rate feeds the receipt VAT breakdown."""
+    raw = get_platform_setting('package_tax_rate')
+    if raw is None or str(raw).strip() == '':
+        return TAX_RATE_SAR
+    try:
+        return max(0.0, min(0.99, float(raw)))
+    except (TypeError, ValueError):
+        return TAX_RATE_SAR
+
+
+def set_package_tax_rate_pct(pct):
+    """Store the desk rate given as a percent (0–99). Returns the fraction."""
+    try:
+        value = float(pct)
+    except (TypeError, ValueError):
+        raise ValueError('Invalid tax rate')
+    if not (0 <= value <= 99):
+        raise ValueError('Invalid tax rate')
+    fraction = round(value / 100.0, 6)
+    set_platform_setting('package_tax_rate', fraction)
+    return fraction
 
 
 def get_rejection_reasons():

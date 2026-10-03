@@ -338,6 +338,10 @@
     }
 
     let llRechargePackages = [];
+    // Desk-set «ضريبة» fraction the catalog feed returns — the custom
+    // package preview mirrors the server's price − tax% → points math.
+    let llPackageTaxRate = 0;
+    let llCustomPackageAmount = null;
 
     async function llLoadPackagesPage() {
       const host = document.getElementById('llPackagesCatalog');
@@ -350,22 +354,20 @@
       }
       const data = await api('GET', '/api/billing/packages').catch(() => null);
       llRechargePackages = (data && data.success && data.packages) || [];
+      if (data && typeof data.taxRate === 'number') llPackageTaxRate = data.taxRate;
       if (llRechargePkgSlider) { llRechargePkgSlider.destroy(); llRechargePkgSlider = null; }
-      if (!llRechargePackages.length) {
-        if (input) input.value = '';
-        host.innerHTML = '<p class="tenant-hint">' +
-          llEscape(WFT('recharge.no_packages', 'لا توجد باقات متاحة')) + '</p>';
-        llShowPackageInfo();
-        return;
-      }
       // A stale pick (deleted or deactivated) never reaches the modal.
-      if (input && input.value &&
+      if (input && input.value && input.value !== '__custom__' &&
           !llRechargePackages.some(p => p.id === input.value)) {
         input.value = '';
       }
+      // The «باقة مخصصة» card rides the same slider as a trailing item — it
+      // stays available even while the desk has published no packages.
       llRechargePkgSlider = wfCardSlider({
-        container: host, items: llRechargePackages,
-        renderCard: llRechargePackageCardHtml, maxVisible: 3, minCardWidth: 220
+        container: host,
+        items: llRechargePackages.concat([{ id: '__custom__', custom: true }]),
+        renderCard: llRechargePackageCardHtml, maxVisible: 3,
+        minCardWidth: 230, maxCardWidth: 340
       });
       llShowPackageInfo();
     }
@@ -374,6 +376,16 @@
       const box = document.getElementById('llRechargePackageInfo');
       const input = document.getElementById('llRechargePackage');
       if (!box || !input) return;
+      if (input.value === '__custom__') {
+        const pts = Math.max(0, (llCustomPackageAmount || 0) * (1 - llPackageTaxRate));
+        box.textContent = WFT('recharge.custom_info',
+          'باقة مخصصة — {points} نقطة — {price} ريال سعودي', {
+            points: llMoney(Math.round(pts * 100) / 100),
+            price: llMoney(llCustomPackageAmount || 0)
+          });
+        box.style.display = '';
+        return;
+      }
       const pkg = llRechargePackages.find(p => p.id === input.value);
       if (!pkg) { box.style.display = 'none'; box.textContent = ''; return; }
       const price = pkg.price_sar != null
@@ -388,6 +400,25 @@
       });
       box.textContent = parts.join(' — ');
       box.style.display = '';
+    }
+
+    /* The «باقة مخصصة» preview mirrors the server: paid riyals minus the
+       desk tax rate become wallet points. Slider clones duplicate the card,
+       so every copy of the input/points display is kept in sync. */
+    function llCustomInputChanged(el) {
+      document.querySelectorAll('.pkg-custom-input').forEach(i => {
+        if (i !== el) i.value = el.value;
+      });
+      llUpdateCustomPoints();
+    }
+    function llUpdateCustomPoints() {
+      const amount = Math.max.apply(null, [0].concat(Array.from(
+        document.querySelectorAll('.pkg-custom-input')).map(i => Number(i.value || 0))));
+      const pts = amount > 0 ? Math.round(amount * (1 - llPackageTaxRate) * 100) / 100 : 0;
+      document.querySelectorAll('.pkg-custom-points').forEach(el => {
+        el.innerHTML = llEscape(llMoney(pts)) +
+          ' <span class="pkg-credit-unit">نقطة</span>';
+      });
     }
 
     async function llUploadRechargeReceipt() {
@@ -421,10 +452,16 @@
         if (errBox) errBox.textContent = receipt.error;
         return;
       }
+      const isCustom = packageId === '__custom__';
+      if (isCustom && !(llCustomPackageAmount > 0)) {
+        if (errBox) errBox.textContent = WFT('recharge.invalid_amount', 'أدخل مبلغًا صالحًا');
+        return;
+      }
       const pkg = llRechargePackages.find(p => p.id === packageId);
       const data = await api('POST', '/api/recharge-requests', {
-        packageId: packageId || null,
-        packageName: pkg ? pkg.name : packageId,
+        packageId: isCustom ? null : packageId,
+        packageName: isCustom ? 'باقة مخصصة' : (pkg ? pkg.name : packageId),
+        customAmountSar: isCustom ? llCustomPackageAmount : undefined,
         referenceNumber: ref.trim(),
         receiptFileId: receipt ? receipt.id : null
       }).catch(e => e);
@@ -436,7 +473,10 @@
       if (document.getElementById('llRechargeReceipt')) document.getElementById('llRechargeReceipt').value = '';
       const pkgInput = document.getElementById('llRechargePackage');
       if (pkgInput) pkgInput.value = '';
-      document.querySelectorAll('.pkg-pick.selected').forEach(c => c.classList.remove('selected'));
+      llCustomPackageAmount = null;
+      document.querySelectorAll('.pkg-custom-input').forEach(i => { i.value = ''; });
+      llUpdateCustomPoints();
+      document.querySelectorAll('.pkg-card.selected').forEach(c => c.classList.remove('selected'));
       llShowPackageInfo();
       closeLlModal('llRechargeModal');
       toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
@@ -908,12 +948,47 @@
     // ── Packages & pricing (t53): admin CRUD, deactivate keeps references ──
     let llAdminPackages = [];
     let llEditingPackageId = null;
+    // The desk tax percent, echoed by GET /api/admin/packages — it drives
+    // the readonly computed-points preview on the package form.
+    let llAdminTaxRatePct = 15;
+
+    function adminRefreshComputedCredit() {
+      const price = Number((document.getElementById('adminPackagePrice') || {}).value || 0);
+      const creditEl = document.getElementById('adminPackageCredit');
+      if (creditEl) {
+        creditEl.value = price > 0
+          ? Math.round(price * (1 - llAdminTaxRatePct / 100) * 100) / 100 : '';
+      }
+    }
+
+    async function adminSaveTaxRate() {
+      const el = document.getElementById('adminPackageTaxRate');
+      const res = await api('PUT', '/api/admin/package-tax-rate', {
+        ratePct: Number((el || {}).value)
+      }).catch(e => e);
+      if (!res || !res.success) {
+        toast((res && res.error) || WFT('recharge.tax_save_failed', 'تعذر حفظ النسبة'));
+        return;
+      }
+      if (typeof res.ratePct === 'number') llAdminTaxRatePct = res.ratePct;
+      adminRefreshComputedCredit();
+      toast(WFT('recharge.tax_saved', 'تم حفظ النسبة'));
+    }
 
     async function adminLoadPackages() {
       const box = document.getElementById('adminPackagesList');
       if (!box) return;
       const data = await api('GET', '/api/admin/packages').catch(() => null);
       llAdminPackages = (data && data.success && data.packages) ? data.packages : [];
+      if (data && typeof data.taxRatePct === 'number') llAdminTaxRatePct = data.taxRatePct;
+      const taxEl = document.getElementById('adminPackageTaxRate');
+      if (taxEl) taxEl.value = llAdminTaxRatePct;
+      const priceEl = document.getElementById('adminPackagePrice');
+      if (priceEl && !priceEl.dataset.computedBound) {
+        priceEl.dataset.computedBound = '1';
+        priceEl.addEventListener('input', adminRefreshComputedCredit);
+      }
+      if (!llEditingPackageId) adminRefreshComputedCredit();
       if (llAdminPkgSlider) { llAdminPkgSlider.destroy(); llAdminPkgSlider = null; }
       if (!llAdminPackages.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد باقات مسجلة.</p>';
@@ -945,6 +1020,10 @@
       });
       const featEl = document.getElementById('adminPackageFeatured');
       if (featEl) featEl.checked = !!p.is_featured;
+      const durEl = document.getElementById('adminPackageDuration');
+      if (durEl) durEl.value = p.duration_days || '';
+      const featuresEl = document.getElementById('adminPackageFeatures');
+      if (featuresEl) featuresEl.value = (p.features || []).join('\n');
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
       const cancel = document.getElementById('adminPackageCancel');
@@ -960,7 +1039,8 @@
       document.getElementById('adminPackagePrice').value = '';
       document.getElementById('adminPackageCredit').value = '';
       ['adminPackageBadge', 'adminPackageBadgeEn', 'adminPackageTagline',
-       'adminPackageTaglineEn'].forEach(elId => {
+       'adminPackageTaglineEn', 'adminPackageDuration',
+       'adminPackageFeatures'].forEach(elId => {
         const el = document.getElementById(elId);
         if (el) el.value = '';
       });
@@ -979,7 +1059,11 @@
         nameEn: (document.getElementById('adminPackageNameEn') || {}).value
           ? document.getElementById('adminPackageNameEn').value.trim() : '',
         priceSar: Number(document.getElementById('adminPackagePrice').value),
-        creditSar: Number(document.getElementById('adminPackageCredit').value),
+        // Points stay server-computed from the price — never keyed here.
+        durationDays: (document.getElementById('adminPackageDuration') || {}).value === ''
+          ? null : parseInt(document.getElementById('adminPackageDuration').value, 10),
+        features: ((document.getElementById('adminPackageFeatures') || {}).value || '')
+          .split('\n').map(s => s.trim()).filter(Boolean),
         badge: (document.getElementById('adminPackageBadge') || {}).value || '',
         badgeEn: (document.getElementById('adminPackageBadgeEn') || {}).value || '',
         tagline: (document.getElementById('adminPackageTagline') || {}).value || '',

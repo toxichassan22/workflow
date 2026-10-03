@@ -127,6 +127,8 @@
       let dragX = null, dragBase = 0, dragging = false, dragPointer = null;
       viewport.addEventListener('pointerdown', e => {
         if (!sliding || e.button === 2) return;
+        // A pull that starts on a real control belongs to it, not the slider.
+        if (e.target.closest('input, button, textarea, select, a')) return;
         dragX = e.clientX;
         dragBase = pos;
         dragging = false;
@@ -209,9 +211,28 @@
     let llAdminPkgSlider = null;
 
     /* Sales card on the «الباقات» tab: optional badge pill, name, big price,
-       a teal credit figure, the desk-authored tagline (e.g. «نحو 30 عرضًا»)
-       and the feature list. ``is_featured`` paints the card dark. */
+       a teal credit figure, the desk-authored tagline (e.g. «نحو 30 عرضًا»),
+       the feature list, the validity line and an «اطلب الآن» footer button.
+       ``is_featured`` paints the card dark. The sentinel ``custom`` item is
+       the «باقة مخصصة»: the client keys a riyal amount and the points mirror
+       the server's price − tax% math. */
     function llRechargePackageCardHtml(p) {
+      if (p.custom) {
+        return '<div class="pkg-card pkg-card--custom" data-pkg-id="__custom__">' +
+          '<span class="pkg-badge">على مقاسك</span>' +
+          '<h3>باقة مخصصة</h3>' +
+          '<div class="pkg-card-meta">المبلغ بالريال السعودي</div>' +
+          '<input type="number" class="pkg-custom-input"' +
+          ' min="1" step="0.01" dir="ltr" placeholder="0" oninput="llCustomInputChanged(this)">' +
+          '<hr class="pkg-hr">' +
+          '<div class="pkg-credit-label">رصيد الاستخدام</div>' +
+          '<div class="pkg-credit-num pkg-custom-points">0' +
+          ' <span class="pkg-credit-unit">نقطة</span></div>' +
+          '<div class="pkg-card-foot">' +
+          '<button type="button" class="btn primary pkg-buy"' +
+          ' onclick="llPickRechargePackage(\'__custom__\')">اطلب الآن</button>' +
+          '</div></div>';
+      }
       const input = document.getElementById('llRechargePackage');
       const selected = input && input.value === p.id;
       const badge = wfBilingual(p.badge, p.badge_en);
@@ -240,15 +261,30 @@
         (tagline ? '<div class="pkg-card-meta">' + llEscape(tagline) + '</div>' : '') +
         features +
         '<div class="pkg-card-meta">' + validity + '</div>' +
-        '</div>';
+        '<div class="pkg-card-foot">' +
+        '<button type="button" class="btn primary pkg-buy">اطلب الآن</button>' +
+        '</div></div>';
     }
 
     /* Picking a card on the packages tab stores the id, marks the card and
-       opens the compact transfer-details modal. */
+       opens the compact transfer-details modal. The «باقة مخصصة» pick needs
+       a keyed amount first — without it the focus just lands on the input. */
     function llPickRechargePackage(packageId) {
       const input = document.getElementById('llRechargePackage');
+      if (packageId === '__custom__') {
+        // Clone cards duplicate the input — take whichever copy is filled.
+        const inputs = Array.from(document.querySelectorAll('.pkg-custom-input'));
+        const amt = Math.max.apply(null, [0].concat(
+          inputs.map(i => Number(i.value || 0))));
+        if (!(amt > 0)) {
+          const target = inputs.find(i => i.offsetParent) || inputs[0];
+          if (target) target.focus();
+          return;
+        }
+        llCustomPackageAmount = Math.round(amt * 100) / 100;
+      }
       if (input) input.value = packageId || '';
-      document.querySelectorAll('.pkg-pick').forEach(card => {
+      document.querySelectorAll('.pkg-pick, .pkg-card--custom').forEach(card => {
         card.classList.toggle('selected',
           card.getAttribute('data-pkg-id') === packageId);
       });

@@ -22,15 +22,34 @@ def api_create_recharge_request():
     # billing_packages row — client-supplied names, amounts and prices are
     # never trusted (they only reach the db layer through admin tooling).
     package_id = data.get('packageId') or data.get('package_id')
+    package_name = data.get('packageName')
+    amount_sar = None
+    price_sar = data.get('priceSar')
     if not str(package_id or '').strip():
-        return jsonify({'error': 'اختر الباقة المطلوب شراؤها',
-                        'error_code': 'package_required'}), 400
+        # «باقة مخصصة»: the client keys the riyal amount they want to pay and
+        # the server shaves the configured tax rate off it into wallet points.
+        try:
+            amount = float(data.get('customAmountSar', data.get('custom_amount_sar')))
+        except (TypeError, ValueError):
+            amount = None
+        if amount is None:
+            return jsonify({'error': 'اختر الباقة المطلوب شراؤها',
+                            'error_code': 'package_required'}), 400
+        if not (0 < amount <= 1000000):
+            return jsonify({'error': 'مبلغ غير صالح',
+                            'error_code': 'invalid_amount'}), 400
+        package_name = 'باقة مخصصة'
+        price_sar = round(amount, 2)
+        amount_sar = round(amount * (1 - db.get_package_tax_rate()), 2)
+        package_id = None
     row = db.create_recharge_request(
-        g.tenant_id, data.get('packageName'), amount_usd=data.get('amountUsd') or 0,
-        price_sar=data.get('priceSar'), transfer_reference=data.get('referenceNumber'),
+        g.tenant_id, package_name,
+        amount_usd=(db.sar_to_usd(amount_sar) if amount_sar is not None
+                    else data.get('amountUsd') or 0),
+        price_sar=price_sar, transfer_reference=data.get('referenceNumber'),
         package_id=package_id,
         receipt_file_id=data.get('receiptFileId'), requested_by=_landloom_actor_id(),
-        requested_by_name=_landloom_actor_name(),
+        requested_by_name=_landloom_actor_name(), amount_sar=amount_sar,
     )
     failure = _landloom_error(row)
     if failure:
@@ -60,7 +79,7 @@ def api_list_recharge_requests():
     except Exception as exc:
         app.logger.exception('list_recharge_requests failed for tenant %s', g.tenant_id)
         return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
-    return jsonify({'success': True, 'requests': rows, 'taxRate': db.TAX_RATE_SAR})
+    return jsonify({'success': True, 'requests': rows, 'taxRate': db.get_package_tax_rate()})
 
 
 @app.route('/api/admin/recharge-requests', methods=['GET'])
@@ -71,7 +90,7 @@ def api_admin_list_recharge_requests():
     except Exception as exc:
         app.logger.exception('admin list_recharge_requests failed')
         return jsonify({'success': False, 'error': f'recharge_list_failed: {exc}'}), 500
-    return jsonify({'success': True, 'requests': rows, 'taxRate': db.TAX_RATE_SAR})
+    return jsonify({'success': True, 'requests': rows, 'taxRate': db.get_package_tax_rate()})
 
 
 @app.route('/api/recharge-requests/<request_id>/attachment/<slot>', methods=['GET'])
@@ -108,7 +127,7 @@ def api_billing_packages():
     if not _landloom_can('billing'):
         return _landloom_forbidden('عرض باقات الشحن يتطلب صلاحية الفوترة')
     packages = db.with_sar_fields(db.list_billing_packages(active_only=True))
-    return jsonify({'success': True, 'packages': packages, 'taxRate': db.TAX_RATE_SAR})
+    return jsonify({'success': True, 'packages': packages, 'taxRate': db.get_package_tax_rate()})
 
 
 @app.route('/api/billing/receipts', methods=['GET'])
