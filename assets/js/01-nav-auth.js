@@ -339,6 +339,90 @@
       }
     }
 
+    function initOtpDigitBoxes() {
+      const container = document.getElementById('loginOtpBoxes');
+      const hiddenInput = document.getElementById('loginOtpInput');
+      if (!container || container.dataset.ready) return;
+      container.dataset.ready = '1';
+
+      const boxes = Array.from(container.querySelectorAll('.otp-digit-box'));
+
+      function syncOtp() {
+        const val = boxes.map(b => b.value.trim()).join('');
+        if (hiddenInput) hiddenInput.value = val;
+        boxes.forEach(b => {
+          if (b.value.trim()) b.classList.add('filled');
+          else b.classList.remove('filled');
+        });
+        return val;
+      }
+
+      boxes.forEach((box, idx) => {
+        box.addEventListener('input', () => {
+          const char = box.value.replace(/[^0-9a-zA-Z]/g, '').slice(-1);
+          box.value = char;
+          const full = syncOtp();
+          if (char && idx < boxes.length - 1) {
+            boxes[idx + 1].focus();
+            boxes[idx + 1].select();
+          }
+          if (full.length === boxes.length) {
+            const btn = document.getElementById('loginOtpSubmitBtn');
+            if (btn) btn.focus();
+          }
+        });
+
+        box.addEventListener('keydown', (e) => {
+          if (e.key === 'Backspace') {
+            if (!box.value && idx > 0) {
+              boxes[idx - 1].focus();
+              boxes[idx - 1].value = '';
+              syncOtp();
+              e.preventDefault();
+            } else {
+              box.value = '';
+              syncOtp();
+            }
+          } else if (e.key === 'ArrowLeft') {
+            if (idx > 0) boxes[idx - 1].focus();
+          } else if (e.key === 'ArrowRight') {
+            if (idx < boxes.length - 1) boxes[idx + 1].focus();
+          }
+        });
+
+        box.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const pasteData = (e.clipboardData || window.clipboardData).getData('text') || '';
+          const cleaned = pasteData.trim().replace(/[^0-9a-zA-Z]/g, '').slice(0, boxes.length);
+          if (!cleaned) return;
+          for (let i = 0; i < boxes.length; i++) {
+            boxes[i].value = cleaned[i] || '';
+          }
+          const full = syncOtp();
+          const nextIdx = Math.min(cleaned.length, boxes.length - 1);
+          boxes[nextIdx].focus();
+          if (full.length === boxes.length) {
+            const btn = document.getElementById('loginOtpSubmitBtn');
+            if (btn) btn.focus();
+          }
+        });
+
+        box.addEventListener('focus', () => {
+          box.select();
+        });
+      });
+    }
+
+    function resetOtpBoxes() {
+      const boxes = document.querySelectorAll('#loginOtpBoxes .otp-digit-box');
+      boxes.forEach(b => {
+        b.value = '';
+        b.classList.remove('filled');
+      });
+      const hiddenInput = document.getElementById('loginOtpInput');
+      if (hiddenInput) hiddenInput.value = '';
+    }
+
     async function handleLogin(e) {
       e.preventDefault();
       showTenantError('loginError', '');
@@ -362,15 +446,16 @@
         const loginForm = document.getElementById('loginForm');
         const otpForm = document.getElementById('loginOtpForm');
         const hint = document.getElementById('loginOtpHint');
-        const input = document.getElementById('loginOtpInput');
+        initOtpDigitBoxes();
+        resetOtpBoxes();
         if (hint && data.maskedEmail) {
           hint.textContent = 'رمز التحقق مرسل إلى ' + data.maskedEmail;
         }
         if (loginForm) loginForm.style.display = 'none';
         if (otpForm) otpForm.style.display = 'block';
-        if (input) {
-          input.value = '';
-          input.focus();
+        const firstBox = document.querySelector('#loginOtpBoxes .otp-digit-box');
+        if (firstBox) {
+          setTimeout(() => { firstBox.focus(); firstBox.select(); }, 50);
         }
         startOtpResendCooldown(60);
         return;
@@ -470,6 +555,7 @@
     function handleLoginOtpCancel() {
       currentLoginChallengeToken = null;
       clearInterval(otpResendCooldownTimer);
+      resetOtpBoxes();
       const loginForm = document.getElementById('loginForm');
       const otpForm = document.getElementById('loginOtpForm');
       if (otpForm) otpForm.style.display = 'none';

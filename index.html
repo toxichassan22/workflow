@@ -50,7 +50,7 @@
   <div id="tenantAuthPage" class="tenant-auth">
     <div class="auth-card">
       <div class="auth-brand">
-        <img class="auth-brand-logo" src="/assets/landloom-logo-white.png" alt="LandLoom">
+        <img class="auth-brand-logo" src="/assets/landloom-logo.png" alt="LandLoom">
         <p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>
       </div>
       <div class="auth-body">
@@ -68,13 +68,21 @@
           <button type="submit" class="auth-btn">دخول</button>
         </form>
         <form id="loginOtpForm" class="auth-form" onsubmit="handleLoginOtpVerify(event)" style="display:none">
-          <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:12px;text-align:center">رمز التحقق مرسل إلى البريد الإلكتروني</p>
-          <label>رمز التحقق</label>
-          <div style="position:relative;margin-bottom:14px">
-            <input type="text" id="loginOtpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="20" placeholder="000000" required style="letter-spacing:6px;font-size:20px;text-align:center;font-weight:bold;margin-bottom:0">
+          <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:14px;text-align:center;color:#475569;font-weight:600">رمز التحقق مرسل إلى البريد الإلكتروني</p>
+          <label style="text-align:center;margin-bottom:8px">رمز التحقق</label>
+
+          <div class="otp-boxes" dir="ltr" id="loginOtpBoxes">
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="0" autofocus>
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="1">
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="2">
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="3">
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="4">
+            <input type="text" class="otp-digit-box" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-index="5">
           </div>
+          <input type="hidden" id="loginOtpInput" name="otp" required>
+
           <button type="submit" class="auth-btn" id="loginOtpSubmitBtn">تأكيد الرمز</button>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px">
+          <div class="auth-secondary-actions">
             <button type="button" class="btn ghost small" id="loginOtpResendBtn" onclick="handleLoginOtpResend()">إعادة إرسال الرمز</button>
             <button type="button" class="btn ghost small" onclick="handleLoginOtpCancel()">الرجوع</button>
           </div>
