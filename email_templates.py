@@ -21,17 +21,15 @@ import html as _html_lib
 BRAND_NAVY = '#07182c'        # the «LandLoom» wordmark
 BRAND_TEAL = '#03e1ce'        # the «AI» accent
 BRAND_TEAL_DEEP = '#0d9488'   # readable teal for links/text on white
-BRAND_HERO_GRADIENT = 'linear-gradient(135deg, #07182c 0%, #0e3a4a 55%, #0a5f56 100%)'
 
 
-def brand_assets(base_url):
-    """Logo URLs for the email header — /assets is served publicly."""
-    base = (base_url or '').rstrip('/')
-    if not base:
-        return None
+def brand_assets():
+    """CID references for the platform wordmark. The sender attaches the PNGs
+    as inline related parts, so the logo renders without any remote fetch —
+    Gmail's image proxy and remote-image-blocked clients still show it."""
     return {
-        'logo_url': f'{base}/assets/landloom-logo.png',
-        'logo_url_light': f'{base}/assets/landloom-logo-white.png',
+        'logo_url': 'cid:landloom-logo',
+        'logo_url_light': 'cid:landloom-logo-white',
     }
 
 
@@ -76,25 +74,40 @@ def build_base_email(
         h_title = _html_lib.escape(hero_banner.get('title', ''))
         h_sub = _html_lib.escape(hero_banner.get('subtitle', ''))
         h_tag = _html_lib.escape(hero_banner.get('tag') or 'LANDLOOM AI')
-        gradient = hero_banner.get('gradient') or BRAND_HERO_GRADIENT
         hero_logo = (f'<img src="{logo_url_light}" alt="LandLoom AI" height="30" '
                      'style="display: block; margin: 0 auto 20px auto; height: 30px; width: auto;" />'
                      if logo_url_light else '')
+        # Solid navy field with teal bubble accents — table columns instead of
+        # position:absolute, which Gmail strips.
         hero_html = f'''
         <tr>
-          <td style="background: {gradient}; padding: 48px 36px 42px 36px; border-radius: 20px 20px 0 0; text-align: center; direction: rtl;">
-            {hero_logo}
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto 16px auto;">
+          <td style="background-color: {BRAND_NAVY}; padding: 44px 30px 40px 30px; border-radius: 20px 20px 0 0; direction: rtl;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
               <tr>
-                <td align="center" style="background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 24px; padding: 4px 16px; font-size: 11px; font-weight: 800; color: #ffffff; letter-spacing: 1.2px; text-transform: uppercase;">
-                  {h_tag}
+                <td width="58" valign="top">
+                  <div style="width: 52px; height: 52px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.10);"></div>
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.55); margin-top: 12px; margin-right: 24px;"></div>
+                </td>
+                <td align="center" style="text-align: center;">
+                  {hero_logo}
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto 16px auto;">
+                    <tr>
+                      <td align="center" style="background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(3, 225, 206, 0.45); border-radius: 24px; padding: 4px 16px; font-size: 11px; font-weight: 800; color: #ffffff; letter-spacing: 1.2px; text-transform: uppercase;">
+                        {h_tag}
+                      </td>
+                    </tr>
+                  </table>
+                  <h1 style="margin: 0; font-size: 30px; font-weight: 900; color: #ffffff; line-height: 1.3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Tahoma, sans-serif; letter-spacing: -0.5px;">
+                    {h_title}
+                  </h1>
+                  {f'<div style="margin-top: 12px; font-size: 15px; color: rgba(255, 255, 255, 0.92); font-weight: 500; line-height: 1.6; max-width: 480px; margin-left: auto; margin-right: auto;">{h_sub}</div>' if h_sub else ''}
+                </td>
+                <td width="58" valign="bottom" align="left">
+                  <div style="width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(3, 225, 206, 0.45); margin-bottom: 16px;"></div>
+                  <div style="width: 48px; height: 48px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.08);"></div>
                 </td>
               </tr>
             </table>
-            <h1 style="margin: 0; font-size: 30px; font-weight: 900; color: #ffffff; line-height: 1.3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Tahoma, sans-serif; letter-spacing: -0.5px;">
-              {h_title}
-            </h1>
-            {f'<div style="margin-top: 12px; font-size: 15px; color: rgba(255, 255, 255, 0.92); font-weight: 500; line-height: 1.6; max-width: 480px; margin-left: auto; margin-right: auto;">{h_sub}</div>' if h_sub else ''}
           </td>
         </tr>'''
 
@@ -194,7 +207,7 @@ def build_base_email(
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: {tile_bg}; border: 1px solid {tile_border}; border-radius: 14px; margin-bottom: 12px; padding: 18px 20px; direction: rtl; text-align: right;">
               <tr>
                 <td valign="top" style="width: 54px; padding-left: 16px;">
-                  <div style="width: 48px; height: 48px; background: linear-gradient(135deg, {BRAND_NAVY} 0%, #0a4f46 100%); border-radius: 12px; text-align: center; line-height: 48px; font-weight: 900; font-size: 14px; color: {BRAND_TEAL}; font-family: 'SFMono-Regular', Consolas, monospace; box-shadow: 0 4px 10px rgba(7, 24, 44, 0.2);">
+                  <div style="width: 48px; height: 48px; background: linear-gradient(135deg, {BRAND_NAVY} 0%, #123B6D 100%); border-radius: 12px; text-align: center; line-height: 48px; font-weight: 900; font-size: 14px; color: {BRAND_TEAL}; font-family: 'SFMono-Regular', Consolas, monospace; box-shadow: 0 4px 10px rgba(7, 24, 44, 0.2);">
                     {t_mono}
                   </div>
                 </td>
@@ -522,7 +535,6 @@ def render_company_welcome_email(recipient, company_name, activation_url,
             'title': 'مرحبًا بك في LandLoom AI',
             'subtitle': 'المنصة الذكية الأولى لدراسات التطوير والاستثمار العقاري في المملكة',
             'tag': 'منصة الجيل الجديد',
-            'gradient': BRAND_HERO_GRADIENT,
         },
         user_pill={'email': recipient},
         badge='انضمام جديد',

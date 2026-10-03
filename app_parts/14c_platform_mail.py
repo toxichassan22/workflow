@@ -51,7 +51,30 @@ def _open_smtp_client(settings):
     return client
 
 
-def send_platform_email(recipient, subject, body, html=None):
+_LOGO_IMAGES = None
+
+
+def _platform_logo_images():
+    """Inline copies of the wordmark PNGs so mail clients never need a remote
+    fetch to show the logo (the cid: references inside the designed templates
+    resolve against these related parts)."""
+    global _LOGO_IMAGES
+    if _LOGO_IMAGES is None:
+        _LOGO_IMAGES = {}
+        assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
+        for filename, cid in (('landloom-logo.png', 'landloom-logo'),
+                              ('landloom-logo-white.png', 'landloom-logo-white')):
+            try:
+                with open(os.path.join(assets_dir, filename), 'rb') as fh:
+                    _LOGO_IMAGES[cid] = {
+                        'data': fh.read(), 'maintype': 'image', 'subtype': 'png',
+                        'filename': filename}
+            except OSError:
+                pass
+    return _LOGO_IMAGES
+
+
+def send_platform_email(recipient, subject, body, html=None, inline_images=None):
     _set_smtp_error(None)
     settings = _smtp_settings()
     if not recipient:
@@ -71,6 +94,18 @@ def send_platform_email(recipient, subject, body, html=None):
     message.set_content(body)
     if html:
         message.add_alternative(html, subtype='html')
+        if inline_images:
+            html_part = message.get_payload()[-1]
+            for cid, image in inline_images.items():
+                if not image or not image.get('data'):
+                    continue
+                html_part.add_related(
+                    image['data'],
+                    maintype=image.get('maintype', 'image'),
+                    subtype=image.get('subtype', 'png'),
+                    cid=f'<{cid}>',
+                    filename=image.get('filename') or cid,
+                    disposition='inline')
     try:
         client = _open_smtp_client(settings)
         try:
@@ -113,10 +148,11 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
         html = email_templates.render_company_welcome_email(
             recipient, company_name, setup_url,
             account_name=account_name, stats=stats,
-            brand=email_templates.brand_assets(_current_base_url()))
+            brand=email_templates.brand_assets())
     except Exception:
         html = None
-    return send_platform_email(recipient, subject, body, html=html)
+    return send_platform_email(recipient, subject, body, html=html,
+                               inline_images=_platform_logo_images())
 
 
 def _send_user_welcome_email(recipient, user_name, tenant):
@@ -133,10 +169,11 @@ def _send_user_welcome_email(recipient, user_name, tenant):
     try:
         html = email_templates.render_user_welcome_email(
             recipient, user_name, company_name, base_url,
-            brand=email_templates.brand_assets(base_url))
+            brand=email_templates.brand_assets())
     except Exception:
         html = None
-    return send_platform_email(recipient, subject, body, html=html)
+    return send_platform_email(recipient, subject, body, html=html,
+                               inline_images=_platform_logo_images())
 
 
 def _send_invite_email(invite, tenant, email=None, responsibility=None):
@@ -161,10 +198,11 @@ def _send_invite_email(invite, tenant, email=None, responsibility=None):
     try:
         html = email_templates.render_user_invite_email(
             recipient, inviter, company_name, role_label, full_invite_url,
-            brand=email_templates.brand_assets(base_url))
+            brand=email_templates.brand_assets())
     except Exception:
         html = None
-    ok = send_platform_email(recipient, subject, body, html=html)
+    ok = send_platform_email(recipient, subject, body, html=html,
+                             inline_images=_platform_logo_images())
     db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
                          None if ok else (smtp_last_error() or 'smtp_send_failed'))
     return ok

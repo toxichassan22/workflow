@@ -71,9 +71,10 @@ def send_login_otp_email(recipient, otp_code, company_name=None, device_info=Non
         device_info=device_info,
         expiry_mins=10,
         login_url=base_url or None,
-        brand=email_templates.brand_assets(base_url),
+        brand=email_templates.brand_assets(),
     )
-    return send_platform_email(recipient, subject, body, html=html)
+    return send_platform_email(recipient, subject, body, html=html,
+                               inline_images=_platform_logo_images())
 
 
 @app.route('/api/auth/login/verify-otp', methods=['POST'])
