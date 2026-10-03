@@ -155,13 +155,8 @@
         email: document.getElementById('sagCreateEmail').value.trim().toLowerCase(),
         phone: document.getElementById('sagCreatePhone').value.trim(),
         username: document.getElementById('sagCreateUsername').value.trim().toLowerCase(),
-        slug: (document.getElementById('sagCreateSlug') || {}).value || '',
         isActive: document.getElementById('sagCreateStatus').value === 'active',
         trialDays: trialDaysEl && trialDaysEl.value !== '' ? Number(trialDaysEl.value) : null,
-        legalName: (document.getElementById('sagCreateLegalName') || {}).value || '',
-        taxNumber: (document.getElementById('sagCreateTaxNumber') || {}).value || '',
-        crNumber: (document.getElementById('sagCreateCrNumber') || {}).value || '',
-        country: (document.getElementById('sagCreateCountry') || {}).value || '',
         passwordMode: document.getElementById('sagCreatePasswordMode').value,
         password: document.getElementById('sagCreatePassword').value,
         sendWelcomeEmail: document.getElementById('sagCreateWelcomeEmail').checked
