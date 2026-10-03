@@ -617,62 +617,6 @@
       }
     }
 
-    // ── File types registry (t62, d10) — lives on the platform settings page ──
-    async function llLoadFileTypes(targetBoxId) {
-      const box = document.getElementById(targetBoxId || 'adminFileTypesList');
-      if (!box) return;
-      box.innerHTML = '<p class="tenant-hint">جاري التحميل...</p>';
-      const data = await api('GET', '/api/file-types').catch(() => null);
-      if (!data || !data.success) {
-        box.innerHTML = '<p class="tenant-hint">تعذر تحميل سجل أنواع الملفات.</p>';
-        return;
-      }
-      const types = data.fileTypes || [];
-      if (!types.length) {
-        box.innerHTML = '<p class="tenant-hint">لا توجد أنواع ملفات مسجلة.</p>';
-        return;
-      }
-      box.innerHTML =
-        '<div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">' +
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
-        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
-        '<th style="padding:10px 8px;">نوع الملف</th>' +
-        '<th style="padding:10px 8px;">المفتاح</th>' +
-        '<th style="padding:10px 8px;">الحد الأقصى</th>' +
-        '<th style="padding:10px 8px;">الامتدادات المسموحة</th>' +
-        '<th style="padding:10px 8px;">الإجراء</th>' +
-        '</tr></thead><tbody>' +
-        types.map(t =>
-          '<tr style="border-bottom:1px solid #e2e8f0;">' +
-          '<td style="padding:10px 8px;font-weight:600;">' + llEscape(t.label_ar) + '</td>' +
-          '<td style="padding:10px 8px;font-family:monospace;font-size:12px;">' + llEscape(t.key) + '</td>' +
-          '<td style="padding:10px 8px;">' + (t.max_size_mb || 25) + ' <span>ميجابايت</span></td>' +
-          '<td style="padding:10px 8px;font-size:12px;color:#64748b;">' + llEscape(t.allowed_extensions || 'جميع الامتدادات المدعومة') + '</td>' +
-          '<td style="padding:10px 8px;">' +
-          '<button type="button" class="btn small ghost" onclick="llUpdateFileTypePrompt(\'' + llEscape(t.key) + '\', \'' + llEscape(t.label_ar) + '\', ' + (t.max_size_mb || 25) + ', \'' + llEscape(t.allowed_extensions || '') + '\')">تعديل الحد</button>' +
-          '</td></tr>'
-        ).join('') +
-        '</tbody></table></div>';
-    }
-
-    async function llUpdateFileTypePrompt(key, label, currentMaxMb, currentExts) {
-      const newMbStr = prompt(WFT('file_types.max_prompt', 'الحد الأقصى بالـ MB لنوع ({label}):', { label }), currentMaxMb);
-      if (!newMbStr) return;
-      const newMb = parseInt(newMbStr, 10);
-      if (isNaN(newMb) || newMb <= 0) { toast(WFT('common.invalid_value', 'قيمة غير صالحة')); return; }
-      const res = await api('POST', '/api/file-types/' + encodeURIComponent(key), {
-        labelAr: label,
-        maxSizeMb: newMb,
-        allowedExtensions: currentExts
-      }).catch(e => e);
-      if (res && res.success) {
-        toast(WFT('file_types.updated', 'تم تحديث حد نوع الملف'));
-        await llLoadFileTypes();
-      } else {
-        toast((res && res.error) || 'تعذر التحديث');
-      }
-    }
-
     // ── Super-admin pages: recharge queue, support inbox, platform settings ──
 
     async function openAdminRechargePage() {
@@ -855,7 +799,7 @@
 
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([llLoadFileTypes(), llLoadRejectionReasons(), llLoadFxRate(),
+      await Promise.all([llLoadRejectionReasons(), llLoadFxRate(),
         adminLoadFeatureCatalog()]);
     }
 
