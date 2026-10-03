@@ -62,6 +62,7 @@
         let res = await api('POST', '/api/extract-croquis', {
           documents,
           draftId: tenantProjectData.draftId,
+          project_language: tenantProjectData.project_language || '',
           projectName: projectContext.project_name,
           projectType: projectContext.project_type,
           projectStage: projectContext.project_stage,
@@ -333,7 +334,8 @@
         'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address', 'location_detail',
         'location_maps_link', 'maps_link', 'location_lat', 'location_lng', 'city', 'district', 'main_roads',
         'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks',
-        'catchment_areas', 'population_density', 'population_density_source', 'location_polygon'
+        'catchment_areas', 'population_density', 'population_density_source', 'location_polygon',
+        'project_language'
       ];
       const analysisProjectData = {};
       analysisKeys.forEach(key => {

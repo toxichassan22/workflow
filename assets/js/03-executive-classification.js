@@ -182,6 +182,7 @@
           };
         });
       return {
+        project_language: tenantProjectData.project_language || '',
         projectName: tenantProjectData.project_name || field('project_name'),
         projectType: typeof selectedProjectTypeMains === 'function' ? selectedProjectTypeMains() : (tenantProjectData.project_type || ''),
         projectSubtype: typeof selectedProjectSubtypes === 'function' ? selectedProjectSubtypes() : (tenantProjectData.project_subtype || ''),

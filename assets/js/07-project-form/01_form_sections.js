@@ -171,7 +171,29 @@
       };
     }
 
+    // Every new project first names the language its generated proposal is
+    // written in. The choice is stored on the draft as project_language and
+    // the backend resolves it before falling back to content detection.
+    function askProjectLanguage() {
+      const modal = document.getElementById('projectLanguageModal');
+      if (!modal) return Promise.resolve('ar');
+      return new Promise(resolve => {
+        const done = value => {
+          modal.onclick = null;
+          closeLlModal('projectLanguageModal');
+          resolve(value);
+        };
+        document.getElementById('projectLanguageArBtn').onclick = () => done('ar');
+        document.getElementById('projectLanguageEnBtn').onclick = () => done('en');
+        document.getElementById('projectLanguageCancelBtn').onclick = () => done(null);
+        modal.onclick = event => { if (event.target === modal) done(null); };
+        openLlModal('projectLanguageModal');
+      });
+    }
+
     async function startTenantProject() {
+      const projectLanguage = await askProjectLanguage();
+      if (!projectLanguage) return;
       setDraftDirty(false);
       tenantPresentationId = null;
       tenantPresentationRevision = 0;
@@ -179,7 +201,7 @@
       tenantPresentationProvenance = null;
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';
-      tenantProjectData = { draftId: crypto.randomUUID() };
+      tenantProjectData = { draftId: crypto.randomUUID(), project_language: projectLanguage };
       tenantVisualConceptState = null;
       tenantSlidesData = [];
       tenantSlidePlan = null;

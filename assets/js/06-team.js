@@ -810,6 +810,18 @@
         return false;
       }
       tenantFields = fieldsData.fields || [];
+      // The language picked at project creation is editable here like any other
+      // field — canonical ar/en values, rendered by the dedicated branch in
+      // renderTenantProjectForm, with an empty «auto» state for legacy drafts.
+      if (!tenantFields.some(field => field.fieldKey === 'project_language')) {
+        tenantFields.unshift({
+          fieldKey: 'project_language',
+          fieldLabel: 'لغة المشروع',
+          fieldType: 'select',
+          sectionKey: 'basic',
+          sortOrder: 0
+        });
+      }
       if (!tenantFields.some(field => field.fieldKey === 'location_detail')) {
         tenantFields.push({
           fieldKey: 'location_detail',

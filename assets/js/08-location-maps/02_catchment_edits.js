@@ -433,6 +433,18 @@
             input.style.display = 'none';
           } else if (f.fieldType === 'textarea') {
             input = document.createElement('textarea');
+          } else if (f.fieldKey === 'project_language') {
+            // Canonical ar/en values — the stored choice feeds
+            // slide_engine.resolve_offer_lang; «auto» (empty) is the legacy
+            // state, where the backend detects the language from content.
+            input = document.createElement('select');
+            [['', 'تلقائي'], ['ar', 'العربية'], ['en', 'English']].forEach(pair => {
+              const option = document.createElement('option');
+              option.value = pair[0];
+              option.textContent = pair[1];
+              option.dataset.arText = pair[1];
+              input.appendChild(option);
+            });
           } else if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'activity_class') {
             input = document.createElement('input');
             input.type = 'hidden';
@@ -699,7 +711,7 @@
             div.appendChild(uploadStatus);
             renderProjectLogoState(tenantProjectData.project_logo_file_meta || (tenantProjectData.project_logo ? { path: tenantProjectData.project_logo, id: tenantProjectData.project_logo_file_id } : null));
           }
-          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level' && f.fieldKey !== 'project_type') {
+          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level' && f.fieldKey !== 'project_type' && f.fieldKey !== 'project_language') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
             otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';

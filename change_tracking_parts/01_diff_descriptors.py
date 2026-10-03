@@ -207,6 +207,7 @@ DRAFT_SCALAR_LABELS = {
     'timeline_start_date': 'تاريخ بداية المشروع',
     'timeline_start_year': 'سنة بداية المشروع',
     'timeline_years': 'عدد سنوات المشروع',
+    'project_language': 'لغة المشروع',
 }
 
 DRAFT_IGNORED_KEYS = {

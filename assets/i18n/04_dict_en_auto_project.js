@@ -42,6 +42,8 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "انتهت مهلة توليد الصورة؛ أعد المحاولة.": "Image generation timed out; retry.",
   "بيانات التواصل": "Contact details",
   "بيانات المشروع": "Project Data",
+  "لغة المشروع": "Project Language",
+  "العربية": "Arabic",
   "تاريخ الصك": "Title Deed Date",
   "تجاري": "Commercial",
   "تجزئة": "Retail",

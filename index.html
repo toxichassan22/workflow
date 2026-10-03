@@ -1107,6 +1107,21 @@
     <!-- Company management modals (position:fixed — must live outside .tenant-page which is display:none) -->
     <div id="sagTenantModal" style="display:none" data-a11y-modal></div>
 
+    <!-- Project language: every new project picks the language its generated
+         proposal is written in before the form opens. -->
+    <div id="projectLanguageModal" class="ll-modal-overlay" data-a11y-modal>
+      <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="projectLanguageModalTitle">
+        <div class="sag-modal-head">
+          <h2 id="projectLanguageModalTitle">لغة المشروع</h2>
+        </div>
+        <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+          <button type="button" class="btn ghost" id="projectLanguageCancelBtn">إلغاء</button>
+          <button type="button" class="btn primary" id="projectLanguageArBtn">العربية</button>
+          <button type="button" class="btn primary" id="projectLanguageEnBtn">English</button>
+        </div>
+      </div>
+    </div>
+
     <div id="sagCompanyCreateModal" data-a11y-modal
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
         <div role="dialog" aria-modal="true" aria-labelledby="sagCompanyCreateTitle"

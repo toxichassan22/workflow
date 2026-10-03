@@ -607,7 +607,7 @@ def api_site_analysis():
         'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
         'city', 'district', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
         'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
-        'location_polygon'
+        'location_polygon', 'project_language',
     )
     project_data = {
         key: raw_project_data.get(key)
@@ -654,28 +654,8 @@ def api_site_analysis():
             project_data[key] = enriched_fields[key]
             filled_fields[key] = enriched_fields[key]
 
-    prompt = f"""اكتب تحليلًا عربيًا احترافيًا ومفصلًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
-
-المطلوب:
-- اكتب تحليلًا عربيًا مسترسلًا في فقرات مترابطة، ولا تختصره إلى ملخص سريع أو عبارات عامة.
-- غطِّ جميع الفئات التالية الموجودة في البيانات ولا تتخطى أي فئة فيها بيانات.
-- يجب أن يتضمن التحليل إشارة مختصرة إلى كل ما يلي متاح منه، بالترتيب التالي قدر الإمكان:
-  1. نوع المشروع وفكرته ووصفه والهدف منه ومرحلته الحالية والجمهور المستهدف.
-  2. المميزات الأولية ونقاط القوة وفرص الاستثمار المناسبة للمشروع.
-  3. طبيعة الموقع وموقعه الاستراتيجي والعنوان التفصيلي والإحداثيات.
-  4. الكثافة السكانية ومصدرها إن وجدت.
-  5. الطرق الرئيسية وطبيعة الوصول.
-  6. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
-  7. نطاق التأثير ومناطق الالتقاط إن وجدت.
-- اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته وهدفه ومرحلته والجمهور المستهدف ومميزات المشروع وفرصه.
-- اشرح العلاقة والاستنتاجات بالتفصيل دون تكرار نفس المعلومة.
-- لا تخترع أي معلومة غير موجودة في البيانات.
-- إذا كانت معلومة غير متوفرة، لا تذكرها أبدًا بدلًا من اختلاقها.
-- لا تستخدم عناوين أو نقاط تعداد في النص النهائي؛ أعد تحليلًا عربيًا سلسًا جاهزًا للعرض.
-
-بيانات المشروع والموقع:
-{json.dumps(project_data, ensure_ascii=False, indent=2)}"""
-    system_prompt = 'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا سلسًا يغطي كل فئة متاحة من البيانات دون تخطي أي منها، ودون اختلاق معلومات غير موجودة.'
+    offer_lang = slide_engine.resolve_offer_lang(project_data)
+    system_prompt, prompt = build_site_analysis_prompts(project_data, offer_lang)
     training_context = db.get_training_context(g.tenant_id, surface='content') or ''
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"

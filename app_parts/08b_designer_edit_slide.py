@@ -141,7 +141,17 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
                 '[DESIGNER-EDIT] deterministic boundary build failed for slide %s', slide_index + 1)
     project_context = _designer_project_context(project_data, creative_images, tenant_id)
 
-    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
+    _edit_lang_note = ''
+    _edit_response_spec = 'شرح عربي موجز ودقيق لما قمت به جراحياً'
+    if slide_engine.resolve_offer_lang(project_data) == slide_engine.OFFER_LANG_ENGLISH:
+        _edit_lang_note = (
+            '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN +
+            '\nEvery word you author on the slide — headings, paragraphs, labels, cell text — '
+            'is written in English.'
+        )
+        _edit_response_spec = 'brief, precise English summary of the surgical change'
+
+    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}{_edit_lang_note}
 
 {project_context}
 أنت Landloom، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
@@ -179,7 +189,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
    - عند حذف عنصر مُدار عمداً أعلنه في حقل "removed" داخل JSON حتى لا يعاد إدراجه آلياً: القيم المعتمدة "company_logo"، "project_logo"، "logo" (الشعاران معاً)، "header"، "footer"، "counter". ما لا تُعلنه ولم يُطلب حذفه يبقى محفوظاً — لا تحذفه من تلقاء نفسك.
    - الترقيم الوحيد المسموح هو عنصر data-slide-counter المُدار — لا تخترع رقم صفحة أو تكتب «7/1» أو «NN — NN» بنفسك في الهيدر أو أي مكان، وأي عنصر كهذا موجود احذفه عند الطلب وأعلنه في "removed".
 أعد JSON فقط بالشكل:
-{{"html":"<div class=\\"slide\\">...</div>","response":"شرح عربي موجز ودقيق لما قمت به جراحياً","removed":["project_logo"]}}
+{{"html":"<div class=\\"slide\\">...</div>","response":"{_edit_response_spec}","removed":["project_logo"]}}
 (الحقل "removed" يُدرج فقط عند حذف عنصر مُدار فعلاً؛ غير ذلك أرسله قائمة فارغة أو احذفه.)
 عنوان الشريحة: {title}
 HTML الحالي:

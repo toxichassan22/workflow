@@ -130,7 +130,7 @@ _MACHINE_OFFER_KEY_RE = re.compile(
     r'(?:^map_|^regen_|^_|^image|^logo|^file|^http|^tenant|section_?status|page_?draft'
     r'|_id$|^id$|_url$|^url$|_path$|_token$|_file$|_meta$|_slug$|^slug$|_email$|^email$'
     r'|_hash$|^phone$|^username$|^domain$|^latitude$|^longitude$|^lat$|^lng$'
-    r'|^draftid$|^draft_id$)',
+    r'|^draftid$|^draft_id$|language$|_lang$|^lang$)',
     re.IGNORECASE,
 )
 

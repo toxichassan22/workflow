@@ -817,6 +817,7 @@
       }).filter(Boolean).slice(0, 12);
       return {
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id || '',
+        project_language: tenantProjectData.project_language || '',
         projectName: tenantProjectData.project_name || '',
         projectType: selectedProjectTypeMains().join('، '),
         projectSubtype: selectedProjectSubtypes().join('، '),

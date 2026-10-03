@@ -90,6 +90,65 @@ class DetectOfferLangTests(unittest.TestCase):
         self.assertEqual(slide_engine.resolve_offer_lang(AR_DRAFT, 'en'), OFFER_LANG_ENGLISH)
 
 
+class StoredProjectLanguageTests(unittest.TestCase):
+    """The language picked at project creation rides on the draft as
+    project_language and beats content detection everywhere resolve runs."""
+
+    def test_stored_english_overrides_arabic_content(self):
+        draft = dict(AR_DRAFT)
+        draft['project_language'] = 'en'
+        self.assertEqual(slide_engine.resolve_offer_lang(draft), OFFER_LANG_ENGLISH)
+
+    def test_stored_arabic_overrides_english_content(self):
+        draft = dict(EN_DRAFT)
+        draft['project_language'] = 'ar'
+        self.assertEqual(slide_engine.resolve_offer_lang(draft), OFFER_LANG_ARABIC)
+
+    def test_written_labels_normalize(self):
+        for value in ('العربية', 'عربي', 'ar', 'AR', 'Arabic'):
+            draft = dict(EN_DRAFT)
+            draft['project_language'] = value
+            self.assertEqual(
+                slide_engine.resolve_offer_lang(draft), OFFER_LANG_ARABIC, value)
+        for value in ('English', 'EN', 'en-US', 'الإنجليزية', 'انجليزي'):
+            draft = dict(AR_DRAFT)
+            draft['project_language'] = value
+            self.assertEqual(
+                slide_engine.resolve_offer_lang(draft), OFFER_LANG_ENGLISH, value)
+
+    def test_camel_and_offer_aliases(self):
+        for key in ('offer_lang', 'offerLang', 'projectLanguage'):
+            draft = dict(AR_DRAFT)
+            draft[key] = 'en'
+            self.assertEqual(
+                slide_engine.resolve_offer_lang(draft), OFFER_LANG_ENGLISH, key)
+
+    def test_empty_or_unknown_stored_value_falls_back_to_detection(self):
+        for value in ('', 'auto', None, 'fr'):
+            draft = dict(EN_DRAFT)
+            draft['project_language'] = value
+            self.assertEqual(
+                slide_engine.resolve_offer_lang(draft), OFFER_LANG_ENGLISH, value)
+            draft = dict(AR_DRAFT)
+            draft['project_language'] = value
+            self.assertEqual(
+                slide_engine.resolve_offer_lang(draft), OFFER_LANG_ARABIC, value)
+
+    def test_explicit_argument_beats_stored_choice(self):
+        draft = dict(EN_DRAFT)
+        draft['project_language'] = 'ar'
+        self.assertEqual(
+            slide_engine.resolve_offer_lang(draft, 'en'), OFFER_LANG_ENGLISH)
+
+    def test_stored_language_drives_plan_titles(self):
+        draft = dict(AR_DRAFT)
+        draft['project_language'] = 'en'
+        plan = slide_engine.normalize_presentation_plan(
+            _plan_with_types('cover', 'closing'), draft)
+        self.assertEqual(plan.get('offer_lang'), 'en')
+        self.assertEqual(plan['slides'][0]['title'], 'Cover')
+
+
 class SectionTitleTests(unittest.TestCase):
     def test_every_section_has_an_english_title(self):
         missing = [key for key in PRESENTATION_SECTION_TITLES if key not in PRESENTATION_SECTION_TITLES_EN]

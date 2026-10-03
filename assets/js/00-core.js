@@ -566,6 +566,7 @@
         if (GENERATION_PAYLOAD_DROPPED.includes(key)) return false;
         if (key === 'financial_study_model' || key === 'financial_calc_data') return false;
         if (key === 'draftId' || key === 'draft_id' || key === 'sectionStatuses') return false;
+        if (key === 'project_language') return false;
         if (key.startsWith('map_') || key.endsWith('_file_meta') || key.endsWith('_file_ids')) return false;
         const value = src[key];
         if (value === undefined || value === null || value === '' || value === false) return false;

@@ -339,6 +339,13 @@ def _execute_extract_croquis():
             "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
             "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
         )
+        if slide_engine.resolve_offer_lang(data) == slide_engine.OFFER_LANG_ENGLISH:
+            system_prompt += (
+                "\n" + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN +
+                "\nJSON keys, the source/enum values, and every quoted document value stay exactly "
+                "as specified; only free-text prose (land_and_building_summary, uses, notes, "
+                "conflict descriptions, and similar) is authored in English."
+            )
 
         raw_resp = ""
         response_finish_reason = None
