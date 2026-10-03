@@ -1000,13 +1000,16 @@ def get_billing_package(package_id):
 
 
 def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
-                           name_en=None):
+                           name_en=None, badge=None, badge_en=None,
+                           tagline=None, tagline_en=None, is_featured=False):
     """Create a package. credit_sar may be zero (prepaid, topped up later).
 
     The wallet credit is riyal-denominated; ``credit_usd`` on the row keeps
     the dollar equivalent for provider-side audit only. ``name_en`` is the
     English catalog label; it is optional and the client falls back to the
-    Arabic ``name`` when it is empty.
+    Arabic ``name`` when it is empty. ``badge``/``tagline`` (plus their
+    ``*_en`` twins) dress the sales card — a pill above the name and a
+    blurb line — and ``is_featured`` paints the card dark.
     """
     label = str(name or '').strip()
     if not label or len(label) > 120:
@@ -1014,6 +1017,18 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
     label_en = str(name_en or '').strip()
     if len(label_en) > 120:
         raise ValueError('Invalid package name_en')
+    badge_label = str(badge or '').strip()
+    if len(badge_label) > 80:
+        raise ValueError('Invalid package badge')
+    badge_label_en = str(badge_en or '').strip()
+    if len(badge_label_en) > 80:
+        raise ValueError('Invalid package badge_en')
+    tagline_label = str(tagline or '').strip()
+    if len(tagline_label) > 200:
+        raise ValueError('Invalid package tagline')
+    tagline_label_en = str(tagline_en or '').strip()
+    if len(tagline_label_en) > 200:
+        raise ValueError('Invalid package tagline_en')
     try:
         credit = round(float(credit_sar or 0.0) + 1e-9, 2)
     except (TypeError, ValueError):
@@ -1032,16 +1047,20 @@ def create_billing_package(name, credit_sar=0.0, price_sar=None, is_custom=True,
     package_id = str(uuid.uuid4())
     conn.execute(
         'INSERT INTO billing_packages (id, name, name_en, credit_usd, credit_sar, '
-        'price_sar, is_active, is_custom) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+        'price_sar, badge, badge_en, tagline, tagline_en, is_featured, '
+        'is_active, is_custom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
         (package_id, label, label_en or None, sar_to_usd(credit), credit, price,
-         1 if is_custom else 0)
+         badge_label or None, badge_label_en or None,
+         tagline_label or None, tagline_label_en or None,
+         1 if is_featured else 0, 1 if is_custom else 0)
     )
     conn.commit()
     return get_billing_package(package_id)
 
 
 def update_billing_package(package_id, name=None, credit_sar=None, price_sar=None,
-                           is_active=None, name_en=None):
+                           is_active=None, name_en=None, badge=None, badge_en=None,
+                           tagline=None, tagline_en=None, is_featured=None):
     conn = get_db()
     row = conn.execute(
         'SELECT * FROM billing_packages WHERE id = ?', (str(package_id),)).fetchone()
@@ -1061,6 +1080,33 @@ def update_billing_package(package_id, name=None, credit_sar=None, price_sar=Non
             raise ValueError('Invalid package name_en')
         assignments.append('name_en = ?')
         params.append(label_en or None)
+    if badge is not None:
+        badge_label = str(badge or '').strip()
+        if len(badge_label) > 80:
+            raise ValueError('Invalid package badge')
+        assignments.append('badge = ?')
+        params.append(badge_label or None)
+    if badge_en is not None:
+        badge_label_en = str(badge_en or '').strip()
+        if len(badge_label_en) > 80:
+            raise ValueError('Invalid package badge_en')
+        assignments.append('badge_en = ?')
+        params.append(badge_label_en or None)
+    if tagline is not None:
+        tagline_label = str(tagline or '').strip()
+        if len(tagline_label) > 200:
+            raise ValueError('Invalid package tagline')
+        assignments.append('tagline = ?')
+        params.append(tagline_label or None)
+    if tagline_en is not None:
+        tagline_label_en = str(tagline_en or '').strip()
+        if len(tagline_label_en) > 200:
+            raise ValueError('Invalid package tagline_en')
+        assignments.append('tagline_en = ?')
+        params.append(tagline_label_en or None)
+    if is_featured is not None:
+        assignments.append('is_featured = ?')
+        params.append(1 if is_featured else 0)
     if credit_sar is not None:
         try:
             credit = round(float(credit_sar) + 1e-9, 2)

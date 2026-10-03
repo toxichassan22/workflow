@@ -1,11 +1,7 @@
     /* ── Package catalog slider ─────────────────────────────────────────
-       Shared by the client recharge picker and the super-admin package
+       Shared by the «الباقات» purchase page and the super-admin package
        list. The window shows up to three cards; one card moves per step
        and the track loops at both ends. */
-
-    .ll-modal-card--wide {
-      max-width: 720px;
-    }
 
     .wf-slider {
       display: flex;
@@ -97,4 +93,111 @@
     .pkg-pick.selected {
       border-color: var(--p);
       background: var(--p-soft);
+    }
+
+    /* ── Sales card (packages purchase page) ────────────────────────────
+       Badge pill, big price, teal credit figure and the desk-authored
+       tagline; `.pkg-card--featured` is the dark highlighted tier. */
+
+    .pkg-pick h3,
+    .pkg-pick .pkg-card-meta {
+      text-align: center;
+    }
+
+    .pkg-badge {
+      display: inline-block;
+      align-self: center;
+      padding: 3px 14px;
+      border: 1px solid var(--ui-border);
+      border-radius: 999px;
+      background: var(--surface-subtle);
+      color: var(--ink-muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .pkg-price {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .pkg-price-num {
+      color: var(--ink);
+      font-size: 30px;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .pkg-price-cur {
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pkg-hr {
+      width: 100%;
+      margin: 4px 0;
+      border: 0;
+      border-top: 1px solid var(--ui-border);
+    }
+
+    .pkg-credit-label {
+      color: var(--ink-muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .pkg-credit-num {
+      color: var(--sidebar-accent);
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1.15;
+      text-align: center;
+    }
+
+    .pkg-credit-unit {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .pkg-feature-line {
+      text-align: center;
+    }
+
+    .pkg-card--featured,
+    .pkg-card--featured.pkg-pick:hover {
+      background: var(--sidebar-bg);
+      border-color: var(--sidebar-bg);
+    }
+
+    .pkg-card--featured h3,
+    .pkg-card--featured .pkg-price-num {
+      color: #f4f8fa;
+    }
+
+    .pkg-card--featured .pkg-card-meta,
+    .pkg-card--featured .pkg-price-cur {
+      color: #9db8c8;
+    }
+
+    .pkg-card--featured .pkg-hr {
+      border-top-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .pkg-card--featured .pkg-badge {
+      background: var(--sidebar-accent);
+      border-color: var(--sidebar-accent);
+      color: #05323a;
+    }
+
+    .pkg-card--featured .pkg-credit-label {
+      color: #9db8c8;
+    }
+
+    .pkg-card--featured.pkg-pick.selected {
+      background: var(--sidebar-bg);
+      border-color: var(--sidebar-accent);
     }

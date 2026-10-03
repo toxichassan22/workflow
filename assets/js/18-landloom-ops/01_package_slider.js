@@ -192,48 +192,59 @@
       };
     }
 
-    /* ── Client recharge picker ───────────────────────────────────────── */
+    /* ── Packages purchase page ───────────────────────────────────────── */
 
     let llRechargePkgSlider = null;
     let llAdminPkgSlider = null;
 
+    /* Sales card on the «الباقات» tab: optional badge pill, name, big price,
+       a teal credit figure, the desk-authored tagline (e.g. «نحو 30 عرضًا»)
+       and the feature list. ``is_featured`` paints the card dark. */
     function llRechargePackageCardHtml(p) {
       const input = document.getElementById('llRechargePackage');
       const selected = input && input.value === p.id;
-      const price = p.price_sar != null
-        ? llEscape(llMoney(p.price_sar)) + ' <span>ريال سعودي</span>'
-        : 'بلا سعر';
+      const badge = wfBilingual(p.badge, p.badge_en);
+      const tagline = wfBilingual(p.tagline, p.tagline_en);
       const validity = p.duration_days
         ? '<span>الصلاحية:</span> ' + llEscape(p.duration_days) + ' <span>يومًا</span>'
         : 'الصلاحية: بلا انتهاء محدد';
       const features = (Array.isArray(p.features) ? p.features : [])
         .filter(Boolean)
-        .map(f => '<div class="pkg-card-meta">' + llEscape(f) + '</div>')
+        .map(f => '<div class="pkg-card-meta pkg-feature-line">' + llEscape(f) + '</div>')
         .join('');
-      return '<div class="pkg-card pkg-pick' + (selected ? ' selected' : '') + '"' +
+      return '<div class="pkg-card pkg-pick' + (selected ? ' selected' : '') +
+        (p.is_featured ? ' pkg-card--featured' : '') + '"' +
         ' data-pkg-id="' + llEscape(p.id) + '" role="button" tabindex="0"' +
         ' onclick="llPickRechargePackage(\'' + llEscape(p.id) + '\')">' +
+        (badge ? '<span class="pkg-badge">' + llEscape(badge) + '</span>' : '') +
         '<h3>' + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
-        '<div class="pkg-card-points">' + llEscape(llMoney(p.credit_sar)) +
-        ' <span>نقطة</span></div>' +
-        '<div class="pkg-card-meta">' + price + '</div>' +
+        '<div class="pkg-price"><span class="pkg-price-num">' +
+        (p.price_sar != null ? llEscape(llMoney(p.price_sar)) : 'بلا سعر') + '</span>' +
+        (p.price_sar != null ? ' <span class="pkg-price-cur">ريال سعودي</span>' : '') +
+        '</div>' +
+        '<hr class="pkg-hr">' +
+        '<div class="pkg-credit-label">رصيد الاستخدام</div>' +
+        '<div class="pkg-credit-num">' + llEscape(llMoney(p.credit_sar)) +
+        ' <span class="pkg-credit-unit">نقطة</span></div>' +
+        (tagline ? '<div class="pkg-card-meta">' + llEscape(tagline) + '</div>' : '') +
+        features +
         '<div class="pkg-card-meta">' + validity + '</div>' +
-        features + '</div>';
+        '</div>';
     }
 
-    /* Card clicks select into a hidden input so llCreateRechargeRequest and
-       llShowPackageInfo read the pick exactly like the old <select>. */
+    /* Picking a card on the packages tab stores the id, marks the card and
+       opens the compact transfer-details modal. */
     function llPickRechargePackage(packageId) {
       const input = document.getElementById('llRechargePackage');
       if (input) input.value = packageId || '';
-      const host = document.getElementById('llRechargePackageCards');
-      if (host) {
-        host.querySelectorAll('.pkg-pick').forEach(card => {
-          card.classList.toggle('selected',
-            card.getAttribute('data-pkg-id') === packageId);
-        });
-      }
+      document.querySelectorAll('.pkg-pick').forEach(card => {
+        card.classList.toggle('selected',
+          card.getAttribute('data-pkg-id') === packageId);
+      });
       llShowPackageInfo();
+      if (packageId && typeof openLlModal === 'function') {
+        openLlModal('llRechargeModal');
+      }
     }
 
     /* ── Super-admin catalog ──────────────────────────────────────────── */
@@ -248,8 +259,11 @@
       const margin = p.est_margin_sar != null
         ? '<div class="pkg-card-meta">الربح التقديري: ' +
           llEscape(llMoney(p.est_margin_sar)) + ' <span>نقطة</span></div>' : '';
+      const badge = p.badge || p.badge_en
+        ? '<div class="pkg-card-meta">' + llEscape(wfBilingual(p.badge, p.badge_en)) + '</div>' : '';
       return '<div class="pkg-card">' +
         '<h3>' + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
+        badge +
         '<div class="pkg-card-points">' + price + '</div>' +
         '<div class="pkg-card-meta">' + llEscape(llMoney(p.credit_sar)) +
         ' <span>نقطة</span></div>' +

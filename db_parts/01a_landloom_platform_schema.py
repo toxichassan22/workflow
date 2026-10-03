@@ -710,6 +710,13 @@ def _ensure_platform_columns(conn):
     # Tracks a provider-cap push that never confirmed so the housekeeping
     # sweep retries it instead of leaving the dashboard limit stale.
     _add('tenant_openrouter_keys', 'cap_sync_pending', 'INTEGER DEFAULT 0')
+    # Sales-page dressing authored on the package form: a badge pill, a dark
+    # featured card and a one-line blurb such as «نحو 30 عرضًا».
+    _add('billing_packages', 'badge', 'TEXT')
+    _add('billing_packages', 'badge_en', 'TEXT')
+    _add('billing_packages', 'tagline', 'TEXT')
+    _add('billing_packages', 'tagline_en', 'TEXT')
+    _add('billing_packages', 'is_featured', 'INTEGER DEFAULT 0')
     # sag_admin_panel is a platform-session attribute, not a grantable company
     # permission — drop stale grant rows written before the guard existed.
     try:

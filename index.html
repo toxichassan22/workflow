@@ -1307,6 +1307,26 @@
             <label data-i18n="admin.package_credit_sar">الرصيد بالنقاط</label>
             <input type="number" id="adminPackageCredit" min="0" step="0.01" required dir="ltr">
           </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_badge">الشارة</label>
+            <input type="text" id="adminPackageBadge" maxlength="80">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_badge_en">الشارة بالإنجليزية</label>
+            <input type="text" id="adminPackageBadgeEn" dir="ltr" maxlength="80">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_tagline">السطر التوضيحي</label>
+            <input type="text" id="adminPackageTagline" maxlength="160">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_tagline_en">السطر التوضيحي بالإنجليزية</label>
+            <input type="text" id="adminPackageTaglineEn" dir="ltr" maxlength="160">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="admin.package_featured">باقة مميزة</label>
+            <input type="checkbox" id="adminPackageFeatured" style="width:auto">
+          </div>
         </div><div class="sag-modal-actions">
           <button type="submit" class="btn primary" id="adminPackageSubmit" data-i18n="admin.package_save">حفظ الباقة</button>
           <button type="button" class="btn ghost" id="adminPackageCancel" style="display:none" onclick="adminCancelPackageEdit()">إلغاء</button></div>
@@ -1398,6 +1418,7 @@
       <!-- Navigation Tabs -->
       <div class="sag-tabs" id="landloomOpsTabs">
         <button type="button" class="btn small primary" id="llTabBtn_recharge" data-permission="billing" onclick="showLandloomOpsTab('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
+        <button type="button" class="btn small ghost" id="llTabBtn_packages" data-permission="billing" onclick="showLandloomOpsTab('packages')" data-i18n="nav.packages">الباقات</button>
         <button type="button" class="btn small ghost" id="llTabBtn_tickets" data-permission="support_tickets" onclick="showLandloomOpsTab('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
       </div>
 
@@ -1412,10 +1433,18 @@
               <option value="approved">معتمدة</option>
               <option value="rejected">مرفوضة</option>
             </select>
-            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="openLlModal('llRechargeModal');llLoadRechargePackages()">طلب شحن جديد</button>
+            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="showLandloomOpsTab('packages')">طلب شحن جديد</button>
           </div>
         </div>
         <div id="llRechargeList" style="margin-bottom:24px"></div>
+      </div>
+
+      <!-- Tab 2b: Packages catalog — pick a card, then the transfer modal -->
+      <div id="llTabPane_packages" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 class="dash-section-title" style="margin:0" data-i18n="packages.catalog_title">باقات الاستخدام</h3>
+        </div>
+        <div id="llPackagesCatalog" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Tab 3: Support Tickets -->
@@ -1429,15 +1458,14 @@
 
       <!-- Modal 2: Recharge Request -->
       <div id="llRechargeModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeModal')">
-        <div class="ll-modal-card ll-modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
+        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
           <div class="sag-modal-head">
             <h2 id="llRechargeModalTitle">طلب شحن رصيد جديد</h2>
             <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label id="llRechargePackageLabel" for="llRechargePackage">الباقة</label>
+            <div class="tenant-field"><label for="llRechargePackage">الباقة</label>
               <input type="hidden" id="llRechargePackage">
-              <div id="llRechargePackageCards" role="group" aria-labelledby="llRechargePackageLabel"></div>
               <div id="llRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
             </div>
             <div class="tenant-field"><label for="llRechargeRef">رقم الحوالة البنكية</label><input type="text" id="llRechargeRef" placeholder="المرجع البنكي للتحويل"></div>

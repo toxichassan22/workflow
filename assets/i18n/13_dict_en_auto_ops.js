@@ -7,6 +7,7 @@
  * suite parses the block between them). Loaded before i18n.js. */
 window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/{
   "إيصال التحويل": "Transfer receipt",
+  "رصيد الاستخدام": "Usage credit",
   "اسم الباقة": "Package name",
   "اسم التذكرة": "Ticket",
   "اكتمل التحميل": "Loading complete",

@@ -525,6 +525,11 @@ def api_admin_packages_create():
             data.get('priceSar', data.get('price_sar')),
             is_custom=bool(data.get('isCustom', data.get('is_custom', True))),
             name_en=data.get('nameEn', data.get('name_en')),
+            badge=data.get('badge'),
+            badge_en=data.get('badgeEn', data.get('badge_en')),
+            tagline=data.get('tagline'),
+            tagline_en=data.get('taglineEn', data.get('tagline_en')),
+            is_featured=bool(data.get('isFeatured', data.get('is_featured'))),
         )
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -552,6 +557,16 @@ def api_admin_package_update(package_id):
         kwargs['price_sar'] = data.get('priceSar', data.get('price_sar'))
     if 'isActive' in data or 'is_active' in data:
         kwargs['is_active'] = data.get('isActive', data.get('is_active'))
+    if 'badge' in data:
+        kwargs['badge'] = data.get('badge')
+    if 'badgeEn' in data or 'badge_en' in data:
+        kwargs['badge_en'] = data.get('badgeEn', data.get('badge_en'))
+    if 'tagline' in data:
+        kwargs['tagline'] = data.get('tagline')
+    if 'taglineEn' in data or 'tagline_en' in data:
+        kwargs['tagline_en'] = data.get('taglineEn', data.get('tagline_en'))
+    if 'isFeatured' in data or 'is_featured' in data:
+        kwargs['is_featured'] = data.get('isFeatured', data.get('is_featured'))
     try:
         package = db.update_billing_package(package_id, **kwargs)
     except ValueError as exc:

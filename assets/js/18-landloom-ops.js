@@ -44,7 +44,7 @@
       }
     }
 
-    const LANDLOOM_OPS_TABS = ['recharge', 'tickets'];
+    const LANDLOOM_OPS_TABS = ['recharge', 'packages', 'tickets'];
     let llActiveTab = 'recharge';
 
     function landloomOpsTabVisible(t) {
@@ -77,6 +77,8 @@
         // Remember the tab so a refresh on the operations route reopens it.
         if (typeof saveTenantNavigationState === 'function') saveTenantNavigationState('tenantLandloomOpsPage', { opsTab: target });
       }
+      // The catalog refetches on every visit so desk edits land live.
+      if (target === 'packages') llLoadPackagesPage();
     }
 
     async function openLandloomOpsPage(tabKey) {
@@ -85,7 +87,8 @@
 
       await Promise.all([
         llLoadTickets(),
-        llLoadRechargeRequests()
+        llLoadRechargeRequests(),
+        llLoadPackagesPage()
       ]);
     }
 
@@ -336,36 +339,50 @@
 
     let llRechargePackages = [];
 
-    async function llLoadRechargePackages() {
-      const host = document.getElementById('llRechargePackageCards');
+    async function llLoadPackagesPage() {
+      const host = document.getElementById('llPackagesCatalog');
       const input = document.getElementById('llRechargePackage');
-      if (!host || !input) return;
+      if (!host) return;
+      // The desk is permission-gated; skip the call for members without it.
+      if (typeof hasPermission === 'function' && !hasPermission('billing')) {
+        host.innerHTML = '';
+        return;
+      }
       const data = await api('GET', '/api/billing/packages').catch(() => null);
       llRechargePackages = (data && data.success && data.packages) || [];
       if (llRechargePkgSlider) { llRechargePkgSlider.destroy(); llRechargePkgSlider = null; }
       if (!llRechargePackages.length) {
-        input.value = '';
+        if (input) input.value = '';
         host.innerHTML = '<p class="tenant-hint">' +
           llEscape(WFT('recharge.no_packages', 'لا توجد باقات متاحة')) + '</p>';
         llShowPackageInfo();
         return;
       }
+      // A stale pick (deleted or deactivated) never reaches the modal.
+      if (input && input.value &&
+          !llRechargePackages.some(p => p.id === input.value)) {
+        input.value = '';
+      }
       llRechargePkgSlider = wfCardSlider({
         container: host, items: llRechargePackages,
-        renderCard: llRechargePackageCardHtml, maxVisible: 3, minCardWidth: 148
+        renderCard: llRechargePackageCardHtml, maxVisible: 3, minCardWidth: 220
       });
-      llPickRechargePackage(llRechargePackages[0].id);
+      llShowPackageInfo();
     }
 
     function llShowPackageInfo() {
       const box = document.getElementById('llRechargePackageInfo');
-      const select = document.getElementById('llRechargePackage');
-      if (!box || !select) return;
-      const pkg = llRechargePackages.find(p => p.id === select.value);
+      const input = document.getElementById('llRechargePackage');
+      if (!box || !input) return;
+      const pkg = llRechargePackages.find(p => p.id === input.value);
       if (!pkg) { box.style.display = 'none'; box.textContent = ''; return; }
-      const parts = [pkg.duration_days
-        ? 'الصلاحية: ' + pkg.duration_days + ' يومًا'
-        : 'الصلاحية: بلا انتهاء محدد'];
+      const price = pkg.price_sar != null
+        ? ' — ' + llMoney(pkg.price_sar) + ' ريال سعودي' : '';
+      const parts = [
+        wfBilingual(pkg.name, pkg.name_en) + ' — ' + llMoney(pkg.credit_sar) + ' نقطة' + price,
+        pkg.duration_days
+          ? 'الصلاحية: ' + pkg.duration_days + ' يومًا'
+          : 'الصلاحية: بلا انتهاء محدد'];
       (Array.isArray(pkg.features) ? pkg.features : []).forEach(f => {
         if (f) parts.push(String(f));
       });
@@ -417,6 +434,10 @@
       }
       if (document.getElementById('llRechargeRef')) document.getElementById('llRechargeRef').value = '';
       if (document.getElementById('llRechargeReceipt')) document.getElementById('llRechargeReceipt').value = '';
+      const pkgInput = document.getElementById('llRechargePackage');
+      if (pkgInput) pkgInput.value = '';
+      document.querySelectorAll('.pkg-pick.selected').forEach(c => c.classList.remove('selected'));
+      llShowPackageInfo();
       closeLlModal('llRechargeModal');
       toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
       await llLoadRechargeRequests();
@@ -914,6 +935,16 @@
       if (nameEnEl) nameEnEl.value = p.name_en || '';
       document.getElementById('adminPackagePrice').value = llRound2(p.price_sar);
       document.getElementById('adminPackageCredit').value = llRound2(p.credit_sar);
+      const pkgFieldMap = {
+        adminPackageBadge: 'badge', adminPackageBadgeEn: 'badge_en',
+        adminPackageTagline: 'tagline', adminPackageTaglineEn: 'tagline_en'
+      };
+      Object.keys(pkgFieldMap).forEach(elId => {
+        const el = document.getElementById(elId);
+        if (el) el.value = p[pkgFieldMap[elId]] || '';
+      });
+      const featEl = document.getElementById('adminPackageFeatured');
+      if (featEl) featEl.checked = !!p.is_featured;
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
       const cancel = document.getElementById('adminPackageCancel');
@@ -928,6 +959,13 @@
       if (nameEnEl) nameEnEl.value = '';
       document.getElementById('adminPackagePrice').value = '';
       document.getElementById('adminPackageCredit').value = '';
+      ['adminPackageBadge', 'adminPackageBadgeEn', 'adminPackageTagline',
+       'adminPackageTaglineEn'].forEach(elId => {
+        const el = document.getElementById(elId);
+        if (el) el.value = '';
+      });
+      const featEl = document.getElementById('adminPackageFeatured');
+      if (featEl) featEl.checked = false;
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('admin.package_save', 'حفظ الباقة');
       const cancel = document.getElementById('adminPackageCancel');
@@ -941,8 +979,17 @@
         nameEn: (document.getElementById('adminPackageNameEn') || {}).value
           ? document.getElementById('adminPackageNameEn').value.trim() : '',
         priceSar: Number(document.getElementById('adminPackagePrice').value),
-        creditSar: Number(document.getElementById('adminPackageCredit').value)
+        creditSar: Number(document.getElementById('adminPackageCredit').value),
+        badge: (document.getElementById('adminPackageBadge') || {}).value || '',
+        badgeEn: (document.getElementById('adminPackageBadgeEn') || {}).value || '',
+        tagline: (document.getElementById('adminPackageTagline') || {}).value || '',
+        taglineEn: (document.getElementById('adminPackageTaglineEn') || {}).value || '',
+        isFeatured: !!((document.getElementById('adminPackageFeatured') || {}).checked)
       };
+      payload.badge = payload.badge.trim();
+      payload.badgeEn = payload.badgeEn.trim();
+      payload.tagline = payload.tagline.trim();
+      payload.taglineEn = payload.taglineEn.trim();
       const res = llEditingPackageId
         ? await api('PUT', '/api/admin/packages/' + llEditingPackageId, payload).catch(e => e)
         : await api('POST', '/api/admin/packages', Object.assign({ isCustom: false }, payload)).catch(e => e);
