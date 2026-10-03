@@ -198,6 +198,23 @@ def build_base_email(
           </td>
         </tr>'''
 
+    brand_bar_html = ''
+    if not hero_banner:
+        brand_bar_html = '''
+          <tr>
+            <td align="center" style="padding: 0 0 24px 0;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto; text-align: center;">
+                <tr>
+                  <td align="center">
+                    <div style="display: inline-block; background-color: #07182c; border-radius: 12px; padding: 10px 24px; color: #ffffff; font-size: 16px; font-weight: 900; letter-spacing: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-shadow: 0 4px 12px rgba(7, 24, 44, 0.25);">
+                      LANDLOOM <span style="color: #38bdf8; font-weight: 700; font-size: 14px;">AI</span>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>'''
+
     card_radius = '0 0 20px 20px' if hero_banner else '20px'
 
     return f'''<!DOCTYPE html>
@@ -263,20 +280,7 @@ def build_base_email(
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="email-container" style="max-width: 580px; margin: 0 auto; text-align: right; direction: rtl;">
 
           <!-- Top Brand Bar (Google / X style when no hero banner) -->
-          {'' if hero_banner else f'''
-          <tr>
-            <td align="center" style="padding: 0 0 24px 0;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto; text-align: center;">
-                <tr>
-                  <td align="center">
-                    <div style="display: inline-block; background-color: #07182c; border-radius: 12px; padding: 10px 24px; color: #ffffff; font-size: 16px; font-weight: 900; letter-spacing: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-shadow: 0 4px 12px rgba(7, 24, 44, 0.25);">
-                      LANDLOOM <span style="color: #38bdf8; font-weight: 700; font-size: 14px;">AI</span>
-                    </div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>'''}
+          {brand_bar_html}
 
           <!-- Main Tech Card -->
           <tr>
