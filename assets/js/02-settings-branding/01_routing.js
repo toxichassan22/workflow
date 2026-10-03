@@ -132,7 +132,7 @@
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       // Admin modals live outside the page sections (position:fixed needs a
       // visible ancestor), so page switches have to close them explicitly.
-      ['sagTenantModal', 'sagCompanyCreateModal'].forEach(modalId => {
+      ['sagTenantModal', 'sagCompanyCreateModal', 'llRechargeDecisionModal'].forEach(modalId => {
         const modal = document.getElementById(modalId);
         if (modal) modal.style.display = 'none';
       });

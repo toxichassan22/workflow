@@ -1223,6 +1223,29 @@
       </div>
     </section>
 
+    <!-- Modal: Recharge decision — top-level like every overlay; nested inside
+         a .tenant-page it would stay invisible whenever that page is inactive. -->
+    <div id="llRechargeDecisionModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeDecisionModal')">
+      <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeDecisionTitle">
+        <div class="sag-modal-head">
+          <h2 id="llRechargeDecisionTitle">قرار طلب الشحن</h2>
+          <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeDecisionModal')">إغلاق</button>
+        </div>
+        <input type="hidden" id="llRechargeDecisionId">
+        <input type="hidden" id="llRechargeDecisionKind">
+        <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
+          <div class="tenant-field" id="llRechargeInvoiceField" style="display:none"><label for="llRechargeInvoice">الفاتورة (إجباري)</label><input type="file" id="llRechargeInvoice" accept=".pdf,.png,.jpg,.jpeg" required></div>
+          <div class="tenant-field" id="llRechargeReasonField" style="display:none"><label for="llRechargeReason">سبب الرفض</label><select id="llRechargeReason" onchange="llRechargeReasonChanged()"></select></div>
+          <div class="tenant-field" id="llRechargeNoteField" style="display:none"><label for="llRechargeNote" id="llRechargeNoteLabel">ملاحظة إضافية</label><input type="text" id="llRechargeNote"></div>
+        </div>
+        <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeDecisionError"></div>
+        <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+          <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeDecisionModal')">إلغاء</button>
+          <button type="button" class="btn primary" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Support inbox: tickets of every company -->
     <section id="tenantAdminTicketsPage" class="tenant-page">
       <div class="tenant-page-heading">
@@ -1423,28 +1446,6 @@
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
             <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeModal')">إلغاء</button>
             <button type="button" class="btn primary" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Modal 2b: Recharge decision (super admin) -->
-      <div id="llRechargeDecisionModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeDecisionModal')">
-        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeDecisionTitle">
-          <div class="sag-modal-head">
-            <h2 id="llRechargeDecisionTitle">قرار طلب الشحن</h2>
-            <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeDecisionModal')">إغلاق</button>
-          </div>
-          <input type="hidden" id="llRechargeDecisionId">
-          <input type="hidden" id="llRechargeDecisionKind">
-          <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field" id="llRechargeInvoiceField" style="display:none"><label for="llRechargeInvoice">الفاتورة (إجباري)</label><input type="file" id="llRechargeInvoice" accept=".pdf,.png,.jpg,.jpeg" required></div>
-            <div class="tenant-field" id="llRechargeReasonField" style="display:none"><label for="llRechargeReason">سبب الرفض</label><select id="llRechargeReason" onchange="llRechargeReasonChanged()"></select></div>
-            <div class="tenant-field" id="llRechargeNoteField" style="display:none"><label for="llRechargeNote" id="llRechargeNoteLabel">ملاحظة إضافية</label><input type="text" id="llRechargeNote"></div>
-          </div>
-          <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeDecisionError"></div>
-          <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
-            <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeDecisionModal')">إلغاء</button>
-            <button type="button" class="btn primary" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
           </div>
         </div>
       </div>
