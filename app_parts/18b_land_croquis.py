@@ -77,6 +77,22 @@ def _land_document_key(filename, provided=''):
     return provided or 'land_document'
 
 
+def _scrub_pii_from_extracted_data(data):
+    """Recursively scrub any accidentally extracted national ID numbers or personal owner identifiers."""
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            if str(k).lower() in ('owner_name', 'owner_id', 'national_id', 'id_number', 'buyer_name', 'seller_name', 'client_id_number'):
+                continue
+            cleaned[k] = _scrub_pii_from_extracted_data(v)
+        return cleaned
+    if isinstance(data, list):
+        return [_scrub_pii_from_extracted_data(item) for item in data]
+    if isinstance(data, str):
+        return re.sub(r'\b[12]\d{9}\b', '[تم حجب رقم الهوية]', data)
+    return data
+
+
 @app.route('/api/extract-croquis', methods=['POST'])
 @require_permission('create_presentation')
 def api_extract_croquis():
@@ -217,6 +233,10 @@ def _execute_extract_croquis():
         system_prompt = (
             "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
             "ملفا الاشتراطات الرسميان اشتراطات1 واشتراطات2 متاحان لك بمحتواهما الكامل؛ استخدمهما كاملين ولا تعتمد على جزء أو صفحات منتقاة فقط.\n"
+            "ضوابط حماية البيانات والخصوصية وحقوق الإنسان (إلزامية وصارمة):\n"
+            "1. يُحظر منعًا باتًا استخراج أو تسجيل أو تضمين أي أسماء لأشخاص طبيعيين (مثل أسماء الملاك أو المشترين أو المجاورين أو الوكلاء)، أو أرقام هويات وطنية، أو أرقام سجلات مدنية، أو أرقام هواتف، أو تواقيع شخصية واردة في الصكوك أو المخططات أو الرخص. في حال وجود أسماء ملاك أو هويات، يجب تجاهلها كليًا ولا تُذكر في أي حقل.\n"
+            "2. يُحظر تمامًا تقديم أي توصيات أو مقترحات تمس حقوق الأفراد أو السكان القائمين أو تقترح إخلاءً أو نزع ملكية أو تمييزًا، وتقتصر المخرجات على التحليل الهندسي والتخطيطي والمكاني الموضوعي المحايد.\n"
+            "3. تجنب أي صور نمطية أو تعميمات غير موضوعية، والالتزام بأعلى معايير الإنصاف والحياد المهني.\n"
             "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
             "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
             "ستجد في مستندات PDF صورة كاملة للصفحة وقصاصات مكبرة عالية الدقة، وقد توجد قصاصات بديلة باتجاه دوران آخر. استخدم النسخة التي يكون النص فيها أفقيًا واضحًا، ولا تعتبر النسخة المقلوبة مصدرًا مستقلًا.\n"
@@ -574,11 +594,13 @@ def _execute_extract_croquis():
                 'providerError': raw_resp[:400],
                 'documentProcessing': document_processing
             }), 503
+
         resp_json = _normalize_land_document_result(
             parsed_response,
             raw_resp,
             project_type=str(data.get('projectType') or data.get('project_type') or '').strip(),
         )
+        resp_json = _scrub_pii_from_extracted_data(resp_json)
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
         resp_json['document_processing'] = document_processing

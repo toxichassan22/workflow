@@ -509,6 +509,20 @@ def api_get_project_file(file_id):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     if resolve_tenant == g.tenant_id and not _project_file_in_scope(stored):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    mime_type = stored.get('mime_type') or 'application/octet-stream'
+    inline = mime_type == 'application/pdf' or mime_type.startswith('image/')
+    _record_audit_event(
+        action='file.previewed' if inline else 'file.downloaded',
+        entity_type='project_file',
+        entity_id=str(file_id),
+        entity_name=stored.get('original_name') or 'ملف مشروع',
+        metadata={
+            'file_type': stored.get('file_type'),
+            'file_size_bytes': stored.get('file_size_bytes'),
+            'mime_type': mime_type,
+            'inline': inline,
+        },
+    )
     return _send_project_file_response(stored, resolve_tenant)
 
 
@@ -564,6 +578,27 @@ def api_signed_file_download(token):
     stored = db.get_project_file(claims['tenant_id'], claims['file_id'])
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    mime_type = stored.get('mime_type') or 'application/octet-stream'
+    inline = mime_type == 'application/pdf' or mime_type.startswith('image/')
+    try:
+        db.record_audit_event(
+            tenant_id=claims['tenant_id'],
+            action='file.signed_download',
+            entity_type='project_file',
+            entity_id=str(claims['file_id']),
+            user_id=None,
+            user_name='رابط موقّع',
+            user_role=None,
+            entity_name=stored.get('original_name') or 'ملف مشروع',
+            metadata={
+                'file_type': stored.get('file_type'),
+                'file_size_bytes': stored.get('file_size_bytes'),
+                'ip': request.remote_addr if has_request_context() else None,
+                'inline': inline,
+            },
+        )
+    except Exception as exc:
+        print(f'[AUDIT LOG] Signed download audit failed: {exc}')
     return _send_project_file_response(stored, claims['tenant_id'])
 
 

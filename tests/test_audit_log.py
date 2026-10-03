@@ -368,6 +368,39 @@ class AuditLogApiTests(unittest.TestCase):
             self.assertEqual(resp_sub.status_code, 405)
             self.assertEqual(resp_sub.get_json().get('error_code'), 'AUDIT_LOG_IMMUTABLE')
 
+    def test_project_file_access_records_audit_event(self):
+        client = self.flask_app.test_client()
+        tenant_upload_dir = os.path.join(tempfile.gettempdir(), 'landloom_test_uploads', 'tenant-1')
+        os.makedirs(tenant_upload_dir, exist_ok=True)
+        file_path = os.path.join(tenant_upload_dir, 'sample_doc.pdf')
+        with open(file_path, 'wb') as f:
+            f.write(b'%PDF-1.4 test document')
+
+        import app as app_module
+        orig_upload_dir = app_module.UPLOADS_DIR
+        app_module.UPLOADS_DIR = os.path.join(tempfile.gettempdir(), 'landloom_test_uploads')
+
+        try:
+            file_id = db.create_project_file(
+                tenant_id='tenant-1',
+                file_type='land_deed',
+                original_name='صك_الملكية.pdf',
+                storage_path=file_path,
+                mime_type='application/pdf',
+                file_size=len(b'%PDF-1.4 test document'),
+                sha256='dummyhash',
+            )
+
+            resp = client.get(f"/api/project-files/{file_id}", headers=self.headers())
+            self.assertEqual(resp.status_code, 200)
+
+            events = db.list_audit_events('tenant-1', entity_type='project_file', entity_id=file_id)
+            self.assertEqual(events['total'], 1)
+            self.assertEqual(events['events'][0]['action'], 'file.previewed')
+            self.assertEqual(events['events'][0]['entity_name'], 'صك_الملكية.pdf')
+        finally:
+            app_module.UPLOADS_DIR = orig_upload_dir
+
 
 if __name__ == '__main__':
     unittest.main()
