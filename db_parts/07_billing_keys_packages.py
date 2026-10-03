@@ -1484,7 +1484,7 @@ def set_platform_setting(key, value):
 
 
 def get_package_tax_rate():
-    """The desk-set «ضريبة» percentage for price→points conversion, as a
+    """The desk-set «ضريبة» percentage for price-to-points conversion, as a
     fraction (0.15 = 15%). The stored platform setting wins; the
     ``TOPUP_TAX_RATE`` env default keeps installs working before the knob
     is first saved. The same rate feeds the receipt VAT breakdown."""
@@ -1508,6 +1508,53 @@ def set_package_tax_rate_pct(pct):
     fraction = round(value / 100.0, 6)
     set_platform_setting('package_tax_rate', fraction)
     return fraction
+
+
+# ── Global package feature pool ─────────────────────────────────────────────
+# The desk maintains one ordered list of features; every package then just
+# marks which entries it includes. The client card renders the whole pool —
+# included lines get the green mark, the rest the red one — so buyers compare
+# tiers at a glance. Package rows store only the feature ids they include.
+
+def get_package_feature_catalog():
+    """The ordered feature pool: [{id, ar, en}]. Never raises."""
+    items = get_platform_setting('package_feature_catalog', [])
+    if not isinstance(items, list):
+        return []
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        iid = str(it.get('id') or '').strip()
+        ar = str(it.get('ar') or '').strip()
+        en = str(it.get('en') or '').strip()
+        if iid and (ar or en):
+            out.append({'id': iid, 'ar': ar or en, 'en': en})
+    return out
+
+
+def set_package_feature_catalog(items):
+    """Replace the whole pool; order is preserved. Returns the clean list."""
+    if not isinstance(items, list):
+        raise ValueError('Invalid features')
+    clean = []
+    seen = set()
+    for it in items[:100]:
+        if not isinstance(it, dict):
+            raise ValueError('Invalid features')
+        iid = str(it.get('id') or '').strip()[:60]
+        ar = str(it.get('ar') or '').strip()[:160]
+        en = str(it.get('en') or '').strip()[:160]
+        if not ar and not en:
+            continue
+        if not iid:
+            iid = 'f' + uuid.uuid4().hex[:10]
+        if iid in seen:
+            raise ValueError('Duplicate feature id')
+        seen.add(iid)
+        clean.append({'id': iid, 'ar': ar or en, 'en': en})
+    set_platform_setting('package_feature_catalog', clean)
+    return clean
 
 
 def get_rejection_reasons():

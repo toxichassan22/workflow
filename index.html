@@ -92,6 +92,9 @@
               data-nav-page="tenantAdminRechargePage" onclick="openAdminRechargePage()"
               data-i18n="nav.recharge_requests">طلبات الشحن</button>
             <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPackagesPage" onclick="openAdminPackagesPage()"
+              data-i18n="nav.packages">الباقات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
               data-nav-page="tenantAdminTicketsPage" onclick="openAdminTicketsPage()"
               data-i18n="nav.support_desk">الدعم الفني</button>
             <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
@@ -1277,12 +1280,12 @@
       </div>
     </section>
 
-    <!-- Platform settings -->
-    <section id="tenantAdminPlatformPage" class="tenant-page">
+    <!-- Packages catalog: the super-admin's dedicated desk -->
+    <section id="tenantAdminPackagesPage" class="tenant-page">
       <div class="tenant-page-heading">
         <div>
           <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
-          <h2 data-i18n="nav.platform_settings">إعدادات المنصة</h2>
+          <h2 data-i18n="nav.packages">الباقات</h2>
         </div>
       </div>
       <div class="tenant-content-panel">
@@ -1297,7 +1300,8 @@
           </div>
           <button type="button" class="btn ghost small" id="adminTaxRateSave" onclick="adminSaveTaxRate()" data-i18n="admin.package_tax_save">حفظ النسبة</button>
         </div>
-        <form onsubmit="adminSavePackage(event)" style="margin-top:12px"><div class="tenant-grid">
+        <div class="pkg-editor">
+        <form onsubmit="adminSavePackage(event)"><div class="tenant-grid">
           <div class="tenant-field">
             <label data-i18n="admin.package_name">اسم الباقة</label>
             <input type="text" id="adminPackageName" maxlength="80" required>
@@ -1339,15 +1343,30 @@
             <input type="checkbox" id="adminPackageFeatured" style="width:auto">
           </div>
           <div class="tenant-field full">
-            <label data-i18n="admin.package_features">المزايا</label>
-            <textarea id="adminPackageFeatures" rows="3" maxlength="2000"></textarea>
+            <label data-i18n="admin.package_features">المزايا المتاحة في الباقة</label>
+            <div id="adminPackageFeaturesChecklist" class="pkg-feat-checklist"></div>
           </div>
         </div><div class="sag-modal-actions">
           <button type="submit" class="btn primary" id="adminPackageSubmit" data-i18n="admin.package_save">حفظ الباقة</button>
           <button type="button" class="btn ghost" id="adminPackageCancel" style="display:none" onclick="adminCancelPackageEdit()">إلغاء</button></div>
         </form>
+        <aside class="pkg-preview" aria-hidden="true">
+          <div class="pkg-preview-label" data-i18n="admin.package_preview">معاينة الكارت</div>
+          <div id="adminPackagePreview"></div>
+        </aside>
+        </div>
       </div>
-      <div class="tenant-content-panel" style="margin-top:16px">
+    </section>
+
+    <!-- Platform settings -->
+    <section id="tenantAdminPlatformPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.platform_settings">إعدادات المنصة</h2>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
         <div class="tenant-panel-heading">
           <h3 class="dash-section-title">سعر الصرف USD/SAR</h3>
           <span class="tenant-hint" id="adminFxInfo"></span>
@@ -1361,6 +1380,25 @@
           <button type="submit" class="btn primary">حفظ السعر</button>
           <button type="button" class="btn ghost" onclick="adminSaveFxRate(null, true)">العودة للتحديث التلقائي</button>
         </div></form>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.features_pool_title">مزايا الباقات</h3>
+        </div>
+        <div id="adminFeaturesPoolList"></div>
+        <div class="tenant-grid" style="margin-top:12px">
+          <div class="tenant-field">
+            <label for="adminFeatureAr" data-i18n="admin.feature_ar">الميزة بالعربية</label>
+            <input type="text" id="adminFeatureAr" maxlength="160">
+          </div>
+          <div class="tenant-field">
+            <label for="adminFeatureEn" data-i18n="admin.feature_en">الميزة بالإنجليزية</label>
+            <input type="text" id="adminFeatureEn" dir="ltr" maxlength="160">
+          </div>
+        </div>
+        <div class="sag-modal-actions">
+          <button type="button" class="btn ghost small" onclick="adminAddFeature()" data-i18n="admin.feature_add">إضافة ميزة</button>
+        </div>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
@@ -1433,7 +1471,6 @@
       <!-- Navigation Tabs -->
       <div class="sag-tabs" id="landloomOpsTabs">
         <button type="button" class="btn small primary" id="llTabBtn_recharge" data-permission="billing" onclick="showLandloomOpsTab('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
-        <button type="button" class="btn small ghost" id="llTabBtn_packages" data-permission="billing" onclick="showLandloomOpsTab('packages')" data-i18n="nav.packages">الباقات</button>
         <button type="button" class="btn small ghost" id="llTabBtn_tickets" data-permission="support_tickets" onclick="showLandloomOpsTab('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
       </div>
 
@@ -1448,18 +1485,10 @@
               <option value="approved">معتمدة</option>
               <option value="rejected">مرفوضة</option>
             </select>
-            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="showLandloomOpsTab('packages')">طلب شحن جديد</button>
+            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="llOpenRechargeModal()">طلب شحن جديد</button>
           </div>
         </div>
         <div id="llRechargeList" style="margin-bottom:24px"></div>
-      </div>
-
-      <!-- Tab 2b: Packages catalog — pick a card, then the transfer modal -->
-      <div id="llTabPane_packages" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0" data-i18n="packages.catalog_title">باقات الاستخدام</h3>
-        </div>
-        <div id="llPackagesCatalog" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Tab 3: Support Tickets -->
@@ -1471,25 +1500,32 @@
         <div id="llTicketsList" style="margin-bottom:24px"></div>
       </div>
 
-      <!-- Modal 2: Recharge Request -->
+      <!-- Modal 2: Recharge Request — step 1 picks a card, step 2 takes the
+           transfer proof for the picked package -->
       <div id="llRechargeModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeModal')">
-        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
+        <div class="ll-modal-card ll-modal-wide" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
           <div class="sag-modal-head">
             <h2 id="llRechargeModalTitle">طلب شحن رصيد جديد</h2>
             <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeModal')">إغلاق</button>
           </div>
-          <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label for="llRechargePackage">الباقة</label>
-              <input type="hidden" id="llRechargePackage">
-              <div id="llRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
-            </div>
-            <div class="tenant-field"><label for="llRechargeRef">رقم الحوالة البنكية</label><input type="text" id="llRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
-            <div class="tenant-field"><label for="llRechargeReceipt">إيصال التحويل</label><input type="file" id="llRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
+          <div id="llRechargeStepPick">
+            <div id="llRechargeModalCatalog"></div>
           </div>
-          <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeError"></div>
-          <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
-            <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeModal')">إلغاء</button>
-            <button type="button" class="btn primary" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
+          <div id="llRechargeStepProof" style="display:none">
+            <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
+              <div class="tenant-field"><label for="llRechargePackage">الباقة</label>
+                <input type="hidden" id="llRechargePackage">
+                <div id="llRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
+              </div>
+              <div class="tenant-field"><label for="llRechargeRef">رقم الحوالة البنكية</label><input type="text" id="llRechargeRef" placeholder="المرجع البنكي للتحويل"></div>
+              <div class="tenant-field"><label for="llRechargeReceipt">إيصال التحويل</label><input type="file" id="llRechargeReceipt" accept=".pdf,.png,.jpg,.jpeg"></div>
+            </div>
+            <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeError"></div>
+            <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+              <button type="button" class="btn ghost" onclick="llRechargeBackToPick()" data-i18n="common.back">رجوع</button>
+              <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeModal')">إلغاء</button>
+              <button type="button" class="btn primary" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
+            </div>
           </div>
         </div>
       </div>

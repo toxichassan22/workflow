@@ -28,15 +28,23 @@
       let destroyed = false;
       let suppressClick = false;
 
+      /* Chevron glyphs are drawn in CSS (.wf-slider-arrow) — the buttons
+         keep word labels only for assistive tech, never on screen. */
       container.innerHTML =
         '<div class="wf-slider">' +
-        '<button type="button" class="btn ghost small wf-slider-nav">' +
-          llEscape(opts.prevLabel || 'السابق') + '</button>' +
+        '<div class="wf-slider-body">' +
+        '<button type="button" class="btn ghost small wf-slider-nav wf-slider-prev"' +
+          ' aria-label="' + llEscape(opts.prevLabel || 'السابق') + '">' +
+          '<span class="wf-slider-arrow" aria-hidden="true"></span></button>' +
         '<div class="wf-slider-viewport"><div class="wf-slider-track"></div></div>' +
-        '<button type="button" class="btn ghost small wf-slider-nav">' +
-          llEscape(opts.nextLabel || 'التالي') + '</button>' +
+        '<button type="button" class="btn ghost small wf-slider-nav wf-slider-next"' +
+          ' aria-label="' + llEscape(opts.nextLabel || 'التالي') + '">' +
+          '<span class="wf-slider-arrow" aria-hidden="true"></span></button>' +
+        '</div>' +
+        '<div class="wf-slider-dots"></div>' +
         '</div>';
       const root = container.firstElementChild;
+      const dotsWrap = root.querySelector('.wf-slider-dots');
       const viewport = root.querySelector('.wf-slider-viewport');
       const track = root.querySelector('.wf-slider-track');
       const prevBtn = root.querySelectorAll('.wf-slider-nav')[0];
@@ -55,6 +63,29 @@
         track.classList.toggle('anim', !!animate);
         track.style.transform =
           'translateX(' + (rtlSign() * p * step + (dx || 0)) + 'px)';
+        markCenter();
+        markDot();
+      }
+      /* An odd window has a real middle card — it scales up a touch over
+         the flanking pair. Even windows and the drag's fractional stops
+         just leave every card level. */
+      function markCenter() {
+        const mid = (visible % 2 === 1)
+          ? Math.round(pos) + (visible - 1) / 2 : -1;
+        const kids = track.children;
+        for (let i = 0; i < kids.length; i++) {
+          kids[i].classList.toggle('wf-center', i === mid);
+        }
+      }
+      /* The lit dot tracks the center card's real index; clone positions
+         fold back through the same modulo the settle snap uses. */
+      function markDot() {
+        if (!sliding) return;
+        const centerOffset = Math.floor((visible - 1) / 2);
+        const realIdx = (((Math.round(pos) + centerOffset - visible) % n) + n) % n;
+        dotsWrap.querySelectorAll('.wf-slider-dot').forEach((d, i) => {
+          d.classList.toggle('on', i === realIdx);
+        });
       }
       /* A move can end on a clone; the identical real position is n steps
          back, so snapping there with no transition hides the wrap. */
@@ -90,7 +121,10 @@
         // On a very wide pane, filling only `maxVisible` slots would stretch
         // each card past `maxCardWidth` — grow the window instead so the
         // cards keep their compact shape while more items stay in view.
-        if (n > visible && (vpW - gap * (visible - 1)) / visible > maxCardWidth) {
+        // Pickers that want a strict «three cards, bigger middle» look opt
+        // out through `growWindow: false` and let the cards take the room.
+        if (opts.growWindow !== false &&
+            n > visible && (vpW - gap * (visible - 1)) / visible > maxCardWidth) {
           visible = Math.min(n, Math.ceil((vpW + gap) / (maxCardWidth + gap)));
         }
         sliding = n > visible;
@@ -115,7 +149,25 @@
         track.querySelectorAll('[data-clone] [tabindex]').forEach(el => {
           el.setAttribute('tabindex', '-1');
         });
+        // One dot per real item — clone cards never count. A tap jumps
+        // the window straight onto that package through the same
+        // animate-and-settle path the arrows use.
+        dotsWrap.innerHTML = sliding ? items.map((item, i) =>
+          '<button type="button" class="wf-slider-dot" data-i="' + i + '"' +
+          ' aria-label="' + llEscape('الباقة ' + (i + 1)) + '"></button>'
+        ).join('') : '';
+        dotsWrap.style.display = sliding ? '' : 'none';
+        dotsWrap.querySelectorAll('.wf-slider-dot').forEach(d => {
+          d.addEventListener('click', () => {
+            settle();
+            // Land the window so the tapped item sits in the middle slot.
+            setPos(visible + Number(d.dataset.i) -
+              Math.floor((visible - 1) / 2), 0, true);
+            scheduleSettle();
+          });
+        });
         pos = sliding ? visible + Math.min(realIndex, n - 1) : 0;
+        root.classList.toggle('sliding', sliding);
         setPos(pos, 0, false);
         prevBtn.style.display = sliding ? '' : 'none';
         nextBtn.style.display = sliding ? '' : 'none';
@@ -207,7 +259,7 @@
 
     /* ── Packages purchase page ───────────────────────────────────────── */
 
-    let llRechargePkgSlider = null;
+    let llRechargeModalSlider = null;
     let llAdminPkgSlider = null;
 
     /* Sales card on the «الباقات» tab: optional badge pill, name, big price,
@@ -221,6 +273,7 @@
         return '<div class="pkg-card pkg-card--custom" data-pkg-id="__custom__">' +
           '<span class="pkg-badge">على مقاسك</span>' +
           '<h3>باقة مخصصة</h3>' +
+          '<div class="pkg-mid">' +
           '<div class="pkg-card-meta">المبلغ بالريال السعودي</div>' +
           '<input type="number" class="pkg-custom-input"' +
           ' min="1" step="0.01" dir="ltr" placeholder="0" oninput="llCustomInputChanged(this)">' +
@@ -228,6 +281,7 @@
           '<div class="pkg-credit-label">رصيد الاستخدام</div>' +
           '<div class="pkg-credit-num pkg-custom-points">0' +
           ' <span class="pkg-credit-unit">نقطة</span></div>' +
+          '</div>' +
           '<div class="pkg-card-foot">' +
           '<button type="button" class="btn primary pkg-buy"' +
           ' onclick="llPickRechargePackage(\'__custom__\')">اطلب الآن</button>' +
@@ -240,9 +294,22 @@
       const validity = p.duration_days
         ? '<span>الصلاحية:</span> ' + llEscape(p.duration_days) + ' <span>يومًا</span>'
         : 'الصلاحية: بلا انتهاء محدد';
-      const features = (Array.isArray(p.features) ? p.features : [])
-        .filter(Boolean)
-        .map(f => '<div class="pkg-card-meta pkg-feature-line">' + llEscape(f) + '</div>')
+      /* Every pool entry shows on the card: included ids get the green
+         mark, the rest the red one — the buyer reads the tier difference
+         off one list. Raw (legacy free-text) entries append as included. */
+      const enabled = new Set(Array.isArray(p.features) ? p.features : []);
+      const known = new Set((llPackageFeatureCatalog || []).map(f => f.id));
+      const features = (llPackageFeatureCatalog || []).map(f => {
+        const on = enabled.has(f.id);
+        // The marks are CSS-drawn (no icon glyphs — hard product rule).
+        return '<div class="pkg-feat ' + (on ? 'pkg-feat-on' : 'pkg-feat-off') + '">' +
+          '<span class="pkg-feat-mark" aria-hidden="true"></span>' +
+          '<span>' + llEscape(wfBilingual(f.ar, f.en)) + '</span></div>';
+      }).join('') + (Array.isArray(p.features) ? p.features : [])
+        .filter(f => f && !known.has(f))
+        .map(f => '<div class="pkg-feat pkg-feat-on">' +
+          '<span class="pkg-feat-mark" aria-hidden="true"></span>' +
+          '<span>' + llEscape(f) + '</span></div>')
         .join('');
       return '<div class="pkg-card pkg-pick' + (selected ? ' selected' : '') +
         (p.is_featured ? ' pkg-card--featured' : '') + '"' +
@@ -255,12 +322,14 @@
         (p.price_sar != null ? ' <span class="pkg-price-cur">ريال سعودي</span>' : '') +
         '</div>' +
         '<hr class="pkg-hr">' +
+        '<div class="pkg-mid">' +
         '<div class="pkg-credit-label">رصيد الاستخدام</div>' +
         '<div class="pkg-credit-num">' + llEscape(llMoney(p.credit_sar)) +
         ' <span class="pkg-credit-unit">نقطة</span></div>' +
         (tagline ? '<div class="pkg-card-meta">' + llEscape(tagline) + '</div>' : '') +
         features +
         '<div class="pkg-card-meta">' + validity + '</div>' +
+        '</div>' +
         '<div class="pkg-card-foot">' +
         '<button type="button" class="btn primary pkg-buy">اطلب الآن</button>' +
         '</div></div>';
@@ -289,8 +358,11 @@
           card.getAttribute('data-pkg-id') === packageId);
       });
       llShowPackageInfo();
-      if (packageId && typeof openLlModal === 'function') {
-        openLlModal('llRechargeModal');
+      if (packageId) {
+        // A pick made inside the modal advances to the proof step; a pick
+        // from the «الباقات» tab opens the modal straight on that step.
+        if (typeof llShowRechargeStep === 'function') llShowRechargeStep('proof');
+        if (typeof openLlModal === 'function') openLlModal('llRechargeModal');
       }
     }
 
@@ -308,13 +380,21 @@
           llEscape(llMoney(p.est_margin_sar)) + ' <span>نقطة</span></div>' : '';
       const badge = p.badge || p.badge_en
         ? '<div class="pkg-card-meta">' + llEscape(wfBilingual(p.badge, p.badge_en)) + '</div>' : '';
+      const pool = llPackageFeatureCatalog || [];
+      const onCount = (Array.isArray(p.features) ? p.features : [])
+        .filter(id => pool.some(f => f.id === id)).length;
+      const featsMeta = pool.length
+        ? '<div class="pkg-card-meta">المزايا المتاحة: ' + onCount + ' / ' + pool.length + '</div>'
+        : '';
+      const durMeta = p.duration_days
+        ? '<div class="pkg-card-meta">الصلاحية: ' + llEscape(p.duration_days) + ' يومًا</div>' : '';
       return '<div class="pkg-card">' +
         '<h3>' + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
         badge +
         '<div class="pkg-card-points">' + price + '</div>' +
         '<div class="pkg-card-meta">' + llEscape(llMoney(p.credit_sar)) +
         ' <span>نقطة</span></div>' +
-        cost + margin +
+        cost + margin + featsMeta + durMeta +
         '<div class="pkg-card-meta">' + (p.is_active ? 'نشطة' : 'موقوفة') + '</div>' +
         '<div class="pkg-card-actions">' +
         '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' +

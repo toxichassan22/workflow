@@ -44,7 +44,7 @@
       }
     }
 
-    const LANDLOOM_OPS_TABS = ['recharge', 'packages', 'tickets'];
+    const LANDLOOM_OPS_TABS = ['recharge', 'tickets'];
     let llActiveTab = 'recharge';
 
     function landloomOpsTabVisible(t) {
@@ -77,8 +77,6 @@
         // Remember the tab so a refresh on the operations route reopens it.
         if (typeof saveTenantNavigationState === 'function') saveTenantNavigationState('tenantLandloomOpsPage', { opsTab: target });
       }
-      // The catalog refetches on every visit so desk edits land live.
-      if (target === 'packages') llLoadPackagesPage();
     }
 
     async function openLandloomOpsPage(tabKey) {
@@ -88,7 +86,8 @@
       await Promise.all([
         llLoadTickets(),
         llLoadRechargeRequests(),
-        llLoadPackagesPage()
+        // Prefetching the catalog keeps the recharge modal opening instant.
+        llFetchPackages()
       ]);
     }
 
@@ -339,37 +338,66 @@
 
     let llRechargePackages = [];
     // Desk-set «ضريبة» fraction the catalog feed returns — the custom
-    // package preview mirrors the server's price − tax% → points math.
+    // package preview mirrors the server's price-minus-tax% points math.
     let llPackageTaxRate = 0;
     let llCustomPackageAmount = null;
+    // The desk's global feature pool [{id, ar, en}]: package rows store the
+    // ids they include and the card paints every entry green or red.
+    let llPackageFeatureCatalog = [];
 
-    async function llLoadPackagesPage() {
-      const host = document.getElementById('llPackagesCatalog');
-      const input = document.getElementById('llRechargePackage');
-      if (!host) return;
-      // The desk is permission-gated; skip the call for members without it.
-      if (typeof hasPermission === 'function' && !hasPermission('billing')) {
-        host.innerHTML = '';
-        return;
-      }
+    /* Catalog fetch is shared by the «الباقات» tab and the recharge modal:
+       one call refreshes packages, the desk tax rate and the feature pool. */
+    async function llFetchPackages() {
       const data = await api('GET', '/api/billing/packages').catch(() => null);
       llRechargePackages = (data && data.success && data.packages) || [];
       if (data && typeof data.taxRate === 'number') llPackageTaxRate = data.taxRate;
-      if (llRechargePkgSlider) { llRechargePkgSlider.destroy(); llRechargePkgSlider = null; }
+      if (data && Array.isArray(data.featureCatalog)) llPackageFeatureCatalog = data.featureCatalog;
+    }
+
+    function llPackageSliderItems() {
+      // The «باقة مخصصة» card rides the same slider as a trailing item — it
+      // stays available even while the desk has published no packages.
+      return llRechargePackages.concat([{ id: '__custom__', custom: true }]);
+    }
+
+    function llDropStalePackagePick() {
+      const input = document.getElementById('llRechargePackage');
       // A stale pick (deleted or deactivated) never reaches the modal.
       if (input && input.value && input.value !== '__custom__' &&
           !llRechargePackages.some(p => p.id === input.value)) {
         input.value = '';
       }
-      // The «باقة مخصصة» card rides the same slider as a trailing item — it
-      // stays available even while the desk has published no packages.
-      llRechargePkgSlider = wfCardSlider({
+    }
+
+    /* «طلب شحن جديد» opens the picker modal: a fresh catalog, the card
+       slider on step 1, and the transfer proof on step 2 after a pick. */
+    async function llOpenRechargeModal() {
+      if (typeof openLlModal === 'function') openLlModal('llRechargeModal');
+      llShowRechargeStep('pick');
+      await llFetchPackages();
+      llDropStalePackagePick();
+      const host = document.getElementById('llRechargeModalCatalog');
+      if (!host) return;
+      if (llRechargeModalSlider) { llRechargeModalSlider.destroy(); llRechargeModalSlider = null; }
+      llRechargeModalSlider = wfCardSlider({
         container: host,
-        items: llRechargePackages.concat([{ id: '__custom__', custom: true }]),
+        items: llPackageSliderItems(),
         renderCard: llRechargePackageCardHtml, maxVisible: 3,
-        minCardWidth: 230, maxCardWidth: 340
+        minCardWidth: 230, maxCardWidth: 340, growWindow: false, gap: 28
       });
-      llShowPackageInfo();
+    }
+
+    function llShowRechargeStep(step) {
+      const pick = document.getElementById('llRechargeStepPick');
+      const proof = document.getElementById('llRechargeStepProof');
+      if (pick) pick.style.display = step === 'pick' ? '' : 'none';
+      if (proof) proof.style.display = step === 'proof' ? '' : 'none';
+    }
+
+    function llRechargeBackToPick() {
+      llShowRechargeStep('pick');
+      const err = document.getElementById('llRechargeError');
+      if (err) err.textContent = '';
     }
 
     function llShowPackageInfo() {
@@ -478,6 +506,8 @@
       llUpdateCustomPoints();
       document.querySelectorAll('.pkg-card.selected').forEach(c => c.classList.remove('selected'));
       llShowPackageInfo();
+      llShowRechargeStep('pick');
+      if (llRechargeModalSlider) { llRechargeModalSlider.destroy(); llRechargeModalSlider = null; }
       closeLlModal('llRechargeModal');
       toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
       await llLoadRechargeRequests();
@@ -816,9 +846,26 @@
       await adminLoadTickets();
     }
 
+    async function openAdminPackagesPage() {
+      showTenantPage('tenantAdminPackagesPage');
+      bindAdminPackagePreview();
+      adminRefreshPackagePreview();
+      await adminLoadPackages();
+    }
+
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
-      await Promise.all([llLoadFileTypes(), adminLoadPackages(), llLoadRejectionReasons(), llLoadFxRate()]);
+      await Promise.all([llLoadFileTypes(), llLoadRejectionReasons(), llLoadFxRate(),
+        adminLoadFeatureCatalog()]);
+    }
+
+    /* The feature pool lives in platform settings; the packages page shares
+       the same `llPackageFeatureCatalog` state through its own feed. */
+    async function adminLoadFeatureCatalog() {
+      const data = await api('GET', '/api/admin/package-features').catch(() => null);
+      if (data && Array.isArray(data.features)) llPackageFeatureCatalog = data.features;
+      adminRenderFeaturesPool();
+      adminRenderFeatureChecklist();
     }
 
     // ── USD/SAR rate: manual override or provider-tracked auto mode ──────
@@ -961,6 +1008,153 @@
       }
     }
 
+    /* Live preview: the card next to the form is rendered by the same
+       client-side card builder the «الباقات» page uses, so what the desk
+       sees is literally what the client gets. */
+    const ADMIN_PACKAGE_FIELD_IDS = [
+      'adminPackageName', 'adminPackageNameEn', 'adminPackagePrice',
+      'adminPackageDuration', 'adminPackageBadge', 'adminPackageBadgeEn',
+      'adminPackageTagline', 'adminPackageTaglineEn', 'adminPackageFeatured'
+    ];
+
+    function adminSelectedFeatureIds() {
+      return Array.from(document.querySelectorAll(
+        '#adminPackageFeaturesChecklist input[type="checkbox"]:checked'))
+        .map(cb => cb.value);
+    }
+
+    function adminSetFeatureChecks(ids) {
+      const wanted = new Set(ids || []);
+      document.querySelectorAll(
+        '#adminPackageFeaturesChecklist input[type="checkbox"]')
+        .forEach(cb => { cb.checked = wanted.has(cb.value); });
+    }
+
+    /* The form's feature block: one checkbox per pool entry. Ticks feed the
+       live preview through the same `change` binding as the text fields. */
+    function adminRenderFeatureChecklist() {
+      const box = document.getElementById('adminPackageFeaturesChecklist');
+      if (!box) return;
+      if (!llPackageFeatureCatalog.length) {
+        box.innerHTML = '<p class="tenant-hint">' +
+          llEscape(WFT('admin.features_pool_empty', 'أضف مزايا من القايمة أدناه')) + '</p>';
+        return;
+      }
+      box.innerHTML = llPackageFeatureCatalog.map(f =>
+        '<label class="pkg-feat-check">' +
+        '<input type="checkbox" value="' + llEscape(f.id) + '"> ' +
+        llEscape(wfBilingual(f.ar, f.en)) + '</label>').join('');
+      if (!box.dataset.previewBound) {
+        box.dataset.previewBound = '1';
+        box.addEventListener('change', adminRefreshPackagePreview);
+      }
+    }
+
+    /* Pool manager on the packages page: every add/remove PUTs the full
+       ordered list — the server stores it in platform settings and the
+       client catalog feed echoes it back for the cards. */
+    function adminRenderFeaturesPool() {
+      const box = document.getElementById('adminFeaturesPoolList');
+      if (!box) return;
+      if (!llPackageFeatureCatalog.length) {
+        box.innerHTML = '<p class="tenant-hint">' +
+          llEscape(WFT('admin.features_pool_none', 'لا توجد مزايا مسجلة.')) + '</p>';
+        return;
+      }
+      box.innerHTML = llPackageFeatureCatalog.map(f =>
+        '<div class="pkg-pool-row">' +
+        '<span class="pkg-pool-label">' + llEscape(wfBilingual(f.ar, f.en)) +
+        (f.en ? ' <span class="tenant-hint">(' + llEscape(f.en) + ')</span>' : '') +
+        '</span>' +
+        '<button type="button" class="btn small danger" onclick="adminDeleteFeature(\'' +
+          llEscape(f.id) + '\')">' + llEscape(WFT('admin.feature_delete', 'حذف')) + '</button>' +
+        '</div>').join('');
+    }
+
+    async function adminSaveFeatureCatalog() {
+      const res = await api('PUT', '/api/admin/package-features', {
+        features: llPackageFeatureCatalog
+      }).catch(e => e);
+      if (!res || !res.success) {
+        toast((res && res.error) || WFT('admin.features_save_failed', 'تعذر حفظ المزايا'));
+        return false;
+      }
+      llPackageFeatureCatalog = res.features || llPackageFeatureCatalog;
+      adminRenderFeaturesPool();
+      adminRenderFeatureChecklist();
+      adminRefreshPackagePreview();
+      return true;
+    }
+
+    async function adminAddFeature() {
+      const arEl = document.getElementById('adminFeatureAr');
+      const enEl = document.getElementById('adminFeatureEn');
+      const ar = (arEl.value || '').trim();
+      const en = (enEl.value || '').trim();
+      if (!ar && !en) { toast(WFT('admin.feature_name_required', 'أدخل اسم الميزة')); return; }
+      llPackageFeatureCatalog = llPackageFeatureCatalog.concat([{
+        id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        ar: ar || en, en: en
+      }]);
+      if (await adminSaveFeatureCatalog()) {
+        arEl.value = '';
+        enEl.value = '';
+        toast(WFT('admin.features_saved', 'تم حفظ المزايا'));
+      }
+    }
+
+    async function adminDeleteFeature(featureId) {
+      llPackageFeatureCatalog = llPackageFeatureCatalog.filter(f => f.id !== featureId);
+      if (await adminSaveFeatureCatalog()) {
+        toast(WFT('admin.features_saved', 'تم حفظ المزايا'));
+      }
+    }
+
+    function adminPackageDraftFromForm() {
+      const v = (id) => (document.getElementById(id) || {}).value || '';
+      const price = Number(v('adminPackagePrice') || 0);
+      const dur = v('adminPackageDuration');
+      return {
+        id: '__preview__',
+        name: v('adminPackageName').trim() || WFT('admin.package_name', 'اسم الباقة'),
+        name_en: v('adminPackageNameEn').trim(),
+        price_sar: price > 0 ? price : null,
+        credit_sar: Math.round(price * (1 - llAdminTaxRatePct / 100) * 100) / 100,
+        duration_days: dur === '' ? null : parseInt(dur, 10),
+        features: adminSelectedFeatureIds(),
+        badge: v('adminPackageBadge'), badge_en: v('adminPackageBadgeEn'),
+        tagline: v('adminPackageTagline'), tagline_en: v('adminPackageTaglineEn'),
+        is_featured: !!((document.getElementById('adminPackageFeatured') || {}).checked),
+        is_active: 1
+      };
+    }
+
+    function adminRefreshPackagePreview() {
+      adminRefreshComputedCredit();
+      const box = document.getElementById('adminPackagePreview');
+      if (!box || typeof llRechargePackageCardHtml !== 'function') return;
+      box.innerHTML = llRechargePackageCardHtml(adminPackageDraftFromForm());
+      // The preview is a picture, not a control: nothing inside it is
+      // clickable or tabbable — the form beside it does the editing.
+      box.querySelectorAll('[onclick], [role], [tabindex]').forEach(el => {
+        el.removeAttribute('onclick');
+        el.removeAttribute('role');
+        el.setAttribute('tabindex', '-1');
+      });
+      box.querySelectorAll('button').forEach(el => { el.tabIndex = -1; });
+    }
+
+    function bindAdminPackagePreview() {
+      ADMIN_PACKAGE_FIELD_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.previewBound) {
+          el.dataset.previewBound = '1';
+          el.addEventListener('input', adminRefreshPackagePreview);
+          el.addEventListener('change', adminRefreshPackagePreview);
+        }
+      });
+    }
+
     async function adminSaveTaxRate() {
       const el = document.getElementById('adminPackageTaxRate');
       const res = await api('PUT', '/api/admin/package-tax-rate', {
@@ -971,7 +1165,7 @@
         return;
       }
       if (typeof res.ratePct === 'number') llAdminTaxRatePct = res.ratePct;
-      adminRefreshComputedCredit();
+      adminRefreshPackagePreview();
       toast(WFT('recharge.tax_saved', 'تم حفظ النسبة'));
     }
 
@@ -981,14 +1175,13 @@
       const data = await api('GET', '/api/admin/packages').catch(() => null);
       llAdminPackages = (data && data.success && data.packages) ? data.packages : [];
       if (data && typeof data.taxRatePct === 'number') llAdminTaxRatePct = data.taxRatePct;
+      if (data && Array.isArray(data.featureCatalog)) llPackageFeatureCatalog = data.featureCatalog;
+      adminRenderFeaturesPool();
+      adminRenderFeatureChecklist();
       const taxEl = document.getElementById('adminPackageTaxRate');
       if (taxEl) taxEl.value = llAdminTaxRatePct;
-      const priceEl = document.getElementById('adminPackagePrice');
-      if (priceEl && !priceEl.dataset.computedBound) {
-        priceEl.dataset.computedBound = '1';
-        priceEl.addEventListener('input', adminRefreshComputedCredit);
-      }
-      if (!llEditingPackageId) adminRefreshComputedCredit();
+      bindAdminPackagePreview();
+      if (!llEditingPackageId) adminRefreshPackagePreview();
       if (llAdminPkgSlider) { llAdminPkgSlider.destroy(); llAdminPkgSlider = null; }
       if (!llAdminPackages.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد باقات مسجلة.</p>';
@@ -1022,12 +1215,12 @@
       if (featEl) featEl.checked = !!p.is_featured;
       const durEl = document.getElementById('adminPackageDuration');
       if (durEl) durEl.value = p.duration_days || '';
-      const featuresEl = document.getElementById('adminPackageFeatures');
-      if (featuresEl) featuresEl.value = (p.features || []).join('\n');
+      adminSetFeatureChecks(p.features || []);
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('packages.update', 'تحديث الباقة');
       const cancel = document.getElementById('adminPackageCancel');
       if (cancel) cancel.style.display = '';
+      adminRefreshPackagePreview();
       document.getElementById('adminPackageName').focus();
     }
 
@@ -1039,17 +1232,18 @@
       document.getElementById('adminPackagePrice').value = '';
       document.getElementById('adminPackageCredit').value = '';
       ['adminPackageBadge', 'adminPackageBadgeEn', 'adminPackageTagline',
-       'adminPackageTaglineEn', 'adminPackageDuration',
-       'adminPackageFeatures'].forEach(elId => {
+       'adminPackageTaglineEn', 'adminPackageDuration'].forEach(elId => {
         const el = document.getElementById(elId);
         if (el) el.value = '';
       });
+      adminSetFeatureChecks([]);
       const featEl = document.getElementById('adminPackageFeatured');
       if (featEl) featEl.checked = false;
       const submit = document.getElementById('adminPackageSubmit');
       if (submit) submit.textContent = WFT('admin.package_save', 'حفظ الباقة');
       const cancel = document.getElementById('adminPackageCancel');
       if (cancel) cancel.style.display = 'none';
+      adminRefreshPackagePreview();
     }
 
     async function adminSavePackage(event) {
@@ -1062,8 +1256,7 @@
         // Points stay server-computed from the price — never keyed here.
         durationDays: (document.getElementById('adminPackageDuration') || {}).value === ''
           ? null : parseInt(document.getElementById('adminPackageDuration').value, 10),
-        features: ((document.getElementById('adminPackageFeatures') || {}).value || '')
-          .split('\n').map(s => s.trim()).filter(Boolean),
+        features: adminSelectedFeatureIds(),
         badge: (document.getElementById('adminPackageBadge') || {}).value || '',
         badgeEn: (document.getElementById('adminPackageBadgeEn') || {}).value || '',
         tagline: (document.getElementById('adminPackageTagline') || {}).value || '',

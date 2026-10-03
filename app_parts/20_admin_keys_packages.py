@@ -498,7 +498,8 @@ def api_admin_packages():
     return jsonify({'success': True, 'packages': packages,
                     'billingMultiplier': multiplier,
                     'fxRate': fx_rate or None,
-                    'taxRatePct': round(db.get_package_tax_rate() * 100, 4)})
+                    'taxRatePct': round(db.get_package_tax_rate() * 100, 4),
+                    'featureCatalog': db.get_package_feature_catalog()})
 
 
 @app.route('/api/admin/packages', methods=['POST'])
@@ -623,6 +624,29 @@ def api_admin_package_tax_rate():
     _record_audit_event('settings.package_tax_rate', 'platform_settings',
                         'package_tax_rate', metadata={'rate': rate})
     return jsonify({'success': True, 'ratePct': round(rate * 100, 4)})
+
+
+@app.route('/api/admin/package-features', methods=['GET'])
+@require_admin
+def api_admin_package_features_get():
+    """The ordered pool every package marks included features against."""
+    return jsonify({'success': True,
+                    'features': db.get_package_feature_catalog()})
+
+
+@app.route('/api/admin/package-features', methods=['PUT'])
+@require_admin
+def api_admin_package_features():
+    """Replace the global feature pool every package picks from."""
+    data = request.json or {}
+    try:
+        items = db.set_package_feature_catalog(data.get('features'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    _record_audit_event('settings.package_features', 'platform_settings',
+                        'package_feature_catalog',
+                        metadata={'count': len(items)})
+    return jsonify({'success': True, 'features': items})
 
 
 @app.route('/api/admin/tenants/<tenant_id>/package', methods=['GET'])

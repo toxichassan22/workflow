@@ -25,6 +25,7 @@
       tenantCompaniesPage: 'admin/companies',
       tenantAdminRechargePage: 'admin/recharges',
       tenantAdminTicketsPage: 'admin/tickets',
+      tenantAdminPackagesPage: 'admin/packages',
       tenantAdminPlatformPage: 'admin/platform'
     };
     const TENANT_SUFFIX_PAGES = Object.fromEntries(Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]));
@@ -71,7 +72,7 @@
 
     const TENANT_ADMIN_ONLY_PAGES = new Set([
       'tenantAdminPage', 'tenantCompaniesPage', 'tenantAdminRechargePage',
-      'tenantAdminTicketsPage', 'tenantAdminPlatformPage'
+      'tenantAdminTicketsPage', 'tenantAdminPackagesPage', 'tenantAdminPlatformPage'
     ]);
 
     function enforceTenantRouteGuard(pageId, urlSlug) {
@@ -205,6 +206,7 @@
       tenantCompaniesPage: 'openTenantCompanies',
       tenantAdminRechargePage: 'openAdminRechargePage',
       tenantAdminTicketsPage: 'openAdminTicketsPage',
+      tenantAdminPackagesPage: 'openAdminPackagesPage',
       tenantAdminPlatformPage: 'openAdminPlatformPage',
       tenantLandloomOpsPage: 'openLandloomOpsPage',
       tenantPresentationsPage: 'openTenantPresentations',
@@ -623,6 +625,7 @@
       tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
       tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
       tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
+      tenantAdminPackagesPage: ['page.packages', 'الباقات'],
       tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'],
       tenantLandloomOpsPage: ['page.operations', 'العمليات']
     });

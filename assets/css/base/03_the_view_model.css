@@ -849,6 +849,13 @@
       box-shadow: 0 20px 45px rgba(37, 75, 102, .18);
     }
 
+    /* The recharge picker needs room for three ~340px package cards plus
+       the slider's nav buttons; the proof step stays readable inside it. */
+    .ll-modal-card.ll-modal-wide {
+      max-width: 1180px;
+      min-height: min(680px, 86vh);
+    }
+
     .ops-stat-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

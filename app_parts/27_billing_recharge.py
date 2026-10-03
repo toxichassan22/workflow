@@ -127,7 +127,9 @@ def api_billing_packages():
     if not _landloom_can('billing'):
         return _landloom_forbidden('عرض باقات الشحن يتطلب صلاحية الفوترة')
     packages = db.with_sar_fields(db.list_billing_packages(active_only=True))
-    return jsonify({'success': True, 'packages': packages, 'taxRate': db.get_package_tax_rate()})
+    return jsonify({'success': True, 'packages': packages,
+                    'taxRate': db.get_package_tax_rate(),
+                    'featureCatalog': db.get_package_feature_catalog()})
 
 
 @app.route('/api/billing/receipts', methods=['GET'])

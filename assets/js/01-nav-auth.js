@@ -269,5 +269,6 @@
       tenantCompaniesPage: '/app/admin/companies',
       tenantAdminRechargePage: '/app/admin/recharges',
       tenantAdminTicketsPage: '/app/admin/tickets',
+      tenantAdminPackagesPage: '/app/admin/packages',
       tenantAdminPlatformPage: '/app/admin/platform'
     };

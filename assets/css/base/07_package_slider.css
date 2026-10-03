@@ -5,22 +5,95 @@
 
     .wf-slider {
       display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .wf-slider-body {
+      display: flex;
       align-items: stretch;
+      gap: 8px;
+    }
+
+    /* Position dots: one per real item, the lit pill marks the card in
+       the middle slot. Pure CSS shapes — no icon glyphs. */
+    .wf-slider-dots {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      padding-top: 2px;
+    }
+
+    .wf-slider-dot {
+      width: 8px;
+      height: 8px;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: var(--ui-border-strong, #cbd5e1);
+      cursor: pointer;
+      transition: width .25s ease, background-color .25s ease;
+    }
+
+    .wf-slider-dot.on {
+      width: 22px;
+      background: var(--p);
+    }
+
+    /* The card's middle block centres its content so a tall card shows
+       no dead gap between the features and the buy footer. */
+    .pkg-mid {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
       gap: 8px;
     }
 
     .wf-slider-nav {
       align-self: center;
       flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 999px;
     }
+
+    /* Chevron drawn from two border edges — no icon glyph. «next» points
+       to the inline end, «prev» to the inline start. */
+    .wf-slider-arrow {
+      width: 9px;
+      height: 9px;
+      border-top: 2px solid currentColor;
+      border-right: 2px solid currentColor;
+    }
+
+    .wf-slider-next .wf-slider-arrow { transform: rotate(45deg); margin-left: -4px; }
+    .wf-slider-prev .wf-slider-arrow { transform: rotate(-135deg); margin-right: -4px; }
+    [dir="rtl"] .wf-slider-next .wf-slider-arrow { transform: rotate(-135deg); margin-left: 0; margin-right: -4px; }
+    [dir="rtl"] .wf-slider-prev .wf-slider-arrow { transform: rotate(45deg); margin-right: 0; margin-left: -4px; }
 
     .wf-slider-viewport {
       flex: 1 1 auto;
       min-width: 0;
       overflow: hidden;
+      padding: 24px 0;
       touch-action: pan-y;
       user-select: none;
       cursor: grab;
+    }
+
+    /* Looping sliders fade both edges so the next card peeks out of the
+       mist instead of clipping hard against the viewport line. */
+    .wf-slider.sliding .wf-slider-viewport {
+      -webkit-mask-image: linear-gradient(90deg,
+        transparent 0, #000 6%, #000 94%, transparent 100%);
+      mask-image: linear-gradient(90deg,
+        transparent 0, #000 6%, #000 94%, transparent 100%);
     }
 
     .wf-slider.dragging .wf-slider-viewport {
@@ -40,6 +113,14 @@
     .wf-slider-card {
       display: flex;
       min-width: 0;
+      transition: transform .3s ease;
+    }
+
+    /* The middle card of an odd window steps clearly forward. */
+    .wf-slider-card.wf-center {
+      position: relative;
+      z-index: 1;
+      transform: scale(1.07);
     }
 
     .pkg-card {
@@ -83,6 +164,9 @@
 
     .pkg-pick {
       cursor: pointer;
+      /* The sales card stands tall — it fills the recharge modal and the
+         catalog row instead of hugging its content. */
+      min-height: 540px;
       transition: border-color .16s ease, background-color .16s ease,
         transform .16s ease, box-shadow .16s ease;
     }
@@ -171,6 +255,123 @@
       text-align: center;
     }
 
+    /* ── Feature list on the sales card ─────────────────────────────────
+       The whole desk pool renders per card: included rows carry the green
+       mark, excluded rows the red one and a muted strike — the buyer sees
+       the tier gap without leaving the card. */
+
+    .pkg-feat {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.7;
+      text-align: start;
+    }
+
+    .pkg-feat-mark {
+      position: relative;
+      flex: 0 0 auto;
+      width: 14px;
+      height: 14px;
+      display: inline-block;
+    }
+
+    /* Check: a rotated L drawn with two borders — no icon glyph. */
+    .pkg-feat-on .pkg-feat-mark::before {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 0;
+      width: 5px;
+      height: 10px;
+      border-right: 2px solid var(--green, #1e9e6a);
+      border-bottom: 2px solid var(--green, #1e9e6a);
+      transform: rotate(45deg);
+      border-radius: 1px;
+    }
+
+    .pkg-feat-off {
+      color: var(--ink-muted);
+      font-weight: 500;
+    }
+
+    /* Cross: two bars rotated to an X — no icon glyph. */
+    .pkg-feat-off .pkg-feat-mark::before,
+    .pkg-feat-off .pkg-feat-mark::after {
+      content: '';
+      position: absolute;
+      left: 6px;
+      top: 1px;
+      width: 2px;
+      height: 12px;
+      background: var(--danger, #c0392b);
+      border-radius: 1px;
+    }
+
+    .pkg-feat-off .pkg-feat-mark::before { transform: rotate(45deg); }
+    .pkg-feat-off .pkg-feat-mark::after { transform: rotate(-45deg); }
+
+    .pkg-feat-off span:last-child {
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+
+    .pkg-card--featured .pkg-feat {
+      color: #d8e6ee;
+    }
+
+    .pkg-card--featured .pkg-feat-off {
+      color: #7d96a6;
+    }
+
+    /* ── Admin: per-package checklist + global pool manager ───────────── */
+
+    .pkg-feat-checklist {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--ui-border);
+      border-radius: 10px;
+      background: var(--surface-subtle);
+    }
+
+    .pkg-feat-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .pkg-feat-check input {
+      width: auto;
+      accent-color: var(--p);
+    }
+
+    .pkg-pool-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px;
+      border: 1px solid var(--ui-border);
+      border-radius: 10px;
+      margin-bottom: 6px;
+      background: var(--surface);
+    }
+
+    .pkg-pool-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
     .pkg-card--featured,
     .pkg-card--featured.pkg-pick:hover {
       background: var(--sidebar-bg);
@@ -224,6 +425,7 @@
     }
 
     .pkg-card--custom {
+      min-height: 540px;
       border-style: dashed;
       border-width: 2px;
       border-color: var(--ui-border-strong);
@@ -253,6 +455,62 @@
       box-shadow: 0 0 0 3px var(--p-soft);
     }
 
+    /* On the dark featured card the CTA flips to the accent — the navy
+       button would sink into the card background. */
     .pkg-card--featured .pkg-buy {
+      background: var(--sidebar-accent);
+      border-color: var(--sidebar-accent);
+      color: #05323a;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    }
+
+    .pkg-card--featured .pkg-buy:hover {
+      filter: brightness(1.08);
+    }
+
+    /* ── Admin editor: form + live card preview ──────────────────────────
+       The preview renders through the client card builder, so the desk
+       edits against the exact output the «الباقات» page ships. */
+
+    .pkg-editor {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+      margin-top: 12px;
+    }
+
+    .pkg-editor > form {
+      flex: 1 1 460px;
+      min-width: 0;
+      margin-top: 0;
+    }
+
+    .pkg-preview {
+      flex: 0 0 340px;
+      position: sticky;
+      top: 16px;
+      padding: 16px;
+      background: var(--surface-subtle);
+      border: 1px dashed var(--ui-border-strong);
+      border-radius: 14px;
+    }
+
+    .pkg-preview-label {
+      margin-bottom: 12px;
+      color: var(--ink-muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    #adminPackagePreview .pkg-card {
+      margin: 0 auto;
+      max-width: 340px;
+    }
+
+    @media (max-width: 900px) {
+      .pkg-preview {
+        position: static;
+        flex-basis: 100%;
+      }
     }

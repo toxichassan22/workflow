@@ -141,5 +141,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "اطلب الآن": "Order now",
   "أدخل مبلغًا صالحًا": "Enter a valid amount",
   "أدخل اسمًا وسعرًا صالحًا": "Enter a valid name and price",
-  "مبلغ غير صالح": "Invalid amount"
+  "مبلغ غير صالح": "Invalid amount",
+  "المزايا المتاحة:": "Included features:",
+  "المزايا المتاحة في الباقة": "Features included in this package"
 }/*I18N_EN_AUTO_END*/);
