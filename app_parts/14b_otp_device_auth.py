@@ -54,8 +54,8 @@ def verify_login_otp(challenge, input_otp):
     return input_hash == challenge.get('otp_hash')
 
 
-def send_login_otp_email(recipient, otp_code, company_name=None):
-    """Send an OTP email with clear text and a prominent copyable code block."""
+def send_login_otp_email(recipient, otp_code, company_name=None, device_info=None):
+    """Send an OTP email with world-class Google Security + X style branded layout."""
     subject = f'رمز التحقق: {otp_code} - LandLoom AI'
     body = (
         f'مرحبًا،\n\n'
@@ -64,29 +64,12 @@ def send_login_otp_email(recipient, otp_code, company_name=None):
         f'هذا الرمز صالح لمدة 10 دقائق فقط للاستخدام لمرة واحدة.\n'
         f'إذا لم تكن قد طلبت هذا الرمز، يرجى تجاهل هذه الرسالة أو مراجعة مسؤول النظام.\n'
     )
-    html = f'''<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-  <meta charset="utf-8">
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 24px; direction: rtl; }}
-    .card {{ max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
-    .title {{ font-size: 20px; font-weight: 700; margin-bottom: 12px; color: #07182c; text-align: center; }}
-    .desc {{ font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 24px; text-align: center; }}
-    .otp-box {{ background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 18px; text-align: center; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #07182c; font-family: monospace; user-select: all; -webkit-user-select: all; margin-bottom: 24px; }}
-    .footer {{ font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="title">رمز التحقق لتسجيل الدخول</div>
-    <div class="desc">استخدم الرمز التالي لإكمال تسجيل دخولك إلى منصة LandLoom AI:</div>
-    <div class="otp-box">{otp_code}</div>
-    <div class="desc" style="font-size:12px;color:#64748b;margin-bottom:16px">صالح لمدة 10 دقائق ولا تشاركه مع أي شخص.</div>
-    <div class="footer">منصة LandLoom AI لتوليد العروض والدراسات العقارية</div>
-  </div>
-</body>
-</html>'''
+    html = email_templates.render_login_otp_email(
+        recipient=recipient,
+        otp_code=otp_code,
+        device_info=device_info,
+        expiry_mins=10,
+    )
     return send_platform_email(recipient, subject, body, html=html)
 
 
