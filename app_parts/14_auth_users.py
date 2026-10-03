@@ -114,6 +114,7 @@ def _drain_email_outbox(limit=20):
     push them through SMTP, and record the outcome on the message and on the
     notification's delivery row."""
     sent = failed = 0
+    brand = email_templates.brand_assets(_current_base_url())
     for row in db.claim_due_emails(limit=limit):
         # The outbox stores an optional HTML part; when a row only carries
         # plain text it still leaves inside the branded shell so every email
@@ -122,7 +123,8 @@ def _drain_email_outbox(limit=20):
         if not html and row.get('body_text'):
             try:
                 html = email_templates.render_notification_email(
-                    row.get('to_email'), row.get('subject'), row.get('body_text'))
+                    row.get('to_email'), row.get('subject'), row.get('body_text'),
+                    brand=brand)
             except Exception:
                 html = None
         ok = send_platform_email(row.get('to_email'), row.get('subject'),

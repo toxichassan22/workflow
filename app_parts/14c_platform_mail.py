@@ -112,7 +112,8 @@ def _send_company_welcome_email(recipient, company_name, account_name, username,
     try:
         html = email_templates.render_company_welcome_email(
             recipient, company_name, setup_url,
-            account_name=account_name, stats=stats)
+            account_name=account_name, stats=stats,
+            brand=email_templates.brand_assets(_current_base_url()))
     except Exception:
         html = None
     return send_platform_email(recipient, subject, body, html=html)
@@ -131,7 +132,8 @@ def _send_user_welcome_email(recipient, user_name, tenant):
     )
     try:
         html = email_templates.render_user_welcome_email(
-            recipient, user_name, company_name, base_url)
+            recipient, user_name, company_name, base_url,
+            brand=email_templates.brand_assets(base_url))
     except Exception:
         html = None
     return send_platform_email(recipient, subject, body, html=html)
@@ -158,7 +160,8 @@ def _send_invite_email(invite, tenant, email=None, responsibility=None):
         inviter = None
     try:
         html = email_templates.render_user_invite_email(
-            recipient, inviter, company_name, role_label, full_invite_url)
+            recipient, inviter, company_name, role_label, full_invite_url,
+            brand=email_templates.brand_assets(base_url))
     except Exception:
         html = None
     ok = send_platform_email(recipient, subject, body, html=html)

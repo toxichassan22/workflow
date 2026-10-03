@@ -16,6 +16,25 @@ Strict repository compliance (AGENTS.md):
 import html as _html_lib
 
 
+# ── Platform brand ────────────────────────────────────────────────────────────
+# The wordmark palette sampled from assets/landloom-logo(-white).png.
+BRAND_NAVY = '#07182c'        # the «LandLoom» wordmark
+BRAND_TEAL = '#03e1ce'        # the «AI» accent
+BRAND_TEAL_DEEP = '#0d9488'   # readable teal for links/text on white
+BRAND_HERO_GRADIENT = 'linear-gradient(135deg, #07182c 0%, #0e3a4a 55%, #0a5f56 100%)'
+
+
+def brand_assets(base_url):
+    """Logo URLs for the email header — /assets is served publicly."""
+    base = (base_url or '').rstrip('/')
+    if not base:
+        return None
+    return {
+        'logo_url': f'{base}/assets/landloom-logo.png',
+        'logo_url_light': f'{base}/assets/landloom-logo-white.png',
+    }
+
+
 def build_base_email(
     title,
     content_html,
@@ -30,6 +49,7 @@ def build_base_email(
     secondary_note=None,
     footer_text=None,
     theme='light',           # 'light' (clean white/slate card) or 'dark' (obsidian tech card)
+    brand=None,              # Optional dict from brand_assets(): logo_url / logo_url_light
 ):
     """
     Universal responsive email engine for LandLoom AI.
@@ -37,15 +57,18 @@ def build_base_email(
     """
     safe_title = _html_lib.escape(title or '')
     preview_snippet = _html_lib.escape(preheader or title or '')
+    brand = brand or {}
+    logo_url = _html_lib.escape(brand.get('logo_url') or '')
+    logo_url_light = _html_lib.escape(brand.get('logo_url_light') or brand.get('logo_url') or '')
 
     is_dark = (theme == 'dark')
-    body_bg = '#090d16' if is_dark else '#f4f6f9'
-    card_bg = '#111827' if is_dark else '#ffffff'
-    card_border = '#1f293d' if is_dark else '#e2e8f0'
+    body_bg = '#04101d' if is_dark else '#f4f6f9'
+    card_bg = '#0a1f33' if is_dark else '#ffffff'
+    card_border = '#16344e' if is_dark else '#e2e8f0'
     text_primary = '#f8fafc' if is_dark else '#07182c'
     text_secondary = '#94a3b8' if is_dark else '#475569'
-    tile_bg = '#1e293b' if is_dark else '#f8fafc'
-    tile_border = '#334155' if is_dark else '#e2e8f0'
+    tile_bg = '#0f2a44' if is_dark else '#f8fafc'
+    tile_border = '#1e4258' if is_dark else '#e2e8f0'
 
     # ── 1. Hero Header Banner (Cloudflare / Chess.com style) ───────────────────
     hero_html = ''
@@ -53,10 +76,14 @@ def build_base_email(
         h_title = _html_lib.escape(hero_banner.get('title', ''))
         h_sub = _html_lib.escape(hero_banner.get('subtitle', ''))
         h_tag = _html_lib.escape(hero_banner.get('tag') or 'LANDLOOM AI')
-        gradient = hero_banner.get('gradient') or 'linear-gradient(135deg, #07182c 0%, #1e3a8a 55%, #0369a1 100%)'
+        gradient = hero_banner.get('gradient') or BRAND_HERO_GRADIENT
+        hero_logo = (f'<img src="{logo_url_light}" alt="LandLoom AI" height="30" '
+                     'style="display: block; margin: 0 auto 20px auto; height: 30px; width: auto;" />'
+                     if logo_url_light else '')
         hero_html = f'''
         <tr>
           <td style="background: {gradient}; padding: 48px 36px 42px 36px; border-radius: 20px 20px 0 0; text-align: center; direction: rtl;">
+            {hero_logo}
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto 16px auto;">
               <tr>
                 <td align="center" style="background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 24px; padding: 4px 16px; font-size: 11px; font-weight: 800; color: #ffffff; letter-spacing: 1.2px; text-transform: uppercase;">
@@ -82,7 +109,7 @@ def build_base_email(
           <td align="center" style="padding-bottom: 24px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" dir="ltr" style="margin: 0 auto; background-color: {tile_bg}; border: 1px solid {tile_border}; border-radius: 28px; padding: 4px 16px 4px 6px;">
               <tr>
-                <td align="center" style="width: 26px; height: 26px; background-color: #07182c; color: #38bdf8; border-radius: 50%; font-size: 13px; font-weight: 800; line-height: 26px;">
+                <td align="center" style="width: 26px; height: 26px; background-color: {BRAND_NAVY}; color: {BRAND_TEAL}; border-radius: 50%; font-size: 13px; font-weight: 800; line-height: 26px;">
                   {initial}
                 </td>
                 <td style="font-size: 13px; font-weight: 700; color: {text_secondary}; padding-left: 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
@@ -100,7 +127,7 @@ def build_base_email(
         badge_html = f'''
         <tr>
           <td align="center" style="padding-bottom: 14px;">
-            <span style="display: inline-block; background-color: {'#1e293b' if is_dark else '#eef2ff'}; color: {'#93c5fd' if is_dark else '#3730a3'}; border: 1px solid {'#334155' if is_dark else '#c7d2fe'}; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 20px; letter-spacing: 0.5px;">
+            <span style="display: inline-block; background-color: {'#083930' if is_dark else '#e6fcf8'}; color: {'#5eead4' if is_dark else '#0f766e'}; border: 1px solid {'#0f766e' if is_dark else '#9cf0e2'}; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 20px; letter-spacing: 0.5px;">
               {safe_badge}
             </span>
           </td>
@@ -112,10 +139,10 @@ def build_base_email(
         safe_cta_text = _html_lib.escape(str(cta_text))
         safe_cta_url = _html_lib.escape(str(cta_url))
 
-        # Default: Google Blue
-        btn_bg = '#1a73e8'
+        # Default: brand navy
+        btn_bg = BRAND_NAVY
         btn_color = '#ffffff'
-        btn_border = '#1a73e8'
+        btn_border = BRAND_NAVY
         btn_radius = '28px'
 
         if cta_style == 'orange':  # Chess.com style
@@ -125,13 +152,17 @@ def build_base_email(
         elif cta_style == 'emerald':
             btn_bg = '#059669'
             btn_border = '#059669'
+        elif cta_style == 'teal':
+            btn_bg = BRAND_TEAL
+            btn_color = BRAND_NAVY
+            btn_border = BRAND_TEAL
         elif cta_style == 'obsidian':
-            btn_bg = '#07182c'
-            btn_border = '#07182c'
+            btn_bg = BRAND_NAVY
+            btn_border = BRAND_NAVY
         elif cta_style == 'outline':  # LinkedIn style
             btn_bg = 'transparent'
-            btn_color = '#1a73e8' if not is_dark else '#38bdf8'
-            btn_border = '#1a73e8' if not is_dark else '#38bdf8'
+            btn_color = BRAND_TEAL_DEEP if not is_dark else BRAND_TEAL
+            btn_border = BRAND_TEAL_DEEP if not is_dark else BRAND_TEAL
 
         cta_html = f'''
         <tr>
@@ -163,7 +194,7 @@ def build_base_email(
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: {tile_bg}; border: 1px solid {tile_border}; border-radius: 14px; margin-bottom: 12px; padding: 18px 20px; direction: rtl; text-align: right;">
               <tr>
                 <td valign="top" style="width: 54px; padding-left: 16px;">
-                  <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #07182c 0%, #1e3a8a 100%); border-radius: 12px; text-align: center; line-height: 48px; font-weight: 900; font-size: 14px; color: #38bdf8; font-family: 'SFMono-Regular', Consolas, monospace; box-shadow: 0 4px 10px rgba(7, 24, 44, 0.2);">
+                  <div style="width: 48px; height: 48px; background: linear-gradient(135deg, {BRAND_NAVY} 0%, #0a4f46 100%); border-radius: 12px; text-align: center; line-height: 48px; font-weight: 900; font-size: 14px; color: {BRAND_TEAL}; font-family: 'SFMono-Regular', Consolas, monospace; box-shadow: 0 4px 10px rgba(7, 24, 44, 0.2);">
                     {t_mono}
                   </div>
                 </td>
@@ -174,7 +205,7 @@ def build_base_email(
                   <div style="font-size: 13px; color: {text_secondary}; line-height: 1.6; margin-top: 6px;">
                     {t_desc}
                   </div>
-                  {f'<div style="margin-top: 10px;"><a href="{t_url}" target="_blank" style="font-size: 13px; font-weight: 800; color: #2563eb; text-decoration: none;">{t_link}</a></div>' if t_link else ''}
+                  {f'<div style="margin-top: 10px;"><a href="{t_url}" target="_blank" style="font-size: 13px; font-weight: 800; color: {BRAND_TEAL_DEEP}; text-decoration: none;">{t_link}</a></div>' if t_link else ''}
                 </td>
               </tr>
             </table>''')
@@ -192,22 +223,33 @@ def build_base_email(
         note_html = f'''
         <tr>
           <td style="padding-top: 20px;">
-            <div style="background-color: {'#1e293b' if is_dark else '#f8fafc'}; border: 1px solid {tile_border}; border-right: 4px solid #07182c; border-radius: 10px; padding: 14px 18px; font-size: 13px; color: {text_secondary}; line-height: 1.65;">
+            <div style="background-color: {'#0f2a44' if is_dark else '#f8fafc'}; border: 1px solid {tile_border}; border-right: 4px solid {BRAND_TEAL}; border-radius: 10px; padding: 14px 18px; font-size: 13px; color: {text_secondary}; line-height: 1.65;">
               {secondary_note}
             </div>
           </td>
         </tr>'''
 
+    # ── 7. Top Brand Bar — real wordmark when a logo URL is supplied ─────────
     brand_bar_html = ''
     if not hero_banner:
-        brand_bar_html = '''
+        if logo_url:
+            brand_bar_html = f'''
+          <tr>
+            <td align="center" style="padding: 0 0 24px 0;">
+              <div style="display: inline-block; background-color: #ffffff; border-radius: 14px; padding: 9px 24px; box-shadow: 0 4px 14px rgba(7, 24, 44, 0.18);">
+                <img src="{logo_url}" alt="LandLoom AI" height="26" style="display: block; height: 26px; width: auto;" />
+              </div>
+            </td>
+          </tr>'''
+        else:
+            brand_bar_html = f'''
           <tr>
             <td align="center" style="padding: 0 0 24px 0;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto; text-align: center;">
                 <tr>
                   <td align="center">
-                    <div style="display: inline-block; background-color: #07182c; border-radius: 12px; padding: 10px 24px; color: #ffffff; font-size: 16px; font-weight: 900; letter-spacing: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-shadow: 0 4px 12px rgba(7, 24, 44, 0.25);">
-                      LANDLOOM <span style="color: #38bdf8; font-weight: 700; font-size: 14px;">AI</span>
+                    <div style="display: inline-block; background-color: {BRAND_NAVY}; border-radius: 12px; padding: 10px 24px; color: #ffffff; font-size: 16px; font-weight: 900; letter-spacing: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; box-shadow: 0 4px 12px rgba(7, 24, 44, 0.25);">
+                      LANDLOOM <span style="color: {BRAND_TEAL}; font-weight: 700; font-size: 14px;">AI</span>
                     </div>
                   </td>
                 </tr>
@@ -248,7 +290,7 @@ def build_base_email(
       -moz-osx-font-smoothing: grayscale;
     }}
     table {{ border-collapse: separate !important; }}
-    a {{ color: #2563eb; text-decoration: none; }}
+    a {{ color: {BRAND_TEAL_DEEP}; text-decoration: none; }}
     @media only screen and (max-width: 620px) {{
       .email-container {{
         width: 100% !important;
@@ -355,7 +397,8 @@ def build_base_email(
 # 1. Login OTP Email (Google Security + X Style)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10):
+def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10,
+                           login_url=None, brand=None):
     """
     Precision Google Security & X style template for Login OTP.
     Features: User identity pill, glowing monospace code box, session metadata, Google Blue pill CTA.
@@ -368,14 +411,14 @@ def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10
     </p>
 
     <!-- High-Tech Monospace OTP Code Display -->
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background: linear-gradient(180deg, #07182c 0%, #0f172a 100%); border-radius: 16px; margin: 24px 0 20px 0; text-align: center; box-shadow: 0 8px 24px rgba(7, 24, 44, 0.25); border: 1px solid #1e293b;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background: linear-gradient(180deg, {BRAND_NAVY} 0%, #0e3a4a 100%); border-radius: 16px; margin: 24px 0 20px 0; text-align: center; box-shadow: 0 8px 24px rgba(7, 24, 44, 0.25); border: 1px solid #16344e;">
       <tr>
         <td style="padding: 30px 16px;">
-          <div style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 42px; font-weight: 900; letter-spacing: 14px; color: #38bdf8; text-align: center; user-select: all; -webkit-user-select: all;">
+          <div style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 42px; font-weight: 900; letter-spacing: 14px; color: {BRAND_TEAL}; text-align: center; user-select: all; -webkit-user-select: all;">
             {otp_code}
           </div>
           <div style="margin-top: 12px;">
-            <span style="display: inline-block; background-color: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 700; color: #38bdf8;">
+            <span style="display: inline-block; background-color: rgba(3, 225, 206, 0.14); border: 1px solid rgba(3, 225, 206, 0.35); border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 700; color: {BRAND_TEAL};">
               صلاحية الرمز: {expiry_mins} دقائق
             </span>
           </div>
@@ -400,9 +443,10 @@ def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10
         badge='أمان الحساب',
         preheader=f'رمز التحقق لتسجيل الدخول إلى حسابك: {otp_code}',
         cta_text='تأكيد تسجيل الدخول عبر المنصة',
-        cta_url='https://lab.landloom.ai',
+        cta_url=login_url,
         cta_style='primary',
         secondary_note='هذا الرمز مخصص لاستخدامك الشخصي فقط. لن يطلب منك فريق دعم LandLoom AI هذا الرمز بأي وسيلة.',
+        brand=brand,
     )
 
 
@@ -411,7 +455,7 @@ def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_company_welcome_email(recipient, company_name, activation_url,
-                                 account_name=None, stats=None):
+                                 account_name=None, stats=None, brand=None):
     """
     Cloudflare Hero + X style onboarding email for new company onboarding.
     Features: Vibrant gradient hero, account parameter metrics, and modular feature tiles.
@@ -478,7 +522,7 @@ def render_company_welcome_email(recipient, company_name, activation_url,
             'title': 'مرحبًا بك في LandLoom AI',
             'subtitle': 'المنصة الذكية الأولى لدراسات التطوير والاستثمار العقاري في المملكة',
             'tag': 'منصة الجيل الجديد',
-            'gradient': 'linear-gradient(135deg, #07182c 0%, #1e3a8a 55%, #0284c7 100%)',
+            'gradient': BRAND_HERO_GRADIENT,
         },
         user_pill={'email': recipient},
         badge='انضمام جديد',
@@ -488,6 +532,7 @@ def render_company_welcome_email(recipient, company_name, activation_url,
         cta_style='primary',
         secondary_tiles=tiles,
         secondary_note='صلاحية رابط التفعيل 7 أيام. للاستفسار أو الدعم الفني، تواصل مع فريق الحسابات عبر المنصة.',
+        brand=brand,
     )
 
 
@@ -495,7 +540,7 @@ def render_company_welcome_email(recipient, company_name, activation_url,
 # 3. Low Balance Warning & Billing Alert (Chess.com Style)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_billing_low_balance_email(recipient, company_name, remaining_points, recharge_url):
+def render_billing_low_balance_email(recipient, company_name, remaining_points, recharge_url, brand=None):
     """
     High-contrast Chess.com style alert email for low balance.
     Features: Amber badge, large metric display box, and vibrant punchy orange CTA.
@@ -539,6 +584,7 @@ def render_billing_low_balance_email(recipient, company_name, remaining_points, 
         cta_url=recharge_url,
         cta_style='orange',
         secondary_note='يتم معالجة وتفعيل طلبات التحويل البنكي وشحن الباقات آلياً عبر لوحة الإدارة.',
+        brand=brand,
     )
 
 
@@ -546,7 +592,7 @@ def render_billing_low_balance_email(recipient, company_name, remaining_points, 
 # 4. User Invitation Email (LinkedIn / X Style)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_user_invite_email(recipient, inviter_name, company_name, role_name, invite_url):
+def render_user_invite_email(recipient, inviter_name, company_name, role_name, invite_url, brand=None):
     """
     LinkedIn / X style invitation email for new team members.
     """
@@ -585,6 +631,7 @@ def render_user_invite_email(recipient, inviter_name, company_name, role_name, i
         cta_url=invite_url,
         cta_style='primary',
         secondary_note='هذه الدعوة صالحة لمدة 7 أيام مخصصة لعنوان البريد الإلكتروني المدعو فقط.',
+        brand=brand,
     )
 
 
@@ -592,7 +639,7 @@ def render_user_invite_email(recipient, inviter_name, company_name, role_name, i
 # 5. Employee Welcome Email (account created directly by the company admin)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_user_welcome_email(recipient, user_name, company_name, login_url):
+def render_user_welcome_email(recipient, user_name, company_name, login_url, brand=None):
     """
     Welcome mail for a directly-added employee: the account already exists and
     the password arrives from the admin — never inside the email itself.
@@ -627,6 +674,7 @@ def render_user_welcome_email(recipient, user_name, company_name, login_url):
         cta_text='تسجيل الدخول',
         cta_url=login_url,
         cta_style='primary',
+        brand=brand,
     )
 
 
@@ -634,7 +682,7 @@ def render_user_welcome_email(recipient, user_name, company_name, login_url):
 # 6. Generic Notification Email (branded shell for outbox rows without html)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_notification_email(recipient, title, body):
+def render_notification_email(recipient, title, body, brand=None):
     """
     Generic branded shell for notification/outbox mail: the subject becomes the
     headline and the plain body lands inside the standard card, so every email
@@ -652,4 +700,5 @@ def render_notification_email(recipient, title, body):
         user_pill={'email': recipient},
         badge='إشعار',
         preheader=title,
+        brand=brand,
     )

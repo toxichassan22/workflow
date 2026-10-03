@@ -64,11 +64,14 @@ def send_login_otp_email(recipient, otp_code, company_name=None, device_info=Non
         f'هذا الرمز صالح لمدة 10 دقائق فقط للاستخدام لمرة واحدة.\n'
         f'إذا لم تكن قد طلبت هذا الرمز، يرجى تجاهل هذه الرسالة أو مراجعة مسؤول النظام.\n'
     )
+    base_url = _current_base_url().rstrip('/')
     html = email_templates.render_login_otp_email(
         recipient=recipient,
         otp_code=otp_code,
         device_info=device_info,
         expiry_mins=10,
+        login_url=base_url or None,
+        brand=email_templates.brand_assets(base_url),
     )
     return send_platform_email(recipient, subject, body, html=html)
 
