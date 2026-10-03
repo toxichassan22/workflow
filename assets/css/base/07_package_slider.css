@@ -1,0 +1,100 @@
+    /* ── Package catalog slider ─────────────────────────────────────────
+       Shared by the client recharge picker and the super-admin package
+       list. The window shows up to three cards; one card moves per step
+       and the track loops at both ends. */
+
+    .ll-modal-card--wide {
+      max-width: 720px;
+    }
+
+    .wf-slider {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .wf-slider-nav {
+      align-self: center;
+      flex: 0 0 auto;
+    }
+
+    .wf-slider-viewport {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      touch-action: pan-y;
+      user-select: none;
+      cursor: grab;
+    }
+
+    .wf-slider.dragging .wf-slider-viewport {
+      cursor: grabbing;
+    }
+
+    .wf-slider-track {
+      display: flex;
+      align-items: stretch;
+      will-change: transform;
+    }
+
+    .wf-slider-track.anim {
+      transition: transform .32s ease;
+    }
+
+    .wf-slider-card {
+      display: flex;
+      min-width: 0;
+    }
+
+    .pkg-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      padding: 14px;
+      background: var(--surface);
+      border: 1px solid var(--ui-border);
+      border-radius: 9px;
+    }
+
+    .pkg-card h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .pkg-card-points {
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 850;
+    }
+
+    .pkg-card-meta {
+      color: var(--ink-muted);
+      font-size: 11px;
+      line-height: 1.7;
+    }
+
+    .pkg-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: auto;
+      padding-top: 6px;
+    }
+
+    .pkg-pick {
+      cursor: pointer;
+      transition: border-color .16s ease, background-color .16s ease;
+    }
+
+    .pkg-pick:hover {
+      background: var(--surface-subtle);
+      border-color: var(--ui-border-strong);
+    }
+
+    .pkg-pick.selected {
+      border-color: var(--p);
+      background: var(--p-soft);
+    }

@@ -1429,14 +1429,15 @@
 
       <!-- Modal 2: Recharge Request -->
       <div id="llRechargeModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeModal')">
-        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
+        <div class="ll-modal-card ll-modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="llRechargeModalTitle">
           <div class="sag-modal-head">
             <h2 id="llRechargeModalTitle">طلب شحن رصيد جديد</h2>
             <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeModal')">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field"><label for="llRechargePackage">الباقة</label>
-              <select id="llRechargePackage" onchange="llShowPackageInfo()"></select>
+            <div class="tenant-field"><label id="llRechargePackageLabel" for="llRechargePackage">الباقة</label>
+              <input type="hidden" id="llRechargePackage">
+              <div id="llRechargePackageCards" role="group" aria-labelledby="llRechargePackageLabel"></div>
               <div id="llRechargePackageInfo" class="tenant-hint" style="display:none;margin-top:6px"></div>
             </div>
             <div class="tenant-field"><label for="llRechargeRef">رقم الحوالة البنكية</label><input type="text" id="llRechargeRef" placeholder="المرجع البنكي للتحويل"></div>

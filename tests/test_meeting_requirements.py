@@ -53,7 +53,7 @@ FRONTEND_JS_ORDER = (
     '17-admin-boot/01_training_rules.js',
     '17-admin-boot/02_users_roles.js',
     '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
-    '19-notifications.js',
+    '18-landloom-ops/01_package_slider.js', '19-notifications.js',
 )
 
 

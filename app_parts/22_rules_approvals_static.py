@@ -319,6 +319,7 @@ FRONTEND_CSS_ORDER = (
     'base/01_preview_chat.css', 'base/02_tenant_pages.css',
     'base/03_the_view_model.css', 'base/04_export_responsive.css',
     'base/05_dashboard_viz.css', 'base/06_designer_activity.css',
+    'base/07_package_slider.css',
     'project-form/01_sections_changelog.css',
     'project-form/02_fields_tables_rail.css',
 )
@@ -349,7 +350,7 @@ FRONTEND_JS_ORDER = (
     '17-admin-boot/01_training_rules.js',
     '17-admin-boot/02_users_roles.js',
     '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
-    '19-notifications.js',
+    '18-landloom-ops/01_package_slider.js', '19-notifications.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}

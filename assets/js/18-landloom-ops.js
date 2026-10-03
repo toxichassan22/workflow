@@ -337,22 +337,24 @@
     let llRechargePackages = [];
 
     async function llLoadRechargePackages() {
-      const select = document.getElementById('llRechargePackage');
-      if (!select) return;
+      const host = document.getElementById('llRechargePackageCards');
+      const input = document.getElementById('llRechargePackage');
+      if (!host || !input) return;
       const data = await api('GET', '/api/billing/packages').catch(() => null);
       llRechargePackages = (data && data.success && data.packages) || [];
+      if (llRechargePkgSlider) { llRechargePkgSlider.destroy(); llRechargePkgSlider = null; }
       if (!llRechargePackages.length) {
-        select.innerHTML = '<option value="" disabled selected>' +
-          llEscape(WFT('recharge.no_packages', 'لا توجد باقات متاحة')) + '</option>';
+        input.value = '';
+        host.innerHTML = '<p class="tenant-hint">' +
+          llEscape(WFT('recharge.no_packages', 'لا توجد باقات متاحة')) + '</p>';
         llShowPackageInfo();
         return;
       }
-      select.innerHTML = llRechargePackages.map(p =>
-        '<option value="' + llEscape(p.id) + '">' + llEscape(wfBilingual(p.name, p.name_en)) +
-        ' (' + llMoney(p.credit_sar) + ' <span>نقطة</span>' +
-        (p.price_sar ? ' — ' + llMoney(p.price_sar) + ' <span>ريال سعودي</span>' : '') + ')</option>'
-      ).join('');
-      llShowPackageInfo();
+      llRechargePkgSlider = wfCardSlider({
+        container: host, items: llRechargePackages,
+        renderCard: llRechargePackageCardHtml, maxVisible: 3, minCardWidth: 148
+      });
+      llPickRechargePackage(llRechargePackages[0].id);
     }
 
     function llShowPackageInfo() {
@@ -891,28 +893,15 @@
       if (!box) return;
       const data = await api('GET', '/api/admin/packages').catch(() => null);
       llAdminPackages = (data && data.success && data.packages) ? data.packages : [];
+      if (llAdminPkgSlider) { llAdminPkgSlider.destroy(); llAdminPkgSlider = null; }
       if (!llAdminPackages.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد باقات مسجلة.</p>';
         return;
       }
-      box.innerHTML = llAdminPackages.map(p => {
-        const cost = (p.est_cost_sar != null)
-          ? ' | <span>التكلفة التقديرية: ' + llEscape(llMoney(p.est_cost_sar)) + ' <span>نقطة</span></span>' : '';
-        const margin = (p.est_margin_sar != null)
-          ? ' | <span>الربح التقديري: ' + llEscape(llMoney(p.est_margin_sar)) + ' <span>نقطة</span></span>' : '';
-        return '<div class="tenant-presentation-card" style="margin-bottom:8px"><div><h3>'
-        + llEscape(wfBilingual(p.name, p.name_en)) + '</h3>' +
-          '<div class="meta"><span>' + (p.price_sar != null ? llEscape(llMoney(p.price_sar)) + ' <span>ريال سعودي</span>' : 'بلا سعر') + '</span>' +
-          ' | <span>' + llEscape(llMoney(p.credit_sar)) + ' <span>نقطة</span></span>' + cost + margin +
-          ' | <span>' + (p.is_active ? 'نشطة' : 'موقوفة') + '</span></div></div>' +
-          '<div class="tenant-actions">' +
-          '<button type="button" class="btn small ghost" onclick="adminEditPackage(\'' + llEscape(p.id) + '\')">تعديل</button>' +
-          '<button type="button" class="btn small ' + (p.is_active ? 'danger' : 'green') +
-          '" onclick="adminTogglePackage(\'' + llEscape(p.id) + '\', ' + (p.is_active ? 0 : 1) + ')">' +
-          (p.is_active ? 'إيقاف' : 'تفعيل') + '</button>' +
-          '<button type="button" class="btn small danger" onclick="adminDeletePackage(\'' + llEscape(p.id) + '\')">حذف</button>' +
-          '</div></div>';
-      }).join('');
+      llAdminPkgSlider = wfCardSlider({
+        container: box, items: llAdminPackages,
+        renderCard: llAdminPackageCardHtml, maxVisible: 3, minCardWidth: 210
+      });
     }
 
     function adminEditPackage(packageId) {
