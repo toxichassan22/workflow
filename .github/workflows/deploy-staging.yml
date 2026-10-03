@@ -37,10 +37,13 @@ jobs:
           set -euo pipefail
           base="${STAGING_BASE_URL%/}"
           expected_short="${EXPECTED_COMMIT:0:7}"
-          for attempt in $(seq 1 36); do
+          # 72 x ~10s ≈ 12 min: covers a deploy queued behind one in-flight run
+          # (the lock is held only for pull→restart since playwright install
+          # now runs after the lock is released).
+          for attempt in $(seq 1 72); do
             health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$base/health?deploy_check=${EXPECTED_COMMIT}")"
             deployed="$(printf '%s' "$health" | jq -r '.deployed_commit // .commit // "unknown"')"
-            echo "Staging check ${attempt}/36: deployed=${deployed} expected=${EXPECTED_COMMIT}"
+            echo "Staging check ${attempt}/72: deployed=${deployed} expected=${EXPECTED_COMMIT}"
             if [ "$deployed" = "$EXPECTED_COMMIT" ] || [[ "$deployed" == "$expected_short"* ]]; then
               echo "Verified staged commit ${deployed}"
               exit 0

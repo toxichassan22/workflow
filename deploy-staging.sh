@@ -104,13 +104,18 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 DEPLOY_STEP="pull"
+# From here this run holds the deploy lock: say so on /health, otherwise a
+# slow-but-healthy deploy looked exactly like a dead one.
+write_deploy_status running
 echo "===== 1. Pull latest staging code (branch: $BRANCH) ====="
 cd "$REPO_DIR"
 if [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
   echo "ERROR: $REPO_DIR is a bare clone — git reset --hard needs a worktree; re-clone normally."
   exit 1
 fi
-git fetch origin "$BRANCH"
+# GIT_TERMINAL_PROMPT=0: a missing/expired credential must fail fast here —
+# an interactive prompt would hang forever while holding the deploy lock.
+GIT_TERMINAL_PROMPT=0 git fetch origin "$BRANCH"
 if [ -n "$TARGET_COMMIT" ]; then
   if ! git cat-file -e "${TARGET_COMMIT}^{commit}" 2>/dev/null; then
     echo "ERROR: target deployment commit is not available after fetch: $TARGET_COMMIT"
@@ -120,7 +125,7 @@ if [ -n "$TARGET_COMMIT" ]; then
 else
   git reset --hard "origin/$BRANCH"
 fi
-git lfs pull 2>/dev/null || true
+GIT_TERMINAL_PROMPT=0 git lfs pull 2>/dev/null || true
 
 DEPLOY_STEP="sync"
 echo "===== 2. Sync to staging app directory ($APP_DIR) ====="
@@ -182,6 +187,12 @@ bash "$APP_DIR/start_server-staging.sh" --force
 
 write_deploy_status deployed 0
 trap - EXIT
+
+# The deploy is done — marker written, server restarted, status recorded. The
+# playwright install below is a best-effort extra that can take up to 2x15
+# minutes; keeping the flock through it starved every queued webhook deploy
+# into a lock-timeout failure. Release the lock before it.
+exec 9>&-
 
 DEPLOY_STEP="vision"
 echo "===== 8. Headless browser for slide rendering (optional) ====="
