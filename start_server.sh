@@ -128,7 +128,7 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
-  </dev/null >>"$APP_DIR/boot.log" 2>&1 &
+  </dev/null >>"$APP_DIR/boot.log" 2>&1 9>&- &
 disown
 
 sleep 3

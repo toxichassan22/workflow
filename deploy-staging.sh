@@ -183,7 +183,9 @@ fi
 
 DEPLOY_STEP="restart"
 echo "===== 7. Start/restart staging application server ====="
-bash "$APP_DIR/start_server-staging.sh" --force
+# 9>&-: the lock fd is inheritable — anything the restart chain spawns (the
+# daemon above all) must not carry it or the lock outlives this deploy.
+bash "$APP_DIR/start_server-staging.sh" --force 9>&-
 
 write_deploy_status deployed 0
 trap - EXIT

@@ -131,6 +131,9 @@ log "Starting staging gunicorn on 127.0.0.1:$SELECTED_PORT"
 
 mkdir -p "$WEB_ROOT"
 cd "$APP_DIR"
+# fd 9 is the deploy script's flock: it is inheritable, and a daemon that
+# keeps it holds the deploy lock forever after the deploy exits. 9>&- drops
+# it for gunicorn; without it every later deploy starved at flock -w.
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --workers 2 \
   --threads 4 \
@@ -141,7 +144,7 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
-  </dev/null >>"$APP_DIR/boot.log" 2>&1 &
+  </dev/null >>"$APP_DIR/boot.log" 2>&1 9>&- &
 disown
 
 sleep 3
