@@ -100,40 +100,7 @@ def _password_setup_url(raw_token):
     return f'{_current_base_url()}/set-password/{raw_token}'
 
 
-def send_platform_email(recipient, subject, body, html=None):
-    host = (os.environ.get('SMTP_HOST') or '').strip()
-    if not host or not recipient:
-        return False
-    port = int(os.environ.get('SMTP_PORT') or 587)
-    smtp_user = (os.environ.get('SMTP_USER') or '').strip()
-    smtp_password = os.environ.get('SMTP_PASSWORD') or ''
-    sender = (os.environ.get('SMTP_FROM') or smtp_user or 'noreply@landloom.ai').strip()
-    if not sender:
-        return False
-    message = EmailMessage()
-    message['Subject'] = subject
-    message['From'] = sender
-    message['To'] = recipient
-    message.set_content(body)
-    if html:
-        message.add_alternative(html, subtype='html')
-    try:
-        if str(os.environ.get('SMTP_SSL') or '').lower() in {'1', 'true', 'yes'}:
-            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as client:
-                if smtp_user:
-                    client.login(smtp_user, smtp_password)
-                client.send_message(message)
-        else:
-            with smtplib.SMTP(host, port, timeout=20) as client:
-                if str(os.environ.get('SMTP_TLS', 'true')).lower() not in {'0', 'false', 'no'}:
-                    client.starttls(context=ssl.create_default_context())
-                if smtp_user:
-                    client.login(smtp_user, smtp_password)
-                client.send_message(message)
-        return True
-    except Exception:
-        app.logger.exception('Platform email could not be sent')
-        return False
+# send_platform_email() lives in 14c_platform_mail.py.
 
 
 # ── Housekeeping: periodic sweeps that used to wait for a human request ──────
@@ -155,9 +122,10 @@ def _drain_email_outbox(limit=20):
             db.mark_email_delivery(row.get('notification_id'), 'sent')
             sent += 1
         else:
-            db.mark_email_failed(row['id'], error='smtp_send_failed')
+            reason = smtp_last_error() or 'smtp_send_failed'
+            db.mark_email_failed(row['id'], error=reason)
             db.mark_email_delivery(row.get('notification_id'), 'failed',
-                                   error='smtp_send_failed')
+                                   error=reason)
             failed += 1
     return {'sent': sent, 'failed': failed}
 
@@ -1153,7 +1121,7 @@ def _send_invite_email(invite, tenant, email=None):
         'هذا الرابط صالح للاستخدام لمدة 7 أيام.'
     )
     db.mark_invite_email(invite['id'], 'sent' if ok else 'failed',
-                         None if ok else 'smtp_send_failed')
+                         None if ok else (smtp_last_error() or 'smtp_send_failed'))
     return ok
 
 
