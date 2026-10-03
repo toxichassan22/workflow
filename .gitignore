@@ -26,6 +26,7 @@ __pycache__/
 
 .jwt_secret
 .deployed_commit
+.deploy_status
 uploads/
 exports/*.pdf
 exports/*.pptx

@@ -81,6 +81,10 @@ log() {
 }
 
 write_deployment_marker() {
+  # A watchdog restart is not a deploy: the deploy script owns this marker.
+  # Rewriting it from the clone's HEAD on every restart misreported which
+  # code is actually live whenever HEAD and the synced tree diverged.
+  [ -f "$DEPLOYMENT_MARKER" ] && return 0
   local deployed_commit
   deployed_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
   if [ -z "$deployed_commit" ]; then

@@ -911,6 +911,25 @@ def _read_deployment_metadata():
     return metadata
 
 
+def _read_deploy_status():
+    """Outcome of the last deploy script run, when the script recorded one.
+
+    deploy-staging.sh writes .deploy_status next to .deployed_commit on every
+    exit, so a half-finished deploy stops looking like a successful old one.
+    Only the step name and status ride /health — never stderr or env details.
+    """
+    try:
+        path = os.path.join(os.path.dirname(DEPLOYMENT_MARKER_PATH), '.deploy_status')
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {key: data.get(key) for key in
+            ('commit', 'status', 'step', 'exit_code', 'finished_at')}
+
+
 def _deployed_vision_status():
     """What the deployment recorded about the slide renderer, including the install log tail."""
     for directory in ('/home/landloom/proposal-generator', os.path.dirname(__file__)):
@@ -963,6 +982,7 @@ def health():
         'deployed_commit': metadata.get('deployed_commit', 'unknown'),
         'deployed_at': metadata.get('deployed_at'),
         'deployment_source': metadata.get('source'),
+        'last_deploy': _read_deploy_status(),
         'map_label_font': os.path.basename(maps_service.bundled_arabic_overlay_font_path() or ''),
     }
     # Model/config internals and the chromium probe stay behind a platform-admin

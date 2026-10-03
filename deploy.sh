@@ -79,8 +79,8 @@ fi
 echo "===== 6. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
 
-# Pre-seed deployment marker from repo HEAD
-local_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
+# Pre-seed deployment marker from the requested commit, not a re-read HEAD
+local_commit="${TARGET_COMMIT:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)}"
 if [ -n "$local_commit" ]; then
   printf '{"commit":"%s","deployed_at":"%s","source":"github"}\n' \
     "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"

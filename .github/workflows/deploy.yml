@@ -44,6 +44,7 @@ jobs:
             sleep 10
           done
           echo "Hosting did not report expected commit ${EXPECTED_COMMIT}"
+          printf '%s' "$health" | jq -r '"Last server deploy attempt: " + ((.last_deploy // "none recorded") | tostring)'
           exit 1
 
       - name: Verify land analysis route

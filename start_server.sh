@@ -71,6 +71,8 @@ log() {
 }
 
 write_deployment_marker() {
+  # A watchdog restart is not a deploy: the deploy script owns this marker.
+  [ -f "$DEPLOYMENT_MARKER" ] && return 0
   local deployed_commit
   deployed_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
   if [ -z "$deployed_commit" ]; then

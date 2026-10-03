@@ -80,8 +80,36 @@ if [ -n "$TARGET_COMMIT" ] && [[ ! "$TARGET_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; the
   exit 1
 fi
 
+# Record every run's outcome where /health can report it: a run that dies
+# mid-way used to leave only a stale .deployed_commit, and the GitHub check
+# timed out with no hint which step failed.
+DEPLOY_STEP="start"
+STATUS_FILE="$APP_DIR/.deploy_status"
+write_deploy_status() {
+  printf '{"commit":"%s","status":"%s","step":"%s","exit_code":%s,"finished_at":"%s"}\n' \
+    "${TARGET_COMMIT:-latest}" "$1" "$DEPLOY_STEP" "${2:-0}" \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$STATUS_FILE" 2>/dev/null || true
+}
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then write_deploy_status failed "$rc"; fi' EXIT
+
+# Serialize deploys: two webhook spawns used to fight over one clone's git
+# locks and kill each other mid-run — code synced, marker never written.
+if command -v flock >/dev/null 2>&1; then
+  DEPLOY_STEP="lock"
+  exec 9>"${TMPDIR:-/tmp}/landloom-staging-deploy.lock"
+  if ! flock -w 1200 9; then
+    echo "ERROR: another staging deploy held the lock for 20 minutes"
+    exit 1
+  fi
+fi
+
+DEPLOY_STEP="pull"
 echo "===== 1. Pull latest staging code (branch: $BRANCH) ====="
 cd "$REPO_DIR"
+if [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
+  echo "ERROR: $REPO_DIR is a bare clone — git reset --hard needs a worktree; re-clone normally."
+  exit 1
+fi
 git fetch origin "$BRANCH"
 if [ -n "$TARGET_COMMIT" ]; then
   if ! git cat-file -e "${TARGET_COMMIT}^{commit}" 2>/dev/null; then
@@ -94,10 +122,12 @@ else
 fi
 git lfs pull 2>/dev/null || true
 
+DEPLOY_STEP="sync"
 echo "===== 2. Sync to staging app directory ($APP_DIR) ====="
 mkdir -p "$APP_DIR" "$WEB_ROOT"
 rsync -av \
   --exclude='.deployed_commit' \
+  --exclude='.deploy_status' \
   --exclude='app.db' \
   --exclude='data.db' \
   --exclude='.env' \
@@ -125,6 +155,7 @@ cd "$APP_DIR"
 find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 find . -name '*.pyc' -delete 2>/dev/null || true
 
+DEPLOY_STEP="deps"
 echo "===== 5. Update dependencies ====="
 if [ ! -d "$APP_DIR/venv" ]; then
   python3 -m venv "$APP_DIR/venv"
@@ -133,18 +164,26 @@ fi
 "$PIP" install -r "$APP_DIR/requirements.txt" || true
 "$PIP" install gunicorn || true
 
+DEPLOY_STEP="migrate"
 echo "===== 6. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
 
-local_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
+# The marker reports the commit this deploy was asked to ship — re-reading the
+# clone's HEAD here could record whatever a concurrent operation left behind.
+local_commit="${TARGET_COMMIT:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)}"
 if [ -n "$local_commit" ]; then
   printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \
     "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"
 fi
 
+DEPLOY_STEP="restart"
 echo "===== 7. Start/restart staging application server ====="
 bash "$APP_DIR/start_server-staging.sh" --force
 
+write_deploy_status deployed 0
+trap - EXIT
+
+DEPLOY_STEP="vision"
 echo "===== 8. Headless browser for slide rendering (optional) ====="
 (
   set +e
