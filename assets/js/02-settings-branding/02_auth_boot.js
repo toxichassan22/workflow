@@ -24,20 +24,7 @@
       if (tenantLastTrends) renderTenantActivityChart(tenantLastTrends);
     });
 
-    async function handleLogin(e) {
-      e.preventDefault();
-      showTenantError('loginError', '');
-      const email = document.getElementById('loginEmail').value.trim();
-      const password = document.getElementById('loginPassword').value;
-      const data = await api('POST', '/api/auth/login', { email, password });
-      if (data.success && data.token) {
-        setTenantToken(data.token);
-        setTenantUser(data.tenant);
-        await bootstrapTenant();
-      } else {
-        showTenantError('loginError', data.error || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
-      }
-    }
+    // (Login & OTP Device-Trust handlers live in 01-nav-auth.js)
 
     function tenantLogout() {
       api('POST', '/api/auth/logout', {});

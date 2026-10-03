@@ -233,6 +233,11 @@
       if (trialBanner) trialBanner.remove();
       document.getElementById('tenantAppPage').classList.remove('active');
       document.getElementById('tenantAuthPage').classList.add('active');
+      const loginForm = document.getElementById('loginForm');
+      const otpForm = document.getElementById('loginOtpForm');
+      if (loginForm) loginForm.style.display = 'block';
+      if (otpForm) otpForm.style.display = 'none';
+      showTenantError('loginError', '');
       // The login screen owns the bare domain: it never carries an /app/...
       // path, so a logged-out deep link or an expired session lands on '/'
       // instead of showing the login card under a workspace address.
@@ -272,3 +277,202 @@
       tenantAdminPackagesPage: '/app/admin/packages',
       tenantAdminPlatformPage: '/app/admin/platform'
     };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Device Trust & OTP Authentication
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const T_DEVICE_ID_KEY = 'landloom_device_id';
+    const T_TRUSTED_DEVICE_KEY = 'landloom_trusted_device_token';
+    let currentLoginChallengeToken = null;
+    let otpResendCooldownTimer = null;
+
+    function getOrCreateDeviceId() {
+      let id = null;
+      try { id = localStorage.getItem(T_DEVICE_ID_KEY); } catch (e) {}
+      if (!id) {
+        try {
+          id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : ('dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+        } catch (e) {
+          id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        }
+        try { localStorage.setItem(T_DEVICE_ID_KEY, id); } catch (e) {}
+      }
+      return id;
+    }
+
+    function getDeviceFingerprint() {
+      try {
+        const parts = [
+          getOrCreateDeviceId(),
+          navigator.userAgent || '',
+          navigator.platform || '',
+          (screen && (screen.width + 'x' + screen.height)) || '',
+          (Intl && Intl.DateTimeFormat && Intl.DateTimeFormat().resolvedOptions().timeZone) || '',
+          navigator.language || ''
+        ];
+        return parts.join('|');
+      } catch (e) {
+        return getOrCreateDeviceId();
+      }
+    }
+
+    function getDeviceName() {
+      try {
+        const ua = navigator.userAgent || '';
+        let browser = 'المتصفح';
+        if (ua.includes('Chrome')) browser = 'Chrome';
+        else if (ua.includes('Safari')) browser = 'Safari';
+        else if (ua.includes('Firefox')) browser = 'Firefox';
+        else if (ua.includes('Edge')) browser = 'Edge';
+
+        let os = 'جهاز';
+        if (ua.includes('Windows')) os = 'Windows';
+        else if (ua.includes('Macintosh') || ua.includes('Mac OS')) os = 'macOS';
+        else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+        else if (ua.includes('Android')) os = 'Android';
+        return browser + ' على ' + os;
+      } catch (e) {
+        return 'متصفح ويب';
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      showTenantError('loginError', '');
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const deviceId = getOrCreateDeviceId();
+      let trustedDeviceToken = '';
+      try { trustedDeviceToken = localStorage.getItem(T_TRUSTED_DEVICE_KEY) || ''; } catch (e) {}
+      const deviceFingerprint = getDeviceFingerprint();
+
+      const data = await api('POST', '/api/auth/login', {
+        email,
+        password,
+        deviceId,
+        trustedDeviceToken,
+        deviceFingerprint
+      });
+
+      if (data && data.otpRequired && data.challengeToken) {
+        currentLoginChallengeToken = data.challengeToken;
+        const loginForm = document.getElementById('loginForm');
+        const otpForm = document.getElementById('loginOtpForm');
+        const hint = document.getElementById('loginOtpHint');
+        const input = document.getElementById('loginOtpInput');
+        if (hint && data.maskedEmail) {
+          hint.textContent = 'رمز التحقق مرسل إلى ' + data.maskedEmail;
+        }
+        if (loginForm) loginForm.style.display = 'none';
+        if (otpForm) otpForm.style.display = 'block';
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+        startOtpResendCooldown(60);
+        return;
+      }
+
+      if (data && data.success && data.token) {
+        setTenantToken(data.token);
+        setTenantUser(data.tenant);
+        await bootstrapTenant();
+      } else {
+        showTenantError('loginError', (data && data.error) || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
+      }
+    }
+
+    async function handleLoginOtpVerify(e) {
+      e.preventDefault();
+      showTenantError('loginError', '');
+      const otpInput = document.getElementById('loginOtpInput');
+      const otp = otpInput ? otpInput.value.trim() : '';
+      if (!otp || !currentLoginChallengeToken) return;
+
+      const deviceId = getOrCreateDeviceId();
+      const deviceFingerprint = getDeviceFingerprint();
+      const deviceName = getDeviceName();
+
+      const submitBtn = document.getElementById('loginOtpSubmitBtn');
+      if (submitBtn) submitBtn.disabled = true;
+
+      const data = await api('POST', '/api/auth/login/verify-otp', {
+        challengeToken: currentLoginChallengeToken,
+        otp,
+        deviceId,
+        deviceFingerprint,
+        deviceName
+      });
+
+      if (submitBtn) submitBtn.disabled = false;
+
+      if (data && data.success && data.token) {
+        if (data.trustedDeviceToken) {
+          try { localStorage.setItem(T_TRUSTED_DEVICE_KEY, data.trustedDeviceToken); } catch (err) {}
+        }
+        clearInterval(otpResendCooldownTimer);
+        setTenantToken(data.token);
+        setTenantUser(data.tenant);
+        await bootstrapTenant();
+      } else {
+        let msg = (data && data.error) || WFT('auth.otp_invalid', 'رمز التحقق غير صحيح');
+        if (data && typeof data.remainingAttempts === 'number' && data.remainingAttempts > 0) {
+          msg += ' (المحاولات المتبقية: ' + data.remainingAttempts + ')';
+        }
+        showTenantError('loginError', msg);
+        if (data && data.remainingAttempts === 0) {
+          handleLoginOtpCancel();
+        }
+      }
+    }
+
+    async function handleLoginOtpResend() {
+      if (!currentLoginChallengeToken) return;
+      const resendBtn = document.getElementById('loginOtpResendBtn');
+      if (resendBtn && resendBtn.disabled) return;
+      showTenantError('loginError', '');
+
+      const data = await api('POST', '/api/auth/login/resend-otp', {
+        challengeToken: currentLoginChallengeToken
+      });
+
+      if (data && data.success && data.challengeToken) {
+        currentLoginChallengeToken = data.challengeToken;
+        toast(WFT('auth.otp_resent', 'تم إرسال رمز تحقق جديد إلى بريدك'));
+        startOtpResendCooldown(60);
+      } else {
+        showTenantError('loginError', (data && data.error) || 'تعذر إعادة إرسال الرمز');
+      }
+    }
+
+    function startOtpResendCooldown(seconds) {
+      const resendBtn = document.getElementById('loginOtpResendBtn');
+      if (!resendBtn) return;
+      clearInterval(otpResendCooldownTimer);
+      let remaining = seconds;
+      resendBtn.disabled = true;
+      resendBtn.textContent = 'إعادة إرسال الرمز (' + remaining + ')';
+      otpResendCooldownTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearInterval(otpResendCooldownTimer);
+          resendBtn.disabled = false;
+          resendBtn.textContent = 'إعادة إرسال الرمز';
+        } else {
+          resendBtn.textContent = 'إعادة إرسال الرمز (' + remaining + ')';
+        }
+      }, 1000);
+    }
+
+    function handleLoginOtpCancel() {
+      currentLoginChallengeToken = null;
+      clearInterval(otpResendCooldownTimer);
+      const loginForm = document.getElementById('loginForm');
+      const otpForm = document.getElementById('loginOtpForm');
+      if (otpForm) otpForm.style.display = 'none';
+      if (loginForm) loginForm.style.display = 'block';
+      showTenantError('loginError', '');
+    }

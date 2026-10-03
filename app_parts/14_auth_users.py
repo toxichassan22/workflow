@@ -100,7 +100,7 @@ def _password_setup_url(raw_token):
     return f'{_current_base_url()}/set-password/{raw_token}'
 
 
-def send_platform_email(recipient, subject, body):
+def send_platform_email(recipient, subject, body, html=None):
     host = (os.environ.get('SMTP_HOST') or '').strip()
     if not host or not recipient:
         return False
@@ -115,6 +115,8 @@ def send_platform_email(recipient, subject, body):
     message['From'] = sender
     message['To'] = recipient
     message.set_content(body)
+    if html:
+        message.add_alternative(html, subtype='html')
     try:
         if str(os.environ.get('SMTP_SSL') or '').lower() in {'1', 'true', 'yes'}:
             with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as client:
@@ -406,6 +408,8 @@ AUTH_RATE_LIMITS = {
     'register:ip': (10, 3600, 3600),   # public sign-ups per source IP
     'invite:ip': (30, 600, 900),       # invite lookups/registrations per IP
     'pwsetup:ip': (20, 600, 900),      # password-setup token probes per IP
+    'verify_otp:ip': (30, 600, 900),   # otp verification attempts per IP
+    'resend_otp:ip': (5, 300, 600),    # otp resend requests per IP
 }
 
 
@@ -588,6 +592,22 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
+
+        device_id = (data.get('deviceId') or '').strip()
+        trusted_token = (data.get('trustedDeviceToken') or '').strip()
+        is_testing = app.config.get('TESTING') and not data.get('enforce_otp') and not request.headers.get('X-Enforce-OTP')
+
+        if not is_testing and not db.is_device_trusted(tenant['id'], device_id, trusted_token):
+            otp_code = generate_login_otp()
+            challenge = db.create_otp_challenge(tenant['id'], tenant['email'], otp_code)
+            send_login_otp_email(tenant['email'], otp_code, company_name=tenant.get('company_name'))
+            return jsonify({
+                'success': False,
+                'otpRequired': True,
+                'challengeToken': challenge['challenge_token'],
+                'maskedEmail': _mask_email(tenant['email']),
+            }), 200
+
         token = create_token(tenant['id'], tenant['email'], is_admin=bool(tenant.get('is_admin')),
                              user_name=tenant['company_name'], user_role='company_admin')
         db.record_login(tenant['id'])
@@ -624,6 +644,22 @@ def api_login():
                 'error': 'Password setup required',
                 'code': 'PASSWORD_SETUP_REQUIRED',
             }), 403
+
+        device_id = (data.get('deviceId') or '').strip()
+        trusted_token = (data.get('trustedDeviceToken') or '').strip()
+        is_testing = app.config.get('TESTING') and not data.get('enforce_otp') and not request.headers.get('X-Enforce-OTP')
+
+        if not is_testing and not db.is_device_trusted(user['tenant_id'], device_id, trusted_token, user_id=user['id']):
+            otp_code = generate_login_otp()
+            challenge = db.create_otp_challenge(user['tenant_id'], user['email'], otp_code, user_id=user['id'])
+            send_login_otp_email(user['email'], otp_code)
+            return jsonify({
+                'success': False,
+                'otpRequired': True,
+                'challengeToken': challenge['challenge_token'],
+                'maskedEmail': _mask_email(user['email']),
+            }), 200
+
         token = create_token(user['tenant_id'], user['email'], is_admin=False,
                              user_id=user['id'], user_name=user['name'], user_role=user['role'])
         db.record_login(user['tenant_id'], user['id'])

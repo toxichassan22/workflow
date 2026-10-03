@@ -317,3 +317,152 @@ def expire_stale_invites(tenant_id):
     )
     conn.commit()
     return cursor.rowcount
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth OTP Challenges & Trusted Devices
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_otp_challenge(tenant_id, email, raw_otp, user_id=None, expiry_minutes=10):
+    """Create a 6-digit OTP challenge with single-use token and expiration."""
+    import hashlib as _hashlib
+    import secrets as _secrets
+    from datetime import timedelta
+    conn = get_db()
+    challenge_id = str(uuid.uuid4())
+    challenge_token = _secrets.token_urlsafe(32)
+    otp_hash = _hashlib.sha256(str(raw_otp).strip().encode('utf-8')).hexdigest()
+    expires_at = (_utcnow() + timedelta(minutes=expiry_minutes)).isoformat()
+    now = _utcnow().isoformat()
+
+    # Invalidate previous unused challenges for this email
+    conn.execute(
+        '''UPDATE auth_otp_codes SET used_at = ?
+           WHERE email = ? AND used_at IS NULL''',
+        (now, str(email).lower().strip())
+    )
+    conn.execute(
+        '''INSERT INTO auth_otp_codes
+           (id, tenant_id, user_id, email, otp_hash, challenge_token, attempts, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)''',
+        (challenge_id, tenant_id, user_id, str(email).lower().strip(), otp_hash, challenge_token, expires_at, now)
+    )
+    conn.commit()
+    return {
+        'id': challenge_id,
+        'challenge_token': challenge_token,
+        'expires_at': expires_at,
+        'email': email,
+    }
+
+
+def get_otp_challenge(challenge_token):
+    """Fetch an active, non-expired OTP challenge with remaining attempts."""
+    conn = get_db()
+    now = _utcnow().isoformat()
+    row = conn.execute(
+        '''SELECT * FROM auth_otp_codes
+           WHERE challenge_token = ? AND used_at IS NULL AND expires_at > ? AND attempts < 5''',
+        (challenge_token, now)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def increment_otp_attempt(challenge_token):
+    """Record an invalid OTP attempt. Returns the new attempt count."""
+    conn = get_db()
+    conn.execute(
+        '''UPDATE auth_otp_codes SET attempts = attempts + 1
+           WHERE challenge_token = ?''',
+        (challenge_token,)
+    )
+    conn.commit()
+    row = conn.execute(
+        'SELECT attempts FROM auth_otp_codes WHERE challenge_token = ?',
+        (challenge_token,)
+    ).fetchone()
+    return row['attempts'] if row else 5
+
+
+def complete_otp_challenge(challenge_token):
+    """Mark an OTP challenge as successfully verified and consumed."""
+    conn = get_db()
+    now = _utcnow().isoformat()
+    conn.execute(
+        'UPDATE auth_otp_codes SET used_at = ? WHERE challenge_token = ?',
+        (now, challenge_token)
+    )
+    conn.commit()
+
+
+def is_device_trusted(tenant_id, device_id, raw_token, user_id=None, fingerprint_hash=None):
+    """Check if the given device and secret token represent a valid trusted device."""
+    if not tenant_id or not device_id or not raw_token:
+        return False
+    import hashlib as _hashlib
+    conn = get_db()
+    token_hash = _hashlib.sha256(str(raw_token).strip().encode('utf-8')).hexdigest()
+    now = _utcnow().isoformat()
+
+    query = '''SELECT * FROM trusted_devices
+               WHERE tenant_id = ? AND device_id = ? AND token_hash = ?
+                 AND is_revoked = 0 AND expires_at > ?'''
+    params = [tenant_id, str(device_id).strip(), token_hash, now]
+
+    if user_id:
+        query += ' AND (user_id = ? OR user_id IS NULL)'
+        params.append(user_id)
+
+    row = conn.execute(query, params).fetchone()
+    if not row:
+        return False
+
+    # Bump last_used_at on successful check
+    conn.execute(
+        'UPDATE trusted_devices SET last_used_at = ? WHERE id = ?',
+        (now, row['id'])
+    )
+    conn.commit()
+    return True
+
+
+def create_trusted_device(tenant_id, device_id, user_id=None, fingerprint_hash=None,
+                          device_name=None, ip_address=None, expiry_days=90):
+    """Register or refresh a trusted device and return a raw secret token."""
+    import hashlib as _hashlib
+    import secrets as _secrets
+    from datetime import timedelta
+    conn = get_db()
+    device_row_id = str(uuid.uuid4())
+    raw_token = _secrets.token_urlsafe(32)
+    token_hash = _hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    now = _utcnow().isoformat()
+    expires_at = (_utcnow() + timedelta(days=expiry_days)).isoformat()
+
+    # Revoke any prior active tokens for this specific device on this tenant/user
+    if user_id:
+        conn.execute(
+            '''UPDATE trusted_devices SET is_revoked = 1
+               WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND is_revoked = 0''',
+            (tenant_id, user_id, str(device_id).strip())
+        )
+    else:
+        conn.execute(
+            '''UPDATE trusted_devices SET is_revoked = 1
+               WHERE tenant_id = ? AND device_id = ? AND is_revoked = 0''',
+            (tenant_id, str(device_id).strip())
+        )
+
+    conn.execute(
+        '''INSERT INTO trusted_devices
+           (id, tenant_id, user_id, device_id, token_hash, fingerprint_hash,
+            device_name, ip_address, last_used_at, expires_at, is_revoked, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+        (device_row_id, tenant_id, user_id, str(device_id).strip(), token_hash,
+         str(fingerprint_hash or '')[:128] or None,
+         str(device_name or '')[:120] or None,
+         str(ip_address or '')[:64] or None,
+         now, expires_at, now)
+    )
+    conn.commit()
+    return raw_token

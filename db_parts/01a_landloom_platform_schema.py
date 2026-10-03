@@ -249,6 +249,40 @@ def _create_landloom_tables(conn):
         updated_at TEXT DEFAULT (datetime('now'))
     )''')
 
+    # Auth OTP challenges: 6-digit codes with 10-minute expiry and attempt tracking
+    conn.execute('''CREATE TABLE IF NOT EXISTS auth_otp_codes (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT,
+        email TEXT NOT NULL,
+        otp_hash TEXT NOT NULL,
+        challenge_token TEXT NOT NULL UNIQUE,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_auth_otp_challenge ON auth_otp_codes(challenge_token)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_auth_otp_lookup ON auth_otp_codes(tenant_id, email, used_at)')
+
+    # Trusted devices: persistent browser fingerprint + secret token for seamless login
+    conn.execute('''CREATE TABLE IF NOT EXISTS trusted_devices (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT,
+        device_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        fingerprint_hash TEXT,
+        device_name TEXT,
+        ip_address TEXT,
+        last_used_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT NOT NULL,
+        is_revoked INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_trusted_devices_lookup ON trusted_devices(tenant_id, device_id, is_revoked)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_trusted_devices_token ON trusted_devices(token_hash)')
+
 
 def _ensure_landloom_columns(conn):
     """Additive migrations on existing installs: last_login on users/tenants."""

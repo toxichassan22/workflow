@@ -67,6 +67,18 @@
           </div>
           <button type="submit" class="auth-btn">دخول</button>
         </form>
+        <form id="loginOtpForm" class="auth-form" onsubmit="handleLoginOtpVerify(event)" style="display:none">
+          <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:12px;text-align:center">رمز التحقق مرسل إلى البريد الإلكتروني</p>
+          <label>رمز التحقق</label>
+          <div style="position:relative;margin-bottom:14px">
+            <input type="text" id="loginOtpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="20" placeholder="000000" required style="letter-spacing:6px;font-size:20px;text-align:center;font-weight:bold;margin-bottom:0">
+          </div>
+          <button type="submit" class="auth-btn" id="loginOtpSubmitBtn">تأكيد الرمز</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px">
+            <button type="button" class="btn ghost small" id="loginOtpResendBtn" onclick="handleLoginOtpResend()">إعادة إرسال الرمز</button>
+            <button type="button" class="btn ghost small" onclick="handleLoginOtpCancel()">الرجوع</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
