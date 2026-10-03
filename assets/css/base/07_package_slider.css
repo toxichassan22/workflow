@@ -45,12 +45,13 @@
     .pkg-card {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
       width: 100%;
-      padding: 14px;
+      padding: 18px;
       background: var(--surface);
       border: 1px solid var(--ui-border);
-      border-radius: 9px;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
     }
 
     .pkg-card h3 {
@@ -82,12 +83,15 @@
 
     .pkg-pick {
       cursor: pointer;
-      transition: border-color .16s ease, background-color .16s ease;
+      transition: border-color .16s ease, background-color .16s ease,
+        transform .16s ease, box-shadow .16s ease;
     }
 
     .pkg-pick:hover {
       background: var(--surface-subtle);
       border-color: var(--ui-border-strong);
+      box-shadow: var(--shadow-lift);
+      transform: translateY(-2px);
     }
 
     .pkg-pick.selected {

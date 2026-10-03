@@ -13,6 +13,9 @@
       const renderCard = opts.renderCard || function () { return ''; };
       const maxVisible = opts.maxVisible || 3;
       const minCardWidth = opts.minCardWidth || 150;
+      // Fewer cards than the window must not stretch edge to edge — a
+      // static row holds `maxCardWidth` and centers instead.
+      const maxCardWidth = opts.maxCardWidth || 300;
       const gap = opts.gap == null ? 12 : opts.gap;
       let items = Array.isArray(opts.items) ? opts.items : [];
       let n = items.length;
@@ -84,10 +87,18 @@
           (minCardWidth * maxVisible + gap * (maxVisible - 1));
         visible = Math.max(1, Math.min(
           maxVisible, n || 1, Math.floor((vpW + gap) / (minCardWidth + gap))));
+        // On a very wide pane, filling only `maxVisible` slots would stretch
+        // each card past `maxCardWidth` — grow the window instead so the
+        // cards keep their compact shape while more items stay in view.
+        if (n > visible && (vpW - gap * (visible - 1)) / visible > maxCardWidth) {
+          visible = Math.min(n, Math.ceil((vpW + gap) / (maxCardWidth + gap)));
+        }
         sliding = n > visible;
-        const cardW = Math.max(0, (vpW - gap * (visible - 1)) / visible);
+        let cardW = Math.max(0, (vpW - gap * (visible - 1)) / visible);
+        if (!sliding) cardW = Math.min(cardW, maxCardWidth);
         step = cardW + gap;
         track.style.gap = gap + 'px';
+        track.style.justifyContent = sliding ? '' : 'center';
         const cardHtml = (i, clone) =>
           '<div class="wf-slider-card"' +
           (clone ? ' data-clone="1" aria-hidden="true"' : '') +
