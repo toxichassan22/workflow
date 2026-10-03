@@ -95,7 +95,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "إلغاء الطلب": "Cancel request",
   "إلى (ر.س)": "To (SAR)",
   "إلى (م²)": "To (sqm)",
-  "إنشاء / إعادة توليد الوصف": "Create / regenerate description",
   "إنشاء الحساب": "Create account",
   "إنشاء الحساب ورابط كلمة المرور": "Create Account & Password Link",
   "إيراد": "Revenue",

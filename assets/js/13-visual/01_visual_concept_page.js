@@ -8,8 +8,7 @@
       if (button && !button.disabled) {
         const action = button.getAttribute('data-visual-action');
         const slotId = button.getAttribute('data-visual-slot');
-        if (action === 'prompt') generateVisualConceptPrompt(slotId);
-        else if (action === 'generate') generateVisualConceptImage(slotId);
+        if (action === 'generate') generateVisualConceptImage(slotId);
         else if (action === 'approve') approveVisualConceptImage(slotId);
         else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
         else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
@@ -61,13 +60,6 @@
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
       const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
-      bindRoot.querySelectorAll('[data-visual-prompt]').forEach(input => {
-        input.addEventListener('input', () => {
-          const slotId = input.getAttribute('data-visual-prompt');
-          tenantVisualConceptState.slots[slotId].prompt = input.value;
-          markVisualConceptDirty();
-        });
-      });
       bindRoot.querySelectorAll('[data-visual-caption]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-caption');

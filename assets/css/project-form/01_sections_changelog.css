@@ -673,17 +673,6 @@
       margin-top: 10px;
     }
 
-    .visual-concept-prompt {
-      width: 100%;
-      min-height: 64px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px;
-      font: inherit;
-      direction: ltr;
-      text-align: left;
-    }
-
     .visual-concept-stack {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));

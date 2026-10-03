@@ -498,10 +498,8 @@
         coverImage: tenantVisualConceptState.slots.cover.approvedImageUrl || tenantVisualConceptState.slots.cover.imageUrl || '',
         coverFileId: tenantVisualConceptState.slots.cover.sourceFileId || '',
         slotLabel: visualConceptSlotLabel(slotId),
-        currentPrompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
-          || tenantVisualConceptState.slots[slotId]?.prompt || '',
-        prompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
-          || tenantVisualConceptState.slots[slotId]?.prompt || '',
+        currentPrompt: tenantVisualConceptState.slots[slotId]?.prompt || '',
+        prompt: tenantVisualConceptState.slots[slotId]?.prompt || '',
         componentId: isVisualConceptInteriorSlot(slotId)
           ? (visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId())
           : '',
@@ -750,13 +748,10 @@
           deleteBtn + deleteFieldBtn +
           '</div>';
       } else {
-        bodyControls = '<label>وصف التوليد</label>' +
-          '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
-          (isVisualConceptPlanSlot(slotDef.id)
-            ? '<label>وصف المخطط</label><textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>'
-            : '') +
+        bodyControls = (isVisualConceptPlanSlot(slotDef.id)
+          ? '<label>وصف المخطط</label><textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>'
+          : '') +
           '<div class="visual-concept-actions">' +
-          '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
           '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
           deleteBtn + deleteFieldBtn +
@@ -1147,7 +1142,7 @@
         ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
           renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
         ).join('') + '</div>'
-        : '<p class="tenant-hint">لم تُجهز برومبتات المخططات بعد.</p>';
+        : '<p class="tenant-hint">المخططات غير جاهزة للتوليد بعد.</p>';
       root.innerHTML =
         '<div class="plans-workflow-card">' +
         '<ol class="plans-workflow-steps">' +
@@ -1172,8 +1167,8 @@
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">إعداد برومبتات المخططات</button></div>' +
-        '<p class="tenant-hint">' + escapeHtml(promptReady ? 'البرومبتات جاهزة للتعديل والتوليد.' : (workflow.promptsError ? 'تعذر إعداد برومبتات المخططات: ' + workflow.promptsError : 'برومبتات المخططات الثلاثة غير جاهزة.')) + '</p>' +
+        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">تجهيز توليد المخططات</button></div>' +
+        '<p class="tenant-hint">' + escapeHtml(promptReady ? 'المخططات جاهزة للتوليد.' : (workflow.promptsError ? 'تعذر تجهيز توليد المخططات: ' + workflow.promptsError : 'المخططات الثلاثة غير جاهزة للتوليد.')) + '</p>' +
         '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
         '</section></div>';
       const preview = root.querySelector('[data-plans-boundary-preview]');
@@ -1502,14 +1497,14 @@
       if (visualConceptPlansPromptsPending) return;
       visualConceptPlansPromptsPending = true;
       initialWorkflow.promptsError = '';
-      showLoader(WFT('plans.prompts_loading', 'جاري إعداد برومبتات المخططات'), WFT('plans.prompts_loading_detail', 'يتم بناء البرومبتات من البيانات المعتمدة وحدود الأرض...'), 50);
+      showLoader(WFT('plans.prompts_loading', 'جاري تجهيز توليد المخططات'), WFT('plans.prompts_loading_detail', 'يتم تجهيز المخططات من البيانات المعتمدة وحدود الأرض...'), 50);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const response = await api('POST', '/api/visual-concept/plans-prompts', payload);
         hideLoader();
         const workflow = visualConceptPlansWorkflowState();
         if (!response?.success || !response.prompts) {
-          workflow.promptsError = String(response?.error || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+          workflow.promptsError = String(response?.error || WFT('plans.prompts_failed', 'تعذر تجهيز توليد المخططات'));
           markVisualConceptDirty();
           renderVisualConceptPage();
           toast(workflow.promptsError);
@@ -1517,7 +1512,7 @@
         }
         workflow.prompts = { ...workflow.prompts, ...response.prompts };
         workflow.promptReady = VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(workflow.prompts[item.kind]));
-        workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'برومبتات المخططات الثلاثة غير مكتملة');
+        workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'تجهيز المخططات الثلاثة غير مكتمل');
         workflow.status = workflow.promptReady ? 'ready' : 'boundary';
         VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
           const slot = tenantVisualConceptState.slots[definition.id] || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
@@ -1531,7 +1526,7 @@
       } catch (error) {
         hideLoader();
         const workflow = visualConceptPlansWorkflowState();
-        workflow.promptsError = String(error.message || WFT('plans.prompts_failed', 'تعذر إعداد برومبتات المخططات'));
+        workflow.promptsError = String(error.message || WFT('plans.prompts_failed', 'تعذر تجهيز توليد المخططات'));
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast(workflow.promptsError);
