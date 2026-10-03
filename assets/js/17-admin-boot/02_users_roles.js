@@ -799,36 +799,57 @@
       initGlobalRail();
     }
 
+    // Shared chrome for the public entry screens (set-password, invite): the
+    // same brand header + body shell the login card uses, plus a read-only box
+    // that mirrors the auth-form inputs for fixed values (company, email).
+    function authBrandHeader() {
+      return '<div class="auth-brand">' +
+        '<img class="auth-brand-logo" src="/assets/landloom-logo.png" alt="LandLoom">' +
+        '<p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>' +
+        '</div>';
+    }
+
+    const AUTH_RO_VALUE_STYLE = 'display:block;width:100%;box-sizing:border-box;min-height:46px;' +
+      'border:1.5px solid #e2e8f0;border-radius:12px;background:#f8fafc;' +
+      'padding:12px 14px;font-size:14px;font-weight:600;color:#07182C;margin:0 0 14px';
+    const AUTH_PASS_TOGGLE_STYLE = 'position:absolute;left:10px;top:50%;transform:translateY(-50%);' +
+      'border:0;background:none;color:#07182C;font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px';
+    const AUTH_NOTE_STYLE = 'color:#475569;font-size:14px;font-weight:600;text-align:center;margin:0 0 20px';
+
     async function showPasswordSetupPage(rawToken) {
       const data = await api('GET', '/api/auth/password-setup/' + encodeURIComponent(rawToken));
       const authPage = document.getElementById('tenantAuthPage');
       document.getElementById('tenantAppPage').classList.remove('active');
       authPage.classList.add('active');
       if (!data.success) {
-        authPage.innerHTML = '<div class="auth-card"><h2>رابط كلمة المرور غير صالح</h2>' +
-          '<p>انتهت صلاحية الرابط أو تم استخدامه.</p>' +
-          '<button class="auth-btn" onclick="window.location.href=\'/\'">العودة لتسجيل الدخول</button></div>';
+        authPage.innerHTML = '<div class="auth-card">' + authBrandHeader() +
+          '<div class="auth-body">' +
+          '<p class="auth-title">رابط كلمة المرور غير صالح</p>' +
+          '<div style="' + AUTH_NOTE_STYLE + '">انتهت صلاحية الرابط أو تم استخدامه.</div>' +
+          '<button class="auth-btn" onclick="window.location.href=\'/\'">العودة لتسجيل الدخول</button>' +
+          '</div></div>';
         return;
       }
-      authPage.innerHTML = '<div class="auth-card">' +
-        '<h2>تعيين كلمة المرور</h2>' +
-        '<p>' + escapeHtml(data.companyName || '') + '</p>' +
-        '<div class="tenant-grid full" style="margin-bottom:16px;text-align:right">' +
-        '<div class="tenant-field"><label>البريد الإلكتروني</label><p style="margin:0">' +
-        escapeHtml(data.email || '') + '</p></div></div>' +
-        '<div id="passwordSetupError" class="auth-error"></div>' +
+      authPage.innerHTML = '<div class="auth-card">' + authBrandHeader() +
+        '<div class="auth-body">' +
+        '<p class="auth-title">تعيين كلمة المرور</p>' +
         '<form class="auth-form active" onsubmit="handlePasswordSetup(event, \'' +
         rawToken.replace(/'/g, '') + '\')">' +
+        '<label>اسم الشركة</label>' +
+        '<div style="' + AUTH_RO_VALUE_STYLE + '">' + escapeHtml(data.companyName || '') + '</div>' +
+        '<label>البريد الإلكتروني</label>' +
+        '<div style="' + AUTH_RO_VALUE_STYLE + '">' + escapeHtml(data.email || '') + '</div>' +
+        '<div id="passwordSetupError" class="auth-error"></div>' +
         '<label>كلمة المرور الجديدة</label>' +
-        '<div style="position:relative;margin-bottom:12px">' +
+        '<div style="position:relative;margin-bottom:14px">' +
         '<input type="password" id="passwordSetupValue" minlength="10" autocomplete="new-password" required style="padding-left:70px;margin-bottom:0">' +
-        '<button type="button" onclick="togglePasswordSetupVisibility(\'passwordSetupValue\', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button></div>' +
+        '<button type="button" onclick="togglePasswordSetupVisibility(\'passwordSetupValue\', this)" style="' + AUTH_PASS_TOGGLE_STYLE + '">إظهار</button></div>' +
         '<label>تأكيد كلمة المرور</label>' +
-        '<div style="position:relative">' +
+        '<div style="position:relative;margin-bottom:16px">' +
         '<input type="password" id="passwordSetupConfirm" minlength="10" autocomplete="new-password" required style="padding-left:70px;margin-bottom:0">' +
-        '<button type="button" onclick="togglePasswordSetupVisibility(\'passwordSetupConfirm\', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button></div>' +
+        '<button type="button" onclick="togglePasswordSetupVisibility(\'passwordSetupConfirm\', this)" style="' + AUTH_PASS_TOGGLE_STYLE + '">إظهار</button></div>' +
         '<button type="submit" class="auth-btn">اعتماد كلمة المرور</button>' +
-        '</form></div>';
+        '</form></div></div>';
     }
 
     function togglePasswordVisibility(inputId, btn) {
@@ -847,21 +868,20 @@
       event.preventDefault();
       const password = document.getElementById('passwordSetupValue').value;
       const confirmation = document.getElementById('passwordSetupConfirm').value;
-      const errorHost = document.getElementById('passwordSetupError');
-      errorHost.textContent = '';
+      showTenantError('passwordSetupError', '');
       if (password !== confirmation) {
-        errorHost.textContent = 'كلمتا المرور غير متطابقتين';
+        showTenantError('passwordSetupError', 'كلمتا المرور غير متطابقتين');
         return;
       }
       const pwError = passwordPolicyError(password);
-      if (pwError) { errorHost.textContent = pwError; return; }
+      if (pwError) { showTenantError('passwordSetupError', pwError); return; }
       const data = await api(
         'POST',
         '/api/auth/password-setup/' + encodeURIComponent(rawToken),
         { password }
       );
       if (!data.success || !data.token) {
-        errorHost.textContent = data.error || 'تعذر اعتماد كلمة المرور';
+        showTenantError('passwordSetupError', data.error || 'تعذر اعتماد كلمة المرور');
         return;
       }
       setTenantToken(data.token);
@@ -878,24 +898,32 @@
       const data = await api('GET', '/api/invite/' + inviteToken);
       const authPage = document.getElementById('tenantAuthPage');
       if (!data.success) {
-        authPage.innerHTML = '<div class="auth-card"><h2>الدعوة غير صالحة</h2><p>رابط الدعوة منتهي أو مستخدم بالفعل.</p><button class="auth-btn" onclick="window.location.href=\'/\'">العودة للرئيسية</button></div>';
+        authPage.innerHTML = '<div class="auth-card">' + authBrandHeader() +
+          '<div class="auth-body">' +
+          '<p class="auth-title">الدعوة غير صالحة</p>' +
+          '<div style="' + AUTH_NOTE_STYLE + '">رابط الدعوة منتهي أو مستخدم بالفعل.</div>' +
+          '<button class="auth-btn" onclick="window.location.href=\'/\'">العودة للرئيسية</button>' +
+          '</div></div>';
         authPage.style.display = 'flex';
         return;
       }
-      authPage.innerHTML = '<div class="auth-card">' +
-        '<h2>دعوة انضمام للشركة</h2>' +
-        '<p>تمت دعوتك للانضمام لـ <strong>' + escapeHtml(data.companyName) + '</strong></p>' +
-        '<p class="tenant-hint">البريد: ' + escapeHtml(data.email) + '</p>' +
-        '<div id="inviteError" class="auth-error"></div>' +
+      authPage.innerHTML = '<div class="auth-card">' + authBrandHeader() +
+        '<div class="auth-body">' +
+        '<p class="auth-title">دعوة انضمام للشركة</p>' +
         '<form class="auth-form active" onsubmit="handleInviteRegister(event, \'' + inviteToken + '\')">' +
+        '<label>اسم الشركة</label>' +
+        '<div style="' + AUTH_RO_VALUE_STYLE + '">' + escapeHtml(data.companyName || '') + '</div>' +
+        '<label>البريد الإلكتروني</label>' +
+        '<div style="' + AUTH_RO_VALUE_STYLE + '">' + escapeHtml(data.email || '') + '</div>' +
+        '<div id="inviteError" class="auth-error"></div>' +
         '<label>الاسم الكامل *</label>' +
         '<input type="text" id="inviteName" placeholder="اسمك الكامل" required>' +
         '<label>كلمة المرور (10 أحرف على الأقل، حروف وأرقام) *</label>' +
-        '<div style="position:relative">' +
-        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="10" style="padding-left:64px">' +
-        '<button type="button" onclick="togglePasswordVisibility(\'invitePassword\', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button></div>' +
+        '<div style="position:relative;margin-bottom:16px">' +
+        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="10" style="padding-left:64px;margin-bottom:0">' +
+        '<button type="button" onclick="togglePasswordVisibility(\'invitePassword\', this)" style="' + AUTH_PASS_TOGGLE_STYLE + '">إظهار</button></div>' +
         '<button type="submit" class="auth-btn">إنشاء حسابي</button>' +
-        '</form></div>';
+        '</form></div></div>';
       authPage.style.display = 'flex';
     }
 
