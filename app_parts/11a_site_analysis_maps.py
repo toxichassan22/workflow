@@ -88,6 +88,13 @@ def api_nearby_landmarks():
         return jsonify({'error': 'lat and lng are required'}), 400
     nearby_lang = maps_service.map_language(data.get('projectData') if isinstance(data.get('projectData'), dict) else data)
     result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data), language=nearby_lang)
+    if nearby_lang == 'en' and result.get('success'):
+        landmarks = result.get('landmarks') or []
+        label_map = translate_site_labels_en([item.get('name') for item in landmarks], data, g.tenant_id)
+        for item in landmarks:
+            translated = label_map.get(str(item.get('name') or '').strip())
+            if translated:
+                item['name'] = translated
     status = 502 if result.get('error') and not result.get('success') else 200
     return jsonify(result), status
 
@@ -161,6 +168,15 @@ def api_preview_map_data():
         places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data), language=preview_lang)
         if places.get('success'):
             landmarks = places['landmarks']
+            if preview_lang == 'en' and landmarks:
+                # Same gap as _collect_site_fields: Places may still return
+                # Arabic display names under languageCode=en.
+                preview_map = translate_site_labels_en(
+                    [lm.get('name') for lm in landmarks], project_data, g.tenant_id)
+                for lm in landmarks:
+                    translated = preview_map.get(str(lm.get('name') or '').strip())
+                    if translated:
+                        lm['name'] = translated
             if not landmarks:
                 landmarks_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع'
         else:
@@ -457,6 +473,43 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         primary_location.get('address_components') or secondary_location.get('address_components') or [],
         primary_location.get('formatted_address') or secondary_location.get('formatted_address') or '',
     )
+    if lang == 'en':
+        # Google keeps Arabic display names for many Saudi places — one batched
+        # call translates whatever the APIs could not localize. Road names keep
+        # their original in name_src as the Google-matching alias.
+        label_map = translate_site_labels_en(
+            [item.get('name') for item in nearby_items]
+            + [item.get('category') for item in nearby_items]
+            + [item.get('name') for item in city_items]
+            + [item.get('category') for item in city_items]
+            + [item.get('name') for item in all_roads]
+            + [item.get('type') for item in all_roads]
+            + [place_names.get('city'), place_names.get('district'),
+               primary_location.get('formatted_address')
+               or secondary_location.get('formatted_address')],
+            project_data, tenant_id)
+        for item in nearby_items + city_items:
+            for key in ('name', 'category'):
+                translated = label_map.get(str(item.get(key) or '').strip())
+                if translated:
+                    item[key] = translated
+        for item in all_roads:
+            original_name = str(item.get('name') or '').strip()
+            if label_map.get(original_name):
+                item.setdefault('name_src', original_name)
+                item['name'] = label_map[original_name]
+            for key in ('category', 'type'):
+                translated = label_map.get(str(item.get(key) or '').strip())
+                if translated:
+                    item[key] = translated
+        for key in ('city', 'district'):
+            translated = label_map.get(str(place_names.get(key) or '').strip())
+            if translated:
+                place_names[key] = translated
+        formatted = str(primary_location.get('formatted_address') or '').strip()
+        if label_map.get(formatted):
+            primary_location = dict(primary_location)
+            primary_location['formatted_address'] = label_map[formatted]
     fields = {
         'location_lat': lat,
         'location_detail': primary_location.get('formatted_address') or secondary_location.get('formatted_address', ''),
@@ -464,9 +517,15 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         'nearby_landmarks': landmark_lines(nearby_items),
         'city_landmarks': landmark_lines(city_items),
     }
-    if place_names.get('city') and (site_moved or not str(project_data.get('city') or '').strip()):
+    if lang == 'en':
+        # A re-run under an English project replaces city/district values that
+        # were collected and stored in Arabic earlier.
+        stale_arabic = lambda value: bool(re.search('[\\u0600-\\u06FF]', str(value or '')))
+    else:
+        stale_arabic = lambda value: False
+    if place_names.get('city') and (site_moved or not str(project_data.get('city') or '').strip() or stale_arabic(project_data.get('city'))):
         fields['city'] = place_names['city']
-    if place_names.get('district') and (site_moved or not str(project_data.get('district') or '').strip()):
+    if place_names.get('district') and (site_moved or not str(project_data.get('district') or '').strip() or stale_arabic(project_data.get('district'))):
         fields['district'] = place_names['district']
     if population.get('available'):
         population_unit = population.get('unit', 'نسمة/كم²')

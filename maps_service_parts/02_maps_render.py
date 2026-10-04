@@ -1470,6 +1470,24 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         }
         discoverable_road_names = [name for name in approved_road_names if _road_name_key(name) not in manual_road_keys]
 
+        # A stored road name translated for an English deck never matches the
+        # name Google returns, so matching runs on the original-script alias
+        # (name_src, kept at collection time) while the drawn label stays the
+        # approved display name.
+        discoverable_aliases = []
+        display_by_alias = {}
+        for name in discoverable_road_names:
+            alias = name
+            for item in road_data if isinstance(road_data, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                display = str(item.get('name') or '').strip()
+                if display and is_same_road_name(display, name):
+                    alias = str(item.get('name_src') or '').strip() or display
+                    break
+            discoverable_aliases.append(alias)
+            display_by_alias[alias] = name
+
         # Manual geometry is already reviewed by the user, but its label must still
         # match a normalized main-road name. The provided point sequence is kept intact.
         road_route_mapping = _approved_manual_road_paths(
@@ -1516,6 +1534,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         # so every regeneration snapped to different roads and the map came back with a
         # different set of street names for the same site.
         road_lang = map_language(project_data)
+        ambient_ctx = _current_maps_ctx()
         probe_points = access_probe_points(route_origin_lat, route_origin_lng)
         targeted_probes = []
         for item in road_data if isinstance(road_data, list) else []:
@@ -1528,11 +1547,16 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             except (TypeError, ValueError):
                 continue
             if expected_name and math.isfinite(road_lat) and math.isfinite(road_lng):
-                targeted_probes.append(((road_lat, road_lng), expected_name))
+                expected_alias = str(item.get('name_src') or '').strip() or expected_name
+                targeted_probes.append(((road_lat, road_lng), (expected_name, expected_alias)))
         probe_entries = targeted_probes + [(point, None) for point in probe_points]
 
         def _fetch_probe_route(entry):
-            probe, expected_name = entry
+            probe, expected_pair = entry
+            if isinstance(expected_pair, tuple):
+                expected_name, expected_alias = expected_pair
+            else:
+                expected_name, expected_alias = expected_pair, expected_pair
             p_lat, p_lng = probe
             snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
             dest_lat = snapped['lat'] if snapped else p_lat
@@ -1552,8 +1576,16 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 )
                 if localized_name:
                     discovered_name = localized_name
-            candidates = [expected_name] if expected_name else discoverable_road_names
-            approved_name = match_known_road_name(discovered_name, candidates)
+            if expected_name:
+                # A targeted probe sits on the stored road's own coordinates —
+                # a cross-script Google name it cannot verify under an English
+                # deck still draws under the approved label instead of dropping
+                # the road. Arabic keeps the strict name check.
+                matched = match_known_road_name(discovered_name, [expected_alias or expected_name])
+                approved_name = expected_name if (matched or road_lang == 'en') else None
+            else:
+                matched_alias = match_known_road_name(discovered_name, discoverable_aliases)
+                approved_name = display_by_alias.get(matched_alias) if matched_alias else None
             if not approved_name:
                 return None
             return route['coords'], approved_name, _road_name_key(approved_name)
@@ -1565,6 +1597,21 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         probe_results = []
         if allow_discovery and remaining_approved_names:
             print("[ACCESS ROADS] Discovering approved nearby roads through Google Maps APIs...")
+            targeted_names = [pair[1][0] for pair in targeted_probes if isinstance(pair[1], tuple)]
+            alias_by_name = dict(zip(discoverable_road_names, discoverable_aliases))
+            for name in remaining_approved_names:
+                if any(is_same_road_name(name, seen) for seen in targeted_names):
+                    continue
+                # Name-only approved rows carry no stored coordinates — under an
+                # English deck the fixed probes' name check cannot match a road
+                # Google only names in Arabic, so the row is located through
+                # Places first and its probe then binds to real geometry.
+                place = find_place_near(
+                    name, route_origin_lat, route_origin_lng,
+                    radius_m=30000, language=road_lang, usage_ctx=ambient_ctx)
+                if place and place.get('lat') is not None and place.get('lng') is not None:
+                    probe_entries.append(((place['lat'], place['lng']),
+                                          (name, alias_by_name.get(name) or name)))
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, max(1, len(probe_entries)))) as executor:
                 probe_results = list(executor.map(_fetch_probe_route, probe_entries))
