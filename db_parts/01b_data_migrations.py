@@ -92,6 +92,36 @@ def _migrate_font_system(conn):
                VALUES (?, ?, ?, ?, ?, 'preset', ?, 1, 1)""",
             (font_id, name, family, script, weight, family),
         )
+
+    # The most popular families a company can pick without uploading a file. Every
+    # name resolves in design_templates._resolve_preset_font_source — a Google
+    # Fonts import or the reader's installed copy. Script coverage follows the
+    # glyphs the family actually ships: Traditional Arabic has no Latin face and
+    # Segoe UI / Georgia / Helvetica carry no Arabic glyphs, so those scripts
+    # keep their own selection (or the platform default) instead of a dead name.
+    popular = [
+        ('the-sans-arabic', 'The Sans Arabic', ('latin',)),
+        ('arial', 'Arial', ('arabic',)),
+        ('cairo', 'Cairo', ('arabic', 'latin')),
+        ('times-new-roman', 'Times New Roman', ('arabic', 'latin')),
+        ('traditional-arabic', 'Traditional Arabic', ('arabic',)),
+        ('amiri', 'Amiri', ('arabic', 'latin')),
+        ('segoe-ui', 'Segoe UI', ('latin',)),
+        ('georgia', 'Georgia', ('latin',)),
+        ('tajawal', 'Tajawal', ('arabic', 'latin')),
+        ('almarai', 'Almarai', ('arabic', 'latin')),
+        ('helvetica', 'Helvetica', ('latin',)),
+    ]
+    for slug, family, scripts in popular:
+        for script in scripts:
+            for weight in ('regular', 'bold'):
+                name = family if weight == 'regular' else f'{family} Bold'
+                conn.execute(
+                    """INSERT OR IGNORE INTO sag_fonts
+                       (id, font_name, font_family, script, weight, source_type, source_data, is_active, is_default)
+                       VALUES (?, ?, ?, ?, ?, 'preset', ?, 1, 0)""",
+                    (f'sag-pop-{slug}-{script}-{weight}', name, family, script, weight, family),
+                )
     conn.commit()
 
 

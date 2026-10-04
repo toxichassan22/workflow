@@ -171,6 +171,7 @@ def _resolve_preset_font_source(name):
         'almarai': 'Almarai',
         'arefruqaa': 'Aref+Ruqaa',
         'readexpro': 'Readex+Pro',
+        'amiri': 'Amiri',
     }
     if norm in google_map:
         encoded = google_map[norm]
@@ -181,6 +182,13 @@ def _resolve_preset_font_source(name):
     system_map = {
         'arial': 'Arial',
         'tahoma': 'Tahoma',
+        'timesnewroman': 'Times New Roman',
+        'timesroman': 'Times New Roman',
+        'traditionalarabic': 'Traditional Arabic',
+        'segoeui': 'Segoe UI',
+        'segoeuiarabic': 'Segoe UI',
+        'georgia': 'Georgia',
+        'helvetica': 'Helvetica',
     }
     if norm in system_map:
         return {'type': 'system', 'family': system_map[norm]}

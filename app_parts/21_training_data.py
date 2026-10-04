@@ -576,13 +576,19 @@ def api_training_chat():
         tokens = set(re.findall(r'[؀-ۿ]+|[A-Za-z]+', message))
         if not parsed_actions and (tokens & font_words or 'font' in message.lower()):
             msg_lower = message.lower()
-            font_hit = None
+            font_hits = []
             for f in db.get_sag_fonts():
                 name = (f.get('font_name') or '').lower()
                 family = (f.get('font_family') or '').lower()
                 if (name and name in msg_lower) or (family and family in msg_lower):
-                    font_hit = f
-                    break
+                    font_hits.append(f)
+            # A family match lands on whatever row sorts first — 'bold' before
+            # 'regular' — so "الخط Cairo" used to latch onto the Cairo Bold row.
+            # Prefer a hit whose own name is in the message at regular weight.
+            named_hits = [f for f in font_hits if (f.get('font_name') or '').lower() in msg_lower]
+            font_hit = next((f for f in named_hits if f.get('weight') == 'regular'), None) \
+                or (named_hits[0] if named_hits else None) \
+                or (font_hits[0] if font_hits else None)
             if font_hit:
                 parsed_actions.append({'tool': 'set_font', 'params': {'font_query': font_hit['font_name']}})
                 reply = f"تم تخصيص خط الشركة إلى **{font_hit['font_name']}**. "

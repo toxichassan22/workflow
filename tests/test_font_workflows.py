@@ -125,6 +125,37 @@ class FontWorkflowTests(unittest.TestCase):
         families = {f['font_family'] for f in payload['available']}
         self.assertIn('Cairo', families)
 
+    def test_popular_preset_families_are_seeded_and_resolve(self):
+        """The seeded catalog offers the popular families without a file upload."""
+        from design_templates import _resolve_preset_font_source
+
+        expected = {'Arial', 'Cairo', 'Times New Roman', 'The Sans Arabic', 'Traditional Arabic',
+                    'Amiri', 'Segoe UI', 'Georgia', 'Tajawal', 'Almarai', 'Helvetica'}
+        with self.app.app_context():
+            available = db.get_sag_fonts(active_only=False)
+        seeded = {f['font_family'] for f in available}
+        self.assertTrue(expected <= seeded, expected - seeded)
+        for row in available:
+            if row['font_family'] not in expected:
+                continue
+            self.assertEqual(row['source_type'], 'preset', row)
+            if row['id'].startswith('sag-pop-'):
+                self.assertFalse(row['is_default'], row)
+            source = _resolve_preset_font_source(row['source_data'] or row['font_family'])
+            self.assertIsNotNone(source, row)
+            self.assertIn(source['type'], ('bundled', 'google', 'system'), row)
+
+        scripts = {}
+        for row in available:
+            scripts.setdefault(row['font_family'], set()).add(row['script'])
+        self.assertEqual(scripts['Traditional Arabic'], {'arabic'})
+        self.assertEqual(scripts['Segoe UI'], {'latin'})
+        self.assertEqual(scripts['Georgia'], {'latin'})
+        self.assertEqual(scripts['Helvetica'], {'latin'})
+        for family in ('Arial', 'Cairo', 'Times New Roman', 'The Sans Arabic',
+                       'Amiri', 'Tajawal', 'Almarai'):
+            self.assertEqual(scripts[family], {'arabic', 'latin'}, family)
+
     def test_put_and_delete_branding_font_selection(self):
         client = self.app.test_client()
         resp = client.put('/api/branding/fonts', headers=self._headers(self.token), json={
@@ -417,8 +448,9 @@ class FontWorkflowTests(unittest.TestCase):
             result = self.application_module._execute_agent_action(self.tenant, {'tool': 'list_fonts'})
         self.assertEqual(result['status'], 'success')
         # The registry ships with seeded defaults plus the two Cairo rows created in setUpClass.
-        cairo_fonts = [f for f in result['data']['available'] if f['font_family'] == 'Cairo']
-        self.assertEqual(len(cairo_fonts), 2)
+        available_ids = {f['id'] for f in result['data']['available']}
+        self.assertIn(self.font_ar, available_ids)
+        self.assertIn(self.font_lat, available_ids)
         self.assertEqual(result['data']['current'][0]['font_id'], self.font_ar)
 
     def test_agent_set_font_by_name_applies_to_all_scripts(self):
