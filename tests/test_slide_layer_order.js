@@ -26,6 +26,7 @@ const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding
   '15-slide-edit-chat/04_slide_activity.js',
   '16-presentations-export/01_presentations.js',
   '16-presentations-export/02_admin_dashboard.js',
+  '16-presentations-export/02a_admin_charts.js',
   '16-presentations-export/03_export_delivery.js',
   '16-presentations-export/04_sag_company_create.js',
   '17-admin-boot/01_training_rules.js',
