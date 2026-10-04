@@ -1,6 +1,8 @@
 *.png binary
-*.ttf filter=lfs diff=lfs merge=lfs -text
-*.otf filter=lfs diff=lfs merge=lfs -text
+# Fonts ship as regular blobs: the deploy host has no git-lfs, so LFS-tracked
+# web fonts arrived as pointer text and browsers rejected them (OTS parse).
+*.ttf binary
+*.otf binary
 *.db filter=lfs diff=lfs merge=lfs -text
 
 *.sh text eol=lf
