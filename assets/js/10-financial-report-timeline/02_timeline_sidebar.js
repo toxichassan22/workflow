@@ -241,6 +241,7 @@
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && target) {
         window.WFI18n.autoTranslate(target);
       }
+      if (typeof refreshActiveSectionApproveButton === 'function') refreshActiveSectionApproveButton();
     }
 
     // Keep for backward compatibility with older callers.

@@ -304,19 +304,6 @@
           generateButton.addEventListener('click', () => generateProjectSectionPresentation(sectionKey, label));
           title.appendChild(generateButton);
         }
-        const toggleButton = document.createElement('button');
-        toggleButton.type = 'button';
-        toggleButton.className = 'section-approve-btn';
-        toggleButton.id = 'section-lock-toggle-' + sectionKey;
-        toggleButton.dataset.sectionLockIgnore = '1';
-        toggleButton.textContent = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
-        if (typeof tr === 'function') toggleButton.textContent = tr(toggleButton.textContent);
-        toggleButton.dataset.arText = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
-        toggleButton.addEventListener('click', () => {
-          const next = (tenantProjectSectionStatuses[sectionKey] === 'approved') ? 'draft' : 'approved';
-          setSectionStatus(sectionKey, next);
-        });
-        title.appendChild(toggleButton);
         const sendButton = document.createElement('button');
         sendButton.type = 'button';
         sendButton.className = 'section-approve-btn';
@@ -386,14 +373,40 @@
           badge.textContent = normalizedStatus === 'approved' ? tr('معتمد') : tr('مسودة');
           badge.dataset.arText = normalizedStatus === 'approved' ? 'معتمد' : 'مسودة';
         }
-        const toggle = document.getElementById('section-lock-toggle-' + sectionKey);
-        if (toggle) {
-          toggle.textContent = normalizedStatus === 'approved' ? tr('الغاء الاعتماد') : tr('اعتماد');
-          toggle.dataset.arText = normalizedStatus === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
-        }
         updateProjectSidebarStatus(sectionKey, normalizedStatus);
       });
+      refreshActiveSectionApproveButton();
       try { if (typeof refreshAllSectionVersionLines === 'function') refreshAllSectionVersionLines(); } catch (e) {}
+    }
+
+    function activeProjectSectionKey() {
+      if (tenantActiveProjectSection) return tenantActiveProjectSection;
+      const active = document.querySelector('#tenantProjectForm .tenant-form-section.active[data-section]');
+      return active ? active.dataset.section : null;
+    }
+
+    function refreshActiveSectionApproveButton() {
+      const btn = document.getElementById('activeSectionApproveBtn');
+      if (!btn) return;
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+      const tr = text => (isEn && dict && dict[text]) ? dict[text] : text;
+      const sectionKey = activeProjectSectionKey();
+      const section = sectionKey ? getProjectSectionElement(sectionKey) : null;
+      const approvable = !!section && section.dataset.underConstruction !== '1';
+      const approved = approvable && tenantProjectSectionStatuses[sectionKey] === 'approved';
+      btn.style.display = approvable ? '' : 'none';
+      btn.disabled = !approvable;
+      btn.textContent = approved ? tr('الغاء الاعتماد') : tr('اعتماد');
+      btn.dataset.arText = approved ? 'الغاء الاعتماد' : 'اعتماد';
+    }
+
+    function toggleActiveSectionApproval() {
+      const sectionKey = activeProjectSectionKey();
+      if (!sectionKey) return;
+      const section = getProjectSectionElement(sectionKey);
+      if (!section || section.dataset.underConstruction === '1') return;
+      setSectionStatus(sectionKey, tenantProjectSectionStatuses[sectionKey] === 'approved' ? 'draft' : 'approved');
     }
 
     async function setSectionStatus(sectionKey, status) {
