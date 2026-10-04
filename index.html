@@ -685,62 +685,7 @@
       </div>
     </aside>
 
-    <!-- Map Style Selector Panel (Modal style) — shared by project & slides pages -->
-    <div id="mapStylePanel"
-      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; padding:20px;">
-      <div
-        style="background:#fff; border-radius:20px; padding:24px; max-width:600px; width:100%; box-shadow: 0 10px 40px rgba(0,0,0,0.2); position:relative;">
-        <h3 style="margin-top:0; margin-bottom:12px; color:var(--p); font-size:18px; font-weight:700;">نوع الخريطة لكل
-          شريحة</h3>
 
-        <div class="tenant-grid"
-          style="display:grid; grid-template-columns:1fr; gap:12px; max-height:50vh; overflow-y:auto; padding-right:4px;">
-          <div class="tenant-field">
-            <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة الأرض /
-              المبنى</label>
-            <select id="mapStyleOverview"
-              style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة المعالم</label>
-            <select id="mapStyleLandmarks"
-              style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة الطرق
-              الرئيسية</label>
-            <select id="mapStyleAccess"
-              style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-          <div class="tenant-field">
-            <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة المنطقة</label>
-            <select id="mapStyleCatchment"
-              style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-              <option value="auto">تلقائي</option>
-              <option value="satellite">قمر صناعي</option>
-            </select>
-          </div>
-        </div>
-
-        <div
-          style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px; border-top:1px solid #e8e4e0; padding-top:14px;">
-          <button class="btn primary"
-            onclick="collectMapStylePanel(); if(tenantPresentationId){ saveExistingPresentation(); } else { saveProjectAsDraft(); } toggleMapStylePanel();"
-            style="background:var(--p); color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">حفظ</button>
-          <button class="btn ghost" onclick="toggleMapStylePanel()"
-            style="background:#f5f5f5; border:none; padding:10px 18px; border-radius:8px; cursor:pointer;">إلغاء</button>
-        </div>
-      </div>
-    </div>
 
     <div id="presentationFontSettingsPanel" class="presentation-font-overlay" data-a11y-modal
       onclick="if(event.target === this) closePresentationFontSettings()">

@@ -573,23 +573,6 @@
       }
     }
 
-    function toggleMapStylePanel() {
-      const panel = document.getElementById('mapStylePanel');
-      if (panel) {
-        if (panel.style.display === 'none' || !panel.style.display) {
-          const pStyles = (tenantProjectData && tenantProjectData.map_styles) || {};
-          const setSelect = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
-          setSelect('mapStyleOverview', pStyles.overview || 'auto');
-          setSelect('mapStyleLandmarks', pStyles.landmarks || 'auto');
-          setSelect('mapStyleAccess', pStyles.access || 'auto');
-          setSelect('mapStyleCatchment', pStyles.catchment || 'auto');
-          panel.style.display = 'flex';
-        } else {
-          panel.style.display = 'none';
-        }
-      }
-    }
-
     function editSlideHtml(index) {
       if (!hasPermission('create_presentation')) return;
       const slide = tenantSlidesData[index];

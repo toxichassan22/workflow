@@ -354,9 +354,6 @@
           // context, while a newly generated presentation starts with a clean history.
           data.designerChat = designerChatPersistence(syncPresentation ? tenantPresentationId : null);
           data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
-          collectMapStylePanel();
-          data.map_styles = tenantProjectData.map_styles || {};
-          data.map_type = tenantProjectData.map_type || '';
           data.pageDrafts = {
             project: {
               sectionStatuses: { ...tenantProjectSectionStatuses },

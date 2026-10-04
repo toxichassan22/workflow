@@ -329,7 +329,6 @@
 
     function mapsSignature(d, highlightSite = true) {
       d = d || tenantProjectData || {};
-      const projectStyles = d.map_styles || {};
       return JSON.stringify({
         lat: d.location_lat || '',
         lng: d.location_lng || '',
@@ -341,14 +340,6 @@
         catchment: d.catchment_areas || '',
         cityLandmarks: d.city_landmarks || '',
         locationDetail: d.location_detail || '',
-        mapType: d.map_type || 'satellite',
-        projectStyles: projectStyles,
-        styles: [
-          projectStyles.overview || d.map_type || 'satellite',
-          projectStyles.landmarks || d.map_type || 'satellite',
-          projectStyles.access || d.map_type || 'satellite',
-          projectStyles.catchment || d.map_type || 'satellite'
-        ],
         highlightSite: highlightSite !== false
       });
     }
@@ -400,29 +391,17 @@
       return !!c.cover && mb.length > 0 && c.images_signature === imagesSignature();
     }
 
-    // Collect map style panel values into tenantProjectData.map_styles
-    function collectMapStylePanel() {
-      tenantProjectData = tenantProjectData || {};
-      const saved = tenantProjectData.map_styles || {};
-      tenantProjectData.map_styles = {
-        overview: document.getElementById('mapStyleOverview')?.value || saved.overview || 'auto',
-        landmarks: document.getElementById('mapStyleLandmarks')?.value || saved.landmarks || 'auto',
-        access: document.getElementById('mapStyleAccess')?.value || saved.access || 'auto',
-        catchment: document.getElementById('mapStyleCatchment')?.value || saved.catchment || 'auto'
-      };
-    }
-
     // Fields actually read by maps_service.generate_all_map_images on the server.
     // Sending the whole project data pushed the request past ~35KB, where the shared
     // hosting proxy corrupts the body and the request fails (404/502).
     const MAP_PAYLOAD_FIELDS = [
       'catchment_areas', 'catchment_label_positions', 'catchment_map_landmarks', 'city_landmarks', 'calculate_landmark_driving',
-      'draft_id', 'draftId', 'draw_compass', 'draw_inset',
+      'draft_id', 'draftId',
       'enabled_maps', 'landmark_label_positions', 'landmark_map_items', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
       'access_road_label_positions', 'access_road_label_sizes', 'access_roads_data', 'location_coordinates_confirmed',
-      'main_roads', 'main_roads_data', 'manual_road_paths', 'map_styles', 'map_type', 'maps_link',
+      'main_roads', 'main_roads_data', 'manual_road_paths', 'maps_link',
       'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'city_landmarks_data', 'regen_seed',
       'refresh_maps',
       // The croquis coordinates are the real plot boundary, so the server needs them to
@@ -635,8 +614,6 @@
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
       if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
-      // Collect map style panel overrides (map_styles is not in #tenantProjectForm)
-      collectMapStylePanel();
       // Refresh project data if the form is present
       if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
         const fresh = await collectTenantFormData();

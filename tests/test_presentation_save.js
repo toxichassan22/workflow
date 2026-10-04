@@ -8,8 +8,21 @@ const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding
   '07-project-form.js', '08-location-maps.js', '09-financial.js', '10-financial-report-timeline.js',
   '11-land-croquis.js', '12-files-media.js', '13-visual.js', '14-slides-gen.js',
   '15-slide-edit-chat.js', '16-presentations-export.js', '17-admin-boot.js'];
-const source = ['index.html', 'assets/css/base.css', 'assets/css/project-form.css',
-  ...FRONTEND_JS_ORDER.map(n => 'assets/js/' + n)]
+// Monolithic asset names map to ordered part dirs after the frontend split —
+// expand each entry to either the file itself or its sorted part files.
+function expandFrontend(paths) {
+  return paths.flatMap(p => {
+    if (fs.existsSync(p)) return [p];
+    const dir = p.replace(/\.(js|css)$/, '');
+    if (fs.existsSync(dir)) {
+      const ext = path.extname(p);
+      return fs.readdirSync(dir).filter(f => f.endsWith(ext)).sort().map(f => dir + '/' + f);
+    }
+    return [p];
+  });
+}
+const source = expandFrontend(['index.html', 'assets/css/base.css', 'assets/css/project-form.css',
+  ...FRONTEND_JS_ORDER.map(n => 'assets/js/' + n)])
   .map(f => fs.readFileSync(path.join(process.cwd(), f), 'utf8')).join('\n');
 const names = ['commitTenantPresentation', 'saveTenantPresentation', 'savePresentationFromToolbar', 'savePresentationCopy', 'preparePresentationGenerationTarget'];
 const start = source.indexOf('    async function commitTenantPresentation(');
@@ -23,6 +36,9 @@ const context = {
   tenantSlidePlan: {}, tenantCreativeImages: {}, tenantArchiveCache: null, isGeneratingTenantSlides: false,
   document: { getElementById: id => buttons[id] ||= {} },
   renumberTenantSlides() {}, updatePresentationUndoButtons() {}, setSlidesEditorInfo() {},
+  ensureSlideIds() {},
+  tenantDesignerMessages: [], tenantDesignerChatMemory: '', DESIGNER_CHAT_HISTORY_KEPT: 12,
+  tenantChatFocusIndexes: [],
   clearPresentationUndoProvenance() { context.tenantPresentationProvenance = null; },
   designerChatPersistence() { return {}; }, setDraftDirty() {}, toast() {}, resetPresentationUndo() {},
   checkpointPresentationUndo() {}, recoverTenantSlidePlan(data) { return data.tenantSlidePlan || {}; },
@@ -131,6 +147,7 @@ async function testGenerationRunRelease() {
   let allowCancel = false;
   const state = {
     console, JSON, Promise, Set,
+    WFT: (k, d) => d || k,
     window: { currentGenerationJobId: 'job-1', currentGenerationApprovalId: 'approval-1' },
     tenantSlidesData: [{ html: 'saved' }],
     getTenantToken: () => 'token',
@@ -219,6 +236,7 @@ async function testCheckpointPreservesInputs() {
   let collected = 0;
   const state = {
     console, JSON, Math, Number, String, Promise, crypto: require('node:crypto').webcrypto,
+    WFT: (k, d) => d || k,
     tenantProjectData: JSON.parse(JSON.stringify(approved)),
     tenantSlidePlan: { slides: [{ title: 'Cover' }, { title: 'Content' }] },
     tenantSlidesData: [{ html: '<div class="slide">saved</div>' }],
@@ -240,7 +258,7 @@ async function testCheckpointPreservesInputs() {
     },
   };
   vm.createContext(state);
-  for (const name of ['collectMapStylePanel', 'saveProjectAsDraftNow', 'tenantSlidePlanFingerprint',
+  for (const name of ['saveProjectAsDraftNow', 'tenantSlidePlanFingerprint',
     'tenantSlideGenerationOptions', 'saveTenantSlideGenerationCheckpoint']) {
     const match = new RegExp('^    (?:async )?function ' + name + '\\(', 'm').exec(source);
     assert(match, name);
@@ -290,6 +308,8 @@ async function testSlideGenerationFailures() {
     const saving = deferred();
     const generation = {
       console, JSON, Math, Number, String, Promise, window: {},
+      WFT: (k, d) => d || k,
+      wfNewSlideId: (() => { let n = 0; return () => 's' + (++n); })(),
       isGeneratingTenantSlides: false,
       tenantSlidePlan: { slides: Array.from({ length: 8 }, (_, i) => ({ title: 'Slide ' + i })) },
       tenantProjectData: { draftId: 'draft', project_name: 'Approved project' },

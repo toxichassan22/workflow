@@ -376,7 +376,6 @@
     }
 
     async function regeneratePresentationMaps() {
-      collectMapStylePanel();
       return regenerateMapPreview(tenantSelectedMapType || 'overview');
     }
 

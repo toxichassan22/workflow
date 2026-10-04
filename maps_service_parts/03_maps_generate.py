@@ -203,20 +203,10 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
     polygon = _overview_polygon(project_data, highlight_site)
-    map_styles = project_data.get('map_styles') or {}
-    if isinstance(map_styles, str):
-        try:
-            map_styles = json.loads(map_styles)
-        except (TypeError, ValueError):
-            map_styles = {}
-    draw_compass = project_data.get('draw_compass', True)
-    if isinstance(draw_compass, str):
-        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
-    draw_inset = project_data.get('draw_inset', True)
-    if isinstance(draw_inset, str):
-        draw_inset = draw_inset.lower() in {'true', '1', 'yes'}
-    elif not isinstance(draw_inset, bool):
-        draw_inset = True
+    # Map type and chrome are platform-fixed: no company or project setting
+    # carries map_styles, draw_compass or draw_inset any more.
+    draw_compass = True
+    draw_inset = True
     map_lang = map_language(project_data)
     # Same editable-sidecar rebuild the other three maps already had: a legacy or
     # cross-scope overview map that kept only its marked row could never recompose,
@@ -236,9 +226,7 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('overview') or project_data.get('map_type') or 'satellite')
-        if active_maptype in {'auto', 'both'}:
-            active_maptype = 'roadmap' if active_maptype == 'auto' else 'satellite'
+        active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WITH_LABELS_STYLES if active_maptype == 'satellite' else []
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
@@ -335,15 +323,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
     )
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
-    map_styles = project_data.get('map_styles') or {}
-    if isinstance(map_styles, str):
-        try:
-            map_styles = json.loads(map_styles)
-        except (TypeError, ValueError):
-            map_styles = {}
-    draw_compass = project_data.get('draw_compass', True)
-    if isinstance(draw_compass, str):
-        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    draw_compass = True
     map_lang = map_language(project_data)
     for final_type, editable_type in (
         ('access', 'access_editable'),
@@ -360,9 +340,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('access') or project_data.get('map_type') or 'satellite')
-        if active_maptype in {'auto', 'both'}:
-            active_maptype = 'roadmap' if active_maptype == 'auto' else 'satellite'
+        active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_CLEAN_STYLES if active_maptype == 'satellite' else ACCESS_ROADMAP_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
@@ -473,15 +451,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             landmarks = []
     if not isinstance(landmarks, list):
         landmarks = []
-    map_styles = project_data.get('map_styles') or {}
-    if isinstance(map_styles, str):
-        try:
-            map_styles = json.loads(map_styles)
-        except (TypeError, ValueError):
-            map_styles = {}
-    draw_compass = project_data.get('draw_compass', True)
-    if isinstance(draw_compass, str):
-        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    draw_compass = True
     rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
     map_lang = map_language(project_data)
     # The stored frame was fitted to the rings only — a selected landmark beyond
@@ -524,9 +494,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
                 existing_zoom = None
             if existing_zoom is not None and existing_zoom <= frame_zoom:
                 continue
-        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('catchment') or project_data.get('map_type') or 'satellite')
-        if active_maptype in {'auto', 'both'}:
-            active_maptype = 'satellite'
+        active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, frame_zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
@@ -648,15 +616,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             landmarks = []
     if not isinstance(landmarks, list):
         landmarks = []
-    map_styles = project_data.get('map_styles') or {}
-    if isinstance(map_styles, str):
-        try:
-            map_styles = json.loads(map_styles)
-        except (TypeError, ValueError):
-            map_styles = {}
-    draw_compass = project_data.get('draw_compass', True)
-    if isinstance(draw_compass, str):
-        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    draw_compass = True
     map_lang = map_language(project_data)
     for final_type, editable_type in (
         ('landmarks', 'landmarks_editable'),
@@ -673,9 +633,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('landmarks') or project_data.get('map_type') or 'satellite')
-        if active_maptype in {'auto', 'both'}:
-            active_maptype = 'satellite'
+        active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
@@ -1030,42 +988,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # center the viewport, but it must never move that saved pin implicitly.
     marker_lat, marker_lng = lat, lng
 
-    # Parse UI element flags (compass, inset map) — fixed platform defaults unless
-    # the project itself carries an explicit flag; the company-level map settings
-    # were removed, so tenant branding is no longer consulted.
-    draw_compass = project_data.get('draw_compass', True)
-    if isinstance(draw_compass, str):
-        draw_compass = draw_compass.lower() in ('true', '1', 'yes')
-    elif not isinstance(draw_compass, bool):
-        draw_compass = True
-
-    draw_inset = project_data.get('draw_inset', True)
-    if isinstance(draw_inset, str):
-        draw_inset = draw_inset.lower() in ('true', '1', 'yes')
-    elif not isinstance(draw_inset, bool):
-        draw_inset = True
-
-    # Parse per-map style preferences (satellite/roadmap/terrain/hybrid/both)
-    # Default: all satellite. Employee can override per-map via map_styles dict.
-    map_styles_raw = project_data.get('map_styles', {})
-    if isinstance(map_styles_raw, str):
-        try:
-            map_styles_raw = json.loads(map_styles_raw)
-        except Exception:
-            map_styles_raw = {}
-    if not isinstance(map_styles_raw, dict):
-        map_styles_raw = {}
-    else:
-        map_styles_raw = dict(map_styles_raw)
-    # default_map_type is only a fallback; explicit per-map project settings win.
-    default_map_type = project_data.get('map_type') or 'satellite'
-    VALID_MAPTYPES = {'auto', 'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
-    map_styles = {}
-    for key in ('overview', 'landmarks', 'access', 'catchment'):
-        val = map_styles_raw.get(key) or default_map_type
-        if val not in VALID_MAPTYPES:
-            val = 'auto'
-        map_styles[key] = 'roadmap' if val == 'auto' and key == 'access' else 'satellite' if val == 'auto' else val
+    # Map type and chrome are platform-fixed — every map renders satellite with
+    # the compass and inset on; no company or project setting carries them.
+    draw_compass = True
+    draw_inset = True
+    map_styles = dict.fromkeys(('overview', 'landmarks', 'access', 'catchment'), 'satellite')
 
     landmark_radius_m = 20000
     city_context = project_data.get('city') or project_data.get('location', '')

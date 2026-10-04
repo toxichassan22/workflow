@@ -1115,9 +1115,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                     'location_polygon': '23.9999,45.9999;23.9999,46.0001;24.0001,46.0001;24.0001,45.9999',
-                    'draw_inset': False,
                 }, self.tenant_a, draft_id='overview-legacy-sidecar', highlight_site=True)
-            provider.assert_called_once()
+            # Two provider reads: the base map plus the fixed inset (map chrome is
+            # no longer a per-project flag, so the inset always renders).
+            self.assertEqual(provider.call_count, 2)
         self.assertNotIn('error', composed)
         self.assertIn('##MAP_OVERVIEW_EDITABLE##', composed['placeholders'])
         self.assertIn('##MAP_OVERVIEW##', composed['placeholders'])
