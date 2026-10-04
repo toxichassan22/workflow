@@ -718,6 +718,19 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertLess(
             ai_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
             ai_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        # The distribution check and repair used to write their responses onto a
+        # detached workflow too: check findings never reached the draft, approval
+        # stayed blocked on stale conflicts, and the whole AI repair vanished.
+        check_start = index_source.index('async function checkVisualConceptPlansDistribution(')
+        check_body = index_source[check_start:index_source.index('async function repairVisualConceptPlansDistribution()', check_start)]
+        self.assertLess(
+            check_body.index("api('POST', '/api/visual-concept/plans-distribution-check'"),
+            check_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        repair_start = index_source.index('async function repairVisualConceptPlansDistribution()')
+        repair_body = index_source[repair_start:index_source.index('function approveVisualConceptPlansDistribution()', repair_start)]
+        self.assertLess(
+            repair_body.index("api('POST', '/api/visual-concept/plans-distribution-repair'"),
+            repair_body.index('const workflow = visualConceptPlansWorkflowState()'))
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen

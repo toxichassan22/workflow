@@ -1424,20 +1424,21 @@
 
     async function checkVisualConceptPlansDistribution(mode, options) {
       const silent = Boolean(options && options.silent);
-      const workflow = visualConceptPlansWorkflowState();
-      if (!workflow.verification.approved || !(workflow.distribution.rows || []).length) return;
+      const seedWorkflow = visualConceptPlansWorkflowState();
+      if (!seedWorkflow.verification.approved || !(seedWorkflow.distribution.rows || []).length) return;
       if (!silent) showLoader(WFT('plans.distribution_check_loading', 'جاري فحص التوزيع'),
         WFT('plans.distribution_check_loading_detail', 'يتم مراجعة المساحات والقيود...'), 35);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         payload.mode = mode || 'local';
-        payload.distribution = { rows: workflow.distribution.rows };
+        payload.distribution = { rows: seedWorkflow.distribution.rows };
         const response = await api('POST', '/api/visual-concept/plans-distribution-check', payload);
         if (!silent) hideLoader();
         if (!response?.success) {
           if (!silent) toast(response?.error || WFT('plans.distribution_check_failed', 'تعذر فحص التوزيع'));
           return;
         }
+        const workflow = visualConceptPlansWorkflowState();
         workflow.distribution.totals = Array.isArray(response.totals) ? response.totals : [];
         workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
         if (Array.isArray(response.issues)) workflow.distribution.issues = response.issues;
@@ -1456,17 +1457,18 @@
 
     async function repairVisualConceptPlansDistribution() {
       if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
-      const workflow = visualConceptPlansWorkflowState();
-      if (!(workflow.distribution.rows || []).length) return;
+      const seedWorkflow = visualConceptPlansWorkflowState();
+      if (!(seedWorkflow.distribution.rows || []).length) return;
       showLoader(WFT('plans.distribution_repair_loading', 'جاري إصلاح التوزيع'),
         WFT('plans.distribution_repair_loading_detail', 'يعالج الذكاء الصفوف المتعارضة ويحدّث المجاميع...'), 40);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        payload.distribution = { rows: workflow.distribution.rows, issues: workflow.distribution.issues };
+        payload.distribution = { rows: seedWorkflow.distribution.rows, issues: seedWorkflow.distribution.issues };
         const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
         hideLoader();
         if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return; }
         if (response.repaired === false) toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
+        const workflow = visualConceptPlansWorkflowState();
         workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
         workflow.promptReady = false;
         workflow.promptsError = '';
