@@ -1095,7 +1095,7 @@
       const canApprove = rows.length > 0 && !visualConceptDistributionBlocking(distribution).length;
       return findingsHtml +
         '<div class="visual-concept-actions">' +
-        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص وإصلاح التعارضات</button>' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="repair-distribution" ' + (findings.length ? '' : 'disabled') + '>إصلاح التعارضات بالذكاء الاصطناعي</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
         (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
@@ -1223,7 +1223,7 @@
           else if (action === 'boundary-ai') reviseVisualConceptPlansBoundaryWithAi();
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
-          else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
+          else if (action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution();
           else if (action === 'repair-distribution') repairVisualConceptPlansDistribution();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
@@ -1448,10 +1448,23 @@
         const host = document.querySelector('[data-plans-distribution-results]');
         if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
         else renderVisualConceptPage();
+        return true;
       } catch (error) {
         if (silent) return;
         hideLoader();
         toast(error.message || WFT('plans.distribution_check_failed', 'تعذر فحص التوزيع'));
+      }
+    }
+
+    // One motion: sol adjudicates the deterministic findings, then surgically
+    // repairs whatever he still confirms as blocking — «يولد ويفحص ويعدّل».
+    async function checkAndRepairVisualConceptPlansDistribution() {
+      const checked = await checkVisualConceptPlansDistribution('ai');
+      if (!checked) return;
+      const workflow = visualConceptPlansWorkflowState();
+      if ((workflow.distribution.rows || []).length
+          && visualConceptDistributionBlocking(workflow.distribution).length) {
+        await repairVisualConceptPlansDistribution();
       }
     }
 

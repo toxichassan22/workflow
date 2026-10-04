@@ -205,25 +205,40 @@ def api_visual_concept_plans_distribution_check():
     posted = (data.get('distribution') if isinstance(data.get('distribution'), dict)
               else (workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}))
     distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
+    checks = distribution['checks']
     issues = distribution['issues']
-    can_proceed = not any(check.get('result') == 'متعارض' for check in distribution['checks'])
+    can_proceed = not any(check.get('result') == 'متعارض' for check in checks)
     if str(data.get('mode') or '').lower() == 'ai':
         _billing_guard = _require_billing_balance('visual_concept')
         if _billing_guard is not None:
             return _billing_guard
+        # sol is the judge here, not the deterministic pass: he reviews every
+        # numbered finding and may confirm it, soften it, or dismiss it as a
+        # false alarm — a hard «متعارض» now requires his verdict.
         system_prompt = (
-            'أنت مدقق اشتراطات لمخطط مفاهيمي. راجع جدول التوزيع مقابل البيانات التنظيمية الموثقة '
-            'فقط. الجدول يعبّر عن: المبنى، الدور أو نطاق الأدوار، الاستخدام، عدد الوحدات لكل دور، '
-            'مساحة الدور، والحركة والخدمات — فدقّق فيما يمكن للجدول إثباته فعلًا: الاستخدامات '
-            'المسموحة، سقف الارتفاع وعدد الأدوار، حد التغطية، وعدم تجاوز مساحات أو وحدات الدراسة. '
+            'أنت مدقق اشتراطات لمخطط مفاهيمي تحكم على جدول توزيع مكونات على الأدوار مقابل '
+            'البيانات التنظيمية الموثقة فقط. الجدول يعبّر عن: المبنى، الدور أو نطاق الأدوار، '
+            'الاستخدام، عدد الوحدات لكل دور، مساحة الدور، والحركة والخدمات — فدقّق فيما يمكن '
+            'للجدول إثباته فعلًا: الاستخدامات المسموحة، سقف الارتفاع وعدد الأدوار، حد التغطية، '
+            'عدم تداخل نطاقات المكوّن الواحد في مبنى واحد، وعدم تجاوز مساحات أو وحدات الدراسة. '
+            'ستصلك بنود فحص آلي مرقّمة — لكل بند احكم: «متعارض» مخالفة حقيقية تمنع الاعتماد، '
+            '«يحتاج تأكيد» تستدعي مراجعة العميل دون منع، أو «مطابق» إنذار كاذب لأن التوزيع '
+            'سليم فعلًا (نطاقات متجاورة لا متداخلة، مبانٍ مختلفة، أو استخدامات مختلفة تشترك '
+            'في الدور بشكل مشروع). راجع كل البنود المرقّمة ولا تترك بندًا بلا حكم. '
             'لا تكتب بنود «لم يوثّق» عمّا لا يمكن لجدول توزيع إثباته بطبيعته (أبعاد المواقف، '
             'عروض الممرات والمنحدرات، مسافات الإخلاء، تفاصيل الحريق) — فهي مرحلة تصميم لاحقة. '
-            'كل بند يجب أن يكون إجراءً واضحًا قابلاً للتنفيذ على الجدول: «عدّل قيمة X في صف Y إلى Z» '
+            'issues تبقى ملاحظات إجرائية واضحة قابلة للتنفيذ على الجدول: «عدّل قيمة X في صف Y إلى Z» '
             'أو «أضف مكوّنًا لـ…»، وبحد أقصى 8 بنود مرتبة بالأهمية. '
             'سمّ الصفوف باسم المكوّن والدور («صف سكني في الدور أرضي»)، ولا تذكر معرّفات داخلية. أعد JSON فقط: '
-            '{"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],"canProceed":true}. '
-            'لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
+            '{"reviews":[{"index":0,"result":"متعارض|يحتاج تأكيد|مطابق","detail":""}],'
+            '"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],'
+            '"canProceed":true}. لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
         )
+        indexed_checks = [
+            {'index': index, 'item': check.get('item'), 'detail': check.get('detail'),
+             'result': check.get('result')}
+            for index, check in enumerate(checks)
+        ]
         user_prompt = (
             'البيانات التنظيمية الموثقة:\n' + json.dumps(regulations, ensure_ascii=False)
             + '\n\nبيانات المشروع المعتمدة:\n'
@@ -231,6 +246,8 @@ def api_visual_concept_plans_distribution_check():
             + '\n\nالتوزيع المدخل للمراجعة:\n'
             + json.dumps({'rows': distribution['rows'], 'totals': distribution['totals']},
                          ensure_ascii=False)
+            + '\n\nبنود الفحص الآلي المطلوب الحكم عليها كلها:\n'
+            + json.dumps(indexed_checks, ensure_ascii=False)
         )
         try:
             response = call_openrouter_chat(
@@ -241,11 +258,15 @@ def api_visual_concept_plans_distribution_check():
         except Exception:
             parsed = {}
         if isinstance(parsed, dict):
+            reviews = parsed.get('reviews')
+            if isinstance(reviews, list):
+                checks = _visual_concept_plan_adjudicate_checks(checks, reviews)
+                can_proceed = not any(check.get('result') == 'متعارض' for check in checks)
             issues = _visual_concept_plan_normalize_issues(parsed.get('issues') or [])
             if parsed.get('canProceed') is False:
                 can_proceed = False
     return jsonify({'success': True, 'totals': distribution['totals'],
-                    'checks': distribution['checks'], 'issues': issues,
+                    'checks': checks, 'issues': issues,
                     'canProceed': can_proceed})
 
 

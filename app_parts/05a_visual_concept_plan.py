@@ -1525,6 +1525,45 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
     return checks
 
 
+def _visual_concept_plan_adjudicate_checks(checks, reviews):
+    """Merge sol's per-finding verdicts into the deterministic check list: the model
+    judges every numbered finding — «متعارض» keeps blocking, «يحتاج تأكيد» stays
+    advisory, and «مطابق»/«سليم» dismisses a false alarm outright. A finding the
+    model skipped keeps its deterministic verdict, so nothing clears silently."""
+    verdicts = {}
+    for item in (reviews or [])[:60]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get('index'))
+        except (TypeError, ValueError):
+            continue
+        result = _visual_concept_plan_sanitize_text(item.get('result'))
+        detail = _visual_concept_plan_sanitize_text(
+            item.get('detail') or item.get('reason'))[:500]
+        if result in ('مطابق', 'سليم', 'صحيح'):
+            verdicts[index] = ('مطابق', detail)
+        elif result == 'متعارض':
+            verdicts[index] = ('متعارض', detail)
+        elif result:
+            verdicts[index] = ('يحتاج تأكيد', detail)
+    adjudicated = []
+    for index, check in enumerate(checks or []):
+        if index not in verdicts:
+            adjudicated.append(check)
+            continue
+        result, detail = verdicts[index]
+        if result == 'مطابق':
+            continue
+        updated = dict(check)
+        updated['result'] = result
+        updated['severity'] = 'high' if result == 'متعارض' else 'medium'
+        if detail:
+            updated['detail'] = detail
+        adjudicated.append(updated)
+    return adjudicated
+
+
 def _visual_concept_plan_normalize_distribution(raw, context, regulations):
     """Normalize the distribution table (proposed or client-edited) and attach the
     deterministic totals + checks so every edit re-verifies the same way."""

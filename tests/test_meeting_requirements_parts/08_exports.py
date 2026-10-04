@@ -731,6 +731,12 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertLess(
             repair_body.index("api('POST', '/api/visual-concept/plans-distribution-repair'"),
             repair_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        # The check action is one sol-driven motion: adjudicate, then repair what
+        # is still blocking.
+        self.assertIn('checkAndRepairVisualConceptPlansDistribution', index_source)
+        self.assertIn(
+            "action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution()",
+            index_source)
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen
@@ -1182,7 +1188,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(shared.status_code, 200, shared.get_json())
         self.assertTrue(all(item['result'] != 'متعارض' for item in shared.get_json()['checks']))
 
-        # mode=ai layers sol's conflict review on top of the deterministic pass.
+        # mode=ai has sol judge the deterministic findings — his issues still land,
+        # and a finding he never reviews keeps its deterministic verdict.
         ai_review = {'issues': [{'title': 'المواقف', 'points': ['نقص مواقف'], 'suggestion': '', 'action': '', 'severity': 'low'}],
                      'canProceed': True}
         with patch.object(module, 'call_openrouter_chat', return_value={
@@ -1193,6 +1200,20 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(ai_checked.status_code, 200, ai_checked.get_json())
         self.assertTrue(review_call.called)
         self.assertEqual(ai_checked.get_json()['issues'][0]['title'], 'المواقف')
+
+        # sol may also dismiss a finding as a false alarm: the deterministic
+        # «متعارض» on touching ranges is dropped when he rules the split clean.
+        adjudication = {'reviews': [{'index': 0, 'result': 'مطابق',
+                                     'detail': 'النطاقان متجاوران لا متداخلان'}],
+                        'issues': [], 'canProceed': True}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(adjudication, ensure_ascii=False)}}]
+        }):
+            cleared = client.post('/api/visual-concept/plans-distribution-check', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow, 'distribution': overlapping, 'mode': 'ai'})
+        self.assertEqual(cleared.status_code, 200, cleared.get_json())
+        self.assertTrue(cleared.get_json()['canProceed'])
+        self.assertFalse(any(item['result'] == 'متعارض' for item in cleared.get_json()['checks']))
 
         # When sol is offline the proposal falls back to the deterministic inferred
         # distribution so the client still gets an editable table.
@@ -1269,6 +1290,40 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         far_check = next(item for item in checks if 'معامل' in item['item'])
         self.assertIn('17906', far_check['detail'])
         self.assertNotIn('22906', far_check['detail'])
+
+    def test_plans_distribution_adjudication_honours_sol_verdicts(self):
+        """sol is the judge of the deterministic findings: «متعارض» stays
+        blocking, «يحتاج تأكيد» softens, «مطابق» drops a false alarm, and a
+        finding he never reviewed keeps its deterministic verdict."""
+        module = self.application_module
+        checks = [
+            {'item': 'نطاقان متداخلان لمكوّن واحد — A', 'detail': 'orig',
+             'result': 'متعارض', 'severity': 'high', 'row_ids': ['r1', 'r2']},
+            {'item': 'تجاوز سقف الأدوار الموثق', 'detail': 'orig',
+             'result': 'متعارض', 'severity': 'high', 'row_ids': ['r3']},
+            {'item': 'فرق الوحدات — سكني', 'detail': 'orig',
+             'result': 'يحتاج تأكيد', 'severity': 'medium', 'row_ids': ['r4']},
+        ]
+        adjudicated = module._visual_concept_plan_adjudicate_checks(checks, [
+            {'index': 0, 'result': 'مطابق', 'detail': 'النطاقان متجاوران'},
+            {'index': 1, 'result': 'متعارض', 'detail': 'يتجاوز الحد فعلًا'},
+        ])
+        self.assertEqual(len(adjudicated), 2)
+        self.assertEqual(adjudicated[0]['item'], 'تجاوز سقف الأدوار الموثق')
+        self.assertEqual(adjudicated[0]['result'], 'متعارض')
+        self.assertEqual(adjudicated[0]['severity'], 'high')
+        self.assertEqual(adjudicated[0]['detail'], 'يتجاوز الحد فعلًا')
+        self.assertEqual(adjudicated[0]['row_ids'], ['r3'])
+        self.assertEqual(adjudicated[1]['result'], 'يحتاج تأكيد')
+        self.assertFalse(any(item['item'].startswith('نطاقان') for item in adjudicated))
+        # A confirm verdict keeps the flagged rows so the repair stays surgical.
+        softened = module._visual_concept_plan_adjudicate_checks(checks, [
+            {'index': 0, 'result': 'يحتاج تأكيد'},
+        ])
+        self.assertEqual(softened[0]['result'], 'يحتاج تأكيد')
+        self.assertEqual(softened[0]['severity'], 'medium')
+        self.assertEqual(softened[0]['row_ids'], ['r1', 'r2'])
+        self.assertEqual(softened[1]['result'], 'متعارض')
 
     def test_plans_distribution_repair_edits_only_flagged_rows(self):
         """The AI repair is surgical: the model receives the flagged row ids and

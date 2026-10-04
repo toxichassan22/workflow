@@ -120,6 +120,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "عدد التعارضات المباشرة:": "Number of direct conflicts:",
   "عدد الوحدات لكل دور": "Units per floor",
   "فحص التعارضات": "Check conflicts",
+  "فحص وإصلاح التعارضات": "Check and fix conflicts",
   "لا تملك صلاحية توليد المخططات": "You do not have permission to generate plans",
   "لا توجد تعارضات في التوزيع.": "There are no conflicts in the layout.",
   "لا توجد تعارضات مباشرة.": "There are no direct conflicts.",
