@@ -737,6 +737,20 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn(
             "action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution()",
             index_source)
+        # Findings belong to sol's review: the proposal lands verdict-free, the
+        # silent pass refreshes totals only, and approval needs aiReviewed with
+        # no confirmed blockers — the standalone repair button is gone.
+        results_start = index_source.index('function visualConceptDistributionResultsHtml')
+        results_body = index_source[results_start:index_source.index('function visualConceptDistributionBlocking', results_start)]
+        self.assertIn('aiReviewed', results_body)
+        self.assertIn('لم يُفحص بعد', results_body)
+        self.assertNotIn('repair-distribution', results_body)
+        propose_start = index_source.index('async function proposeVisualConceptPlansDistribution()')
+        propose_body = index_source[propose_start:index_source.index('async function checkVisualConceptPlansDistribution(', propose_start)]
+        self.assertIn('checks: [], issues: []', propose_body)
+        approve_start = index_source.index('function approveVisualConceptPlansDistribution()')
+        approve_body = index_source[approve_start:approve_start + 1200]
+        self.assertIn('aiReviewed', approve_body)
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen

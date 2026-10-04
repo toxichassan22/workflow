@@ -127,6 +127,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "لا توجد ملاحظات تستدعي الإصلاح": "There are no notes that need fixing",
   "لا توجد نقاط حدود مكتملة.": "There are no complete boundary points.",
   "المخططات غير جاهزة للتوليد بعد.": "The plans are not ready for generation yet.",
+  "لم يُفحص بعد.": "Not checked yet.",
   "لم يُقترح توزيع بعد.": "No layout has been suggested yet.",
   "متعارض": "Conflicting",
   "مراجعة بيانات الأرض والكروكي": "Review the land and croquis data",

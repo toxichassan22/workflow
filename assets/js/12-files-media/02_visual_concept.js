@@ -92,7 +92,7 @@
         status: 'idle',
         verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
         boundary: { points: [], referenceUrl: '', instruction: '', approved: false },
-        distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false },
+        distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false, aiReviewed: false },
         prompts: { site: '', uses: '', massing: '' },
         planContext: null,
         viewStage: 'verify',
@@ -142,7 +142,8 @@
           notes: Array.isArray(distribution.notes) ? distribution.notes.slice(0, 12) : [],
           checks: Array.isArray(distribution.checks) ? distribution.checks.slice(0, 40) : [],
           issues: Array.isArray(distribution.issues) ? distribution.issues.slice(0, 30) : [],
-          approved: Boolean(distribution.approved)
+          approved: Boolean(distribution.approved),
+          aiReviewed: Boolean(distribution.aiReviewed)
         },
         prompts: {
           site: String(prompts.site || '').slice(0, 12000),
@@ -1088,15 +1089,19 @@
         .concat(issues.flatMap(item =>
           (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
         .filter(Boolean);
+      const reviewed = Boolean(distribution.aiReviewed);
       const findingsHtml = findings.length
         ? '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
           findings.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
-        : (rows.length ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>' : '');
-      const canApprove = rows.length > 0 && !visualConceptDistributionBlocking(distribution).length;
+        : (rows.length
+          ? (reviewed
+            ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>'
+            : '<p class="tenant-hint">لم يُفحص بعد.</p>')
+          : '');
+      const canApprove = rows.length > 0 && reviewed && !visualConceptDistributionBlocking(distribution).length;
       return findingsHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص وإصلاح التعارضات</button>' +
-        '<button type="button" class="btn ghost small" data-plans-workflow-action="repair-distribution" ' + (findings.length ? '' : 'disabled') + '>إصلاح التعارضات بالذكاء الاصطناعي</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
         (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
         '</div>';
@@ -1197,6 +1202,9 @@
             const id = removeBtn.getAttribute('data-dist-remove');
             state.distribution.rows = (state.distribution.rows || []).filter(item => item.id !== id);
             state.distribution.approved = false;
+            state.distribution.aiReviewed = false;
+            state.distribution.checks = [];
+            state.distribution.issues = [];
             state.promptReady = false;
             markVisualConceptDirty();
             renderVisualConceptPage();
@@ -1211,6 +1219,9 @@
             state.verification.approved = false;
             state.boundary.approved = false;
             state.distribution.approved = false;
+            state.distribution.aiReviewed = false;
+            state.distribution.checks = [];
+            state.distribution.issues = [];
             state.promptReady = false;
             state.promptsError = '';
             state.viewStage = 'verify';
@@ -1224,7 +1235,6 @@
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution();
-          else if (action === 'repair-distribution') repairVisualConceptPlansDistribution();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
@@ -1239,6 +1249,9 @@
           if (!row) return;
           row[field] = input.value;
           state.distribution.approved = false;
+          state.distribution.aiReviewed = false;
+          state.distribution.checks = [];
+          state.distribution.issues = [];
           state.promptReady = false;
           state.promptsError = '';
           markVisualConceptDirty();
@@ -1291,6 +1304,9 @@
         workflow.viewStage = 'verify';
         workflow.boundary.approved = false;
         workflow.distribution.approved = false;
+        workflow.distribution.aiReviewed = false;
+        workflow.distribution.checks = [];
+        workflow.distribution.issues = [];
         workflow.promptReady = false;
         workflow.promptsError = '';
         markVisualConceptDirty();
@@ -1395,6 +1411,9 @@
         units_per_floor: '', floor_area_sqm: '', circulation: ''
       });
       workflow.distribution.approved = false;
+      workflow.distribution.aiReviewed = false;
+      workflow.distribution.checks = [];
+      workflow.distribution.issues = [];
       workflow.promptReady = false;
       markVisualConceptDirty();
       renderVisualConceptPage();
@@ -1410,7 +1429,11 @@
         hideLoader();
         if (!response?.success) { toast(response?.error || WFT('plans.distribution_failed', 'تعذر اقتراح التوزيع')); return; }
         const workflow = visualConceptPlansWorkflowState();
-        workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
+        // Verdicts belong to sol's review only — the proposed table lands with
+        // totals but no pre-baked deterministic conflict list.
+        workflow.distribution = normalizeVisualConceptPlansWorkflow({
+          distribution: { ...response.distribution, checks: [], issues: [] }
+        }).distribution;
         workflow.planContext = response.planContext || workflow.planContext || null;
         workflow.promptReady = false;
         workflow.promptsError = '';
@@ -1440,8 +1463,13 @@
         }
         const workflow = visualConceptPlansWorkflowState();
         workflow.distribution.totals = Array.isArray(response.totals) ? response.totals : [];
-        workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
-        if (Array.isArray(response.issues)) workflow.distribution.issues = response.issues;
+        if (!silent) {
+          // Verdicts display only after sol adjudicates — the silent local pass
+          // refreshes totals but never writes a conflict list on its own.
+          workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
+          if (Array.isArray(response.issues)) workflow.distribution.issues = response.issues;
+          workflow.distribution.aiReviewed = mode === 'ai';
+        }
         markVisualConceptDirty();
         const totalsHost = document.querySelector('[data-plans-distribution-totals]');
         if (totalsHost) totalsHost.innerHTML = visualConceptDistributionTotalsRowsHtml(workflow.distribution);
@@ -1483,6 +1511,8 @@
         if (response.repaired === false) toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
         const workflow = visualConceptPlansWorkflowState();
         workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
+        // sol produced this table — it counts as his review of it.
+        workflow.distribution.aiReviewed = true;
         workflow.promptReady = false;
         workflow.promptsError = '';
         markVisualConceptDirty();
@@ -1497,6 +1527,7 @@
       const workflow = visualConceptPlansWorkflowState();
       const rows = workflow.distribution.rows || [];
       if (!rows.length) return;
+      if (!workflow.distribution.aiReviewed) return;
       if (visualConceptDistributionBlocking(workflow.distribution).length) return;
       workflow.distribution.approved = true;
       workflow.promptReady = false;
