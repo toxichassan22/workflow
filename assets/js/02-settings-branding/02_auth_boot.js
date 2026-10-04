@@ -501,6 +501,9 @@
     async function loadTenantFonts() {
       const host = document.getElementById('tenantFontSelections');
       if (!host) return;
+      // Every font change path ends here, so refreshing the slide font CSS
+      // alongside the list keeps the preview on the new face without a reload.
+      const cssPromise = loadTenantFontCss();
       const data = await api('GET', '/api/branding/fonts');
       if (!data.success) { host.textContent = 'تعذر تحميل الخطوط'; return; }
       const selections = data.selections || [];
@@ -581,6 +584,7 @@
           uploadTenantFontAutomatically({ files: event.dataTransfer.files });
         };
       }
+      await cssPromise;
       refreshDynamicI18n(host);
     }
     document.addEventListener('wf:lang', () => { try { loadTenantFonts(); } catch (e) { /* ignore */ } });
