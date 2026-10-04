@@ -801,9 +801,11 @@
           <input type="hidden" id="tenantCoordinatesConfirmed" data-key="location_coordinates_confirmed" data-type="text" value="">
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
             <img src="" alt="Map preview" draggable="false" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" onpointerdown="startMapViewportPan(event)" />
+            <div id="mapLiveView" style="display:none;position:absolute;inset:0;"></div>
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
             <div id="mapLabelOverlay" style="position:absolute;inset:0;pointer-events:none"></div>
           </div>
+          <p id="mapFrameDirtyHint" class="tenant-hint" style="margin:4px 0 0;display:none"></p>
           <div id="mapPreviewGallery" class="tenant-map-preview-gallery" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;"></div>
           <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none"></p>
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">

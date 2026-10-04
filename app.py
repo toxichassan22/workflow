@@ -122,10 +122,10 @@ SECURITY_HEADERS = {
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     'Content-Security-Policy': (
-        "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "default-src 'self'; script-src 'self' https://maps.googleapis.com; script-src-attr 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://maps.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "img-src 'self' data: blob: https:; connect-src 'self' blob:; "
+        "img-src 'self' data: blob: https:; connect-src 'self' blob: https://maps.googleapis.com https://*.googleapis.com https://*.google.com https://*.gstatic.com; "
         "frame-src 'self' blob:; worker-src 'self' blob:; "
         "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     ),
@@ -394,10 +394,16 @@ if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
+# Browser-side key for the interactive map preview (Maps JavaScript API). It is
+# public in the page by design and must be HTTP-referrer restricted in Cloud
+# Console; the server-side key above never leaves the backend. When unset the
+# preview silently keeps the generated static image.
+GOOGLE_MAPS_BROWSER_API_KEY = os.environ.get('GOOGLE_MAPS_BROWSER_API_KEY')
 print(f"[CONFIG] OPENROUTER_KEY: {'SET' if OPENROUTER_KEY else 'MISSING'}")
 print(f"[CONFIG] OPENROUTER_MANAGEMENT_KEY: {'SET' if OPENROUTER_MANAGEMENT_KEY else 'MISSING'}")
 print(f"[CONFIG] REQUIRE_TENANT_OPENROUTER_KEY: {'ON' if REQUIRE_TENANT_OPENROUTER_KEY else 'OFF'}")
 print(f"[CONFIG] GOOGLE_MAPS_API_KEY: {'SET' if GOOGLE_MAPS_API_KEY else 'MISSING'}")
+print(f"[CONFIG] GOOGLE_MAPS_BROWSER_API_KEY: {'SET' if GOOGLE_MAPS_BROWSER_API_KEY else 'MISSING (static preview)'}")
 print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

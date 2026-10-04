@@ -669,6 +669,7 @@
       if (!url || !previewBox || !image) {
         if (previewBox) previewBox.style.display = 'none';
         if (image) image.removeAttribute('src');
+        if (typeof unmountInteractiveMap === 'function') unmountInteractiveMap();
         tenantMapPreviewState = null;
         renderTenantMapPolygonOverlay();
         return false;
@@ -678,20 +679,35 @@
       image.alt = view.title;
       previewBox.style.display = 'block';
       // Clicks are converted against this state, so it must be the centre the server actually
-      // rendered: the plot view is centred on the boundary, not on the site pin.
+      // rendered: the plot view is centred on the boundary, not on the site pin. The live map
+      // may leave map_centers ahead of the stored raster, so the static fallback reads the
+      // baked frame — the exact frame the image was rendered at — not the live camera.
+      const bakedFrame = (tenantCreativeImages.map_baked_frames || {})[mapType] || {};
       const center = (tenantCreativeImages.map_centers || {})[mapType] || {};
-      const lat = Number(center.lat ?? tenantCreativeImages.map_lat ?? tenantProjectData.location_lat);
-      const lng = Number(center.lng ?? tenantCreativeImages.map_lng ?? tenantProjectData.location_lng);
+      const lat = Number(bakedFrame.lat ?? center.lat ?? tenantCreativeImages.map_lat ?? tenantProjectData.location_lat);
+      const lng = Number(bakedFrame.lng ?? center.lng ?? tenantCreativeImages.map_lng ?? tenantProjectData.location_lng);
       const zooms = tenantCreativeImages.map_zooms || {};
-      const zoom = Number(zooms[mapType] || zooms.overview || 17);
+      const zoom = Number(bakedFrame.zoom ?? zooms[mapType] ?? zooms.overview ?? 17);
       if (Number.isFinite(lat) && Number.isFinite(lng)) tenantMapPreviewState = {
         lat, lng, zoom,
         usesEditableBase: url === editableUrl,
-        frameAccurate: Number.isFinite(Number(zooms[mapType]))
+        // Only a frame the raster was actually rendered at makes static clicks
+        // convertible — the ?? 17 display fallback must not count as known.
+        frameAccurate: Number.isFinite(Number(bakedFrame.zoom ?? zooms[mapType]))
       };
       renderTenantMapPolygonOverlay();
       updateTenantMapInteractionState();
       previewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // The live map mounts over the raster when the browser key is available,
+      // framed on the user's live camera (map_centers/zooms), not on the baked
+      // frame the fallback image shows. On any failure the static image below
+      // keeps working unchanged.
+      if (typeof mountInteractivePreview === 'function') {
+        const liveLat = Number(center.lat ?? lat);
+        const liveLng = Number(center.lng ?? lng);
+        const liveZoom = Number(zooms[mapType] ?? zoom);
+        mountInteractivePreview(mapType, liveLat, liveLng, liveZoom);
+      }
       return true;
     }
 
@@ -828,6 +844,7 @@
         if (data.centers?.[mapType] !== undefined) {
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: data.centers[mapType] };
         }
+        if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame(mapType, data.zooms?.[mapType], data.centers?.[mapType]);
         if (mapType === 'overview' && Array.isArray(data.sitePolygon) && data.sitePolygon.length >= 3) {
           tenantMapPolygonPoints = parseTenantPolygonPoints(data.sitePolygon);
           if (!['manual', 'cleared'].includes(tenantProjectData.location_polygon_source)) tenantProjectData.location_polygon_source = 'auto';

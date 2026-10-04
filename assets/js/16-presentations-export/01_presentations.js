@@ -44,6 +44,7 @@
       tenantLandmarkPlacementTarget = null;
       tenantNearbyLandmarks = [];
       tenantActiveProjectSection = null;
+      if (typeof resetInteractiveMapState === 'function') resetInteractiveMapState();
       const ci = tenantProjectData.tenantCreativeImages || {};
       tenantCreativeImages = {
         ...ci,
@@ -247,6 +248,7 @@
         resetTenantLandmarksEditMode();
         tenantNearbyLandmarks = [];
         tenantActiveProjectSection = null;
+        if (typeof resetInteractiveMapState === 'function') resetInteractiveMapState();
         tempCoverImage = null;
         tempMoodboardImages = {};
         tenantProjectSectionStatuses = { ...sectionStatuses };

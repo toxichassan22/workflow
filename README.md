@@ -21,7 +21,9 @@ super admin owns the platform catalog and tenant keys.
 - **PDF:** PyMuPDF (`fitz`) + HTML render pipelines under `exports/`,
   `pdf_generator*_parts/` and `generate_pdf_from_preview_parts/`.
 - **Maps:** Google Maps Static, Places (New), Distance Matrix and Street View
-  Static — one restricted key (`GOOGLE_MAPS_API_KEY`).
+  Static — one restricted key (`GOOGLE_MAPS_API_KEY`). The tenant map preview
+  can additionally mount a live `google.maps.Map` for free pan/zoom when a
+  second, browser-side key is set (`GOOGLE_MAPS_BROWSER_API_KEY`).
 
 ## Repo layout
 
@@ -53,6 +55,7 @@ Minimum `.env`:
 |---|---|
 | `OPENROUTER_KEY` | Platform OpenRouter key (all AI generation) |
 | `GOOGLE_MAPS_API_KEY` | Maps/Places/Distance Matrix/Street View |
+| `GOOGLE_MAPS_BROWSER_API_KEY` | Optional browser key — Maps JavaScript API |
 | `JWT_SECRET` | Session signing — set explicitly in production |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeds the super-admin account |
 | `SMTP_*` | Outgoing mail (invites, approvals, receipts) |
@@ -93,6 +96,13 @@ node scripts/verify-frontend.js   # bundle order, orphans, i18n, syntax
 One Google Cloud project, billing enabled, and an API key restricted to exactly
 these four APIs: **Maps Static**, **Places (New)**, **Distance Matrix**,
 **Street View Static**. Set it as `GOOGLE_MAPS_API_KEY` in `.env`.
+
+For the interactive map preview (drag/zoom like Google Maps instead of
+regenerating the static image on every move), create a second key with only
+**Maps JavaScript API** enabled and restrict it by HTTP referrer
+(`https://landloom.ai/*`, `https://lab.landloom.ai/*`, `http://localhost/*`).
+Set it as `GOOGLE_MAPS_BROWSER_API_KEY`. Without it the preview keeps the
+generated static image; each mounted map is metered as one Dynamic Maps load.
 
 ## Large request bodies
 

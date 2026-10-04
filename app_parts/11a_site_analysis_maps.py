@@ -904,6 +904,23 @@ def api_generate_single_map_image():
                 **(creative.get('map_centers') if isinstance(creative.get('map_centers'), dict) else {}),
                 map_type: result['centers'][map_type],
             }
+        # The rendered frame is the truth the interactive preview's dirty flag
+        # compares against — a stored-but-unbaked viewport override must stay
+        # distinguishable after a reload, and map_zooms/map_centers can no
+        # longer tell them apart once the live map writes into them.
+        if (result.get('zooms') or {}).get(map_type) is not None \
+                or isinstance((result.get('centers') or {}).get(map_type), dict):
+            _baked_zoom = (result.get('zooms') or {}).get(map_type)
+            _baked_center = (result.get('centers') or {}).get(map_type) or {}
+            _prev_baked = (creative.get('map_baked_frames') or {}).get(map_type) or {}
+            creative['map_baked_frames'] = {
+                **(creative.get('map_baked_frames') if isinstance(creative.get('map_baked_frames'), dict) else {}),
+                map_type: {
+                    'zoom': _baked_zoom if _baked_zoom is not None else _prev_baked.get('zoom'),
+                    'lat': _baked_center.get('lat', _prev_baked.get('lat')),
+                    'lng': _baked_center.get('lng', _prev_baked.get('lng')),
+                },
+            }
         if 'highlightSite' in data:
             creative['map_highlight_site'] = bool(highlight_site)
         creative['maps_persisted'] = True
@@ -970,6 +987,48 @@ def api_generate_single_map_image():
         'catchmentLandmarks': result.get('catchment_landmarks', []),
         'landmarkMapItems': result.get('landmark_map_items', []),
     })
+
+
+@app.route('/api/maps/interactive-config', methods=['GET'])
+@require_auth
+def api_maps_interactive_config():
+    """Browser-side Maps JS bootstrap for the live preview map.
+
+    The browser key is public in the page by design — it must be the dedicated
+    GOOGLE_MAPS_BROWSER_API_KEY, HTTP-referrer restricted in Cloud Console. The
+    server-side GOOGLE_MAPS_API_KEY is never served here: a missing browser key
+    just keeps the client on the generated static image.
+    """
+    key = GOOGLE_MAPS_BROWSER_API_KEY or ''
+    if not key:
+        return jsonify({'success': False, 'error_code': 'INTERACTIVE_MAPS_KEY_MISSING'}), 404
+    return jsonify({'success': True, 'key': key})
+
+
+@app.route('/api/maps/interactive-load', methods=['POST'])
+@require_auth
+def api_maps_interactive_load():
+    """Meter one Dynamic Maps load (~$7/1000). Pans/zooms inside the mounted
+    map are free, so the client posts once per map instance — the count is a
+    client-reported estimate bounded by the tenant rate limit, matching the
+    estimate-based metering the rest of the Maps spend tracking uses.
+    """
+    data = request.json or {}
+    map_type = str(data.get('mapType') or '').strip().lower()
+    flow = map_type if map_type in maps_service.MAPS_USAGE_FLOWS else 'maps'
+    rate_error = maps_service._check_maps_rate_limit(g.tenant_id)
+    if rate_error:
+        return jsonify({'success': False, **rate_error}), 429
+    maps_service._record_maps_call(g.tenant_id)
+    maps_service._record_maps_usage(
+        maps_service.maps_usage_ctx(
+            flow, tenant_id=g.tenant_id,
+            draft_id=data.get('draftId') or data.get('draft_id') or None,
+            presentation_id=data.get('presentationId') or data.get('presentation_id') or None,
+        ),
+        'dynamic_map',
+    )
+    return jsonify({'success': True})
 
 
 @app.route('/api/generate-map-images', methods=['POST'])

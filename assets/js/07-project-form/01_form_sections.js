@@ -222,6 +222,7 @@
       resetTenantCatchmentMode();
       resetTenantLandmarksEditMode();
       tenantLandmarkPlacementTarget = null;
+      if (typeof resetInteractiveMapState === 'function') resetInteractiveMapState();
       tenantNearbyLandmarks = [];
       tenantProjectSectionStatuses = {};
       tenantProjectDraftApproval = null;
@@ -454,6 +455,12 @@
     // decided as sent — unless the form carried unsaved edits, in which case a
     // fresh snapshot supersedes it so approval never lands on stale data.
     async function approveSectionWithVersion(sectionKey, options = {}) {
+      // A live-map frame the user adjusted but never baked must land in the
+      // stored raster before the approval freezes it — the approval certifies
+      // the map as displayed, not the last generated image.
+      if (sectionKey === 'location' && typeof settleInteractiveMapFrames === 'function') {
+        try { await settleInteractiveMapFrames(); } catch (e) { console.warn('[MAP FRAME BAKE]', e); }
+      }
       const hadUnsaved = options.pendingStale === undefined
         ? (tenantDraftDirty || !tenantProjectData.draftId)
         : options.pendingStale;

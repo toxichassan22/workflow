@@ -264,7 +264,8 @@ def _check_maps_rate_limit(tenant_id):
 # SKU ids on the invoice: Directions 28A8-3EB4-4595 at $5.00/1000,
 # Distance Matrix Advanced DFAE-763F-CF6E at $10.00/1000 elements,
 # Static Maps 3C2D-B525-2E5F at $2.00/1000, Roads Nearest Road at
-# $10.00/1000. Free usage caps (10,000 Essentials, 5,000 Pro, 1,000
+# $10.00/1000, Dynamic Maps at $7.00/1000 loads (client-reported via
+# /api/maps/interactive-load). Free usage caps (10,000 Essentials, 5,000 Pro, 1,000
 # Enterprise) and the monthly credit are NOT subtracted: verify prices
 # against Cloud Billing and override with the MAPS_SKU_PRICES env var (a JSON
 # object mapping SKU names to dollars). The unit price is stored on each row,
@@ -282,6 +283,7 @@ MAPS_SKU_UNIT_PRICES = {
     'directions': 0.005,
     'streetview': 0.007,
     'roads': 0.01,
+    'dynamic_map': 0.007,
 }
 try:
     _maps_price_overrides = json.loads(os.environ.get('MAPS_SKU_PRICES') or '{}')

@@ -69,11 +69,13 @@
         map_access_roads: [],
         map_catchment_landmarks: [],
         map_landmark_items: [],
+        map_baked_frames: {},
         map_lat: null,
         map_lng: null,
         maps_signature: null,
         maps_persisted: false
       };
+      if (typeof resetInteractiveMapState === 'function') resetInteractiveMapState();
       // Rendered roads, resolved marker items, label placements and a manually
       // drawn boundary are all pinned to the old site's coordinates — carrying
       // them over draws them off-frame or blocks the next render with stale
@@ -106,6 +108,8 @@
 
 
     function tenantMapCoordinatesFromClient(clientX, clientY, img) {
+      // The live map converts through its own projection — always frame-accurate.
+      if (interactiveMapActive()) return interactiveMapClientToLatLng(clientX, clientY);
       // Without the zoom the server rendered at, click-to-coordinates math lands the
       // point at a completely wrong place — refuse instead of storing corrupt data.
       if (!tenantMapPreviewState || tenantMapPreviewState.frameAccurate === false || !img) return null;
@@ -131,7 +135,12 @@
         }
         return;
       }
-      const [nextLat, nextLng] = coordinates;
+      dispatchTenantMapPoint(coordinates[0], coordinates[1]);
+    }
+
+    // Shared by the static image click and the live map's click listener —
+    // both hand in resolved coordinates.
+    function dispatchTenantMapPoint(nextLat, nextLng) {
       if (tenantMapPolygonMode && tenantSelectedMapType === 'overview') {
         tenantMapDraftPolygonPoints.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
@@ -205,9 +214,13 @@
     }
 
     function updateTenantMapInteractionState() {
+      const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
+      if (interactiveMapActive()) {
+        try { tenantInteractiveMap.setOptions({ draggableCursor: modeActive ? 'crosshair' : 'grab' }); } catch (e) { /* map gone */ }
+        return;
+      }
       const image = document.querySelector('#mapPreviewImage img');
       if (!image) return;
-      const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
       image.style.cursor = modeActive ? 'crosshair' : (mapViewportPanAllowed() ? 'grab' : 'default');
     }
 
@@ -227,6 +240,14 @@
 
     async function adjustMapPreviewZoom(mapType, delta) {
       if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
+      // On the live map the zoom is just a camera move — the stored raster only
+      // catches up at the next bake, tracked by the dirty flag.
+      if (interactiveMapActive() && tenantInteractiveMapType === mapType) {
+        const current = Math.round(Number(tenantInteractiveMap.getZoom()) || 0);
+        const nextLive = Math.max(8, Math.min(20, current + delta));
+        if (nextLive !== current) tenantInteractiveMap.setZoom(nextLive);
+        return;
+      }
       const zooms = tenantCreativeImages.map_zooms || {};
       const current = Number(zooms[mapType]);
       if (!Number.isFinite(current)) { toast('تعذر تحديد إطار الخريطة الحالي'); return; }
@@ -324,6 +345,7 @@
         tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
         tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+        if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('overview', data.zooms?.overview, data.centers?.overview);
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         await saveMapPreviewState();
@@ -352,6 +374,7 @@
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('access', data.zooms?.access, data.centers?.access);
           tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : tenantProjectData.access_roads_data || [];
           tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
           const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
@@ -374,6 +397,8 @@
     }
 
     async function ensureAccessEditablePreview() {
+      // On the live map the editable base is always there — no raster swap needed.
+      if (await ensureInteractivePreview('access')) return true;
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('access');
       if (tenantMapPreviewState?.usesEditableBase) return true;
@@ -398,6 +423,7 @@
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('catchment', data.zooms?.catchment, data.centers?.catchment);
           tenantProjectData.catchment_map_landmarks = Array.isArray(data.catchmentLandmarks) ? data.catchmentLandmarks : tenantProjectData.catchment_map_landmarks || [];
           tenantCreativeImages.map_catchment_landmarks = tenantProjectData.catchment_map_landmarks;
           const positions = { ...(tenantProjectData.catchment_label_positions || {}) };
@@ -418,6 +444,7 @@
     }
 
     async function ensureCatchmentEditablePreview() {
+      if (await ensureInteractivePreview('catchment')) return true;
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('catchment');
       if (tenantMapPreviewState?.usesEditableBase) return true;
@@ -442,6 +469,7 @@
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('landmarks', data.zooms?.landmarks, data.centers?.landmarks);
           tenantProjectData.landmark_map_items = Array.isArray(data.landmarkMapItems) ? data.landmarkMapItems : tenantProjectData.landmark_map_items || [];
           tenantCreativeImages.map_landmark_items = tenantProjectData.landmark_map_items;
           const positions = { ...(tenantProjectData.landmark_label_positions || {}) };
@@ -462,6 +490,7 @@
     }
 
     async function ensureLandmarksEditablePreview() {
+      if (await ensureInteractivePreview('landmarks')) return true;
       if (tenantMapPreviewState?.usesEditableBase) return true;
       selectMapPreviewView('landmarks');
       if (tenantMapPreviewState?.usesEditableBase) return true;
@@ -625,7 +654,9 @@
     function renderCatchmentLabels(items, toPoint) {
       const layer = document.getElementById('mapLabelOverlay');
       if (!layer) return;
-      layer.style.pointerEvents = tenantCatchmentEditMode ? 'auto' : 'none';
+      // The layer stays click-through: only .editable labels/markers opt into
+      // pointer events, so a live map keeps panning during edit mode too.
+      layer.style.pointerEvents = 'none';
       layer.innerHTML = items.map(item => {
         if (!item?.name) return '';
         const markerPoint = toPoint([item.lat, item.lng]).split(',').map(Number);
@@ -651,7 +682,7 @@
     function renderLandmarksLabels(items, toPoint) {
       const layer = document.getElementById('mapLabelOverlay');
       if (!layer) return;
-      layer.style.pointerEvents = tenantLandmarksEditMode ? 'auto' : 'none';
+      layer.style.pointerEvents = 'none';
       layer.innerHTML = items.map((item, index) => {
         if (!item?.name) return '';
         const markerPoint = toPoint([item.lat, item.lng]).split(',').map(Number);
@@ -688,7 +719,8 @@
       const showAccessPin = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
       const showCatchment = tenantSelectedMapType === 'catchment' && !!state?.usesEditableBase;
       const showLandmarks = tenantSelectedMapType === 'landmarks' && !!state?.usesEditableBase;
-      if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && !showAccessPin && !showCatchment && !showLandmarks && (!showRoads || !roadPaths.length))) {
+      const liveActive = interactiveMapActive();
+      if (!overlay || !state || (!liveActive && (!img || !img.naturalWidth || !img.naturalHeight)) || (!showBoundary && !showPin && !showAccessPin && !showCatchment && !showLandmarks && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';
         if (labelLayer) {
           labelLayer.innerHTML = '';
@@ -699,13 +731,15 @@
       const world = 256 * Math.pow(2, state.zoom) * 2;
       const centerLatRad = state.lat * Math.PI / 180;
       const centerY = (1 - Math.log(Math.tan(centerLatRad) + 1 / Math.cos(centerLatRad)) / Math.PI) / 2;
-      const toPoint = point => {
-        const lngOffset = (point[1] - state.lng) * world / 360;
-        const pointLatRad = point[0] * Math.PI / 180;
-        const pointY = (1 - Math.log(Math.tan(pointLatRad) + 1 / Math.cos(pointLatRad)) / Math.PI) / 2;
-        const yOffset = (pointY - centerY) * world;
-        return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
-      };
+      const toPoint = liveActive
+        ? (point => interactiveMapLatLngToPercent(point[0], point[1]) || '-1000,-1000')
+        : (point => {
+          const lngOffset = (point[1] - state.lng) * world / 360;
+          const pointLatRad = point[0] * Math.PI / 180;
+          const pointY = (1 - Math.log(Math.tan(pointLatRad) + 1 / Math.cos(pointLatRad)) / Math.PI) / 2;
+          const yOffset = (pointY - centerY) * world;
+          return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
+        });
       const points = showBoundary ? polygonPoints.map(toPoint) : [];
       const line = points.length > 2 ? points.concat(points[0]).join(' ') : points.join(' ');
       const pointMarkup = tenantMapPolygonMode ? points.map((point, index) => {
