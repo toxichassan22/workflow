@@ -297,20 +297,15 @@ a { color: var(--p); }
   font-size: 12px;
   font-weight: 700;
   box-shadow: 0 12px 28px rgba(4, 16, 31, .3);
-  animation: chipFloat 6s ease-in-out infinite;
 }
 
-.chip-a { top: 6%; inset-inline-start: 2%; animation-delay: 0s; }
-.chip-b { bottom: 10%; inset-inline-end: 0%; animation-delay: 2.2s; }
-.chip-c { bottom: -2%; inset-inline-start: 14%; animation-delay: 4.1s; }
+.chip-a { top: 6%; inset-inline-start: 2%; --ci: 0s; }
+.chip-b { bottom: 10%; inset-inline-end: 0%; --ci: .6s; }
+.chip-c { bottom: -2%; inset-inline-start: 14%; --ci: 1.2s; }
 
 @keyframes chipFloat {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .float-chip { animation: none; }
 }
 
 /* ── Outputs strip ───────────────────────────────────────────────────────── */
@@ -322,7 +317,27 @@ a { color: var(--p); }
 }
 
 .outputs .wrap {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  display: flex; align-items: center; gap: 14px;
+}
+
+.outputs-track {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  direction: ltr;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+
+.outputs-marquee {
+  display: flex;
+  width: max-content;
+}
+
+.mq-set {
+  display: flex;
+  gap: 14px;
+  padding-inline-end: 14px;
 }
 
 .outputs .label {
@@ -577,4 +592,98 @@ a { color: var(--p); }
   .site-nav a:not(.keep) { display: none; }
   .join-card { padding: 26px; }
   .float-chip { display: none; }
+}
+
+/* ── Motion ────────────────────────────────────────────────────────────────
+   Everything lives behind no-preference so reduced-motion users get the same
+   page, static. Entrance keyframes animate FROM hidden states — if scripts or
+   animations never run, every element simply sits in its natural visible
+   position. Reveal states additionally require body.js, which site.js sets
+   before wiring the IntersectionObserver. */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  .btn { transition: transform .18s ease, background .2s ease, border-color .2s ease; }
+  .btn:hover { transform: translateY(-2px); }
+  .feature-card { transition: transform .25s ease, border-color .2s ease, box-shadow .25s ease; }
+  .feature-card:hover { transform: translateY(-4px); }
+  .brand-thumb { transition: transform .25s ease, box-shadow .25s ease; }
+  .brand-thumb:hover { transform: translateY(-4px); }
+  .output-chip { transition: transform .2s ease, border-color .2s ease; }
+  .output-chip:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .site-topbar.on-dark { transition: background .3s ease, border-color .3s ease; }
+
+  @keyframes riseIn {
+    from { opacity: 0; transform: translateY(26px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes deckIn {
+    from { opacity: 0; transform: translateX(56px) scale(.96); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes chipIn {
+    from { opacity: 0; transform: translateY(14px) scale(.85); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes outputsDrift {
+    to { transform: translateX(-50%); }
+  }
+  @keyframes gridPan {
+    from { background-position: 0 0, 0 0; }
+    to { background-position: 44px 44px, 44px 44px; }
+  }
+
+  .hero::after { animation: gridPan 9s linear infinite; }
+
+  .hero .kicker, .hero h1, .hero .lead, .hero-actions, .hero .trust {
+    animation: riseIn .7s ease both;
+  }
+  .hero .kicker { animation-delay: .05s; }
+  .hero h1 { animation-delay: .12s; }
+  .hero .lead { animation-delay: .22s; }
+  .hero-actions { animation-delay: .3s; }
+  .hero .trust { animation-delay: .4s; }
+
+  .hero-visual { animation: deckIn .9s .25s cubic-bezier(.2, .7, .2, 1) both; }
+
+  .float-chip {
+    animation:
+      chipIn .55s calc(.95s + var(--ci, 0s)) both,
+      chipFloat 6s calc(1.5s + var(--ci, 0s)) ease-in-out infinite;
+  }
+
+  .outputs-marquee { animation: outputsDrift 32s linear infinite; }
+  .outputs-track:hover .outputs-marquee { animation-play-state: paused; }
+
+  body.js [data-reveal] {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity .65s ease, transform .65s ease;
+  }
+  body.js [data-reveal].in { opacity: 1; transform: none; }
+
+  body.js [data-reveal-group] > * {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .55s ease, transform .55s ease;
+  }
+  body.js [data-reveal-group].in > * { opacity: 1; transform: none; }
+  body.js [data-reveal-group].in > *:nth-child(2) { transition-delay: .07s; }
+  body.js [data-reveal-group].in > *:nth-child(3) { transition-delay: .14s; }
+  body.js [data-reveal-group].in > *:nth-child(4) { transition-delay: .21s; }
+  body.js [data-reveal-group].in > *:nth-child(5) { transition-delay: .28s; }
+  body.js [data-reveal-group].in > *:nth-child(6) { transition-delay: .35s; }
+}
+
+/* The fixed-on-scroll bar is functional, not decorative motion — it stays
+   available for reduced-motion users too; only its transition is gated. */
+.site-topbar.on-dark.scrolled {
+  position: fixed;
+  background: rgba(7, 24, 44, .88);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, .09);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
 }
