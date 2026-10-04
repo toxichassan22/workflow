@@ -391,9 +391,18 @@
       const overview = typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS[0] : null;
       const overviewGenerated = mapPreviewIsGenerated(overview);
       const generateOverviewButton = document.getElementById('generateOverviewMapButton');
+      const toolsPanel = document.getElementById('locationMapToolsPanel');
       const hasCoords = isUsableMapCoordinate(tenantProjectData.location_lat, true)
         && isUsableMapCoordinate(tenantProjectData.location_lng, false);
-      if (generateOverviewButton) generateOverviewButton.disabled = !hasCoords || overviewGenerated;
+      // The overview generate button belongs to its own map: it only shows
+      // while overview is selected and still ungenerated — a permanently
+      // disabled button floating above every map was noise.
+      const showOverviewGenerate = tenantSelectedMapType === 'overview' && !overviewGenerated;
+      if (generateOverviewButton) {
+        generateOverviewButton.style.display = showOverviewGenerate ? '' : 'none';
+        generateOverviewButton.disabled = !hasCoords || overviewGenerated;
+      }
+      if (toolsPanel) toolsPanel.style.display = showOverviewGenerate ? 'flex' : 'none';
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
         const roadModeLocked = key === 'main_roads' && (tenantRoadEditMode || !!tenantRoadDrawingTarget);
         const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
