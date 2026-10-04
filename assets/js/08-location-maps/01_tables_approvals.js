@@ -432,8 +432,6 @@
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoTenantMapPinButton" onclick="undoTenantMapPin()">تراجع</button>';
         } else if (view.mapType === 'overview' && generated) {
           actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')">إعادة توليد الخريطة</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', 1)">تكبير</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'overview\', -1)">تصغير</button>' +
             ((tenantCreativeImages.map_viewport_overrides || {}).overview
               ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'overview\')">الإطار التلقائي</button>' : '') +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>' +
@@ -458,8 +456,6 @@
           actions = manualRoadDrawingControlsHtml();
         } else if (view.mapType === 'access' && generated) {
           actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')">إعادة توليد الخريطة</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', 1)">تكبير</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustMapPreviewZoom(\'access\', -1)">تصغير</button>' +
             ((tenantCreativeImages.map_viewport_overrides || {}).access
               ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'access\')">الإطار التلقائي</button>' : '') +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()">إضافة / تعديل الطرق</button>' +

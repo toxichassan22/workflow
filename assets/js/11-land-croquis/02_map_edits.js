@@ -238,31 +238,6 @@
 
     let tenantMapViewportBusy = false;
 
-    async function adjustMapPreviewZoom(mapType, delta) {
-      if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
-      // On the live map the zoom is just a camera move — the stored raster only
-      // catches up at the next bake, tracked by the dirty flag.
-      if (interactiveMapActive() && tenantInteractiveMapType === mapType) {
-        const current = Math.round(Number(tenantInteractiveMap.getZoom()) || 0);
-        const nextLive = Math.max(8, Math.min(20, current + delta));
-        if (nextLive !== current) tenantInteractiveMap.setZoom(nextLive);
-        return;
-      }
-      const zooms = tenantCreativeImages.map_zooms || {};
-      const current = Number(zooms[mapType]);
-      if (!Number.isFinite(current)) { toast('تعذر تحديد إطار الخريطة الحالي'); return; }
-      const next = Math.max(8, Math.min(20, Math.round(current + delta)));
-      if (next === current) return;
-      tenantMapViewportBusy = true;
-      try {
-        tenantCreativeImages.map_zooms = { ...zooms, [mapType]: next };
-        tenantCreativeImages.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}), [mapType]: true };
-        await regenerateMapPreview(mapType);
-      } finally {
-        tenantMapViewportBusy = false;
-      }
-    }
-
     // Clears a hand-picked zoom/center so the next render frames this map
     // automatically again — without it a stray pan would pin the frame forever.
     function resetMapViewport(mapType) {

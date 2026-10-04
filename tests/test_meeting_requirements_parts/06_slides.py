@@ -648,14 +648,14 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("tenantSelectedMapType === 'overview' && tenantMapPinMode", index_source)
         self.assertIn("editableKeys: ['##MAP_OVERVIEW_EDITABLE##'", index_source)
         self.assertNotIn('function applyTenantPolygonZoom()', index_source)
-        # Manual viewport: overview/access previews expose zoom buttons and drag-pan,
-        # and the picked frame rides in the regenerate payload for the server.
-        self.assertIn('async function adjustMapPreviewZoom(mapType, delta)', index_source)
+        # Manual viewport: the live map owns zoom natively, so the custom zoom
+        # buttons are gone; drag-pan stays for the static fallback, and the
+        # picked frame still rides in the regenerate payload for the server.
         self.assertIn('function startMapViewportPan(event)', index_source)
         self.assertIn('function mapViewportPanAllowed()', index_source)
         self.assertIn('onpointerdown="startMapViewportPan(event)"', index_source)
-        self.assertIn(">تكبير</button>", workflow_body)
-        self.assertIn(">تصغير</button>", workflow_body)
+        self.assertNotIn(">تكبير</button>", workflow_body)
+        self.assertNotIn(">تصغير</button>", workflow_body)
         self.assertIn("return mapType === 'overview' || mapType === 'access';", index_source)
         regen_body = index_source.split('async function regenerateMapPreviewOnce(mapType)', 1)[1].split('function ', 1)[0]
         self.assertIn('payload.map_zooms', regen_body)

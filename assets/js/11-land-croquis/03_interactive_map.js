@@ -84,7 +84,10 @@
       tenantInteractiveReadyPromise = (async () => {
         try {
           const cfg = await api('GET', '/api/maps/interactive-config');
-          if (!cfg || !cfg.success || !cfg.key) return false;
+          if (!cfg || !cfg.success || !cfg.key) {
+            console.warn('[INTERACTIVE MAP] static fallback —', (cfg && (cfg.error || cfg.error_code)) || 'no config');
+            return false;
+          }
           if (!(window.google && window.google.maps && window.google.maps.Map)) {
             const lang = (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang && window.WFI18n.getLang()) || 'ar';
             await new Promise((resolve, reject) => {
