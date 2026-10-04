@@ -1030,28 +1030,23 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # center the viewport, but it must never move that saved pin implicitly.
     marker_lat, marker_lng = lat, lng
 
-    # Parse UI element flags (compass, inset map)
+    # Parse UI element flags (compass, inset map) — fixed platform defaults unless
+    # the project itself carries an explicit flag; the company-level map settings
+    # were removed, so tenant branding is no longer consulted.
     draw_compass = project_data.get('draw_compass', True)
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in ('true', '1', 'yes')
     elif not isinstance(draw_compass, bool):
-        if branding and 'draw_compass' in branding:
-            draw_compass = bool(branding['draw_compass'])
-        else:
-            draw_compass = True
+        draw_compass = True
 
     draw_inset = project_data.get('draw_inset', True)
     if isinstance(draw_inset, str):
         draw_inset = draw_inset.lower() in ('true', '1', 'yes')
     elif not isinstance(draw_inset, bool):
-        if branding and 'draw_inset' in branding:
-            draw_inset = bool(branding['draw_inset'])
-        else:
-            draw_inset = True
+        draw_inset = True
 
     # Parse per-map style preferences (satellite/roadmap/terrain/hybrid/both)
     # Default: all satellite. Employee can override per-map via map_styles dict.
-    # Fallback to tenant branding defaults if not in project_data
     map_styles_raw = project_data.get('map_styles', {})
     if isinstance(map_styles_raw, str):
         try:
@@ -1062,16 +1057,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         map_styles_raw = {}
     else:
         map_styles_raw = dict(map_styles_raw)
-    # default_map_type is only a fallback; explicit per-map tenant settings win.
-    default_map_type = (
-        project_data.get('map_type')
-        or (branding.get('default_map_type') if branding else None)
-        or 'satellite'
-    )
-    if branding:
-        for key in ('overview', 'landmarks', 'access', 'catchment'):
-            if not map_styles_raw.get(key):
-                map_styles_raw[key] = branding.get(f'map_style_{key}') or default_map_type
+    # default_map_type is only a fallback; explicit per-map project settings win.
+    default_map_type = project_data.get('map_type') or 'satellite'
     VALID_MAPTYPES = {'auto', 'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
     map_styles = {}
     for key in ('overview', 'landmarks', 'access', 'catchment'):

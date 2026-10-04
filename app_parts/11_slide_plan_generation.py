@@ -102,17 +102,14 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     )
     section_mode = bool(target_section_keys)
     training_context = db.get_training_context(tenant_id) or ''
-    slide_count_locked = bool(branding.get('lock_slide_count')) and not section_mode
-    bounds_branding = dict(branding)
-    if section_mode:
-        bounds_branding['lock_slide_count'] = False
-    configured_min, configured_max, locked_count = resolve_slide_bounds(bounds_branding)
+    # Slide bounds are platform constants now — there is no company slide-count
+    # setting to honour or to lock, only the planner's floor and the open ceiling.
+    configured_min, configured_max, _fallback_count = resolve_slide_bounds(branding)
 
     effective_max_slides = max(1, configured_max)
     effective_min_slides = 1 if section_mode else min(configured_min, effective_max_slides)
 
-    # A locked slide count outranks any hint found in the training context.
-    if not slide_count_locked and not section_mode:
+    if not section_mode:
         # Search training context only for explicit min slide constraints
         matches = re.findall(r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)', training_context)
         if matches:
@@ -124,17 +121,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
             except ValueError:
                 pass
 
-    effective_branding = dict(branding)
-    effective_branding['min_slides'] = effective_min_slides
-    effective_branding['max_slides'] = effective_max_slides
-    if section_mode:
-        effective_branding['lock_slide_count'] = False
-    if slide_count_locked:
-        effective_branding['default_slide_count'] = locked_count
-    elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
-        effective_branding['default_slide_count'] = effective_max_slides
-
-    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id, images=images)
+    prompt = build_slide_plan_prompt(project_data, branding, tenant_id=tenant_id, images=images)
     offer_lang = slide_engine.resolve_offer_lang(project_data)
     if section_mode:
         target_titles = '، '.join(slide_engine.section_title(key, offer_lang) for key in target_section_keys)
@@ -145,13 +132,11 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
             + prompt
         )
     if training_context:
-        # Only a locked count is a ceiling. Otherwise the count follows the content, and this
-        # header used to contradict the prompt by naming a maximum the prompt calls open.
+        # The count follows the content; this header states the floor without
+        # naming a maximum the prompt itself calls open.
         count_rule = (
             "هذا عرض مستقل لقسم محدد، وعدد شرائحه يتبع محتوى القسم فقط."
             if section_mode else
-            f"عدد الشرائح لهذه الشركة مقفل على {locked_count} شريحة بالضبط."
-            if slide_count_locked else
             f"لا يقل عدد الشرائح عن {effective_min_slides} شريحة، ولا يوجد حد أعلى: "
             "وزّع كل المحتوى المتاح على ما يحتاجه من شرائح دون اختصار أو دمج، "
             "وابقِ كل شريحة بفكرة واحدة غير مزدحمة."
@@ -176,7 +161,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
                 usage_ctx=_usage_ctx('slide_plan', project_data, tenant_id=tenant_id)
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
-            plan = parse_slide_plan(content, effective_branding, project_data)
+            plan = parse_slide_plan(content, branding, project_data)
             print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
             break
         except Exception as e:
@@ -192,7 +177,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     plan_error = ''
     if not plan:
         print(f"[SLIDE-PLAN FALLBACK] Using fallback plan after {max_attempts} attempts. Last error: {last_error}")
-        plan = build_fallback_plan(effective_branding, project_data)
+        plan = build_fallback_plan(branding, project_data)
         plan_source = 'fallback'
         plan_error = str(last_error or '')
 
@@ -278,7 +263,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     if plan_error:
         plan['source_error'] = plan_error[:400]
 
-    is_valid, issues = validate_slide_plan(plan, effective_branding)
+    is_valid, issues = validate_slide_plan(plan, branding)
     if not is_valid:
         print(f"[SLIDE-PLAN] Validation issues: {issues}")
 

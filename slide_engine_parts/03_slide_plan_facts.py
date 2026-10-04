@@ -97,24 +97,20 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 
 # There is no upper limit on how many slides a project may need. The stored max_slides used to
 # trim the plan — a project with more content than the number allowed simply lost the surplus
-# slides, and the planner was told to obey a ceiling the prompt itself calls open. Only
-# lock_slide_count still binds the count, and then it binds it exactly.
+# slides, and the planner was told to obey a ceiling the prompt itself calls open.
 SLIDE_COUNT_OPEN = 100000
+
+# The slide count belongs to the planner, not to a tenant setting — the company no
+# longer has a field for it. The only bounds left are platform constants: a sanity
+# floor so a thin project still gets a real deck, and a fixed count just for the
+# deterministic fallback plan. Stored tenant values are ignored.
+PLAN_MIN_SLIDES = 8
+PLAN_FALLBACK_SLIDE_COUNT = 16
 
 
 def resolve_slide_bounds(branding):
-    """Resolve (min_slides, max_slides, default_count) from branding.
-
-    When lock_slide_count is enabled the tenant's default_slide_count becomes an
-    exact requirement. Otherwise only the minimum applies and the upper end is open:
-    the planner decides the count from the amount of content.
-    """
-    branding = branding or {}
-    default_count = int(branding.get('default_slide_count') or 16)
-    if branding.get('lock_slide_count'):
-        return default_count, default_count, default_count
-    min_slides = int(branding.get('min_slides') or 14)
-    return min(min_slides, SLIDE_COUNT_OPEN), SLIDE_COUNT_OPEN, default_count
+    """Resolve (min_slides, max_slides, default_count) — platform constants."""
+    return PLAN_MIN_SLIDES, SLIDE_COUNT_OPEN, PLAN_FALLBACK_SLIDE_COUNT
 
 
 def build_fallback_plan(branding, project_data=None, offer_lang=None):
@@ -306,46 +302,6 @@ def _extract_json_from_text(response_text):
     return None
 
 
-def _enforce_slide_count(slides, target_count, offer_lang=None, project_data=None):
-    """Trim or pad a slide list to exactly target_count, keeping fixed slides intact.
-
-    The cover, index and closing slides keep their reserved positions;
-    only content slides are removed or appended.
-    """
-    lang = resolve_offer_lang(project_data, offer_lang)
-    if target_count < 1 or len(slides) == target_count:
-        return slides
-
-    reserved_tail_types = {'closing'}
-
-    if len(slides) > target_count:
-        head = slides[:2]                      # cover + index
-        tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
-        middle = slides[len(head):len(slides) - len(tail)]
-        keep_middle = max(0, target_count - len(head) - len(tail))
-        return (head + middle[:keep_middle] + tail)[:target_count]
-
-    tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
-    body = slides[:len(slides) - len(tail)]
-    while len(body) + len(tail) < target_count:
-        title = (f'Additional details {len(body)}' if lang == OFFER_LANG_ENGLISH
-                 else f'تفاصيل إضافية {len(body)}')
-        style = _suggest_design_style(title, slide_type='content')
-        if body and body[-1].get('design_style') == style and style == 'cards':
-            style = 'text'
-        body.append({
-            'title': title,
-            'type': 'content',
-            'design_style': style,
-            'content_density': 'medium',
-            'requires_image': False,
-            'bullets': (['First key point', 'Second key point', 'Third key point']
-                        if lang == OFFER_LANG_ENGLISH else
-                        ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة']),
-        })
-    return body + tail
-
-
 def parse_slide_plan(response_text, branding=None, project_data=None):
     """Parse the AI response into a slide plan dict."""
     json_text = _extract_json_from_text(response_text)
@@ -360,15 +316,6 @@ def parse_slide_plan(response_text, branding=None, project_data=None):
     # Validate structure
     if 'slides' not in plan or not isinstance(plan['slides'], list):
         raise ValueError("Missing 'slides' array in response")
-
-    # A locked slide count is a hard tenant requirement: reshape the plan
-    # instead of failing validation and burning another generation round.
-    if branding and branding.get('lock_slide_count'):
-        _min_s, _max_s, default_count = resolve_slide_bounds(branding)
-        if len(plan['slides']) != default_count:
-            print(f"[SLIDE-PLAN] lock_slide_count active: reshaping "
-                  f"{len(plan['slides'])} -> {default_count} slides")
-            plan['slides'] = _enforce_slide_count(plan['slides'], default_count, project_data=project_data)
 
     plan['proposed_count'] = len(plan['slides'])
 

@@ -1228,8 +1228,9 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
                 self.application_module, 'call_text_chat_parallel', return_value={
                     'choices': [{'message': {'content': planner}}]
                 }):
+            # Slide counts are platform-fixed now: a stored tenant value cannot
+            # force a section-scoped regeneration up to a locked count.
             branding = dict(db.get_branding(self.tenant_a) or {})
-            branding.update({'lock_slide_count': 1, 'default_slide_count': 30, 'min_slides': 30})
             locked_payload = self.application_module._execute_slide_plan(
                 project, self.tenant_a, branding, target_section_keys=('financial',))
         self.assertTrue(locked_payload['success'])

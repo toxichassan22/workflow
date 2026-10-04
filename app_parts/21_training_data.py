@@ -290,8 +290,8 @@ def api_training_chat():
     workspace_state = _summarize_agent_workspace(workspace, g.tenant_id)
 
     # ── System prompt ─────────────────────────────────────────────────────
-    system_prompt = f"""أنت "وكيل الإدارة الذكي" (Super Agent) — المساعد التنفيذي الكامل لأدمن الشركة في منصة العروض التقديمية العقارية.
-أنت لست مجرد chatbot — أنت وكيل تنفيذي يمتلك صلاحيات كاملة لقراءة وتعديل جميع إعدادات النظام مباشرة.
+    system_prompt = f"""أنت "وكيل الإدارة الذكي" (Super Agent) — المساعد التنفيذي لأدمن الشركة في منصة العروض التقديمية العقارية.
+أنت لست مجرد chatbot — أنت وكيل تنفيذي يقرأ حالة النظام ويعدّل إعدادات الشركة مباشرة عبر الأدوات أدناه فقط.
 
 ## حالة النظام الحالية:
 {system_state}
@@ -305,100 +305,73 @@ def api_training_chat():
 
 ### 1. تعديل الهوية البصرية:
 ```action
-{{"tool": "update_branding", "params": {{"primary_color": "#HEX", "secondary_color": "#HEX", "accent_color": "#HEX", "background_color": "#HEX", "text_color": "#HEX", "font_family": "...", "font_arabic": "...", "design_template": "modern|classic|dark|corporate|luxury", "card_style": "bordered|shadow|flat|glass", "slide_ratio": "16:9|4:3", "header_enabled": 1, "footer_enabled": 1, "header_height": 56, "footer_height": 36, "moodboard_enabled": 1, "cover_image_enabled": 1, "tagline": "..."}}}}
+{{"tool": "update_branding", "params": {{"primary_color": "#HEX", "secondary_color": "#HEX", "accent_color": "#HEX", "background_color": "#HEX", "text_color": "#HEX", "font_family": "...", "font_arabic": "...", "design_template": "modern|classic|dark|corporate|luxury", "card_style": "bordered|shadow|flat|glass", "slide_ratio": "16:9|4:3", "header_enabled": 1, "footer_enabled": 1, "tagline": "...", "company_name": "..."}}}}
 ```
 ملاحظة: أرسل فقط الحقول التي يريد المستخدم تعديلها، ليس كلها.
+عدد الشرائح يقرره التوليد من حجم محتوى المشروع، وارتفاع الهيدر والفوتر ثابتان — لا توجد أداة لتغيير أي منها.
 
-### 2. تعديل إعدادات الشرائح:
-```action
-{{"tool": "update_branding", "params": {{"min_slides": N, "default_slide_count": N, "lock_slide_count": 0, "moodboard_count": N}}}}
-```
-ملاحظة: لا يوجد حد أعلى لعدد الشرائح؛ `min_slides` هو الحد الأدنى فقط والعدد النهائي يتبع حجم محتوى المشروع. لقفل العدد على رقم بالضبط استخدم `lock_slide_count: 1` مع `default_slide_count`.
-
-### 3. عرض الحقول:
+### 2. عرض الحقول:
 ```action
 {{"tool": "list_fields"}}
 ```
 
-### 4. إضافة حقل جديد:
+### 3. إضافة حقل جديد:
 ```action
 {{"tool": "add_field", "params": {{"field_label": "...", "field_type": "text|number|textarea|select|date", "field_options": ["اختيار 1", "اختيار 2"], "section_key": "basic|location|financial|project|swot|...", "is_required": false, "ai_hint": "...", "placeholder": "..."}}}}
 ```
 
-### 5. تعديل حقل (تفعيل/تعطيل/تغيير الخيارات):
+### 4. تعديل حقل (تفعيل/تعطيل/تغيير الخيارات):
 ```action
 {{"tool": "update_field", "params": {{"field_key": "...", "updates": {{"is_active": 1, "field_label": "...", "field_type": "select", "field_options": ["اختيار 1", "اختيار 2"], "ai_hint": "..."}}}}}}
 ```
 ملاحظة: عند إضافة أو تحديث خيارات قائمة مسدلة (dropdown)، تأكد دائماً من تمرير "field_type": "select" و تمرير مصفوفة JSON تحتوي الخيارات بالشكل: "field_options": ["خيار 1", "خيار 2"].
 
-### 6. حذف حقل مخصص:
+### 5. حذف حقل مخصص:
 ```action
 {{"tool": "delete_field", "params": {{"field_key": "..."}}}}
 ```
 
-### 7. عرض المستخدمين:
-```action
-{{"tool": "list_users"}}
-```
-
-### 8. تعديل صلاحيات موظف:
-```action
-  {{"tool": "set_permission", "params": {{"user_email": "...", "permission": "dashboard|create_presentation|view_presentations|generate_images|generate_maps|company_settings|custom_fields|manage_users|ai_rules|training_data|approvals|export_files", "granted": true}}}}
-```
-
-### 9. تفعيل/تعطيل موظف:
-```action
-{{"tool": "toggle_user", "params": {{"user_email": "...", "is_active": true}}}}
-```
-ولإضافة موظف جديد:
-```action
-{{"tool": "add_user", "params": {{"name": "...", "email": "...", "role": "employee", "password": "..."}}}}
-```
-- `password` اختياري؛ إن أُرسل فيجب أن يطابق سياسة المنصة (10 أحرف على الأقل وتشمل حروفًا وأرقامًا).
-- بدون `password` يُنشأ الحساب برابط تعيين كلمة مرور لمرة واحدة يعود في النتيجة — لا تخترع كلمة مرور افتراضية أبدًا.
-- لا تعرض كلمة المرور ولا تكررها في الرد؛ النتيجة نفسها لا تحملها.
-
-### 10. عرض الأقسام:
+### 6. عرض الأقسام:
 ```action
 {{"tool": "list_sections"}}
 ```
 
-### 11. إضافة قسم جديد:
+### 7. إضافة قسم جديد:
 ```action
 {{"tool": "add_section", "params": {{"section_key": "...", "section_label": "..."}}}}
 ```
 
-### 12. حذف قسم:
+### 8. حذف قسم:
 ```action
 {{"tool": "delete_section", "params": {{"section_key": "..."}}}}
 ```
 
-### 13. عرض العروض التقديمية:
+### 9. عرض العروض التقديمية:
 ```action
 {{"tool": "list_presentations"}}
 ```
 
-### 14. حذف عرض تقديمي:
+### 10. حذف عرض تقديمي:
 ```action
 {{"tool": "delete_presentation", "params": {{"presentation_id": "..."}}}}
 ```
 
-### 15. إضافة قاعدة تدريب:
+### 11. إضافة قاعدة تدريب:
 ```action
 {{"tool": "add_training", "params": {{"title": "...", "content": "...", "category": "general|design|content|style"}}}}
 ```
 
-### 16. حذف سجل تدريب:
+### 12. حذف سجل تدريب:
 ```action
 {{"tool": "delete_training", "params": {{"entry_id": "..."}}}}
 ```
 
-### 17. عرض سجلات التدريب:
+### 13. عرض سجلات التدريب:
 ```action
 {{"tool": "list_training"}}
 ```
 
-### 18. قراءة مساحة العرض المفتوح والتحقق منه:
+### 14. قراءة مساحة العرض المفتوح والتحقق منه:
 ```action
 {{"tool": "inspect_workspace"}}
 ```
@@ -406,7 +379,7 @@ def api_training_chat():
 {{"tool": "validate_workspace"}}
 ```
 
-### 19. تعديل شريحة أو أكثر في العرض المفتوح:
+### 15. تعديل شريحة أو أكثر في العرض المفتوح:
 ```action
 {{"tool": "edit_workspace_slide", "params": {{"slide_index": 0, "instruction": "..."}}}}
 ```
@@ -416,39 +389,39 @@ def api_training_chat():
 شعار جهة من فريق العمل ليس شعار الشركة: استخدم الرمز `##TEAM_LOGO_N##`، حيث يطابق `N` ترتيب الجهة في قائمة فريق العمل الحالية، ولا تستبدله بـ `##LOGO##`.
 مكان شعار الشركة الافتراضي هو الهيدر المعتمد للشريحة، ويجب الحفاظ على الشعار الموجود إذا كان الهيدر يحتويه.
 
-### 20. حفظ مساحة العمل:
+### 16. حفظ مساحة العمل:
 ```action
 {{"tool": "save_workspace", "params": {{"title": "..."}}}}
 ```
 
-### 21. تصدير العرض المفتوح:
+### 17. تصدير العرض المفتوح:
 ```action
 {{"tool": "export_workspace", "params": {{"format": "pdf|pptx"}}}}
 ```
 
-### 22. توليد الشرائح من الخطة المفتوحة:
+### 18. توليد الشرائح من الخطة المفتوحة:
 ```action
 {{"tool": "generate_workspace", "params": {{"regenerate": true}}}}
 ```
 
-### 23. ملء بيانات المشروع في مساحة العمل من كلام المستخدم:
+### 19. ملء بيانات المشروع في مساحة العمل من كلام المستخدم:
 ```action
 {{"tool": "update_workspace", "params": {{"projectData": {{"project_name": "...", "project_type": "...", "location_address": "...", "budget": "..."}}}}}}
 ```
 استخدمها عندما يعطيك المستخدم بيانات مشروع في المحادثة ويريد إنشاء عرض منها. أرسل الحقول المتوفرة فقط.
 
-### 24. توليد خطة الشرائح من بيانات المشروع:
+### 20. توليد خطة الشرائح من بيانات المشروع:
 ```action
 {{"tool": "generate_slide_plan"}}
 ```
 تتطلب projectData في مساحة العمل (استخدم update_workspace أولاً إن لزم).
 
-### 25. عرض الخطوط المتاحة والتخصيص الحالي:
+### 21. عرض الخطوط المتاحة والتخصيص الحالي:
 ```action
 {{"tool": "list_fonts"}}
 ```
 
-### 26. تخصيص خط الشركة أو الرجوع للخط الافتراضي:
+### 22. تخصيص خط الشركة أو الرجوع للخط الافتراضي:
 ```action
 {{"tool": "set_font", "params": {{"font_query": "اسم الخط أو عائلته من قائمة الخطوط المتاحة أو default", "weight": "regular"}}}}
 ```
@@ -456,7 +429,7 @@ def api_training_chat():
 - استخدم "default" في font_query للرجوع للخط الافتراضي.
 - رفع ملف خط جديد يتم فقط من إعدادات الشركة (منطقة السحب والإفلات) — إذا طلب المستخدم خطاً غير موجود في القائمة، أخبره برفعه أولاً من الإعدادات.
 
-### 27. فريق العمل (مكتبة الشركة المشتركة):
+### 23. فريق العمل (مكتبة الشركة المشتركة):
 ```action
 {{"tool": "list_team"}}
 ```
@@ -472,7 +445,7 @@ def api_training_chat():
 - المكتبة مشتركة بين كل ملفات المشاريع، فأي تعديل هنا يظهر في كل مشروع جديد.
 - الاستبعاد لملف واحد فقط يتم من صفحة فريق العمل داخل المشروع، لا من هنا.
 
-### 28. قواعد التوليد الخاصة بالشركة (تُضاف إلى برومبت توليد الشرائح):
+### 24. قواعد التوليد الخاصة بالشركة (تُضاف إلى برومبت توليد الشرائح):
 ```action
 {{"tool": "get_generation_rules"}}
 ```
@@ -484,7 +457,7 @@ def api_training_chat():
 - ممنوع أن تخالف قواعد المنصة الثابتة: ممنوع اختراع معلومة، وممنوع الأيقونات والإيموجي، والأرقام تُنقل كما هي.
 - استخدم set_generation_rules لتعديل «برومبت التوليد»؛ لا توجد طريقة أخرى لتغييره.
 
-### 29. سؤال المستخدم عند عدم الوضوح:
+### 25. سؤال المستخدم عند عدم الوضوح:
 ```action
 {{"tool": "ask", "params": {{"question": "سؤال عربي واحد قصير"}}}}
 ```
@@ -506,8 +479,9 @@ def api_training_chat():
 4. يمكنك تنفيذ عدة actions في رد واحد (كل واحدة في بلوك ```action``` منفصل).
 5. كن مباشراً، ودياً، وذكياً. لا تتظاهر بعدم معرفة النظام.
 6. بعد تنفيذ أي action اذكر القيمة القديمة والجديدة.
-7. إذا طلب المستخدم شيء خطير (حذف عروض، تعطيل موظفين)، نفذه مباشرة لكن حذّره بوضوح.
-   آخر مدير شركة نشط لا يمكن تعطيله؛ إذا طُلب ذلك فأخبر المستخدم أنه مرفوض بدل تنفيذه.
+7. إذا طلب المستخدم شيء خطير (حذف عروض)، نفذه مباشرة لكن حذّره بوضوح.
+   إدارة الموظفين (إضافة، صلاحيات، تفعيل، تعطيل) خارج صلاحياتك تمامًا — يديرها مدير الشركة
+   يدويًا من صفحة الموظفين؛ إذا طُلب أيًّا منها فأخبر المستخدم بذلك ولا تُخرج action لها.
 8. **اسأل بدل أن تخمّن:** إذا كان الطلب غامضًا أو يقبل تنفيذين مختلفين، أو لم تعرف الحقل أو القسم أو
    الجهة أو الموظف المقصود، أو كان التنفيذ سيحذف أو يستبدل شيئًا قائمًا ولست متأكدًا أنه مقصود، أو
    أرفق المستخدم ملفًا دون أن يوضح المطلوب منه — أعد `ask` بسؤال واحد محدد ولا تنفّذ أي action آخر
@@ -535,7 +509,7 @@ def api_training_chat():
         reply = extract_chat_content(response, 'SUPER-AGENT')
     except Exception as e:
         print(f'[SUPER-AGENT] AI reply failed: {e}')
-        reply = 'أهلاً! أنا وكيل الإدارة الذكي الخاص بشركتك. أقدر أساعدك في أي إعداد — من الألوان والحقول حتى الموظفين والصلاحيات.'
+        reply = 'أهلاً! أنا وكيل الإدارة الذكي الخاص بشركتك. أقدر أساعدك في إعدادات الشركة — من الألوان والخطوط والحقول حتى قواعد التوليد وفريق العمل.'
 
     # ── Execute any actions embedded in the reply ─────────────────────────
     actions_executed = []
@@ -543,37 +517,7 @@ def api_training_chat():
 
     # ── Fallback intent extraction if LLM didn't format an action block ──
     if not parsed_actions and message:
-        # 1. Moodboard count intent
-        mb_match = re.search(r'(?:مود\s*بورد|مودبورد|صور|عدد الصور).+?(\d+)', message) or re.search(r'(\d+).+?(?:مود\s*بورد|مودبورد|صور)', message)
-        if mb_match:
-            try:
-                num = int(mb_match.group(1))
-                if 1 <= num <= 20:
-                    parsed_actions.append({
-                        'tool': 'update_branding',
-                        'params': {'moodboard_count': num}
-                    })
-                    reply = f"تم التعديل!  عدد صور المود بورد تم تغييره إلى **{num} صور**. الآن كل عرض تقديمي سيتم إنشاؤه سيضم {num} صور في شريحة المود بورد."
-            except ValueError:
-                pass
-
-        # 2. Slide count intent
-        slide_match = re.search(r'(?:شرائح|شريحة|عدد الشرائح).+?(\d+)', message) or re.search(r'(\d+).+?(?:شرائح|شريحة)', message)
-        if not parsed_actions and slide_match:
-            try:
-                num = int(slide_match.group(1))
-                if 1 <= num <= 50:
-                    # Only the minimum binds the planner; the upper end is open, so a requested
-                    # number is stored as the default and the floor, never as a ceiling.
-                    parsed_actions.append({
-                        'tool': 'update_branding',
-                        'params': {'default_slide_count': num, 'min_slides': num}
-                    })
-                    reply = f"تم التعديل!  عدد الشرائح الافتراضي تم تغييره إلى **{num} شريحة**، وهو الحد الأدنى أيضًا. لا يوجد حد أعلى: العدد النهائي يتبع حجم محتوى المشروع، ولقفله على {num} بالضبط فعّل «قفل عدد الشرائح»."
-            except ValueError:
-                pass
-
-        # 3. Color intent (hex codes like #7a6938, #a8a851, etc.)
+        # 1. Color intent (hex codes like #7a6938, #a8a851, etc.)
         hex_matches = re.findall(r'#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b', message)
         if not parsed_actions and hex_matches:
             full_hexes = [f"#{h}" for h in hex_matches]
@@ -612,7 +556,7 @@ def api_training_chat():
                 desc = ', '.join([f"{k}: {v}" for k, v in color_params.items()])
                 reply = f"تم التعديل!  تم تحديث ألوان الهوية البصرية للشركة: ({desc})."
 
-        # 4. Revert / Reset colors intent ("رجع الألوان", "استرجع الألوان", "الألوان القديمة", "الألوان الافتراضية")
+        # 2. Revert / Reset colors intent ("رجع الألوان", "استرجع الألوان", "الألوان القديمة", "الألوان الافتراضية")
         if not parsed_actions and any(kw in message for kw in ['رجع الالوان', 'رجع الألوان', 'الالوان القديمه', 'الألوان القديمة', 'الالوان السابقة', 'الألوان السابقة', 'استرجاع الالوان', 'استرجاع الألوان', 'الالوان الافتراضية', 'الألوان الافتراضية', 'القديمة', 'القديمه']):
             default_colors = {
                 'primary_color': '#3B6E91',
@@ -627,7 +571,7 @@ def api_training_chat():
             })
             reply = "تم استرجاع الألوان القديمة والافتراضية للهوية البصرية بنجاح!  (Primary: #3B6E91, Secondary: #254B66)."
 
-        # 5. Font intent ("غيّر الخط إلى X" / "استخدم خط X" / "رجّع الخط الافتراضي")
+        # 3. Font intent ("غيّر الخط إلى X" / "استخدم خط X" / "رجّع الخط الافتراضي")
         font_words = {'خط', 'الخط', 'خطوط', 'الخطوط', 'بالخط', 'فونت', 'الفونت'}
         tokens = set(re.findall(r'[؀-ۿ]+|[A-Za-z]+', message))
         if not parsed_actions and (tokens & font_words or 'font' in message.lower()):
@@ -803,8 +747,8 @@ def _build_agent_system_state(tenant_id):
 - قالب التصميم: {branding.get('design_template', 'modern')}
 - نمط البطاقات: {branding.get('card_style', 'bordered')}
 - نسبة العرض: {branding.get('slide_ratio', '16:9')}
-- الهيدر: {'مفعل' if branding.get('header_enabled') else 'معطل'} (ارتفاع {branding.get('header_height', 56)}px)
-- الفوتر: {'مفعل' if branding.get('footer_enabled') else 'معطل'} (ارتفاع {branding.get('footer_height', 36)}px)
+- الهيدر: {'مفعل' if branding.get('header_enabled') else 'معطل'}
+- الفوتر: {'مفعل' if branding.get('footer_enabled') else 'معطل'}
 - اللوجو: {'موجود' if branding.get('logo_path') else 'غير مرفوع'}
 
 ###  الخطوط:
@@ -813,13 +757,8 @@ def _build_agent_system_state(tenant_id):
 - الخطوط المتاحة للتخصيص ({len(seen_families)} خط):
 {chr(10).join(available_font_lines) if available_font_lines else '  لا توجد خطوط مركزية — يمكن للأدمن رفع خط مخصص من صفحة الإعدادات.'}
 
-###  إعدادات الشرائح والصور:
-- عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
-- الحد الأدنى: {branding.get('min_slides', 8)}
-- الحد الأقصى: {f"مقفل على {branding.get('default_slide_count', 16)} شريحة بالضبط" if branding.get('lock_slide_count') else 'لا يوجد حد أعلى — العدد يتبع حجم المحتوى'}
-- عدد صور المود بورد: {branding.get('moodboard_count', 4)}
-- المود بورد: {'مفعل' if branding.get('moodboard_enabled') else 'معطل'}
-- صورة الغلاف: {'مفعلة' if branding.get('cover_image_enabled') else 'معطلة'}
+###  إعدادات الشرائح:
+- عدد الشرائح يقرره التوليد تلقائيًا من حجم محتوى المشروع — لا يوجد إعداد له.
 
 ###  حقول الإدخال النشطة ({len(active_fields)} حقل):
 {chr(10).join(field_lines) if field_lines else '  لا توجد حقول نشطة.'}
@@ -849,11 +788,6 @@ def _build_agent_system_state(tenant_id):
 - رصيد المحفظة: {db.get_tenant_balance(tenant_id):.2f} نقطة
 - المتبقي من الباقة: {db.get_package_remaining_sar(tenant_id):.2f} نقطة
 - المتاح للإنفاق الإجمالي: {db.get_tenant_balance(tenant_id) + db.get_package_remaining_sar(tenant_id):.2f} نقطة
-
-###  إعدادات الخرائط:
-- نوع الخريطة الافتراضي: {branding.get('default_map_type', 'satellite')}
-- نظرة عامة/معالم/طرق/نطاق: {branding.get('map_style_overview', 'satellite')} / {branding.get('map_style_landmarks', 'satellite')} / {branding.get('map_style_access', 'satellite')} / {branding.get('map_style_catchment', 'satellite')}
-- بوصلة: {'مفعلة' if branding.get('draw_compass') else 'معطلة'} — خريطة مصغّرة: {'مفعلة' if branding.get('draw_inset') else 'معطلة'}
 
 ###  قواعد التوليد الخاصة بالشركة (تُرسل مع كل توليد شريحة):
 {generation_rules if generation_rules else '  لا توجد قواعد مخصصة — التوليد يتبع قواعد المنصة فقط.'}
@@ -1036,10 +970,6 @@ AGENT_TOOL_PERMISSIONS = {
     'delete_field': 'custom_fields',
     'add_section': 'custom_fields',
     'delete_section': 'custom_fields',
-    'list_users': 'manage_users',
-    'add_user': 'manage_users',
-    'set_permission': 'manage_users',
-    'toggle_user': 'manage_users',
     'update_workspace': 'create_presentation',
     'edit_workspace_slide': 'create_presentation',
     'generate_slide_plan': 'create_presentation',
@@ -1060,7 +990,6 @@ AGENT_PERMISSION_LABELS = {
     'view_presentations': 'عرض العروض',
     'company_settings': 'إعدادات الشركة',
     'custom_fields': 'إدارة الحقول',
-    'manage_users': 'إدارة الموظفين',
     'training_data': 'إدارة بيانات التدريب',
     'export_files': 'تصدير الملفات',
 }
@@ -1111,27 +1040,13 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
             allowed_keys = {
                 'primary_color', 'secondary_color', 'accent_color', 'background_color',
                 'text_color', 'font_family', 'font_arabic', 'design_template', 'card_style',
-                'slide_ratio', 'header_enabled', 'footer_enabled', 'header_height',
-                'footer_height', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
-                'default_slide_count', 'min_slides', 'max_slides', 'tagline', 'company_name',
-                # Map appearance is a company setting like any other; it was in the database and in
-                # db.update_branding, but the agent could not reach it.
-                'default_map_type', 'map_style_overview', 'map_style_landmarks',
-                'map_style_access', 'map_style_catchment', 'draw_compass', 'draw_inset',
-                'lock_slide_count',
+                'slide_ratio', 'header_enabled', 'footer_enabled', 'tagline', 'company_name',
             }
             updates = {}
             for k, v in params.items():
                 if k in allowed_keys:
-                    # Cast integers for boolean/numeric fields
-                    if k in ('header_enabled', 'footer_enabled', 'moodboard_enabled',
-                             'cover_image_enabled', 'draw_compass', 'draw_inset', 'lock_slide_count'):
+                    if k in ('header_enabled', 'footer_enabled'):
                         v = 1 if v in (True, 1, '1', 'true', 'نعم') else 0
-                    elif k in ('header_height', 'footer_height', 'moodboard_count', 'default_slide_count', 'min_slides', 'max_slides'):
-                        try:
-                            v = int(v)
-                        except (ValueError, TypeError):
-                            continue
                     updates[k] = v
 
             if updates:
@@ -1411,104 +1326,6 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
         elif tool == 'ask':
             result['status'] = 'question'
             result['message'] = str(params.get('question') or '').strip() or 'وضّح المطلوب.'
-
-        # ── List Users ────────────────────────────────────────────────
-        elif tool == 'list_users':
-            users = db.get_users_by_tenant(tenant_id)
-            result['data'] = [{
-                'name': u['name'], 'email': u['email'], 'role': u['role'],
-                'is_active': bool(u['is_active']),
-            } for u in users]
-            result['message'] = f'{len(users)} موظف في الشركة'
-
-        # ── Add User ──────────────────────────────────────────────────
-        elif tool == 'add_user':
-            name = (params.get('name') or params.get('user_name') or '').strip()
-            email = (params.get('email') or params.get('user_email') or '').strip().lower()
-            password = (params.get('password') or '').strip()
-            role = (params.get('role') or 'employee').strip()
-            password_error = _password_validation_error(password) if password else None
-            if not name or not email:
-                result['status'] = 'error'
-                result['message'] = 'name و email مطلوبان لإضافة الموظف'
-            elif role not in db.USER_ROLES:
-                result['status'] = 'error'
-                result['message'] = f'الدور "{role}" غير معروف. الأدوار المتاحة: {", ".join(db.USER_ROLES)}'
-            elif password_error:
-                result['status'] = 'error'
-                result['message'] = password_error
-            else:
-                existing = db.get_user_by_email(email)
-                if existing:
-                    result['status'] = 'error'
-                    result['message'] = f'الموظف بالإيميل "{email}" موجود بالفعل'
-                else:
-                    # No default password: when none is supplied the account is
-                    # created behind a one-time setup link and stays locked to
-                    # password login until the employee sets their own.
-                    if password:
-                        pw_hash = auth.hash_password(password)
-                        require_change = False
-                    else:
-                        pw_hash = auth.hash_password(_generate_secure_password())
-                        require_change = True
-                    user_id = db.create_user(tenant_id, name, email, pw_hash, role=role,
-                                             require_password_change=require_change)
-                    setup_url = None
-                    if require_change:
-                        setup_url = _password_setup_url(
-                            db.create_password_setup_token(tenant_id, user_id))
-                    db.log_ai_rule_change(tenant_id, 'agent_user', 'add_user', None, f'{name} ({email})', risk_level='yellow')
-                    result['user_id'] = user_id
-                    if setup_url:
-                        result['data'] = {'setupUrl': setup_url}
-                        result['message'] = (f'تم إضافة الموظف "{name}" ({email}). '
-                                             f'رابط تعيين كلمة المرور: {setup_url}')
-                    else:
-                        result['message'] = f'تم إضافة الموظف "{name}" ({email}) بنجاح.'
-
-        # ── Set Permission ────────────────────────────────────────────
-        elif tool == 'set_permission':
-            email = (params.get('user_email') or '').lower()
-            perm = params.get('permission', '')
-            granted = params.get('granted', True)
-            users = db.get_users_by_tenant(tenant_id)
-            target_user = next((u for u in users if u['email'] == email), None)
-            if not target_user:
-                result['status'] = 'error'
-                result['message'] = f'الموظف "{email}" غير موجود'
-            elif perm not in db.PERMISSION_KEYS:
-                result['status'] = 'error'
-                result['message'] = f'الصلاحية "{perm}" غير صالحة. الصلاحيات المتاحة: {", ".join(db.PERMISSION_KEYS)}'
-            else:
-                granted_val = 1 if granted in (True, 1, '1', 'true') else 0
-                db.set_user_permission(target_user['id'], perm, granted_val)
-                db.log_ai_rule_change(tenant_id, 'agent_permission', f'{email}:{perm}', 'unknown', granted_val, risk_level='red')
-                status_text = 'منح' if granted_val else 'سحب'
-                target_label = 'للموظف' if granted_val else 'من الموظف'
-                target_name = target_user["name"]
-                result['message'] = f'تم {status_text} صلاحية "{perm}" {target_label} {target_name}'
-
-        # ── Toggle User ───────────────────────────────────────────────
-        elif tool == 'toggle_user':
-            email = (params.get('user_email') or '').lower()
-            is_active = params.get('is_active', True)
-            users = db.get_users_by_tenant(tenant_id)
-            target_user = next((u for u in users if u['email'] == email), None)
-            if not target_user:
-                result['status'] = 'error'
-                result['message'] = f'الموظف "{email}" غير موجود'
-            else:
-                active_val = 1 if is_active in (True, 1, '1', 'true') else 0
-                # The agent is bound by the same primary-admin guard as the user routes.
-                if not active_val and db.is_primary_company_admin(tenant_id, target_user['id']):
-                    result['status'] = 'error'
-                    result['message'] = 'لا يمكن تعطيل مدير الشركة الأساسي'
-                else:
-                    db.update_user(target_user['id'], is_active=active_val)
-                    db.log_ai_rule_change(tenant_id, 'agent_user', f'toggle_{email}', target_user.get('is_active'), active_val, risk_level='red')
-                    status_text = 'تفعيل' if active_val else 'تعطيل'
-                    result['message'] = f'تم {status_text} حساب الموظف {target_user["name"]}'
 
         # ── List Sections ─────────────────────────────────────────────
         elif tool == 'list_sections':

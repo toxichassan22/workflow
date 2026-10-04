@@ -179,69 +179,28 @@ class AdminAgentTests(unittest.TestCase):
         deleted = self._run('delete_field', field_label='حقل تجريبي للوكيل')
         self.assertEqual(deleted['status'], 'success', deleted.get('message'))
 
-    # ── Permissions: the reported result must match what was applied ───────
+    # ── Employees are managed by the admin by hand, never by the agent ────
 
-    def test_set_permission_reports_the_change_it_applied(self):
-        """Regression: the branch used `status_text` before defining it, so the
-        permission was written and logged, then the tool still answered
-        status='error' (UnboundLocalError) — the user could retry or believe
-        the grant never happened."""
-        with self.app.app_context():
-            uid = db.create_user(self.tenant, 'موظف الصلاحيات',
-                                 'perm-target@example.test', 'hash')
-        try:
-            granted = self._run('set_permission', user_email='perm-target@example.test',
-                                permission='export_files', granted=True)
-            self.assertEqual(granted['status'], 'success', granted.get('message'))
-            self.assertIn('منح', granted['message'])
-            with self.app.app_context():
-                self.assertTrue(db.get_user_permissions(uid)['export_files'])
+    def test_agent_has_no_employee_tools(self):
+        """Employee management belongs to the company admin alone: the agent
+        exposes no tool for it, so a crafted action block dies as unknown."""
+        for tool in ('add_user', 'set_permission', 'toggle_user', 'list_users'):
+            result = self._run(tool, user_email='x@agent.test', permission='export_files')
+            self.assertEqual(result['status'], 'error', tool)
+            self.assertIn('أداة غير معروفة', result['message'])
 
-            # A string 'false' from the model must revoke, not count as truthy.
-            revoked = self._run('set_permission', user_email='perm-target@example.test',
-                                permission='export_files', granted='false')
-            self.assertEqual(revoked['status'], 'success', revoked.get('message'))
-            self.assertIn('سحب', revoked['message'])
-            with self.app.app_context():
-                self.assertFalse(db.get_user_permissions(uid)['export_files'])
-        finally:
-            with self.app.app_context():
-                db.delete_user(uid)
-
-    # ── The primary-admin guard binds the agent like the user routes ────────
-
-    def test_agent_cannot_disable_the_primary_company_admin(self):
-        with self.app.app_context():
-            admin_id = db.create_user(self.tenant, 'مدير الشركة', 'primary-admin@agent.test',
-                                      'hash', role='employee')
-            db.update_tenant(self.tenant, primary_user_id=admin_id)
-
-        refused = self._run('toggle_user', user_email='primary-admin@agent.test', is_active=False)
-        self.assertEqual(refused['status'], 'error')
-        self.assertIn('مدير الشركة الأساسي', refused['message'])
-        with self.app.app_context():
-            self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 1)
-
-        # Once the link points elsewhere the row is a plain employee and the
-        # same tool disables it normally. (update_tenant — not
-        # set_primary_company_admin — so the shared class token's session
-        # version is not bumped mid-class.)
-        with self.app.app_context():
-            other_id = db.create_user(self.tenant, 'مدير ثان', 'second-admin@agent.test',
-                                      'hash', role='employee')
-            db.update_tenant(self.tenant, primary_user_id=other_id)
-        allowed = self._run('toggle_user', user_email='primary-admin@agent.test', is_active=False)
-        self.assertEqual(allowed['status'], 'success', allowed.get('message'))
-        with self.app.app_context():
-            self.assertEqual(db.get_user_by_id(admin_id)['is_active'], 0)
-            db.update_tenant(self.tenant, primary_user_id=admin_id)
+        app_source = read_module_source('app.py')
+        for tool in ('add_user', 'set_permission', 'toggle_user', 'list_users'):
+            self.assertNotIn(f'"tool": "{tool}"', app_source)
+        self.assertNotIn('manage_users',
+                         self.application_module.AGENT_TOOL_PERMISSIONS.values())
 
     # ── The agent may not exceed the requester's own permissions ───────────
 
     def test_agent_tools_respect_the_requesters_own_permissions(self):
         """Regression: entering the agent needed only `training_data`, while its
-        tools created users, granted permissions and rewrote company settings.
-        Every tool now re-checks the permission its dedicated route requires."""
+        tools rewrote company settings. Every tool re-checks the permission its
+        dedicated route requires."""
         client = self.app.test_client()
         with self.app.app_context():
             employee_id = db.create_user(self.tenant, 'موظف تدريب',
@@ -253,9 +212,7 @@ class AdminAgentTests(unittest.TestCase):
             user_name='موظف تدريب', user_role='employee')}
         try:
             reply = _reply_with([
-                {'tool': 'add_user', 'params': {'name': 'مستخدم متسلل', 'email': 'sneaky@agent.test'}},
                 {'tool': 'update_branding', 'params': {'primary_color': '#000000'}},
-                {'tool': 'list_users'},
                 {'tool': 'add_training', 'params': {'title': 'قاعدة', 'content': 'محتوى'}},
             ], text='نفذت كل المطلوب')
             with patch.object(self.application_module, 'call_text_chat', return_value=reply):
@@ -265,99 +222,47 @@ class AdminAgentTests(unittest.TestCase):
             payload = response.get_json()
             self.assertTrue(payload['success'], payload)
             by_tool = {item.get('tool'): item for item in payload['actions']}
-            for denied_tool in ('add_user', 'update_branding', 'list_users'):
-                self.assertEqual(by_tool[denied_tool]['status'], 'error', denied_tool)
-                self.assertEqual(by_tool[denied_tool]['error_code'], 'AGENT_PERMISSION_DENIED')
-            self.assertIn('إدارة الموظفين', by_tool['add_user']['message'])
+            self.assertEqual(by_tool['update_branding']['status'], 'error')
+            self.assertEqual(by_tool['update_branding']['error_code'], 'AGENT_PERMISSION_DENIED')
+            self.assertIn('إعدادات الشركة', by_tool['update_branding']['message'])
             # A tool inside the requester's own permission still runs.
             self.assertEqual(by_tool['add_training']['status'], 'success')
             with self.app.app_context():
-                self.assertIsNone(db.get_user_by_email('sneaky@agent.test'))
-                self.assertEqual(db.get_branding(self.tenant)['primary_color'], branding_before)
-
-            # Granting manage_users re-opens exactly those tools — nothing else.
-            with self.app.app_context():
-                db.set_user_permission(employee_id, 'manage_users', True)
-            reply2 = _reply_with([
-                {'tool': 'add_user', 'params': {'name': 'مستخدم جديد',
-                                                'email': 'sneaky@agent.test',
-                                                'password': 'strongpass1'}},
-                {'tool': 'update_branding', 'params': {'primary_color': '#000000'}},
-            ])
-            with patch.object(self.application_module, 'call_text_chat', return_value=reply2):
-                response2 = client.post('/api/training-chat', headers=employee_headers,
-                                        json={'message': 'نفذ'})
-            by_tool2 = {item.get('tool'): item for item in response2.get_json()['actions']}
-            self.assertEqual(by_tool2['add_user']['status'], 'success', by_tool2['add_user'])
-            self.assertEqual(by_tool2['update_branding']['status'], 'error')
-            self.assertEqual(by_tool2['update_branding']['error_code'], 'AGENT_PERMISSION_DENIED')
-            with self.app.app_context():
-                self.assertIsNotNone(db.get_user_by_email('sneaky@agent.test'))
                 self.assertEqual(db.get_branding(self.tenant)['primary_color'], branding_before)
         finally:
             with self.app.app_context():
-                for email in ('trainer@agent.test', 'sneaky@agent.test'):
-                    user = db.get_user_by_email(email)
-                    if user:
-                        db.delete_user(user['id'])
+                user = db.get_user_by_email('trainer@agent.test')
+                if user:
+                    db.delete_user(user['id'])
 
-    # ── Adding employees never goes through a default password ────────────
+    # ── Retired company settings are ignored, not written ─────────────────
 
-    def test_agent_add_user_never_falls_back_to_a_default_password(self):
-        """ISS-008: the tool used to substitute '123456' when the model sent
-        no password and then repeated that password back in the chat reply."""
-        # No password at all -> one-time setup link, first login must set one.
-        created = self._run('add_user', name='موظف بلا كلمة', email='nopw@agent.test',
-                            role='employee')
-        self.assertEqual(created['status'], 'success', created.get('message'))
-        setup_url = (created.get('data') or {}).get('setupUrl', '')
-        self.assertIn('/set-password/', setup_url)
-        self.assertNotIn('123456', created['message'])
+    def test_agent_ignores_retired_branding_keys(self):
+        """Slide count, moodboard, map styles and header heights no longer exist
+        as company settings — a crafted update_branding must leave them alone."""
+        retired = ('map_style_overview', 'map_style_landmarks', 'default_map_type',
+                   'lock_slide_count', 'min_slides', 'max_slides', 'default_slide_count',
+                   'header_height', 'footer_height', 'moodboard_count', 'moodboard_enabled',
+                   'cover_image_enabled', 'draw_compass', 'draw_inset')
         with self.app.app_context():
-            user = db.get_user_by_email('nopw@agent.test')
-            self.assertEqual(user['require_password_change'], 1)
-            token_row = db.get_password_setup_token(setup_url.rsplit('/', 1)[-1])
-            self.assertIsNotNone(token_row)
-            self.assertEqual(token_row['user_id'], user['id'])
-
-        # A weak password is refused, not silently accepted.
-        weak = self._run('add_user', name='موظف ضعيف', email='weak@agent.test',
-                         password='123456')
-        self.assertEqual(weak['status'], 'error')
-        with self.app.app_context():
-            self.assertIsNone(db.get_user_by_email('weak@agent.test'))
-
-        # A policy-compliant password is honoured and never echoed back.
-        strong = self._run('add_user', name='موظف قوي', email='strong@agent.test',
-                           password='AgentPass123')
-        self.assertEqual(strong['status'], 'success', strong.get('message'))
-        self.assertNotIn('AgentPass123', strong['message'])
-        with self.app.app_context():
-            user = db.get_user_by_email('strong@agent.test')
-            self.assertEqual(user['require_password_change'], 0)
-            self.assertTrue(auth.verify_password('AgentPass123', user['password_hash']))
-
-    def test_agent_prompt_documents_the_add_user_contract(self):
-        app_source = read_module_source('app.py')
-        self.assertIn('"tool": "add_user"', app_source)
-        # The contract must rule out invented defaults and echoed secrets.
-        self.assertNotIn("or '123456'", app_source)
-        self.assertIn('لا تخترع كلمة مرور افتراضية', app_source)
-
-    # ── Company settings the agent could not reach before ─────────────────
-
-    def test_agent_can_set_map_styles_and_lock_the_slide_count(self):
+            before = db.get_branding(self.tenant)
         result = self._run('update_branding', map_style_overview='roadmap',
-                           map_style_landmarks='hybrid', default_map_type='roadmap',
-                           lock_slide_count=True, draw_compass=False)
-        self.assertEqual(result['status'], 'success', result.get('message'))
+                           lock_slide_count=True, min_slides=40, header_height=90,
+                           moodboard_count=9, draw_compass=False)
+        self.assertEqual(result['status'], 'no_changes', result.get('message'))
+        with self.app.app_context():
+            after = db.get_branding(self.tenant)
+        for key in retired:
+            self.assertEqual(before[key], after[key], key)
+
+        # Live keys still apply even when the same call carries retired ones.
+        applied = self._run('update_branding', primary_color='#123456',
+                            map_style_access='terrain')
+        self.assertEqual(applied['status'], 'success', applied.get('message'))
         with self.app.app_context():
             branding = db.get_branding(self.tenant)
-        self.assertEqual(branding['map_style_overview'], 'roadmap')
-        self.assertEqual(branding['map_style_landmarks'], 'hybrid')
-        self.assertEqual(branding['default_map_type'], 'roadmap')
-        self.assertEqual(branding['lock_slide_count'], 1)
-        self.assertEqual(branding['draw_compass'], 0)
+        self.assertEqual(branding['primary_color'], '#123456')
+        self.assertEqual(branding['map_style_access'], before['map_style_access'])
 
     # ── The generation prompt ─────────────────────────────────────────────
 

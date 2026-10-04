@@ -1032,8 +1032,10 @@ def api_generate_images():
     project_type = project_data.get('project_type') or project_data.get('projectType') or 'سكني'
     location = project_data.get('location_address') or project_data.get('location') or 'السعودية'
 
-    branding = db.get_branding(g.tenant_id) if hasattr(g, 'tenant_id') and g.tenant_id else {}
-    raw_count = data.get('count') or (branding.get('moodboard_count') if branding else 4) or 4
+    # The moodboard-count company setting was removed with the rest of the
+    # branding switches: the visual concept always defaults to 4 images unless
+    # the request itself asks for another count.
+    raw_count = data.get('count') or 4
     try:
         target_count = max(1, min(20, int(raw_count)))
     except (ValueError, TypeError):

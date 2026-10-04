@@ -139,10 +139,6 @@ def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=Non
         for key in ['design_template', 'card_style', 'slide_ratio']:
             if branding.get(key):
                 lines.append(f"{key.replace('_', ' ').title()}: {branding[key]}")
-        lines.append(f"حد الشرائح: min={branding.get('min_slides', 8)}, max={branding.get('max_slides', 30)}, default={branding.get('default_slide_count', 16)}")
-        lines.append(f"عدد صور المود بورد: {branding.get('moodboard_count', 4)}")
-        lines.append(f"تفعيل مود بورد: {'نعم' if branding.get('moodboard_enabled') else 'لا'}")
-        lines.append(f"تفعيل صورة الغلاف: {'نعم' if branding.get('cover_image_enabled') else 'لا'}")
         part = '\n'.join(lines)
         remaining = max_chars - used
         if remaining > 0:

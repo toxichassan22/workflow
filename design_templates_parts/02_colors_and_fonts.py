@@ -72,8 +72,9 @@ def build_design_rules(branding):
     # that renders a slide without the injected stylesheet showed the wrong font.
     header_enabled = branding.get('header_enabled', 1)
     footer_enabled = branding.get('footer_enabled', 1)
-    header_h = branding.get('header_height', 56)
-    footer_h = branding.get('footer_height', 36)
+    # Header/footer height is platform chrome, not a company setting — the
+    # stored tenant columns are ignored so every deck shares the same rail.
+    header_h, footer_h = 56, 36
     card_style = branding.get('card_style', template['card_style'])
     logo_path = branding.get('logo_path', '')
     slide_ratio = branding.get('slide_ratio', '16:9')

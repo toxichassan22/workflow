@@ -1859,12 +1859,15 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
     def test_slide_count_has_no_upper_limit(self):
         """The plan follows the amount of content: a stored max_slides used to trim the surplus."""
         engine = self.application_module.slide_engine
-        # Only a locked count binds the plan; otherwise the ceiling is open.
-        self.assertEqual(engine.resolve_slide_bounds({'min_slides': 8, 'max_slides': 30})[1],
-                         engine.SLIDE_COUNT_OPEN)
+        # The count belongs to the planner: only the platform floor and open
+        # ceiling apply, and stored tenant values are ignored outright.
+        self.assertEqual(engine.resolve_slide_bounds({'min_slides': 8, 'max_slides': 30}),
+                         (engine.PLAN_MIN_SLIDES, engine.SLIDE_COUNT_OPEN,
+                          engine.PLAN_FALLBACK_SLIDE_COUNT))
         self.assertEqual(engine.resolve_slide_bounds(
-            {'min_slides': 8, 'max_slides': 30, 'lock_slide_count': 1, 'default_slide_count': 12}),
-            (12, 12, 12))
+            {'min_slides': 40, 'lock_slide_count': 1, 'default_slide_count': 12}),
+            (engine.PLAN_MIN_SLIDES, engine.SLIDE_COUNT_OPEN,
+             engine.PLAN_FALLBACK_SLIDE_COUNT))
         # Every one of the 117 content slides survives; the canonical section divider is added.
         long_plan = {'slides': (
             [{'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'}]

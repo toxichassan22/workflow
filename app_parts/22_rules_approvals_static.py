@@ -18,13 +18,6 @@ AI_RULE_FIELDS = {
     'slide_ratio': {'label': 'نسبة العرض', 'category': 'design', 'risk': 'yellow'},
     'header_enabled': {'label': 'تفعيل الهيدر', 'category': 'design', 'risk': 'red'},
     'footer_enabled': {'label': 'تفعيل الفوتر', 'category': 'design', 'risk': 'red'},
-    'header_height': {'label': 'ارتفاع الهيدر', 'category': 'design', 'risk': 'yellow'},
-    'footer_height': {'label': 'ارتفاع الفوتر', 'category': 'design', 'risk': 'yellow'},
-    'moodboard_enabled': {'label': 'تفعيل المود بورد', 'category': 'design', 'risk': 'yellow'},
-    'cover_image_enabled': {'label': 'تفعيل صورة الغلاف', 'category': 'design', 'risk': 'green'},
-    'default_slide_count': {'label': 'عدد الشرائح الافتراضي', 'category': 'content', 'risk': 'yellow'},
-    'min_slides': {'label': 'الحد الأدنى للشرائح', 'category': 'content', 'risk': 'red'},
-    'max_slides': {'label': 'الحد الأقصى للشرائح', 'category': 'content', 'risk': 'red'},
 }
 
 DEFAULT_BRANDING_VALUES = {
@@ -40,14 +33,6 @@ DEFAULT_BRANDING_VALUES = {
     'slide_ratio': '16:9',
     'header_enabled': 1,
     'footer_enabled': 1,
-    'header_height': 56,
-    'footer_height': 36,
-    'moodboard_enabled': 1,
-    'cover_image_enabled': 1,
-    'default_slide_count': 16,
-    'lock_slide_count': 0,
-    'min_slides': 8,
-    'max_slides': 30,
 }
 
 
