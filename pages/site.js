@@ -142,6 +142,171 @@
     onScroll();
   }
 
+  /* ── Showcase: interactive deck viewer ─────────────────────────────────── */
+
+  // Mock files and slides — stand-ins for real generated decks, each carrying
+  // the client brand accent it was "designed" under.
+  var SHOWCASE_FILES = [
+    {
+      name: 'عرض استثماري — حي الياسمين', meta: 'شركة الأفق · الرياض', accent: '#123B6D', logo: 'أ',
+      slides: [
+        { t: 'cover', title: 'عرض استثماري — حي الياسمين', sub: 'شركة الأفق للتطوير العقاري · الرياض' },
+        { t: 'metrics', kicker: 'دراسة سوق', h: 'مؤشرات الطلب في النطاق', metrics: [['+34%', 'نمو الطلب'], ['8,250', 'سكن في النطاق'], ['91%', 'معدل الإشغال']], lines: 2 },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'الموقع والمحيط العمراني' },
+        { t: 'metrics', kicker: 'النموذج المالي', h: 'المؤشرات الاستثمارية', metrics: [['12.4%', 'العائد المتوقع'], ['4.2', 'سنوات الاسترداد'], ['+18%', 'صافي التدفق']], lines: 2 },
+        { t: 'closing', h: 'شكرًا', sub: 'شركة الأفق للتطوير العقاري' }
+      ]
+    },
+    {
+      name: 'دراسة جدوى — أرض الصحافة', meta: 'إسكان الشمال · الرياض', accent: '#0D7B55', logo: 'إ',
+      slides: [
+        { t: 'cover', title: 'دراسة جدوى — أرض الصحافة', sub: 'إسكان الشمال · الرياض' },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'الأرض وحدودها والوصول' },
+        { t: 'metrics', kicker: 'دراسة السوق', h: 'العرض والطلب', metrics: [['1,940', 'وحدة معروضة'], ['+21%', 'نمو الأسعار'], ['6.8', 'أشهر التصريف']], lines: 2 },
+        { t: 'closing', h: 'شكرًا', sub: 'إسكان الشمال' }
+      ]
+    },
+    {
+      name: 'عرض برج الواجهة البحرية', meta: 'مجموعة الريادة · جدة', accent: '#14B8A6', logo: 'ر',
+      slides: [
+        { t: 'cover', title: 'عرض برج الواجهة البحرية', sub: 'مجموعة الريادة · جدة' },
+        { t: 'metrics', kicker: 'ملخص تنفيذي', h: 'أرقام المشروع', metrics: [['28', 'طابقًا'], ['340', 'وحدة فندقية'], ['1.2B', 'قيمة المشروع']], lines: 2 },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'الواجهة البحرية والمعالم' },
+        { t: 'metrics', kicker: 'دراسة السوق', h: 'سياحة جدة', metrics: [['+27%', 'نمو الزوار'], ['84%', 'إشغال الفنادق'], ['5', 'معالم قريبة']], lines: 2 },
+        { t: 'closing', h: 'شكرًا', sub: 'مجموعة الريادة' }
+      ]
+    },
+    {
+      name: 'تطوير مخطط النرجس', meta: 'ديار للتطوير · الرياض', accent: '#A65B00', logo: 'د',
+      slides: [
+        { t: 'cover', title: 'تطوير مخطط النرجس', sub: 'ديار للتطوير · الرياض' },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'المخطط والبنية المحيطة' },
+        { t: 'metrics', kicker: 'النموذج المالي', h: 'الجدوى', metrics: [['9.8%', 'العائد'], ['520', 'قطعة أرض'], ['3.1', 'سنوات البيع']], lines: 2 },
+        { t: 'closing', h: 'شكرًا', sub: 'ديار للتطوير' }
+      ]
+    },
+    {
+      name: 'عرض مجمع الورود السكني', meta: 'شركة الورود · الدمام', accent: '#5B3A8E', logo: 'و',
+      slides: [
+        { t: 'cover', title: 'عرض مجمع الورود السكني', sub: 'شركة الورود · الدمام' },
+        { t: 'metrics', kicker: 'دراسة سوق', h: 'الطلب السكني', metrics: [['+19%', 'نمو الطلب'], ['3,400', 'أسرة مستهدفة'], ['95%', 'إشغال متوقع']], lines: 2 },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'الموقع والخدمات' },
+        { t: 'closing', h: 'شكرًا', sub: 'شركة الورود' }
+      ]
+    },
+    {
+      name: 'دراسة أرض حي العارض', meta: 'شركة المدار · الرياض', accent: '#B3346B', logo: 'م',
+      slides: [
+        { t: 'cover', title: 'دراسة أرض حي العارض', sub: 'شركة المدار · الرياض' },
+        { t: 'map', kicker: 'تحليل الموقع', h: 'الأرض ومناطق التقاط' },
+        { t: 'metrics', kicker: 'دراسة السوق', h: 'التنافسية', metrics: [['12', 'مشروع منافس'], ['+8%', 'فارق التسعير'], ['4.5', 'أشهر التصريف']], lines: 2 },
+        { t: 'metrics', kicker: 'النموذج المالي', h: 'العائد', metrics: [['11.2%', 'العائد المتوقع'], ['3.8', 'سنوات الاسترداد'], ['+15%', 'صافي التدفق']], lines: 2 },
+        { t: 'closing', h: 'شكرًا', sub: 'شركة المدار' }
+      ]
+    }
+  ];
+
+  var showcaseFile = 0;
+  var showcaseSlide = 0;
+
+  function msFoot(brand, page) {
+    return '<div class="ms-foot"><span>' + brand + '</span><b>' + page + '</b></div>';
+  }
+
+  function slideHtml(slide, file, page) {
+    var a = file.accent;
+    if (slide.t === 'cover') {
+      return '<div class="ms ms-cover" style="--msa:' + a + '">' +
+        '<div class="ms-logo">' + file.logo + '</div>' +
+        '<h4 class="ms-title">' + slide.title + '</h4>' +
+        '<p class="ms-sub">' + slide.sub + '</p>' + msFoot('LandLoom', page) + '</div>';
+    }
+    if (slide.t === 'map') {
+      return '<div class="ms" style="--msa:' + a + '">' +
+        '<div class="ms-bar"></div><div class="ms-kicker">' + slide.kicker + '</div>' +
+        '<h4 class="ms-h">' + slide.h + '</h4>' +
+        '<div class="ms-map"><span class="ms-pin"></span></div>' + msFoot('LandLoom', page) + '</div>';
+    }
+    if (slide.t === 'closing') {
+      return '<div class="ms ms-closing" style="--msa:' + a + '">' +
+        '<div class="ms-logo">' + file.logo + '</div>' +
+        '<h4 class="ms-h">' + slide.h + '</h4>' +
+        '<p class="ms-sub">' + slide.sub + '</p></div>';
+    }
+    var tiles = (slide.metrics || []).map(function (m) {
+      return '<div><b>' + m[0] + '</b><span>' + m[1] + '</span></div>';
+    }).join('');
+    var lines = '';
+    for (var i = 0; i < (slide.lines || 0); i++) lines += '<i></i>';
+    return '<div class="ms" style="--msa:' + a + '">' +
+      '<div class="ms-bar"></div><div class="ms-kicker">' + slide.kicker + '</div>' +
+      '<h4 class="ms-h">' + slide.h + '</h4>' +
+      '<div class="ms-metrics">' + tiles + '</div>' +
+      '<div class="ms-lines">' + lines + '</div>' + msFoot('LandLoom', page) + '</div>';
+  }
+
+  function renderShowcaseSlide(dir) {
+    var stage = document.getElementById('deckStage');
+    var counter = document.getElementById('deckCounter');
+    var file = SHOWCASE_FILES[showcaseFile];
+    if (!stage || !file) return;
+    stage.innerHTML = slideHtml(file.slides[showcaseSlide], file, showcaseSlide + 1);
+    stage.classList.remove('swap-next', 'swap-prev');
+    if (dir) {
+      void stage.offsetWidth;
+      stage.classList.add(dir === 'prev' ? 'swap-prev' : 'swap-next');
+    }
+    if (counter) counter.textContent = (showcaseSlide + 1) + ' / ' + file.slides.length;
+    var prev = document.getElementById('deckPrev');
+    var next = document.getElementById('deckNext');
+    if (prev) prev.disabled = showcaseSlide === 0;
+    if (next) next.disabled = showcaseSlide === file.slides.length - 1;
+  }
+
+  function selectShowcaseFile(idx, animate) {
+    showcaseFile = idx;
+    showcaseSlide = 0;
+    document.querySelectorAll('.file-item').forEach(function (el, i) {
+      el.classList.toggle('active', i === idx);
+    });
+    renderShowcaseSlide(animate ? 'next' : null);
+  }
+
+  function initShowcase() {
+    var list = document.getElementById('showcaseFiles');
+    var stage = document.getElementById('deckStage');
+    if (!list || !stage) return;
+    list.innerHTML = SHOWCASE_FILES.map(function (f, i) {
+      return '<button type="button" class="file-item" style="--f-accent:' + f.accent + '" data-idx="' + i + '">' +
+        '<span class="f-dot"></span>' +
+        '<span class="f-text"><span class="f-name">' + f.name + '</span>' +
+        '<span class="f-meta">' + f.meta + '</span></span></button>';
+    }).join('');
+    list.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('.file-item');
+      if (btn) selectShowcaseFile(parseInt(btn.getAttribute('data-idx'), 10), true);
+    });
+    var prev = document.getElementById('deckPrev');
+    var next = document.getElementById('deckNext');
+    if (prev) prev.addEventListener('click', function () {
+      if (showcaseSlide > 0) { showcaseSlide--; renderShowcaseSlide('prev'); }
+    });
+    if (next) next.addEventListener('click', function () {
+      var file = SHOWCASE_FILES[showcaseFile];
+      if (showcaseSlide < file.slides.length - 1) { showcaseSlide++; renderShowcaseSlide('next'); }
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      var file = SHOWCASE_FILES[showcaseFile];
+      if (ev.key === 'ArrowLeft' && showcaseSlide < file.slides.length - 1) {
+        showcaseSlide++; renderShowcaseSlide('next');
+      } else if (ev.key === 'ArrowRight' && showcaseSlide > 0) {
+        showcaseSlide--; renderShowcaseSlide('prev');
+      }
+    });
+    selectShowcaseFile(0, false);
+  }
+
   /* ── Request-access form ───────────────────────────────────────────────── */
 
   function formStrings(key) {
@@ -209,4 +374,5 @@
   initTilt();
   initMarquee();
   initTopbar();
+  initShowcase();
 })();
