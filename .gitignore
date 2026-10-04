@@ -46,6 +46,10 @@ userfiles/
 # اشتراطات1.pdf. Kept locally only; regulation_pdf_paths() skips it when absent.
 اشتراطات2.pdf
 
+# Auto-fetched per-city regulation PDFs and their provenance — a server-side
+# cache rebuilt by city_regulations.ensure_city_regulation_paths on demand.
+regulations/
+
 # Local tooling data. Never commit: Freebuff's workspace database and Playwright logs.
 .freebuff/
 .playwright-mcp/

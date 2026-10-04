@@ -232,7 +232,7 @@ def _execute_extract_croquis():
 
         system_prompt = (
             "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
-            "ملفا الاشتراطات الرسميان اشتراطات1 واشتراطات2 متاحان لك بمحتواهما الكامل؛ استخدمهما كاملين ولا تعتمد على جزء أو صفحات منتقاة فقط.\n"
+            "ملفات الاشتراطات الرسمية المتوفرة لمدينة الموقع تصلك بمحتواها الكامل؛ استخدمها كاملة ولا تعتمد على جزء أو صفحات منتقاة فقط.\n"
             "ضوابط حماية البيانات والخصوصية وحقوق الإنسان (إلزامية وصارمة):\n"
             "1. يُحظر منعًا باتًا استخراج أو تسجيل أو تضمين أي أسماء لأشخاص طبيعيين (مثل أسماء الملاك أو المشترين أو المجاورين أو الوكلاء)، أو أرقام هويات وطنية، أو أرقام سجلات مدنية، أو أرقام هواتف، أو تواقيع شخصية واردة في الصكوك أو المخططات أو الرخص. في حال وجود أسماء ملاك أو هويات، يجب تجاهلها كليًا ولا تُذكر في أي حقل.\n"
             "2. يُحظر تمامًا تقديم أي توصيات أو مقترحات تمس حقوق الأفراد أو السكان القائمين أو تقترح إخلاءً أو نزع ملكية أو تمييزًا، وتقتصر المخرجات على التحليل الهندسي والتخطيطي والمكاني الموضوعي المحايد.\n"
@@ -424,7 +424,26 @@ def _execute_extract_croquis():
                 vision_warnings.append('تعذر استخراج حقائق الكروكي الأولية؛ تم استخدام بيانات المشروع المدخلة فقط.')
                 print(f'[LAND ANALYSIS STAGE ERROR] site_facts cap={facts_cap} {facts_error}')
             site_facts = _extract_land_site_facts(facts_result, request_facts)
-            if REGULATION_DIGEST_ENABLED:
+            # City gate: the verified rules/ digest and the اشتراطات pair on
+            # disk cover Jeddah only. A declared different city never reads
+            # them — it uses its own fetched PDFs, or the prompt is told
+            # plainly that no verified regulations exist for it.
+            site_city_slug, site_city_label = city_regulations.resolve_site_city(
+                site_facts.get('city'))
+            foreign_city = not city_regulations.is_local_city(site_city_slug)
+            city_pdf_paths = []
+            if foreign_city:
+                try:
+                    city_pdf_paths, city_warnings = city_regulations.ensure_city_regulation_paths(
+                        site_city_slug, site_city_label, call_openrouter_chat,
+                        usage_ctx=_usage_ctx('land', data))
+                    vision_warnings.extend(city_warnings)
+                except Exception as fetch_error:
+                    print(f'[CITY REGULATIONS ERROR] {fetch_error}')
+                    vision_warnings.append(
+                        f'تعذر جلب اشتراطات مدينة «{site_city_label}» تلقائيًا؛ '
+                        'قيم الاشتراطات ستبقى مبنية على معرفة النموذج غير الموثقة.')
+            if REGULATION_DIGEST_ENABLED and not foreign_city:
                 try:
                     reg_digest = regulation_digest.build_regulation_digest(site_facts)
                 except Exception as digest_error:
@@ -438,6 +457,7 @@ def _execute_extract_croquis():
                     'zone': reg_digest.get('zone_key'),
                     'special_plan_required': reg_digest.get('special_plan_required'),
                     'sources': reg_digest.get('sources', []),
+                    'provenance': 'verified_rules',
                 }]
                 print(f"[REGULATION DIGEST] zone={reg_digest.get('zone_key')} "
                       f"fields={sorted(reg_digest.get('fields') or {})} "
@@ -445,8 +465,14 @@ def _execute_extract_croquis():
             else:
                 regulation_query = ' '.join(str(value) for value in site_facts.values() if value not in (None, ''))
                 try:
-                    evidence_package, evidence_warnings = search_official_regulations_evidence(
-                        regulation_query, site_facts)
+                    if foreign_city and not city_pdf_paths:
+                        # No verified documents for this city — never fall
+                        # back to another municipality's files.
+                        evidence_package = {'context': '', 'documents': [], 'table_pages': []}
+                        evidence_warnings = []
+                    else:
+                        evidence_package, evidence_warnings = search_official_regulations_evidence(
+                            regulation_query, site_facts, paths=city_pdf_paths or None)
                 except Exception as evidence_error:
                     evidence_package = {'context': '', 'documents': [], 'table_pages': []}
                     evidence_warnings = [f'تعذر تجهيز أدلة الاشتراطات: {evidence_error}']
@@ -480,9 +506,23 @@ def _execute_extract_croquis():
                         'name': source.get('name'),
                         'text_pages': source.get('text_pages', []),
                         'table_pages': source.get('table_pages', []),
+                        'provenance': 'auto_fetched' if foreign_city else 'verified_local',
                     }
                     for source in evidence_package.get('documents', [])
                 ]
+                if foreign_city:
+                    for meta in regulation_evidence_metadata:
+                        meta['city'] = site_city_label
+                    if not regulation_evidence_metadata:
+                        regulation_evidence_metadata = [{
+                            'name': f'لا يوجد ملف اشتراطات موثق لمدينة «{site_city_label}»',
+                            'city': site_city_label,
+                            'provenance': 'model_knowledge',
+                        }]
+                    if not city_pdf_paths:
+                        vision_warnings.append(
+                            f'قيم الاشتراطات لمدينة «{site_city_label}» غير موثقة بملف رسمي — '
+                            'مبنية على معرفة النموذج؛ راجعها قبل الاعتماد.')
                 print(
                     f"[REGULATION EVIDENCE] documents={len(regulation_evidence_metadata)} "
                     f"text_chars={sum(len(source.get('context') or '') for source in evidence_package.get('documents', []))} "
@@ -501,22 +541,40 @@ def _execute_extract_croquis():
                 )
                 regulation_block = regulation_digest.digest_prompt_block(reg_digest) + "\n\n"
             else:
+                city_doc_names = '، '.join(os.path.basename(path) for path in city_pdf_paths)
                 instructions = (
                     "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
                     "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
                     "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
-                    "٢) نتائج استخلاص مبنية على المحتوى الكامل لملفي اشتراطات1 واشتراطات2، بما في ذلك جداول كل ملف. "
-                    "استخدم القواعد التي تنطبق على حقائق الموقع فقط، ولا تخترع قاعدة غير موجودة في المحتوى الكامل.\n"
+                    + (
+                        f"٢) نتائج استخلاص مبنية على المحتوى الكامل لملفات اشتراطات «{site_city_label}» "
+                        f"({city_doc_names})، بما في ذلك جداول كل ملف. "
+                        if city_pdf_paths else
+                        "٢) نتائج استخلاص مبنية على المحتوى الكامل لملفي اشتراطات1 واشتراطات2، بما في ذلك جداول كل ملف. "
+                    )
+                    + "استخدم القواعد التي تنطبق على حقائق الموقع فقط، ولا تخترع قاعدة غير موجودة في المحتوى الكامل.\n"
                     "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
                     "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude. لا تذكر أرقام الصفحات أو أسماء الملفات في أي قيمة للمستخدم.\n"
                 )
-                regulation_block = (
-                    "نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين:\n"
-                    + json.dumps(evidence_results, ensure_ascii=False)
-                    + "\n\n"
-                    if evidence_results else
-                    "تنبيه: لم تتوفر نتائج قابلة للاستخدام من الملفين كاملين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
-                )
+                if evidence_results:
+                    regulation_block = (
+                        ("نتائج استخلاص الاشتراطات من المحتوى الكامل لملفات المدينة:\n"
+                         if city_pdf_paths else
+                         "نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين:\n")
+                        + json.dumps(evidence_results, ensure_ascii=False)
+                        + "\n\n"
+                    )
+                elif foreign_city:
+                    regulation_block = (
+                        f"تنبيه مهم: المدينة المعلنة في حقائق الموقع هي «{site_city_label}»، وهي خارج "
+                        "نطاق ملفات الاشتراطات الموثقة المتوفرة لديك (اشتراطات جدة فقط) ولم تُرسل أي "
+                        "قواعد من مدينة أخرى. أي قيمة اشتراط (ارتدادات/نسبة بناء/أدوار/مواقف) تذكرها "
+                        "مصدرها معرفتك العامة وليست موثقة بمستند رسمي — سجّلها في conflicts.\n\n"
+                    )
+                else:
+                    regulation_block = (
+                        "تنبيه: لم تتوفر نتائج قابلة للاستخدام من الملفين كاملين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
+                    )
             user_content = [{
                 "type": "text",
                 "text": instructions

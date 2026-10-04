@@ -131,11 +131,15 @@ def _visual_concept_plan_regulation_facts(project_data):
 
     digest = {}
     if REGULATION_DIGEST_ENABLED:
-        try:
-            digest = regulation_digest.build_regulation_digest(
-                _visual_concept_plan_site_facts(source, analysis, parcel))
-        except Exception:
-            digest = {}
+        facts_input = _visual_concept_plan_site_facts(source, analysis, parcel)
+        # The verified digest covers Jeddah only — a declared different city
+        # must not borrow its values.
+        if city_regulations.is_local_city(
+                city_regulations.resolve_site_city(facts_input.get('city'))[0]):
+            try:
+                digest = regulation_digest.build_regulation_digest(facts_input)
+            except Exception:
+                digest = {}
     if digest.get('matched'):
         zone_label = _visual_concept_plan_sanitize_text(digest.get('zone_key'))
         if zone_label:

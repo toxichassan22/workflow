@@ -52,6 +52,7 @@ import designer_chat_targets
 import designer_chat_colors
 import designer_chat_context
 import regulation_digest
+import city_regulations
 import email_templates
 from auth import (require_auth, require_admin, require_company_admin, require_permission,
                   hash_password, verify_password, create_token, decode_token,

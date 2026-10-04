@@ -556,8 +556,10 @@ REGULATION_EVIDENCE_MIN_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MIN_TOK
 # skipped. Set REGULATION_DIGEST=0 to restore the legacy extraction path.
 REGULATION_DIGEST_ENABLED = os.environ.get('REGULATION_DIGEST', '1') != '0'
 
-_REGULATION_PAGE_INDEX = None
-_REGULATION_PAGE_INDEX_SIGNATURE = None
+# Signature-keyed page indexes so alternating cities do not rebuild each
+# other's index every request; a small bound keeps memory flat.
+_REGULATION_PAGE_INDEXES = {}
+_REGULATION_PAGE_INDEXES_MAX = 4
 
 # Terms that mark a page as carrying the conditions we need. Arabic extracted from these PDFs
 # loses the lam-alef ligature and some letters, so the roots are matched without "ال".
@@ -601,8 +603,14 @@ def _score_regulation_page(text, query_tokens):
     return score
 
 
-def regulation_pdf_paths():
-    """Absolute paths of the municipality regulation PDFs that exist on disk."""
+def regulation_pdf_paths(paths=None):
+    """Absolute paths of the municipality regulation PDFs that exist on disk.
+
+    ``paths`` supplies an explicit set (a fetched city's documents); when
+    omitted the default municipal pair — REGULATION_PDF_NAMES — is used."""
+    if paths is not None:
+        return [os.path.abspath(path) for path in paths
+                if isinstance(path, str) and os.path.isfile(path)]
     base = os.path.dirname(__file__)
     return [os.path.join(base, name) for name in REGULATION_PDF_NAMES
             if os.path.isfile(os.path.join(base, name))]
@@ -647,17 +655,15 @@ def _regulation_transcription_pages(pdf_name):
     return pages
 
 
-def _build_regulation_page_index():
-    global _REGULATION_PAGE_INDEX, _REGULATION_PAGE_INDEX_SIGNATURE
-    paths = regulation_pdf_paths()
+def _build_regulation_page_index(paths=None):
+    paths = regulation_pdf_paths(paths)
     signature = _regulation_index_signature(paths)
-    if _REGULATION_PAGE_INDEX_SIGNATURE == signature and _REGULATION_PAGE_INDEX is not None:
-        return _REGULATION_PAGE_INDEX
+    if signature in _REGULATION_PAGE_INDEXES:
+        return _REGULATION_PAGE_INDEXES[signature]
     try:
         import fitz
     except ImportError:
-        _REGULATION_PAGE_INDEX = []
-        _REGULATION_PAGE_INDEX_SIGNATURE = signature
+        _REGULATION_PAGE_INDEXES[signature] = []
         return []
 
     records = []
@@ -704,8 +710,9 @@ def _build_regulation_page_index():
         finally:
             if document:
                 document.close()
-    _REGULATION_PAGE_INDEX = records
-    _REGULATION_PAGE_INDEX_SIGNATURE = signature
+    if len(_REGULATION_PAGE_INDEXES) >= _REGULATION_PAGE_INDEXES_MAX:
+        _REGULATION_PAGE_INDEXES.pop(next(iter(_REGULATION_PAGE_INDEXES)))
+    _REGULATION_PAGE_INDEXES[signature] = records
     return records
 
 
@@ -721,18 +728,20 @@ def _regulation_search_tokens(query_text='', site_facts=None):
     return list(dict.fromkeys(token.casefold() for token in tokens))[:24]
 
 
-def search_official_regulations_evidence(query_text='', site_facts=None):
-    records = _build_regulation_page_index()
+def search_official_regulations_evidence(query_text='', site_facts=None, paths=None):
+    records = _build_regulation_page_index(paths)
+    requested_names = (list(REGULATION_PDF_NAMES) if paths is None
+                       else [os.path.basename(path) for path in paths])
     if not records:
         return {'context': '', 'documents': [], 'table_pages': []}, [
             'ملفات الاشتراطات غير موجودة أو لا تحتوي صفحات قابلة للبحث: '
-            + '، '.join(REGULATION_PDF_NAMES)
+            + '، '.join(requested_names)
         ]
     query_tokens = _regulation_search_tokens(query_text, site_facts)
     warnings = []
     documents = []
     table_pages = []
-    for name in REGULATION_PDF_NAMES:
+    for name in requested_names:
         file_records = [record for record in records if record['name'] == name]
         scored = sorted(
             (
