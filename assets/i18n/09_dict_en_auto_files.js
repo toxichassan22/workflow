@@ -130,6 +130,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "لم يُفحص بعد.": "Not checked yet.",
   "لم يُقترح توزيع بعد.": "No layout has been suggested yet.",
   "متعارض": "Conflicting",
+  "متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات": "Conflicting — sourced from the approved project data or the regulations",
   "مراجعة بيانات الأرض والكروكي": "Review the land and croquis data",
   "مساحة الدور الإجمالية": "Total floor area",
   "مطابق": "Matching",
