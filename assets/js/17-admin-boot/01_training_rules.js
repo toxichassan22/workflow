@@ -59,6 +59,7 @@
     async function refreshSystemDataAfterAgentAction() {
       try {
         await loadTenantBranding();
+        if (typeof loadTenantFontCss === 'function') await loadTenantFontCss();
         const settingsPage = document.getElementById('tenantSettingsPage');
         if (settingsPage && settingsPage.style.display !== 'none') {
           await loadTenantFonts();

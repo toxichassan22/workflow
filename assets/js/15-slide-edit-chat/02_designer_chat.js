@@ -562,6 +562,7 @@
           await api('PUT', '/api/branding', { font_family: familyName, font_arabic: familyName });
         }
         await loadTenantBranding();
+        if (typeof loadTenantFontCss === 'function') await loadTenantFontCss();
         await renderPresentationFontStatus();
         if (typeof renderTenantSlides === 'function') renderTenantSlides();
         toast(familyName ? 'تم تطبيق الخط على العرض' : 'تم الرجوع للخط الافتراضي');
