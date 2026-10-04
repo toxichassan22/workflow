@@ -162,8 +162,8 @@ def api_visual_concept_plans_distribution():
         '"floor_area_sqm":0,"circulation":""}],"notes":[""]}. '
         'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
         '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. '
-        'component هو اسم الاستخدام فقط (سكني، تجاري، خدمات، مواقف...) دون اسم الدور — '
-        'الدور موجود في floor_range. '
+        'component هو اسم المكوّن كما ورد في بيانات المشروع حرفيًا — بالعربية دون ترجمة '
+        'أو إعادة صياغة ودون اسم الدور — الدور موجود في floor_range. '
         'التزم بسقوف الارتفاع ونسبة التغطية والارتدادات الموثقة، ووزّع الوحدات بحيث يطابق إجماليها '
         'الوحدات والمساحات المطلوبة في بيانات المشروع، وراعِ العلاقات بين الاستخدامات (فصل مداخل '
         'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
@@ -270,31 +270,6 @@ def api_visual_concept_plans_distribution_check():
                     'canProceed': can_proceed})
 
 
-def _visual_concept_plan_surgical_rows(old_rows, new_rows, editable_ids):
-    """Keep the model's edit surgical: rows no check flagged are restored
-    verbatim — the model may edit, merge or drop only the flagged ids, and may
-    add brand-new rows (e.g. a study component the table is missing). Untouched
-    rows keep their original order; new rows append at the end."""
-    old_by_id = {row.get('id'): row for row in old_rows}
-    new_by_id = {}
-    extra_rows = []
-    for row in new_rows:
-        rid = row.get('id')
-        if rid in old_by_id or rid in new_by_id:
-            new_by_id[rid] = row
-        else:
-            extra_rows.append(row)
-    merged = []
-    for row in old_rows:
-        rid = row.get('id')
-        if rid in new_by_id:
-            merged.append(new_by_id[rid] if rid in editable_ids else row)
-        elif rid not in editable_ids:
-            merged.append(row)
-    merged.extend(extra_rows)
-    return merged
-
-
 @app.route('/api/visual-concept/plans-distribution-repair', methods=['POST'])
 @require_permission('generate_images')
 def api_visual_concept_plans_distribution_repair():
@@ -332,7 +307,8 @@ def api_visual_concept_plans_distribution_repair():
         'وإن كان تجاوز معامل البناء أو الحد التنظيمي متأصلًا في البرنامج المعتمد نفسه، '
         'فلا تحلّه بتقليص مساحات دون مجاميع الدراسة — أولويتك مطابقة المجاميع وحل التداخلات. '
         'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
-        '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. component اسم الاستخدام فقط دون اسم الدور. '
+        '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. component اسم المكوّن كما ورد في '
+        'الدراسة حرفيًا — بالعربية ودون ترجمة أو إعادة صياغة أو اسم الدور. '
         'التزم بسقف الأدوار ومعامل البناء وحد التغطية الموثقة ومجاميع الدراسة، ولا تُنتج '
         'تعارضًا جديدًا ولا تترك فجوة مقابل مكوّن مطلوب. لا تذكر أسماء ملفات أو مصادر.'
     )
@@ -362,8 +338,15 @@ def api_visual_concept_plans_distribution_repair():
     if not isinstance(result, dict) or not result.get('rows'):
         return jsonify({'success': False, 'error': 'تعذر إصلاح التوزيع بالذكاء الاصطناعي'}), 503
     candidate = _visual_concept_plan_normalize_distribution(result, context, regulations)
+    allowed_keys = set()
+    for comp in context.get('components') or []:
+        for variant in (comp.get('name'),
+                        _visual_concept_plan_component_base(comp.get('name'))):
+            key = _visual_concept_plan_component_key(variant)
+            if key:
+                allowed_keys.add(key)
     enforced = _visual_concept_plan_surgical_rows(
-        distribution['rows'], candidate['rows'], editable_ids)
+        distribution['rows'], candidate['rows'], editable_ids, allowed_keys)
     repaired = _visual_concept_plan_normalize_distribution(
         {'rows': enforced, 'issues': result.get('issues')}, context, regulations)
     return jsonify({'success': True, 'distribution': repaired, 'repaired': True})

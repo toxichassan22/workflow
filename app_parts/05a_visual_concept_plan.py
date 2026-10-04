@@ -1426,6 +1426,36 @@ def _visual_concept_plan_distribution_totals(rows, context):
     return totals
 
 
+def _visual_concept_plan_regulation_floor_cap(regulations):
+    """Documented maximum floor count. `table_floors` is the regulation table's
+    floor number and wins outright. `max_floors_height` is free text that can
+    carry a METER height («حتى 23م لأربعة أدوار», «أقصى ارتفاع 15م»): a number
+    there only counts as a floor cap when it sits next to a floor word —
+    numbers tied to م/متر are heights, not floors, and must never cap a tower.
+    """
+    cap = _visual_concept_number(regulations.get('table_floors'))
+    if cap:
+        return cap
+    text = str(regulations.get('max_floors_height') or '')
+    if not text.strip():
+        return None
+    floor_word = r'(?:طوابق|طابق(?:ة|ين)?|أدوار|ادوار|دور(?:ات)?|floors?)'
+    floors_first = re.search(r'(\d+(?:[.,]\d+)?)\s*' + floor_word, text, re.IGNORECASE)
+    if floors_first:
+        return _visual_concept_number(floors_first.group(1))
+    floors_labeled = re.search(floor_word + r'\s*[:=]?\s*(\d+(?:[.,]\d+)?)', text, re.IGNORECASE)
+    if floors_labeled:
+        return _visual_concept_number(floors_labeled.group(1))
+    candidates = []
+    for match in re.finditer(r'(\d+(?:[.,]\d+)?)\s*(متر|م\b|meters?|metres?|m\b)?', text, re.IGNORECASE):
+        if match.group(2):
+            continue
+        number = _visual_concept_number(match.group(1))
+        if number:
+            candidates.append(number)
+    return max(candidates) if candidates else None
+
+
 def _visual_concept_plan_distribution_checks(rows, totals, context, regulations):
     """Deterministic re-check of an (edited) distribution table — instant, no model:
     floor-range overlaps per building, height caps, coverage footprint, and the
@@ -1466,13 +1496,13 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                         'result': 'متعارض', 'severity': 'high',
                         'row_ids': [row_a.get('id'), row_b.get('id')]})
 
-    cap = _visual_concept_number(regulations.get('max_floors_height') or regulations.get('table_floors'))
+    cap = _visual_concept_plan_regulation_floor_cap(regulations)
     if cap:
         for row, parsed in parsed_rows:
             if parsed and parsed['kind'] == 'range' and parsed['hi'] > cap:
                 checks.append({
                     'item': 'تجاوز سقف الأدوار الموثق',
-                    'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد {cap}',
+                    'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد الموثق {cap:g} دورًا',
                     'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
     land = _visual_concept_number(context.get('land_area') or regulations.get('croquis_land_area'))
     coverage = _visual_concept_number(context.get('coverage_ratio') or regulations.get('coverage_ratio')
@@ -1562,6 +1592,48 @@ def _visual_concept_plan_adjudicate_checks(checks, reviews):
             updated['detail'] = detail
         adjudicated.append(updated)
     return adjudicated
+
+
+def _visual_concept_plan_surgical_rows(old_rows, new_rows, editable_ids, allowed_keys=None):
+    """Keep the model's edit surgical: rows no check flagged are restored
+    verbatim — the model may edit, merge or drop only the flagged ids, and may
+    add brand-new rows (e.g. a study component the table is missing). Untouched
+    rows keep their original order; new rows append at the end. When
+    `allowed_keys` (the study's component keys) is given, a rename that lands
+    outside the study vocabulary — «الشقق السكنية الفاخرة» turned
+    «Residential» — is reverted and off-vocabulary additions are dropped, so
+    every row keeps matching its study totals."""
+    old_by_id = {row.get('id'): row for row in old_rows}
+    new_by_id = {}
+    extra_rows = []
+    for row in new_rows:
+        rid = row.get('id')
+        if rid in old_by_id or rid in new_by_id:
+            new_by_id[rid] = row
+        else:
+            extra_rows.append(row)
+    if allowed_keys is not None:
+        def _key(name):
+            return _visual_concept_plan_component_key(
+                _visual_concept_plan_component_base(name))
+        for rid, row in list(new_by_id.items()):
+            if rid in editable_ids and rid in old_by_id:
+                new_key = _key(row.get('component'))
+                old_key = _key(old_by_id[rid].get('component'))
+                if new_key != old_key and new_key not in allowed_keys:
+                    row = dict(row)
+                    row['component'] = old_by_id[rid].get('component')
+                    new_by_id[rid] = row
+        extra_rows = [row for row in extra_rows if _key(row.get('component')) in allowed_keys]
+    merged = []
+    for row in old_rows:
+        rid = row.get('id')
+        if rid in new_by_id:
+            merged.append(new_by_id[rid] if rid in editable_ids else row)
+        elif rid not in editable_ids:
+            merged.append(row)
+    merged.extend(extra_rows)
+    return merged
 
 
 def _visual_concept_plan_normalize_distribution(raw, context, regulations):

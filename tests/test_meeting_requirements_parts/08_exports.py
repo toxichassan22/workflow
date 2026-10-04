@@ -751,6 +751,17 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         approve_start = index_source.index('function approveVisualConceptPlansDistribution()')
         approve_body = index_source[approve_start:approve_start + 1200]
         self.assertIn('aiReviewed', approve_body)
+        # A repair changes rows, so the verdicts that described the old table are
+        # cleared («لم يُفحص بعد») and the chain re-checks — findings on screen
+        # always describe the table as it stands.
+        repair_start = index_source.index('async function repairVisualConceptPlansDistribution(')
+        repair_body = index_source[repair_start:repair_start + 4000]
+        self.assertIn('aiReviewed = false', repair_body)
+        self.assertIn("check.result !== 'مطابق'", repair_body)
+        chain_start = index_source.index('async function checkAndRepairVisualConceptPlansDistribution(')
+        chain_body = index_source[chain_start:chain_start + 1400]
+        self.assertGreaterEqual(
+            chain_body.count("checkVisualConceptPlansDistribution('ai')"), 2)
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen
@@ -1338,6 +1349,64 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(softened[0]['severity'], 'medium')
         self.assertEqual(softened[0]['row_ids'], ['r1', 'r2'])
         self.assertEqual(softened[1]['result'], 'متعارض')
+
+    def test_plans_distribution_floor_cap_reads_floors_not_meters(self):
+        """`max_floors_height` is free text that may carry a METER height — a
+        tower must never be capped by «حتى 23م». `table_floors` wins outright,
+        a number next to a floor word counts, and a meters-only text yields no
+        cap rather than a false «متعارض»."""
+        module = self.application_module
+        cap = module._visual_concept_plan_regulation_floor_cap
+        self.assertEqual(cap({'table_floors': 52}), 52)
+        self.assertEqual(cap({'table_floors': 52, 'max_floors_height': 'حتى 23م'}), 52)
+        self.assertIsNone(cap({'max_floors_height': 'حتى 23م لأربعة أدوار'}))
+        self.assertIsNone(cap({'max_floors_height': 'أقصى ارتفاع للمبنى 15م'}))
+        self.assertEqual(cap({'max_floors_height': 'أقصى 30 طابق وبارتفاع 100م'}), 30)
+        self.assertEqual(cap({'max_floors_height': '8 طوابق بحد أقصى 30م'}), 8)
+        self.assertEqual(cap({'max_floors_height': '12 دور'}), 12)
+        self.assertEqual(cap({'max_floors_height': '52'}), 52)
+        self.assertIsNone(cap({}))
+        # End-to-end: a 52-floor tower under table_floors=52 draws no cap finding.
+        checks = module._visual_concept_plan_distribution_checks(
+            [{'id': 'r1', 'building': 'A', 'floor_range': '21-52',
+              'component': 'شقق', 'units_per_floor': 8, 'floor_area_sqm': 500}],
+            [], {'land_area': 7012, 'components': []},
+            {'table_floors': 52, 'max_floors_height': 'حتى 23م'})
+        self.assertFalse(any(c['item'] == 'تجاوز سقف الأدوار الموثق' for c in checks))
+
+    def test_plans_distribution_repair_keeps_component_names_in_study_vocabulary(self):
+        """A repair rename landing outside the study's component names —
+        «الشقق السكنية الفاخرة» rewritten as «Residential» — is reverted, an
+        off-vocabulary added row is dropped, but renaming a flagged row TO a
+        missing study component still sticks."""
+        module = self.application_module
+        surgical = module._visual_concept_plan_surgical_rows
+        key = lambda n: module._visual_concept_plan_component_key(
+            module._visual_concept_plan_component_base(n))
+        old = [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5',
+             'component': 'الشقق السكنية الفاخرة'},
+            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
+        ]
+        allowed = {key('الشقق السكنية الفاخرة'), key('مكاتب'), key('سبا')}
+        out = surgical(old, [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'Residential'},
+            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
+            {'id': 'r9', 'building': 'A', 'floor_range': 'أرضي', 'component': 'قاعة أفراح'},
+        ], {'r1'}, allowed)
+        self.assertEqual(out[0]['component'], 'الشقق السكنية الفاخرة')
+        self.assertEqual(len(out), 2)
+        renamed = surgical(old, [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'سبا'},
+            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
+        ], {'r1'}, allowed)
+        self.assertEqual(renamed[0]['component'], 'سبا')
+        # Without the vocabulary list the merge keeps legacy behaviour.
+        legacy = surgical(old, [
+            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'Residential'},
+            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
+        ], {'r1'})
+        self.assertEqual(legacy[0]['component'], 'Residential')
 
     def test_plans_distribution_repair_edits_only_flagged_rows(self):
         """The AI repair is surgical: the model receives the flagged row ids and

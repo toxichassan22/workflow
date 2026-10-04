@@ -1484,42 +1484,56 @@
       }
     }
 
-    // One motion: sol adjudicates the deterministic findings, then surgically
-    // repairs whatever he still confirms as blocking — «يولد ويفحص ويعدّل».
+    // One motion: sol adjudicates the deterministic findings, surgically repairs
+    // whatever he still confirms as blocking, then re-checks the repaired table —
+    // «يولد ويفحص ويعدّل ويتأكد». The findings on screen always describe the
+    // current table, never a pre-repair snapshot.
     async function checkAndRepairVisualConceptPlansDistribution() {
       const checked = await checkVisualConceptPlansDistribution('ai');
       if (!checked) return;
-      const workflow = visualConceptPlansWorkflowState();
-      if ((workflow.distribution.rows || []).length
-          && visualConceptDistributionBlocking(workflow.distribution).length) {
-        await repairVisualConceptPlansDistribution();
-      }
+      const distribution = visualConceptPlansWorkflowState().distribution;
+      if (!(distribution.rows || []).length
+          || !visualConceptDistributionBlocking(distribution).length) return;
+      const repaired = await repairVisualConceptPlansDistribution();
+      if (repaired) await checkVisualConceptPlansDistribution('ai');
     }
 
     async function repairVisualConceptPlansDistribution() {
-      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return false; }
       const seedWorkflow = visualConceptPlansWorkflowState();
-      if (!(seedWorkflow.distribution.rows || []).length) return;
+      if (!(seedWorkflow.distribution.rows || []).length) return false;
       showLoader(WFT('plans.distribution_repair_loading', 'جاري إصلاح التوزيع'),
         WFT('plans.distribution_repair_loading_detail', 'يعالج الذكاء الصفوف المتعارضة ويحدّث المجاميع...'), 40);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        payload.distribution = { rows: seedWorkflow.distribution.rows, issues: seedWorkflow.distribution.issues };
+        payload.distribution = {
+          rows: seedWorkflow.distribution.rows,
+          issues: seedWorkflow.distribution.issues,
+          checks: (seedWorkflow.distribution.checks || []).filter((check) => check.result !== 'مطابق'),
+        };
         const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
         hideLoader();
-        if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return; }
-        if (response.repaired === false) toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
+        if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return false; }
+        if (response.repaired === false) {
+          toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
+          return false;
+        }
         const workflow = visualConceptPlansWorkflowState();
         workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
-        // sol produced this table — it counts as his review of it.
-        workflow.distribution.aiReviewed = true;
+        // The rows changed — the pre-repair verdicts no longer describe this
+        // table. Findings stay hidden («لم يُفحص بعد») until sol re-adjudicates.
+        workflow.distribution.checks = [];
+        workflow.distribution.issues = [];
+        workflow.distribution.aiReviewed = false;
         workflow.promptReady = false;
         workflow.promptsError = '';
         markVisualConceptDirty();
         renderVisualConceptPage();
+        return true;
       } catch (error) {
         hideLoader();
         toast(error.message || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع'));
+        return false;
       }
     }
 
