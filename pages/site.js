@@ -123,6 +123,19 @@
     });
   }
 
+  function initSpotlight() {
+    // Cursor-tracked radial glow on dark glass surfaces. Cheap — one
+    // pointermove per card, two custom properties, CSS does the rest.
+    if (reduceMotion || !window.matchMedia('(hover: hover)').matches) return;
+    document.querySelectorAll('.feature-card, .file-item').forEach(function (el) {
+      el.addEventListener('pointermove', function (ev) {
+        var r = el.getBoundingClientRect();
+        el.style.setProperty('--mx', ((ev.clientX - r.left) / r.width * 100).toFixed(1) + '%');
+        el.style.setProperty('--my', ((ev.clientY - r.top) / r.height * 100).toFixed(1) + '%');
+      });
+    });
+  }
+
   function initMarquee() {
     var track = document.querySelector('.outputs-marquee');
     var set = track && track.querySelector('.mq-set');
@@ -140,6 +153,102 @@
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
+  }
+
+  /* ── Opening sequence: scroll-scrubbed ───────────────────────────────────
+     The track is a tall in-flow section whose stage sticks to the viewport;
+     real scroll position drives everything — the welcome lifts out through
+     the first stretch, the caret fades in, and LANDLOOM AI types letter by
+     letter across the second stretch (scroll back up and it deletes). Escape
+     jumps past the whole thing. Reduced-motion drops the track in CSS. */
+
+  function initOpening() {
+    var track = document.getElementById('opening');
+    if (!track) return;
+    if (reduceMotion) {
+      track.parentNode.removeChild(track);
+      return;
+    }
+
+    var welcomeEl = track.querySelector('.op-welcome');
+    var brandEl = track.querySelector('.op-brand');
+    var typedEl = track.querySelector('.op-typed');
+    var typedAi = track.querySelector('.op-typed.op-ai');
+    var cueEl = track.querySelector('.op-cue');
+    var brandText = '';
+    Array.prototype.forEach.call(track.querySelectorAll('.op-typed'), function (el) {
+      brandText += el.textContent;
+      el.textContent = '';
+    });
+    var splitAt = brandText.lastIndexOf(' ') + 1;
+
+    var typed = -1;
+    var raf = 0;
+
+    function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+    function render() {
+      raf = 0;
+      var rect = track.getBoundingClientRect();
+      var span = rect.height - window.innerHeight;
+      var p = span > 0 ? clamp(-rect.top / span, 0, 1) : 0;
+
+      // Welcome holds through p .10, then lifts out by p .32.
+      var we = clamp((p - .10) / .22, 0, 1);
+      if (welcomeEl) {
+        welcomeEl.style.opacity = (1 - we).toFixed(3);
+        welcomeEl.style.transform = 'translateY(' + (-70 * we).toFixed(1) + 'px) scale(' + (1 + .06 * we).toFixed(3) + ')';
+        welcomeEl.style.filter = we > 0 ? 'blur(' + (9 * we).toFixed(1) + 'px)' : '';
+      }
+      if (cueEl) cueEl.style.opacity = (1 - clamp(p / .07, 0, 1)).toFixed(3);
+
+      // Brand fades in p .30 → .38, then types across p .38 → .88.
+      if (brandEl) brandEl.style.opacity = clamp((p - .30) / .08, 0, 1).toFixed(3);
+      if (typedEl) {
+        var n = Math.round(clamp((p - .38) / .5, 0, 1) * brandText.length);
+        if (n !== typed) {
+          typedEl.textContent = brandText.slice(0, Math.min(n, splitAt));
+          if (typedAi) typedAi.textContent = brandText.slice(splitAt, Math.max(splitAt, n));
+          typed = n;
+        }
+      }
+    }
+
+    function onScroll() {
+      if (!raf) raf = window.requestAnimationFrame(render);
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && track.getBoundingClientRect().bottom > 0) {
+        window.scrollTo(0, track.offsetTop + track.offsetHeight);
+      }
+    });
+    render();
+  }
+
+  /* ── Hero entrance ───────────────────────────────────────────────────────
+     body.entered fires the hero's staggered riseIn/deckIn animations and the
+     metric counters. It trips when the hero scrolls ~a fifth into view —
+     which is right after the opening track ends. Pages without a hero get it
+     immediately. */
+
+  function initHeroEnter() {
+    var hero = document.querySelector('.hero');
+    if (!hero || !('IntersectionObserver' in window)) {
+      document.body.classList.add('entered');
+      initCounters();
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) {
+        document.body.classList.add('entered');
+        initCounters();
+        io.disconnect();
+      }
+    }, { threshold: .22 });
+    io.observe(hero);
   }
 
   /* ── Showcase: interactive deck viewer ─────────────────────────────────── */
@@ -370,9 +479,11 @@
   authedSwap();
   initJoinForm();
   initReveal();
-  initCounters();
   initTilt();
+  initSpotlight();
   initMarquee();
   initTopbar();
   initShowcase();
+  initOpening();
+  initHeroEnter();
 })();
