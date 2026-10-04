@@ -642,7 +642,6 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "land.no_fields_updated": "لم يتم تحديث أي حقل: {reason}",
   "land.analysis_error": "حدث خطأ أثناء تحليل الملفات: {err}",
   "land.boundary_len": "بطول {n}م",
-  "sample.filled": "تم تعبئة {n} حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض",
   "training.actions_done": "تم تنفيذ {n} إجراء بنجاح",
   "slide.opacity_set": "تم ضبط شفافية العنصر {n}%",
   "slide.font_size_set": "حجم النص {n}px",

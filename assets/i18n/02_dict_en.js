@@ -642,7 +642,6 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "land.no_fields_updated": "No fields were updated: {reason}",
   "land.analysis_error": "An error occurred while analysing the files: {err}",
   "land.boundary_len": "{n}m long",
-  "sample.filled": "{n} fields + sample tables filled — Al-Waha residential compound data, Al-Narjis district, Riyadh",
   "training.actions_done": "{n} actions executed successfully",
   "slide.opacity_set": "Element opacity set to {n}%",
   "slide.font_size_set": "Text size {n}px",

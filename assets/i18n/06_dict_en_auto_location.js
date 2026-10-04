@@ -154,7 +154,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "فشل التحليل ولم يتغير أي حقل.": "Analysis failed; no fields were changed.",
   "كم": "km",
   "لا تملك صلاحية توليد الخرائط": "No permission to generate maps",
-  "لا توجد حقول مطابقة": "No matching fields found",
   "لا توجد حقول مفعّلة": "No active fields",
   "لا توجد طرق رئيسية": "No main roads identified",
   "لا توجد معالم مختارة لجلب المعلومات": "No selected Landmarks to fetch info for",

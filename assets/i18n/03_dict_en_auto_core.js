@@ -242,7 +242,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تصميم ودراسات": "Design & Engineering Studies",
   "تصور داخلي": "Interior Concept",
   "تطبق تعاقديًا فقط على فرق الزيادة عند البيع أعلى من السعر أو القيمة المستهدفة، ولا تدخل تلقائيًا ضمن أرقام الدراسة.": "Contractual promote on price premiums above target; not automatically compounded in study.",
-  "تعبئة بيانات تجريبية": "Fill sample data",
   "تعديل المحتوى": "Edit content",
   "تعديل المستخدم": "Edit user",
   "تعديل حقل مخصص": "Edit Custom Field",
