@@ -1084,8 +1084,12 @@
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
-      const findings = checks.map(item =>
-          (item.result && item.result !== 'مطابق' ? item.result + ': ' : '') + (item.detail || item.item || ''))
+      const findings = checks.map(item => {
+          const label = item.result === 'متعارض' && item.fixable === false
+            ? 'متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات'
+            : (item.result || '');
+          return (label && label !== 'مطابق' ? label + ': ' : '') + (item.detail || item.item || '');
+        })
         .concat(issues.flatMap(item =>
           (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
         .filter(Boolean);
@@ -1492,8 +1496,12 @@
       const checked = await checkVisualConceptPlansDistribution('ai');
       if (!checked) return;
       const distribution = visualConceptPlansWorkflowState().distribution;
+      const blocking = visualConceptDistributionBlocking(distribution);
+      // A blocker sol marked fixable=false is a program-vs-regulation conflict —
+      // no table edit resolves it, so the loop skips the futile repair call and
+      // the verdict stays on screen pointing at the upstream source.
       if (!(distribution.rows || []).length
-          || !visualConceptDistributionBlocking(distribution).length) return;
+          || !blocking.some((item) => item.fixable !== false)) return;
       const repaired = await repairVisualConceptPlansDistribution();
       if (repaired) await checkVisualConceptPlansDistribution('ai');
     }

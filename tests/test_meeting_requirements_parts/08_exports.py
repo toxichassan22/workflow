@@ -762,6 +762,14 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         chain_body = index_source[chain_start:chain_start + 1400]
         self.assertGreaterEqual(
             chain_body.count("checkVisualConceptPlansDistribution('ai')"), 2)
+        # A fixable=false blocker is a program-vs-regulation conflict — the
+        # chain skips the futile repair and the row is labelled with its
+        # upstream source instead of looping forever.
+        self.assertIn('fixable !== false', chain_body)
+        self.assertIn('مصدره بيانات المشروع المعتمدة أو الاشتراطات', results_body)
+        repair_route = read_module_source('app.py')
+        self.assertIn("check.get('fixable', True)", repair_route)
+        self.assertIn('json.dumps(repairable', repair_route)
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen
@@ -1331,7 +1339,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         ]
         adjudicated = module._visual_concept_plan_adjudicate_checks(checks, [
             {'index': 0, 'result': 'مطابق', 'detail': 'النطاقان متجاوران'},
-            {'index': 1, 'result': 'متعارض', 'detail': 'يتجاوز الحد فعلًا'},
+            {'index': 1, 'result': 'متعارض', 'detail': 'يتجاوز الحد فعلًا',
+             'fixable': False},
         ])
         self.assertEqual(len(adjudicated), 2)
         self.assertEqual(adjudicated[0]['item'], 'تجاوز سقف الأدوار الموثق')
@@ -1339,6 +1348,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(adjudicated[0]['severity'], 'high')
         self.assertEqual(adjudicated[0]['detail'], 'يتجاوز الحد فعلًا')
         self.assertEqual(adjudicated[0]['row_ids'], ['r3'])
+        # fixable=false survives the merge so the repair loop skips what no row
+        # edit can resolve; an unflagged verdict defaults to fixable.
+        self.assertIs(adjudicated[0]['fixable'], False)
+        self.assertNotIn('fixable', adjudicated[1])
         self.assertEqual(adjudicated[1]['result'], 'يحتاج تأكيد')
         self.assertFalse(any(item['item'].startswith('نطاقان') for item in adjudicated))
         # A confirm verdict keeps the flagged rows so the repair stays surgical.

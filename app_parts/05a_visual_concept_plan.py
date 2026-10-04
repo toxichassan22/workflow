@@ -1571,23 +1571,26 @@ def _visual_concept_plan_adjudicate_checks(checks, reviews):
         result = _visual_concept_plan_sanitize_text(item.get('result'))
         detail = _visual_concept_plan_sanitize_text(
             item.get('detail') or item.get('reason'))[:500]
+        fixable = item.get('fixable') is not False
         if result in ('مطابق', 'سليم', 'صحيح'):
-            verdicts[index] = ('مطابق', detail)
+            verdicts[index] = ('مطابق', detail, fixable)
         elif result == 'متعارض':
-            verdicts[index] = ('متعارض', detail)
+            verdicts[index] = ('متعارض', detail, fixable)
         elif result:
-            verdicts[index] = ('يحتاج تأكيد', detail)
+            verdicts[index] = ('يحتاج تأكيد', detail, fixable)
     adjudicated = []
     for index, check in enumerate(checks or []):
         if index not in verdicts:
             adjudicated.append(check)
             continue
-        result, detail = verdicts[index]
+        result, detail, fixable = verdicts[index]
         if result == 'مطابق':
             continue
         updated = dict(check)
         updated['result'] = result
         updated['severity'] = 'high' if result == 'متعارض' else 'medium'
+        if not fixable:
+            updated['fixable'] = False
         if detail:
             updated['detail'] = detail
         adjudicated.append(updated)

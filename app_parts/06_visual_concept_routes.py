@@ -225,12 +225,16 @@ def api_visual_concept_plans_distribution_check():
             '«يحتاج تأكيد» تستدعي مراجعة العميل دون منع، أو «مطابق» إنذار كاذب لأن التوزيع '
             'سليم فعلًا (نطاقات متجاورة لا متداخلة، مبانٍ مختلفة، أو استخدامات مختلفة تشترك '
             'في الدور بشكل مشروع). راجع كل البنود المرقّمة ولا تترك بندًا بلا حكم. '
+            'ولكل بند متعارض قرّر fixable: true إن كان يُحل بتحرير صفوف الجدول، أو false إن '
+            'كان مصدره بيانات المشروع المعتمدة نفسها مقابل الاشتراطات (برنامج يتجاوز معامل '
+            'البناء مهما توزّع، استخدام غير مسموح به إطلاقًا) — حينها اشرح في detail أين '
+            'يصحّح المصدر بدل وصف التحرير المستحيل. '
             'لا تكتب بنود «لم يوثّق» عمّا لا يمكن لجدول توزيع إثباته بطبيعته (أبعاد المواقف، '
             'عروض الممرات والمنحدرات، مسافات الإخلاء، تفاصيل الحريق) — فهي مرحلة تصميم لاحقة. '
             'issues تبقى ملاحظات إجرائية واضحة قابلة للتنفيذ على الجدول: «عدّل قيمة X في صف Y إلى Z» '
             'أو «أضف مكوّنًا لـ…»، وبحد أقصى 8 بنود مرتبة بالأهمية. '
             'سمّ الصفوف باسم المكوّن والدور («صف سكني في الدور أرضي»)، ولا تذكر معرّفات داخلية. أعد JSON فقط: '
-            '{"reviews":[{"index":0,"result":"متعارض|يحتاج تأكيد|مطابق","detail":""}],'
+            '{"reviews":[{"index":0,"result":"متعارض|يحتاج تأكيد|مطابق","detail":"","fixable":true}],'
             '"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high|medium|low"}],'
             '"canProceed":true}. لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية.'
         )
@@ -286,12 +290,21 @@ def api_visual_concept_plans_distribution_repair():
     posted = (data.get('distribution') if isinstance(data.get('distribution'), dict)
               else (workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}))
     distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
-    if not (distribution['rows'] and (distribution['checks'] or distribution['issues'])):
+    # normalize recomputes checks deterministically and drops the verdicts the
+    # client holds — but the repair must fix what sol CONFIRMED, so the posted
+    # (adjudicated) findings win when they exist. fixable=false findings are
+    # program-vs-regulation conflicts no row edit can resolve — they stay on
+    # screen as sol's verdict and are never fed back to the repair loop.
+    posted_checks = [check for check in posted.get('checks') or [] if isinstance(check, dict)]
+    findings = posted_checks or distribution['checks']
+    repairable = [check for check in findings
+                  if check.get('fixable', True) and check.get('result') != 'مطابق']
+    if not (distribution['rows'] and (repairable or distribution['issues'])):
         return jsonify({'success': True, 'distribution': distribution, 'repaired': False})
     _billing_guard = _require_billing_balance('visual_concept')
     if _billing_guard is not None:
         return _billing_guard
-    editable_ids = {rid for check in distribution['checks']
+    editable_ids = {rid for check in repairable
                     for rid in (check.get('row_ids') or []) if rid}
     system_prompt = (
         'أنت مخطط معماري مفاهيمي تصحّح جدول توزيع مكونات على الأدوار بناءً على نتيجة فحص آلي. '
@@ -321,7 +334,7 @@ def api_visual_concept_plans_distribution_repair():
         + '\n\nمجاميع التوزيع مقابل المطلوب في الدراسة:\n'
         + json.dumps(distribution['totals'], ensure_ascii=False)
         + '\n\nنتائج الفحص المطلوب معالجتها كلها:\n'
-        + json.dumps(distribution['checks'], ensure_ascii=False)
+        + json.dumps(repairable, ensure_ascii=False)
         + ('\n\nملاحظات مراجعة سابقة (استرشادية):\n'
            + json.dumps(distribution['issues'], ensure_ascii=False)
            if distribution['issues'] else '')
