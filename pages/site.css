@@ -636,29 +636,33 @@ html[dir="ltr"] .feature-card::before { transform-origin: 0 50%; }
      would push the grid wider than the viewport on small screens —
      min-width: 0 keeps the thumb shrinkable. */
   min-width: 0;
+  position: relative;
+  overflow: hidden;
   aspect-ratio: 16 / 10;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, .14);
-  background: #fff;
-  padding: 14px;
+  border-top: 3px solid var(--t-accent, var(--p));
+  background: #0B2745;
   box-shadow: 0 18px 44px rgba(0, 0, 0, .42);
-  display: flex;
-  flex-direction: column;
 }
 
-.brand-thumb .t-head {
-  height: 8px; width: 46%; border-radius: 4px;
-  background: var(--t-accent, var(--p));
-  margin-bottom: 8px;
+.brand-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
 }
-.brand-thumb .t-sub { height: 6px; width: 30%; border-radius: 3px; background: #DDE6EE; margin-bottom: auto; }
-.brand-thumb .t-row { display: flex; gap: 6px; margin-bottom: 6px; }
-.brand-thumb .t-row i {
-  flex: 1; height: 20px; border-radius: 5px;
-  border: 1px solid var(--line);
+
+.brand-thumb .t-name {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  padding: 22px 12px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #EAF3F9;
+  background: linear-gradient(180deg, transparent, rgba(4, 16, 31, .82));
 }
-.brand-thumb .t-row i:first-child { border-top: 2px solid var(--t-accent, var(--p)); }
-.brand-thumb .t-name { font-size: 9.5px; color: var(--muted); font-weight: 700; margin-top: 4px; }
 
 /* ── Flow ────────────────────────────────────────────────────────────────── */
 
@@ -803,8 +807,8 @@ body.js .flow.in::after { transform: scaleX(1); }
   box-shadow: inset 0 0 0 1px rgba(7, 24, 44, .08), 0 14px 40px rgba(0, 0, 0, .5);
 }
 
-.deck-stage.swap-next .ms { animation: msIn .35s ease both; }
-.deck-stage.swap-prev .ms { animation: msInPrev .35s ease both; }
+.deck-stage.swap-next > * { animation: msIn .35s ease both; }
+.deck-stage.swap-prev > * { animation: msInPrev .35s ease both; }
 
 @keyframes msIn {
   from { opacity: 0; transform: translateX(-22px); }
@@ -835,80 +839,13 @@ body.js .flow.in::after { transform: scaleX(1); }
   border-radius: 999px; padding: 5px 16px;
 }
 
-/* Mock slides — pure markup stand-ins for generated output. --msa is the
-   file's brand accent, set inline per slide. */
-.ms {
+/* Showcase slides are real rendered decks — JPEGs that fill the 16:9 stage. */
+.ms-real {
+  display: block;
   width: 100%; height: 100%;
-  background: #fff;
-  padding: 4.5% 5.5%;
-  display: flex; flex-direction: column;
-  font-size: clamp(8px, 1.1vw, 14px);
+  object-fit: cover;
+  background: #0B2745;
 }
-
-.ms-bar { height: 5px; border-radius: 3px; background: var(--msa); width: 34%; margin-bottom: 4%; }
-.ms-kicker { font-size: .8em; font-weight: 800; color: var(--msa); margin-bottom: 1.5%; }
-.ms-h { margin: 0 0 1.5%; font-size: 1.5em; font-weight: 800; color: var(--ink); }
-.ms-sub { margin: 0; font-size: .85em; color: var(--muted); }
-
-.ms-logo {
-  width: 2.2em; height: 2.2em; border-radius: .5em;
-  background: var(--msa); color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 1.1em;
-}
-
-.ms-cover { justify-content: center; }
-.ms-cover .ms-logo { margin-bottom: 4%; }
-.ms-cover .ms-title { font-size: 2em; font-weight: 800; margin: 0 0 1%; color: var(--ink); line-height: 1.35; }
-.ms-cover .ms-sub { font-size: .95em; }
-
-.ms-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3%; margin: 3% 0; }
-.ms-metrics > div {
-  border: 1px solid var(--line); border-radius: .6em;
-  border-top: .25em solid var(--msa);
-  padding: 6% 7%;
-}
-.ms-metrics b { display: block; font-size: 1.5em; font-weight: 800; color: var(--msa); }
-.ms-metrics span { font-size: .72em; color: var(--muted); }
-
-.ms-lines { display: flex; flex-direction: column; gap: .55em; margin-top: 2%; }
-.ms-lines i { display: block; height: .55em; border-radius: .3em; background: #E7EEF4; }
-.ms-lines i:nth-child(1) { width: 90%; }
-.ms-lines i:nth-child(2) { width: 62%; }
-.ms-lines i:nth-child(3) { width: 78%; }
-
-.ms-map {
-  flex: 1; border-radius: .7em; margin: 2.5% 0;
-  border: 1px solid var(--line);
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(120% 90% at 28% 34%, rgba(123, 160, 91, .5) 0%, transparent 48%),
-    radial-gradient(95% 110% at 74% 62%, rgba(74, 122, 181, .42) 0%, transparent 52%),
-    radial-gradient(60% 60% at 60% 20%, rgba(20, 184, 166, .18) 0%, transparent 60%),
-    linear-gradient(135deg, #DCE8D4 0%, #C9D9E8 55%, #D8E4CE 100%);
-}
-
-.ms-pin {
-  position: absolute; top: 42%; inset-inline-start: 47%;
-  width: .9em; height: .9em; border-radius: 50%;
-  background: var(--msa); box-shadow: 0 0 0 .3em rgba(255, 255, 255, .85);
-}
-.ms-pin::after {
-  content: ''; position: absolute; inset: -.55em; border-radius: 50%;
-  border: .16em solid var(--msa); opacity: .5;
-}
-
-.ms-foot {
-  margin-top: auto; padding-top: 2.5%;
-  border-top: 1px solid var(--line);
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: .72em; color: var(--muted);
-}
-.ms-foot b { color: var(--msa); }
-
-.ms-closing { align-items: center; justify-content: center; text-align: center; }
-.ms-closing .ms-logo { width: 3em; height: 3em; font-size: 1.3em; margin-bottom: 3%; }
-.ms-closing .ms-h { font-size: 1.7em; }
 
 @media (max-width: 980px) {
   .showcase { grid-template-columns: 1fr; }

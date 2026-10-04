@@ -253,105 +253,30 @@
 
   /* ── Showcase: interactive deck viewer ─────────────────────────────────── */
 
-  // Mock files and slides — stand-ins for real generated decks, each carrying
-  // the client brand accent it was "designed" under.
+  // Real decks rendered by the platform itself — every slide ships as a JPEG
+  // under /pages/decks/<slug>/. Each file keeps the brand accent its tenant
+  // palette produced, so the list dots match the deck colors.
   var SHOWCASE_FILES = [
-    {
-      name: 'عرض استثماري — حي الياسمين', meta: 'شركة الأفق · الرياض', accent: '#123B6D', logo: 'أ',
-      slides: [
-        { t: 'cover', title: 'عرض استثماري — حي الياسمين', sub: 'شركة الأفق للتطوير العقاري · الرياض' },
-        { t: 'metrics', kicker: 'دراسة سوق', h: 'مؤشرات الطلب في النطاق', metrics: [['+34%', 'نمو الطلب'], ['8,250', 'سكن في النطاق'], ['91%', 'معدل الإشغال']], lines: 2 },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'الموقع والمحيط العمراني' },
-        { t: 'metrics', kicker: 'النموذج المالي', h: 'المؤشرات الاستثمارية', metrics: [['12.4%', 'العائد المتوقع'], ['4.2', 'سنوات الاسترداد'], ['+18%', 'صافي التدفق']], lines: 2 },
-        { t: 'closing', h: 'شكرًا', sub: 'شركة الأفق للتطوير العقاري' }
-      ]
-    },
-    {
-      name: 'دراسة جدوى — أرض الصحافة', meta: 'إسكان الشمال · الرياض', accent: '#0D7B55', logo: 'إ',
-      slides: [
-        { t: 'cover', title: 'دراسة جدوى — أرض الصحافة', sub: 'إسكان الشمال · الرياض' },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'الأرض وحدودها والوصول' },
-        { t: 'metrics', kicker: 'دراسة السوق', h: 'العرض والطلب', metrics: [['1,940', 'وحدة معروضة'], ['+21%', 'نمو الأسعار'], ['6.8', 'أشهر التصريف']], lines: 2 },
-        { t: 'closing', h: 'شكرًا', sub: 'إسكان الشمال' }
-      ]
-    },
-    {
-      name: 'عرض برج الواجهة البحرية', meta: 'مجموعة الريادة · جدة', accent: '#14B8A6', logo: 'ر',
-      slides: [
-        { t: 'cover', title: 'عرض برج الواجهة البحرية', sub: 'مجموعة الريادة · جدة' },
-        { t: 'metrics', kicker: 'ملخص تنفيذي', h: 'أرقام المشروع', metrics: [['28', 'طابقًا'], ['340', 'وحدة فندقية'], ['1.2B', 'قيمة المشروع']], lines: 2 },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'الواجهة البحرية والمعالم' },
-        { t: 'metrics', kicker: 'دراسة السوق', h: 'سياحة جدة', metrics: [['+27%', 'نمو الزوار'], ['84%', 'إشغال الفنادق'], ['5', 'معالم قريبة']], lines: 2 },
-        { t: 'closing', h: 'شكرًا', sub: 'مجموعة الريادة' }
-      ]
-    },
-    {
-      name: 'تطوير مخطط النرجس', meta: 'ديار للتطوير · الرياض', accent: '#A65B00', logo: 'د',
-      slides: [
-        { t: 'cover', title: 'تطوير مخطط النرجس', sub: 'ديار للتطوير · الرياض' },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'المخطط والبنية المحيطة' },
-        { t: 'metrics', kicker: 'النموذج المالي', h: 'الجدوى', metrics: [['9.8%', 'العائد'], ['520', 'قطعة أرض'], ['3.1', 'سنوات البيع']], lines: 2 },
-        { t: 'closing', h: 'شكرًا', sub: 'ديار للتطوير' }
-      ]
-    },
-    {
-      name: 'عرض مجمع الورود السكني', meta: 'شركة الورود · الدمام', accent: '#5B3A8E', logo: 'و',
-      slides: [
-        { t: 'cover', title: 'عرض مجمع الورود السكني', sub: 'شركة الورود · الدمام' },
-        { t: 'metrics', kicker: 'دراسة سوق', h: 'الطلب السكني', metrics: [['+19%', 'نمو الطلب'], ['3,400', 'أسرة مستهدفة'], ['95%', 'إشغال متوقع']], lines: 2 },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'الموقع والخدمات' },
-        { t: 'closing', h: 'شكرًا', sub: 'شركة الورود' }
-      ]
-    },
-    {
-      name: 'دراسة أرض حي العارض', meta: 'شركة المدار · الرياض', accent: '#B3346B', logo: 'م',
-      slides: [
-        { t: 'cover', title: 'دراسة أرض حي العارض', sub: 'شركة المدار · الرياض' },
-        { t: 'map', kicker: 'تحليل الموقع', h: 'الأرض ومناطق التقاط' },
-        { t: 'metrics', kicker: 'دراسة السوق', h: 'التنافسية', metrics: [['12', 'مشروع منافس'], ['+8%', 'فارق التسعير'], ['4.5', 'أشهر التصريف']], lines: 2 },
-        { t: 'metrics', kicker: 'النموذج المالي', h: 'العائد', metrics: [['11.2%', 'العائد المتوقع'], ['3.8', 'سنوات الاسترداد'], ['+15%', 'صافي التدفق']], lines: 2 },
-        { t: 'closing', h: 'شكرًا', sub: 'شركة المدار' }
-      ]
-    }
+    { name: 'واحة النخيل السكنية', meta: 'عرض مشروع سكني · 6 شرائح', accent: '#0F4C81', slug: 'nakheel', count: 6 },
+    { name: 'حي الياسمين', meta: 'تحليل أرض وخرائط · 9 شرائح', accent: '#1E7A4F', slug: 'yasmin', count: 9 },
+    { name: 'برج الرواف التجاري', meta: 'دراسة مالية · 18 شريحة', accent: '#0D8B7D', slug: 'rawaf', count: 18 },
+    { name: 'مجمع الضياء اللوجستي', meta: 'دراسة سوق · 18 شريحة', accent: '#B45A1B', slug: 'diyaa', count: 18 },
+    { name: 'فندق مرافق البوتيك', meta: 'جدول زمني · 6 شرائح', accent: '#6D3FA3', slug: 'marafiq', count: 6 }
   ];
+  SHOWCASE_FILES.forEach(function (f) {
+    f.slides = [];
+    for (var n = 1; n <= f.count; n++) {
+      f.slides.push('/pages/decks/' + f.slug + '/' + (n < 10 ? '0' : '') + n + '.jpg');
+    }
+  });
 
   var showcaseFile = 0;
   var showcaseSlide = 0;
 
-  function msFoot(brand, page) {
-    return '<div class="ms-foot"><span>' + brand + '</span><b>' + page + '</b></div>';
-  }
-
-  function slideHtml(slide, file, page) {
-    var a = file.accent;
-    if (slide.t === 'cover') {
-      return '<div class="ms ms-cover" style="--msa:' + a + '">' +
-        '<div class="ms-logo">' + file.logo + '</div>' +
-        '<h4 class="ms-title">' + slide.title + '</h4>' +
-        '<p class="ms-sub">' + slide.sub + '</p>' + msFoot('LandLoom', page) + '</div>';
-    }
-    if (slide.t === 'map') {
-      return '<div class="ms" style="--msa:' + a + '">' +
-        '<div class="ms-bar"></div><div class="ms-kicker">' + slide.kicker + '</div>' +
-        '<h4 class="ms-h">' + slide.h + '</h4>' +
-        '<div class="ms-map"><span class="ms-pin"></span></div>' + msFoot('LandLoom', page) + '</div>';
-    }
-    if (slide.t === 'closing') {
-      return '<div class="ms ms-closing" style="--msa:' + a + '">' +
-        '<div class="ms-logo">' + file.logo + '</div>' +
-        '<h4 class="ms-h">' + slide.h + '</h4>' +
-        '<p class="ms-sub">' + slide.sub + '</p></div>';
-    }
-    var tiles = (slide.metrics || []).map(function (m) {
-      return '<div><b>' + m[0] + '</b><span>' + m[1] + '</span></div>';
-    }).join('');
-    var lines = '';
-    for (var i = 0; i < (slide.lines || 0); i++) lines += '<i></i>';
-    return '<div class="ms" style="--msa:' + a + '">' +
-      '<div class="ms-bar"></div><div class="ms-kicker">' + slide.kicker + '</div>' +
-      '<h4 class="ms-h">' + slide.h + '</h4>' +
-      '<div class="ms-metrics">' + tiles + '</div>' +
-      '<div class="ms-lines">' + lines + '</div>' + msFoot('LandLoom', page) + '</div>';
+  function slideHtml(file, slideIdx) {
+    return '<img class="ms-real" src="' + file.slides[slideIdx] + '" ' +
+      'alt="' + file.name + ' — شريحة ' + (slideIdx + 1) + '" ' +
+      'width="1440" height="810" loading="lazy" decoding="async">';
   }
 
   function renderShowcaseSlide(dir) {
@@ -359,7 +284,7 @@
     var counter = document.getElementById('deckCounter');
     var file = SHOWCASE_FILES[showcaseFile];
     if (!stage || !file) return;
-    stage.innerHTML = slideHtml(file.slides[showcaseSlide], file, showcaseSlide + 1);
+    stage.innerHTML = slideHtml(file, showcaseSlide);
     stage.classList.remove('swap-next', 'swap-prev');
     if (dir) {
       void stage.offsetWidth;
