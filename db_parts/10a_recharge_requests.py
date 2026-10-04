@@ -150,18 +150,19 @@ def get_recharge_request(request_id):
 
 def list_recharge_requests(tenant_id=None, status=None, limit=100):
     conn = get_db()
-    query = 'SELECT * FROM recharge_requests'
+    query = ('SELECT r.*, tn.company_name AS tenant_name FROM recharge_requests r '
+             'LEFT JOIN tenants tn ON tn.id = r.tenant_id')
     clauses = []
     params = []
     if tenant_id:
-        clauses.append('tenant_id = ?')
+        clauses.append('r.tenant_id = ?')
         params.append(tenant_id)
     if status:
-        clauses.append('status = ?')
+        clauses.append('r.status = ?')
         params.append(status)
     if clauses:
         query += ' WHERE ' + ' AND '.join(clauses)
-    query += ' ORDER BY requested_at DESC LIMIT ?'
+    query += ' ORDER BY r.requested_at DESC LIMIT ?'
     params.append(int(limit))
     return with_sar_fields([dict(row) for row in conn.execute(query, params).fetchall()])
 
