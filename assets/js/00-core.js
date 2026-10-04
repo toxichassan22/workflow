@@ -341,13 +341,13 @@
         catchment: d.catchment_areas || '',
         cityLandmarks: d.city_landmarks || '',
         locationDetail: d.location_detail || '',
-        mapType: d.map_type || (tenantBranding && tenantBranding.default_map_type) || '',
+        mapType: d.map_type || 'satellite',
         projectStyles: projectStyles,
         styles: [
-          projectStyles.overview || (tenantBranding || {}).map_style_overview,
-          projectStyles.landmarks || (tenantBranding || {}).map_style_landmarks,
-          projectStyles.access || (tenantBranding || {}).map_style_access,
-          projectStyles.catchment || (tenantBranding || {}).map_style_catchment
+          projectStyles.overview || d.map_type || 'satellite',
+          projectStyles.landmarks || d.map_type || 'satellite',
+          projectStyles.access || d.map_type || 'satellite',
+          projectStyles.catchment || d.map_type || 'satellite'
         ],
         highlightSite: highlightSite !== false
       });
@@ -359,7 +359,7 @@
         name: d.project_name || '',
         type: d.project_type || '',
         desc: d.project_description || '',
-        count: (tenantBranding && tenantBranding.moodboard_count) || 4
+        count: 4
       });
     }
 
@@ -678,11 +678,10 @@
             setGenPct(22, 'صياغة أوصاف الصور بالذكاء الاصطناعي...');
           }
           updateLoaderProgress(basePct, 'جاري توليد الصور الإبداعية...');
-          const count = (tenantBranding && tenantBranding.moodboard_count) || 4;
           const payload = {
             projectData: tenantProjectData,
             includeCover: includeCover !== false,
-            count: count,
+            count: 4,
             referenceImage: (includeCover === false ? (tenantCreativeImages.cover || null) : null)
           };
           let res = null;

@@ -289,11 +289,8 @@ def update_branding(tenant_id, **fields):
         'primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color',
         'logo_path', 'watermark_path', 'company_name', 'tagline', 'font_family', 'font_arabic',
         'design_template', 'reference_image_path',
-        'header_enabled', 'footer_enabled', 'header_height', 'footer_height',
-        'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
-        'default_slide_count', 'lock_slide_count', 'min_slides', 'max_slides',
-        'default_map_type', 'map_style_overview', 'map_style_landmarks', 'map_style_access', 'map_style_catchment',
-        'draw_compass', 'draw_inset', 'font_file_path', 'font_file_data',
+        'header_enabled', 'footer_enabled',
+        'card_style', 'slide_ratio', 'font_file_path', 'font_file_data',
         # Company-written rules that ride with every slide-generation prompt.
         'generation_rules',
         # d05: how many days a decided section approval stays valid.
