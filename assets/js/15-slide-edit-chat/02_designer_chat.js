@@ -485,36 +485,48 @@
 
     async function openPresentationFontSettings() {
       const panel = document.getElementById('presentationFontSettingsPanel');
-      const select = document.getElementById('presentationFontSelect');
-      if (!panel || !select) return;
+      const selects = {
+        arabic: document.getElementById('presentationFontArabicSelect'),
+        latin: document.getElementById('presentationFontLatinSelect'),
+      };
+      if (!panel || !selects.arabic || !selects.latin) return;
       panel.style.display = 'flex';
       if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(panel);
-      select.disabled = true;
-      select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
+      Object.values(selects).forEach(select => {
+        select.disabled = true;
+        select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
+      });
       try {
         const data = await api('GET', '/api/branding/fonts');
         if (!data.success) throw new Error(data.error || 'Font list unavailable');
         const families = presentationFontFamilies(data);
         const selections = data.selections || [];
-        const chosenIds = new Set(selections.map(item => item.font_id).filter(Boolean));
-        const chosenPaths = new Set(selections.map(item => item.custom_font_path).filter(Boolean));
         window.tenantPresentationFontFamilies = families;
-        select.innerHTML = '<option value="">الخط الافتراضي</option>' + families.map(family => {
-          const selected = family.faces.some(face =>
-            chosenIds.has(face.id) || (face.custom_font_path && chosenPaths.has(face.custom_font_path)));
-          const scripts = new Set(family.faces.map(face => face.script || 'arabic'));
-          const coverage = scripts.has('arabic') && scripts.has('latin') ? trDynamicI18n('عربي ولاتيني')
-            : scripts.has('arabic') ? trDynamicI18n('عربي') : trDynamicI18n('لاتيني');
-          return '<option value="' + escapeHtml(family.name) + '"' + (selected ? ' selected' : '') +
-            '>' + escapeHtml(family.name + ' — ' + coverage) + '</option>';
-        }).join('');
-        select.disabled = false;
-        refreshDynamicI18n(select);
+        for (const script of ['arabic', 'latin']) {
+          const chosenIds = new Set(selections.filter(item => (item.script || 'arabic') === script)
+            .map(item => item.font_id).filter(Boolean));
+          const chosenPaths = new Set(selections.filter(item => (item.script || 'arabic') === script)
+            .map(item => item.custom_font_path).filter(Boolean));
+          // A family joins a select when it ships a face for that script; custom
+          // uploads are catalogued under Arabic but offered for Latin as well.
+          const offered = families.filter(family => family.faces.some(face =>
+            (face.script || 'arabic') === script || face.custom_font_path));
+          selects[script].innerHTML = '<option value="">' + escapeHtml(trDynamicI18n('الخط الافتراضي')) + '</option>' +
+            offered.map(family => {
+              const selected = family.faces.some(face =>
+                chosenIds.has(face.id) || (face.custom_font_path && chosenPaths.has(face.custom_font_path)));
+              return '<option value="' + escapeHtml(family.name) + '"' + (selected ? ' selected' : '') +
+                '>' + escapeHtml(family.name) + '</option>';
+            }).join('');
+          selects[script].disabled = false;
+          refreshDynamicI18n(selects[script]);
+        }
         await renderPresentationFontStatus();
       } catch (error) {
         console.warn('[PRESENTATION FONT] load failed:', error);
-        select.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
-        refreshDynamicI18n(select);
+        selects.arabic.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+        selects.latin.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+        refreshDynamicI18n(selects.arabic);
       }
     }
     document.addEventListener('wf:lang', () => {
@@ -532,17 +544,17 @@
       }
     }
 
-    // The chosen family is applied to the whole deck: both scripts and every weight. A family that
-    // ships faces for one script only is used for the other script too, otherwise half the text
-    // would silently stay on the platform default and the choice would look like it did nothing.
-    async function selectPresentationFont(familyName) {
-      const select = document.getElementById('presentationFontSelect');
+    // Each selector owns one script: the server resolves Arabic and Latin independently, so a
+    // mixed deck can carry two different families. A family without faces for the chosen script
+    // (a custom upload is catalogued under Arabic only) reuses the faces it has.
+    async function selectPresentationFont(script, familyName) {
+      const select = document.getElementById(
+        script === 'latin' ? 'presentationFontLatinSelect' : 'presentationFontArabicSelect');
       if (!select || select.disabled) return;
       select.disabled = true;
       const weights = ['light', 'regular', 'medium', 'bold', 'black'];
       try {
-        await Promise.all(['arabic', 'latin'].flatMap(script =>
-          weights.map(weight => api('DELETE', '/api/branding/fonts/' + script + '/' + weight))));
+        await Promise.all(weights.map(weight => api('DELETE', '/api/branding/fonts/' + script + '/' + weight)));
         if (familyName) {
           let families = window.tenantPresentationFontFamilies;
           if (!families) {
@@ -550,17 +562,16 @@
           }
           const family = families.find(item => item.name === familyName);
           if (!family) throw new Error('Unknown font family');
-          for (const script of ['arabic', 'latin']) {
-            const own = family.faces.filter(face => (face.script || 'arabic') === script);
-            for (const face of (own.length ? own : family.faces)) {
-              const body = { script, weight: face.weight || 'regular' };
-              if (face.custom_font_path) body.custom_font_path = face.custom_font_path;
-              else body.font_id = face.id;
-              await api('PUT', '/api/branding/fonts', body);
-            }
+          const own = family.faces.filter(face => (face.script || 'arabic') === script);
+          for (const face of (own.length ? own : family.faces)) {
+            const body = { script, weight: face.weight || 'regular' };
+            if (face.custom_font_path) body.custom_font_path = face.custom_font_path;
+            else body.font_id = face.id;
+            await api('PUT', '/api/branding/fonts', body);
           }
-          await api('PUT', '/api/branding', { font_family: familyName, font_arabic: familyName });
         }
+        const field = script === 'latin' ? 'font_family' : 'font_arabic';
+        await api('PUT', '/api/branding', { [field]: familyName || 'The Sans Arabic' });
         await loadTenantBranding();
         if (typeof loadTenantFontCss === 'function') await loadTenantFontCss();
         await renderPresentationFontStatus();

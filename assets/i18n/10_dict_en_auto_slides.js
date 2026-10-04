@@ -58,6 +58,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الخامسه": "Fifth",
   "الخامسه عشر": "Fifteenth",
   "الخط الافتراضي": "Default font",
+  "الخط اللاتيني": "Latin font",
   "الرابع": "Fourth",
   "الرابعة": "Fourth",
   "الرابعة عشر": "Fourteenth",

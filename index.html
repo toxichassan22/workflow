@@ -698,11 +698,15 @@
           <button type="button" class="presentation-font-close" onclick="closePresentationFontSettings()"
             aria-label="إغلاق">×</button>
         </div>
-        <!-- One font for the whole deck. It is applied to both scripts and to every weight, because
-             a font chosen for "the presentation" that left half the text on another face read as
-             doing nothing at all. The status line below states what actually ended up applied. -->
-        <label for="presentationFontSelect">خط العرض</label>
-        <select id="presentationFontSelect" onchange="selectPresentationFont(this.value)" disabled>
+        <!-- One selector per script: Arabic and Latin resolve independently on the server, so a
+             deck that mixes both scripts can carry a different family for each. The status line
+             below states what actually ended up applied. -->
+        <label for="presentationFontArabicSelect">الخط العربي</label>
+        <select id="presentationFontArabicSelect" onchange="selectPresentationFont('arabic', this.value)" disabled>
+          <option value="">جاري تحميل الخطوط...</option>
+        </select>
+        <label for="presentationFontLatinSelect">الخط اللاتيني</label>
+        <select id="presentationFontLatinSelect" onchange="selectPresentationFont('latin', this.value)" disabled>
           <option value="">جاري تحميل الخطوط...</option>
         </select>
         <p id="presentationFontStatus" class="tenant-hint" style="margin:10px 0 0"></p>

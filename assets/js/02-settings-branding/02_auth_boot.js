@@ -517,18 +517,13 @@
           sel.font_family = (sel.custom_font_path.split('/').pop() || '').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
         }
       });
-      const currentArabic = selections.find(item => item.script === 'arabic' && item.weight === 'regular')
-        || selections.find(item => item.script === 'arabic')
-        || {};
-      const currentLatin = selections.find(item => item.script === 'latin' && item.weight === 'regular')
-        || selections.find(item => item.script === 'latin')
-        || {};
       const activeBranding = (typeof tenantBranding !== 'undefined' && tenantBranding) ? tenantBranding : (window.tenantBranding || null);
-      const matchedBrandingSel = activeBranding && activeBranding.font_family
-        ? selections.find(item => item.font_family && item.font_family.toLowerCase() === activeBranding.font_family.toLowerCase())
-        : null;
-      const currentSelection = matchedBrandingSel
-        || ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin);
+      const pickCurrent = (list, brandingName) => {
+        const named = brandingName && list.find(item => item.font_family && item.font_family.toLowerCase() === brandingName.toLowerCase());
+        return named || list.find(item => item.weight === 'regular') || list[0] || {};
+      };
+      const currentArabic = pickCurrent(selections.filter(item => item.script === 'arabic'), activeBranding && activeBranding.font_arabic);
+      const currentLatin = pickCurrent(selections.filter(item => item.script === 'latin'), activeBranding && activeBranding.font_family);
       const uniqueFonts = [];
       available.forEach(font => {
         const existing = uniqueFonts.find(item => item.font_family === font.font_family);
@@ -555,22 +550,41 @@
         }
       });
       window.tenantCustomFonts = customFonts;
-      const allFonts = uniqueFonts.concat(customFonts);
+      const fontFamilies = new Map();
+      available.concat(customFonts).forEach(font => {
+        const name = font.font_family || font.font_name;
+        if (!name) return;
+        if (!fontFamilies.has(name)) fontFamilies.set(name, []);
+        fontFamilies.get(name).push(font);
+      });
+      window.tenantFontFamilies = fontFamilies;
       const fontUiEn = (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en');
       const fontScriptName = script => trDynamicI18n(script === 'arabic' ? 'عربي' : 'لاتيني');
       const fontUploadedMark = trDynamicI18n('(مرفوع)');
       const summary = selections.length
         ? selections.map(item => fontScriptName(item.script) + ' ' + item.weight + (item.custom_font_path ? ' ' + fontUploadedMark : '')).join(fontUiEn ? ', ' : '، ')
         : 'سيتم استخدام الخط الافتراضي';
+      // One select per script: Arabic and Latin resolve independently in the
+      // renderer, so a mixed deck can carry a different family for each.
+      const scriptFontSelect = (selectId, script, current) => {
+        const options = [];
+        fontFamilies.forEach((faces, name) => {
+          const facesForScript = faces.filter(face => (face.script || 'arabic') === script || face.is_custom);
+          if (!facesForScript.length) return;
+          const rep = facesForScript.find(face => face.weight === 'regular') || facesForScript[0];
+          const selected = ((current.font_family || '').toLowerCase() === name.toLowerCase())
+            || (current.custom_font_path && facesForScript.some(face => face.custom_font_path === current.custom_font_path));
+          options.push('<option value="' + escapeHtml(name) + '"' + (selected ? ' selected' : '') + '>' +
+            escapeHtml(name) + (rep.is_custom ? ' ' + fontUploadedMark : '') + '</option>');
+        });
+        return '<select id="' + selectId + '" onchange="selectTenantScriptFont(\'' + script + '\', this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
+          '<option value="">' + escapeHtml(trDynamicI18n('الخط الافتراضي')) + '</option>' + options.join('') + '</select>';
+      };
       host.innerHTML = '<div style="display:grid;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px;">' +
-        '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
-        '<option value="">استخدام الخط الافتراضي</option>' +
-        allFonts.map(font => {
-          const isSelected = (currentSelection.font_id && font.id === currentSelection.font_id)
-            || (currentSelection.font_family && font.font_family && font.font_family.toLowerCase() === currentSelection.font_family.toLowerCase());
-          return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + fontScriptName(font.script) + (font.is_custom ? ' ' + fontUploadedMark : '') + '</option>';
-        }).join('') +
-        '</select>' +
+        '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(trDynamicI18n('الخط العربي')) + '</span>' +
+        scriptFontSelect('tenantArabicFontSelect', 'arabic', currentArabic) +
+        '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(trDynamicI18n('الخط اللاتيني')) + '</span>' +
+        scriptFontSelect('tenantLatinFontSelect', 'latin', currentLatin) +
         '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
         '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
         '</div>';
@@ -589,49 +603,25 @@
     }
     document.addEventListener('wf:lang', () => { try { loadTenantFonts(); } catch (e) { /* ignore */ } });
 
-    async function selectTenantPrimaryFont(fontId) {
-      if (fontId === 'custom') return;
-      if (fontId.startsWith('custom_')) {
-        const allCustom = (window.tenantCustomFonts || []);
-        const targetFont = allCustom.find(f => f.id === fontId);
-        const name = targetFont ? targetFont.font_family : 'خط مخصص';
-        if (targetFont && targetFont.custom_font_path) {
-          await api('PUT', '/api/branding/fonts', { script: targetFont.script || 'arabic', weight: targetFont.weight || 'regular', custom_font_path: targetFont.custom_font_path });
+    // Each selector owns one script: the renderer resolves Arabic and Latin
+    // independently, so a mixed deck can carry two different families. A family
+    // without faces for the chosen script (a custom upload is catalogued under
+    // Arabic only) reuses the faces it has.
+    async function selectTenantScriptFont(script, familyName) {
+      if (script !== 'arabic' && script !== 'latin') return;
+      await Promise.all(MANAGED_FONT_WEIGHTS.map(w => api('DELETE', '/api/branding/fonts/' + script + '/' + w)));
+      if (familyName) {
+        const faces = (window.tenantFontFamilies || new Map()).get(familyName) || [];
+        const own = faces.filter(face => (face.script || 'arabic') === script);
+        for (const face of (own.length ? own : faces)) {
+          const body = { script, weight: face.weight || 'regular' };
+          if (face.custom_font_path) body.custom_font_path = face.custom_font_path;
+          else body.font_id = face.id;
+          await api('PUT', '/api/branding/fonts', body);
         }
-        await api('PUT', '/api/branding', { font_family: name, font_arabic: name });
-        await loadTenantBranding();
-        await loadTenantFonts();
-        toast('تم تخصيص الخط للشركة');
-        return;
       }
-      if (!fontId) {
-        const weights = ['light', 'regular', 'medium', 'bold', 'black'];
-        await Promise.all(weights.flatMap(w => [
-          api('DELETE', '/api/branding/fonts/arabic/' + w),
-          api('DELETE', '/api/branding/fonts/latin/' + w)
-        ]));
-        await api('PUT', '/api/branding', { font_family: 'The Sans Arabic', font_arabic: 'The Sans Arabic' });
-        await loadTenantBranding();
-        await loadTenantFonts();
-        return;
-      }
-      const selected = (window.tenantAvailableFonts || []).find(font => font.id === fontId);
-      if (!selected) return;
-      const weight = selected.weight || 'regular';
-      const matches = (window.tenantAvailableFonts || []).filter(font => font.font_family === selected.font_family);
-      const target = matches.length ? matches : [selected];
-      // Replace the previous family completely. The PDF renderer will reuse
-      // the nearest available face when the new family has only one weight.
-      await Promise.all(MANAGED_FONT_WEIGHTS.flatMap(w => [
-        api('DELETE', '/api/branding/fonts/arabic/' + w),
-        api('DELETE', '/api/branding/fonts/latin/' + w)
-      ]));
-      for (const font of target) {
-        await setTenantFontSelection(font.script, font.weight || weight, font.id, true);
-      }
-      if (selected.font_family) {
-        await api('PUT', '/api/branding', { font_family: selected.font_family, font_arabic: selected.font_family });
-      }
+      const field = script === 'arabic' ? 'font_arabic' : 'font_family';
+      await api('PUT', '/api/branding', { [field]: familyName || 'The Sans Arabic' });
       await loadTenantBranding();
       await loadTenantFonts();
       toast('تم تخصيص الخط للشركة');

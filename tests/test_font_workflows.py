@@ -336,34 +336,39 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertEqual(status['renders'], 'google web font')
         self.assertTrue(status['willRenderRealFont'], status)
 
-    def test_one_font_choice_covers_both_scripts(self):
-        """A font chosen for the deck must move Arabic and Latin together.
+    def test_arabic_and_latin_fonts_select_independently(self):
+        """Each script has its own picker and its own selections.
 
-        Arabic and Latin resolve independently and a script with no selection keeps the platform
-        default, so the old single picker — which offered exactly those two defaults — could not
-        change anything at all. One choice is now written to both scripts.
+        The renderer resolves Arabic and Latin separately, so a mixed deck can
+        carry two different families — the selectors are scoped per script and
+        one pick never rewrites the other's rows.
         """
         from design_templates import build_font_css
 
         client = self.app.test_client()
         with self.app.app_context():
-            for script in ('arabic', 'latin'):
-                db.set_tenant_font_selection(self.tenant, script, 'regular', font_id=self.font_lat)
-            branding = db.get_branding(self.tenant)
-            css, family_list = build_font_css(branding, self.tenant, embed=False)
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+            latin_rows = [f for f in db.get_sag_fonts(script='latin')
+                          if f['font_family'] == 'Georgia' and f['weight'] == 'regular']
+            self.assertTrue(latin_rows, 'the popular-font seed should include a Latin Georgia row')
+            db.set_tenant_font_selection(self.tenant, 'latin', 'regular', font_id=latin_rows[0]['id'])
+            css, family_list = build_font_css(db.get_branding(self.tenant), self.tenant, embed=False)
 
         status = client.get('/api/branding/font-status',
                             headers=self._headers(self.token)).get_json()['status']
-        self.assertTrue(status['scripts']['arabic']['chosen'])
-        self.assertTrue(status['scripts']['latin']['chosen'])
-        self.assertEqual(status['scripts']['arabic']['font'], status['scripts']['latin']['font'])
+        self.assertEqual(status['scripts']['arabic']['font'], 'Cairo')
+        self.assertEqual(status['scripts']['latin']['font'], 'Georgia')
+        self.assertIn("src:local('Georgia')", css)
 
         index_source = read_frontend_text()
-        self.assertIn('async function selectPresentationFont(familyName)', index_source)
-        self.assertIn("for (const script of ['arabic', 'latin'])", index_source)
-        # The two-selector version is gone: the owner asked for one font for everything.
-        self.assertNotIn('id="presentationFontArabic"', index_source)
-        self.assertNotIn('selectPresentationScriptFont', index_source)
+        self.assertIn('tenantArabicFontSelect', index_source)
+        self.assertIn('tenantLatinFontSelect', index_source)
+        self.assertIn('id="presentationFontArabicSelect"', index_source)
+        self.assertIn('id="presentationFontLatinSelect"', index_source)
+        self.assertIn('async function selectPresentationFont(script', index_source)
+        # The one-selector version is gone: each script now picks on its own.
+        self.assertNotIn('id="presentationFontSelect"', index_source)
+        self.assertNotIn('id="tenantPrimaryFontSelect"', index_source)
 
     def test_a_system_font_choice_keeps_a_shipped_arabic_face_for_export(self):
         """Arial renders where it is installed; the export machine has no Arial and no Tahoma."""
@@ -411,7 +416,7 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertFalse(status['scripts']['latin']['chosen'])
 
         index_source = read_frontend_text()
-        self.assertIn('id="presentationFontSelect"', index_source)
+        self.assertIn('id="presentationFontArabicSelect"', index_source)
         self.assertIn('async function renderPresentationFontStatus()', index_source)
         self.assertIn('المطبَّق الآن', index_source)
 
