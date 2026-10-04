@@ -1478,8 +1478,9 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         """The SPA shell is ~740KB and was sent with no-store and no compression, so every load
         pulled all of it down again."""
         client = self.app.test_client()
-        plain = client.get('/', headers={'Accept': 'text/html'})
-        gzipped = client.get('/', headers={'Accept': 'text/html', 'Accept-Encoding': 'gzip'})
+        # "/" is the public landing page now; the SPA shell lives at /app.
+        plain = client.get('/app', headers={'Accept': 'text/html'})
+        gzipped = client.get('/app', headers={'Accept': 'text/html', 'Accept-Encoding': 'gzip'})
 
         self.assertEqual(gzipped.headers.get('Content-Encoding'), 'gzip')
         self.assertLess(len(gzipped.data), len(plain.data) / 2, 'compression should at least halve it')
@@ -1490,7 +1491,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertNotIn('no-store', plain.headers.get('Cache-Control', ''))
         etag = plain.headers.get('ETag')
         self.assertTrue(etag)
-        revalidated = client.get('/', headers={'Accept': 'text/html', 'If-None-Match': etag})
+        revalidated = client.get('/app', headers={'Accept': 'text/html', 'If-None-Match': etag})
         self.assertEqual(revalidated.status_code, 304)
         self.assertEqual(len(revalidated.data), 0)
 

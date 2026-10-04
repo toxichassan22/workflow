@@ -52,6 +52,7 @@ def init_db():
         _create_identity_tables(conn)
         _create_landloom_event_tables(conn)
         _create_platform_tables(conn)
+        _create_join_requests_table(conn)
         _seed_file_type_registry(conn)
         _ensure_landloom_columns(conn)
         _ensure_platform_columns(conn)

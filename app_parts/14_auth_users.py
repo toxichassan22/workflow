@@ -384,6 +384,7 @@ AUTH_RATE_LIMITS = {
     'pwsetup:ip': (20, 600, 900),      # password-setup token probes per IP
     'verify_otp:ip': (30, 600, 900),   # otp verification attempts per IP
     'resend_otp:ip': (5, 300, 600),    # otp resend requests per IP
+    'join:ip': (5, 3600, 3600),        # landing-page access requests per IP
 }
 
 

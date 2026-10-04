@@ -70,6 +70,7 @@ sandbox/
 !tests/i18n_hardcoded_baseline.txt
 *.html
 !index.html
+!pages/*.html
 /*.png
 /*.jpg
 /*.jpeg

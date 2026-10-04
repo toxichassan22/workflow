@@ -245,7 +245,9 @@ def api_approval_status(pres_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Static Files + Health
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-@app.route('/')
+# The bare "/" no longer serves the SPA: it is the public landing page in
+# 22a_public_pages.py. The shell itself stays reachable through /app, /c/<slug>,
+# /superadmin and /invite/<token>, which all call index().
 def index():
     resp = send_from_directory(os.path.dirname(__file__), 'index.html')
     # "no-cache" means revalidate before use, which is what a SPA shell needs so a deploy is picked
