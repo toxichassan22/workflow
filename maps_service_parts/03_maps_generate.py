@@ -340,7 +340,9 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
+        # The unsuffixed access map is the roadmap render — only an explicit
+        # _satellite suffix means satellite.
+        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap'
         styles = SATELLITE_CLEAN_STYLES if active_maptype == 'satellite' else ACCESS_ROADMAP_STYLES
         cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
@@ -988,11 +990,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # center the viewport, but it must never move that saved pin implicitly.
     marker_lat, marker_lng = lat, lng
 
-    # Map type and chrome are platform-fixed — every map renders satellite with
-    # the compass and inset on; no company or project setting carries them.
+    # Map type and chrome are platform-fixed — every map renders satellite except
+    # the roads map, which renders roadmap; compass and inset always on. No
+    # company or project setting carries them.
     draw_compass = True
     draw_inset = True
-    map_styles = dict.fromkeys(('overview', 'landmarks', 'access', 'catchment'), 'satellite')
+    map_styles = {'overview': 'satellite', 'landmarks': 'satellite',
+                  'access': 'roadmap', 'catchment': 'satellite'}
 
     landmark_radius_m = 20000
     city_context = project_data.get('city') or project_data.get('location', '')
