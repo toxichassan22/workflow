@@ -250,7 +250,7 @@
       tr.dataset.priceCache = JSON.stringify(row.price_cache || row.priceCache || {});
       const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
-      const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
+      const priceTypes = marketPriceTypesForOperation(operation);
       tr.dataset.previousPriceType = priceType;
       let warnings = [];
       try { warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { warnings = []; }
@@ -281,14 +281,14 @@
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td data-field="logo_cell"></td>' +
-        '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
-        '<td><select data-field="classification">' + marketSelectHtml(MARKET_COMPETITOR_CLASSIFICATIONS, row.classification || '') + '</select></td>' +
+        '<td><select data-field="project_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_PROJECT_TYPES_EN : MARKET_PROJECT_TYPES, marketTranslateCompetitorValue(row.project_type)) + '</select></td>' +
+        '<td><select data-field="classification">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_CLASSIFICATIONS_EN : MARKET_COMPETITOR_CLASSIFICATIONS, marketTranslateCompetitorValue(row.classification)) + '</select></td>' +
         '<td data-field="area_cell"></td>' +
-        '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
+        '<td><select data-field="status">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_STATUSES_EN : MARKET_COMPETITOR_STATUSES, marketTranslateCompetitorValue(row.status)) + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
         '<div data-source-url-editor class="market-source-url-editor"></div>' +
         '<div data-source-links class="market-source-links"></div><div data-conflict-warnings>' + warningsHtml + '</div></td>' +
-        '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
+        '<td><select data-field="operation_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_OPERATIONS_EN : MARKET_COMPETITOR_OPERATIONS, operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
@@ -301,7 +301,7 @@
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
         cacheCompetitorPriceInputs(tr, tr.dataset.previousPriceType);
         const nextOp = tr.querySelector('[data-field="operation_type"]').value;
-        const options = MARKET_PRICE_TYPES[nextOp] || MARKET_PRICE_TYPES['أخرى'];
+        const options = marketPriceTypesForOperation(nextOp);
         const previousType = tr.dataset.previousPriceType || '';
         const nextType = options.includes(previousType) ? previousType : (options[0] || '');
         fillSelectOptions(tr.querySelector('[data-field="price_type"]'), options, nextType, '--');

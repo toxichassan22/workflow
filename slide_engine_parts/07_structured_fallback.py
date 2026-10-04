@@ -356,15 +356,15 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         elif re.fullmatch(r'market_study_data\.(?:scope|summary|one_block_summary|sources)(?::\d+:\d+)?', content_source):
             slide.update({'type': 'content', 'section_key': 'market', 'requires_image': False, 'image_tokens': []})
         else:
-            if re.search(r'نطاق', title_text, flags=re.IGNORECASE) and _market_scope_rows(market):
+            if re.search(r'نطاق|scope', title_text, flags=re.IGNORECASE) and _market_scope_rows(market):
                 slide['content_source'] = 'market_study_data.scope'
                 slide['source_table'] = 'market_scope'
                 slide['design_style'] = 'table'
-            elif re.search(r'مصادر', title_text, flags=re.IGNORECASE) and _market_source_rows(market):
+            elif re.search(r'مصادر|sources?|references?', title_text, flags=re.IGNORECASE) and _market_source_rows(market):
                 slide['content_source'] = 'market_study_data.sources'
                 slide['source_table'] = 'market_sources'
                 slide['design_style'] = 'table'
-            elif re.search(r'ملخص', title_text, flags=re.IGNORECASE):
+            elif re.search(r'ملخص|summary', title_text, flags=re.IGNORECASE):
                 slide['content_source'] = (
                     'market_study_data.one_block_summary'
                     if str(market.get('one_block_summary') or '').strip()

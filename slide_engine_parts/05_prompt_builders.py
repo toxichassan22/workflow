@@ -1166,7 +1166,7 @@ def _required_slide_texts(slide, project_data):
         return [str(value).strip() for value in swot.values() if str(value or '').strip()]
     if source == 'market_study_data.scope':
         market = _market_state(project_data)
-        return [str(value).strip() for row in _market_scope_rows(market) for value in row if str(value or '').strip()]
+        return [str(value).strip() for row in _market_scope_rows(market, resolve_offer_lang(project_data)) for value in row if str(value or '').strip()]
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match:
         market = _market_state(project_data)

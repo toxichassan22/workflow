@@ -163,6 +163,50 @@ PRICE_TYPE_BY_OPERATION = {
 
 RANGE_PRICE_TYPES = {'نطاق سعري', 'نطاق أسعار الغرف'}
 
+# English enum twins — an English-language project stores English values so the
+# review table, executive content and generated slides all display them verbatim.
+COMPETITOR_STATUS_OPTIONS_EN = ['Operating', 'Under Construction', 'Off-Plan']
+COMPETITOR_CLASS_OPTIONS_EN = ['Direct', 'Indirect', 'Benchmark']
+COMPETITOR_OPERATION_OPTIONS_EN = ['Sale', 'Rent', 'Hotel Operation', 'Other']
+COMPETITOR_PROJECT_TYPE_OPTIONS_EN = [
+    'Residential', 'Commercial', 'Hospitality',
+    'Industrial & Logistics', 'Mixed-Use', 'Other',
+]
+
+PRICE_TYPE_BY_OPERATION_EN = {
+    'Sale': [
+        'Unit Price', 'Price per SQM', 'Average Unit Price', 'Average Price per SQM',
+        'Starting From', 'Price Range', 'Other',
+    ],
+    'Rent': [
+        'Monthly Unit Rent', 'Annual Unit Rent', 'Monthly Rent per SQM',
+        'Annual Rent per SQM', 'Average Unit Rent', 'Average Rent per SQM',
+        'Starting From', 'Price Range', 'Other',
+    ],
+    'Hotel Operation': [
+        'Nightly Rate', 'Average Daily Rate (ADR)', 'RevPAR',
+        'Average Monthly Stay', 'Starting From', 'Room Price Range', 'Other',
+    ],
+    'Other': ['Single Value', 'Price Range', 'Other'],
+}
+
+RANGE_PRICE_TYPES_EN = {'Price Range', 'Room Price Range'}
+
+OPERATION_EN_BY_AR = dict(zip(COMPETITOR_OPERATION_OPTIONS, COMPETITOR_OPERATION_OPTIONS_EN))
+OPERATION_AR_BY_EN = {en: ar for ar, en in OPERATION_EN_BY_AR.items()}
+STATUS_EN_BY_AR = dict(zip(COMPETITOR_STATUS_OPTIONS, COMPETITOR_STATUS_OPTIONS_EN))
+CLASS_EN_BY_AR = dict(zip(COMPETITOR_CLASS_OPTIONS, COMPETITOR_CLASS_OPTIONS_EN))
+
+_PRICE_TYPE_PAIRS = tuple(
+    (ar, en)
+    for ar_op, en_op in OPERATION_EN_BY_AR.items()
+    for ar, en in zip(PRICE_TYPE_BY_OPERATION[ar_op], PRICE_TYPE_BY_OPERATION_EN[en_op])
+)
+PRICE_TYPE_EN_BY_AR = dict(_PRICE_TYPE_PAIRS)
+PRICE_TYPE_AR_BY_EN = {en: ar for ar, en in _PRICE_TYPE_PAIRS}
+
+MISSING_VALUE_PHRASE_EN = 'not available from a reliable source'
+
 COMPETITOR_MIN_DIRECT = 5
 
 SUMMARY_LABEL = 'تحليل السوق'

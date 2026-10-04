@@ -68,6 +68,11 @@ def catalog_payload():
         'competitorOperations': COMPETITOR_OPERATION_OPTIONS,
         'priceTypesByOperation': PRICE_TYPE_BY_OPERATION,
         'rangePriceTypes': sorted(RANGE_PRICE_TYPES),
+        'competitorStatusesEn': COMPETITOR_STATUS_OPTIONS_EN,
+        'competitorClassesEn': COMPETITOR_CLASS_OPTIONS_EN,
+        'competitorOperationsEn': COMPETITOR_OPERATION_OPTIONS_EN,
+        'priceTypesByOperationEn': PRICE_TYPE_BY_OPERATION_EN,
+        'rangePriceTypesEn': sorted(RANGE_PRICE_TYPES_EN),
         'summaryTitle': SUMMARY_TITLE,
         'summaryWordTarget': SUMMARY_WORD_TARGET,
         'summaryLabel': SUMMARY_LABEL,
@@ -384,7 +389,7 @@ def _project_input_block(payload):
     return '\n'.join(lines)
 
 
-def build_competitors_user_prompt(payload, existing_competitors, mode='generate'):
+def build_competitors_user_prompt(payload, existing_competitors, mode='generate', offer_lang='ar'):
     existing = existing_competitors if isinstance(existing_competitors, list) else []
     named = [row for row in existing if _norm(row.get('name'))]
 
@@ -401,6 +406,26 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
 
     incomplete = [row for row in named if not is_complete(row)]
     today = date.today().isoformat()
+    en = offer_lang == 'en'
+    missing_phrase = MISSING_VALUE_PHRASE_EN if en else MISSING_VALUE_PHRASE
+    enum = {
+        'project_type': ' or '.join(COMPETITOR_PROJECT_TYPE_OPTIONS_EN) if en
+        else 'سكني أو تجاري أو فندقي أو صناعي ولوجستي أو متعدد الاستخدامات أو أخرى',
+        'status': ' or '.join(COMPETITOR_STATUS_OPTIONS_EN) if en
+        else 'قائم أو تحت الإنشاء أو على الخارطة',
+        'classification': ' or '.join(COMPETITOR_CLASS_OPTIONS_EN) if en
+        else 'مباشر أو غير مباشر أو مرجعي',
+        'operation_type': ' or '.join(COMPETITOR_OPERATION_OPTIONS_EN) if en
+        else 'بيع أو إيجار أو تشغيل فندقي أو أخرى',
+    }
+    language_directive = (
+        'OUTPUT LANGUAGE: this project is English. Author EVERY field value in '
+        'professional English — status/classification/operation_type/price_type '
+        'use exactly the allowed English values below; district, source, notes, '
+        'data_date and expansionNote are written in English. Keep the competitor '
+        'name verbatim in its source spelling.\n\n'
+        if en else ''
+    )
     if mode == 'fill':
         task = (
             'المستخدم كتب أسماء منافسين وطلب إكمال بياناتهم. '
@@ -418,8 +443,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
             'واذكر ذلك في notes. صنف كل منافس: مباشر أو غير مباشر أو مرجعي.'
         )
     price_types = '\n'.join(
-        f'- {operation}: ' + '، '.join(options)
-        for operation, options in PRICE_TYPE_BY_OPERATION.items()
+        f'- {operation}: ' + ', '.join(options)
+        for operation, options in (
+            PRICE_TYPE_BY_OPERATION_EN if en else PRICE_TYPE_BY_OPERATION
+        ).items()
     )
     search_protocol = (
         'بروتوكول البحث الإلزامي:\n'
@@ -437,10 +464,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'إذا وجدت فقط المساحة الإجمالية اترك area_sqm فارغة واكتب السبب في notes.\n'
         '4. لا تكتب سعرًا من معرفتك السابقة. السعر يُقبل فقط إذا ورد في صفحة قرأتها في هذا البحث، '
         'ويجب أن يكون رابط تلك الصفحة نفسها في source_url، مع إدراج كل الصفحات المستخدمة للمنافس في source_urls.\n'
-        f'5. إذا لم تجد سعرًا بعد البحث اترك حقول السعر فارغة واكتب في source عبارة {MISSING_VALUE_PHRASE} '
+        f'5. إذا لم تجد سعرًا بعد البحث اترك حقول السعر فارغة واكتب في source عبارة {missing_phrase} '
         'مع بيان ما بحثت عنه في notes. الصف الناقص السعر مقبول؛ الرقم المختلق مرفوض.\n'
         '6. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
-        f'({"، ".join(sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
+        f'({", ".join(sorted(RANGE_PRICE_TYPES_EN) if en else sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
         '7. النطاق الجغرافي ملزم: ابحث عن منافسين داخل النطاق المكتوب في بيانات المشروع فقط. '
         'لكل منافس اكتب حيه في district ومسافته التقريبية من موقع المشروع بالكيلومتر في distance_km '
         'وإحداثياته في lat وlng إن ظهرت في المصدر. '
@@ -472,6 +499,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         f'{price_types}\n'
     )
     return (
+        language_directive +
         f'تاريخ اليوم: {today}\n'
         f'المهمة: {task}\n\n'
         f'{search_protocol}\n'
@@ -491,14 +519,14 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '    {\n'
         '      "id": "أبق المعرف إن وُجد وإلا اتركه فارغًا",\n'
         '      "name": "",\n'
-        '      "project_type": "سكني أو تجاري أو فندقي أو صناعي ولوجستي أو متعدد الاستخدامات أو أخرى",\n'
+        f'      "project_type": "{enum["project_type"]}",\n'
         '      "area_mode": "fixed أو range حسب المصدر",\n'
         '      "area_sqm": "القيمة الثابتة أو فارغ للنطاق",\n'
         '      "area_from": "بداية النطاق أو فارغ للقيمة الثابتة",\n'
         '      "area_to": "نهاية النطاق أو فارغ للقيمة الثابتة",\n'
-        '      "status": "قائم أو تحت الإنشاء أو على الخارطة",\n'
-        '      "classification": "مباشر أو غير مباشر أو مرجعي",\n'
-        '      "operation_type": "بيع أو إيجار أو تشغيل فندقي أو أخرى",\n'
+        f'      "status": "{enum["status"]}",\n'
+        f'      "classification": "{enum["classification"]}",\n'
+        f'      "operation_type": "{enum["operation_type"]}",\n'
         '      "price_type": "",\n'
         '      "price_value": "",\n'
         '      "price_from": "",\n'
@@ -532,7 +560,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '
         'رابط النطاق وحده أو الصفحة الرئيسية غير مقبول؛ إن لم تتوفر صفحة محددة '
-        f'اترك source_url وsource_urls فارغين واكتب في source عبارة {MISSING_VALUE_PHRASE}.'
+        f'اترك source_url وsource_urls فارغين واكتب في source عبارة {missing_phrase}.'
     )
 
 
@@ -646,7 +674,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
     )
 
 
-def normalize_competitor_row(row, fallback_source='ai'):
+def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     if not isinstance(row, dict):
         return None
     name = _norm(row.get('name') or row.get('project_name') or row.get('projectName'))
@@ -696,8 +724,10 @@ def normalize_competitor_row(row, fallback_source='ai'):
         or row.get('نوع التشغيل') or row.get('التشغيل'),
         raw_price_type,
         project_type,
+        offer_lang=offer_lang,
     )
-    price_type = _canonical_price_type(raw_price_type, operation, price_from, price_to, price_value)
+    price_type = _canonical_price_type(
+        raw_price_type, operation, price_from, price_to, price_value, offer_lang=offer_lang)
     classification = _norm(row.get('classification') or row.get('class') or row.get('تصنيف'))
     status = _norm(row.get('status') or row.get('project_status') or row.get('حالة المشروع'))
     field_sources = competitor_field_sources(row)
@@ -891,19 +921,19 @@ def _competitor_values_equal(left, right):
     return _norm(left).casefold() == _norm(right).casefold()
 
 
-def merge_generated_competitors(existing, generated, mode='generate'):
+def merge_generated_competitors(existing, generated, mode='generate', offer_lang='ar'):
     current = []
     for row in existing or []:
         if not isinstance(row, dict):
             continue
         normalized = normalize_competitor_row(
-            row, fallback_source=_norm(row.get('row_source')) or 'manual')
+            row, fallback_source=_norm(row.get('row_source')) or 'manual', offer_lang=offer_lang)
         if normalized:
             current.append(normalized)
     if mode != 'fill':
         replaced = []
         for raw in generated or []:
-            incoming = normalize_competitor_row(raw)
+            incoming = normalize_competitor_row(raw, offer_lang=offer_lang)
             if incoming:
                 replaced.append(incoming)
         return replaced, len(replaced), 0
@@ -914,8 +944,9 @@ def merge_generated_competitors(existing, generated, mode='generate'):
         'id', 'name', 'row_source', 'field_sources', 'source_urls', 'conflict_warnings',
         'area_mode', 'area_sqm', 'area_from', 'area_to', 'area_cache',
     }
+    official_label = 'Official source' if offer_lang == 'en' else 'مصدر رسمي للجهة'
     for raw in generated or []:
-        incoming = normalize_competitor_row(raw)
+        incoming = normalize_competitor_row(raw, offer_lang=offer_lang)
         if not incoming:
             continue
         index = by_id.get(incoming['id'])
@@ -952,7 +983,7 @@ def merge_generated_competitors(existing, generated, mode='generate'):
             if target_area != incoming_area and official_url:
                 warnings.append({
                     'field': 'area_mode', 'existing': target_area, 'incoming': incoming_area,
-                    'source': incoming.get('source') or 'مصدر رسمي للجهة', 'source_url': official_url,
+                    'source': incoming.get('source') or official_label, 'source_url': official_url,
                 })
         for key, value in incoming.items():
             if key in protected or (has_manual_logo and key in {'logo_url', 'logo_source_url'}):
@@ -978,7 +1009,7 @@ def merge_generated_competitors(existing, generated, mode='generate'):
                     'field': key,
                     'existing': current_value,
                     'incoming': value,
-                    'source': incoming.get('source') or 'مصدر رسمي للجهة',
+                    'source': incoming.get('source') or official_label,
                     'source_url': official_url,
                 }
                 signature = (key, str(current_value), str(value), official_url)

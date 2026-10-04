@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import market_study
 import slide_engine
 from slide_engine import (
     OFFER_LANG_ARABIC,
@@ -147,6 +148,127 @@ class StoredProjectLanguageTests(unittest.TestCase):
             _plan_with_types('cover', 'closing'), draft)
         self.assertEqual(plan.get('offer_lang'), 'en')
         self.assertEqual(plan['slides'][0]['title'], 'Cover')
+
+
+class EnglishCompetitorDataTests(unittest.TestCase):
+    """An English project stores English competitor rows end to end: the
+    model sees English enum lists, normalization keeps canonical English,
+    and the deterministic slide chrome renders in English."""
+
+    def test_canonical_operation_english(self):
+        self.assertEqual(market_study._canonical_operation('sale', offer_lang='en'), 'Sale')
+        self.assertEqual(market_study._canonical_operation('بيع', offer_lang='en'), 'Sale')
+        self.assertEqual(market_study._canonical_operation('Rent', offer_lang='en'), 'Rent')
+        self.assertEqual(market_study._canonical_operation('تشغيل فندقي', offer_lang='en'), 'Hotel Operation')
+        self.assertEqual(market_study._canonical_operation('zz', offer_lang='en'), 'Other')
+        self.assertEqual(market_study._canonical_operation('sale'), 'بيع')
+        self.assertEqual(market_study._canonical_operation('Rent'), 'إيجار')
+
+    def test_canonical_price_type_english(self):
+        self.assertEqual(
+            market_study._canonical_price_type('Price Range', 'Sale', offer_lang='en'), 'Price Range')
+        self.assertEqual(
+            market_study._canonical_price_type('نطاق سعري', 'Sale', offer_lang='en'), 'Price Range')
+        self.assertEqual(
+            market_study._canonical_price_type('adr', 'Hotel Operation', offer_lang='en'),
+            'Average Daily Rate (ADR)')
+        self.assertEqual(
+            market_study._canonical_price_type('night rate', 'تشغيل فندقي', offer_lang='en'), 'Nightly Rate')
+        self.assertEqual(
+            market_study._canonical_price_type('نطاق', 'إيجار'), 'نطاق سعري')
+        self.assertEqual(
+            market_study._canonical_price_type('سعر الوحدة', 'بيع'), 'سعر الوحدة')
+
+    def test_price_uses_range_bilingual(self):
+        self.assertTrue(market_study.price_uses_range('Price Range'))
+        self.assertTrue(market_study.price_uses_range('Room Price Range'))
+        self.assertTrue(market_study.price_uses_range('نطاق سعري'))
+        self.assertFalse(market_study.price_uses_range('Unit Price'))
+        self.assertFalse(market_study.price_uses_range('سعر الوحدة'))
+
+    def test_price_types_for_operation_english(self):
+        opts = market_study.price_types_for_operation('Sale', offer_lang='en')
+        self.assertIn('Unit Price', opts)
+        self.assertIn('Price Range', opts)
+        self.assertEqual(market_study.price_types_for_operation('بيع', offer_lang='en'), opts)
+        self.assertIn('سعر الوحدة', market_study.price_types_for_operation('بيع'))
+
+    def test_normalize_row_keeps_english(self):
+        row = market_study.normalize_competitor_row({
+            'name': 'Marina Gate',
+            'operation_type': 'sale',
+            'price_type': 'price range',
+            'price_from': '1,200,000',
+            'price_to': '1,800,000',
+            'status': 'Off-Plan',
+            'classification': 'Direct',
+        }, offer_lang='en')
+        self.assertEqual(row['operation_type'], 'Sale')
+        self.assertEqual(row['price_type'], 'Price Range')
+        self.assertEqual(row['status'], 'Off-Plan')
+        self.assertEqual(row['classification'], 'Direct')
+
+    def test_merge_preserves_english_enums(self):
+        merged, added, _ = market_study.merge_generated_competitors(
+            [], [{'name': 'Rival', 'operation_type': 'rent', 'price_type': 'annual rent per sqm',
+                  'price_value': '85'}], offer_lang='en')
+        self.assertEqual(added, 1)
+        self.assertEqual(merged[0]['operation_type'], 'Rent')
+        self.assertEqual(merged[0]['price_type'], 'Annual Rent per SQM')
+
+    def test_competitors_prompt_english(self):
+        prompt = market_study.build_competitors_user_prompt(
+            {'projectName': 'Marina Gate', 'city': 'Jeddah'}, [], offer_lang='en')
+        self.assertIn('OUTPUT LANGUAGE', prompt)
+        self.assertIn('Unit Price', prompt)
+        self.assertIn('Off-Plan', prompt)
+        self.assertIn('Direct', prompt)
+        self.assertIn('not available from a reliable source', prompt)
+        self.assertNotIn('سعر الوحدة', prompt)
+        self.assertNotIn('على الخارطة', prompt)
+        arabic_prompt = market_study.build_competitors_user_prompt(
+            {'projectName': 'برج'}, [], offer_lang='ar')
+        self.assertNotIn('OUTPUT LANGUAGE', arabic_prompt)
+        self.assertIn('سعر الوحدة', arabic_prompt)
+
+    def test_english_competitor_table_chrome(self):
+        rows = [{'name': 'Rival', 'status': 'Off-Plan', 'operation_type': 'Sale',
+                 'classification': 'Direct', 'project_type': 'Residential',
+                 'price_type': 'Price Range', 'price_from': '1200000', 'price_to': '1800000'}]
+        html = slide_engine._render_competitor_table(rows, '#000', offer_lang='en')
+        self.assertIn('Status', html)
+        self.assertIn('Operation', html)
+        self.assertIn('Off-Plan', html)
+        self.assertIn('Source', html)
+        self.assertNotIn('الحالة', html)
+        self.assertNotIn('direction:rtl', html)
+        ar_html = slide_engine._render_competitor_table(rows, '#000')
+        self.assertIn('الحالة', ar_html)
+
+    def test_sol_competitor_slide_english(self):
+        source = {
+            'project_name': 'Marina Gate',
+            'project_language': 'en',
+            'market_study_data': {'competitors': [{
+                'name': 'Rival', 'status': 'Operating', 'operation_type': 'Sale',
+                'price_type': 'Unit Price', 'price_value': '1500000'}]},
+        }
+        html = slide_engine._build_sol_horizontal_bar_slide(
+            {'title': 'Competitor Comparison'}, source)
+        self.assertIn('dir="ltr"', html)
+        self.assertIn('Market pricing analysis', html)
+        self.assertIn('Operating', html)
+        self.assertNotIn('تحليل أسعار السوق ومقارنة', html)
+        self.assertNotIn('من 1,500,000', html)
+
+    def test_market_scope_display_english(self):
+        market = {'competitor_radius': 'city', 'data_period': '12m'}
+        self.assertEqual(
+            slide_engine._market_scope_display(market, 'en'),
+            'Competitor scope: Entire City | Data period: Last 12 months')
+        self.assertEqual(
+            slide_engine._market_scope_display(market),
+            'نطاق المنافسين: كامل المدينة | فترة البيانات: آخر 12 شهرًا')
 
 
 class SectionTitleTests(unittest.TestCase):

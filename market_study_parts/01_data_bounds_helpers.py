@@ -499,16 +499,19 @@ def _fold_choice(value):
     return re.sub(r'\s+', ' ', _norm(value).replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه')).casefold()
 
 
-def _canonical_operation(value, price_type='', project_type=''):
+def _canonical_operation_ar(value, price_type='', project_type=''):
+    """Canonical Arabic operation — the historical normalizer kept intact."""
     text = _norm(value)
     if text in COMPETITOR_OPERATION_OPTIONS:
         return text
+    if text in OPERATION_AR_BY_EN:
+        return OPERATION_AR_BY_EN[text]
     folded = _fold_choice(text)
     if folded in {'sale', 'sell', 'selling'} or any(token in folded for token in ('بيع', 'شراء', 'تمليك')):
         return 'بيع'
     if folded in {'rent', 'rental', 'leasing'} or any(token in folded for token in ('ايجار', 'تاجير', 'تأجير')):
         return 'إيجار'
-    if folded in {'hotel', 'hospitality'} or any(token in folded for token in ('فندقي', 'فندق', 'ليله', 'hotel')):
+    if folded in {'hotel', 'hospitality'} or any(token in folded for token in ('فندقي', 'فندق', 'ليله', 'hotel', 'hospital')):
         return 'تشغيل فندقي'
     if folded in {'تشغيل', 'تشغيل فندقي', 'hotel operation'} or folded.startswith('تشغيل '):
         return 'تشغيل فندقي'
@@ -526,36 +529,58 @@ def _canonical_operation(value, price_type='', project_type=''):
     return ''
 
 
-def _canonical_price_type(value, operation, price_from='', price_to='', price_value=''):
+def _canonical_operation(value, price_type='', project_type='', offer_lang='ar'):
+    canonical = _canonical_operation_ar(value, price_type, project_type)
+    if canonical and offer_lang == 'en':
+        canonical = OPERATION_EN_BY_AR.get(canonical, 'Other')
+    return canonical
+
+
+def _canonical_price_type(value, operation, price_from='', price_to='', price_value='', offer_lang='ar'):
+    en = offer_lang == 'en'
     text = _norm(value)
-    options = PRICE_TYPE_BY_OPERATION.get(operation or 'أخرى', PRICE_TYPE_BY_OPERATION['أخرى'])
+    if en:
+        operation = OPERATION_EN_BY_AR.get(_norm(operation), _norm(operation))
+    options = (PRICE_TYPE_BY_OPERATION_EN if en else PRICE_TYPE_BY_OPERATION).get(
+        operation or ('Other' if en else 'أخرى'),
+        (PRICE_TYPE_BY_OPERATION_EN if en else PRICE_TYPE_BY_OPERATION)['Other' if en else 'أخرى'])
     if text in options:
         return text
+    text = PRICE_TYPE_EN_BY_AR.get(text, text) if en else text
+    if text in options:
+        return text
+    op_ar = OPERATION_AR_BY_EN.get(operation, operation) if en else operation
     folded = _fold_choice(text)
     if any(token in folded for token in ('نطاق', 'range')) or price_from or price_to:
-        return 'نطاق أسعار الغرف' if operation == 'تشغيل فندقي' else 'نطاق سعري'
+        return ('Room Price Range' if en else 'نطاق أسعار الغرف') if op_ar == 'تشغيل فندقي' else ('Price Range' if en else 'نطاق سعري')
     if any(token in folded for token in ('adr', 'متوسط سعر الغرف')):
-        return 'متوسط سعر الغرفة ADR' if operation == 'تشغيل فندقي' else text
+        return ('Average Daily Rate (ADR)' if en else 'متوسط سعر الغرفة ADR') if op_ar == 'تشغيل فندقي' else text
     if 'revpar' in folded or 'الايراد لكل غرفه' in folded:
-        return 'الإيراد لكل غرفة RevPAR' if operation == 'تشغيل فندقي' else text
-    if any(token in folded for token in ('ليله', 'night')):
-        return 'سعر الليلة' if operation == 'تشغيل فندقي' else text
+        return ('RevPAR' if en else 'الإيراد لكل غرفة RevPAR') if op_ar == 'تشغيل فندقي' else text
+    if any(token in folded for token in ('ليله', 'night', 'nightly')):
+        return ('Nightly Rate' if en else 'سعر الليلة') if op_ar == 'تشغيل فندقي' else text
     if 'يبدأ' in text or 'starting' in folded:
-        return 'يبدأ من' if operation in ('بيع', 'إيجار') else text
-    if 'سعر المتر المربع' in text or 'سعر المتر' in text or 'price per sqm' in folded:
-        if operation == 'بيع':
-            return 'سعر المتر المربع'
-        if operation == 'إيجار':
-            return 'إيجار المتر السنوي' if any(token in folded for token in ('سنوي', 'annual', 'year')) else 'إيجار المتر الشهري'
+        return ('Starting From' if en else 'يبدأ من') if op_ar in ('بيع', 'إيجار') else text
+    if 'سعر المتر المربع' in text or 'سعر المتر' in text or 'price per sqm' in folded or 'per sqm' in folded or 'sqm' in folded:
+        if op_ar == 'بيع':
+            return 'Price per SQM' if en else 'سعر المتر المربع'
+        if op_ar == 'إيجار':
+            annual = any(token in folded for token in ('سنوي', 'annual', 'year'))
+            if en:
+                return 'Annual Rent per SQM' if annual else 'Monthly Rent per SQM'
+            return 'إيجار المتر السنوي' if annual else 'إيجار المتر الشهري'
     if 'الوحدة' in text or 'unit' in folded:
-        if operation == 'بيع':
-            return 'سعر الوحدة'
-        if operation == 'إيجار':
-            return 'إيجار الوحدة السنوي' if any(token in folded for token in ('سنوي', 'annual', 'year')) else 'إيجار الوحدة الشهري'
+        if op_ar == 'بيع':
+            return 'Unit Price' if en else 'سعر الوحدة'
+        if op_ar == 'إيجار':
+            annual = any(token in folded for token in ('سنوي', 'annual', 'year'))
+            if en:
+                return 'Annual Unit Rent' if annual else 'Monthly Unit Rent'
+            return 'إيجار الوحدة السنوي' if annual else 'إيجار الوحدة الشهري'
     if text:
         return text
     if price_value:
-        return 'أخرى'
+        return 'Other' if en else 'أخرى'
     return ''
 
 
@@ -641,12 +666,16 @@ def target_audience_options(main_type, subtype='', components=None):
     return options
 
 
-def price_types_for_operation(operation):
+def price_types_for_operation(operation, offer_lang='ar'):
+    if offer_lang == 'en':
+        operation = OPERATION_EN_BY_AR.get(_norm(operation), _norm(operation))
+        return list(PRICE_TYPE_BY_OPERATION_EN.get(operation, PRICE_TYPE_BY_OPERATION_EN['Other']))
     return list(PRICE_TYPE_BY_OPERATION.get(_norm(operation), PRICE_TYPE_BY_OPERATION['أخرى']))
 
 
 def price_uses_range(price_type):
-    return _norm(price_type) in RANGE_PRICE_TYPES
+    text = _norm(price_type)
+    return text in RANGE_PRICE_TYPES or text in RANGE_PRICE_TYPES_EN
 
 
 def resolve_competitor_radius_km(radius_value, custom_km=None):

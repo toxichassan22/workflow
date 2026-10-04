@@ -912,33 +912,59 @@
       ).join('');
     }
 
+    function marketProjectIsEnglish() {
+      return typeof tenantProjectData !== 'undefined'
+        && String((tenantProjectData && tenantProjectData.project_language) || '') === 'en';
+    }
+
+    function marketCompetitorPriceTypes() {
+      return marketProjectIsEnglish() ? MARKET_PRICE_TYPES_EN : MARKET_PRICE_TYPES;
+    }
+
+    function marketPriceTypesForOperation(operation) {
+      const map = marketCompetitorPriceTypes();
+      return map[operation] || map[marketProjectIsEnglish() ? 'Other' : 'أخرى'] || [];
+    }
+
+    function marketTranslateCompetitorValue(value) {
+      const text = String(value || '').trim();
+      return marketProjectIsEnglish() ? (MARKET_AR_TO_EN_COMPETITOR[text] || text) : text;
+    }
+
     function competitorPriceIsRange(priceType) {
-      return MARKET_RANGE_PRICE_TYPES.includes(String(priceType || '').trim())
-        || String(priceType || '').includes('نطاق');
+      const text = String(priceType || '').trim();
+      return MARKET_RANGE_PRICE_TYPES.includes(text)
+        || MARKET_RANGE_PRICE_TYPES_EN.includes(text)
+        || text.includes('نطاق')
+        || /range/i.test(text);
     }
 
     function inferCompetitorOperation(row = {}) {
       const explicit = String(row.operation_type || row.operationType || row.operation || row['نوع العملية'] || row['نوع التشغيل'] || row['التشغيل'] || '').trim();
-      if (MARKET_PRICE_TYPES[explicit]) return explicit;
+      const priceTypesMap = marketCompetitorPriceTypes();
+      if (priceTypesMap[explicit]) return explicit;
+      const en = marketProjectIsEnglish();
       const folded = explicit.replace(/[أإآ]/g, 'ا').toLowerCase();
-      if (folded.includes('بيع') || folded.includes('sale') || folded.includes('sell')) return 'بيع';
-      if (folded.includes('ايجار') || folded.includes('تأجير') || folded.includes('rent')) return 'إيجار';
-      if (folded.includes('فندقي') || folded.includes('فندق') || folded.includes('hotel') || folded === 'تشغيل' || folded.startsWith('تشغيل ')) return 'تشغيل فندقي';
+      if (folded.includes('بيع') || folded.includes('sale') || folded.includes('sell')) return en ? 'Sale' : 'بيع';
+      if (folded.includes('ايجار') || folded.includes('تأجير') || folded.includes('rent')) return en ? 'Rent' : 'إيجار';
+      if (folded.includes('فندقي') || folded.includes('فندق') || folded.includes('hotel') || folded.includes('hospital') || folded === 'تشغيل' || folded.startsWith('تشغيل ')) return en ? 'Hotel Operation' : 'تشغيل فندقي';
       const priceType = String(row.price_type || row.priceType || '').trim();
-      for (const [operation, options] of Object.entries(MARKET_PRICE_TYPES)) {
+      for (const [operation, options] of Object.entries(priceTypesMap)) {
         if (priceType && options.includes(priceType)) return operation;
       }
-      if (String(row.project_type || '').trim() === 'فندقي') return 'تشغيل فندقي';
-      return explicit ? 'أخرى' : '';
+      if (['فندقي', 'hospitality', 'hotel'].includes(String(row.project_type || '').trim().toLowerCase())) return en ? 'Hotel Operation' : 'تشغيل فندقي';
+      return explicit ? (en ? 'Other' : 'أخرى') : '';
     }
 
     function inferCompetitorPriceType(row = {}) {
       const explicit = String(row.price_type || row.priceType || row['نوع السعر'] || row['نوع التسعير'] || '').trim();
-      if (explicit) return explicit;
+      if (explicit) return marketTranslateCompetitorValue(explicit);
+      const en = marketProjectIsEnglish();
       if (String(competitorPriceField(row, 'price_from') || '').trim() || String(competitorPriceField(row, 'price_to') || '').trim()) {
-        return inferCompetitorOperation(row) === 'تشغيل فندقي' ? 'نطاق أسعار الغرف' : 'نطاق سعري';
+        const hotel = inferCompetitorOperation(row) === (en ? 'Hotel Operation' : 'تشغيل فندقي');
+        return en ? (hotel ? 'Room Price Range' : 'Price Range') : (hotel ? 'نطاق أسعار الغرف' : 'نطاق سعري');
       }
-      return String(competitorPriceField(row, 'price_value') || '').trim() ? 'أخرى' : '';
+      return String(competitorPriceField(row, 'price_value') || '').trim() ? (en ? 'Other' : 'أخرى') : '';
     }
 
     function competitorPriceField(row, key) {

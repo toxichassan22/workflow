@@ -558,7 +558,8 @@ def _competitor_display_text(value, fallback='—'):
     return text or fallback
 
 
-def _competitor_price_display(comp):
+def _competitor_price_display(comp, offer_lang='ar'):
+    en = offer_lang == 'en'
     price_value, price_from, price_to = _competitor_price_fields(comp)
     currency = _competitor_value(comp, 'price_currency', 'currency', 'العملة')
     values = []
@@ -568,7 +569,8 @@ def _competitor_price_display(comp):
     if price_value not in (None, '', []) and value_text != '—':
         values.append(value_text)
     elif (price_from not in (None, '', []) or price_to not in (None, '', [])):
-        range_text = f'من {from_text} إلى {to_text}'
+        range_text = (f'{from_text} – {to_text}' if en
+                      else f'من {from_text} إلى {to_text}')
         values.append(range_text)
     if currency and values:
         values[-1] = f'{values[-1]} {str(currency).strip()}'
@@ -616,6 +618,7 @@ def _competitor_chart_group(comp):
 
 def _extract_competitor_chart_data(competitors, project_data=None):
     project_data = project_data if isinstance(project_data, dict) else {}
+    en = resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH
     candidates = []
     for comp in (competitors or []):
         if not isinstance(comp, dict):
@@ -640,7 +643,7 @@ def _extract_competitor_chart_data(competitors, project_data=None):
             low_num = min(valid_range)
             high_num = max(valid_range)
         if name:
-            unit_str = f" {unit}" if unit else " ر.س/م²"
+            unit_str = f" {unit}" if unit else (" SAR/m²" if en else " ر.س/م²")
             candidates.append({
                 'name': name,
                 'price_num': high_num,
@@ -648,7 +651,8 @@ def _extract_competitor_chart_data(competitors, project_data=None):
                 'price_max_num': high_num,
                 'is_range': high_num != low_num,
                 'display_price': (
-                    f"من {int(low_num):,} إلى {int(high_num):,}{unit_str}"
+                    (f"{int(low_num):,} – {int(high_num):,}{unit_str}" if en
+                     else f"من {int(low_num):,} إلى {int(high_num):,}{unit_str}")
                     if high_num != low_num else f"{int(high_num):,}{unit_str}"
                 ),
                 'price_type': p_type,
@@ -676,17 +680,18 @@ def _extract_competitor_chart_data(competitors, project_data=None):
     if proj_price_raw and groups:
         p_val = _clean_numeric_val(proj_price_raw)
         if p_val > 0:
-            p_name = str(project_data.get('project_name') or project_data.get('projectName') or 'مشروعنا').strip()
+            p_name = str(project_data.get('project_name') or project_data.get('projectName')
+                         or ('Our Project' if en else 'مشروعنا')).strip()
             first_items = groups[0][1]
-            unit_str = first_items[0]['display_price'].split()[-1] if first_items and ' ' in first_items[0]['display_price'] else 'ر.س/م²'
+            unit_str = first_items[0]['display_price'].split()[-1] if first_items and ' ' in first_items[0]['display_price'] else ('SAR/m²' if en else 'ر.س/م²')
             first_items.append({
-                'name': f"{p_name} (المشروع المقترح)",
+                'name': f"{p_name} ({'Proposed Project' if en else 'المشروع المقترح'})",
                 'price_num': p_val,
                 'price_min_num': p_val,
                 'price_max_num': p_val,
                 'is_range': False,
                 'display_price': f"{int(p_val):,} {unit_str}",
-                'price_type': 'سعر مقترح',
+                'price_type': 'Proposed Price' if en else 'سعر مقترح',
                 'chart_group': groups[0][0],
                 'is_project': True,
             })
@@ -707,7 +712,7 @@ def _extract_competitor_chart_data(competitors, project_data=None):
             for it in group_items:
                 it['bar_start_pct'] = 0.0
                 it['bar_width_pct'] = max(round((it['price_max_num'] / max_p) * 100, 1), 15.0)
-        label = _competitor_group_label(group_key)
+        label = _competitor_group_label(group_key, 'en' if en else 'ar')
         for position, it in enumerate(group_items):
             it['group_key'] = group_key
             it['group_label'] = label
@@ -723,24 +728,26 @@ def _extract_competitor_chart_data(competitors, project_data=None):
     return items
 
 
-def _competitor_group_label(group_key):
+def _competitor_group_label(group_key, offer_lang='ar'):
     """Human label for one comparable chart section (operation + unit + price kind)."""
+    en = offer_lang == 'en'
     operation, unit_key, type_key = (group_key or (None, None, None))
     op_label = {
-        'sale': 'مشاريع البيع',
-        'rent': 'مشاريع الإيجار',
-        'hotel': 'التشغيل الفندقي',
+        'sale': 'Sale Projects' if en else 'مشاريع البيع',
+        'rent': 'Rental Projects' if en else 'مشاريع الإيجار',
+        'hotel': 'Hotel Operations' if en else 'التشغيل الفندقي',
     }.get(operation, '')
     unit_label = {
-        'sqm': 'سعر المتر المربع',
-        'unit': 'سعر الوحدة',
-        'room_night': 'سعر الليلة',
+        'sqm': 'Price per SQM' if en else 'سعر المتر المربع',
+        'unit': 'Unit Price' if en else 'سعر الوحدة',
+        'room_night': 'Nightly Rate' if en else 'سعر الليلة',
     }.get(unit_key, '')
     if type_key == 'range':
-        unit_label = f'{unit_label} (نطاق)' if unit_label else 'نطاق سعري'
+        unit_label = (f'{unit_label} (Range)' if unit_label else 'Price Range') if en \
+            else (f'{unit_label} (نطاق)' if unit_label else 'نطاق سعري')
     if op_label and unit_label:
         return f'{op_label} — {unit_label}'
-    return op_label or unit_label or 'أسعار المنافسين'
+    return op_label or unit_label or ('Competitor Prices' if en else 'أسعار المنافسين')
 
 
 def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f', secondary='#0284c7', gold='#b89564'):

@@ -487,11 +487,11 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     name = str(row.get('name') or '').strip()
     if not name:
         return
+    offer_lang = slide_engine.resolve_offer_lang(data)
+    en = offer_lang == 'en'
     city = str(payload.get('city') or '').strip() or 'السعودية'
-    operation = str(row.get('operation_type') or '').strip() or 'أخرى'
-    price_options = '، '.join(
-        market_study.PRICE_TYPE_BY_OPERATION.get(operation)
-        or market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
+    operation = str(row.get('operation_type') or '').strip() or ('Other' if en else 'أخرى')
+    price_options = '، '.join(market_study.price_types_for_operation(operation, offer_lang))
     price_shape = (
         '"price": {"type": "أحد: ' + price_options + '", "value": "الرقم فقط", '
         '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
@@ -582,7 +582,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         parsed, _parse_error = _parse_market_model_json(prompt_response)
         # A project price is only as good as the page naming this competitor —
         # the figure must come from a page this search actually retrieved.
-        _apply_verified_competitor_price(row, parsed, set(prompt_matched))
+        _apply_verified_competitor_price(row, parsed, set(prompt_matched), offer_lang=offer_lang)
         price_filled = any(str(row.get(key) or '').strip()
                            for key in ('price_value', 'price_from', 'price_to'))
         # Identity proven is not the job done — keep searching while the price
@@ -624,7 +624,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         row['logo_official_verified'] = True
 
 
-def _apply_verified_competitor_price(row, parsed, citation_urls):
+def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'):
     """Fill empty price fields from the per-competitor verification search.
 
     That call already retrieves real pages for this competitor — accept its
@@ -647,19 +647,18 @@ def _apply_verified_competitor_price(row, parsed, citation_urls):
         return
     url = market_study.canonical_index_source_url(url, row.get('operation_type'))
     price_type = str(price.get('type') or price.get('price_type') or '').strip()
-    options = market_study.PRICE_TYPE_BY_OPERATION.get(
-        str(row.get('operation_type') or '').strip() or 'أخرى',
-        market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
+    options = market_study.price_types_for_operation(
+        str(row.get('operation_type') or '').strip(), offer_lang)
     if price_type not in options:
         price_type = ''
-    is_range = price_type in market_study.RANGE_PRICE_TYPES or (from_v and to_v)
+    is_range = market_study.price_uses_range(price_type) or (from_v and to_v)
     if is_range:
         row['price_from'] = from_v or value
         row['price_to'] = to_v or ''
         row['price_cache'] = {'price_from': row['price_from'], 'price_to': row['price_to']}
         field_key = 'price_from'
         if not price_type:
-            price_type = 'نطاق سعري' if 'نطاق سعري' in options else 'أخرى'
+            price_type = next((o for o in options if market_study.price_uses_range(o)), options[-1])
     else:
         row['price_value'] = value or from_v
         row['price_cache'] = {'price_value': row['price_value']}

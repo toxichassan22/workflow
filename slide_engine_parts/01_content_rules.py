@@ -192,7 +192,7 @@ def _normalize_legacy_single_slide(slide, project_data=None):
                     'content_source': 'market_study_data.competitors',
                     'source_table': 'competitors', 'image_tokens': [],
                 })
-        elif re.search(r'نطاق' if not deck_en else r'نطاق|scope', title, flags=re.IGNORECASE) and _market_scope_rows(market):
+        elif re.search(r'نطاق' if not deck_en else r'نطاق|scope', title, flags=re.IGNORECASE) and _market_scope_rows(market, 'en' if deck_en else 'ar'):
             item.update({'content_source': 'market_study_data.scope', 'source_table': 'market_scope',
                          'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
         elif re.search(r'مصادر|مراجع' if not deck_en else r'مصادر|مراجع|sources?|references?', title, flags=re.IGNORECASE) and _market_source_rows(market):
@@ -1236,11 +1236,11 @@ def _extract_project_swot(project_data):
     return res
 
 
-def _market_scope_rows(market):
+def _market_scope_rows(market, offer_lang='ar'):
     if not isinstance(market, dict):
         return []
     rows = []
-    scope_text = _market_scope_display(market)
+    scope_text = _market_scope_display(market, offer_lang)
     if scope_text:
         parts = [part.strip() for part in scope_text.split('|') if part.strip()]
         for part in parts:
@@ -1248,7 +1248,7 @@ def _market_scope_rows(market):
                 label, value = part.split(':', 1)
                 rows.append([label.strip(), value.strip()])
             else:
-                rows.append(['نطاق الدراسة', part])
+                rows.append(['Study Scope' if offer_lang == 'en' else 'نطاق الدراسة', part])
     return rows
 
 
@@ -1701,7 +1701,7 @@ def _normalize_market_group_slides(existing, market, offer_lang=None):
         return slide
 
     result = []
-    scope_rows = _market_scope_rows(market)
+    scope_rows = _market_scope_rows(market, lang)
     if scope_rows:
         result.append(take('market_study_data.scope', 'Study Scope' if lang == OFFER_LANG_ENGLISH else 'نطاق الدراسة', 'editorial', 'market_scope'))
 

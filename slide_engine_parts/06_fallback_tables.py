@@ -100,8 +100,9 @@ def _fallback_table_data(slide, project_data):
         return headers, [[row.get(header, '') for header in headers] for row in rows]
     if source == 'market_study_data.scope' or (slide or {}).get('source_table') == 'market_scope':
         market = _market_state(project_data)
-        rows = _market_scope_rows(market)
-        return ['البند', 'القيمة'], rows
+        en = resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH
+        rows = _market_scope_rows(market, 'en' if en else 'ar')
+        return (['Item', 'Value'] if en else ['البند', 'القيمة']), rows
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match or (slide or {}).get('source_table') == 'market_summary':
         market = _market_state(project_data)
@@ -131,7 +132,8 @@ def _fallback_table_data(slide, project_data):
                 competitors = competitors[int(parts[-2]):int(parts[-1])]
         chart_items = _extract_competitor_chart_data(competitors, project_data)
         if chart_items:
-            headers = ['المنافس / المشروع', 'السعر', 'النوع']
+            en = resolve_offer_lang(project_data) == OFFER_LANG_ENGLISH
+            headers = ['Competitor / Project', 'Price', 'Type'] if en else ['المنافس / المشروع', 'السعر', 'النوع']
             rows = [[it.get('name', ''), it.get('display_price', ''), it.get('price_type', '')] for it in chart_items]
             return headers, rows
     if source == 'timeline_table_data' or (slide or {}).get('design_style') == 'timeline':
@@ -243,18 +245,20 @@ def _competitor_table_cell(value, fallback='—'):
     return formatted if is_num else html_lib.escape(text)
 
 
-def _competitor_area_display(comp):
+def _competitor_area_display(comp, offer_lang='ar'):
     area_cache = comp.get('area_cache') if isinstance(comp, dict) and isinstance(comp.get('area_cache'), dict) else {}
     area_fixed = _competitor_value(comp, 'area_sqm', 'area', 'المساحة') or area_cache.get('area_sqm')
     area_from = _competitor_value(comp, 'area_from', 'min_area', 'من') or area_cache.get('area_from')
     area_to = _competitor_value(comp, 'area_to', 'max_area', 'إلى') or area_cache.get('area_to')
     area_mode = str(_competitor_value(comp, 'area_mode', 'mode') or '').strip().lower()
     if area_mode == 'range' or area_from not in (None, '', []) or area_to not in (None, '', []):
+        if offer_lang == 'en':
+            return f'{_competitor_table_cell(area_from)} – {_competitor_table_cell(area_to)}'
         return f'من {_competitor_table_cell(area_from)} إلى {_competitor_table_cell(area_to)}'
     return _competitor_table_cell(area_fixed)
 
 
-def _competitor_source_display(comp):
+def _competitor_source_display(comp, offer_lang='ar'):
     """The sources column carries numbered source links only — no extra prose."""
     urls = comp.get('source_urls') if isinstance(comp, dict) and isinstance(comp.get('source_urls'), list) else []
     if not urls:
@@ -266,14 +270,14 @@ def _competitor_source_display(comp):
         if re.match(r'^https?://', url_text, re.IGNORECASE):
             links.append(
                 f'<a href="{html_lib.escape(url_text, quote=True)}" target="_blank" rel="noopener noreferrer" '
-                f'style="color:#2563eb;font-size:9px;">المصدر {index}</a>'
+                f'style="color:#2563eb;font-size:9px;">{"Source " if offer_lang == "en" else "المصدر "}{index}</a>'
             )
     if not links:
         return '<div style="color:#94a3b8;">—</div>'
     return '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;">' + ''.join(links) + '</div>'
 
 
-def _render_competitor_table(competitors, primary):
+def _render_competitor_table(competitors, primary, offer_lang='ar'):
     """Render every stored competitor field in one deterministic table."""
     named = [c for c in (competitors or []) if isinstance(c, dict) and _competitor_name(c)]
     roomy = len(named) <= 4
@@ -295,7 +299,8 @@ def _render_competitor_table(competitors, primary):
                 '</div>'
             )
         else:
-            logo_html = f'<div style="height:{logo_height};display:flex;align-items:center;justify-content:center;color:#64748b;">لا يوجد</div>'
+            no_logo = '—' if offer_lang == 'en' else 'لا يوجد'
+            logo_html = f'<div style="height:{logo_height};display:flex;align-items:center;justify-content:center;color:#64748b;">{no_logo}</div>'
         project_type = _competitor_value(comp, 'project_type', 'projectType', 'النوع')
         classification = _competitor_value(comp, 'classification', 'التصنيف')
         type_html = f'<div>{html_lib.escape(_competitor_display_text(project_type))}</div>'
@@ -303,28 +308,32 @@ def _render_competitor_table(competitors, primary):
             type_html += f'<div style="margin-top:2px;color:#64748b;font-size:8px;">{html_lib.escape(_competitor_display_text(classification))}</div>'
         operation = _competitor_value(comp, 'operation_type', 'operation', 'نوع العملية')
         status = _competitor_value(comp, 'status', 'الحالة')
-        price = html_lib.escape(_competitor_price_display(comp))
+        price = html_lib.escape(_competitor_price_display(comp, offer_lang))
         cells = (
             logo_html,
             html_lib.escape(name),
             type_html,
-            _competitor_area_display(comp),
+            _competitor_area_display(comp, offer_lang),
             _competitor_table_cell(status),
             _competitor_table_cell(operation),
             price,
-            _competitor_source_display(comp),
+            _competitor_source_display(comp, offer_lang),
         )
         bg = '#f8fafc' if len(rows_html) % 2 else '#ffffff'
+        cell_dir = 'ltr' if offer_lang == 'en' else 'rtl'
         rows_html.append(
             f'<tr style="background:{bg};">' + ''.join(
                 f'<td style="border-bottom:1px solid #e2e8f0;padding:{cell_pad};font-size:{"8.5px" if col_idx in (0, 7) else "9px"};'
-                f'text-align:center;direction:rtl;vertical-align:middle;line-height:1.25;word-break:break-word;">{value}</td>'
+                f'text-align:center;direction:{cell_dir};vertical-align:middle;line-height:1.25;word-break:break-word;">{value}</td>'
                 for col_idx, value in enumerate(cells)
             ) + '</tr>'
         )
     if not rows_html:
-        return '<div data-competitor-table="1" style="padding:20px;text-align:center;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;">لا توجد بيانات منافسين</div>'
-    headers = ('الشعار', 'اسم المشروع', 'النوع والتصنيف', 'المساحة م²', 'الحالة', 'نوع العملية', 'بيانات السعر', 'المصادر')
+        empty_text = 'No competitor data' if offer_lang == 'en' else 'لا توجد بيانات منافسين'
+        return f'<div data-competitor-table="1" style="padding:20px;text-align:center;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;">{empty_text}</div>'
+    headers = (('Logo', 'Project', 'Type / Class', 'Area m²', 'Status', 'Operation', 'Pricing', 'Sources')
+               if offer_lang == 'en'
+               else ('الشعار', 'اسم المشروع', 'النوع والتصنيف', 'المساحة م²', 'الحالة', 'نوع العملية', 'بيانات السعر', 'المصادر'))
     header_html = ''.join(
         f'<th style="background:{primary};color:#fff;padding:6px 4px;font-size:9px;text-align:center;vertical-align:middle;line-height:1.2;">{header}</th>'
         for header in headers
@@ -339,9 +348,11 @@ def _render_competitor_table(competitors, primary):
     )
 
 
-def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9'):
+def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9', offer_lang='ar'):
+    en = offer_lang == 'en'
     if not items:
-        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات منافسين كافية</div>'
+        empty = 'Not enough competitor data' if en else 'لا تتوفر بيانات منافسين كافية'
+        return f'<div style="padding:20px;text-align:center;color:#64748b;">{empty}</div>'
     grouped = len({it.get('group_key') for it in items if it.get('group_key')}) > 1
     many = len(items) > 5
     bar_height = '14px' if many else '20px'
@@ -364,7 +375,8 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
         bar_color = primary if is_project else secondary
         font_weight = '800' if is_project else '600'
         border_box = f'border: 2px solid {primary}; background: rgba(0, 95, 120, 0.06); padding: 8px 10px; border-radius: 6px;' if is_project else 'padding: 4px 0;'
-        badge = f'<span style="background:{primary};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;margin-right:6px;">مشروعنا</span>' if is_project else ''
+        badge = (f'<span style="background:{primary};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;margin-right:6px;">'
+                 f'{"Our Project" if en else "مشروعنا"}</span>') if is_project else ''
         rows_html.append(f'''
         <div style="display:flex;flex-direction:column;gap:5px;{border_box}">
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:{name_font};">
@@ -378,40 +390,47 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
         ''')
     return (
         f'<div style="display:flex;flex-direction:column;gap:{row_gap};background:#f8fafc;padding:16px 18px;border-radius:8px;border:1px solid #e2e8f0;flex:1 1 auto;box-sizing:border-box;justify-content:center;">'
-        f'<div style="font-size:13px;font-weight:700;color:{primary};border-bottom:1px solid #cbd5e1;padding-bottom:6px;">مقارنة أسعار المنافسين في السوق</div>'
+        f'<div style="font-size:13px;font-weight:700;color:{primary};border-bottom:1px solid #cbd5e1;padding-bottom:6px;">'
+        f'{"Market Price Comparison" if en else "مقارنة أسعار المنافسين في السوق"}</div>'
         f'{"".join(rows_html)}'
         f'</div>'
     )
 
 
-def _market_scope_display(market):
+def _market_scope_display(market, offer_lang='ar'):
     if not isinstance(market, dict):
         return ''
+    en = offer_lang == 'en'
     radius = market.get('competitor_radius')
     if radius == 'city':
-        radius_text = 'كامل المدينة'
+        radius_text = 'Entire City' if en else 'كامل المدينة'
     elif radius == 'custom':
-        radius_text = _competitor_display_text(market.get('competitor_radius_custom_km')) + ' كم'
+        radius_text = _competitor_display_text(market.get('competitor_radius_custom_km')) + (' km' if en else ' كم')
     elif radius not in (None, ''):
-        radius_text = _competitor_display_text(radius) + ' كم'
+        radius_text = _competitor_display_text(radius) + (' km' if en else ' كم')
     else:
         radius_text = ''
-    period_map = {
-        '12m': 'آخر 12 شهرًا', '24m': 'آخر 24 شهرًا', '3y': 'آخر 3 سنوات', '5y': 'آخر 5 سنوات',
-    }
+    period_map = (
+        {'12m': 'Last 12 months', '24m': 'Last 24 months', '3y': 'Last 3 years', '5y': 'Last 5 years'}
+        if en else
+        {'12m': 'آخر 12 شهرًا', '24m': 'آخر 24 شهرًا', '3y': 'آخر 3 سنوات', '5y': 'آخر 5 سنوات'}
+    )
     period = market.get('data_period')
     period_text = period_map.get(str(period), '') if period not in (None, '') else ''
     if period == 'custom':
-        period_text = f'من {_competitor_display_text(market.get("data_period_from"))} إلى {_competitor_display_text(market.get("data_period_to"))}'
+        period_text = (f'{_competitor_display_text(market.get("data_period_from"))} – {_competitor_display_text(market.get("data_period_to"))}'
+                       if en else
+                       f'من {_competitor_display_text(market.get("data_period_from"))} إلى {_competitor_display_text(market.get("data_period_to"))}')
     parts = []
     if radius_text:
-        parts.append(f'نطاق المنافسين: {radius_text}')
+        parts.append(f'{"Competitor scope" if en else "نطاق المنافسين"}: {radius_text}')
     if period_text:
-        parts.append(f'فترة البيانات: {period_text}')
+        parts.append(f'{"Data period" if en else "فترة البيانات"}: {period_text}')
     return ' | '.join(parts)
 
 
-def _market_chart_provenance(competitors):
+def _market_chart_provenance(competitors, offer_lang='ar'):
+    en = offer_lang == 'en'
     items = []
     for comp in competitors or []:
         if not isinstance(comp, dict):
@@ -419,14 +438,14 @@ def _market_chart_provenance(competitors):
         source = _competitor_display_text(_competitor_value(comp, 'source', 'المصدر'), '')
         data_date = _competitor_display_text(_competitor_value(comp, 'data_date', 'dataDate', 'source_date', 'date', 'تاريخ البيانات'), '')
         if source or data_date:
-            text = source or 'مصدر موثق'
+            text = source or ('Documented source' if en else 'مصدر موثق')
             if data_date:
-                text += f'، تاريخ البيانات: {data_date}'
+                text += f'{", data date: " if en else "، تاريخ البيانات: "}{data_date}'
             if text not in items:
                 items.append(text)
     if not items:
         return ''
-    return 'مصدر ووقت بيانات المقارنة: ' + '؛ '.join(items)
+    return ('Comparison sources & dates: ' if en else 'مصدر ووقت بيانات المقارنة: ') + ('; ' if en else '؛ ').join(items)
 
 
 def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9'):
@@ -1060,9 +1079,12 @@ def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total
 
 
 def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    offer_lang = resolve_offer_lang(source)
+    en = offer_lang == OFFER_LANG_ENGLISH
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-    title = html_lib.escape(str((slide or {}).get('title') or 'مقارنة أسعار المنافسين'))
+    title = html_lib.escape(str((slide or {}).get('title')
+                                or ('Competitor Price Comparison' if en else 'مقارنة أسعار المنافسين')))
     project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
 
     market = _decode_json_fact(source.get('market_study_data')) if isinstance(source.get('market_study_data'), (str, dict)) else {}
@@ -1081,16 +1103,17 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
 
     items = _extract_competitor_chart_data(competitors, source)
 
-    bar_chart_html = _render_fallback_horizontal_bar(items, primary, accent)
-    table_html = _render_competitor_table(competitors, primary)
-    scope_text = _market_scope_display(market)
+    bar_chart_html = _render_fallback_horizontal_bar(items, primary, accent, offer_lang)
+    table_html = _render_competitor_table(competitors, primary, offer_lang)
+    scope_text = _market_scope_display(market, offer_lang)
+    text_align = 'left' if en else 'right'
     scope_html = (
-        f'<div style="margin-bottom:10px;color:#64748b;font-size:10px;text-align:right;">'
+        f'<div style="margin-bottom:10px;color:#64748b;font-size:10px;text-align:{text_align};">'
         f'{html_lib.escape(scope_text)}</div>'
     ) if scope_text else ''
-    provenance_text = _market_chart_provenance(competitors)
+    provenance_text = _market_chart_provenance(competitors, offer_lang)
     provenance_html = (
-        f'<div style="margin-top:8px;color:#64748b;font-size:9px;text-align:right;line-height:1.35;">'
+        f'<div style="margin-top:8px;color:#64748b;font-size:9px;text-align:{text_align};line-height:1.35;">'
         f'{html_lib.escape(provenance_text)}</div>'
     ) if provenance_text else ''
     stats_html = ''
@@ -1101,17 +1124,22 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
         hi = max((it['price_max_num'] for it in first_items), default=0.0)
         unit_hint = first_items[0].get('display_price', '').split()[-1] if ' ' in first_items[0].get('display_price', '') else ''
         group_caption = items[0].get('group_label') or unit_hint
-        range_text = f'من {lo:,.0f} إلى {hi:,.0f}' if hi > lo else f'{lo:,.0f}'
+        range_text = (f'{lo:,.0f} – {hi:,.0f}' if en else f'من {lo:,.0f} إلى {hi:,.0f}') if hi > lo else f'{lo:,.0f}'
+        shown_text = f'{len(competitors)} competitors shown' if en else f'{len(competitors)} منافسًا معروضًا'
+        range_label = 'Range' if en else 'نطاق'
         stats_html = (
             f'<div style="margin-top:auto;padding-top:10px;display:flex;align-items:center;gap:16px;'
             f'font-size:10.5px;color:#475569;border-top:1px solid #e2e8f0;">'
-            f'<span style="font-weight:800;color:{primary};">{len(competitors)} منافسًا معروضًا</span>'
-            f'<span>نطاق {html_lib.escape(str(group_caption))}: {range_text}</span>'
+            f'<span style="font-weight:800;color:{primary};">{shown_text}</span>'
+            f'<span>{range_label} {html_lib.escape(str(group_caption))}: {range_text}</span>'
             f'</div>'
         )
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
-    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+    slide_dir = 'ltr' if en else 'rtl'
+    subtitle = ('Market pricing analysis and competitor comparison within the study scope'
+                if en else 'تحليل أسعار السوق ومقارنة الوحدات المنافسة في النطاق الجغرافي')
+    return f'''<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
   <header class="slide-header">
     <div class="header-left">
@@ -1122,14 +1150,14 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
       <div class="header-accent-bar" style="background:{accent};"></div>
       <div class="header-text-group">
         <h1 class="header-title">{title}</h1>
-        <p class="header-subtitle">تحليل أسعار السوق ومقارنة الوحدات المنافسة في النطاق الجغرافي</p>
+        <p class="header-subtitle">{subtitle}</p>
       </div>
     </div>
   </header>
   <div style="padding:0 42px;margin-top:12px;">
     <div style="background:#f3f6f8;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px 16px;box-sizing:border-box;min-height:560px;display:flex;flex-direction:column;">
       {scope_html}
-      <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;flex:1;overflow:visible;align-items:stretch;">
+      <div style="display:grid;direction:{slide_dir};grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;flex:1;overflow:visible;align-items:stretch;">
       <div style="grid-area:table;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:10px;overflow:visible;">
         {table_html}
       </div>
@@ -1289,11 +1317,13 @@ def _market_paragraph_blocks(value, count=3):
 def _build_market_scope_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render the market scope as an editorial overview instead of a raw key/value table."""
     source = source if isinstance(source, dict) else {}
+    offer_lang = resolve_offer_lang(source)
+    en = offer_lang == OFFER_LANG_ENGLISH
     market = _market_state(source)
-    rows = _market_scope_rows(market)
+    rows = _market_scope_rows(market, offer_lang)
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-    title = html_lib.escape(str((slide or {}).get('title') or 'نطاق الدراسة'))
+    title = html_lib.escape(str((slide or {}).get('title') or ('Study Scope' if en else 'نطاق الدراسة')))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     midpoint = (len(rows) + 1) // 2
     columns = (rows[:midpoint], rows[midpoint:])
@@ -1316,7 +1346,7 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
     location_line = ' — '.join(item for item in (district, city) if item)
     location_html = (
         f'<div style="background:#f1f5f9;border-radius:10px;padding:12px 18px;border:1px solid #cbd5e1;min-width:200px;">'
-        f'<div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:4px;">النطاق الجغرافي للمشروع</div>'
+        f'<div style="font-size:11px;font-weight:800;color:#475569;margin-bottom:4px;">{"Project Geographic Scope" if en else "النطاق الجغرافي للمشروع"}</div>'
         f'<div style="font-size:16px;font-weight:800;color:{primary};">{html_lib.escape(location_line)}</div></div>'
     ) if location_line else ''
 
@@ -1325,25 +1355,31 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
     prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
     if prop_type:
         context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
-                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">نوع الأصل الاستثماري</div>'
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">{"Asset Type" if en else "نوع الأصل الاستثماري"}</div>'
                              f'<div style="font-size:13.5px;font-weight:800;color:{primary};margin-top:2px;">{html_lib.escape(prop_type)}</div></div>')
     decision = str(market.get('decision') or '').strip()
     if decision:
         context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
-                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">تصنيف ملاءمة السوق</div>'
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">{"Market Fit Rating" if en else "تصنيف ملاءمة السوق"}</div>'
                              f'<div style="font-size:13.5px;font-weight:800;color:{accent};margin-top:2px;">{html_lib.escape(decision)}</div></div>')
     sources_count = len(market.get('sources') or [])
     if sources_count:
         context_cards.append(f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;">'
-                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">المصادر المرجعية المعتمدة</div>'
-                             f'<div style="font-size:13.5px;font-weight:800;color:{primary};margin-top:2px;">{sources_count} مصادر بيانات</div></div>')
+                             f'<div style="font-size:11px;font-weight:700;color:#64748b;">{"Approved Reference Sources" if en else "المصادر المرجعية المعتمدة"}</div>'
+                             f'<div style="font-size:13.5px;font-weight:800;color:{primary};margin-top:2px;">{sources_count} {"data sources" if en else "مصادر بيانات"}</div></div>')
     highlights_html = (
         f'<div style="margin-top:16px;display:grid;grid-template-columns:repeat({len(context_cards)}, 1fr);gap:14px;">{"".join(context_cards)}</div>'
         if context_cards else ''
     )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
-    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+    slide_dir = 'ltr' if en else 'rtl'
+    subtitle = ('The geographic and methodological frame the market reading is bound to'
+                if en else 'الإطار الجغرافي والزمني والمنهجي المعتمد لقراءة السوق')
+    heading = 'Market Definition & Study Scope' if en else 'تعريف السوق ونطاق الدراسة'
+    subheading = ('Criteria governing the comparison and analysis domain'
+                  if en else 'المحددات والمعايير التي تحكم مجال المقارنة والتحليل')
+    return f'''<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
   <header class="slide-header">
     <div class="header-left">
@@ -1354,14 +1390,14 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
       <div class="header-accent-bar" style="background:{accent};"></div>
       <div class="header-text-group">
         <h1 class="header-title">{title}</h1>
-        <p class="header-subtitle">الإطار الجغرافي والزمني والمنهجي المعتمد لقراءة السوق</p>
+        <p class="header-subtitle">{subtitle}</p>
       </div>
     </div>
   </header>
   <div data-market-scope="1" style="padding:0 36px;margin-top:14px;">
     <div style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;padding:22px 24px;box-sizing:border-box;">
-      <div style="display:flex;align-items:end;justify-content:space-between;gap:20px;border-bottom:1px solid #dbe4ee;padding-bottom:14px;margin-bottom:16px;direction:rtl;">
-        <div><div style="font-size:22px;font-weight:800;color:{primary};">تعريف السوق ونطاق الدراسة</div><div style="font-size:12px;color:#64748b;margin-top:5px;">المحددات والمعايير التي تحكم مجال المقارنة والتحليل</div></div>
+      <div style="display:flex;align-items:end;justify-content:space-between;gap:20px;border-bottom:1px solid #dbe4ee;padding-bottom:14px;margin-bottom:16px;direction:{slide_dir};">
+        <div><div style="font-size:22px;font-weight:800;color:{primary};">{heading}</div><div style="font-size:12px;color:#64748b;margin-top:5px;">{subheading}</div></div>
         {location_html}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
@@ -1372,7 +1408,7 @@ def _build_market_scope_slide(slide, source, branding=None, slide_num=None, tota
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
-    <div class="footer-center">تحليل السوق — نطاق الدراسة</div>
+    <div class="footer-center">{"Market Analysis — Study Scope" if en else "تحليل السوق — نطاق الدراسة"}</div>
     <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
   </footer>
 </div>'''

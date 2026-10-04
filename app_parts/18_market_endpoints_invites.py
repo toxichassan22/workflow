@@ -29,6 +29,7 @@ def _prepare_market_payload(data):
 def _execute_market_competitors(data, tenant_id=None, progress=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
+    offer_lang = slide_engine.resolve_offer_lang(data)
     existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
     if tenant_id is None:
@@ -36,11 +37,12 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             tenant_id = getattr(g, 'tenant_id', None)
         except Exception:
             tenant_id = None
-    system_prompt = market_study.build_consultant_system_prompt()
+    system_prompt = market_study.build_consultant_system_prompt(offer_lang)
     training_context = db.get_training_context(tenant_id, surface='content') if tenant_id else ''
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
-    user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
+    user_prompt = market_study.build_competitors_user_prompt(
+        payload, existing, mode=mode, offer_lang=offer_lang)
     report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
     # The reasoning budget counts against max_tokens on this model — a tight cap
     # truncates the competitors array mid-generation and returns a thin table.
@@ -129,7 +131,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
               'distance_km الحقيقية، ولا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
               'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
               '"operation_type":"","price_type":"","price":"","source_urls":[]}]} '
-              'مع بقية الحقول المعتادة عند توفرها.')
+              'مع بقية الحقول المعتادة عند توفرها.'
+              + (' Write every field value in English using the allowed English enum '
+                 'values (status: Operating/Under Construction/Off-Plan; classification: '
+                 'Direct/Indirect/Benchmark; operation_type: Sale/Rent/Hotel Operation/Other).'
+                 if offer_lang == 'en' else ''))
         res2, _err2 = _call_market_study_model(
             system_prompt, expansion_prompt, max_tokens=14000, max_search_results=20,
             usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
@@ -159,7 +165,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             # A clean response with no new rows means retrieval is exhausted;
             # a malformed/empty response is a technical miss — try the next angle.
             break
-    merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
+    merged, added, updated = market_study.merge_generated_competitors(
+        existing, generated, mode=mode, offer_lang=offer_lang)
     market_study.apply_search_citations(merged, citation_urls)
     _attach_retrieved_citations(merged, citation_pages)
     report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
@@ -441,7 +448,9 @@ def api_market_study_summary():
 @require_permission('create_presentation')
 def api_market_study_competitor_logo():
     data = request.json or {}
-    competitor = market_study.normalize_competitor_row(data.get('competitor') or {}, fallback_source='manual')
+    competitor = market_study.normalize_competitor_row(
+        data.get('competitor') or {}, fallback_source='manual',
+        offer_lang=slide_engine.resolve_offer_lang(data))
     if not competitor:
         return jsonify({'success': False, 'error': 'بيانات المنافس غير صالحة'}), 400
     if competitor.get('logo_file_id') or competitor.get('logo_path'):

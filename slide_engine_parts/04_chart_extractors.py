@@ -71,7 +71,7 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
         return 'تحليل SWOT الأصلي الوحيد، انقل المحاور الأربعة دون إضافة أو تكرار:\n' + json.dumps(swot, ensure_ascii=False, indent=2) if swot else ''
     if source == 'market_study_data.scope':
         market = _market_state(project_data)
-        rows = _market_scope_rows(market)
+        rows = _market_scope_rows(market, resolve_offer_lang(project_data))
         return 'نطاق الدراسة وفترة البيانات كما أُدخلتا في القسم:\n' + json.dumps(rows, ensure_ascii=False, indent=2) if rows else ''
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match:

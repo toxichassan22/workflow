@@ -592,6 +592,29 @@
     };
     const MARKET_RANGE_PRICE_TYPES = ['نطاق سعري', 'نطاق أسعار الغرف'];
     const MARKET_COMPETITOR_CLASSIFICATIONS = ['مباشر', 'غير مباشر', 'مرجعي'];
+    const MARKET_COMPETITOR_STATUSES = ['قائم', 'تحت الإنشاء', 'على الخارطة'];
+    const MARKET_COMPETITOR_OPERATIONS = ['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'];
+    // English enum twins — an English project stores English competitor values.
+    const MARKET_COMPETITOR_PROJECT_TYPES_EN = ['Residential', 'Commercial', 'Hospitality', 'Industrial & Logistics', 'Mixed-Use', 'Other'];
+    const MARKET_COMPETITOR_CLASSIFICATIONS_EN = ['Direct', 'Indirect', 'Benchmark'];
+    const MARKET_COMPETITOR_STATUSES_EN = ['Operating', 'Under Construction', 'Off-Plan'];
+    const MARKET_COMPETITOR_OPERATIONS_EN = ['Sale', 'Rent', 'Hotel Operation', 'Other'];
+    const MARKET_PRICE_TYPES_EN = {
+      'Sale': ['Unit Price', 'Price per SQM', 'Average Unit Price', 'Average Price per SQM', 'Starting From', 'Price Range', 'Other'],
+      'Rent': ['Monthly Unit Rent', 'Annual Unit Rent', 'Monthly Rent per SQM', 'Annual Rent per SQM', 'Average Unit Rent', 'Average Rent per SQM', 'Starting From', 'Price Range', 'Other'],
+      'Hotel Operation': ['Nightly Rate', 'Average Daily Rate (ADR)', 'RevPAR', 'Average Monthly Stay', 'Starting From', 'Room Price Range', 'Other'],
+      'Other': ['Single Value', 'Price Range', 'Other']
+    };
+    const MARKET_RANGE_PRICE_TYPES_EN = ['Price Range', 'Room Price Range'];
+    const MARKET_AR_TO_EN_COMPETITOR = {
+      'قائم': 'Operating', 'تحت الإنشاء': 'Under Construction', 'على الخارطة': 'Off-Plan',
+      'مباشر': 'Direct', 'غير مباشر': 'Indirect', 'مرجعي': 'Benchmark',
+      'بيع': 'Sale', 'إيجار': 'Rent', 'تشغيل فندقي': 'Hotel Operation',
+      'سكني': 'Residential', 'تجاري': 'Commercial', 'فندقي': 'Hospitality',
+      'صناعي ولوجستي': 'Industrial & Logistics', 'متعدد الاستخدامات': 'Mixed-Use',
+      'نطاق سعري': 'Price Range', 'نطاق أسعار الغرف': 'Room Price Range',
+      'أخرى': 'Other', 'قيمة واحدة': 'Single Value'
+    };
     let marketSummaryPending = null;
 
     function marketAudienceKind(label) {
