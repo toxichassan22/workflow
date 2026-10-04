@@ -94,13 +94,31 @@ _TRAINING_SURFACE_CATEGORIES = {
 }
 
 
-def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=None):
+def _resolve_branding_tagline(branding, offer_lang=None):
+    """Pick the company tagline in the deck language, falling back to the other.
+
+    English generations pull ``tagline_en``; Arabic ones pull ``tagline``.
+    When the requested language has no value the other one still ships — a
+    half-filled pair must not erase the slogan from the prompt.
+    """
+    tagline_ar = str(branding.get('tagline') or '').strip()
+    tagline_en = str(branding.get('tagline_en') or '').strip()
+    if str(offer_lang or '').strip().lower() == 'en':
+        return tagline_en or tagline_ar
+    return tagline_ar or tagline_en
+
+
+def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=None,
+                         offer_lang=None):
     """Build bounded, tenant-only context for AI calls.
 
     ``surface`` optionally scopes which training entries apply: a 'content'
     surface hears general/chat and content entries, a 'design' surface hears
     the visual categories plus anything carrying a reference image. Entries
     with no category count as 'general'.
+
+    ``offer_lang`` ('ar'/'en') selects the company tagline language; callers
+    without a resolved deck language keep the Arabic-first behaviour.
 
     Image files themselves remain in tenant storage.  Only the tenant's saved
     description and analysis are supplied to the model as contextual text.
@@ -131,8 +149,9 @@ def get_training_context(tenant_id, max_entries=20, max_chars=12000, surface=Non
         lines = ['## هوية الشركة وتصميمها']
         if branding.get('company_name'):
             lines.append(f"اسم الشركة: {branding['company_name']}")
-        if branding.get('tagline'):
-            lines.append(f"شعار الشركة: {branding['tagline']}")
+        tagline = _resolve_branding_tagline(branding, offer_lang)
+        if tagline:
+            lines.append(f"شعار الشركة: {tagline}")
         for key in ['primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color']:
             if branding.get(key):
                 lines.append(f"{key.replace('_', ' ').title()}: {branding[key]}")

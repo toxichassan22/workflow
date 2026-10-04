@@ -305,7 +305,7 @@ def api_training_chat():
 
 ### 1. تعديل الهوية البصرية:
 ```action
-{{"tool": "update_branding", "params": {{"primary_color": "#HEX", "secondary_color": "#HEX", "accent_color": "#HEX", "background_color": "#HEX", "text_color": "#HEX", "font_family": "...", "font_arabic": "...", "design_template": "modern|classic|dark|corporate|luxury", "card_style": "bordered|shadow|flat|glass", "slide_ratio": "16:9|4:3", "header_enabled": 1, "footer_enabled": 1, "tagline": "...", "company_name": "..."}}}}
+{{"tool": "update_branding", "params": {{"primary_color": "#HEX", "secondary_color": "#HEX", "accent_color": "#HEX", "background_color": "#HEX", "text_color": "#HEX", "font_family": "...", "font_arabic": "...", "design_template": "modern|classic|dark|corporate|luxury", "card_style": "bordered|shadow|flat|glass", "slide_ratio": "16:9|4:3", "header_enabled": 1, "footer_enabled": 1, "tagline": "...", "tagline_en": "...", "company_name": "..."}}}}
 ```
 ملاحظة: أرسل فقط الحقول التي يريد المستخدم تعديلها، ليس كلها.
 عدد الشرائح يقرره التوليد من حجم محتوى المشروع، وارتفاع الهيدر والفوتر ثابتان — لا توجد أداة لتغيير أي منها.
@@ -741,6 +741,7 @@ def _build_agent_system_state(tenant_id):
     return f"""###  معلومات الشركة:
 - اسم الشركة: {branding.get('company_name', 'غير محدد')}
 - الشعار النصي: {branding.get('tagline', 'غير محدد')}
+- الشعار النصي بالإنجليزية: {branding.get('tagline_en') or 'غير محدد'}
 
 ###  الهوية البصرية:
 - اللون الرئيسي: {branding.get('primary_color', '#3B6E91')}
@@ -1046,7 +1047,7 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
             allowed_keys = {
                 'primary_color', 'secondary_color', 'accent_color', 'background_color',
                 'text_color', 'font_family', 'font_arabic', 'design_template', 'card_style',
-                'slide_ratio', 'header_enabled', 'footer_enabled', 'tagline', 'company_name',
+                'slide_ratio', 'header_enabled', 'footer_enabled', 'tagline', 'tagline_en', 'company_name',
             }
             updates = {}
             for k, v in params.items():
@@ -1513,7 +1514,8 @@ HTML الحالي:
                 result['message'] = 'لا توجد بيانات مشروع في مساحة العمل. استخدم update_workspace أولاً لملء بيانات المشروع من كلام المستخدم.'
             else:
                 plan_branding = db.get_branding(tenant_id) or {}
-                training_context = db.get_training_context(tenant_id) or ''
+                training_context = db.get_training_context(
+                    tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
                 plan_prompt = slide_engine.build_slide_plan_prompt(
                     project_data, plan_branding, tenant_id=tenant_id)
                 if training_context:
@@ -1565,7 +1567,8 @@ HTML الحالي:
             else:
                 branding = db.get_branding(tenant_id) or {}
                 _prepare_generation_logo_context(project_data, branding, tenant_id)
-                training_context = db.get_training_context(tenant_id) or ''
+                training_context = db.get_training_context(
+                    tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
                 def call_text_fn(sys_prompt, user_msg, max_tokens=6000):
                     if training_context:
                         sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"

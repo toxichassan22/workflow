@@ -733,7 +733,8 @@ def api_site_analysis():
 
     offer_lang = slide_engine.resolve_offer_lang(project_data)
     system_prompt, prompt = build_site_analysis_prompts(project_data, offer_lang)
-    training_context = db.get_training_context(g.tenant_id, surface='content') or ''
+    training_context = db.get_training_context(
+        g.tenant_id, surface='content', offer_lang=offer_lang) or ''
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     try:

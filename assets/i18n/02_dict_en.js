@@ -540,6 +540,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "admin.package_name_en": "Package name (English)",
   "company.name_en_field": "Company name in English",
   "company.name_en_placeholder": "Company name",
+  "company.tagline_en_field": "Tagline in English",
+  "company.tagline_en_placeholder": "Short tagline",
   "auth.request_failed": "Request failed",
   "auth.request_failed_http": "Request failed (HTTP {code})",
   "auth.trial_days_left": "The company trial ends in {n} days",

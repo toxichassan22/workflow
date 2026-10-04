@@ -38,7 +38,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         except Exception:
             tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang)
-    training_context = db.get_training_context(tenant_id, surface='content') if tenant_id else ''
+    training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
+                        if tenant_id else '')
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(
@@ -266,7 +267,8 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
         except Exception:
             tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang=offer_lang)
-    training_context = db.get_training_context(tenant_id, surface='content') if tenant_id else ''
+    training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
+                        if tenant_id else '')
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_summary_user_prompt(

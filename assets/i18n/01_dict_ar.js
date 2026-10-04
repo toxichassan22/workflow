@@ -540,6 +540,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "admin.package_name_en": "اسم الباقة بالإنجليزية",
   "company.name_en_field": "اسم الشركة بالإنجليزية",
   "company.name_en_placeholder": "اسم الشركة",
+  "company.tagline_en_field": "الشعار / التاغ لاين بالإنجليزية",
+  "company.tagline_en_placeholder": "شعار قصير",
   "auth.request_failed": "فشل الطلب",
   "auth.request_failed_http": "فشل الطلب (HTTP {code})",
   "auth.trial_days_left": "تنتهي الفترة التجريبية للشركة خلال {n} أيام",

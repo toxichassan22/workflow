@@ -118,6 +118,7 @@ def _create_tables(conn):
         watermark_path TEXT,
         company_name TEXT,
         tagline TEXT,
+        tagline_en TEXT,
         font_family TEXT DEFAULT 'The Sans Arabic',
         font_arabic TEXT DEFAULT 'The Sans Arabic',
         design_template TEXT DEFAULT 'modern',

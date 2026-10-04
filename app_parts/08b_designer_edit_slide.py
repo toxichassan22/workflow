@@ -25,7 +25,8 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     training_context = ''
     if tenant_id:
         try:
-            training_context = db.get_training_context(tenant_id) or ''
+            training_context = db.get_training_context(
+                tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
         except Exception:
             training_context = ''
     training_note = (

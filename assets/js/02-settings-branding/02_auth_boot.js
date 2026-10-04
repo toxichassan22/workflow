@@ -676,6 +676,7 @@
       setValue('settingsCompanyName', b.company_name || '');
     setValue('settingsCompanyNameEn', b.company_name_en || '');
       setValue('settingsTagline', b.tagline || '');
+      setValue('settingsTaglineEn', b.tagline_en || '');
       setValue('settingsPrimaryColor', b.primary_color || '#07182C');
       setValue('settingsSecondaryColor', b.secondary_color || '#03E1CE');
       setValue('settingsAccentColor', b.accent_color || '#6DA3C3');
@@ -742,6 +743,7 @@
         company_name: getValue('settingsCompanyName'),
       company_name_en: getValue('settingsCompanyNameEn'),
         tagline: getValue('settingsTagline'),
+        tagline_en: getValue('settingsTaglineEn'),
         primary_color: getValue('settingsPrimaryColor'),
         secondary_color: getValue('settingsSecondaryColor'),
         accent_color: getValue('settingsAccentColor'),

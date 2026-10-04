@@ -184,7 +184,8 @@ def api_designer_chat():
 
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
-    training_context = db.get_training_context(g.tenant_id) or ''
+    training_context = db.get_training_context(
+        g.tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
 
     # DESIGNER_AGENT=1: per-task planner/runner path (chatplan). The legacy
     # all-at-once planner below stays untouched for DESIGNER_AGENT=0.

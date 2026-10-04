@@ -287,7 +287,8 @@ def update_branding(tenant_id, **fields):
     conn = get_db()
     allowed = {
         'primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color',
-        'logo_path', 'watermark_path', 'company_name', 'tagline', 'font_family', 'font_arabic',
+        'logo_path', 'watermark_path', 'company_name', 'tagline', 'tagline_en',
+        'font_family', 'font_arabic',
         'design_template', 'reference_image_path',
         'header_enabled', 'footer_enabled',
         'card_style', 'slide_ratio', 'font_file_path', 'font_file_data',

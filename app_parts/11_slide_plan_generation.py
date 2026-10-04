@@ -101,7 +101,8 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
         if key in slide_engine.PRESENTATION_SECTION_ORDER
     )
     section_mode = bool(target_section_keys)
-    training_context = db.get_training_context(tenant_id) or ''
+    training_context = db.get_training_context(
+        tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
     # Slide bounds are platform constants now — there is no company slide-count
     # setting to honour or to lock, only the planner's floor and the open ceiling.
     configured_min, configured_max, _fallback_count = resolve_slide_bounds(branding)
@@ -666,7 +667,8 @@ def api_generate_slide_single():
             }
 
     images_info = _get_images_info(images, project_data)
-    training_context = db.get_training_context(g.tenant_id)
+    training_context = db.get_training_context(
+        g.tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data))
 
     design_rules = build_design_rules(branding)
     # Every collected fact, grouped by section. This used to be the raw draft cut at 4,000
@@ -911,7 +913,8 @@ def api_generate_slides():
 
     images_info = _get_images_info(images, project_data)
 
-    training_context = db.get_training_context(g.tenant_id)
+    training_context = db.get_training_context(
+        g.tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data))
 
     # Define the text-model call function for the slide engine
     def call_text_fn(sys_prompt, user_msg, max_tokens=6000):

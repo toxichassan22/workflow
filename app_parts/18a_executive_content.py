@@ -43,7 +43,8 @@ def api_generate_executive_content():
         prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     cap = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
     system_prompt = executive_content.SYSTEM_PROMPT
-    training_context = db.get_training_context(g.tenant_id, surface='content') or ''
+    training_context = db.get_training_context(
+        g.tenant_id, surface='content', offer_lang=offer_lang) or ''
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:

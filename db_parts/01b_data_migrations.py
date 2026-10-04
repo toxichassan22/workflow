@@ -484,6 +484,7 @@ def _migrate_branding_columns(conn):
             'font_file_data': "ALTER TABLE tenant_branding ADD COLUMN font_file_data TEXT",
             'generation_rules': "ALTER TABLE tenant_branding ADD COLUMN generation_rules TEXT",
             'watermark_path': "ALTER TABLE tenant_branding ADD COLUMN watermark_path TEXT",
+            'tagline_en': "ALTER TABLE tenant_branding ADD COLUMN tagline_en TEXT",
         }
         for col, sql in migrations.items():
             if col not in existing_cols:
