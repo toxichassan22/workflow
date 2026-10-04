@@ -387,6 +387,11 @@
       if (applying.length) await Promise.allSettled(applying);
     }
 
+    // Re-entrancy guard for the pending-placeholder reselect inside
+    // renderLocationWorkflowState (selectMapPreviewView renders before it can
+    // populate the preview state).
+    let locationMapReselectPending = false;
+
     function renderLocationWorkflowState() {
       const overview = typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS[0] : null;
       const overviewGenerated = mapPreviewIsGenerated(overview);
@@ -473,6 +478,27 @@
         updateTenantMapInteractionState();
       }
       renderMapPreviewGallery();
+      // The selected map can be picked while map_placeholders is still empty
+      // (the section renders before the draft payload lands) — the select then
+      // bails with no preview state and the box stays blank until the user
+      // clicks the card again. Once the data catches up, re-select it here.
+      if (!tenantMapPreviewState && tenantSelectedMapType && !locationMapReselectPending
+        && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
+        const selView = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType);
+        const selPlaceholders = tenantCreativeImages.map_placeholders || {};
+        const selHasUrl = selView
+          && ((selView.keys || []).some(key => selPlaceholders[key])
+            || (selView.editableKeys || []).some(key => selPlaceholders[key]));
+        const selCenter = (tenantCreativeImages.map_centers || {})[tenantSelectedMapType] || {};
+        const selBaked = (tenantCreativeImages.map_baked_frames || {})[tenantSelectedMapType] || {};
+        const selLat = selBaked.lat ?? selCenter.lat ?? tenantCreativeImages.map_lat ?? tenantProjectData.location_lat;
+        const selLng = selBaked.lng ?? selCenter.lng ?? tenantCreativeImages.map_lng ?? tenantProjectData.location_lng;
+        if (selHasUrl && Number.isFinite(Number(selLat)) && Number.isFinite(Number(selLng))) {
+          locationMapReselectPending = true;
+          try { selectMapPreviewView(tenantSelectedMapType); }
+          finally { locationMapReselectPending = false; }
+        }
+      }
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
         const panel = document.getElementById('locationMapToolsPanel');
         const controlsEl = document.getElementById('locationMapGenerationControls');

@@ -10,6 +10,7 @@
     let tenantInteractiveReadyPromise = null;
     let tenantInteractiveMountPromise = null;
     let tenantInteractiveMounted = false;
+    let tenantInteractiveScriptLoaded = false;
     let tenantInteractiveSuppressIdle = false;
     let interactiveMountSeq = 0;
     let interactiveOverlayRaf = 0;
@@ -78,7 +79,10 @@
     }
 
     // Loads the Maps JS API once. Resolves false (and keeps the static-image
-    // path) when no browser key is configured or the loader script fails.
+    // path) when no browser key is configured or the loader script fails. Only
+    // success is memoized — a transient miss must not kill interactive mode
+    // for the whole session, so failures clear the cached promise and the
+    // next mount retries.
     function ensureInteractiveMapsApi() {
       if (tenantInteractiveReadyPromise) return tenantInteractiveReadyPromise;
       tenantInteractiveReadyPromise = (async () => {
@@ -86,26 +90,39 @@
           const cfg = await api('GET', '/api/maps/interactive-config');
           if (!cfg || !cfg.success || !cfg.key) {
             console.warn('[INTERACTIVE MAP] static fallback —', (cfg && (cfg.error || cfg.error_code)) || 'no config');
+            tenantInteractiveReadyPromise = null;
             return false;
           }
-          if (!(window.google && window.google.maps && window.google.maps.Map)) {
+          if (!(window.google && window.google.maps && window.google.maps.Map) && !tenantInteractiveScriptLoaded) {
             const lang = (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang && window.WFI18n.getLang()) || 'ar';
             await new Promise((resolve, reject) => {
               const script = document.createElement('script');
               script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(cfg.key)
                 + '&loading=async&language=' + encodeURIComponent(lang) + '&region=SA';
               script.async = true;
-              script.onload = resolve;
+              script.onload = () => { tenantInteractiveScriptLoaded = true; resolve(); };
               script.onerror = () => reject(new Error('maps js load failed'));
               document.head.appendChild(script);
             });
           }
+          // loading=async fires onload long before the google.maps namespace
+          // is populated (the api/js bootstrap still has to fetch its own
+          // modules) — wait for it, then pull Map through importLibrary.
+          for (let i = 0; i < 300 && !(window.google && window.google.maps); i++) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
           if (window.google && window.google.maps && window.google.maps.importLibrary) {
             try { await window.google.maps.importLibrary('maps'); } catch (e) { /* Map may already be there */ }
           }
-          return !!(window.google && window.google.maps && window.google.maps.Map);
+          const ok = !!(window.google && window.google.maps && window.google.maps.Map);
+          if (!ok) {
+            console.warn('[INTERACTIVE MAP] static fallback — maps namespace unavailable');
+            tenantInteractiveReadyPromise = null;
+          }
+          return ok;
         } catch (error) {
           console.warn('[INTERACTIVE MAP]', error);
+          tenantInteractiveReadyPromise = null;
           return false;
         }
       })();
@@ -225,14 +242,31 @@
 
     // Called by selectMapPreviewView once the preview state is known. Mounts
     // (or re-frames) the live map when the API is usable; resolves whether the
-    // live map ended up driving the preview.
-    function mountInteractivePreview(mapType, lat, lng, zoom) {
+    // live map ended up driving the preview. A failed mount retries itself a
+    // few times — the Maps loader races slow networks, and without the retry
+    // the preview would sit on the static image (whose pans cost a regen)
+    // until the user happened to reselect the map.
+    function mountInteractivePreview(mapType, lat, lng, zoom, retryAttempt) {
+      const attempt = Number(retryAttempt) || 0;
       const seq = ++interactiveMountSeq;
+      const finish = mounted => {
+        if (!mounted
+          && seq === interactiveMountSeq
+          && tenantSelectedMapType === mapType
+          && !interactiveMapActive()
+          && attempt < 4) {
+          setTimeout(() => {
+            if (interactiveMapActive() || tenantSelectedMapType !== mapType) return;
+            mountInteractivePreview(mapType, lat, lng, zoom, attempt + 1);
+          }, 1200 + attempt * 800);
+        }
+        return mounted;
+      };
       tenantInteractiveMountPromise = ensureInteractiveMapsApi().then(ok => {
-        if (!ok || seq !== interactiveMountSeq) return false;
+        if (!ok || seq !== interactiveMountSeq) return finish(false);
         if (tenantSelectedMapType !== mapType || !tenantMapPreviewState) return false;
         const mounted = mountInteractiveMap(mapType, lat, lng, zoom);
-        if (!mounted) return false;
+        if (!mounted) return finish(false);
         // The live map is always a clean editable base: every drawable item is
         // repainted by the DOM overlay, so the flags never depend on which
         // raster variant the preview fell back to.
