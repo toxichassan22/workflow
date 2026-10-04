@@ -698,15 +698,44 @@
     function refreshSettingsColorFields() {
       document.querySelectorAll('.tenant-color-value[data-color-for]').forEach(el => {
         const input = document.getElementById(el.getAttribute('data-color-for'));
-        el.textContent = input && input.value ? String(input.value).toUpperCase() : '';
+        el.value = input && input.value ? String(input.value).toUpperCase() : '';
       });
+    }
+
+    function normalizeHexColorValue(value) {
+      const match = String(value || '').trim().match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+      if (!match) return null;
+      let hex = match[1];
+      if (hex.length === 3) hex = hex.split('').map(ch => ch + ch).join('');
+      return '#' + hex.toUpperCase();
     }
 
     document.addEventListener('input', e => {
       const t = e.target;
-      if (!t || t.type !== 'color' || !t.id) return;
-      const el = document.querySelector('.tenant-color-value[data-color-for="' + t.id + '"]');
-      if (el) el.textContent = String(t.value).toUpperCase();
+      if (!t) return;
+      if (t.type === 'color' && t.id) {
+        const el = document.querySelector('.tenant-color-value[data-color-for="' + t.id + '"]');
+        if (el) el.value = String(t.value).toUpperCase();
+        return;
+      }
+      if (t.classList && t.classList.contains('tenant-color-value')) {
+        const picker = document.getElementById(t.getAttribute('data-color-for'));
+        const hex = normalizeHexColorValue(t.value);
+        if (picker && hex) picker.value = hex;
+      }
+    });
+
+    document.addEventListener('change', e => {
+      const t = e.target;
+      if (!t || !t.classList || !t.classList.contains('tenant-color-value')) return;
+      const picker = document.getElementById(t.getAttribute('data-color-for'));
+      const hex = normalizeHexColorValue(t.value);
+      if (hex) {
+        t.value = hex;
+        if (picker) picker.value = hex;
+      } else if (picker) {
+        t.value = picker.value ? picker.value.toUpperCase() : '';
+      }
     });
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }

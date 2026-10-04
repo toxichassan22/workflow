@@ -971,15 +971,29 @@
       flex: 1;
       display: inline-flex;
       align-items: center;
+      min-width: 0;
       min-height: 42px;
       padding: 0 12px;
       border: 1px solid var(--ui-border);
       border-radius: 10px;
       background: var(--surface-subtle);
       color: var(--ink);
+      font-family: inherit;
       font-size: 12px;
       font-weight: 800;
       letter-spacing: .04em;
+      cursor: text;
+    }
+
+    .tenant-color-value::placeholder {
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .tenant-color-value:focus {
+      outline: none;
+      border-color: var(--ui-border-strong);
+      background: #fff;
     }
 
     .tenant-color-field input[type="color"]:hover + .tenant-color-value,
