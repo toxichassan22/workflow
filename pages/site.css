@@ -336,8 +336,8 @@ a { color: var(--p); }
 
 .mq-set {
   display: flex;
-  gap: 14px;
-  padding-inline-end: 14px;
+  gap: 18px;
+  padding-inline-end: 18px;
 }
 
 .outputs .label {
@@ -652,7 +652,7 @@ a { color: var(--p); }
       chipFloat 6s calc(1.5s + var(--ci, 0s)) ease-in-out infinite;
   }
 
-  .outputs-marquee { animation: outputsDrift 32s linear infinite; }
+  .outputs-marquee { animation: outputsDrift 48s linear infinite; }
   .outputs-track:hover .outputs-marquee { animation-play-state: paused; }
 
   body.js [data-reveal] {
