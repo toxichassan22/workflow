@@ -342,9 +342,15 @@ def _execute_extract_croquis():
         if slide_engine.resolve_offer_lang(data) == slide_engine.OFFER_LANG_ENGLISH:
             system_prompt += (
                 "\n" + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN +
-                "\nJSON keys, the source/enum values, and every quoted document value stay exactly "
-                "as specified; only free-text prose (land_and_building_summary, uses, notes, "
-                "conflict descriptions, and similar) is authored in English."
+                "\nJSON keys and the source/enum values stay exactly as specified. Every "
+                "human-readable value is authored in English — free-text prose "
+                "(land_and_building_summary, uses, notes, regulation_text, conflict descriptions "
+                "and similar), the mandated fallback phrasing (write 'Not specified in the provided "
+                "reference' wherever the Arabic instructions quote «غير محددة في المرجع المتاح»), "
+                "direction words in facades_directions and uses (e.g. 'northern, western'), and "
+                "unit words. Values taken from the documents — street names, regulation wording, "
+                "table titles — are rendered in English too: translate or transliterate them "
+                "faithfully and keep every number, code and coordinate exact."
             )
 
         raw_resp = ""

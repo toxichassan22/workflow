@@ -115,6 +115,12 @@ OFFER_LANGUAGE_DIRECTIVE_EN = (
     "Author every generated word — titles, headings, paragraphs, lists, captions, table notes, "
     "summaries — in clear professional English. Copy every source value (names, figures, labels, "
     "dates, URLs) VERBATIM; never translate proper names and never recompute or reformat numbers. "
+    "Exception: values produced by map/site enrichment (city, district, location_detail, address, "
+    "main_roads, access_roads_data, nearby_landmarks_data, landmarks_matrix, city_landmarks_data, "
+    "catchment_areas, site_analysis, population_density, road names, landmark categories, and "
+    "distance/duration text) may arrive in Arabic even under an English project — render those "
+    "fields in English, translating names and labels faithfully while keeping numbers, codes and "
+    "coordinates exact. "
     "Keep the brief, rules and data above exactly as given; only the authored output language changes. "
     'Set dir="ltr" on generated slide roots.'
 )

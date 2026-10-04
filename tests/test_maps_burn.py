@@ -58,7 +58,9 @@ class MapsBurnTests(unittest.TestCase):
 
         with cls.app.app_context():
             db.init_db()
-            cls.tenant_id = db.create_tenant('Burn Co', 'burn@example.test', 'hash', 'burn-co')
+            cls.tenant_id = db.create_tenant(
+                'Burn Co', 'burn@example.test', 'hash', 'burn-co',
+                credit_balance=100.0)
 
         cls.token = auth.create_token(
             cls.tenant_id, 'burn@example.test', user_id=None, user_name='Burn Admin',
@@ -100,7 +102,8 @@ class MapsBurnTests(unittest.TestCase):
             snaps.append((lat, lng))
             return {'lat': lat, 'lng': lng, 'placeId': f'p-{len(snaps)}'}
 
-        def _fake_route(o_lat, o_lng, d_lat, d_lng, tenant_id=None, usage_ctx=None):
+        def _fake_route(o_lat, o_lng, d_lat, d_lng, tenant_id=None, usage_ctx=None,
+                        language='ar'):
             routes.append((d_lat, d_lng))
             return {'coords': [(o_lat, o_lng), (d_lat, d_lng)], 'summary': 'طريق الملك فهد',
                     'distance_meters': 500, 'distance_km': 0.5, 'duration_min': 2}

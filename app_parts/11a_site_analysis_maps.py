@@ -29,8 +29,10 @@ def api_geocode():
         coords = maps_service.extract_coords_from_maps_link(query)
         if coords:
             print(f"[MAPS LINK] Extracted coords from link: {coords}")
+            geocode_lang = maps_service.map_language(
+                data.get('projectData') if isinstance(data.get('projectData'), dict) else data)
             place = maps_service.reverse_geocode_location(
-                coords['lat'], coords['lng'], tenant_id=g.tenant_id, language='ar',
+                coords['lat'], coords['lng'], tenant_id=g.tenant_id, language=geocode_lang,
                 usage_ctx=maps_service.maps_usage_ctx('geocode', g.tenant_id, data=data)
             ) or {}
             names = market_study.extract_city_district(
@@ -42,7 +44,8 @@ def api_geocode():
                 'lat': coords['lat'],
                 'lng': coords['lng'],
                 'formatted_address': place.get('formatted_address') or (
-                    address if (address and not address.startswith('http')) else 'تم الاستخراج من رابط خرائط جوجل'
+                    address if (address and not address.startswith('http'))
+                    else ('Extracted from Google Maps link' if geocode_lang == 'en' else 'تم الاستخراج من رابط خرائط جوجل')
                 ),
                 'city': names.get('city') or '',
                 'district': names.get('district') or '',
@@ -83,7 +86,8 @@ def api_nearby_landmarks():
     radius = data.get('radius', 20000)
     if lat is None or lng is None:
         return jsonify({'error': 'lat and lng are required'}), 400
-    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data))
+    nearby_lang = maps_service.map_language(data.get('projectData') if isinstance(data.get('projectData'), dict) else data)
+    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data), language=nearby_lang)
     status = 502 if result.get('error') and not result.get('success') else 200
     return jsonify(result), status
 
@@ -144,16 +148,17 @@ def api_preview_map_data():
         return jsonify({'success': False, 'error': 'لم يتم العثور على إحداثيات للموقع'}), 400
 
     landmark_radius_m = 20000
+    preview_lang = 'en' if slide_engine.resolve_offer_lang(project_data) == slide_engine.OFFER_LANG_ENGLISH else 'ar'
     selected_landmarks = data.get('selectedLandmarks')
     custom_text = project_data.get('nearby_landmarks') or project_data.get('landmarks_text')
     landmarks = selected_landmarks if isinstance(selected_landmarks, list) else (
-        maps_service._parse_landmarks_text(custom_text) if isinstance(custom_text, str) else (custom_text or [])
+        maps_service._parse_landmarks_text(custom_text, language=preview_lang) if isinstance(custom_text, str) else (custom_text or [])
     )
     landmarks_error = None
     landmarks_warning = None
 
     if not landmarks:
-        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data))
+        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data), language=preview_lang)
         if places.get('success'):
             landmarks = places['landmarks']
             if not landmarks:
@@ -187,13 +192,13 @@ def api_preview_map_data():
     geocoded = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
     matrix = []
     if data.get('calculateDriving') and geocoded:
-        matrix = maps_service.get_drive_matrix((lat, lng), geocoded, usage_ctx=maps_service.maps_usage_ctx('matrix', g.tenant_id, data=data))
+        matrix = maps_service.get_drive_matrix((lat, lng), geocoded, usage_ctx=maps_service.maps_usage_ctx('matrix', g.tenant_id, data=data), language=preview_lang)
         for i, lm in enumerate(geocoded):
             if i < len(matrix) and matrix[i]:
                 entry = matrix[i]
                 lm['duration_minutes'] = entry.get('duration_min')
                 lm['distance_km'] = entry.get('distance_km')
-                lm['distance_text'] = f"{entry.get('distance_km')} كم" if entry.get('distance_km') else None
+                lm['distance_text'] = f"{entry.get('distance_km')} {maps_service._distance_unit(preview_lang)}" if entry.get('distance_km') else None
 
     # Rows show nearest-first by the driving distance the table displays; the
     # matrix is index-aligned with `landmarks`, so it is reordered with them.
@@ -329,6 +334,12 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     Does not generate map images.  Used by analyze-site and site-analysis so they
     share the same data sources.
     """
+    # The stored project-language choice decides which language Google's calls
+    # return names in — an English deck must not inherit Arabic site data.
+    site_lang = slide_engine.resolve_offer_lang(project_data if isinstance(project_data, dict) else None)
+    lang = 'en' if site_lang == slide_engine.OFFER_LANG_ENGLISH else 'ar'
+    minutes_word = 'min' if lang == 'en' else 'دقيقة'
+    minutes_word_plural = 'min' if lang == 'en' else 'دقائق'
 
     def landmark_lines(items, matrix=None):
         matrix = matrix or []
@@ -347,14 +358,14 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
             if distance:
                 details.append(str(distance))
             if duration:
-                details.append(f'{duration} دقيقة')
+                details.append(f'{duration} {minutes_word}')
             lines.append(f"{name} - {' - '.join(details)}" if details else name)
         return '\n'.join(lines)
 
     def enrich_road_metrics(items):
         if not items or all(item.get('distance_text') and item.get('duration_minutes') for item in items):
             return
-        matrix = maps_service.get_drive_matrix((lat, lng), items)
+        matrix = maps_service.get_drive_matrix((lat, lng), items, language=lang)
         for index, item in enumerate(items):
             if index >= len(matrix) or not isinstance(matrix[index], dict):
                 continue
@@ -364,11 +375,11 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
             item['duration_min'] = entry.get('duration_min') or item.get('duration_min')
             item['duration_minutes'] = entry.get('duration_min') or item.get('duration_minutes')
 
-    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=20000, max_results=20, include_all=True)
+    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=20000, max_results=20, include_all=True, language=lang)
     nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
     nearby_error = nearby.get('error') if not nearby.get('success') else None
     nearby_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع' if nearby.get('success') and not nearby_items else None
-    nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items) if nearby_items else []
+    nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items, language=lang) if nearby_items else []
     for index, item in enumerate(nearby_items):
         if index >= len(nearby_matrix) or not isinstance(nearby_matrix[index], dict):
             continue
@@ -387,14 +398,14 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     city_error = None
     city_warning = None
     if curated_city:
-        city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=tenant_id)
+        city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=tenant_id, language=lang)
     else:
-        city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True)
+        city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True, language=lang)
         city_items = city.get('landmarks', []) if city.get('success') else []
         city_error = city.get('error') if not city.get('success') else None
         existing_city_names = {item.get('name', '').casefold() for item in city_items}
         city_items.extend(
-            item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id)
+            item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id, language=lang)
             if item.get('name', '').casefold() not in existing_city_names
         )
     if not city_items and not city_error:
@@ -403,7 +414,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     # split locally from the same probes instead of paying for a second
     # 8-probe discovery. Previously every analysis burned ~16 Roads plus
     # ~16 Directions calls here alone.
-    all_roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=10)
+    all_roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=10, language=lang)
     enrich_road_metrics(all_roads)
     roads = all_roads[:6]
 
@@ -438,13 +449,17 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     population = population_service.get_population_density(lat, lng)
     location_details = maps_service.reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='en')
     arabic_location = maps_service.reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='ar') or {}
+    # City/district/address follow the deck language: the English geocode is the
+    # primary source for English projects, the Arabic one otherwise.
+    primary_location = location_details if lang == 'en' else arabic_location
+    secondary_location = arabic_location if lang == 'en' else location_details
     place_names = market_study.extract_city_district(
-        arabic_location.get('address_components') or location_details.get('address_components') or [],
-        arabic_location.get('formatted_address') or location_details.get('formatted_address') or '',
+        primary_location.get('address_components') or secondary_location.get('address_components') or [],
+        primary_location.get('formatted_address') or secondary_location.get('formatted_address') or '',
     )
     fields = {
         'location_lat': lat,
-        'location_detail': arabic_location.get('formatted_address') or location_details.get('formatted_address', ''),
+        'location_detail': primary_location.get('formatted_address') or secondary_location.get('formatted_address', ''),
         'location_lng': lng,
         'nearby_landmarks': landmark_lines(nearby_items),
         'city_landmarks': landmark_lines(city_items),
@@ -454,7 +469,10 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     if place_names.get('district') and (site_moved or not str(project_data.get('district') or '').strip()):
         fields['district'] = place_names['district']
     if population.get('available'):
-        fields['population_density'] = f"{population['value']} {population.get('unit', 'نسمة/كم²')}"
+        population_unit = population.get('unit', 'نسمة/كم²')
+        if lang == 'en' and population_unit == 'نسمة/كم²':
+            population_unit = 'people/km²'
+        fields['population_density'] = f"{population['value']} {population_unit}"
         fields['population_density_source'] = population.get('source')
     road_names = []
     for road in roads:
@@ -465,7 +483,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
 
-    city_matrix = maps_service.get_drive_matrix((lat, lng), city_items) if city_items else []
+    city_matrix = maps_service.get_drive_matrix((lat, lng), city_items, language=lang) if city_items else []
     for index, item in enumerate(city_items):
         if index < len(city_matrix) and isinstance(city_matrix[index], dict):
             if city_matrix[index].get('duration_min') is not None:
@@ -488,7 +506,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         if item.get('distance_text'):
             parts.append(str(item['distance_text']))
         if duration is not None:
-            parts.append(f'{duration} دقائق')
+            parts.append(f'{duration} {minutes_word_plural}')
         catchment_lines.append(' — '.join(parts))
     if catchment_lines:
         fields['catchment_areas'] = '\n'.join(catchment_lines)

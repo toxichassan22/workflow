@@ -1061,7 +1061,7 @@ LAND_ANALYSIS_SITE_CONTEXT_KEYS = (
     'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_polygon',
     'city', 'district', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
     'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
-    'zoning_code', 'land_use',
+    'zoning_code', 'land_use', 'project_language',
 )
 
 

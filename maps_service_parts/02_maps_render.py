@@ -1,6 +1,6 @@
 
 
-def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
+def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None, language='ar'):
     """Return [{name, distance_km, duration_min}] for one driving matrix request.
 
     origin may be (lat, lng) or a dict with lat/lng keys.
@@ -29,10 +29,11 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
     if not points:
         return []
 
+    language = _lang_norm(language)
     matrix_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
     matrix_key = _discovery_cache_key(
         matrix_tenant, 'matrix', None, None,
-        extra=f"{origin_str}|{'|'.join(points)}")
+        extra=f"{origin_str}|{'|'.join(points)}|{language}")
     matrix_hit = _discovery_cache_get(matrix_tenant, matrix_key)
     if isinstance(matrix_hit, list) and len(matrix_hit) == len(points):
         return matrix_hit
@@ -42,7 +43,7 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
         'origins': origin_str,
         'destinations': '|'.join(points),
         'mode': 'driving',
-        'language': 'ar',
+        'language': language,
         'region': 'SA',
         # Live traffic: without departure_time Google returns free-flow duration,
         # which is what made our numbers lower than the Google Maps app.
@@ -81,7 +82,7 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
                 'name': names[i] if i < len(names) else '',
                 'distance_km': distance_km,
                 'duration_min': duration_min,
-                'distance_text': f"{distance_km} كم" if distance_km is not None else None,
+                'distance_text': f"{distance_km} {_distance_unit(language)}" if distance_km is not None else None,
                 'in_traffic': in_traffic,
             })
         # Google bills one element per origin-destination pair; a single origin
@@ -950,8 +951,8 @@ def _post_process_streetview(image_path, heading, index):
         return False
 
 
-def _draw_compass(image_path, position='top-right', compass_size=60):
-    """Draw a professional compass indicator (ش = North) matching reference examples."""
+def _draw_compass(image_path, position='top-right', compass_size=60, language='ar'):
+    """Draw a professional compass indicator (ش / N = North) matching reference examples."""
     try:
         img = Image.open(image_path).convert('RGBA')
         img_w, img_h = img.size
@@ -973,7 +974,7 @@ def _draw_compass(image_path, position='top-right', compass_size=60):
                      fill=(240, 230, 210, 220), outline=COMPASS_COLOR + (255,), width=3)
 
         font = _get_arabic_font(compass_size // 2)
-        text = _reshape_arabic_text('ش')
+        text = _reshape_arabic_text('N' if _lang_norm(language) == 'en' else 'ش')
         bbox = draw.textbbox((0, 0), text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw.text((comp_cx - tw // 2, comp_cy - th // 2 - 2), text,
@@ -1015,7 +1016,7 @@ def _apply_sepia_tone(image_path, intensity=0.3):
         return False
 
 
-def _draw_inset_map(image_path, center_lat, center_lng, inset_size=180):
+def _draw_inset_map(image_path, center_lat, center_lng, inset_size=180, language='ar'):
     """Draw a small inset/overview map in the bottom-right corner."""
     try:
         # Download a smaller wide-area map
@@ -1023,7 +1024,8 @@ def _draw_inset_map(image_path, center_lat, center_lng, inset_size=180):
         inset_res = get_static_map(center_lat, center_lng, zoom=9,
                                     size=(inset_size, inset_size),
                                     output_path=inset_path,
-                                    styles=SATELLITE_CLEAN_STYLES)
+                                    styles=SATELLITE_CLEAN_STYLES,
+                                    language=language)
         if not inset_res.get('success'):
             return False
 
@@ -1136,7 +1138,7 @@ def _snap_to_roads(lat, lng, tenant_id=None, usage_ctx=None):
     return None
 
 
-def _google_directions_route(origin_lat, origin_lng, destination_lat, destination_lng, tenant_id=None, usage_ctx=None):
+def _google_directions_route(origin_lat, origin_lng, destination_lat, destination_lng, tenant_id=None, usage_ctx=None, language='ar'):
     """Return Google Maps road geometry; never fall back to a third-party router."""
     if not _has_api_key():
         return None
@@ -1145,7 +1147,7 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
         'destination': f'{destination_lat},{destination_lng}',
         'mode': 'driving',
         'alternatives': 'false',
-        'language': 'ar',
+        'language': _lang_norm(language),
         'region': 'sa',
         'key': _get_api_key(),
     }
@@ -1183,14 +1185,14 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
         return None
 
 
-def _google_reverse_geocode_road(lat, lng, tenant_id=None, usage_ctx=None):
+def _google_reverse_geocode_road(lat, lng, tenant_id=None, usage_ctx=None, language='ar'):
     """Ask Google which named road is nearest to a point used for an access route."""
     if not _has_api_key():
         return ''
     try:
         response = requests.get(
             'https://maps.googleapis.com/maps/api/geocode/json',
-            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'ar'}, timeout=15
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': _lang_norm(language)}, timeout=15
         )
         data = response.json()
         if data.get('status') != 'OK':
@@ -1225,13 +1227,14 @@ def _fixed_road_probe_points(lat, lng, lat_step, lng_step):
 
 
 def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=None, origin_lng=None, max_results=6,
-                          lat_step=0.0018, lng_step=0.0024):
+                          lat_step=0.0018, lng_step=0.0024, language='ar'):
     """Return verified nearby road names from Google Roads + Directions."""
+    language = _lang_norm(language)
     route_origin_lat = origin_lat if origin_lat is not None else center_lat
     route_origin_lng = origin_lng if origin_lng is not None else center_lng
     roads_key = _discovery_cache_key(
         tenant_id, 'roads', route_origin_lat, route_origin_lng,
-        extra=f"{max_results}:{lat_step}:{lng_step}")
+        extra=f"{max_results}:{lat_step}:{lng_step}:{language}")
     roads_hit = _discovery_cache_get(tenant_id, roads_key)
     if isinstance(roads_hit, list):
         return roads_hit
@@ -1248,17 +1251,20 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         dest_lng = snapped['lng'] if snapped else p_lng
         route = _google_directions_route(
             route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id,
-            usage_ctx=ambient_ctx
+            usage_ctx=ambient_ctx, language=language
         )
         if not route:
             return None
         name = (route.get('summary') or '').strip()
-        if not name or re.search(r'[A-Za-z]', name):
+        # The summary should already arrive in the requested language; when it
+        # still comes back in the other script, re-geocode for a localized name.
+        wrong_script = bool(_ARABIC_CHAR_RE.search(name)) if language == 'en' else bool(re.search(r'[A-Za-z]', name))
+        if not name or wrong_script:
             localized_name = _google_reverse_geocode_road(
-                dest_lat, dest_lng, tenant_id=tenant_id, usage_ctx=ambient_ctx)
+                dest_lat, dest_lng, tenant_id=tenant_id, usage_ctx=ambient_ctx, language=language)
             if localized_name:
                 name = localized_name
-        name = name or 'طريق قريب'
+        name = name or ('Nearby road' if language == 'en' else 'طريق قريب')
         key = (snapped or {}).get('place_id') or name.casefold()
         distance_meters = route.get('distance_meters')
         if distance_meters is None:
@@ -1273,7 +1279,7 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
             'lng': dest_lng,
             'distance_meters': distance_meters,
             'distance_km': distance_km,
-            'distance_text': f'{distance_km} كم',
+            'distance_text': f'{distance_km} {_distance_unit(language)}',
             'duration_min': duration_min,
             'duration_minutes': duration_min,
             'place_id': key,
@@ -1305,7 +1311,9 @@ def access_probe_points(lat, lng):
     return _fixed_road_probe_points(lat, lng, 0.0018, 0.0024)
 
 
-_ROAD_NAME_PREFIXES = ('طريق', 'شارع', 'الطريق', 'الشارع', 'ش.', 'ش')
+_ROAD_NAME_PREFIXES = ('طريق', 'شارع', 'الطريق', 'الشارع', 'ش.', 'ش',
+                       'road', 'rd', 'street', 'st', 'highway', 'hwy', 'avenue', 'ave',
+                       'boulevard', 'blvd', 'drive', 'dr', 'lane', 'route', 'corridor')
 
 
 def _road_name_key(name):
@@ -1315,7 +1323,7 @@ def _road_name_key(name):
     text = re.sub(r'[\u0649]', '\u064a', text)
     text = re.sub(r'[\u0629]', '\u0647', text)
     text = re.sub(r'[^\w\s]', ' ', text)
-    words = [word for word in text.split() if word not in _ROAD_NAME_PREFIXES]
+    words = [word for word in text.split() if word.casefold() not in _ROAD_NAME_PREFIXES]
     words = [word[2:] if word.startswith('ال') and len(word) > 3 else word for word in words]
     return ' '.join(words).casefold()
 
@@ -1507,6 +1515,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         # The probes are fixed on purpose. They used to be shifted and rotated by regen_seed,
         # so every regeneration snapped to different roads and the map came back with a
         # different set of street names for the same site.
+        road_lang = map_language(project_data)
         probe_points = access_probe_points(route_origin_lat, route_origin_lng)
         targeted_probes = []
         for item in road_data if isinstance(road_data, list) else []:
@@ -1529,15 +1538,17 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             dest_lat = snapped['lat'] if snapped else p_lat
             dest_lng = snapped['lng'] if snapped else p_lng
             route = _google_directions_route(
-                route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id
+                route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id,
+                language=road_lang
             )
             if not route:
                 return None
 
             discovered_name = (route.get('summary') or '').strip()
-            if not discovered_name or re.search(r'[A-Za-z]', discovered_name):
+            wrong_script = bool(_ARABIC_CHAR_RE.search(discovered_name)) if road_lang == 'en' else bool(re.search(r'[A-Za-z]', discovered_name))
+            if not discovered_name or wrong_script:
                 localized_name = _google_reverse_geocode_road(
-                    dest_lat, dest_lng, tenant_id=tenant_id
+                    dest_lat, dest_lng, tenant_id=tenant_id, language=road_lang
                 )
                 if localized_name:
                     discovered_name = localized_name

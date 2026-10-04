@@ -666,8 +666,9 @@ def detect_curated_city(lat, lng, tenant_id=None):
     return None
 
 
-def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
+def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None, language='ar'):
     ambient_ctx = _current_maps_ctx()
+    language = _lang_norm(language)
     places = get_nearby_landmarks(
         lat,
         lng,
@@ -676,13 +677,14 @@ def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
         include_all=True,
         included_types=['shopping_mall', 'university', 'hospital'],
         usage_ctx=ambient_ctx or maps_usage_ctx('places', tenant_id=tenant_id),
+        language=language,
     )
     if not places.get('success'):
         return []
     category_specs = (
-        ('shopping_mall', 'التسوق'),
-        ('university', 'التعليم'),
-        ('hospital', 'الصحة'),
+        ('shopping_mall', 'Shopping' if language == 'en' else 'التسوق'),
+        ('university', 'Education' if language == 'en' else 'التعليم'),
+        ('hospital', 'Health' if language == 'en' else 'الصحة'),
     )
     selected = []
     seen_categories = set()
@@ -699,7 +701,8 @@ def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
         })
     matrix = get_drive_matrix(
         (lat, lng), selected,
-        usage_ctx=ambient_ctx or maps_usage_ctx('matrix', tenant_id=tenant_id)) if selected else []
+        usage_ctx=ambient_ctx or maps_usage_ctx('matrix', tenant_id=tenant_id),
+        language=language) if selected else []
     for index, item in enumerate(selected):
         if index >= len(matrix) or not isinstance(matrix[index], dict):
             continue
@@ -709,7 +712,44 @@ def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
     return selected
 
 
-def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
+# English labels for the curated city_landmarks.json categories — the catalog is
+# Arabic-keyed, so English decks map each label instead of carrying Arabic words
+# into the catchment table.
+_CURATED_CATEGORY_EN = {
+    'النقل': 'Transport',
+    'النقل العام': 'Public transit',
+    'المحاور': 'Main corridor',
+    'الواجهة البحرية': 'Waterfront',
+    'التطوير المستقبلي': 'Future development',
+    'التراث والسياحة': 'Heritage & tourism',
+    'الأعمال واللوجستيات': 'Business & logistics',
+    'الترفيه': 'Leisure',
+    'الرياضة والفعاليات': 'Sports & events',
+    'الفعاليات': 'Events',
+    'المناطق الساحلية': 'Coastal areas',
+    'التسوق': 'Shopping',
+    'التعليم': 'Education',
+    'الصحة': 'Health',
+    'ديني ومركزي': 'Religious & central',
+    'ديني': 'Religious',
+    'المشاعر': 'Holy sites',
+    'المشاريع الكبرى': 'Major projects',
+    'السياحة الدينية': 'Religious tourism',
+    'الأعمال والمال': 'Business & finance',
+    'الأعمال والتقنية': 'Business & tech',
+    'الأعمال والحكومة': 'Business & government',
+    'مركز المدينة': 'City center',
+    'السياحة والمعالم': 'Tourism & landmarks',
+    'المعارض والفعاليات': 'Exhibitions & events',
+    'الطبيعة والترفيه': 'Nature & leisure',
+    'اللوجستيات': 'Logistics',
+    'الصناعة واللوجستيات': 'Industry & logistics',
+    'معلم رئيسي': 'Major landmark',
+}
+
+
+def get_curated_city_landmarks(city, lat, lng, tenant_id=None, language='ar'):
+    language = _lang_norm(language)
     entries = CURATED_CITY_LANDMARKS.get(city, [])
     if not entries:
         return []
@@ -730,18 +770,33 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
 
     def resolve_entry(item):
         name, entry = item
-        cache_key = (city, name.casefold())
+        cache_key = (city, name.casefold(), language)
         geo = _CURATED_GEOCODE_CACHE.get(cache_key)
         if geo is None:
             geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id,
                                   usage_ctx=ambient_ctx)
+            if language == 'en' and geo.get('success'):
+                # Google's own English display name for the landmark — the deck
+                # then carries "King Abdulaziz International Airport" rather
+                # than the Arabic curated label.
+                place = find_place_near(name, lat, lng, radius_m=80000, language='en',
+                                        usage_ctx=ambient_ctx)
+                if place and place.get('name'):
+                    geo = dict(geo)
+                    geo['localized_name'] = place['name']
+                    if place.get('lat') is not None and place.get('lng') is not None:
+                        geo['lat'] = place['lat']
+                        geo['lng'] = place['lng']
             if geo.get('success'):
                 _CURATED_GEOCODE_CACHE[cache_key] = geo
         if not geo.get('success'):
             return None
+        category = entry.get('category') or 'معلم رئيسي'
+        if language == 'en':
+            category = _CURATED_CATEGORY_EN.get(category, 'Major landmark')
         return {
-            'name': name,
-            'category': entry.get('category') or 'معلم رئيسي',
+            'name': geo.get('localized_name') or name,
+            'category': category,
             'lat': geo.get('lat'),
             'lng': geo.get('lng'),
             'types': [],
@@ -757,14 +812,14 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
             continue
         item['distance_meters'] = round(_distance_meters(lat, lng, item['lat'], item['lng']))
         landmarks.append(item)
-    for item in get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id):
+    for item in get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id, language=language):
         key = item.get('name', '').casefold()
         if key in seen:
             continue
         seen.add(key)
         landmarks.append(item)
     destinations = [item for item in landmarks if item.get('lat') is not None and item.get('lng') is not None]
-    matrix = get_drive_matrix((lat, lng), destinations) if destinations else []
+    matrix = get_drive_matrix((lat, lng), destinations, language=language) if destinations else []
     for index, item in enumerate(destinations):
         if index >= len(matrix):
             break
@@ -790,15 +845,16 @@ def _download_image(url, params, output_path):
         return {'error': f"Image download failed: {str(e)}"}
 
 
-def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None, styles=None):
+def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None, styles=None, language='ar'):
     """Deterministic cache path for a raw static map.
 
     Every parameter that changes the rendered pixels must be part of the key,
     otherwise different maps (overview/landmarks/access/catchment) at the same
-    coordinates would collide and reuse each other's image.
+    coordinates would collide and reuse each other's image. Language changes the
+    provider's baked tile labels, so it is part of the key too.
     """
     raw = json.dumps(
-        [lat, lng, maptype, zoom, markers, paths, size, styles],
+        [lat, lng, maptype, zoom, markers, paths, size, styles, _lang_norm(language)],
         ensure_ascii=False, sort_keys=True, default=str
     )
     key = hashlib.md5(raw.encode('utf-8')).hexdigest()
@@ -812,9 +868,10 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
     if not _has_api_key():
         return _api_key_error()
 
+    language = _lang_norm(language)
     chosen_styles = styles or SATELLITE_WITH_LABELS_STYLES
     cache_markers = markers if use_google_markers else None
-    cache_path = _map_cache_path(lat, lng, maptype, zoom, cache_markers, paths, size, chosen_styles)
+    cache_path = _map_cache_path(lat, lng, maptype, zoom, cache_markers, paths, size, chosen_styles, language=language)
     if output_path is None:
         output_path = cache_path
 
@@ -1213,21 +1270,22 @@ def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks,
         return []
 
 
-def classify_landmark_category(types):
+def classify_landmark_category(types, language='ar'):
     types = set(types or [])
+    english = _lang_norm(language) == 'en'
     categories = (
-        ('ترفيهي', {'amusement_park', 'aquarium', 'zoo', 'park', 'garden', 'sports_complex', 'golf_course', 'swimming_pool', 'movie_theater', 'performing_arts_theater', 'concert_hall', 'event_venue'}),
-        ('تعليمي', {'school', 'university', 'library', 'preschool', 'primary_school', 'secondary_school'}),
-        ('صحي', {'hospital', 'doctor', 'dentist', 'pharmacy', 'veterinary_care'}),
-        ('تجاري', {'shopping_mall', 'department_store', 'supermarket', 'market', 'store'}),
-        ('ديني', {'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship'}),
-        ('ثقافي/سياحي', {'tourist_attraction', 'landmark', 'historical_landmark', 'museum', 'art_gallery'}),
-        ('حكومي/خدمي', {'city_hall', 'government_office', 'embassy', 'police', 'fire_station'}),
+        ('Leisure' if english else 'ترفيهي', {'amusement_park', 'aquarium', 'zoo', 'park', 'garden', 'sports_complex', 'golf_course', 'swimming_pool', 'movie_theater', 'performing_arts_theater', 'concert_hall', 'event_venue'}),
+        ('Education' if english else 'تعليمي', {'school', 'university', 'library', 'preschool', 'primary_school', 'secondary_school'}),
+        ('Health' if english else 'صحي', {'hospital', 'doctor', 'dentist', 'pharmacy', 'veterinary_care'}),
+        ('Retail' if english else 'تجاري', {'shopping_mall', 'department_store', 'supermarket', 'market', 'store'}),
+        ('Religious' if english else 'ديني', {'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship'}),
+        ('Culture/Tourism' if english else 'ثقافي/سياحي', {'tourist_attraction', 'landmark', 'historical_landmark', 'museum', 'art_gallery'}),
+        ('Government/Services' if english else 'حكومي/خدمي', {'city_hall', 'government_office', 'embassy', 'police', 'fire_station'}),
     )
     for label, matched_types in categories:
         if types & matched_types:
             return label
-    return 'اجتماعي/خدمي'
+    return 'Social/Services' if english else 'اجتماعي/خدمي'
 
 
 def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=None):
@@ -1292,15 +1350,16 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
         return None
 
 
-def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None, usage_ctx=None):
+def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None, usage_ctx=None, language='ar'):
     """Find nearby landmarks using Places API (New).
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
         return _api_key_error()
+    language = _lang_norm(language)
     nearby_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
     nearby_key = _discovery_cache_key(
         nearby_tenant, 'nearby', lat, lng,
-        extra=f"{radius}:{max_results}:{bool(include_all)}:{','.join(sorted(included_types or []))}")
+        extra=f"{radius}:{max_results}:{bool(include_all)}:{','.join(sorted(included_types or []))}:{language}")
     nearby_hit = _discovery_cache_get(nearby_tenant, nearby_key)
     if isinstance(nearby_hit, dict) and nearby_hit.get('success'):
         return nearby_hit
@@ -1353,6 +1412,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
             }
         },
         'maxResultCount': min(max_results * 3, 20),
+        'languageCode': language,
     }
     if included_types:
         body['includedTypes'] = list(included_types)
@@ -1428,7 +1488,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
                 'lng': place_lng,
                 'place_id': p.get('id'),
                 'types': p.get('types', []),
-                'category': classify_landmark_category(p.get('types', [])),
+                'category': classify_landmark_category(p.get('types', []), language=language),
                 'rating': p.get('rating', 0),
                 'preferred': is_preferred,
                 'distance_meters': round(distance_meters),
@@ -1464,7 +1524,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         }
 
 
-def get_driving_times(origin_lat, origin_lng, destinations):
+def get_driving_times(origin_lat, origin_lng, destinations, language='ar'):
     """Backwards-compatible wrapper around get_drive_matrix.
 
     Kept so older callers keep working, but the numbers come from a single
@@ -1476,25 +1536,25 @@ def get_driving_times(origin_lat, origin_lng, destinations):
     if not destinations:
         return {'success': True, 'times': []}
 
-    matrix = get_drive_matrix({'lat': origin_lat, 'lng': origin_lng}, destinations)
+    matrix = get_drive_matrix({'lat': origin_lat, 'lng': origin_lng}, destinations, language=language)
     times = []
     for i, dest in enumerate(destinations):
         entry = matrix[i] if i < len(matrix) else None
         times.append({
             'landmark': dest,
             'duration_minutes': entry['duration_min'] if entry else None,
-            'distance_text': f"{entry['distance_km']} km" if entry else None,
+            'distance_text': f"{entry['distance_km']} {_distance_unit(language)}" if entry else None,
             'status': 'OK' if entry else 'NOT_FOUND',
         })
     return {'success': True, 'times': times}
 
 
-def get_drive_matrix(origin, destinations, usage_ctx=None):
+def get_drive_matrix(origin, destinations, usage_ctx=None, language='ar'):
     """Return driving metrics in chunks so large curated landmark lists remain supported."""
     if not destinations:
         return []
     chunk_size = 25
     combined = []
     for start in range(0, len(destinations), chunk_size):
-        combined.extend(_get_drive_matrix_chunk(origin, destinations[start:start + chunk_size], usage_ctx=usage_ctx))
+        combined.extend(_get_drive_matrix_chunk(origin, destinations[start:start + chunk_size], usage_ctx=usage_ctx, language=language))
     return combined

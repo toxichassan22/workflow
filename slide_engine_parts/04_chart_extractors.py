@@ -27,6 +27,16 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
     c_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     if (slide or {}).get('type') == 'map_access' or source in ('main_roads', 'access_roads'):
         roads_data = project_data.get('access_roads_data')
+        if lang == OFFER_LANG_ENGLISH:
+            # Stored site data may predate the English choice or arrive from a
+            # shared Arabic draft — translate names/labels, never numbers.
+            if isinstance(roads_data, list) and roads_data:
+                return ('Approved road network and site-access table — render every row in English '
+                        '(translate Arabic names and labels, keep numbers and codes exact), '
+                        'dropping and inventing nothing:\n' + json.dumps(roads_data, ensure_ascii=False, indent=2))
+            roads_text = str(project_data.get('main_roads') or '').strip()
+            return ('Road network and site access exactly as provided — render in English '
+                    '(translate Arabic names, keep numbers exact), no omissions:\n' + roads_text) if roads_text else ''
         if isinstance(roads_data, list) and roads_data:
             return 'جدول شبكة الطرق والمحاور الرئيسية ومداخل المشروع كما هو دون حذف أو اختلاق للقيم:\n' + json.dumps(roads_data, ensure_ascii=False, indent=2)
         roads_text = str(project_data.get('main_roads') or '').strip()
@@ -35,17 +45,34 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
         city_data = project_data.get('city_landmarks_data')
         if isinstance(city_data, list):
             approved = _approved_landmark_rows(city_data)
+            if lang == OFFER_LANG_ENGLISH:
+                if approved:
+                    return ('Approved city-landmark table for the catchment map — the same rows and '
+                            'pin order as the map; render every row in English (translate Arabic '
+                            'names and labels, keep numbers exact), dropping, adding or reordering '
+                            'nothing:\n' + json.dumps(approved, ensure_ascii=False, indent=2))
+                return 'No approved city landmarks to show — leave the table empty and invent none.'
             if approved:
                 return ('جدول معالم المدينة المعتمدة لخريطة النطاق — نفس صفوف الخريطة وترتيب دبابيسها؛'
                         ' اعرضها كلها كما هي دون حذف أو إضافة أو إعادة ترتيب:\n'
                         + json.dumps(approved, ensure_ascii=False, indent=2))
             return 'لا توجد معالم مدينة معتمدة للعرض — اترك الجدول فارغًا ولا تخترع معالم.'
         catchment_text = str(project_data.get('catchment_areas') or project_data.get('city_landmarks') or '').strip()
+        if lang == OFFER_LANG_ENGLISH:
+            return ('Catchment area and city landmarks exactly as provided — render in English '
+                    '(translate Arabic names, keep numbers exact), no omissions:\n' + catchment_text) if catchment_text else ''
         return 'نطاق التأثير ومعالم المدينة كما هي دون حذف:\n' + catchment_text if catchment_text else ''
     if (slide or {}).get('type') == 'map_landmarks' or source in ('nearby_landmarks', 'landmarks_matrix'):
         nearby_data = project_data.get('nearby_landmarks_data')
         if isinstance(nearby_data, list):
             approved = _approved_landmark_rows(nearby_data)
+            if lang == OFFER_LANG_ENGLISH:
+                if approved:
+                    return ('Approved nearby-landmark table — the same rows and pin order as the '
+                            'landmarks map; render every row in English (translate Arabic names and '
+                            'labels, keep numbers exact), dropping, adding or reordering nothing:\n'
+                            + json.dumps(approved, ensure_ascii=False, indent=2))
+                return 'No approved nearby landmarks to show — leave the table empty and invent none.'
             if approved:
                 return ('جدول المعالم القريبة المعتمدة للعرض — نفس صفوف خريطة المعالم وترتيب دبابيسها؛'
                         ' اعرضها كلها كما هي دون حذف أو إضافة أو إعادة ترتيب:\n'
@@ -53,8 +80,15 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
             return 'لا توجد معالم قريبة معتمدة للعرض — اترك الجدول فارغًا ولا تخترع معالم.'
         matrix = project_data.get('landmarks_matrix')
         if isinstance(matrix, list) and matrix:
+            if lang == OFFER_LANG_ENGLISH:
+                return ('Landmark distance and drive-time table exactly as provided — render in '
+                        'English (translate Arabic names, keep numbers exact), no omissions:\n'
+                        + json.dumps(matrix, ensure_ascii=False, indent=2))
             return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(matrix, ensure_ascii=False, indent=2)
         value = str(project_data.get('nearby_landmarks') or '').strip()
+        if lang == OFFER_LANG_ENGLISH:
+            return ('Landmarks, distances and drive times exactly as provided — render in English '
+                    '(translate Arabic names, keep numbers exact), no omissions:\n' + value) if value else ''
         return 'المعالم والمسافات وأوقات القيادة كما هي دون حذف:\n' + value if value else ''
     if source in {
         'executive_content.risks', 'market_study_data.risk_analysis',
@@ -159,6 +193,9 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
                 start = int(parts[1]) if parts[1].isdigit() else 0
                 end = int(parts[2]) if parts[2].isdigit() else len(paragraphs)
                 value = '\n\n'.join(paragraphs[start:end])
+        if lang == OFFER_LANG_ENGLISH:
+            return ('Approved site analysis — render it in English (translate it faithfully if the '
+                    'stored text is Arabic), adding and repeating nothing:\n' + value) if value else ''
         return 'ملخص الموقع المعتمد دون إضافة أو تكرار:\n' + value if value else ''
     def _explicit_row_range():
         start = (slide or {}).get('market_row_start')

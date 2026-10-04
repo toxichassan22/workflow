@@ -167,7 +167,7 @@ def _overview_polygon(project_data, highlight_site):
     return points if len(points) >= 3 else None
 
 
-def _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id):
+def _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id, language='ar'):
     """Fetch the raw provider base for a frame when its cache file is gone.
 
     Recompose normally rebuilds a missing editable sidecar from the cached raw
@@ -177,7 +177,8 @@ def _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant
     generation, so a successful call also refills the cache for later edits.
     """
     fetched = get_static_map(center_lat, center_lng, zoom=zoom, paths=None,
-                             size=(1280, 720), maptype=active_maptype, styles=styles)
+                             size=(1280, 720), maptype=active_maptype, styles=styles,
+                             language=language)
     if not fetched.get('success'):
         return None
     _record_maps_call(tenant_id)
@@ -216,6 +217,7 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
         draw_inset = draw_inset.lower() in {'true', '1', 'yes'}
     elif not isinstance(draw_inset, bool):
         draw_inset = True
+    map_lang = map_language(project_data)
     # Same editable-sidecar rebuild the other three maps already had: a legacy or
     # cross-scope overview map that kept only its marked row could never recompose,
     # so the section edit overlay and the designer chat kept serving the old file.
@@ -238,9 +240,9 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
         if active_maptype in {'auto', 'both'}:
             active_maptype = 'roadmap' if active_maptype == 'auto' else 'satellite'
         styles = SATELLITE_WITH_LABELS_STYLES if active_maptype == 'satellite' else []
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id, language=map_lang)
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -249,9 +251,9 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.12)
         if draw_compass:
-            _draw_compass(editable_path, position='top-right')
+            _draw_compass(editable_path, position='top-right', language=map_lang)
         if draw_inset:
-            _draw_inset_map(editable_path, lat, lng, inset_size=180)
+            _draw_inset_map(editable_path, lat, lng, inset_size=180, language=map_lang)
         editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
         editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
         by_type[editable_type] = {
@@ -342,6 +344,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
     draw_compass = project_data.get('draw_compass', True)
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    map_lang = map_language(project_data)
     for final_type, editable_type in (
         ('access', 'access_editable'),
         ('access_satellite', 'access_satellite_editable'),
@@ -361,9 +364,9 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
         if active_maptype in {'auto', 'both'}:
             active_maptype = 'roadmap' if active_maptype == 'auto' else 'satellite'
         styles = SATELLITE_CLEAN_STYLES if active_maptype == 'satellite' else ACCESS_ROADMAP_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id, language=map_lang)
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -372,7 +375,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.10)
         if draw_compass:
-            _draw_compass(editable_path, position='top-right')
+            _draw_compass(editable_path, position='top-right', language=map_lang)
         editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
         editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
         by_type[editable_type] = {
@@ -480,6 +483,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
     rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
+    map_lang = map_language(project_data)
     # The stored frame was fitted to the rings only — a selected landmark beyond
     # it was drawn off-canvas and dropped. Refit around rings + sent landmarks so
     # every checked row stays drawable; a tighter existing editable is rebuilt.
@@ -524,9 +528,9 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         if active_maptype in {'auto', 'both'}:
             active_maptype = 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, frame_zoom, None, None, (1280, 720), styles)
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, frame_zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, frame_zoom, styles, tenant_id)
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang)
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -537,7 +541,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         if rings:
             _draw_catchment_zones(editable_path, center_lat, center_lng, frame_zoom, rings, scale=2)
         if draw_compass:
-            _draw_compass(editable_path, position='top-right')
+            _draw_compass(editable_path, position='top-right', language=map_lang)
         editable_placeholder = (
             str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
             if final else str(existing.get('placeholder') or '')
@@ -653,6 +657,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
     draw_compass = project_data.get('draw_compass', True)
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    map_lang = map_language(project_data)
     for final_type, editable_type in (
         ('landmarks', 'landmarks_editable'),
         ('landmarks_satellite', 'landmarks_satellite_editable'),
@@ -672,9 +677,9 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
         if active_maptype in {'auto', 'both'}:
             active_maptype = 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id)
+            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id, language=map_lang)
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -683,7 +688,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.20)
         if draw_compass:
-            _draw_compass(editable_path, position='top-right')
+            _draw_compass(editable_path, position='top-right', language=map_lang)
         editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
         editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
         by_type[editable_type] = {
@@ -788,6 +793,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     if limit_error:
         return limit_error
 
+    map_lang = map_language(project_data)
+
     address = project_data.get('location_address') or project_data.get('location', '')
     maps_link = (
         (address if str(address).startswith('http') else '') or
@@ -816,10 +823,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     city_rows = select_map_landmark_rows(city_structured)
     if nearby_structured is None:
         nearby_text = project_data.get('nearby_landmarks', '')
-        nearby_rows = _parse_landmarks_text(nearby_text)[:7] if isinstance(nearby_text, str) else []
+        nearby_rows = _parse_landmarks_text(nearby_text, language=map_lang)[:7] if isinstance(nearby_text, str) else []
     if city_structured is None:
         city_text = project_data.get('city_landmarks', '')
-        city_rows = _parse_landmarks_text(city_text)[:7] if isinstance(city_text, str) else []
+        city_rows = _parse_landmarks_text(city_text, language=map_lang)[:7] if isinstance(city_text, str) else []
     landmarks = _merge_landmark_data([], nearby_rows) if 'landmarks' in enabled_maps else []
     city_landmarks = _merge_landmark_data([], city_rows) if 'catchment' in enabled_maps else []
     zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
@@ -1082,7 +1089,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         resolved = []
         for landmark in rows:
             if landmark.get('lat') is None or landmark.get('lng') is None:
-                place = find_place_near(landmark.get('name'), lat, lng, radius_m=search_radius_m)
+                place = find_place_near(landmark.get('name'), lat, lng, radius_m=search_radius_m, language=map_lang)
                 if place:
                     landmark['lat'] = place['lat']
                     landmark['lng'] = place['lng']
@@ -1112,7 +1119,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # nearby-landmark table. An explicit table, including an empty one, is authoritative.
     if 'landmarks' in enabled_maps and nearby_structured is None and not landmarks:
         places = get_nearby_landmarks(
-            lat, lng, radius=landmark_radius_m, max_results=7, include_all=True
+            lat, lng, radius=landmark_radius_m, max_results=7, include_all=True, language=map_lang
         )
         if places.get('success'):
             landmarks = (places.get('landmarks') or [])[:7]
@@ -1132,7 +1139,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Get driving times and distances only for the nearby rows used by the landmarks map.
     if landmarks and project_data.get('calculate_landmark_driving', True) is not False:
-        matrix = get_drive_matrix((lat, lng), landmarks)
+        matrix = get_drive_matrix((lat, lng), landmarks, language=map_lang)
         if matrix:
             for i, landmark in enumerate(landmarks):
                 if i >= len(matrix):
@@ -1143,7 +1150,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if entry['duration_min'] is None:
                     continue
                 landmark['duration_minutes'] = entry['duration_min']
-                landmark['distance_text'] = entry.get('distance_text') or f"{entry['distance_km']} كم"
+                landmark['distance_text'] = entry.get('distance_text') or f"{entry['distance_km']} {_distance_unit(map_lang)}"
             # Only rows with real Google numbers are handed to the AI prompt.
             usable = [item for item in matrix if item.get('duration_min') is not None]
             if usable:
@@ -1177,15 +1184,15 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            overview_res = get_static_map(overview_center_lat, overview_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES), bypass_cache=refresh_maps)
+            overview_res = get_static_map(overview_center_lat, overview_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES), bypass_cache=refresh_maps, language=map_lang)
             if overview_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
                 if draw_compass:
-                    _draw_compass(overview_path, position='top-right')
+                    _draw_compass(overview_path, position='top-right', language=map_lang)
                 if draw_inset:
-                    _draw_inset_map(overview_path, lat, lng, inset_size=180)
+                    _draw_inset_map(overview_path, lat, lng, inset_size=180, language=map_lang)
                 editable_placeholder = editable_placeholders[placeholder]
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
@@ -1229,15 +1236,15 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps)
+            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
             if lm_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
                 if draw_compass:
-                    _draw_compass(landmarks_path, position='top-right')
+                    _draw_compass(landmarks_path, position='top-right', language=map_lang)
                 if draw_inset:
-                    _draw_inset_map(landmarks_path, lat, lng, inset_size=180)
+                    _draw_inset_map(landmarks_path, lat, lng, inset_size=180, language=map_lang)
                 editable_placeholder = editable_placeholders[placeholder]
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
@@ -1285,13 +1292,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             access_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            access_res = get_static_map(access_center_lat, access_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES, 'access'), bypass_cache=refresh_maps)
+            access_res = get_static_map(access_center_lat, access_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES, 'access'), bypass_cache=refresh_maps, language=map_lang)
             if access_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
                 if draw_compass:
-                    _draw_compass(access_path, position='top-right')
+                    _draw_compass(access_path, position='top-right', language=map_lang)
                 editable_placeholder = editable_placeholders[placeholder]
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
@@ -1359,7 +1366,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         for active_mt, placeholder, img_suffix in styles_to_gen:
             catchment_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             # Fetch clean map without the API-drawn paths, as we will draw them with PIL for premium styling.
-            catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps)
+            catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
             if catchment_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(catchment_path, intensity=0.35)
@@ -1368,9 +1375,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if rings:
                     _draw_catchment_zones(catchment_path, lat, lng, catchment_zoom, rings, scale=2)
                 if draw_compass:
-                    _draw_compass(catchment_path, position='top-right')
+                    _draw_compass(catchment_path, position='top-right', language=map_lang)
                 if draw_inset:
-                    _draw_inset_map(catchment_path, lat, lng, inset_size=180)
+                    _draw_inset_map(catchment_path, lat, lng, inset_size=180, language=map_lang)
                 editable_placeholder = editable_placeholders[placeholder]
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
@@ -1431,7 +1438,7 @@ def _extract_coordinate(value):
     return None
 
 
-def _parse_landmarks_text(text):
+def _parse_landmarks_text(text, language='ar'):
     """Parse landmark text into structured list with name, duration_minutes, and distance_km."""
     if not text:
         return []
@@ -1459,7 +1466,7 @@ def _parse_landmarks_text(text):
             clean_name = clean_name.replace(dist_match.group(0), '')
 
         category = ''
-        category_match = re.search(r'(?:^|\s)[—\-]\s*(ترفيهي|تعليمي|صحي|تجاري|ديني(?: ومركزي)?|ثقافي/سياحي|حكومي/خدمي|اجتماعي/خدمي)\s*(?:[—\-]|$)', clean_name)
+        category_match = re.search(r'(?:^|\s)[—\-]\s*(ترفيهي|تعليمي|صحي|تجاري|ديني(?: ومركزي)?|ثقافي/سياحي|حكومي/خدمي|اجتماعي/خدمي|Leisure|Education|Health|Retail|Religious|Culture/Tourism|Government/Services|Social/Services|Shopping|Transport|Public transit|Main corridor|Waterfront|Future development|Heritage & tourism|Business & logistics|Sports & events|Events|Coastal areas|Religious & central|Holy sites|Major projects|Religious tourism|Business & finance|Business & tech|Business & government|City center|Tourism & landmarks|Exhibitions & events|Nature & leisure|Logistics|Industry & logistics|Major landmark|Landmark)\s*(?:[—\-]|$)', clean_name, re.IGNORECASE)
         if category_match:
             category = category_match.group(1)
             clean_name = clean_name.replace(category_match.group(0), ' ')
@@ -1472,7 +1479,7 @@ def _parse_landmarks_text(text):
             'category': category,
             'duration_minutes': duration,
             'distance_km': distance,
-            'distance_text': f"{distance} كم" if distance is not None else None,
+            'distance_text': f"{distance} {_distance_unit(language)}" if distance is not None else None,
             'lat': None,
             'lng': None,
         })
