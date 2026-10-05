@@ -235,6 +235,20 @@
       // site analysis is a sibling generated-content approval, not a gate, and
       // the section approval is what requires all of them together.
       if (!mapOverlayHasBase(mapType)) return false;
+      // Two-tier order: the section certifies everything inside it, so a map
+      // cannot (re)approve inside an already-approved section — its live frame
+      // is also frozen there, and approving would freeze the stale raster
+      // instead of what is on screen. Unapprove the section first.
+      if (tenantProjectSectionStatuses && tenantProjectSectionStatuses.location === 'approved') {
+        toast(typeof WFT === 'function'
+          ? WFT('location.section_unapprove_first_map', 'ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله')
+          : 'ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله');
+        return false;
+      }
+      // The dirty flag is only as fresh as the last idle — pull the live
+      // camera now so a pan followed by an instant click still bakes the
+      // frame the client is looking at, not the pre-pan one.
+      if (typeof syncInteractiveLiveFrame === 'function') syncInteractiveLiveFrame();
       if (tenantInteractiveFrameDirty[mapType]) {
         const baked = await regenerateMapPreview(mapType);
         if (!baked) return false;
@@ -352,6 +366,18 @@
       return !!(view && mapPreviewStoredUrl(view));
     }
 
+    // A recompose answers with the raster's stored frame. Under a viewport
+    // override that frame is stale next to the live camera — merging it would
+    // overwrite map_centers/map_zooms, and the user's unsaved pan would then
+    // compare clean against the baked frame and never reach the bake.
+    function mergeRecomposeMapFrame(mapType, data) {
+      if ((tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
+      if (data.zooms && data.zooms[mapType] !== undefined)
+        tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: data.zooms[mapType] };
+      if (data.centers && data.centers[mapType] !== undefined)
+        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: data.centers[mapType] };
+    }
+
     async function applyOverviewMapEdits() {
       if (!mapOverlayHasBase('overview') || tenantMapApproved('overview')) return false;
       try {
@@ -367,8 +393,7 @@
         if (!data.success) return false;
         if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
         tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
-        tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
-        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+        mergeRecomposeMapFrame('overview', data);
         if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('overview', data.zooms?.overview, data.centers?.overview);
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
@@ -396,8 +421,7 @@
           if (!data.success) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
-          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
-          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          mergeRecomposeMapFrame('access', data);
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('access', data.zooms?.access, data.centers?.access);
           tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : tenantProjectData.access_roads_data || [];
           tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
@@ -445,8 +469,7 @@
           if (!data.success) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
-          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
-          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          mergeRecomposeMapFrame('catchment', data);
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('catchment', data.zooms?.catchment, data.centers?.catchment);
           tenantProjectData.catchment_map_landmarks = Array.isArray(data.catchmentLandmarks) ? data.catchmentLandmarks : tenantProjectData.catchment_map_landmarks || [];
           tenantCreativeImages.map_catchment_landmarks = tenantProjectData.catchment_map_landmarks;
@@ -491,8 +514,7 @@
           if (!data.success) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
-          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
-          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          mergeRecomposeMapFrame('landmarks', data);
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('landmarks', data.zooms?.landmarks, data.centers?.landmarks);
           tenantProjectData.landmark_map_items = Array.isArray(data.landmarkMapItems) ? data.landmarkMapItems : tenantProjectData.landmark_map_items || [];
           tenantCreativeImages.map_landmark_items = tenantProjectData.landmark_map_items;

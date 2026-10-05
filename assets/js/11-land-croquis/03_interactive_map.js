@@ -370,6 +370,14 @@
             && Math.abs(Number(expected.lng) - lng) < 1e-4
             && Math.round(Number(expected.zoom)) === Math.round(zoom)) return;
       }
+      recordInteractiveFrame(mapType, lat, lng, zoom);
+    }
+
+    // Writes one observed frame (idle settle or an explicit sync before an
+    // approval click) into the stored viewport state. Kept separate so the
+    // approve path can pull the live camera synchronously — idle is debounced
+    // by Google, and a click landing first would read stale map_centers.
+    function recordInteractiveFrame(mapType, lat, lng, zoom) {
       const roundedZoom = Math.round(Number.isFinite(zoom) ? zoom : 0);
       if (!roundedZoom) return;
       // Idle also fires on tile loads and viewport fits with no gesture at all —
@@ -419,6 +427,30 @@
       triggerAutoSaveDraft();
     }
 
+    // Synchronous pull of the live camera into the recorded frame state.
+    // Approval paths call this first: the idle listener only runs once Google
+    // settles, so a click fired right after the last pan would otherwise bake
+    // (or skip baking against) the pre-pan frame.
+    function syncInteractiveLiveFrame() {
+      const map = tenantInteractiveMap;
+      if (!map || !tenantInteractiveMounted || !tenantInteractiveMapType) return;
+      const mapType = tenantInteractiveMapType;
+      if (tenantMapApproved(mapType)) return;
+      const center = map.getCenter && map.getCenter();
+      const zoom = map.getZoom && map.getZoom();
+      if (!center) return;
+      const lat = center.lat();
+      const lng = center.lng();
+      if (tenantMapPreviewState) {
+        tenantMapPreviewState.lat = lat;
+        tenantMapPreviewState.lng = lng;
+        if (Number.isFinite(Number(zoom))) tenantMapPreviewState.zoom = zoom;
+      }
+      if (!mapViewportAdjustable(mapType)) return;
+      if (tenantProjectSectionStatuses && tenantProjectSectionStatuses.location === 'approved') return;
+      recordInteractiveFrame(mapType, lat, lng, zoom);
+    }
+
     // The raster bake result for ONE map type: updates the persisted
     // rendered-frame record and clears the dirty flag when the live view
     // already matches what was just rendered. Recompose responses can carry
@@ -441,11 +473,22 @@
       if (tenantCreativeImages.map_approvals && tenantCreativeImages.map_approvals[mapType]) {
         tenantCreativeImages.map_approvals = { ...tenantCreativeImages.map_approvals, [mapType]: false };
       }
-      if (tenantInteractiveMapType === mapType && tenantMapPreviewState && Number.isFinite(Number(frame.zoom))) {
+      // Dirty is live-camera-vs-baked: compare against the recorded live frame
+      // (map_centers/map_zooms — what the interactive map would remount at),
+      // not tenantMapPreviewState, which is the *static* raster's frame and is
+      // equal to the just-baked value by definition. The old comparison wiped a
+      // real dirty flag whenever a recompose response landed after a pan, and
+      // flagged a false one right after the approval bake itself.
+      const liveCenter = (tenantCreativeImages.map_centers || {})[mapType];
+      const liveZoom = (tenantCreativeImages.map_zooms || {})[mapType];
+      const liveKnown = liveCenter
+        && Number.isFinite(Number(liveCenter.lat)) && Number.isFinite(Number(liveCenter.lng))
+        && Number.isFinite(Number(liveZoom));
+      if (liveKnown && Number.isFinite(Number(frame.zoom))) {
         tenantInteractiveFrameDirty[mapType] =
-          Math.abs(Number(frame.lat) - Number(tenantMapPreviewState.lat)) > 1e-4
-          || Math.abs(Number(frame.lng) - Number(tenantMapPreviewState.lng)) > 1e-4
-          || Number(frame.zoom) !== Math.round(Number(tenantMapPreviewState.zoom));
+          Math.abs(Number(frame.lat) - Number(liveCenter.lat)) > 1e-4
+          || Math.abs(Number(frame.lng) - Number(liveCenter.lng)) > 1e-4
+          || Number(frame.zoom) !== Math.round(Number(liveZoom));
       } else {
         tenantInteractiveFrameDirty[mapType] = false;
       }
@@ -469,6 +512,9 @@
     // freezes. Called from approveSectionWithVersion — a failed bake leaves the
     // flag set and never blocks the approval itself.
     async function settleInteractiveMapFrames() {
+      // Same idle-race fix as approveTenantMap: section approval must settle
+      // against the camera on screen right now, not the last idle's record.
+      if (typeof syncInteractiveLiveFrame === 'function') syncInteractiveLiveFrame();
       const dirty = Object.keys(tenantInteractiveFrameDirty).filter(key => tenantInteractiveFrameDirty[key]);
       for (const mapType of dirty) {
         await regenerateMapPreview(mapType);

@@ -907,6 +907,9 @@
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         setLocationDataFetchedAt();
+        // A fresh raster inside an approved section voids what the section
+        // certified — same release every other location mutation performs.
+        if (typeof releaseLocationSectionApproval === 'function') releaseLocationSectionApproval();
         await saveMapPreviewState();
         renderMapPreviewGallery(true);
         renderLocationWorkflowState();

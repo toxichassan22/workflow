@@ -535,6 +535,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "location.map_status_generated": "مولدة",
   "location.map_status_approved": "معتمدة",
   "location.map_unapprove_first": "ألغ اعتماد الخريطة قبل تعديلها أو إعادة توليدها",
+  "location.section_unapprove_first_map": "ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله",
   "location.map_status_not_generated": "غير مولدة",
   "location.map_not_generated_hint": "لم تُولد الخريطة",
   "location.map_frame_unsaved": "إطار المعاينة المعروض لم يُحفظ في صورة الخريطة المخزنة",

@@ -709,6 +709,19 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("_manual_viewport_center('landmarks'", maps_source)
         self.assertIn("_manual_viewport_center('catchment'", maps_source)
         self.assertIn('site_lat=lat, site_lng=lng', maps_source)
+        # The idle listener is debounced by Google — an approve click landing
+        # before it must still see the live camera, or the bake freezes the
+        # pre-pan frame.
+        self.assertIn('function recordInteractiveFrame(', index_source)
+        self.assertIn('function syncInteractiveLiveFrame()', index_source)
+        approve_body = index_source.split('async function approveTenantMap(', 1)[1].split('function ', 1)[0]
+        self.assertIn('syncInteractiveLiveFrame()', approve_body)
+        # A recompose returns the raster's stored frame; merging it under a
+        # viewport override would erase the live camera record and the pending
+        # bake would freeze the stale frame instead of the picked one.
+        self.assertIn('function mergeRecomposeMapFrame(', index_source)
+        merge_guard = index_source.split('function mergeRecomposeMapFrame(', 1)[1].split('function ', 1)[0]
+        self.assertIn('map_viewport_overrides', merge_guard)
 
     def test_confirmed_map_pin_overrides_the_original_google_link(self):
         service = self.application_module.maps_service
