@@ -145,6 +145,8 @@
       const box = document.getElementById('mapPreviewImage');
       const holder = document.getElementById('mapLiveView');
       if (!box || !holder || !(window.google && window.google.maps && window.google.maps.Map)) return false;
+      // An approved map is a fixed raster — the live view never mounts over it.
+      if (tenantMapApproved(mapType)) return false;
       const clampedZoom = Math.max(8, Math.min(20, Number(zoom) || 17));
       const options = {
         center: { lat: Number(lat), lng: Number(lng) },
@@ -250,6 +252,9 @@
     // the preview would sit on the static image (whose pans cost a regen)
     // until the user happened to reselect the map.
     function mountInteractivePreview(mapType, lat, lng, zoom, retryAttempt) {
+      // Approved maps render only the certified raster — skip the API load and
+      // the retry loop entirely.
+      if (tenantMapApproved(mapType)) return Promise.resolve(false);
       const attempt = Number(retryAttempt) || 0;
       const seq = ++interactiveMountSeq;
       const finish = mounted => {
@@ -257,9 +262,10 @@
           && seq === interactiveMountSeq
           && tenantSelectedMapType === mapType
           && !interactiveMapActive()
+          && !tenantMapApproved(mapType)
           && attempt < 4) {
           setTimeout(() => {
-            if (interactiveMapActive() || tenantSelectedMapType !== mapType) return;
+            if (interactiveMapActive() || tenantSelectedMapType !== mapType || tenantMapApproved(mapType)) return;
             mountInteractivePreview(mapType, lat, lng, zoom, attempt + 1);
           }, 1200 + attempt * 800);
         }
@@ -267,7 +273,7 @@
       };
       tenantInteractiveMountPromise = ensureInteractiveMapsApi().then(ok => {
         if (!ok || seq !== interactiveMountSeq) return finish(false);
-        if (tenantSelectedMapType !== mapType || !tenantMapPreviewState) return false;
+        if (tenantSelectedMapType !== mapType || !tenantMapPreviewState || tenantMapApproved(mapType)) return false;
         const mounted = mountInteractiveMap(mapType, lat, lng, zoom);
         if (!mounted) return finish(false);
         // The live map is always a clean editable base: every drawable item is
@@ -335,6 +341,9 @@
     function interactiveMapFrameChanged() {
       const map = tenantInteractiveMap;
       if (!map || !tenantInteractiveMounted || !tenantMapPreviewState) return;
+      // An approved map never mounts live — an idle queued before the
+      // approval-time unmount must not touch its frame or its flag.
+      if (tenantMapApproved(tenantInteractiveMapType)) return;
       const center = map.getCenter();
       if (!center) return;
       const lat = center.lat();

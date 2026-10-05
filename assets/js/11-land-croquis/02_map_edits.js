@@ -248,6 +248,9 @@
       tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: true };
       await saveMapPreviewState();
       toast('تم اعتماد الخريطة');
+      // Re-selecting swaps the mounted live map for the certified raster the
+      // approval just froze — nothing on the preview stays interactive.
+      if (tenantSelectedMapType === mapType) selectMapPreviewView(mapType);
       renderMapPreviewGallery(true);
       renderLocationWorkflowState();
       return true;
@@ -261,6 +264,9 @@
       if (typeof releaseLocationSectionApproval === 'function') releaseLocationSectionApproval();
       await saveMapPreviewState();
       toast('تم إلغاء اعتماد الخريطة');
+      // Re-selecting remounts the live map on the released frame so editing
+      // can resume right away.
+      if (tenantSelectedMapType === mapType) selectMapPreviewView(mapType);
       renderMapPreviewGallery(true);
       renderLocationWorkflowState();
     }
@@ -278,6 +284,7 @@
     // zoom and centre. Every drawing/editing mode keeps priority.
     function mapViewportPanAllowed() {
       if (!mapViewportAdjustable(tenantSelectedMapType)) return false;
+      if (tenantMapApproved(tenantSelectedMapType)) return false;
       if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
       return !!(tenantMapPreviewState && tenantMapPreviewState.frameAccurate);
     }

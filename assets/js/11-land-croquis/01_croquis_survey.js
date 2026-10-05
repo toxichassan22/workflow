@@ -674,7 +674,11 @@
       const placeholders = tenantCreativeImages.map_placeholders || {};
       const markedUrl = view.keys.map(key => placeholders[key]).find(Boolean);
       const editableUrl = view.editableKeys?.map(key => placeholders[key]).find(Boolean);
-      const useEditableBase = !!editableUrl && mapPreviewOverlayReady(mapType);
+      // An approved map is a frozen artifact: it shows exactly the certified
+      // raster and the live view never mounts over it, so a stray gesture can
+      // neither move the frame nor drop the approval.
+      const mapApproved = typeof tenantMapApproved === 'function' && tenantMapApproved(mapType);
+      const useEditableBase = !!editableUrl && !mapApproved && mapPreviewOverlayReady(mapType);
       const url = mapPreviewIsVisible(view) ? (useEditableBase ? editableUrl : (markedUrl || editableUrl)) : '';
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
@@ -713,8 +717,12 @@
       // The live map mounts over the raster when the browser key is available,
       // framed on the user's live camera (map_centers/zooms), not on the baked
       // frame the fallback image shows. On any failure the static image below
-      // keeps working unchanged.
-      if (typeof mountInteractivePreview === 'function') {
+      // keeps working unchanged. An approved map stays the certified raster —
+      // the shared map instance must be dropped explicitly or it keeps
+      // covering the image with the previously mounted type.
+      if (mapApproved) {
+        if (typeof unmountInteractiveMap === 'function') unmountInteractiveMap();
+      } else if (typeof mountInteractivePreview === 'function') {
         const liveLat = Number(center.lat ?? lat);
         const liveLng = Number(center.lng ?? lng);
         const liveZoom = Number(zooms[mapType] ?? zoom);
