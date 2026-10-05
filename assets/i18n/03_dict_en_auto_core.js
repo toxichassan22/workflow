@@ -447,8 +447,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "ردود": "Setbacks",
   "رسم بياني": "Chart",
   "رسم حدود الموقع": "Draw site boundaries",
-  "رسم مسار": "Draw Route",
-  "رسم مسار الطرق": "Draw road paths",
   "رسوم خدمات": "Service Charges",
   "رفض الكل": "Reject all",
   "رفع صورة": "Upload Image",

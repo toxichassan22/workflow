@@ -840,25 +840,34 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
         source = read_frontend_text()
         workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
-        for label in ('إعادة توليد الخريطة', 'إضافة / تعديل الطرق', 'رسم مسار الطرق'):
+        # Road editing is one unified mode: a single «إضافة / تعديل الطرق»
+        # button opens a session where map clicks sketch the selected road's
+        # path and one اعتماد commits every sketched path — the separate
+        # per-path drawing mode is gone.
+        for label in ('إعادة توليد الخريطة', 'إضافة / تعديل الطرق'):
             self.assertIn(label, workflow)
-        for label in ('اختيار الطريق', 'اعتماد المسارات', 'تراجع', 'إلغاء'):
+        self.assertNotIn('رسم مسار الطرق', workflow)
+        for label in ('اختيار الطريق', 'مسح المسار', 'تراجع', 'إلغاء'):
             self.assertIn(label, source)
         self.assertIn("view.mapType === 'access' && tenantRoadEditMode", workflow)
-        self.assertIn("view.mapType === 'access' && tenantRoadDrawingTarget", workflow)
+        self.assertNotIn('tenantRoadDrawingTarget', workflow)
         for function_name in ('startAccessRoadEditMode', 'undoAccessRoadEdits', 'confirmAccessRoadEdits',
-                              'cancelAccessRoadEdits', 'selectManualRoadDrawingRoad', 'undoManualRoadDrawing',
+                              'cancelAccessRoadEdits', 'addAccessRoadPathPoint', 'clearAccessRoadPath',
                               'applyAccessMapEdits'):
             self.assertIn('function ' + function_name + '(', source)
-        path_start = source.split('function startManualRoadDrawing(name)', 1)[1].split('async function finishManualRoadDrawing()', 1)[0]
-        path_confirm = source.split('async function finishManualRoadDrawing()', 1)[1].split('function cancelManualRoadDrawing()', 1)[0]
+        path_start = source.split('function startManualRoadDrawing(name)', 1)[1].split('function isUsableMapCoordinate', 1)[0]
         edit_confirm = source.split('async function confirmAccessRoadEdits()', 1)[1].split('function cancelAccessRoadEdits()', 1)[0]
-        self.assertNotIn('regenerateMapPreview(', path_start + path_confirm + edit_confirm)
-        self.assertNotIn('showLoader(', path_start + path_confirm + edit_confirm)
-        self.assertIn('await applyAccessMapEdits()', path_confirm)
+        self.assertNotIn('regenerateMapPreview(', path_start + edit_confirm)
+        self.assertNotIn('showLoader(', path_start + edit_confirm)
         self.assertIn('await applyAccessMapEdits()', edit_confirm)
-        self.assertIn('tenantProjectData.manual_road_paths', path_confirm)
+        self.assertIn('tenantProjectData.manual_road_paths', edit_confirm)
         self.assertIn('tenantProjectData.access_road_label_positions', edit_confirm)
+        # In the unified mode a map click appends a vertex to the selected
+        # road's sketched path instead of placing a label (labels move by
+        # dragging), and confirm writes every sketch into manual_road_paths.
+        dispatch_body = source.split('function dispatchTenantMapPoint(', 1)[1].split('function updateTenantPolygonControls', 1)[0]
+        self.assertIn('addAccessRoadPathPoint(nextLat, nextLng)', dispatch_body)
+        self.assertIn('row.points.push([lat, lng])', source)
         self.assertIn("editableKeys: ['##MAP_ACCESS_EDITABLE##'", source)
         self.assertIn("'access_roads_data'", source)
         self.assertIn('Array.isArray(data.roads)', source)
@@ -1400,8 +1409,12 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertNotIn('MAP_PREVIEW_VIEW_DEFS.map(view =>', workflow_body)
         landmark_body = source.split('function startLandmarkPlacement(key, tr)', 1)[1].split('function startManualRoadDrawing', 1)[0]
         self.assertIn('openLocationTableMap(mapType)', landmark_body)
-        road_body = source.split('function startManualRoadDrawing(name)', 1)[1].split('function finishManualRoadDrawing', 1)[0]
-        self.assertIn("openLocationTableMap('access')", road_body)
+        # Path drawing folded into the unified road-edit mode — the focused
+        # entry delegates to it, and the mode opens the access map itself.
+        road_body = source.split('function startManualRoadDrawing(name)', 1)[1].split('function isUsableMapCoordinate', 1)[0]
+        self.assertIn('startAccessRoadEditMode()', road_body)
+        edit_body = source.split('async function startAccessRoadEditMode()', 1)[1].split('function selectAccessRoadEdit', 1)[0]
+        self.assertIn("openLocationTableMap('access')", edit_body)
         overlay_body = source.split('function renderTenantMapPolygonOverlay()', 1)[1].split('function removeTenantPolygonPoint', 1)[0]
         self.assertIn("const showRoads = tenantSelectedMapType === 'access' &&", overlay_body)
 

@@ -641,7 +641,7 @@
       if (mapType === 'overview') {
         if (tenantMapPolygonMode || tenantMapPinMode) return true;
       } else if (mapType === 'access') {
-        if (tenantRoadEditMode || tenantRoadDrawingTarget) return true;
+        if (tenantRoadEditMode) return true;
       } else if (mapType === 'catchment') {
         if (tenantCatchmentEditMode) return true;
       } else if (mapType === 'landmarks') {

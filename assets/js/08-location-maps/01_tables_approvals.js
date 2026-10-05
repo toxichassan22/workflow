@@ -331,7 +331,7 @@
       // An open edit session owns this raster — its confirm path applies it.
       if ((mapType === 'landmarks' && tenantLandmarksEditMode)
           || (mapType === 'catchment' && tenantCatchmentEditMode)
-          || (mapType === 'access' && (tenantRoadEditMode || tenantRoadDrawingTarget))) return Promise.resolve();
+          || (mapType === 'access' && tenantRoadEditMode)) return Promise.resolve();
       const apply = { landmarks: applyLandmarksMapEdits, catchment: applyCatchmentMapEdits, access: applyAccessMapEdits }[mapType];
       if (typeof apply !== 'function') return Promise.resolve();
       const run = (async () => {
@@ -409,7 +409,7 @@
       }
       if (toolsPanel) toolsPanel.style.display = showOverviewGenerate ? 'flex' : 'none';
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
-        const roadModeLocked = key === 'main_roads' && (tenantRoadEditMode || !!tenantRoadDrawingTarget);
+        const roadModeLocked = key === 'main_roads' && tenantRoadEditMode;
         const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
         const landmarksModeLocked = key === 'nearby_landmarks' && tenantLandmarksEditMode;
         const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
@@ -466,8 +466,6 @@
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startLandmarksEditMode()">تعديل</button>';
         } else if (view.mapType === 'access' && tenantRoadEditMode) {
           actions = accessRoadEditControlsHtml();
-        } else if (view.mapType === 'access' && tenantRoadDrawingTarget) {
-          actions = manualRoadDrawingControlsHtml();
         } else if (view.mapType === 'access' && generated) {
           actions = tenantMapApproved('access')
             ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="unapproveTenantMap(\'access\')">إلغاء اعتماد الخريطة</button>'
@@ -475,8 +473,7 @@
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')">إعادة توليد الخريطة</button>' +
               ((tenantCreativeImages.map_viewport_overrides || {}).access
                 ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'access\')">الإطار التلقائي</button>' : '') +
-              '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()">إضافة / تعديل الطرق</button>' +
-              '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')">رسم مسار الطرق</button>';
+              '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()">إضافة / تعديل الطرق</button>';
         } else if (view.mapType !== 'overview') {
           actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (hasCoords ? '' : 'disabled') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>';
         }
@@ -539,7 +536,6 @@
       const mapType = LOCATION_TABLE_FIELDS[key]?.mapType;
       if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit(mapType)) return;
       if (!openLocationTableMap(mapType)) return;
-      tenantRoadDrawingTarget = null;
       tenantMapPolygonMode = false;
       tenantLandmarkPlacementTarget = { key, tr };
       renderLocationWorkflowState();
@@ -583,20 +579,19 @@
       const rows = tenantRoadEditMode ? tenantRoadEditDraft?.rows || [] : accessRoadRows();
       const roads = rows.map(row => {
         const geometry = byName.get(accessRoadNameKey(row.original_name)) || byName.get(accessRoadNameKey(row.name));
-        if (!geometry) return null;
+        // In edit mode a row's drawn points are the path being sketched — they
+        // override the stored geometry live, and a road with no stored path
+        // still renders once it has two drawn points.
+        const drawn = tenantRoadEditMode && Array.isArray(row.points) && row.points.length >= 2 ? row.points : null;
+        if (!geometry && !drawn) return null;
         return {
-          ...geometry,
+          ...(geometry || {}),
+          points: drawn || geometry.points,
           name: row.name,
-          label_point: positions[row.name] || positions[row.original_name] || geometry.label_point || null,
-          label_scale: sizes[row.name] || sizes[row.original_name] || geometry.label_scale || 1
+          label_point: positions[row.name] || positions[row.original_name] || geometry?.label_point || null,
+          label_scale: sizes[row.name] || sizes[row.original_name] || geometry?.label_scale || 1
         };
       }).filter(Boolean);
-      if (tenantRoadDrawingTarget?.points?.length) {
-        const index = roads.findIndex(road => accessRoadNameKey(road.name) === accessRoadNameKey(tenantRoadDrawingTarget.name));
-        const draft = { name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points, label_point: positions[tenantRoadDrawingTarget.name] || null, label_scale: sizes[tenantRoadDrawingTarget.name] || 1 };
-        if (index >= 0) roads[index] = draft;
-        else roads.push(draft);
-      }
       return roads;
     }
 
@@ -607,7 +602,7 @@
     function pushRoadEditHistory() {
       const snapshot = roadEditSnapshot();
       if (tenantRoadEditHistory[tenantRoadEditHistory.length - 1] !== snapshot) tenantRoadEditHistory.push(snapshot);
-      if (tenantRoadEditHistory.length > 60) tenantRoadEditHistory.shift();
+      if (tenantRoadEditHistory.length > 300) tenantRoadEditHistory.shift();
     }
 
     function accessRoadEditControlsHtml() {
@@ -616,6 +611,7 @@
       const selectedName = tenantRoadEditSelectedIndex >= 0 ? rows[tenantRoadEditSelectedIndex]?.name || '' : tenantRoadEditDraft?.newName || '';
       return '<label class="map-control-field">اختيار الطريق<select id="accessRoadEditSelect" onchange="selectAccessRoadEdit(this.value)">' + options + '<option value="-1" ' + (tenantRoadEditSelectedIndex < 0 ? 'selected' : '') + '>طريق جديد</option></select></label>' +
         '<label class="map-control-field">اسم الطريق<input id="accessRoadEditName" type="text" value="' + escapeHtml(selectedName) + '" oninput="updateAccessRoadDraftName(this.value)"></label>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="clearAccessRoadPathButton" onclick="clearAccessRoadPath()">مسح المسار</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(-0.1)">تصغير الاسم</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(0.1)">تكبير الاسم</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoAccessRoadEditsButton" onclick="undoAccessRoadEdits()">تراجع</button>' +
@@ -623,19 +619,10 @@
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelAccessRoadEdits()">إلغاء</button>';
     }
 
-    function manualRoadDrawingControlsHtml() {
-      const names = accessRoadRows().map(row => row.name);
-      const options = names.map(name => '<option value="' + escapeHtml(name) + '" ' + (name === tenantRoadDrawingTarget?.name ? 'selected' : '') + '>' + escapeHtml(name) + '</option>').join('');
-      return '<label class="map-control-field">اختيار الطريق<select id="manualRoadDrawingSelect" onchange="selectManualRoadDrawingRoad(this.value)">' + options + '</select></label>' +
-        '<button type="button" class="btn primary small" data-section-lock-ignore="1" id="confirmManualRoadDrawingButton" onclick="finishManualRoadDrawing()">اعتماد المسارات</button>' +
-        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoManualRoadDrawingButton" onclick="undoManualRoadDrawing()">تراجع</button>' +
-        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelManualRoadDrawing()">إلغاء</button>';
-    }
-
     async function startAccessRoadEditMode() {
       if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit('access')) return;
       if (!openLocationTableMap('access')) return;
-      tenantRoadDrawingTarget = null;
+      tenantLandmarkPlacementTarget = null;
       tenantRoadEditMode = true;
       tenantRoadEditDraft = {
         rows: accessRoadRows(),
@@ -657,6 +644,7 @@
         ? tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || ''
         : tenantRoadEditDraft?.newName || '';
       renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
     }
 
     function updateAccessRoadDraftName(value) {
@@ -687,14 +675,40 @@
       return tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
     }
 
-    function setAccessRoadLabelFromMap(lat, lng) {
+    // A map click in the unified edit mode adds a vertex to the selected
+    // road's path — drawing stays open across roads (switch in the select)
+    // until اعتماد commits everything in one recompose. Label positions move
+    // by dragging the label itself, so clicks are free for the path.
+    function addAccessRoadPathPoint(lat, lng) {
       if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      const pendingNew = tenantRoadEditSelectedIndex < 0;
+      if (pendingNew && !String(document.getElementById('accessRoadEditName')?.value || tenantRoadEditDraft.newName || '').trim()) {
+        toast('اسم الطريق مطلوب');
+        return;
+      }
       pushRoadEditHistory();
       const row = commitAccessRoadDraftName();
       if (!row || !String(row.name || '').trim()) return;
-      tenantRoadEditDraft.labelPositions[row.name.trim()] = [lat, lng];
+      row.points = Array.isArray(row.points) ? row.points : [];
+      row.points.push([lat, lng]);
+      if (pendingNew) renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
+    }
+
+    // Empties the selected road's sketched path so it can be redrawn from
+    // scratch; on اعتماد the stored manual path for it is dropped unless a
+    // fresh sketch replaced it.
+    function clearAccessRoadPath() {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft || tenantRoadEditSelectedIndex < 0) return;
+      const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
+      if (!row || !(Array.isArray(row.points) && row.points.length)) return;
+      pushRoadEditHistory();
+      row.points = [];
+      row.pathCleared = true;
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
     }
 
     function startAccessRoadLabelDrag(event, name) {
@@ -788,6 +802,18 @@
         .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
       tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [])
         .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
+      // Paths sketched during the session commit here: a drawn path replaces
+      // the stored manual one for its road, and a cleared sketch drops it.
+      // Sketches shorter than two points are ignored so a stray map click can
+      // never erase a stored path.
+      rows.forEach(row => {
+        const drawn = Array.isArray(row.points) && row.points.length >= 2 ? row.points : null;
+        if (!drawn && !row.pathCleared) return;
+        const key = accessRoadNameKey(row.name);
+        tenantProjectData.manual_road_paths = tenantProjectData.manual_road_paths
+          .filter(road => accessRoadNameKey(road?.name) !== key);
+        if (drawn) tenantProjectData.manual_road_paths.push({ name: row.name, points: drawn });
+      });
       tenantProjectData.access_road_label_positions = Object.fromEntries(rows.map(row => {
         const point = tenantRoadEditDraft.labelPositions[row.name] || tenantRoadEditDraft.labelPositions[row.original_name];
         return point ? [row.name, point] : null;
@@ -797,7 +823,7 @@
         return size ? [row.name, size] : null;
       }).filter(Boolean));
       tenantProjectData.main_roads = rows.map(row => row.name).join('\n');
-      tenantProjectData.main_roads_data = rows.map(({ original_name, ...row }) => row);
+      tenantProjectData.main_roads_data = rows.map(({ original_name, points, pathCleared, ...row }) => row);
       setLocationTableValue('main_roads', tenantProjectData.main_roads_data);
       tenantRoadEditMode = false;
       tenantRoadEditDraft = null;
@@ -826,55 +852,16 @@
       return startManualRoadDrawing(roadName);
     }
 
+    // Path drawing lives inside the unified road-edit mode: this entry opens
+    // it with the asked-for road already selected in the dropdown.
     async function startManualRoadDrawing(name) {
-      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit('access')) return;
-      if (!openLocationTableMap('access')) return;
-      const names = accessRoadRows().map(row => row.name);
-      const requestedName = String(name || '').trim();
-      const roadName = requestedName
-        ? names.find(item => accessRoadNameKey(item) === accessRoadNameKey(requestedName))
-        : names[0];
-      if (!roadName) { toast(requestedName ? 'اسم الطريق غير موجود في الجدول' : 'لا توجد طرق رئيسية'); return; }
-      tenantLandmarkPlacementTarget = null;
-      tenantRoadEditMode = false;
-      tenantRoadEditDraft = null;
-      tenantRoadDrawingTarget = { name: roadName, points: [] };
-      tenantMapPolygonMode = false;
-      renderLocationWorkflowState();
-      renderTenantMapPolygonOverlay();
-      await ensureAccessEditablePreview();
-    }
-
-    function selectManualRoadDrawingRoad(name) {
-      if (!tenantRoadDrawingTarget) return;
-      tenantRoadDrawingTarget = { name: String(name || '').trim(), points: [] };
-      renderLocationWorkflowState();
-      renderTenantMapPolygonOverlay();
-    }
-
-    function undoManualRoadDrawing() {
-      if (!tenantRoadDrawingTarget?.points?.length) return;
-      tenantRoadDrawingTarget.points.pop();
-      renderTenantMapPolygonOverlay();
-      updateTenantRoadControls();
-    }
-
-    async function finishManualRoadDrawing() {
-      if (!tenantRoadDrawingTarget || tenantRoadDrawingTarget.points.length < 2) return;
-      const paths = Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [];
-      tenantProjectData.manual_road_paths = paths.filter(item => accessRoadNameKey(item?.name) !== accessRoadNameKey(tenantRoadDrawingTarget.name))
-        .concat([{ name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points }]);
-      tenantRoadDrawingTarget = null;
-      releaseLocationSectionApproval();
-      renderLocationWorkflowState();
-      renderTenantMapPolygonOverlay();
-      triggerAutoSaveDraft();
-      await applyAccessMapEdits();
-      toast('تم اعتماد مسار الطريق');
-    }
-
-    function cancelManualRoadDrawing() {
-      tenantRoadDrawingTarget = null;
+      await startAccessRoadEditMode();
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      const roadName = String(name || '').trim();
+      if (!roadName) return;
+      const index = tenantRoadEditDraft.rows.findIndex(row => accessRoadNameKey(row.name) === accessRoadNameKey(roadName));
+      if (index < 0) { toast('اسم الطريق غير موجود في الجدول'); return; }
+      tenantRoadEditSelectedIndex = index;
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }

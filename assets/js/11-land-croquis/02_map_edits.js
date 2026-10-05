@@ -8,7 +8,6 @@
     let tenantMapPolygonMode = false;
     let tenantMapPinMode = false;
     let tenantMapDraftPinHistory = [];
-    let tenantRoadDrawingTarget = null;
     let tenantRoadEditMode = false;
     let tenantRoadEditDraft = null;
     let tenantRoadEditHistory = [];
@@ -36,7 +35,6 @@
     }
 
     function resetTenantRoadModes() {
-      tenantRoadDrawingTarget = null;
       tenantRoadEditMode = false;
       tenantRoadEditDraft = null;
       tenantRoadEditHistory = [];
@@ -131,7 +129,7 @@
       const img = event.currentTarget;
       const coordinates = tenantMapCoordinatesFromClient(event.clientX, event.clientY, img);
       if (!coordinates) {
-        if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget) {
+        if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantLandmarkPlacementTarget) {
           toast('تعذر تحديد الإحداثيات على هذه الخريطة');
         }
         return;
@@ -155,15 +153,7 @@
         return;
       }
       if (tenantRoadEditMode && tenantSelectedMapType === 'access') {
-        setAccessRoadLabelFromMap(nextLat, nextLng);
-        return;
-      }
-      if (tenantRoadDrawingTarget && tenantSelectedMapType === 'access') {
-        tenantRoadDrawingTarget.points.push([nextLat, nextLng]);
-        renderTenantMapPolygonOverlay();
-        updateTenantRoadControls();
-        const status = document.getElementById('manualRoadDrawingStatus');
-        if (status) status.innerHTML = '<span>رسم مسار:</span> ' + escapeHtml(tenantRoadDrawingTarget.name) + ' — <span>' + tenantRoadDrawingTarget.points.length + '</span> <span>نقاط</span>';
+        addAccessRoadPathPoint(nextLat, nextLng);
         return;
       }
       const landmarkMapType = LOCATION_TABLE_FIELDS[tenantLandmarkPlacementTarget?.key]?.mapType;
@@ -197,11 +187,12 @@
 
     function updateTenantRoadControls() {
       const editUndo = document.getElementById('undoAccessRoadEditsButton');
-      const pathUndo = document.getElementById('undoManualRoadDrawingButton');
-      const pathConfirm = document.getElementById('confirmManualRoadDrawingButton');
+      const pathClear = document.getElementById('clearAccessRoadPathButton');
       if (editUndo) editUndo.disabled = !tenantRoadEditHistory.length;
-      if (pathUndo) pathUndo.disabled = !tenantRoadDrawingTarget?.points?.length;
-      if (pathConfirm) pathConfirm.disabled = (tenantRoadDrawingTarget?.points?.length || 0) < 2;
+      if (pathClear) pathClear.disabled = !(
+        tenantRoadEditSelectedIndex >= 0
+        && (tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.points || []).length
+      );
     }
 
     function updateTenantCatchmentControls() {
@@ -215,7 +206,7 @@
     }
 
     function updateTenantMapInteractionState() {
-      const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
+      const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
       if (interactiveMapActive()) {
         try { tenantInteractiveMap.setOptions({ draggableCursor: modeActive ? 'crosshair' : 'grab' }); } catch (e) { /* map gone */ }
         return;
@@ -285,7 +276,7 @@
     function mapViewportPanAllowed() {
       if (!mapViewportAdjustable(tenantSelectedMapType)) return false;
       if (tenantMapApproved(tenantSelectedMapType)) return false;
-      if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
+      if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
       return !!(tenantMapPreviewState && tenantMapPreviewState.frameAccurate);
     }
 
@@ -792,7 +783,7 @@
       }
       const selectedRoadName = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
         ? String(tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || '')
-        : (tenantRoadDrawingTarget ? String(tenantRoadDrawingTarget.name || '') : '');
+        : '';
       const roadMarkup = showRoads ? roadPaths.map(path => {
         const roadPoints = (path.points || []).map(toPoint);
         if (roadPoints.length < 2) return '';
@@ -816,10 +807,15 @@
         if (![mx, my, lx, ly].every(Number.isFinite) || Math.abs(lx - mx) + Math.abs(ly - my) < 0.4) return '';
         return '<line class="map-place-link-line' + mapPlaceLinkClass(pair[0], item.name) + '" data-' + pair[0] + '-link="' + escapeHtml(item.name) + '" x1="' + mx.toFixed(3) + '%" y1="' + my.toFixed(3) + '%" x2="' + lx.toFixed(3) + '%" y2="' + ly.toFixed(3) + '%"></line>';
       }).join('');
-      const roadPointMarkup = tenantRoadDrawingTarget ? tenantRoadDrawingTarget.points.map(point => {
+      // Vertex dots mark the path being sketched for the selected road —
+      // clicks append to it until اعتماد commits the session.
+      const sketchPoints = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
+        ? (tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.points || [])
+        : [];
+      const roadPointMarkup = sketchPoints.map(point => {
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
-      }).join('') : '';
+      }).join('');
       overlay.innerHTML = boundaryMarkup + roadMarkup + linkLineMarkup + roadPointMarkup + pinMarkup;
       if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);
       else if (showCatchment) renderCatchmentLabels(catchmentItems, toPoint);
