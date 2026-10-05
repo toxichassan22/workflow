@@ -273,9 +273,14 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
         # color_unchanged for a request it never tried.
 
     # The boundary diagram is rebuilt from documented facts — the legacy
-    # deterministic editor owns that slide type.
-    if _is_land_boundary_diagram_slide(
-            title=title, content_source=content_source, html=html):
+    # deterministic editor owns that slide type. The same applies to a timeline
+    # chart request on the project timeline slide: its canonical Gantt is
+    # rebuilt from the dated phases instead of a freehand model drawing.
+    if (_is_land_boundary_diagram_slide(
+            title=title, content_source=content_source, html=html)
+            or (_is_project_timeline_slide(
+                title=title, content_source=content_source, html=html)
+                and _designer_requests_timeline_chart(instruction))):
         return _designer_edit_slide(
             html, title, instruction, index, ctx['project_data'],
             ctx['presentation_id'], ctx['branding'], tenant_id=ctx['tenant_id'],

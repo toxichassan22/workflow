@@ -396,6 +396,13 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         }
     )
     free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
+    # The timeline slide is a fixed layout too: it renders the dated Gantt from
+    # the client's phases, so the model can never drop the chart or reinvent it.
+    fixed_timeline = (
+        (market_source == 'timeline_table_data'
+         or str((slide or {}).get('design_style') or '') == 'timeline'
+         or _slide_section_key(slide) == 'timeline')
+        and bool(parse_timeline_phases(project_data)))
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
     # comparison; approved financial charts remain fixed in the financial
@@ -416,6 +423,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if (fixed_market_comparison
             or fixed_land_boundary_diagram
             or fixed_map_slide
+            or fixed_timeline
             or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES

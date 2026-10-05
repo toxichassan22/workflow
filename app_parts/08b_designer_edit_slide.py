@@ -21,6 +21,45 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         color_html, color_message = designer_chat_colors.apply_color_edit(html, instruction)
         return color_html or html, color_message
 
+    # The project timeline is a system-owned slide like the boundary diagram: a
+    # request for its chart rebuilds the deterministic colored Gantt instead of
+    # whatever dots-on-a-line the model would improvise.
+    if (_is_project_timeline_slide(title=title, content_source=content_source, html=html)
+            and _designer_requests_timeline_chart(instruction)
+            and slide_engine.parse_timeline_phases(
+                project_data if isinstance(project_data, dict) else {})):
+        try:
+            timeline_html = slide_engine._build_timeline_slide(
+                {
+                    'title': title,
+                    'type': slide_type or 'content',
+                    'content_source': content_source or 'timeline_table_data',
+                },
+                project_data,
+                branding,
+                slide_num=slide_index + 1,
+                total_slides=total_slides or (slide_index + 1),
+            )
+            timeline_html = resolve_designer_chat_placeholders(
+                timeline_html, project_data, presentation_id, tenant_id, creative_images)
+            timeline_html = slide_engine.finalize_designer_slide_html(
+                timeline_html, slide_type or 'content', project_data, branding,
+                creative_images=creative_images, tenant_id=tenant_id,
+                slide_num=slide_index + 1, slide_title=title,
+                total_slides=total_slides or (slide_index + 1), content_source=content_source,
+                allow_all_maps=True,
+            )
+            timeline_html = _sanitize_designer_output(timeline_html)
+            if not _is_watermark_removal_instruction(instruction):
+                timeline_html = _carry_slide_watermark(html, timeline_html)
+            if timeline_html:
+                return timeline_html, (
+                    'أعدت بناء شريحة الجدول الزمني كمخطط جانت ملوّن على محور التاريخ: '
+                    'كل مرحلة شريط ملون بامتداد تاريخها الفعلي مع مدتها وملاحظاتها.')
+        except Exception:
+            app.logger.exception(
+                '[DESIGNER-EDIT] deterministic timeline build failed for slide %s', slide_index + 1)
+
     rules = build_design_rules(branding)
     training_context = ''
     if tenant_id:

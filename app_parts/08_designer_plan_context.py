@@ -774,6 +774,29 @@ def _designer_requests_google_maps_link(instruction):
     return 'رابط' in text and any(word in text for word in ('جوجل', 'google', 'خرائط', 'ماب'))
 
 
+def _is_project_timeline_slide(title=None, content_source=None, html=None):
+    """Detect the system-owned project timeline slide.
+
+    Like the boundary diagram, the timeline is rebuilt from documented project
+    facts — the canonical Gantt — whenever the chat asks for its chart.
+    """
+    if str(content_source or '').strip() in ('timeline_table_data', 'timeline'):
+        return True
+    if re.search(r'(?:الجدول\s+الزمني|الخطة\s+الزمنية|مراحل\s+(?:التطوير|التنفيذ|المشروع)|timeline|gantt)',
+                 str(title or ''), flags=re.IGNORECASE):
+        return True
+    return 'data-timeline-gantt' in str(html or '')
+
+
+def _designer_requests_timeline_chart(instruction):
+    """True when the chat asks for the timeline chart on the timeline slide."""
+    text = str(instruction or '').casefold()
+    return bool(re.search(
+        r'(?:مخطط|مخططات|رسم(?:\s*بياني)?|خريطة|خارطة|خط|جدول)\s*.{0,16}?(?:زمني|زمنية)|'
+        r'(?:جانت|gantt|timeline\s*chart|الجدول\s+الزمني|chart|diagram|مخطط|رسم\s*بياني)',
+        text, flags=re.IGNORECASE))
+
+
 def _designer_project_maps_link(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     for key in ('location_address', 'location_maps_link', 'maps_link'):
