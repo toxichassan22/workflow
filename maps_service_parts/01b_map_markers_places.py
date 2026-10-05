@@ -356,7 +356,9 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
 
     Geocoding a landmark name together with the project address returns the *address*,
     so every named landmark landed on the site itself and was then dropped as a duplicate.
-    A text search with a location bias resolves the place instead.
+    A text search with a location bias resolves the place instead. The top hit is
+    not kept blindly either: a road or multi-branch name can resolve to a far
+    endpoint, so the nearest candidate to the site wins.
     """
     query = str(name or '').strip()
     if not query or not _has_api_key():
@@ -364,7 +366,7 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
     place_tenant = usage_ctx.get('tenant_id') if isinstance(usage_ctx, dict) else None
     cache_key = _discovery_cache_key(
         place_tenant, 'place', lat, lng,
-        extra=f"{query.casefold()}:{radius_m}:{language}")
+        extra=f"{query.casefold()}:{radius_m}:{language}:v2")
     cached = _discovery_cache_get(place_tenant, cache_key)
     if isinstance(cached, dict) and cached.get('lat') is not None:
         return cached
@@ -374,12 +376,12 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
             headers={
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': _get_api_key(),
-                'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress',
+                'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress,places.types',
             },
             json={
                 'textQuery': query,
                 'languageCode': language,
-                'maxResultCount': 1,
+                'maxResultCount': 5,
                 'locationBias': {
                     'circle': {
                         'center': {'latitude': float(lat), 'longitude': float(lng)},
@@ -394,17 +396,37 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
             print(f"[PLACES TEXT] {query}: {(data.get('error') or {}).get('message', response.status_code)}")
             return None
         places = data.get('places') or []
-        if not places:
+        # The first hit can sit kilometres off — a long road's remote segment or
+        # a far same-named branch — while a closer candidate is the landmark this
+        # map means. Road-style names additionally prefer actual route entities
+        # over businesses carrying the road's name.
+        candidates = []
+        for place in places:
+            location = (place or {}).get('location') or {}
+            latitude, longitude = location.get('latitude'), location.get('longitude')
+            if latitude is None or longitude is None:
+                continue
+            candidates.append({
+                'place': place,
+                'lat': float(latitude),
+                'lng': float(longitude),
+                'distance': _distance_meters(lat, lng, latitude, longitude),
+                'route': 'route' in set((place or {}).get('types') or []),
+            })
+        if not candidates:
             return None
-        location = (places[0] or {}).get('location') or {}
-        latitude, longitude = location.get('latitude'), location.get('longitude')
-        if latitude is None or longitude is None:
-            return None
+        roadish = any(query == prefix or query.startswith(prefix + ' ') for prefix in _ROAD_NAME_PREFIXES)
+        if roadish and any(candidate['route'] for candidate in candidates):
+            candidates = [candidate for candidate in candidates if candidate['route']]
+        best = min(candidates, key=lambda candidate: candidate['distance'])
+        if places and best['place'] is not places[0]:
+            print(f"[PLACES TEXT] {query}: picked a nearer candidate "
+                  f"{best['distance'] / 1000.0:.1f} km out instead of the top hit")
         _record_maps_usage(usage_ctx, 'places_text', 1)
         resolved_place = {
-            'lat': float(latitude),
-            'lng': float(longitude),
-            'name': ((places[0].get('displayName') or {}).get('text') or query),
+            'lat': best['lat'],
+            'lng': best['lng'],
+            'name': ((best['place'].get('displayName') or {}).get('text') or query),
         }
         _discovery_cache_put(place_tenant, cache_key, resolved_place, ttl_days=30)
         return resolved_place

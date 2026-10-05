@@ -129,6 +129,53 @@ class MapViewportTests(unittest.TestCase):
                 with Image.open(result['placeholders']['##MAP_OVERVIEW##']) as image:
                     self.assertEqual(image.size, (2560, 1440))
 
+    def place_search(self, places):
+        calls = []
+
+        class Resp:
+            content = b'{}'
+            status_code = 200
+
+            def json(self):
+                return {'places': places}
+
+        self.stack.enter_context(patch.object(maps, '_discovery_cache_get', return_value=None))
+        self.stack.enter_context(patch.object(maps, '_discovery_cache_put', return_value=True))
+        self.stack.enter_context(patch.object(
+            maps.requests, 'post', side_effect=lambda *a, **k: (calls.append(k), Resp())[-1]))
+        return calls
+
+    def test_place_resolution_prefers_the_nearest_candidate(self):
+        calls = self.place_search([
+            {'displayName': {'text': 'far endpoint'}, 'types': ['route'],
+             'location': {'latitude': 24.4, 'longitude': 46.4}},
+            {'displayName': {'text': 'near endpoint'}, 'types': ['route'],
+             'location': {'latitude': 24.01, 'longitude': 46.01}},
+        ])
+        place = maps.find_place_near('طريق الملك فهد', 24.0, 46.0)
+        self.assertEqual((place['lat'], place['lng']), (24.01, 46.01))
+        self.assertEqual(place['name'], 'near endpoint')
+        self.assertEqual(calls[0]['json']['maxResultCount'], 5)
+
+    def test_road_names_prefer_route_entities_over_nearer_businesses(self):
+        self.place_search([
+            {'displayName': {'text': 'a shop on the road'}, 'types': ['store'],
+             'location': {'latitude': 24.01, 'longitude': 46.01}},
+            {'displayName': {'text': 'the road'}, 'types': ['route'],
+             'location': {'latitude': 24.2, 'longitude': 46.2}},
+        ])
+        place = maps.find_place_near('طريق الأمير سلطان', 24.0, 46.0)
+        self.assertEqual((place['lat'], place['lng']), (24.2, 46.2))
+        # A non-road query just takes the closest candidate whatever its type.
+        self.place_search([
+            {'displayName': {'text': 'far mall'}, 'types': ['shopping_mall'],
+             'location': {'latitude': 24.4, 'longitude': 46.4}},
+            {'displayName': {'text': 'near mall'}, 'types': ['store'],
+             'location': {'latitude': 24.01, 'longitude': 46.01}},
+        ])
+        place = maps.find_place_near('الراشد مول', 24.0, 46.0)
+        self.assertEqual((place['lat'], place['lng']), (24.01, 46.01))
+
     def test_failed_static_render_is_not_returned_as_a_generated_map(self):
         add_image = self.generation_patches()
         for map_type in ('overview', 'access', 'catchment', 'landmarks'):
