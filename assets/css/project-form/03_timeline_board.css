@@ -1,0 +1,187 @@
+/* project-form/03_timeline_board.css — the visual project timeline (section-timeline). */
+
+    #section-timeline .validation-panel {
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      background: #fef3c7;
+      border: 1px solid #ead39a;
+      color: #755b12;
+    }
+    #section-timeline .validation-panel.error {
+      background: #fee2e2;
+      border-color: #f3b6b6;
+      color: #8a1f1f;
+    }
+
+    .tl-board-scroll {
+      overflow-x: auto;
+      border: 1px solid #d9d1cb;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .tl-board {
+      position: relative;
+      min-width: 100%;
+      padding: 34px 0 10px;
+    }
+    .tl-project-band {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background: rgba(18, 59, 109, 0.05);
+      border-inline: 1px dashed #9db3cc;
+      pointer-events: none;
+    }
+    .tl-axis {
+      position: absolute;
+      top: 0;
+      inset-inline-start: 0;
+      bottom: 0;
+      inset-inline-end: 0;
+      pointer-events: none;
+    }
+    .tl-tick {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-inline-start: 1px solid #ece4de;
+    }
+    .tl-tick-year {
+      border-inline-start-color: #c9beb4;
+    }
+    .tl-tick-label {
+      position: absolute;
+      top: 5px;
+      inset-inline-start: 4px;
+      font-size: 10px;
+      color: #8a7f74;
+      white-space: nowrap;
+    }
+    .tl-tick-year .tl-tick-label {
+      font-weight: 700;
+      color: #5c4f43;
+    }
+    .tl-lane {
+      position: relative;
+      height: 44px;
+      margin: 6px 0 0;
+    }
+    .tl-card {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 1px;
+      border: 1px solid #123b6d;
+      border-radius: 8px;
+      background: #eaf2f8;
+      color: #082646;
+      padding: 4px 10px;
+      font: inherit;
+      font-size: 11.5px;
+      line-height: 1.35;
+      text-align: start;
+      cursor: grab;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+    }
+    .tl-card:active {
+      cursor: grabbing;
+    }
+    .tl-card.tl-out {
+      border-style: dashed;
+      border-color: #b45309;
+      background: #fef3c7;
+    }
+    .tl-card-name {
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tl-card-dur {
+      font-size: 10px;
+      color: #5c6b7a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tl-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: ew-resize;
+    }
+    .tl-handle-start {
+      inset-inline-start: 0;
+    }
+    .tl-handle-end {
+      inset-inline-end: 0;
+    }
+
+    .tl-undated {
+      margin-top: 10px;
+    }
+    .tl-undated-title {
+      font-size: 11px;
+      color: #8a7f74;
+      margin-bottom: 6px;
+    }
+    .tl-chip {
+      display: inline-block;
+      border: 1px dashed #123b6d;
+      color: #123b6d;
+      background: #fff;
+      border-radius: 16px;
+      padding: 4px 12px;
+      margin: 0 0 6px;
+      margin-inline-end: 6px;
+      font: inherit;
+      font-size: 11.5px;
+      cursor: pointer;
+    }
+    .tl-empty {
+      color: #777;
+      border: 1px dashed #ccc;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      margin-top: 10px;
+    }
+
+    .tl-editor {
+      border: 1px solid #d9d1cb;
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 10px;
+      background: #fbf9f7;
+    }
+    .tl-editor-title {
+      font-weight: 700;
+      color: #082646;
+      margin-bottom: 10px;
+    }
+    .tl-editor-meta {
+      display: flex;
+      gap: 10px;
+      min-height: 18px;
+      font-size: 11.5px;
+      color: #5c6b7a;
+      margin: 4px 0 8px;
+    }
+    .tl-editor-error {
+      color: #b45309;
+      font-weight: 700;
+    }
+    .tl-editor-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }

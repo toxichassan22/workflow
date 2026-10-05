@@ -1063,12 +1063,12 @@ TIMELINE_QUARTERS = ('Q1', 'Q2', 'Q3', 'Q4')
 def _timeline_project_start_index(project_data):
     """Project start as an absolute month index (year*12 + month-1), or None.
 
-    The client picks a month+year start («2030-02»); drafts saved before that field carry a
-    bare start year, which maps to January.
+    The client picks a full start date («2030-02-15»); drafts saved before that stored
+    month+year, and older ones a bare start year that maps to January.
     """
     source = project_data if isinstance(project_data, dict) else {}
     raw = str(source.get('timeline_start_date') or '').strip()
-    match = re.match(r'^(\d{4})-(\d{1,2})$', raw)
+    match = re.match(r'^(\d{4})-(\d{1,2})(?:-\d{1,2})?$', raw)
     if match and 1 <= int(match.group(2)) <= 12:
         return int(match.group(1)) * 12 + (int(match.group(2)) - 1)
     legacy = str(source.get('timeline_start_year') or '').strip()
@@ -1099,11 +1099,64 @@ def compute_timeline_end(year, quarter, duration):
     }
 
 
+def _parse_timeline_date(raw):
+    """A stored phase date — «YYYY-MM-DD», with «YYYY-MM» landing on its first day."""
+    match = re.match(r'^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$', str(raw or '').strip())
+    if not match:
+        return None
+    year, month = int(match.group(1)), int(match.group(2))
+    day = int(match.group(3) or 1)
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return None
+    return (year, month, day)
+
+
+def _timeline_date_label(raw, date_tuple):
+    """Day-precise label; a month-only stored value keeps the bare month/year look."""
+    year, month, day = date_tuple
+    if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', str(raw or '').strip()):
+        return f'{day}/{month}/{year}'
+    return f'{month}/{year}'
+
+
+def _timeline_phase_from_dates(item, start_index):
+    """Normalize a date-pair phase {name, start, end, notes} onto the shared phase shape."""
+    import datetime as _dt
+    phase = {
+        'name': str(item.get('name') or '').strip(),
+        'year': '',
+        'quarter': '',
+        'duration': '',
+        'endYear': '',
+        'endQuarter': '',
+        'notes': str(item.get('notes') or '').strip(),
+    }
+    start_d = _parse_timeline_date(item.get('start'))
+    end_d = _parse_timeline_date(item.get('end'))
+    if not start_d or not end_d or end_d < start_d:
+        return phase
+    phase['start_label'] = _timeline_date_label(item.get('start'), start_d)
+    phase['end_label'] = _timeline_date_label(item.get('end'), end_d)
+    start_date = _dt.date(*start_d)
+    end_date = _dt.date(*end_d)
+    phase['duration'] = str(max(1, round(((end_date - start_date).days + 1) / 30.4375)))
+    if start_index is not None:
+        # Relative project years/quarters stay available for any consumer that still frames
+        # phases on the project's own axis.
+        rel_start = (start_d[0] * 12 + start_d[1] - 1) - start_index
+        rel_end = (end_d[0] * 12 + end_d[1] - 1) - start_index
+        phase['year'] = str(max(1, rel_start // 12 + 1))
+        phase['quarter'] = TIMELINE_QUARTERS[(rel_start % 12) // 3]
+        phase['endYear'] = str(max(1, rel_end // 12 + 1))
+        phase['endQuarter'] = TIMELINE_QUARTERS[(rel_end % 12) // 3]
+    return phase
+
+
 def parse_timeline_phases(project_data):
     """Return named timeline phases from the draft table, including notes.
 
-    Rows keep project-relative years/quarters anchored to the start date; when that date is
-    known each phase also carries its real start/end month labels.
+    Current drafts store each phase as a start/end date pair; rows saved by the earlier
+    quarter/duration table keep their project-relative years and are read on the same shape.
     """
     source = project_data if isinstance(project_data, dict) else {}
     raw = source.get('timeline_table_data')
@@ -1130,6 +1183,9 @@ def parse_timeline_phases(project_data):
             continue
         name = str(item.get('name') or '').strip()
         if not name:
+            continue
+        if 'start' in item or 'end' in item:
+            phases.append(_timeline_phase_from_dates(item, start_index))
             continue
         year = str(item.get('year') or '').strip()
         quarter = str(item.get('quarter') or '').strip()
@@ -1601,6 +1657,7 @@ EXTRA_FIELD_LABELS = {
     'population_density_source': 'مصدر الكثافة السكانية',
     'timeline_start_date': 'تاريخ بداية المشروع',
     'timeline_start_year': 'سنة بداية المشروع',
+    'timeline_end_date': 'تاريخ نهاية المشروع',
     'timeline_years': 'عدد سنوات المشروع',
     'nearby_landmarks_data': 'جدول المعالم القريبة',
     'city_landmarks_data': 'جدول معالم المدينة',

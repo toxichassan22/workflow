@@ -193,7 +193,7 @@
         <div class="finance-block">
           <h3>2. مدة المشروع والأرض ومساحات البناء</h3>
           <div class="grid four">
-            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «عدد السنوات» في قسم الجدول الزمني — عدّلها من هناك.</span></div>
+            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من تاريخي بداية المشروع ونهايته في قسم الجدول الزمني.</span></div>
             <div id="salesStartYearWrap"><label>سنة بدء بيع الوحدات</label><input id="salesStartYear" type="number" min="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع البيعي أو المختلط.</span></div>
             <div id="salesYearsWrap"><label>عدد سنوات بيع الوحدات</label><input id="salesYears" type="number" min="1" oninput="calculateAll()"><span class="help input">توزع المبيعات على هذه السنوات.</span></div>
             <div id="operationYearsWrap"><label>عدد سنوات التشغيل</label><input id="operationYears" type="number" min="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع التأجيري أو المختلط.</span></div>

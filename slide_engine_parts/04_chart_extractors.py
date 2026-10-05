@@ -413,7 +413,8 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
         phases = parse_timeline_phases(project_data)
         timeline_meta = {
             'start_date': project_data.get('timeline_start_date') or project_data.get('start_date') or '',
-            'duration_years': project_data.get('timeline_duration_years') or project_data.get('project_duration_years') or '',
+            'end_date': project_data.get('timeline_end_date') or '',
+            'duration_years': project_data.get('timeline_duration_years') or project_data.get('project_duration_years') or project_data.get('timeline_years') or '',
             'phases': phases,
         }
         return (
@@ -930,10 +931,23 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
     total_months = sum(int(p.get('duration') or 0) for p in phases if str(p.get('duration') or '').isdigit())
-    years_val = source.get('timeline_years') or (str(round(total_months / 12)) if total_months >= 12 else '—')
-    start_str = phases[0].get('start_label') or f"سنة {phases[0].get('year', '1')} ({phases[0].get('quarter', 'Q1')})" if phases else '—'
-    end_str = phases[-1].get('end_label') or f"سنة {phases[-1].get('endYear', '')} ({phases[-1].get('endQuarter', '')})" if phases else '—'
-    duration_str = f"{total_months} شهر ({years_val} سنوات)" if total_months else (f"{years_val} سنوات" if years_val != '—' else '—')
+    try:
+        years_num = float(str(source.get('timeline_years') or 0) or 0)
+    except (TypeError, ValueError):
+        years_num = 0
+    if years_num <= 0 and total_months >= 12:
+        years_num = round(total_months / 12)
+    # Fractional derived years are a storage detail — the strip shows whole years or none.
+    years_text = str(int(years_num)) if years_num >= 1 and float(years_num).is_integer() else (
+        str(round(years_num, 1)) if years_num >= 1 else '')
+    start_str = phases[0].get('start_label') or (
+        f"سنة {phases[0].get('year')} ({phases[0].get('quarter')})" if phases and phases[0].get('year') else '—')
+    end_str = phases[-1].get('end_label') or (
+        f"سنة {phases[-1].get('endYear')} ({phases[-1].get('endQuarter')})" if phases and phases[-1].get('endYear') else '—')
+    if total_months:
+        duration_str = f"{total_months} شهر" + (f" ({years_text} سنوات)" if years_text else '')
+    else:
+        duration_str = f"{years_text} سنوات" if years_text else '—'
 
     stats_cards = [
         f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;text-align:center;">'
@@ -961,8 +975,10 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
             p_name = html_lib.escape(str(phase.get('name') or ''))
             p_dur = str(phase.get('duration') or '').strip()
             dur_badge = f'<span style="background:#f1f5f9;color:{primary};padding:3px 8px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #cbd5e1;">{p_dur} شهر</span>' if p_dur else ''
-            p_start = phase.get('start_label') or f"سنة {phase.get('year', '')} ({phase.get('quarter', '')})"
-            p_end = phase.get('end_label') or f"سنة {phase.get('endYear', '')} ({phase.get('endQuarter', '')})"
+            p_start = phase.get('start_label') or (
+                f"سنة {phase.get('year')} ({phase.get('quarter')})" if phase.get('year') else '—')
+            p_end = phase.get('end_label') or (
+                f"سنة {phase.get('endYear')} ({phase.get('endQuarter')})" if phase.get('endYear') else '—')
             p_notes = html_lib.escape(str(phase.get('notes') or '').strip())
             notes_html = f'<div style="font-size:11.5px;color:#475569;line-height:1.48;margin-top:10px;padding-top:8px;border-top:1px dashed #e2e8f0;">{p_notes}</div>' if p_notes else ''
 
@@ -988,8 +1004,10 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
             p_name = html_lib.escape(str(phase.get('name') or ''))
             p_dur = str(phase.get('duration') or '').strip()
             dur_text = f"{p_dur} شهر" if p_dur else ''
-            p_start = phase.get('start_label') or f"سنة {phase.get('year', '')} ({phase.get('quarter', '')})"
-            p_end = phase.get('end_label') or f"سنة {phase.get('endYear', '')} ({phase.get('endQuarter', '')})"
+            p_start = phase.get('start_label') or (
+                f"سنة {phase.get('year')} ({phase.get('quarter')})" if phase.get('year') else '—')
+            p_end = phase.get('end_label') or (
+                f"سنة {phase.get('endYear')} ({phase.get('endQuarter')})" if phase.get('endYear') else '—')
             p_notes = html_lib.escape(str(phase.get('notes') or '').strip())
             card = f'''<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;border-right:4px solid {primary};">
               <div style="display:flex;align-items:center;justify-content:space-between;">

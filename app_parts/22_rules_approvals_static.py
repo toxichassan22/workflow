@@ -309,6 +309,7 @@ FRONTEND_CSS_ORDER = (
     'base/07_package_slider.css',
     'project-form/01_sections_changelog.css',
     'project-form/02_fields_tables_rail.css',
+    'project-form/03_timeline_board.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
@@ -319,7 +320,8 @@ FRONTEND_JS_ORDER = (
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js',
     '10-financial-report-timeline/01_report_collect.js',
-    '10-financial-report-timeline/02_timeline_sidebar.js', '11-land-croquis/01_croquis_survey.js',
+    '10-financial-report-timeline/02_timeline_sidebar.js',
+    '10-financial-report-timeline/03_timeline_board.js', '11-land-croquis/01_croquis_survey.js',
     '11-land-croquis/02_map_edits.js', '11-land-croquis/03_interactive_map.js',
     '12-files-media/01_files_media.js',
     '12-files-media/02_visual_concept.js',

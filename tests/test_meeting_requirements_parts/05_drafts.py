@@ -543,15 +543,15 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
 
         self.assertIn('function syncFinancialFromTimeline()', index_source)
 
-        # Development duration is taken from the timeline's year count and is not editable here.
+        # Development duration is derived from the project start/end dates and is not editable here.
         self.assertIn('id="developmentYears" type="number" min="1" value="" readonly', index_source)
         self.assertNotIn('id="developmentYears" type="number" min="1" value="4" oninput', index_source)
-        self.assertIn("مأخوذة من «عدد السنوات» في قسم الجدول الزمني", index_source)
+        self.assertIn("مأخوذة من تاريخي بداية المشروع ونهايته في قسم الجدول الزمني", index_source)
 
-        # The year count mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
+        # The duration mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
         # showing 4 while the timeline said 5, in a box the user cannot edit.
         self.assertNotIn('if (namedStages.length && devYearsInput', index_source)
-        self.assertIn("const nextDevYears = Number.isFinite(timelineYears) && timelineYears > 0 ? String(timelineYears) : '';",
+        self.assertIn('String(Math.max(1, Math.ceil(timelineSpanDays(period.start.ms, period.end.ms) / 365.25)))',
                       index_source)
         self.assertIn('if (devYearsChanged) recalculate();', index_source)
 
@@ -592,9 +592,10 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertNotIn('addScheduleStage({', fin_body)
         self.assertNotIn('التصميم والتراخيص والأعمال المبكرة', fin_body)
 
-        # Timeline rows already carry project-relative years — the same axis the cashflow uses —
-        # and the percentages survive a rebuild.
-        self.assertIn('const relative = parseInt(row.year, 10);', index_source)
+        # A phase's project-relative year is derived from its own dates against the project
+        # start — the same axis the cashflow uses — and the percentages survive a rebuild.
+        self.assertIn('const anchor = period ? period.start.ms', index_source)
+        self.assertIn('Math.floor((ms - anchor) / (365.25 * TIMELINE_DAY_MS)) + 1', index_source)
         self.assertIn('previous.get(name) || {}', index_source)
         self.assertIn('tr.dataset.stageEndYear = String(d.endYear ?? d.year ?? 1)', index_source)
         self.assertIn('year >= r.year && year <= r.endYear', index_source)
@@ -641,30 +642,34 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('const raw = readLand(key);', index_source)
         self.assertNotIn('parseCoverageFromLandText', index_source)
 
-    def test_timeline_start_is_a_month_year_and_years_start_blank(self):
-        """«سنة البداية» became «تاريخ البداية» (month+year), «عدد السنوات» opens empty, and the
-        project end lands on the same month — 2/2030 + 5 years is 2/2035, not 3/2035."""
+    def test_timeline_period_is_two_dates_and_a_derived_duration(self):
+        """The client enters the project start and end as full dates; the duration — not the
+        other way around — is derived, so a 4-month or 18-month project is just two picks."""
         index_source = read_frontend_text()
 
-        # Month+year picker instead of the bare year input.
-        self.assertIn('id="tlStartDate" data-key="timeline_start_date"', index_source)
-        self.assertIn('type="month" id="tlStartDate"', index_source)
+        # Two real date pickers instead of a month start plus a year count.
+        self.assertIn('type="date" id="tlStartDate" data-key="timeline_start_date"', index_source)
+        self.assertIn('type="date" id="tlEndDate" data-key="timeline_end_date"', index_source)
         self.assertNotIn('id="tlStartYear"', index_source)
+        self.assertNotIn('type="month" id="tlStartDate"', index_source)
 
-        # «عدد السنوات» carries no invented default.
-        self.assertIn('id="tlYears" data-key="timeline_years" data-type="number" min="1" value=""', index_source)
+        # The duration is a read-only derivative; «timeline_years» survives only as a hidden
+        # derived field the financial study and the slides still read.
+        self.assertIn('id="tlDuration" readonly', index_source)
+        self.assertIn('type="hidden" id="tlYears" data-key="timeline_years"', index_source)
+        self.assertIn('timelineDurationText(period.start.ms, period.end.ms)', index_source)
+        self.assertNotIn('id="tlEndDate" readonly', index_source)
 
-        # The end date is read-only and lands on the same month: start.index + years * 12.
-        self.assertIn('id="tlEndDate" readonly', index_source)
-        self.assertIn('formatTimelineMonth(start.index + years * 12)', index_source)
+        # An end before the start flags a conflict instead of computing a negative span.
+        self.assertIn('id="timelineDatesWarning"', index_source)
+        self.assertIn('تاريخ النهاية قبل تاريخ البداية', index_source)
 
-        # Quarters belong to the project year, which starts at the start month.
-        self.assertIn('start.index + (year - 1) * 12 + quarterIndex * 3', index_source)
-
-        # Drafts saved before «تاريخ البداية» carried a bare start year; hydration maps it to
-        # January and rewrites calendar-year rows as project-relative years.
-        self.assertIn("tenantProjectData.timeline_start_date = legacyStartYear + '-01';", index_source)
-        self.assertIn('calendarYear - legacyStartYear + 1', index_source)
+        # Drafts saved before full dates carried a month-only start or a bare start year;
+        # hydration maps them onto the first of that month / January.
+        self.assertIn('tenantProjectData.timeline_start_date = iso;', index_source)
+        self.assertIn("parseTimelineDate(year + '-01-01')", index_source)
+        # A legacy «عدد السنوات» maps to the matching end date — start plus that span, minus a day.
+        self.assertIn('projectStart.index + legacyYears * 12 - 1', index_source)
 
     def test_new_projects_seed_the_standard_phases_as_editable_rows(self):
         """Every new project opens with the five standard phases named — a starting point the
@@ -681,87 +686,102 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         # Seeding happens on the new-project path only, after the form is built.
         start_fn = index_source.index('async function startTenantProject()')
         self.assertIn('seedDefaultTimelinePhases()', index_source[start_fn:start_fn + 4000])
-        # The seed carries a name only — no invented year, quarter or duration.
-        self.assertIn('TIMELINE_DEFAULT_PHASES.forEach(name => addTimelineRow({ name }));', index_source)
-        # Seeded rows stay ordinary editable rows with a delete button.
+        # The seed carries a name only — no invented dates, so the phases wait unscheduled.
+        self.assertIn("timelinePhases = TIMELINE_DEFAULT_PHASES.map(name => ({ name, start: '', end: '', notes: '' }));",
+                      index_source)
+        # Seeded phases stay ordinary editable phases with a delete path.
         self.assertIn('function seedDefaultTimelinePhases()', index_source)
-        self.assertIn('function removeTimelineRow(button)', index_source)
+        self.assertIn('function removeTimelinePhase(index)', index_source)
 
-    def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
-        """Phases are client data, so the table must not seed invented stages."""
+    def test_timeline_phases_are_date_pairs_on_a_visual_board(self):
+        """Phases are a name plus a start and an end date on a real time axis — the year,
+        quarter and duration a row used to ask for are all derived now."""
         index_source = read_frontend_text()
 
-        # The seeding table and its quarter-advancing loop are gone. (The unrelated `timeline`
-        # sample *text* field may still mention phase names; only the table must not seed rows.)
-        self.assertNotIn("{ name: 'الحصول على التراخيص', q: 'Q1', dur: 3 }", index_source)
-        self.assertNotIn('currentQ += Math.ceil', index_source)
-        self.assertNotIn("value=\"Q${currentQ}\"", index_source)
+        # The quarter/year/duration pickers are gone: a phase carries only what a client knows.
+        self.assertNotIn('class="tl-quarter"', index_source)
+        self.assertNotIn('class="tl-year"', index_source)
+        self.assertNotIn('class="tl-duration"', index_source)
+        self.assertNotIn('function computeTimelineEnd(', index_source)
+        self.assertNotIn('function timelineRowHtml(', index_source)
+        self.assertNotIn('{ name: \'الحصول على التراخيص\', q: \'Q1\', dur: 3 }', index_source)
 
-        # The quarter is a picker, not a free-text box.
-        self.assertIn("const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];", index_source)
-        self.assertIn('<select class="tl-quarter"', index_source)
-        self.assertNotIn('class="tl-quarter" value=', index_source)
-        self.assertIn('function computeTimelineEnd(year, quarter, duration)', index_source)
-        self.assertIn('class="tl-end"', index_source)
-        self.assertIn('endYear: end ? String(end.year) : \'\'', index_source)
-        # The owner asked for no how-to copy on screen; the notes column still feeds the slide.
+        # The board renders phases as cards on a dated axis — overlapping phases get lanes.
+        self.assertIn('id="timelineBoard" class="tl-board"', index_source)
+        self.assertIn('function renderTimelineBoard()', index_source)
+        self.assertIn('laneEnds.findIndex(end => phase.startDate.ms > end)', index_source)
+        self.assertIn('TIMELINE_AXIS_PX_PER_DAY', index_source)
+        # Phases with no dates wait in the unscheduled lane instead of being dropped.
+        self.assertIn('id="timelineUndated"', index_source)
+        self.assertIn('مراحل غير مجدولة', index_source)
+        # Phases outside the project period are flagged, not silently moved.
+        self.assertIn('id="timelineRangeWarning"', index_source)
+        self.assertIn('بعض المراحل خارج فترة المشروع', index_source)
+
+        # The editor asks for a name, a start and an end date — plus optional notes that still
+        # feed the slide.
+        self.assertIn('id="timelinePhaseEditor"', index_source)
+        self.assertIn('type="date" id="tlPhaseStart"', index_source)
+        self.assertIn('type="date" id="tlPhaseEnd"', index_source)
+        self.assertIn('id="tlPhaseName" list="tlPhaseNames"', index_source)
+        self.assertIn('id="tlPhaseNotes"', index_source)
+        self.assertIn('function openTimelinePhaseEditor(index)', index_source)
+        self.assertIn('function saveTimelinePhaseEditor()', index_source)
         self.assertNotIn('الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني', index_source)
-        self.assertNotIn('الملاحظات داخلية في الملف فقط', index_source)
-        self.assertIn('<th>إلى</th><th>الملاحظات</th>', index_source)
-
-        # Rows can be deleted, and one editable row always survives.
-        self.assertIn('function removeTimelineRow(button)', index_source)
-        self.assertIn('onclick="removeTimelineRow(this)"', index_source)
-        self.assertIn('if (!tbody.rows.length) addTimelineRow();', index_source)
 
         # The slide title/subtitle fields are gone: nothing consumed them, so they invited the user
         # to fill in a heading that reached neither the slides nor the PDF.
         self.assertNotIn('timeline_slide_title', index_source)
         self.assertNotIn('timeline_slide_subtitle', index_source)
 
-        # A missing start date keeps the rows usable as relative years/quarters, with a warning.
-        self.assertIn('id="timelineStartYearWarning"', index_source)
-        self.assertIn('startYearWarning.hidden = !!projectStart || !namedStages.length;',
-                      index_source)
-
-        # A single shared builder feeds the blank row, the add button and draft hydration.
-        self.assertIn('function timelineRowHtml(data = {})', index_source)
-        self.assertIn('timelineRows.forEach(row => addTimelineRow(row));', index_source)
-
-        # Saved phases still round-trip through the draft.
+        # Saved date-pair phases round-trip through the draft.
         client = self.app.test_client()
-        rows = [{'name': 'التراخيص', 'year': '1', 'quarter': 'Q3',
-                 'duration': '5', 'notes': 'بانتظار الأمانة'}]
+        rows = [{'name': 'التراخيص', 'start': '2030-08-01', 'end': '2030-12-31',
+                 'notes': 'بانتظار الأمانة'}]
         saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
             'draftData': {
-                'timeline_start_date': '2030-02',
+                'timeline_start_date': '2030-02-01',
+                'timeline_end_date': '2035-01-31',
                 'timeline_years': '5',
                 'timeline_table_data': json.dumps(rows, ensure_ascii=False),
             }
         })
         self.assertEqual(saved.status_code, 200, saved.get_json())
         draft_data = client.get('/api/project-draft', headers=self._headers(self.token_a)).get_json()['draft']['draft_data']
-        self.assertEqual(draft_data['timeline_start_date'], '2030-02')
-        self.assertEqual(draft_data['timeline_years'], '5')
+        self.assertEqual(draft_data['timeline_start_date'], '2030-02-01')
+        self.assertEqual(draft_data['timeline_end_date'], '2035-01-31')
         restored = json.loads(draft_data['timeline_table_data'])[0]
-        self.assertEqual(restored['quarter'], 'Q3')
+        self.assertEqual(restored['start'], '2030-08-01')
         self.assertEqual(restored['notes'], 'بانتظار الأمانة')
 
-        # With a 2/2030 start, year-1 quarter-3 covers months 7–9 of the project → 8–10/2030,
-        # and a 5-month phase ends 12/2030 — real months on the slide, not bare year numbers.
+        # The slide note prints the real dates and a derived month count.
         note = self.application_module.slide_engine._timeline_data_note({
-            'timeline_start_date': '2030-02',
+            'timeline_start_date': '2030-02-01',
+            'timeline_end_date': '2035-01-31',
             'timeline_table_data': json.dumps(rows, ensure_ascii=False)
         })
         self.assertIn('التراخيص', note)
         self.assertIn('بانتظار الأمانة', note)
-        self.assertIn('8/2030 إلى 12/2030', note)
+        self.assertIn('1/8/2030 إلى 31/12/2030', note)
+        self.assertIn('لمدة 5 شهر', note)
         self.assertIn('إذا كانت الملاحظة فارغة فلا تعرض', note)
         empty_note_line = self.application_module.slide_engine.format_timeline_phase_line({
             'name': 'التصميم', 'year': '1', 'quarter': 'Q1',
             'endYear': '1', 'endQuarter': 'Q2', 'duration': '3', 'notes': '',
         })
         self.assertNotIn(' — ', empty_note_line)
+
+        # Rows saved by the quarter/duration table still parse, anchored to the project start:
+        # with a 2/2030 start, year-1 quarter-3 covers months 7–9 of the project → 8–10/2030,
+        # and a 5-month phase ends 12/2030.
+        legacy_rows = [{'name': 'التراخيص', 'year': '1', 'quarter': 'Q3',
+                        'duration': '5', 'notes': 'بانتظار الأمانة'}]
+        note = self.application_module.slide_engine._timeline_data_note({
+            'timeline_start_date': '2030-02',
+            'timeline_table_data': json.dumps(legacy_rows, ensure_ascii=False)
+        })
+        self.assertIn('التراخيص', note)
+        self.assertIn('8/2030 إلى 12/2030', note)
 
         # A pre-migration draft (bare start year + calendar-year rows) is read on the relative
         # axis and still gets real month labels: start year 2026 maps to January, so the

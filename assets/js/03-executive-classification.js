@@ -127,21 +127,15 @@
 
     function collectExecutiveTimelineFacts() {
       const rows = typeof collectTimelineRows === 'function' ? collectTimelineRows() : [];
-      const start = typeof timelineProjectStart === 'function' ? timelineProjectStart() : null;
       return rows.filter(row => (row.name || '').trim()).map(row => {
-        const year = parseInt(row.year, 10);
-        const quarterIndex = typeof TIMELINE_QUARTERS !== 'undefined' ? TIMELINE_QUARTERS.indexOf(String(row.quarter || '').trim()) : -1;
-        const end = typeof computeTimelineEnd === 'function' ? computeTimelineEnd(row.year, row.quarter, row.duration) : null;
-        const startLabel = (start && Number.isFinite(year) && quarterIndex >= 0)
-          ? formatTimelineMonth(start.index + (year - 1) * 12 + quarterIndex * 3) : '';
-        const endLabel = (start && end) ? formatTimelineMonth(start.index + end.monthIndex) : '';
+        const start = typeof parseTimelineDate === 'function' ? parseTimelineDate(row.start) : null;
+        const end = typeof parseTimelineDate === 'function' ? parseTimelineDate(row.end) : null;
         return {
           name: row.name || '',
-          year: row.year || '',
-          quarter: row.quarter || '',
-          duration: row.duration || '',
-          start: startLabel,
-          end: endLabel,
+          start: start ? formatTimelineStart(row.start) : '',
+          end: end ? formatTimelineStart(row.end) : '',
+          duration: (start && end && typeof timelineDurationText === 'function')
+            ? timelineDurationText(start.ms, end.ms) : '',
           notes: row.notes || ''
         };
       });
@@ -220,8 +214,10 @@
         regulatoryConstraints: field('regulatory_constraints'),
         landSummary: field('land_and_building_summary'),
         timelineStartDate: document.getElementById('tlStartDate')?.value || tenantProjectData.timeline_start_date || '',
-        timelineStartYear: (document.getElementById('tlStartDate')?.value || '').slice(0, 4) || tenantProjectData.timeline_start_year || '',
+        timelineEndDate: document.getElementById('tlEndDate')?.value || tenantProjectData.timeline_end_date || '',
+        timelineStartYear: (document.getElementById('tlStartDate')?.value || tenantProjectData.timeline_start_date || '').slice(0, 4) || tenantProjectData.timeline_start_year || '',
         timelineYears: document.getElementById('tlYears')?.value || tenantProjectData.timeline_years || '',
+        timelineDuration: document.getElementById('tlDuration')?.value || '',
         timelineStages: collectExecutiveTimelineFacts(),
         components,
         financialIndicators: collectExecutiveFinancialIndicators(),
@@ -266,7 +262,8 @@
         ['المساحة المعتمدة', facts.approvedFinancialArea],
         ['الاستخدامات المسموحة', facts.allowedUses],
         ['تاريخ البداية', typeof formatTimelineStart === 'function' ? formatTimelineStart(facts.timelineStartDate || facts.timelineStartYear) : (facts.timelineStartDate || facts.timelineStartYear)],
-        ['مدة المشروع', facts.timelineYears],
+        ['تاريخ النهاية', typeof formatTimelineStart === 'function' ? formatTimelineStart(facts.timelineEndDate) : facts.timelineEndDate],
+        ['مدة المشروع', facts.timelineDuration || facts.timelineYears],
         ['قرار السوق', facts.marketDecision]
       ];
       host.innerHTML = rows.map(([label, value]) =>

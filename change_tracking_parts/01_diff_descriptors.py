@@ -206,6 +206,7 @@ DRAFT_BLOB_LABELS = {
 DRAFT_SCALAR_LABELS = {
     'timeline_start_date': 'تاريخ بداية المشروع',
     'timeline_start_year': 'سنة بداية المشروع',
+    'timeline_end_date': 'تاريخ نهاية المشروع',
     'timeline_years': 'عدد سنوات المشروع',
     'project_language': 'لغة المشروع',
 }

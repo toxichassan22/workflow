@@ -131,6 +131,7 @@ DRAFT_FIELD_SECTION_BLOBS = {
     'timeline_table_data': 'section-timeline',
     'timeline_start_date': 'section-timeline',
     'timeline_start_year': 'section-timeline',
+    'timeline_end_date': 'section-timeline',
     'timeline_years': 'section-timeline',
     'financial_study_model': 'section-financial-calc',
     'team_selection': 'section-team',
