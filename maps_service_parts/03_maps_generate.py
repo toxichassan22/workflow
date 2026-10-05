@@ -463,19 +463,10 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         landmarks, project_data, lat, lng, language=map_lang,
         search_radius_m=max(20000, int(ring_km * 1000)))
     # The stored frame was fitted to the rings only — a selected landmark beyond
-    # it was drawn off-canvas and dropped. Refit around rings + sent landmarks so
-    # every checked row stays drawable; a tighter existing editable is rebuilt.
-    landmark_km = 0.0
-    for item in landmarks:
-        try:
-            landmark_km = max(landmark_km, _distance_meters(
-                lat, lng, float(item.get('lat')), float(item.get('lng'))) / 1000.0)
-        except (TypeError, ValueError):
-            continue
-    needed_zoom = (
-        zoom_for_radius_km(lat, max(ring_km, landmark_km * 1.1))
-        if (ring_km or landmark_km) else None
-    )
+    # it was drawn off-canvas and dropped. Refit on the directional spread of
+    # rings + sent landmarks so every checked row stays drawable without
+    # mirroring empty space opposite a far row; a tighter existing editable is
+    # rebuilt.
     for final_type, editable_type in (
         ('catchment', 'catchment_editable'),
         ('catchment_satellite', 'catchment_satellite_editable'),
@@ -493,11 +484,13 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        # The catchment map is a fixed, site-anchored frame fitted to content —
-        # a wider stored frame only ever meant the fit was stretched by a badly
-        # resolved landmark, so the recompose refits and recentres on the site.
-        if needed_zoom is not None:
-            frame_zoom, frame_center_lat, frame_center_lng = needed_zoom, lat, lng
+        # The catchment map is a fixed frame fitted to content — a wider stored
+        # frame only ever meant the fit was stretched by a badly resolved
+        # landmark, so the recompose refits and recentres on the real spread.
+        frame_fit = catchment_frame_fit(
+            lat, lng, ring_km, landmarks, size=_stored_map_viewport_size(metadata))
+        if frame_fit:
+            frame_zoom, frame_center_lat, frame_center_lng = frame_fit
         else:
             frame_zoom, frame_center_lat, frame_center_lng = zoom, center_lat, center_lng
         if existing is not None:

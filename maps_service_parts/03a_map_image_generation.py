@@ -539,15 +539,17 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         rings = catchment_rings(zones)
         ring_km = max([ring['km'] for ring in rings] + [0.0])
         # The frame must cover the selected landmarks too, not just the rings —
-        # a marker beyond the outer ring was silently drawn off-canvas.
-        landmark_km = max([(item.get('distance_meters') or 0) for item in city_landmarks] + [0.0]) / 1000.0 * 1.1
-        fitted_zoom = zoom_for_radius_km(lat, max(ring_km, landmark_km))
-        if fitted_zoom:
-            catchment_zoom = fitted_zoom
-            print(f"[CATCHMENT] {len(rings)} rings + {len(city_landmarks)} landmarks within {max(ring_km, landmark_km):.1f} km, zoom {catchment_zoom}")
-        # Catchment is fixed too — always the content-fitted frame centred on
-        # the site; a stored manual frame is leftover from the interactive era.
-        catchment_center_lat, catchment_center_lng = lat, lng
+        # a marker beyond the outer ring was silently drawn off-canvas. Fitting
+        # each direction on its own keeps a far row drawable without mirroring
+        # the same empty distance into the opposite side of the frame.
+        frame_fit = catchment_frame_fit(lat, lng, ring_km, city_landmarks)
+        if frame_fit:
+            catchment_zoom, catchment_center_lat, catchment_center_lng = frame_fit
+            print(f"[CATCHMENT] {len(rings)} rings + {len(city_landmarks)} landmarks, zoom {catchment_zoom}")
+        else:
+            catchment_center_lat, catchment_center_lng = lat, lng
+        # Catchment is fixed too — always the content-fitted frame; a stored
+        # manual frame is leftover from the interactive era.
         catchment_manual_frame = False
         result['zooms']['catchment'] = catchment_zoom
         result['centers']['catchment'] = _map_frame_center(catchment_center_lat, catchment_center_lng, map_sizes['catchment'])

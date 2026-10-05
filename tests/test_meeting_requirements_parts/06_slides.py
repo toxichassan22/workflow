@@ -1111,8 +1111,8 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('معلم بعيد', [item['name'] for item in composed['catchment_landmarks']])
 
         maps_source = read_module_source('maps_service.py')
-        self.assertIn('landmark_km', maps_source)
-        self.assertIn('zoom_for_radius_km(lat, max(ring_km, landmark_km * 1.1))', maps_source)
+        self.assertIn('def catchment_frame_fit(', maps_source)
+        self.assertIn('def zoom_for_extent(', maps_source)
         self.assertIn('landmark_radius_m / 1000.0', maps_source)
         self.assertNotIn('LANDMARKS_MAX_RADIUS_KM', maps_source)
 
