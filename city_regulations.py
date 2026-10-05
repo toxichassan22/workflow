@@ -97,6 +97,37 @@ CITY_REGULATION_URLS = {
     ),
 }
 
+# Known official amanah/authority domains per city. Domains are not uniform
+# (الرياض is alriyadh.gov.sa, مكة is holymakkah.gov.sa), so per-city seeds are
+# probed first and generic patterns ({slug}.gov.sa, al{slug}.gov.sa, …) are
+# generated for every slug — whichever answers HTTPS is that city's official
+# host and discovery is scoped to it.
+CITY_AMANA_HOSTS = {
+    'jeddah': ('jeddah.gov.sa',),
+    'riyadh': ('alriyadh.gov.sa', 'eservices.alriyadh.gov.sa',
+               'cts.alriyadh.gov.sa', 'trc.alriyadh.gov.sa', 'riyadh.sa'),
+    'makkah': ('holymakkah.gov.sa', 'makkah.gov.sa'),
+    'madinah': ('amana-md.gov.sa', 'madinah.gov.sa'),
+    'dammam': ('eamana.gov.sa',),
+    'khobar': ('eamana.gov.sa',),
+    'ahsa': ('eamana.gov.sa', 'ahsa.gov.sa'),
+    'taif': ('taif.gov.sa',),
+    'tabuk': ('tabuk.gov.sa',),
+    'buraydah': ('qassim.gov.sa',),
+    'qassim': ('qassim.gov.sa',),
+    'hail': ('hail.gov.sa',),
+    'jazan': ('jazan.gov.sa',),
+    'najran': ('najran.gov.sa',),
+    'baha': ('baha.gov.sa',),
+    'jouf': ('jouf.gov.sa', 'joufamana.gov.sa'),
+    'yanbu': ('rcyb.gov.sa',),
+    'jubail': ('rcjy.gov.sa',),
+    'khamis': ('asir.gov.sa',),
+    'abha': ('asir.gov.sa', 'abha.gov.sa'),
+}
+_AMANA_PROBE_TIMEOUT = max(3, int(os.environ.get('CITY_AMANA_PROBE_TIMEOUT', '8')))
+_AMANA_HOSTS_TTL_SECONDS = 24 * 3600
+
 # A downloaded file only counts as a regulation document when its text
 # mentions regulation vocabulary; an unrelated government PDF is rejected.
 _REGULATION_KEYWORDS = (
@@ -211,6 +242,72 @@ def is_official_regulation_url(url):
     return host in _OFFICIAL_HOSTS or host in extra
 
 
+def _amana_host_candidates(slug):
+    """Ordered official-host candidates: seeded domains then slug patterns."""
+    candidates = list(CITY_AMANA_HOSTS.get(slug) or ())
+    candidates += [
+        f'{slug}.gov.sa', f'al{slug}.gov.sa',
+        f'amana{slug}.gov.sa', f'amana-{slug}.gov.sa',
+    ]
+    seen, ordered = set(), []
+    for host in candidates:
+        host = str(host or '').strip().lower()
+        if host and host not in seen:
+            seen.add(host)
+            ordered.append(host)
+    return ordered
+
+
+def _probe_amana_host(host):
+    """Return the host when it answers HTTPS on an official domain."""
+    url = f'https://{host}/'
+    for method in (requests.head, requests.get):
+        try:
+            resp = method(url, timeout=_AMANA_PROBE_TIMEOUT,
+                          allow_redirects=True, stream=True)
+            resp.close()
+        except Exception:
+            continue
+        if resp.status_code >= 500:
+            return None
+        if is_official_regulation_url(resp.url or url):
+            return host
+        return None
+    return None
+
+
+def resolve_city_amana_hosts(slug):
+    """Live official amanah hosts for the city — probed once, cached 24h."""
+    if not slug:
+        return []
+    sources = load_city_sources(slug)
+    cached = sources.get('_amana_hosts')
+    if isinstance(cached, dict):
+        try:
+            age = (datetime.now(timezone.utc)
+                   - datetime.fromisoformat(str(cached.get('probed_at') or ''))
+                   ).total_seconds()
+        except ValueError:
+            age = _AMANA_HOSTS_TTL_SECONDS + 1
+        if age < _AMANA_HOSTS_TTL_SECONDS:
+            return [h for h in cached.get('hosts') or [] if isinstance(h, str)]
+    candidates = _amana_host_candidates(slug)
+    if not candidates:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(6, len(candidates))) as pool:
+        found = [host for host in pool.map(_probe_amana_host, candidates) if host]
+    sources['_amana_hosts'] = {
+        'hosts': found,
+        'probed_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    _save_city_sources(slug, sources)
+    if found:
+        print(f'[CITY REGULATIONS] {slug}: official host(s) '
+              + ', '.join(found))
+    return found
+
+
 def _response_text(res):
     try:
         content = res['choices'][0]['message'].get('content')
@@ -235,14 +332,21 @@ def _parse_json_block(text):
         return {}
 
 
-def discover_city_regulation_urls(slug, city, chat_fn, usage_ctx=None):
+def discover_city_regulation_urls(slug, city, chat_fn, usage_ctx=None, hosts=None):
     """Direct official PDF URLs for a city's building regulations.
 
     The ``web`` plugin (Exa) executes the search on OpenRouter's side for
     every request — unlike the provider's native tool, which the model is
     free to skip. The model only picks which returned links are official
-    PDFs; it never invents a URL."""
+    PDFs; it never invents a URL. When ``hosts`` carries the city's probed
+    amanah domain(s), results on those domains take priority over any other
+    government host."""
     label = city or slug
+    host_hint = ''
+    if hosts:
+        host_hint = (
+            f"الدومين الرسمي لأمانة المدينة هو {' / '.join(hosts)} — "
+            "أعطِ أولوية قصوى للروابط المستضافة عليه.")
     system_prompt = (
         "أنت باحث وثائق حكومية سعودية. أعد JSON فقط بهذا الشكل: "
         "{\"pdf_urls\":[\"https://...\"]} — بدون أي نص أو شرح إضافي.")
@@ -251,6 +355,7 @@ def discover_city_regulation_urls(slug, city, chat_fn, usage_ctx=None):
         f"أنظمة وضوابط البناء / الاشتراطات البلدية / المخطط المحلي الصادرة عن "
         f"أمانة {label} أو الجهة المختصة في مدينة {label} بالسعودية. "
         "اقبل الروابط من المواقع الحكومية الرسمية فقط (gov.sa أو موقع الأمانة). "
+        f"{host_hint} "
         "استبعد صفحات HTML والأخبار والمقالات والمواقع التجارية. "
         "أعِد حتى 4 روابط — وثيقة الأنظمة والضوابط واللائحة التنفيذية أولوية — "
         "وإن لم تجد ملف PDF رسميًا أعد {\"pdf_urls\":[]}.")
@@ -405,10 +510,15 @@ def ensure_city_regulation_paths(slug, city, chat_fn=None, usage_ctx=None):
     if chat_fn is None:
         warnings.append('جلب اشتراطات المدينة غير متاح في هذا السياق.')
         return [], warnings
+    hosts = resolve_city_amana_hosts(slug)
     urls, search_warnings = discover_city_regulation_urls(
-        slug, label, chat_fn, usage_ctx=usage_ctx)
+        slug, label, chat_fn, usage_ctx=usage_ctx, hosts=hosts)
     warnings.extend(search_warnings)
     official = [url for url in urls if is_official_regulation_url(url)]
+    if hosts:
+        host_set = {host.lower() for host in hosts}
+        official.sort(key=lambda url: 0 if (
+            urlsplit(url).hostname or '').lower() in host_set else 1)
     dropped = len(urls) - len(official)
     if dropped:
         warnings.append(f'تم استبعاد {dropped} رابط اشتراطات من مصادر غير حكومية رسمية.')
