@@ -225,14 +225,18 @@
 
       if (!dated.length) return;
 
-      // The axis spans the project period, stretching only as far as the phases demand.
+      // The axis is exactly the project period when one is set — an out-of-range phase is
+      // pinned at the edge it bleeds past instead of stretching the axis past the end date.
       let axisStart = period ? period.start.ms : null;
       let axisEnd = period ? period.end.ms : null;
-      dated.forEach(phase => {
-        axisStart = axisStart === null ? phase.startDate.ms : Math.min(axisStart, phase.startDate.ms);
-        axisEnd = axisEnd === null ? phase.endDate.ms : Math.max(axisEnd, phase.endDate.ms);
-      });
+      if (!period) {
+        dated.forEach(phase => {
+          axisStart = axisStart === null ? phase.startDate.ms : Math.min(axisStart, phase.startDate.ms);
+          axisEnd = axisEnd === null ? phase.endDate.ms : Math.max(axisEnd, phase.endDate.ms);
+        });
+      }
       const spanDays = Math.max(1, Math.round((axisEnd - axisStart) / TIMELINE_DAY_MS) + 1);
+      const axisWidthPx = Math.round(spanDays * TIMELINE_AXIS_PX_PER_DAY);
       const boardWidth = Math.max(520, spanDays * TIMELINE_AXIS_PX_PER_DAY);
       board.style.minWidth = boardWidth + 'px';
       board.dataset.axisStart = String(axisStart);
@@ -282,8 +286,24 @@
         const isOut = period && (phase.startDate.ms < period.start.ms || phase.endDate.ms > period.end.ms);
         card.className = 'tl-card' + (isOut ? ' tl-out' : '');
         card.dataset.index = String(phase.index);
-        card.style.insetInlineStart = dayToPx((phase.startDate.ms - axisStart) / TIMELINE_DAY_MS) + 'px';
-        card.style.inlineSize = Math.max(TIMELINE_CARD_MIN_PX, dayToPx(timelineSpanDays(phase.startDate.ms, phase.endDate.ms))) + 'px';
+        // The board ends at the project end date: a phase reaching past an axis edge is
+        // clipped to it, and one lying fully outside keeps a stub pinned at that edge so it
+        // stays visible and clickable without moving the axis.
+        const startPx = (phase.startDate.ms - axisStart) / TIMELINE_DAY_MS * TIMELINE_AXIS_PX_PER_DAY;
+        const endPx = startPx + timelineSpanDays(phase.startDate.ms, phase.endDate.ms) * TIMELINE_AXIS_PX_PER_DAY;
+        let cardLeft, cardWidth;
+        if (endPx <= 0) {
+          cardLeft = 0;
+          cardWidth = TIMELINE_CARD_MIN_PX;
+        } else if (startPx >= axisWidthPx) {
+          cardLeft = Math.max(0, axisWidthPx - TIMELINE_CARD_MIN_PX);
+          cardWidth = TIMELINE_CARD_MIN_PX;
+        } else {
+          cardLeft = Math.max(0, Math.round(startPx));
+          cardWidth = Math.max(TIMELINE_CARD_MIN_PX, Math.min(axisWidthPx, Math.round(endPx)) - cardLeft);
+        }
+        card.style.insetInlineStart = cardLeft + 'px';
+        card.style.inlineSize = cardWidth + 'px';
         const name = document.createElement('span');
         name.className = 'tl-card-name';
         name.textContent = (phase.name || '').trim() || '—';

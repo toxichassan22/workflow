@@ -711,6 +711,9 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('function renderTimelineBoard()', index_source)
         self.assertIn('const sorted = dated.slice().sort((a, b) => a.startDate.ms - b.startDate.ms', index_source)
         self.assertIn('TIMELINE_AXIS_PX_PER_DAY', index_source)
+        # The axis ends at the project end date — out-of-range phases are pinned to the
+        # edges instead of stretching the board past it.
+        self.assertIn('startPx >= axisWidthPx', index_source)
         # Phases with no dates wait in the unscheduled lane instead of being dropped.
         self.assertIn('id="timelineUndated"', index_source)
         self.assertIn('مراحل غير مجدولة', index_source)
