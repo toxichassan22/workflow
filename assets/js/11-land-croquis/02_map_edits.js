@@ -216,8 +216,11 @@
       image.style.cursor = modeActive ? 'crosshair' : (mapViewportPanAllowed() ? 'grab' : 'default');
     }
 
+    // Every generated map honours a manual viewport: the recorded live frame is
+    // what the next bake (and therefore the approval) freezes.
     function mapViewportAdjustable(mapType) {
-      return mapType === 'overview' || mapType === 'access';
+      return mapType === 'overview' || mapType === 'access'
+        || mapType === 'catchment' || mapType === 'landmarks';
     }
 
     // Per-map approval: the flag certifies the stored raster exactly as the

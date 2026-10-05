@@ -680,7 +680,11 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('onpointerdown="startMapViewportPan(event)"', index_source)
         self.assertNotIn(">تكبير</button>", workflow_body)
         self.assertNotIn(">تصغير</button>", workflow_body)
-        self.assertIn("return mapType === 'overview' || mapType === 'access';", index_source)
+        # Every generated map keeps a manual viewport — a live pan/zoom on
+        # catchment or landmarks must reach the bake too, or approval would
+        # freeze the auto-fitted frame instead of what the client saw.
+        self.assertIn("mapType === 'overview' || mapType === 'access'", index_source)
+        self.assertIn("mapType === 'catchment' || mapType === 'landmarks'", index_source)
         regen_body = index_source.split('async function regenerateMapPreviewOnce(mapType)', 1)[1].split('function ', 1)[0]
         self.assertIn('payload.map_zooms', regen_body)
         self.assertIn('payload.map_centers', regen_body)
@@ -698,6 +702,13 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('def _manual_viewport_zoom(', maps_source)
         self.assertIn('def _manual_viewport_center(', maps_source)
         self.assertIn('map_key not in zoom_overrides', maps_source)
+        # All four maps honour the recorded viewport; catchment rings stay
+        # anchored to the site even when the frame was panned off-centre.
+        self.assertIn("_manual_viewport_zoom('landmarks'", maps_source)
+        self.assertIn("_manual_viewport_zoom('catchment'", maps_source)
+        self.assertIn("_manual_viewport_center('landmarks'", maps_source)
+        self.assertIn("_manual_viewport_center('catchment'", maps_source)
+        self.assertIn('site_lat=lat, site_lng=lng', maps_source)
 
     def test_confirmed_map_pin_overrides_the_original_google_link(self):
         service = self.application_module.maps_service

@@ -488,7 +488,11 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        frame_zoom = zoom if needed_zoom is None else min(zoom, needed_zoom)
+        # A manually framed map keeps its zoom even when it crops content —
+        # refitting here would silently un-pick the frame the client approved.
+        frame_zoom = zoom \
+            if needed_zoom is None or metadata.get('manual_viewport') \
+            else min(zoom, needed_zoom)
         if existing is not None:
             try:
                 existing_zoom = int(json.loads(existing.get('metadata_json') or '{}').get('zoom'))
@@ -509,7 +513,8 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.15)
         if rings:
-            _draw_catchment_zones(editable_path, center_lat, center_lng, frame_zoom, rings, scale=2)
+            _draw_catchment_zones(editable_path, center_lat, center_lng, frame_zoom, rings, scale=2,
+                                  site_lat=lat, site_lng=lng)
         if draw_compass:
             _draw_compass(editable_path, position='top-right', language=map_lang)
         editable_placeholder = (
@@ -559,7 +564,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
                                if isinstance(item, dict) and item.get('name') and item.get('label_point')}
         current_landmarks = _draw_catchment_markers(
             final_path, center_lat, center_lng, zoom, draw_landmarks,
-            label_positions, scale=2
+            label_positions, scale=2, site_lat=lat, site_lng=lng
         )
         next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'catchment_landmarks': current_landmarks}
         final = by_type.get(final_type)
@@ -1138,8 +1143,14 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             fitted_zoom = zoom_for_radius_km(lat, radius_km)
             if fitted_zoom:
                 landmarks_zoom = fitted_zoom
-                result['zooms']['landmarks'] = landmarks_zoom
                 print(f'[LANDMARKS] {len(shown_landmarks)} landmarks within {radius_km:.1f} km, zoom {landmarks_zoom}')
+        # A frame the user picked live beats the content fit — the certified
+        # raster must be exactly what they approved.
+        landmarks_zoom = _manual_viewport_zoom('landmarks', landmarks_zoom)
+        landmarks_center_lat, landmarks_center_lng = _manual_viewport_center(
+            'landmarks', map_center_lat, map_center_lng)
+        result['zooms']['landmarks'] = landmarks_zoom
+        result['centers']['landmarks'] = {'lat': landmarks_center_lat, 'lng': landmarks_center_lng}
         landmarks_mt = map_styles['landmarks']
         if landmarks_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_LANDMARKS_SATELLITE##', 'landmarks_satellite'),
@@ -1154,7 +1165,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
+            lm_res = get_static_map(landmarks_center_lat, landmarks_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
             if lm_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
@@ -1168,7 +1179,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
                 shutil.copyfile(landmarks_path, editable_path)
                 rendered_landmarks = _draw_catchment_markers(
-                    landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, shown_landmarks or landmarks,
+                    landmarks_path, landmarks_center_lat, landmarks_center_lng, landmarks_zoom, shown_landmarks or landmarks,
                     project_data.get('landmark_label_positions'), scale=2, site_lat=marker_lat, site_lng=marker_lng
                 )
                 if not result['landmark_map_items']:
@@ -1177,8 +1188,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                     'lat': lat,
                     'lng': lng,
                     'zoom': landmarks_zoom,
-                    'center_lat': map_center_lat,
-                    'center_lng': map_center_lng,
+                    'center_lat': landmarks_center_lat,
+                    'center_lng': landmarks_center_lng,
                     'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': MAP_LABEL_RENDER_VERSION,
                     'highlight_site': bool(highlight_site),
@@ -1267,8 +1278,15 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         fitted_zoom = zoom_for_radius_km(lat, max(ring_km, landmark_km))
         if fitted_zoom:
             catchment_zoom = fitted_zoom
-            result['zooms']['catchment'] = catchment_zoom
             print(f"[CATCHMENT] {len(rings)} rings + {len(city_landmarks)} landmarks within {max(ring_km, landmark_km):.1f} km, zoom {catchment_zoom}")
+        # Same manual-viewport rule as the other maps: approve freezes the live
+        # frame, so the override lands after the content fit. The site keeps its
+        # ring anchor separately from the frame centre.
+        catchment_zoom = _manual_viewport_zoom('catchment', catchment_zoom)
+        catchment_center_lat, catchment_center_lng = _manual_viewport_center('catchment', lat, lng)
+        catchment_manual_frame = 'catchment' in manual_types
+        result['zooms']['catchment'] = catchment_zoom
+        result['centers']['catchment'] = {'lat': catchment_center_lat, 'lng': catchment_center_lng}
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_CATCHMENT_SATELLITE##', 'catchment_satellite'),
@@ -1284,14 +1302,15 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         for active_mt, placeholder, img_suffix in styles_to_gen:
             catchment_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             # Fetch clean map without the API-drawn paths, as we will draw them with PIL for premium styling.
-            catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
+            catchment_res = get_static_map(catchment_center_lat, catchment_center_lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps, language=map_lang)
             if catchment_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(catchment_path, intensity=0.35)
                     _apply_map_overlay(catchment_path, dark_factor=0.15)
                 # Draw the anti-aliased concentric rings with time label pills
                 if rings:
-                    _draw_catchment_zones(catchment_path, lat, lng, catchment_zoom, rings, scale=2)
+                    _draw_catchment_zones(catchment_path, catchment_center_lat, catchment_center_lng,
+                                          catchment_zoom, rings, scale=2, site_lat=lat, site_lng=lng)
                 if draw_compass:
                     _draw_compass(catchment_path, position='top-right', language=map_lang)
                 if draw_inset:
@@ -1301,8 +1320,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
                 shutil.copyfile(catchment_path, editable_path)
                 rendered_landmarks = _draw_catchment_markers(
-                    catchment_path, lat, lng, catchment_zoom, city_landmarks,
-                    project_data.get('catchment_label_positions'), scale=2
+                    catchment_path, catchment_center_lat, catchment_center_lng, catchment_zoom, city_landmarks,
+                    project_data.get('catchment_label_positions'), scale=2, site_lat=lat, site_lng=lng
                 )
                 if not result['catchment_landmarks']:
                     result['catchment_landmarks'] = rendered_landmarks
@@ -1310,8 +1329,12 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                     'lat': lat,
                     'lng': lng,
                     'zoom': catchment_zoom,
-                    'center_lat': lat,
-                    'center_lng': lng,
+                    'center_lat': catchment_center_lat,
+                    'center_lng': catchment_center_lng,
+                    # Recompose must not refit a frame the client picked —
+                    # the flag survives on the row because overlay payloads
+                    # do not carry the viewport-overrides map.
+                    'manual_viewport': catchment_manual_frame,
                     'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': MAP_LABEL_RENDER_VERSION,
                     'highlight_site': bool(highlight_site),

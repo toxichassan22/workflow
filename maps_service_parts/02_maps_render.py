@@ -781,7 +781,8 @@ def access_map_zoom(lat, base_zoom):
     return max(15, min(17, base, context_zoom))
 
 
-def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale=2):
+def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale=2,
+                          site_lat=None, site_lng=None):
     """Draw smooth, anti-aliased concentric catchment rings and elegant label pills using PIL."""
     try:
         img = Image.open(image_path).convert('RGBA')
@@ -797,6 +798,14 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
         
         ccx = canvas_w // 2
         ccy = canvas_h // 2
+        # The rings belong to the site, not to the viewport centre — a manually
+        # panned frame shifts the image centre while the circles stay on the plot.
+        ring_anchor_lat, ring_anchor_lng = center_lat, center_lng
+        if site_lat is not None and site_lng is not None:
+            ring_anchor_lat, ring_anchor_lng = site_lat, site_lng
+            site_dx, site_dy = _latlng_to_pixel_offset(site_lat, site_lng, center_lat, center_lng, zoom, scale=scale)
+            ccx = int(round(canvas_w / 2 + site_dx * canvas_scale))
+            ccy = int(round(canvas_h / 2 + site_dy * canvas_scale))
         
         # Theme colors: Gold/Maroon/Teal for premium look
         # [Inner, Middle, Outer]
@@ -818,9 +827,10 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             radius_km = zone.get('km', zone.get('minutes', 5) * 0.8 / 1.60934)
             radius_m = radius_km * 1000.0
             
-            # Get latitude offset for radius
+            # Get latitude offset for radius — measured at the ring anchor (the
+            # site), not the frame centre, so a panned frame keeps true metres.
             lat_offset = radius_m / 111320.0
-            _, dy = _latlng_to_pixel_offset(center_lat + lat_offset, center_lng, center_lat, center_lng, zoom, scale=scale)
+            _, dy = _latlng_to_pixel_offset(ring_anchor_lat + lat_offset, ring_anchor_lng, ring_anchor_lat, ring_anchor_lng, zoom, scale=scale)
             
             # Scale to canvas coordinates
             r = int(abs(dy) * canvas_scale)

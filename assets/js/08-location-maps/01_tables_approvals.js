@@ -453,6 +453,8 @@
             ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="unapproveTenantMap(\'catchment\')">إلغاء اعتماد الخريطة</button>'
             : '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="approveTenantMap(\'catchment\')">اعتماد الخريطة</button>' +
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')">إعادة توليد الخريطة</button>' +
+              ((tenantCreativeImages.map_viewport_overrides || {}).catchment
+                ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'catchment\')">الإطار التلقائي</button>' : '') +
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startCatchmentEditMode()">تعديل</button>';
         } else if (view.mapType === 'landmarks' && tenantLandmarksEditMode) {
           actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmLandmarksEdits()">اعتماد</button>' +
@@ -463,6 +465,8 @@
             ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="unapproveTenantMap(\'landmarks\')">إلغاء اعتماد الخريطة</button>'
             : '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="approveTenantMap(\'landmarks\')">اعتماد الخريطة</button>' +
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'landmarks\')">إعادة توليد الخريطة</button>' +
+              ((tenantCreativeImages.map_viewport_overrides || {}).landmarks
+                ? '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="resetMapViewport(\'landmarks\')">الإطار التلقائي</button>' : '') +
               '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startLandmarksEditMode()">تعديل</button>';
         } else if (view.mapType === 'access' && tenantRoadEditMode) {
           actions = accessRoadEditControlsHtml();

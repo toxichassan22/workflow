@@ -171,7 +171,7 @@
         backgroundColor: '#f4f6f8'
       };
       if (!Number.isFinite(options.center.lat) || !Number.isFinite(options.center.lng)) return false;
-      tenantInteractiveSuppressIdle = true;
+      tenantInteractiveSuppressIdle = { lat: options.center.lat, lng: options.center.lng, zoom: clampedZoom };
       if (!tenantInteractiveMap) {
         holder.style.display = 'block';
         tenantInteractiveMap = new google.maps.Map(holder, options);
@@ -206,17 +206,20 @@
     // Restored drafts carry overrides without saying whether they were ever
     // baked; a missing baked record is treated as dirty so the next approval
     // re-bakes once and self-heals. Truly legacy drafts (no baked record for
-    // any map) predate the divergence entirely — there map_centers still is
-    // the raster's frame, so it seeds the record instead of forcing a bake.
+    // any map and no stored override) predate the divergence entirely — there
+    // map_centers still is the raster's frame, so it seeds the record instead
+    // of forcing a bake. An override with no baked record is the opposite
+    // case: the raster was never rendered at the stored frame, and seeding it
+    // as "baked" would let an approval freeze the stale auto-fitted image.
     function evaluateInteractiveDirtyAtMount(mapType, lat, lng, zoom) {
       const allBaked = (tenantCreativeImages && tenantCreativeImages.map_baked_frames) || {};
-      if (!Object.keys(allBaked).length) {
+      const overrides = (tenantCreativeImages && tenantCreativeImages.map_viewport_overrides) || {};
+      if (!Object.keys(allBaked).length && !overrides[mapType]) {
         tenantCreativeImages.map_baked_frames = {
           ...allBaked,
           [mapType]: { zoom, lat, lng }
         };
       }
-      const overrides = (tenantCreativeImages && tenantCreativeImages.map_viewport_overrides) || {};
       if (!overrides[mapType]) {
         tenantInteractiveFrameDirty[mapType] = false;
       } else {
@@ -335,9 +338,9 @@
     }
 
     // Settle handler: mirror the live frame into the stored viewport state so
-    // the next raster bake renders exactly what is on screen. Adjustable types
-    // (overview/access) record the override; catchment/landmarks pans stay
-    // explore-only because the server always re-fits those maps to content.
+    // the next raster bake renders exactly what is on screen. Every generated
+    // map honours a manual viewport, so a real divergence records the override
+    // and the approval then freezes the frame the client actually framed.
     function interactiveMapFrameChanged() {
       const map = tenantInteractiveMap;
       if (!map || !tenantInteractiveMounted || !tenantMapPreviewState) return;
@@ -357,8 +360,16 @@
       if (!mapViewportAdjustable(mapType)) return;
       // An approved section is frozen: exploring never mutates its frame.
       if (tenantProjectSectionStatuses && tenantProjectSectionStatuses.location === 'approved') return;
-      // The first idle after a programmatic mount/reframe is not a user pan.
-      if (tenantInteractiveSuppressIdle) { tenantInteractiveSuppressIdle = false; return; }
+      // The first idle after a programmatic mount/reframe is not a user pan —
+      // but a gesture that landed before that settle already moved the frame,
+      // so only a frame matching the mount target counts as the mount echo.
+      if (tenantInteractiveSuppressIdle) {
+        const expected = tenantInteractiveSuppressIdle;
+        tenantInteractiveSuppressIdle = null;
+        if (Math.abs(Number(expected.lat) - lat) < 1e-4
+            && Math.abs(Number(expected.lng) - lng) < 1e-4
+            && Math.round(Number(expected.zoom)) === Math.round(zoom)) return;
+      }
       const roundedZoom = Math.round(Number.isFinite(zoom) ? zoom : 0);
       if (!roundedZoom) return;
       // Idle also fires on tile loads and viewport fits with no gesture at all —
