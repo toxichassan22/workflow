@@ -373,6 +373,7 @@
           if (dur) dur.textContent = timelineDurationText(start.ms, end.ms);
           card.title = (phase.name || '').trim() + ' — ' + formatTimelineStart(phase.start) + ' إلى ' + formatTimelineStart(phase.end);
         }
+        syncTimelineEditorFromPhase(index);
       };
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
@@ -381,6 +382,7 @@
           card.dataset.tlDragged = '1';
           setTimeout(() => { delete card.dataset.tlDragged; }, 0);
           saveTimelineData();
+          syncTimelineEditorFromPhase(index);
         }
       };
       document.addEventListener('pointermove', onMove);
@@ -447,6 +449,25 @@
       card.style.inlineSize = cardWidth + 'px';
       const dur = card.querySelector('.tl-card-dur');
       if (dur) dur.textContent = timelineDurationText(start.ms, end.ms);
+    }
+
+    // The live preview's mirror image: a drag writes the model first, so the open editor's
+    // inputs, duration and error follow the bar under the pointer in realtime — without it,
+    // «حفظ» would write the pre-drag dates back over the move.
+    function syncTimelineEditorFromPhase(index) {
+      if (timelineEditingIndex !== index) return;
+      const phase = timelinePhases[index];
+      if (!phase) return;
+      const startInput = document.getElementById('tlPhaseStart');
+      const endInput = document.getElementById('tlPhaseEnd');
+      if (startInput) startInput.value = normalizeTimelineInputDate(phase.start);
+      if (endInput) endInput.value = normalizeTimelineInputDate(phase.end);
+      const start = parseTimelineDate(phase.start);
+      const end = parseTimelineDate(phase.end);
+      const duration = document.getElementById('tlPhaseDurationText');
+      if (duration) duration.textContent = (start && end && end.ms >= start.ms) ? timelineDurationText(start.ms, end.ms) : '';
+      const error = document.getElementById('tlPhaseError');
+      if (error) error.textContent = (start && end && end.ms < start.ms) ? 'تاريخ النهاية قبل تاريخ البداية' : '';
     }
 
     function saveTimelinePhaseEditor() {
