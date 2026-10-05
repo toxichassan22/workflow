@@ -159,6 +159,9 @@
       if (!box || !holder || !(window.google && window.google.maps && window.google.maps.Map)) return false;
       // An approved map is a fixed raster — the live view never mounts over it.
       if (tenantMapApproved(mapType)) return false;
+      // Fixed maps never mount live: catchment and landmarks show the stored
+      // auto-framed raster and only their labels/markers are repositioned.
+      if (!mapViewportAdjustable(mapType)) return false;
       const clampedZoom = Math.max(8, Math.min(20, Number(zoom) || 17));
       const options = {
         center: { lat: Number(lat), lng: Number(lng) },
@@ -270,9 +273,9 @@
     // the preview would sit on the static image (whose pans cost a regen)
     // until the user happened to reselect the map.
     function mountInteractivePreview(mapType, lat, lng, zoom, retryAttempt) {
-      // Approved maps render only the certified raster — skip the API load and
-      // the retry loop entirely.
-      if (tenantMapApproved(mapType)) return Promise.resolve(false);
+      // Approved and fixed maps render only the stored raster — skip the API
+      // load and the retry loop entirely.
+      if (tenantMapApproved(mapType) || !mapViewportAdjustable(mapType)) return Promise.resolve(false);
       const attempt = Number(retryAttempt) || 0;
       const seq = ++interactiveMountSeq;
       const finish = mounted => {
@@ -308,8 +311,10 @@
 
     // Edit modes call this instead of the raster path: it waits for the live
     // map to mount on the wanted type, or returns false so the caller keeps
-    // the static-image fallback.
+    // the static-image fallback. Fixed maps skip it — their edit modes run on
+    // the stored raster.
     async function ensureInteractivePreview(mapType) {
+      if (!mapViewportAdjustable(mapType)) return false;
       if (interactiveMapActive() && tenantInteractiveMapType === mapType) return true;
       if (!(await ensureInteractiveMapsApi())) return false;
       if (tenantSelectedMapType !== mapType) selectMapPreviewView(mapType);

@@ -216,11 +216,13 @@
       image.style.cursor = modeActive ? 'crosshair' : (mapViewportPanAllowed() ? 'grab' : 'default');
     }
 
-    // Every generated map honours a manual viewport: the recorded live frame is
-    // what the next bake (and therefore the approval) freezes.
+    // Only the land and roads maps take a manual viewport: the live preview
+    // mounts for them and the recorded frame is what the next bake (and the
+    // approval) freezes. Catchment and landmarks are fixed auto-framed
+    // rasters — their edit sessions move labels and markers on the stored
+    // image, never the frame itself.
     function mapViewportAdjustable(mapType) {
-      return mapType === 'overview' || mapType === 'access'
-        || mapType === 'catchment' || mapType === 'landmarks';
+      return mapType === 'overview' || mapType === 'access';
     }
 
     // Per-map approval: the flag certifies the stored raster exactly as the
@@ -301,8 +303,10 @@
 
     // Clears a hand-picked zoom/center so the next render frames this map
     // automatically again — without it a stray pan would pin the frame forever.
+    // Fixed maps keep this escape hatch: a viewport pinned while they were
+    // still adjustable must stay releasable or the frame is stuck forever.
     function resetMapViewport(mapType) {
-      if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
+      if (tenantMapViewportBusy) return;
       if (mapApprovalBlocksEdit(mapType)) return;
       if (!(tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
       const overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };

@@ -717,10 +717,10 @@
       // The live map mounts over the raster when the browser key is available,
       // framed on the user's live camera (map_centers/zooms), not on the baked
       // frame the fallback image shows. On any failure the static image below
-      // keeps working unchanged. An approved map stays the certified raster —
-      // the shared map instance must be dropped explicitly or it keeps
-      // covering the image with the previously mounted type.
-      if (mapApproved) {
+      // keeps working unchanged. An approved or fixed map stays the stored
+      // raster — the shared map instance must be dropped explicitly or it
+      // keeps covering the image with the previously mounted type.
+      if (mapApproved || !mapViewportAdjustable(mapType)) {
         if (typeof unmountInteractiveMap === 'function') unmountInteractiveMap();
       } else if (typeof mountInteractivePreview === 'function') {
         const liveLat = Number(center.lat ?? lat);

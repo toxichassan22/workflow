@@ -186,7 +186,9 @@ async function verify(page, mapType, zoom) {
   const browser = await chromium.launch({ headless: true, channel });
   try {
     for (const width of [390, 1024, 1440]) {
-      for (const mapType of ['overview', 'access', 'catchment', 'landmarks']) {
+      // Only the land and roads maps mount a live frame — catchment and
+      // landmarks stay fixed rasters, so there is nothing to bake-match.
+      for (const mapType of ['overview', 'access']) {
         for (const zoom of [16, 19]) {
           const page = await browser.newPage({ viewport: { width, height: 1000 } });
           const errors = [];

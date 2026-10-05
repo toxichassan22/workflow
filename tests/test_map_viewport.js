@@ -89,7 +89,9 @@ test('approval synchronizes dimensions even when the camera did not move', () =>
   assert.equal(fixture.creative.map_viewport_overrides.overview, true);
 });
 
-for (const mapType of ['overview', 'access', 'catchment', 'landmarks']) {
+// Only the land and roads maps mount a live frame; catchment and landmarks
+// are fixed auto-framed rasters — edits there move labels, never the frame.
+for (const mapType of ['overview', 'access']) {
   for (const [width, height] of [[375, 211], [974, 548], [1280, 720]]) {
     test(`${mapType} approval retains the ${width}x${height} live frame`, async () => {
       const fixture = preview(mapType, width, height);
@@ -113,7 +115,7 @@ for (const mapType of ['overview', 'access', 'catchment', 'landmarks']) {
   }
 }
 
-for (const mapType of ['overview', 'access', 'catchment', 'landmarks']) {
+for (const mapType of ['overview', 'access']) {
   test(`${mapType} restores an explicit viewport when the legacy baked size is missing`, async () => {
     const fixture = preview(mapType, 974, 548, { width: 974, height: 548 });
     fixture.creative.map_centers[mapType] = { lat: fixture.live.lat, lng: fixture.live.lng, width: 974, height: 548 };
@@ -169,4 +171,34 @@ test('a failed bake leaves the live frame unapproved', async () => {
   assert.notEqual(fixture.creative.map_approvals.overview, true);
   assert.equal(fixture.run('tenantInteractiveMounted'), true);
   assert.equal(fixture.run('tenantInteractiveFrameDirty.overview'), true);
+});
+
+for (const mapType of ['catchment', 'landmarks']) {
+  test(`${mapType} is a fixed raster: no live frame record, no bake on approval`, async () => {
+    const fixture = preview(mapType);
+    assert.equal(fixture.run(`mapViewportAdjustable('${mapType}')`), false);
+    assert.equal(fixture.run(`mapViewportAdjustable('${mapType === 'catchment' ? 'overview' : 'access'}')`), true);
+    // A mounted camera on a fixed map must not write a frame or an override.
+    fixture.state.syncInteractiveLiveFrame();
+    assert.deepEqual(plain(fixture.creative.map_centers[mapType]), { lat: fixture.live.lat, lng: fixture.live.lng });
+    assert.equal(fixture.creative.map_viewport_overrides[mapType], undefined);
+    assert.equal(fixture.run(`tenantInteractiveFrameDirty['${mapType}']`), undefined);
+    // Neither entry point mounts the live map for a fixed type.
+    fixture.run('window.google = { maps: { Map: function () {}, OverlayView: function () {} } }');
+    assert.equal(fixture.state.mountInteractiveMap(mapType, 24, 46, 18), false);
+    assert.equal(await fixture.state.ensureInteractivePreview(mapType), false);
+    // Approval certifies the stored raster directly — nothing is baked.
+    assert.equal(await fixture.state.approveTenantMap(mapType), true);
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(fixture.creative.map_approvals[mapType], true);
+    assert.equal(fixture.run('tenantInteractiveMounted'), false);
+  });
+}
+
+test('selecting a fixed map drops the mounted live view', () => {
+  const fixture = preview('overview');
+  fixture.creative.map_placeholders['##MAP_CATCHMENT##'] = '/uploads/maps/catchment.png';
+  fixture.state.selectMapPreviewView('catchment');
+  assert.equal(fixture.run('tenantInteractiveMounted'), false);
+  assert.equal(fixture.holder.style.display, 'none');
 });

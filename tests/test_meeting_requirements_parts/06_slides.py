@@ -680,11 +680,13 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('onpointerdown="startMapViewportPan(event)"', index_source)
         self.assertNotIn(">تكبير</button>", workflow_body)
         self.assertNotIn(">تصغير</button>", workflow_body)
-        # Every generated map keeps a manual viewport — a live pan/zoom on
-        # catchment or landmarks must reach the bake too, or approval would
-        # freeze the auto-fitted frame instead of what the client saw.
-        self.assertIn("mapType === 'overview' || mapType === 'access'", index_source)
-        self.assertIn("mapType === 'catchment' || mapType === 'landmarks'", index_source)
+        # Only the land and roads maps keep a manual viewport — catchment and
+        # landmarks are fixed auto-framed rasters whose edit sessions move
+        # labels and markers on the stored frame, never the frame itself.
+        viewport_fn = index_source.split('function mapViewportAdjustable(mapType)', 1)[1].split('function ', 1)[0]
+        self.assertIn("mapType === 'overview' || mapType === 'access'", viewport_fn)
+        self.assertNotIn("'catchment'", viewport_fn)
+        self.assertNotIn("'landmarks'", viewport_fn)
         regen_body = index_source.split('async function regenerateMapPreviewOnce(mapType)', 1)[1].split('function ', 1)[0]
         self.assertIn('payload.map_zooms', regen_body)
         self.assertIn('payload.map_centers', regen_body)
