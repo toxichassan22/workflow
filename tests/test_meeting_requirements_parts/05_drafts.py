@@ -706,10 +706,10 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertNotIn('function timelineRowHtml(', index_source)
         self.assertNotIn('{ name: \'الحصول على التراخيص\', q: \'Q1\', dur: 3 }', index_source)
 
-        # The board renders phases as cards on a dated axis — overlapping phases get lanes.
+        # The board renders phases as cards on a dated axis — each phase on its own row.
         self.assertIn('id="timelineBoard" class="tl-board"', index_source)
         self.assertIn('function renderTimelineBoard()', index_source)
-        self.assertIn('laneEnds.findIndex(end => phase.startDate.ms > end)', index_source)
+        self.assertIn('const sorted = dated.slice().sort((a, b) => a.startDate.ms - b.startDate.ms', index_source)
         self.assertIn('TIMELINE_AXIS_PX_PER_DAY', index_source)
         # Phases with no dates wait in the unscheduled lane instead of being dropped.
         self.assertIn('id="timelineUndated"', index_source)

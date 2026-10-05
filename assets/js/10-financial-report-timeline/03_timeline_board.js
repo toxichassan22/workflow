@@ -269,57 +269,44 @@
       }
       board.appendChild(axis);
 
-      // Greedy lane packing: a phase joins the first lane whose previous card has already ended.
+      // One lane per phase, ordered by start date — parallel phases stay readable because
+      // each keeps its own row while their bars overlap on the shared axis.
       const sorted = dated.slice().sort((a, b) => a.startDate.ms - b.startDate.ms || a.endDate.ms - b.endDate.ms);
-      const laneEnds = [];
-      const lanes = [];
-      sorted.forEach(phase => {
-        let lane = laneEnds.findIndex(end => phase.startDate.ms > end);
-        if (lane < 0) {
-          lane = laneEnds.length;
-          laneEnds.push(-Infinity);
-          lanes.push([]);
-        }
-        lanes[lane].push(phase);
-        laneEnds[lane] = phase.endDate.ms;
-      });
       const outOfRange = dated.some(phase => period && (phase.startDate.ms < period.start.ms || phase.endDate.ms > period.end.ms));
 
-      lanes.forEach(lanePhases => {
+      sorted.forEach(phase => {
         const lane = document.createElement('div');
         lane.className = 'tl-lane';
-        lanePhases.forEach(phase => {
-          const card = document.createElement('button');
-          card.type = 'button';
-          const isOut = period && (phase.startDate.ms < period.start.ms || phase.endDate.ms > period.end.ms);
-          card.className = 'tl-card' + (isOut ? ' tl-out' : '');
-          card.dataset.index = String(phase.index);
-          card.style.insetInlineStart = dayToPx((phase.startDate.ms - axisStart) / TIMELINE_DAY_MS) + 'px';
-          card.style.inlineSize = Math.max(TIMELINE_CARD_MIN_PX, dayToPx(timelineSpanDays(phase.startDate.ms, phase.endDate.ms))) + 'px';
-          const name = document.createElement('span');
-          name.className = 'tl-card-name';
-          name.textContent = (phase.name || '').trim() || '—';
-          const dur = document.createElement('span');
-          dur.className = 'tl-card-dur';
-          dur.textContent = timelineDurationText(phase.startDate.ms, phase.endDate.ms);
-          card.append(name, dur);
-          card.title = name.textContent + ' — ' + formatTimelineStart(phase.start) + ' إلى ' + formatTimelineStart(phase.end);
-          card.addEventListener('click', () => {
-            // A real drag sets the flag first, so the trailing click does not reopen the editor.
-            if (!card.dataset.tlDragged) openTimelinePhaseEditor(phase.index);
-          });
-          card.addEventListener('pointerdown', event => timelineDragStart(event, phase.index, 'move', card));
-          ['start', 'end'].forEach(edge => {
-            const handle = document.createElement('span');
-            handle.className = 'tl-handle tl-handle-' + edge;
-            handle.addEventListener('pointerdown', event => {
-              event.stopPropagation();
-              timelineDragStart(event, phase.index, edge, card);
-            });
-            card.appendChild(handle);
-          });
-          lane.appendChild(card);
+        const card = document.createElement('button');
+        card.type = 'button';
+        const isOut = period && (phase.startDate.ms < period.start.ms || phase.endDate.ms > period.end.ms);
+        card.className = 'tl-card' + (isOut ? ' tl-out' : '');
+        card.dataset.index = String(phase.index);
+        card.style.insetInlineStart = dayToPx((phase.startDate.ms - axisStart) / TIMELINE_DAY_MS) + 'px';
+        card.style.inlineSize = Math.max(TIMELINE_CARD_MIN_PX, dayToPx(timelineSpanDays(phase.startDate.ms, phase.endDate.ms))) + 'px';
+        const name = document.createElement('span');
+        name.className = 'tl-card-name';
+        name.textContent = (phase.name || '').trim() || '—';
+        const dur = document.createElement('span');
+        dur.className = 'tl-card-dur';
+        dur.textContent = timelineDurationText(phase.startDate.ms, phase.endDate.ms);
+        card.append(name, dur);
+        card.title = name.textContent + ' — ' + formatTimelineStart(phase.start) + ' إلى ' + formatTimelineStart(phase.end);
+        card.addEventListener('click', () => {
+          // A real drag sets the flag first, so the trailing click does not reopen the editor.
+          if (!card.dataset.tlDragged) openTimelinePhaseEditor(phase.index);
         });
+        card.addEventListener('pointerdown', event => timelineDragStart(event, phase.index, 'move', card));
+        ['start', 'end'].forEach(edge => {
+          const handle = document.createElement('span');
+          handle.className = 'tl-handle tl-handle-' + edge;
+          handle.addEventListener('pointerdown', event => {
+            event.stopPropagation();
+            timelineDragStart(event, phase.index, edge, card);
+          });
+          card.appendChild(handle);
+        });
+        lane.appendChild(card);
         board.appendChild(lane);
       });
 
