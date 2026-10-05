@@ -30,6 +30,7 @@
     }
 
     async function startCatchmentEditMode() {
+      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit('catchment')) return;
       if (!openLocationTableMap('catchment')) return;
       tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
       tenantCatchmentEditMode = true;
@@ -176,6 +177,7 @@
     }
 
     async function startLandmarksEditMode() {
+      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit('landmarks')) return;
       if (!openLocationTableMap('landmarks')) return;
       tenantProjectData.landmark_map_items = nearbyMapLandmarks();
       tenantLandmarksEditMode = true;

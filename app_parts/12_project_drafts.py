@@ -958,9 +958,10 @@ def api_delete_project_draft_by_id(draft_id):
 
 
 def _location_workflow_complete(draft):
-    """Location section approval needs the AI site analysis approved plus the
-    four generated map rasters — the maps are Google renders, so they carry no
-    approval flags of their own."""
+    """Location section approval needs the AI site analysis approved plus all
+    four generated map rasters approved — each map approval certifies the baked
+    raster the client framed, so a missing flag means the client never signed
+    that map off."""
     project = (draft or {}).get('draft_data') if isinstance(draft, dict) else {}
     if isinstance(project, str):
         try:
@@ -976,8 +977,16 @@ def _location_workflow_complete(draft):
     tenant_id = (draft or {}).get('tenant_id') or getattr(g, 'tenant_id', None)
     if not tenant_id:
         return False
-    return all(
+    if not all(
         _map_image_artifact(tenant_id, map_type, draft_id=draft_id)
+        for map_type in _LOCATION_MAP_TYPES):
+        return False
+    creative = project.get('tenantCreativeImages') or {}
+    approvals = creative.get('map_approvals') if isinstance(creative, dict) else {}
+    if not isinstance(approvals, dict):
+        return False
+    return all(
+        approvals.get(map_type) in (True, 'true', 1)
         for map_type in _LOCATION_MAP_TYPES)
 
 
@@ -1030,7 +1039,62 @@ def _sanitize_save_workflow_claims(tenant_id, draft_id, draft_data, stored_data)
         app.logger.warning(
             '[DRAFT SAVE] Refused unbacked site analysis approval: tenant=%s draft=%s',
             tenant_id, draft_id)
+    _sanitize_map_approval_claims(tenant_id, draft_id, draft_data, stored)
     return draft_data
+
+
+def _frame_matches_baked(creative, map_type):
+    """True when a stored viewport override still describes the baked raster.
+
+    A map approval certifies the rendered frame — a live-camera override that
+    diverges from ``map_baked_frames`` means the flag covers a view nobody
+    baked, so the claim is refused."""
+    overrides = creative.get('map_viewport_overrides')
+    if not isinstance(overrides, dict) or not overrides.get(map_type):
+        return True
+    baked = (creative.get('map_baked_frames') or {}).get(map_type) or {}
+    zooms = creative.get('map_zooms') or {}
+    centers = creative.get('map_centers') or {}
+    zoom = zooms.get(map_type)
+    center = centers.get(map_type) or {}
+    try:
+        if zoom is not None and baked.get('zoom') is not None \
+                and int(round(float(zoom))) != int(round(float(baked['zoom']))):
+            return False
+        for axis in ('lat', 'lng'):
+            live_val, baked_val = center.get(axis), baked.get(axis)
+            if live_val is not None and baked_val is not None \
+                    and abs(float(live_val) - float(baked_val)) > 1e-4:
+                return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _sanitize_map_approval_claims(tenant_id, draft_id, draft_data, stored_data):
+    """A map_approvals=true claim only stands on a real raster artifact whose
+    stored frame still matches — anything else reverts to the stored flag."""
+    creative = draft_data.get('tenantCreativeImages')
+    if not isinstance(creative, dict):
+        return
+    claims = creative.get('map_approvals')
+    if not isinstance(claims, dict):
+        return
+    stored_creative = stored_data.get('tenantCreativeImages') if isinstance(stored_data, dict) else {}
+    stored_claims = stored_creative.get('map_approvals') \
+        if isinstance(stored_creative, dict) and isinstance(stored_creative.get('map_approvals'), dict) \
+        else {}
+    truthy = lambda v: v in (True, 'true', 1)
+    for map_type, flag in list(claims.items()):
+        if not truthy(flag) or truthy(stored_claims.get(map_type)):
+            continue
+        backed = _map_image_artifact(tenant_id, map_type, draft_id=draft_id) \
+            and _frame_matches_baked(creative, map_type)
+        if not backed:
+            claims[map_type] = stored_claims.get(map_type) or False
+            app.logger.warning(
+                '[DRAFT SAVE] Refused unbacked map approval: tenant=%s draft=%s map=%s',
+                tenant_id, draft_id, map_type)
 
 
 def _active_generation_approval(draft_id):

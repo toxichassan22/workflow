@@ -544,7 +544,9 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 self.assertEqual(response.status_code, 200, (map_type, response.get_json()))
         self.assertEqual(generate_maps.call_count, 4)
         # Section approval keeps the two-tier contract: the AI site analysis
-        # text is approved, and all four map rasters are persisted artifacts.
+        # text is approved, and every map raster is a persisted artifact whose
+        # generated-content approval flag is set — artifacts alone are not
+        # enough, the client must have signed each map off.
         with self.app.app_context():
             draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
             self.assertFalse(self.application_module._location_workflow_complete(draft_row))
@@ -561,6 +563,18 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                 db.add_map_image(self.tenant_a, map_type, '/tmp/map.png',
                                  f'##MAP_{map_type.upper()}##',
                                  presentation_id='draft_approval-map', metadata={})
+            # Artifacts without the approval flags still do not complete the
+            # section — the flags are what certify each map's baked frame.
+            draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
+            self.assertFalse(self.application_module._location_workflow_complete(draft_row))
+            state = dict(draft_row['draft_data'] or {})
+            state['tenantCreativeImages'] = {
+                'map_approvals': {mt: True for mt in ('overview', 'access', 'catchment', 'landmarks')},
+            }
+            db.get_db().execute(
+                'UPDATE project_drafts SET draft_data = ? WHERE id = ?',
+                (json.dumps(state, ensure_ascii=False), 'approval-map'))
+            db.get_db().commit()
             draft_row = db.get_project_draft_by_id(self.tenant_a, 'approval-map')
             self.assertTrue(self.application_module._location_workflow_complete(draft_row))
         rows = [{'name': f'معلم {index}', 'show_on_map': index in (2, 4)} for index in range(1, 10)]
@@ -586,9 +600,15 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('function startManualRoadDrawing(name)', source)
         self.assertIn('function startLandmarkPlacement(key, tr)', source)
         self.assertIn('main_roads_data', source)
-        self.assertNotIn('map_approvals', source)
+        # Per-map approval is the generated-content approval tier for maps:
+        # a stored flag per map type plus the approve/unapprove pair and the
+        # gate that blocks edits over an approved raster.
+        self.assertIn('map_approvals', source)
+        self.assertIn('function approveTenantMap(', source)
+        self.assertIn('function unapproveTenantMap(', source)
+        self.assertIn('function tenantMapApproved(', source)
+        self.assertIn('function mapApprovalBlocksEdit(', source)
         self.assertNotIn('overviewApproved', source)
-        self.assertNotIn('mapApproved', source)
         self.assertNotIn('approvals.overview', source)
         self.assertIn('توليد الخرائط الأربع مطلوب قبل توليد العرض', source)
         self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة'", source)
@@ -614,17 +634,21 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
-    def test_map_gallery_shows_generated_maps_without_approval_stages(self):
+    def test_map_gallery_marks_generated_and_approved_maps(self):
         source = read_frontend_text()
         self.assertIn('function mapPreviewStoredUrl(view)', source)
         self.assertIn("...(view.editableKeys || [])", source)
         self.assertIn('function mapPreviewIsVisible(view)', source)
-        self.assertNotIn('map_approvals', source)
-        self.assertNotIn('approvalButton', source)
+        # Approval is back as a card status, not a stage strip: the flag lives
+        # in map_approvals and mapCardStatusLabel turns it into the badge.
+        self.assertIn('map_approvals', source)
+        self.assertIn('function mapCardStatusLabel(view)', source)
+        self.assertIn("WFT('location.map_status_approved', 'معتمدة')", source)
         gallery_body = source.split('function renderMapPreviewGallery()', 1)[1].split('function withCacheBust', 1)[0]
         self.assertIn('const visible = mapPreviewIsVisible(view);', gallery_body)
         self.assertIn('visible && url', gallery_body)
-        self.assertIn("'مولدة'", gallery_body)
+        self.assertIn('mapCardStatusLabel(view)', gallery_body)
+        self.assertIn('tenant-map-card-status', gallery_body)
         self.assertIn('const overviewGenerated = mapPreviewIsGenerated(overview);', source)
         self.assertIn('const generated = mapPreviewIsGenerated(view);', source)
 
@@ -936,7 +960,8 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("view.mapType === 'catchment' && tenantCatchmentEditMode", workflow)
         self.assertIn("view.mapType === 'catchment' && generated", workflow)
         self.assertIn('إعادة توليد الخريطة', workflow)
-        self.assertNotIn('اعتماد الخريطة', workflow)
+        self.assertIn('اعتماد الخريطة', workflow)
+        self.assertIn('إلغاء اعتماد الخريطة', workflow)
         self.assertIn('>تعديل</button>', workflow)
         for function_name in ('startCatchmentEditMode', 'startCatchmentLabelDrag', 'undoCatchmentEdits',
                               'confirmCatchmentEdits', 'cancelCatchmentEdits', 'applyCatchmentMapEdits'):
@@ -1553,6 +1578,9 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             draft_state = dict(draft_row['draft_data'] or {})
             draft_state['site_analysis'] = 'تحليل نصي للموقع'
             draft_state['site_analysis_approved'] = True
+            draft_state['tenantCreativeImages'] = {
+                'map_approvals': {mt: True for mt in ('overview', 'access', 'catchment', 'landmarks')},
+            }
             db.get_db().execute(
                 'UPDATE project_drafts SET draft_data = ? WHERE id = ? AND tenant_id = ?',
                 (json.dumps(draft_state, ensure_ascii=False), 'parallel-approval', self.tenant_a))

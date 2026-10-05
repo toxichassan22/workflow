@@ -14,7 +14,7 @@
     let tenantInteractiveSuppressIdle = false;
     let interactiveMountSeq = 0;
     let interactiveOverlayRaf = 0;
-    // mapType → the live frame diverges from the raster stored on the server.
+    // mapType: the live frame diverges from the raster stored on the server.
     const tenantInteractiveFrameDirty = {};
 
     // Ported from maps_service SATELLITE_*_STYLES / ACCESS_ROADMAP_STYLES so the
@@ -156,7 +156,10 @@
         disableDefaultUI: true,
         zoomControl: true,
         fullscreenControl: false,
-        gestureHandling: 'greedy',
+        // cooperative: a stray wheel pass scrolls the page instead of zooming;
+        // zoom needs Ctrl+wheel and panning needs a real drag (two fingers on
+        // touch) — the map only catches deliberate gestures.
+        gestureHandling: 'cooperative',
         // Whole-number zooms only: the Static Maps API bakes integer zooms, so a
         // fractional live frame could never be reproduced exactly at bake time.
         isFractionalZoomEnabled: false,
@@ -349,16 +352,51 @@
       if (tenantInteractiveSuppressIdle) { tenantInteractiveSuppressIdle = false; return; }
       const roundedZoom = Math.round(Number.isFinite(zoom) ? zoom : 0);
       if (!roundedZoom) return;
+      // Idle also fires on tile loads and viewport fits with no gesture at all —
+      // a frame identical to what is already recorded is not user intent, so it
+      // must not mint a viewport override or flip the dirty flag.
+      const recordedCenter = (tenantCreativeImages.map_centers || {})[mapType];
+      const recordedZoom = (tenantCreativeImages.map_zooms || {})[mapType];
+      if (recordedCenter && recordedZoom === roundedZoom
+          && Math.abs(Number(recordedCenter.lat) - lat) < 1e-6
+          && Math.abs(Number(recordedCenter.lng) - lng) < 1e-6) return;
       tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: roundedZoom };
       tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: { lat, lng } };
-      tenantCreativeImages.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}), [mapType]: true };
       const baked = interactiveBakedFrame(mapType);
-      tenantInteractiveFrameDirty[mapType] = !baked
-        || baked.zoom !== roundedZoom
-        || Math.abs(Number(baked.lat) - lat) > 1e-4
-        || Math.abs(Number(baked.lng) - lng) > 1e-4;
+      const mapView = (typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS : [])
+        .find(item => item.mapType === mapType);
+      const mapGenerated = !!(mapView && typeof mapPreviewIsGenerated === 'function' && mapPreviewIsGenerated(mapView));
+      // With a baked frame the divergence is exact. Without one the mount-time
+      // evaluation already decided (a generated raster with an override but no
+      // baked record mounts dirty so its next approval re-bakes) — that verdict
+      // stands, while a never-generated map has nothing to diverge from.
+      const diverged = baked
+        ? (baked.zoom !== roundedZoom
+          || Math.abs(Number(baked.lat) - lat) > 1e-4
+          || Math.abs(Number(baked.lng) - lng) > 1e-4)
+        : (mapGenerated && tenantInteractiveFrameDirty[mapType] === true);
+      tenantInteractiveFrameDirty[mapType] = diverged;
+      // The override flag means "the user picked this frame": mint it on real
+      // divergence, on a map with no baked frame yet, or keep one already set —
+      // but never on a stray idle that re-landed on the baked frame.
+      if (diverged || !baked || (tenantCreativeImages.map_viewport_overrides || {})[mapType]) {
+        tenantCreativeImages.map_viewport_overrides = {
+          ...(tenantCreativeImages.map_viewport_overrides || {}),
+          [mapType]: true
+        };
+      }
+      // Approval certifies the baked raster frame — a live camera that has
+      // drifted off it is no longer what was approved.
+      if (diverged
+          && tenantCreativeImages.map_approvals && tenantCreativeImages.map_approvals[mapType]) {
+        tenantCreativeImages.map_approvals = { ...tenantCreativeImages.map_approvals, [mapType]: false };
+      }
       syncInteractiveFrameDirtyHint();
       renderLocationWorkflowState();
+      // The framed view (and any approval a divergence just released) must
+      // survive a reload — mark the draft dirty so the next save carries it.
+      tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      triggerAutoSaveDraft();
     }
 
     // The raster bake result for ONE map type: updates the persisted
@@ -378,6 +416,11 @@
         ...(tenantCreativeImages.map_baked_frames || {}),
         [mapType]: frame
       };
+      // A fresh bake replaces the artifact the approval certified — the
+      // approve flow re-sets the flag itself after its bake lands.
+      if (tenantCreativeImages.map_approvals && tenantCreativeImages.map_approvals[mapType]) {
+        tenantCreativeImages.map_approvals = { ...tenantCreativeImages.map_approvals, [mapType]: false };
+      }
       if (tenantInteractiveMapType === mapType && tenantMapPreviewState && Number.isFinite(Number(frame.zoom))) {
         tenantInteractiveFrameDirty[mapType] =
           Math.abs(Number(frame.lat) - Number(tenantMapPreviewState.lat)) > 1e-4

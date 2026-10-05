@@ -572,6 +572,15 @@
       { mapType: 'landmarks', title: 'خريطة المعالم', keys: ['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##'], editableKeys: ['##MAP_LANDMARKS_EDITABLE##', '##MAP_LANDMARKS_SATELLITE_EDITABLE##', '##MAP_LANDMARKS_ROADMAP_EDITABLE##'] }
     ];
 
+    function mapCardStatusLabel(view) {
+      if (typeof tenantMapApproved === 'function' && tenantMapApproved(view.mapType)) {
+        return WFT('location.map_status_approved', 'معتمدة');
+      }
+      return mapPreviewStoredUrl(view)
+        ? WFT('location.map_status_generated', 'مولدة')
+        : WFT('location.map_status_not_generated', 'غير مولدة');
+    }
+
     function renderMapPreviewGallery() {
       const forceFull = arguments[0] === true;
       const gallery = document.getElementById('mapPreviewGallery');
@@ -581,20 +590,23 @@
       if (!forceFull && existingCards.length === views.length) {
         existingCards.forEach(card => {
           card.classList.toggle('active', card.dataset.mapSelect === tenantSelectedMapType);
+          // Approvals flip outside a full rebuild (a live pan drops the flag),
+          // so the status label stays fresh even on the cheap path.
+          const view = views.find(item => item.mapType === card.dataset.mapSelect);
+          const statusEl = card.querySelector('.tenant-map-card-status');
+          if (view && statusEl) statusEl.textContent = mapCardStatusLabel(view);
         });
         return;
       }
       const cards = views.map(view => {
         const url = mapPreviewStoredUrl(view);
         const visible = mapPreviewIsVisible(view);
-        const status = url
-          ? WFT('location.map_status_generated', 'مولدة')
-          : WFT('location.map_status_not_generated', 'غير مولدة');
+        const status = mapCardStatusLabel(view);
         const preview = visible && url
           ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
           : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(url ? status : WFT('location.map_not_generated_hint', 'لم تُولد الخريطة')) + '</div>';
         return '<figure class="tenant-map-preview-card' + (tenantSelectedMapType === view.mapType ? ' active' : '') + '" data-map-select="' + escapeHtml(view.mapType) + '" style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
-          '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
+          '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span class="tenant-map-card-status" style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
       }).join('');
       gallery.innerHTML = cards;
       if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
@@ -778,6 +790,7 @@
 
     async function regenerateMapPreviewOnce(mapType) {
       if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
+      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit(mapType)) return false;
       if (!isUsableMapCoordinate(tenantProjectData.location_lat, true)
           || !isUsableMapCoordinate(tenantProjectData.location_lng, false)) {
         toast(WFT('location.analyze_link_first', 'حلل رابط الموقع أولًا قبل توليد الخرائط'));

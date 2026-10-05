@@ -533,6 +533,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "location.analyze_link_first": "Analyze the location link first before generating maps",
   "location.map_generated": "Map generated",
   "location.map_status_generated": "Generated",
+  "location.map_status_approved": "Approved",
+  "location.map_unapprove_first": "Unapprove the map before editing or regenerating it",
   "location.map_status_not_generated": "Not generated",
   "location.map_not_generated_hint": "Map not generated yet",
   "location.map_frame_unsaved": "The displayed preview frame has not been saved to the stored map image",

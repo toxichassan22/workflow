@@ -921,6 +921,12 @@ def api_generate_single_map_image():
                     'lng': _baked_center.get('lng', _prev_baked.get('lng')),
                 },
             }
+            # A fresh raster voids the map's stored approval — the flag must
+            # be re-earned against the new image, not carried onto it.
+            creative['map_approvals'] = {
+                **(creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}),
+                map_type: False,
+            }
         if 'highlightSite' in data:
             creative['map_highlight_site'] = bool(highlight_site)
         creative['maps_persisted'] = True

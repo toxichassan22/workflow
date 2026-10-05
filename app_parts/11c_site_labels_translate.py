@@ -33,8 +33,8 @@ def translate_site_labels_en(values, project_data=None, tenant_id=None):
         'for a real-estate proposal. Return ONLY a JSON array of strings in the '
         'exact same order and length as the input. Translate or transliterate '
         'place, road, city and category names faithfully — use the well-known '
-        'English name when one exists («مطار الملك عبدالعزيز الدولي» → "King '
-        'Abdulaziz International Airport", «طريق الملك فهد» → "King Fahd Road") — '
+        'English name when one exists («مطار الملك عبدالعزيز الدولي» = "King '
+        'Abdulaziz International Airport", «طريق الملك فهد» = "King Fahd Road") — '
         'and keep every number, code and coordinate exact. Never invent content.',
         json.dumps(unique, ensure_ascii=False),
         max_tokens=4000,

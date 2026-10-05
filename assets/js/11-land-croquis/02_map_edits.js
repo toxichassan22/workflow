@@ -70,6 +70,7 @@
         map_catchment_landmarks: [],
         map_landmark_items: [],
         map_baked_frames: {},
+        map_approvals: {},
         map_lat: null,
         map_lng: null,
         maps_signature: null,
@@ -228,6 +229,51 @@
       return mapType === 'overview' || mapType === 'access';
     }
 
+    // Per-map approval: the flag certifies the stored raster exactly as the
+    // client framed it — approving while the live view is dirty bakes that
+    // frame first, and any later frame/content change drops the flag again.
+    function tenantMapApproved(mapType) {
+      return !!(tenantCreativeImages.map_approvals && tenantCreativeImages.map_approvals[mapType]);
+    }
+
+    async function approveTenantMap(mapType) {
+      // Two-tier model: each generated map approves on its own artifact — the
+      // site analysis is a sibling generated-content approval, not a gate, and
+      // the section approval is what requires all of them together.
+      if (!mapOverlayHasBase(mapType)) return false;
+      if (tenantInteractiveFrameDirty[mapType]) {
+        const baked = await regenerateMapPreview(mapType);
+        if (!baked) return false;
+      }
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: true };
+      await saveMapPreviewState();
+      toast('تم اعتماد الخريطة');
+      renderMapPreviewGallery(true);
+      renderLocationWorkflowState();
+      return true;
+    }
+
+    async function unapproveTenantMap(mapType) {
+      if (!tenantMapApproved(mapType)) return;
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
+      // The section approval required every map's flag — dropping one inside an
+      // approved section must drop the section too, same as any other mutation.
+      if (typeof releaseLocationSectionApproval === 'function') releaseLocationSectionApproval();
+      await saveMapPreviewState();
+      toast('تم إلغاء اعتماد الخريطة');
+      renderMapPreviewGallery(true);
+      renderLocationWorkflowState();
+    }
+
+    // Shared gate for every path that would alter an approved raster.
+    function mapApprovalBlocksEdit(mapType) {
+      if (!tenantMapApproved(mapType)) return false;
+      toast(typeof WFT === 'function'
+        ? WFT('location.map_unapprove_first', 'ألغ اعتماد الخريطة قبل تعديلها أو إعادة توليدها')
+        : 'ألغ اعتماد الخريطة قبل تعديلها أو إعادة توليدها');
+      return true;
+    }
+
     // Drag-to-pan is only safe on a frame we can convert clicks against: a known
     // zoom and centre. Every drawing/editing mode keeps priority.
     function mapViewportPanAllowed() {
@@ -242,6 +288,7 @@
     // automatically again — without it a stray pan would pin the frame forever.
     function resetMapViewport(mapType) {
       if (!mapViewportAdjustable(mapType) || tenantMapViewportBusy) return;
+      if (mapApprovalBlocksEdit(mapType)) return;
       if (!(tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
       const overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };
       delete overrides[mapType];
@@ -257,6 +304,7 @@
 
     function startMapViewportPan(event) {
       if (event.button !== 0 || tenantMapViewportBusy || !mapViewportPanAllowed()) return;
+      if (tenantMapApproved(tenantSelectedMapType)) return;
       const box = document.getElementById('mapPreviewImage');
       const img = box?.querySelector('img');
       if (!box || !img || !img.src) return;
@@ -304,7 +352,7 @@
     }
 
     async function applyOverviewMapEdits() {
-      if (!mapOverlayHasBase('overview')) return false;
+      if (!mapOverlayHasBase('overview') || tenantMapApproved('overview')) return false;
       try {
         const payload = slimMapProjectData(tenantProjectData);
         payload.draftId = tenantProjectData.draftId;
@@ -334,7 +382,7 @@
     }
 
     async function applyAccessMapEdits() {
-      if (!mapOverlayHasBase('access')) return false;
+      if (!mapOverlayHasBase('access') || tenantMapApproved('access')) return false;
       try {
           const payload = slimMapProjectData(tenantProjectData);
           payload.draftId = tenantProjectData.draftId;
@@ -382,7 +430,7 @@
     }
 
     function applyCatchmentMapEdits() {
-      if (!mapOverlayHasBase('catchment')) return Promise.resolve(false);
+      if (!mapOverlayHasBase('catchment') || tenantMapApproved('catchment')) return Promise.resolve(false);
       return (async () => {
         try {
           const payload = slimMapProjectData(tenantProjectData);
@@ -428,7 +476,7 @@
     }
 
     function applyLandmarksMapEdits() {
-      if (!mapOverlayHasBase('landmarks')) return Promise.resolve(false);
+      if (!mapOverlayHasBase('landmarks') || tenantMapApproved('landmarks')) return Promise.resolve(false);
       return (async () => {
         try {
           const payload = slimMapProjectData(tenantProjectData);
@@ -476,6 +524,7 @@
     async function toggleTenantPolygonMode() {
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
+      if (mapApprovalBlocksEdit('overview')) return;
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
       tenantMapDraftPolygonPoints = [];
@@ -516,6 +565,7 @@
     async function startTenantMapPinMode() {
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
+      if (mapApprovalBlocksEdit('overview')) return;
       const lat = Number(tenantProjectData.location_lat);
       const lng = Number(tenantProjectData.location_lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) { toast('موقع المبنى غير محدد'); return; }
