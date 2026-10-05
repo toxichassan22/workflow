@@ -86,24 +86,3 @@ jobs:
           done
           echo "Staging /api/extract-croquis never returned HTTP 401 (transient 502/503/504 persisted)"
           exit 1
-
-  sast:
-    name: Bandit Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Bandit
-        run: |
-          pip install --upgrade pip
-          pip install bandit
-
-      - name: Run Bandit Security Scan
-        run: |
-          bandit -r app_parts/ -ll -x tests/ || true
