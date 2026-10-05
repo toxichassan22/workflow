@@ -1,5 +1,13 @@
 /* project-form/03_timeline_board.css — the visual project timeline (section-timeline). */
 
+    /* The form-section default is an auto-fit 280px field grid; the board, the warnings and
+       the editor are stacked full-width blocks, so the section opts out like the financial
+       study does. */
+    .project-form-content #section-timeline.tenant-form-section.active,
+    #tenantProjectForm #section-timeline.active {
+      display: block !important;
+    }
+
     #section-timeline .validation-panel {
       margin: 8px 0;
       padding: 8px 12px;
