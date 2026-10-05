@@ -723,6 +723,14 @@
       if (!table || !hidden) return;
       const lines = [];
       const structuredRows = [];
+      const dataKey = key === 'city_landmarks' ? 'city_landmarks_data'
+        : key === 'nearby_landmarks' ? 'nearby_landmarks_data' : null;
+      // A marker dragged on the map is pinned by hand — the flag lives on the
+      // stored row, so a later table serialize must not silently drop it.
+      const manualRows = new Set(
+        (dataKey && Array.isArray(tenantProjectData[dataKey]) ? tenantProjectData[dataKey] : [])
+          .filter(item => item?.manual_position)
+          .map(item => String(item?.name || '').trim()));
       table.querySelectorAll('tbody tr').forEach(tr => {
         const name = (tr.querySelector('.lt-name-input').value || '').trim();
         if (!name) return;
@@ -734,12 +742,14 @@
         if (dist) parts.push(dist + ' كم');
         if (dur) parts.push(dur + ' دقائق');
         lines.push(parts.join(' — '));
-        structuredRows.push({
+        const structured = {
           name, category, distance_km: dist, duration_minutes: dur,
           lat: tr.dataset.lat || '', lng: tr.dataset.lng || '',
           show_on_map: !!tr.querySelector('.lt-map-select')?.checked,
           row_source: tr.dataset.rowSource || 'manual'
-        });
+        };
+        if (tr.dataset.manualPosition === '1' || manualRows.has(name)) structured.manual_position = true;
+        structuredRows.push(structured);
       });
       hidden.value = (key === 'main_roads' ? normalizeAccessRoadNames(lines) : lines).join('\n');
       if (key === 'main_roads') {

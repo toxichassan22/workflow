@@ -160,6 +160,7 @@
       if (tenantLandmarkPlacementTarget && tenantSelectedMapType === landmarkMapType) {
         tenantLandmarkPlacementTarget.tr.dataset.lat = nextLat.toFixed(6);
         tenantLandmarkPlacementTarget.tr.dataset.lng = nextLng.toFixed(6);
+        tenantLandmarkPlacementTarget.tr.dataset.manualPosition = '1';
         serializeLocationTable(tenantLandmarkPlacementTarget.key);
         scheduleMapTableRecompose(tenantLandmarkPlacementTarget.key);
         tenantLandmarkPlacementTarget = null;
@@ -375,7 +376,9 @@
     // overwrite map_centers/map_zooms, and the user's unsaved pan would then
     // compare clean against the baked frame and never reach the bake.
     function mergeRecomposeMapFrame(mapType, data) {
-      if ((tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
+      // Fixed maps take the refit frame even with a stale override flag —
+      // a leftover flag from the adjustable era must not pin them wide.
+      if (mapViewportAdjustable(mapType) && (tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
       if (data.zooms && data.zooms[mapType] !== undefined)
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: data.zooms[mapType] };
       if (data.centers && data.centers[mapType] !== undefined)
@@ -477,6 +480,24 @@
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('catchment', data.zooms?.catchment, data.centers?.catchment);
           tenantProjectData.catchment_map_landmarks = Array.isArray(data.catchmentLandmarks) ? data.catchmentLandmarks : tenantProjectData.catchment_map_landmarks || [];
           tenantCreativeImages.map_catchment_landmarks = tenantProjectData.catchment_map_landmarks;
+          // The server may have re-anchored a marker (e.g. a road snapped onto
+          // its drawn path) — the table rows must carry the same coordinates or
+          // the next merge would resurrect the stale ones.
+          const returnedCatchmentByName = new Map(tenantProjectData.catchment_map_landmarks.map(item => [item?.name, item]));
+          tenantProjectData.city_landmarks_data = (Array.isArray(tenantProjectData.city_landmarks_data) ? tenantProjectData.city_landmarks_data : []).map(item => {
+            const updated = returnedCatchmentByName.get(item?.name);
+            if (!updated) return item;
+            const next = { ...item, lat: updated.lat, lng: updated.lng };
+            if (updated.manual_position) next.manual_position = true;
+            return next;
+          });
+          document.querySelectorAll('table.location-table[data-location-table="city_landmarks"] tbody tr').forEach(tr => {
+            const updated = returnedCatchmentByName.get(tr.querySelector('.lt-name-input')?.value?.trim());
+            if (!updated) return;
+            tr.dataset.lat = String(updated.lat);
+            tr.dataset.lng = String(updated.lng);
+            if (updated.manual_position) tr.dataset.manualPosition = '1';
+          });
           const positions = { ...(tenantProjectData.catchment_label_positions || {}) };
           tenantProjectData.catchment_map_landmarks.forEach(item => {
             if (item?.name && Array.isArray(item.label_point)) positions[item.name] = item.label_point;
@@ -522,6 +543,23 @@
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('landmarks', data.zooms?.landmarks, data.centers?.landmarks);
           tenantProjectData.landmark_map_items = Array.isArray(data.landmarkMapItems) ? data.landmarkMapItems : tenantProjectData.landmark_map_items || [];
           tenantCreativeImages.map_landmark_items = tenantProjectData.landmark_map_items;
+          // Same write-back as the catchment map: server-side re-anchored
+          // coordinates must reach the nearby-landmark rows too.
+          const returnedLandmarksByName = new Map(tenantProjectData.landmark_map_items.map(item => [item?.name, item]));
+          tenantProjectData.nearby_landmarks_data = (Array.isArray(tenantProjectData.nearby_landmarks_data) ? tenantProjectData.nearby_landmarks_data : []).map(item => {
+            const updated = returnedLandmarksByName.get(item?.name);
+            if (!updated) return item;
+            const next = { ...item, lat: updated.lat, lng: updated.lng };
+            if (updated.manual_position) next.manual_position = true;
+            return next;
+          });
+          document.querySelectorAll('table.location-table[data-location-table="nearby_landmarks"] tbody tr').forEach(tr => {
+            const updated = returnedLandmarksByName.get(tr.querySelector('.lt-name-input')?.value?.trim());
+            if (!updated) return;
+            tr.dataset.lat = String(updated.lat);
+            tr.dataset.lng = String(updated.lng);
+            if (updated.manual_position) tr.dataset.manualPosition = '1';
+          });
           const positions = { ...(tenantProjectData.landmark_label_positions || {}) };
           tenantProjectData.landmark_map_items.forEach(item => {
             if (item?.name && Array.isArray(item.label_point)) positions[item.name] = item.label_point;

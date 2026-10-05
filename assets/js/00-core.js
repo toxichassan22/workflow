@@ -443,7 +443,7 @@
         slim.nearby_landmarks_data = slim.nearby_landmarks_data.map(item => {
           if (!item || typeof item !== 'object') return item;
           return Object.fromEntries(
-            ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng', 'show_on_map', 'selected', 'row_source']
+            ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng', 'show_on_map', 'selected', 'row_source', 'manual_position']
               .filter(key => item[key] !== undefined && item[key] !== null && item[key] !== '')
               .map(key => [key, item[key]])
           );

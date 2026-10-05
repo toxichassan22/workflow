@@ -456,10 +456,15 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
     draw_compass = True
     rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
     map_lang = map_language(project_data)
+    ring_km = max([ring['km'] for ring in rings] + [0.0])
+    # A stored road point can sit at the feature's remote endpoint — snap those
+    # rows back near the site before the frame is measured around them.
+    _snap_road_landmarks(
+        landmarks, project_data, lat, lng, language=map_lang,
+        search_radius_m=max(20000, int(ring_km * 1000)))
     # The stored frame was fitted to the rings only — a selected landmark beyond
     # it was drawn off-canvas and dropped. Refit around rings + sent landmarks so
     # every checked row stays drawable; a tighter existing editable is rebuilt.
-    ring_km = max([ring['km'] for ring in rings] + [0.0])
     landmark_km = 0.0
     for item in landmarks:
         try:
@@ -488,23 +493,34 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        # A manually framed map keeps its zoom even when it crops content —
-        # refitting here would silently un-pick the frame the client approved.
-        frame_zoom = zoom \
-            if needed_zoom is None or metadata.get('manual_viewport') \
-            else min(zoom, needed_zoom)
+        # The catchment map is a fixed, site-anchored frame fitted to content —
+        # a wider stored frame only ever meant the fit was stretched by a badly
+        # resolved landmark, so the recompose refits and recentres on the site.
+        if needed_zoom is not None:
+            frame_zoom, frame_center_lat, frame_center_lng = needed_zoom, lat, lng
+        else:
+            frame_zoom, frame_center_lat, frame_center_lng = zoom, center_lat, center_lng
         if existing is not None:
             try:
-                existing_zoom = int(json.loads(existing.get('metadata_json') or '{}').get('zoom'))
+                existing_meta = json.loads(existing.get('metadata_json') or '{}')
+                existing_zoom = int(existing_meta.get('zoom'))
+                existing_center = (
+                    float(existing_meta.get('center_lat')),
+                    float(existing_meta.get('center_lng')))
             except (TypeError, ValueError, json.JSONDecodeError):
-                existing_zoom = None
-            if existing_zoom is not None and existing_zoom <= frame_zoom:
+                existing_zoom, existing_center = None, None
+            # Only an identical frame skips the rebuild — a wider stored one is
+            # exactly the stale-extent case this refit exists to repair.
+            if (existing_zoom is not None and existing_zoom == frame_zoom
+                    and existing_center is not None
+                    and _distance_meters(existing_center[0], existing_center[1],
+                                         frame_center_lat, frame_center_lng) < 25):
                 continue
         active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, frame_zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
+        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
+            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -513,7 +529,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             _apply_sepia_tone(editable_path, intensity=0.35)
             _apply_map_overlay(editable_path, dark_factor=0.15)
         if rings:
-            _draw_catchment_zones(editable_path, center_lat, center_lng, frame_zoom, rings, scale=2,
+            _draw_catchment_zones(editable_path, frame_center_lat, frame_center_lng, frame_zoom, rings, scale=2,
                                   site_lat=lat, site_lng=lng)
         if draw_compass:
             _draw_compass(editable_path, position='top-right', language=map_lang)
@@ -521,7 +537,8 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
             if final else str(existing.get('placeholder') or '')
         )
-        metadata = {**metadata, 'zoom': frame_zoom}
+        metadata = {**metadata, 'zoom': frame_zoom, 'center_lat': frame_center_lat,
+                    'center_lng': frame_center_lng, 'manual_viewport': False}
         if existing is not None:
             update_map_image(existing['id'], tenant_id, editable_path, editable_placeholder, metadata)
             editable_id = existing['id']
@@ -625,26 +642,86 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
         landmarks = []
     draw_compass = True
     map_lang = map_language(project_data)
+    # Road-named rows keep their drawn-road anchor near the site — a geocoded
+    # endpoint kilometres out would otherwise pin the marker off-frame.
+    _snap_road_landmarks(landmarks, project_data, site_lat, site_lng,
+                         language=map_lang, search_radius_m=20000)
+    # The landmarks frame mirrors generation: content-fitted over the selected
+    # landmarks and centred on the plot (or the site when no boundary exists).
+    frame_lat, frame_lng = site_lat, site_lng
+    poly_data = project_data.get('location_polygon')
+    try:
+        if isinstance(poly_data, str):
+            poly_pts = [
+                tuple(float(v.strip()) for v in pt.split(',', 1))
+                for pt in poly_data.split(';') if ',' in pt
+            ]
+        elif isinstance(poly_data, list):
+            poly_pts = [(float(pt[0]), float(pt[1])) for pt in poly_data if len(pt) >= 2]
+        else:
+            poly_pts = []
+        if len(poly_pts) >= 3:
+            centroid_lat = sum(point[0] for point in poly_pts) / len(poly_pts)
+            centroid_lng = sum(point[1] for point in poly_pts) / len(poly_pts)
+            if (min(_distance_meters(site_lat, site_lng, p[0], p[1]) for p in poly_pts) <= 500
+                    or _distance_meters(site_lat, site_lng, centroid_lat, centroid_lng) <= 500):
+                frame_lat = (min(p[0] for p in poly_pts) + max(p[0] for p in poly_pts)) / 2
+                frame_lng = (min(p[1] for p in poly_pts) + max(p[1] for p in poly_pts)) / 2
+    except (TypeError, ValueError, IndexError):
+        pass
+    landmark_km = 0.0
+    for item in landmarks:
+        try:
+            landmark_km = max(landmark_km, _distance_meters(
+                site_lat, site_lng, float(item.get('lat')), float(item.get('lng'))) / 1000.0)
+        except (TypeError, ValueError):
+            continue
+    needed_zoom = (
+        zoom_for_radius_km(site_lat, max(0.6, min(20.0, landmark_km * 1.1)))
+        if landmark_km else None
+    )
     for final_type, editable_type in (
         ('landmarks', 'landmarks_editable'),
         ('landmarks_satellite', 'landmarks_satellite_editable'),
         ('landmarks_roadmap', 'landmarks_roadmap_editable'),
     ):
         final = by_type.get(final_type)
-        if not final or editable_type in by_type:
+        existing = by_type.get(editable_type)
+        source = final or existing
+        if source is None:
             continue
         try:
-            metadata = json.loads(final.get('metadata_json') or '{}')
+            metadata = json.loads(source.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
+        if needed_zoom is not None:
+            frame_zoom, frame_center_lat, frame_center_lng = needed_zoom, frame_lat, frame_lng
+        else:
+            frame_zoom, frame_center_lat, frame_center_lng = zoom, center_lat, center_lng
+        if existing is not None:
+            try:
+                existing_meta = json.loads(existing.get('metadata_json') or '{}')
+                existing_zoom = int(existing_meta.get('zoom'))
+                existing_center = (
+                    float(existing_meta.get('center_lat')),
+                    float(existing_meta.get('center_lng')))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                existing_zoom, existing_center = None, None
+            # Identical frame → keep the editable; a wider one is the stale
+            # extent this refit repairs.
+            if (existing_zoom is not None and existing_zoom == frame_zoom
+                    and existing_center is not None
+                    and _distance_meters(existing_center[0], existing_center[1],
+                                         frame_center_lat, frame_center_lng) < 25):
+                continue
         active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
+        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(center_lat, center_lng, active_maptype, zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
+            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
             if not cached_base:
                 continue
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
@@ -654,8 +731,17 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             _apply_map_overlay(editable_path, dark_factor=0.20)
         if draw_compass:
             _draw_compass(editable_path, position='top-right', language=map_lang)
-        editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
-        editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
+        editable_placeholder = (
+            str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
+            if final else str(existing.get('placeholder') or '')
+        )
+        metadata = {**metadata, 'zoom': frame_zoom, 'center_lat': frame_center_lat,
+                    'center_lng': frame_center_lng, 'manual_viewport': False}
+        if existing is not None:
+            update_map_image(existing['id'], tenant_id, editable_path, editable_placeholder, metadata)
+            editable_id = existing['id']
+        else:
+            editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
         by_type[editable_type] = {
             'id': editable_id,
             'image_type': editable_type,
@@ -915,7 +1001,78 @@ def _merge_landmark_data(landmarks, structured):
         distance_meters = numeric(item.get('distance_meters'))
         if distance_meters is not None:
             target['distance_meters'] = round(distance_meters)
+        if item.get('manual_position'):
+            target['manual_position'] = True
     return landmarks
+
+
+def _snap_road_landmarks(items, project_data, site_lat, site_lng, language='ar', search_radius_m=50000):
+    """Re-anchor road-named landmark rows near the site.
+
+    A road name geocodes to a single point that can sit at the feature's remote
+    end — the marker then lands kilometres out and the fitted frame zooms out to
+    cover it. When the same road is drawn on the access map, its stored path is
+    the truth: the marker belongs at the path's closest point to the site.
+    Undrawn roads re-resolve through the Places candidate nearest the site.
+    Markers the user placed by hand (``manual_position``) are never moved.
+    """
+    if not isinstance(items, list):
+        return
+    paths = []
+    for key in ('manual_road_paths', 'access_roads_data'):
+        raw = (project_data or {}).get(key)
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (TypeError, ValueError):
+                raw = []
+        for entry in raw or []:
+            if not isinstance(entry, dict):
+                continue
+            road_name = str(entry.get('name') or '').strip()
+            points = []
+            for point in entry.get('points') or []:
+                try:
+                    points.append((float(point[0]), float(point[1])))
+                except (TypeError, ValueError, IndexError):
+                    continue
+            if road_name and points:
+                paths.append((road_name, points))
+    for item in items:
+        if not isinstance(item, dict) or item.get('manual_position'):
+            continue
+        names = [item.get('name'), item.get('name_src')]
+        if not any(is_road_name(name) for name in names if name):
+            continue
+        old_lat, old_lng = item.get('lat'), item.get('lng')
+        match = next((
+            points for road_name, points in paths
+            if any(is_same_road_name(name, road_name) for name in names if name)), None)
+        if match:
+            item['lat'], item['lng'] = min(
+                match, key=lambda pt: _distance_meters(site_lat, site_lng, pt[0], pt[1]))
+        else:
+            place = find_place_near(item.get('name'), site_lat, site_lng,
+                                    radius_m=search_radius_m, language=language)
+            if not (place and place.get('lat') is not None and place.get('lng') is not None):
+                continue
+            item['lat'], item['lng'] = place['lat'], place['lng']
+        item['distance_meters'] = round(_distance_meters(
+            site_lat, site_lng, float(item['lat']), float(item['lng'])))
+        moved_m = None
+        try:
+            moved_m = _distance_meters(float(old_lat), float(old_lng), float(item['lat']), float(item['lng']))
+        except (TypeError, ValueError):
+            moved_m = None
+        if moved_m is None or moved_m > 250:
+            # The stored label point was drawn beside the old marker — a moved
+            # pin would leave it stranded off-frame, so the label re-seats.
+            item.pop('label_point', None)
+            for labels_key in ('catchment_label_positions', 'landmark_label_positions'):
+                labels = (project_data or {}).get(labels_key)
+                if isinstance(labels, dict):
+                    labels.pop(item.get('name'), None)
+            print(f"[LANDMARKS] road marker '{item.get('name')}' snapped near the site")
 
 
 def _parse_catchment_zones(text):

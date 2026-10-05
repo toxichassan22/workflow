@@ -92,23 +92,34 @@ class MapViewportTests(unittest.TestCase):
             'map_centers': {map_type: center},
         }
 
-    def test_all_four_maps_bake_the_live_viewport_dimensions(self):
+    def test_live_viewport_dimensions_apply_only_to_the_adjustable_maps(self):
         add_image = self.generation_patches()
+        polygon = [(23.9997, 45.9997), (24.0003, 45.9997), (24.0003, 46.0003), (23.9997, 46.0003)]
+        auto_zooms = maps._calculate_map_zooms(polygon)
         for map_type in ('overview', 'access', 'catchment', 'landmarks'):
             for size in ((974, 548), (375, 211)):
                 with self.subTest(map_type=map_type, size=size):
                     center = {'lat': 24.0, 'lng': 46.0, 'width': size[0], 'height': size[1]}
                     result = maps._generate_all_map_images(self.project(map_type, center), 'tenant-test')
-                    self.assertEqual(result['centers'][map_type], center)
-                    self.assertEqual(result['zooms'][map_type], 18)
                     path = result['placeholders']['##MAP_' + map_type.upper() + '##']
-                    self.assert_frame(path, (24.0, 46.0), 18, size)
+                    if map_type in ('overview', 'access'):
+                        self.assertEqual(result['centers'][map_type], center)
+                        self.assertEqual(result['zooms'][map_type], 18)
+                        self.assert_frame(path, (24.0, 46.0), 18, size)
+                    elif map_type == 'catchment':
+                        # Fixed map: the stored viewport is ignored — the frame
+                        # refits around the rings (the default 28 km).
+                        self.assertEqual(result['zooms'][map_type], maps.zoom_for_radius_km(24.0, 28.0))
+                        self.assert_frame(path, (24.0, 46.0), result['zooms'][map_type], size)
+                    else:
+                        self.assertEqual(result['zooms'][map_type], auto_zooms['landmarks'])
+                        self.assert_frame(path, (24.0, 46.0), result['zooms'][map_type], size)
                     metadata = add_image.call_args.args[-1]
                     self.assertEqual(metadata['viewport_size'], {'width': size[0], 'height': size[1]})
 
     def test_explicit_live_frame_can_pan_more_than_three_kilometres(self):
         self.generation_patches()
-        for map_type in ('overview', 'access', 'catchment', 'landmarks'):
+        for map_type in ('overview', 'access'):
             with self.subTest(map_type=map_type):
                 center = {'lat': 24.05, 'lng': 46.05, 'width': 974, 'height': 548}
                 project = self.project(map_type, center)
@@ -116,6 +127,17 @@ class MapViewportTests(unittest.TestCase):
                 result = maps._generate_all_map_images(project, 'tenant-test')
                 self.assertEqual(result['centers'][map_type], center)
                 self.assertEqual(result['zooms'][map_type], 12)
+        # The fixed maps never take a stored manual frame — they stay on the
+        # site-anchored content fit however far the recorded pan reached.
+        for map_type in ('catchment', 'landmarks'):
+            with self.subTest(map_type=map_type):
+                center = {'lat': 24.05, 'lng': 46.05, 'width': 974, 'height': 548}
+                project = self.project(map_type, center)
+                project['map_zooms'][map_type] = 12
+                result = maps._generate_all_map_images(project, 'tenant-test')
+                self.assertNotEqual(result['zooms'][map_type], 12)
+                self.assertEqual(result['centers'][map_type]['lat'], 24.0)
+                self.assertEqual(result['centers'][map_type]['lng'], 46.0)
 
     def test_unflagged_or_invalid_dimensions_keep_the_default_frame(self):
         self.generation_patches()
@@ -204,9 +226,63 @@ class MapViewportTests(unittest.TestCase):
                     result = getattr(maps, 'recompose_' + map_type + '_map')(
                         self.project(map_type, center), 'tenant-test', draft_id='viewport-test')
                 self.assertEqual(result['centers'][map_type], center)
-                self.assertEqual(result['zooms'][map_type], 18)
+                if map_type == 'catchment':
+                    # The catchment frame is fixed and content-fitted: a stored
+                    # manual viewport is interactive-era residue, so the
+                    # recompose refits around the rings (the default 28 km).
+                    self.assertEqual(result['zooms'][map_type], maps.zoom_for_radius_km(24.0, 28.0))
+                else:
+                    self.assertEqual(result['zooms'][map_type], 18)
                 with Image.open(result['placeholders']['##MAP_' + map_type.upper() + '##']) as image:
                     self.assertEqual(image.size, (1948, 1096))
+
+    def test_road_landmark_snaps_to_the_drawn_path_point_nearest_the_site(self):
+        items = [{'name': 'طريق الملك عبدالعزيز', 'lat': 24.6, 'lng': 46.0}]
+        project = {'access_roads_data': [{'name': 'طريق الملك عبدالعزيز',
+                                        'points': [[24.3, 46.3], [24.01, 46.01]]}]}
+        with patch.object(maps, 'find_place_near', side_effect=AssertionError('no Places call needed')):
+            maps._snap_road_landmarks(items, project, 24.0, 46.0)
+        self.assertEqual((items[0]['lat'], items[0]['lng']), (24.01, 46.01))
+        self.assertLess(items[0]['distance_meters'], 2000)
+
+    def test_undrawn_road_landmark_re_resolves_through_the_nearest_place(self):
+        items = [{'name': 'طريق الملك عبدالعزيز', 'lat': 24.6, 'lng': 46.0}]
+        with patch.object(maps, 'find_place_near', return_value={'lat': 24.02, 'lng': 46.02}) as search:
+            maps._snap_road_landmarks(items, {}, 24.0, 46.0)
+        search.assert_called_once()
+        self.assertEqual((items[0]['lat'], items[0]['lng']), (24.02, 46.02))
+
+    def test_manual_position_road_landmark_keeps_its_coordinates(self):
+        items = [{'name': 'طريق الملك عبدالعزيز', 'lat': 24.6, 'lng': 46.0, 'manual_position': True}]
+        project = {'access_roads_data': [{'name': 'طريق الملك عبدالعزيز', 'points': [[24.01, 46.01]]}]}
+        with patch.object(maps, 'find_place_near', side_effect=AssertionError('unexpected')):
+            maps._snap_road_landmarks(items, project, 24.0, 46.0)
+        self.assertEqual((items[0]['lat'], items[0]['lng']), (24.6, 46.0))
+
+    def test_non_road_landmarks_keep_their_stored_coordinates(self):
+        items = [{'name': 'مطار الملك عبدالعزيز الدولي', 'lat': 24.6, 'lng': 46.0}]
+        project = {'access_roads_data': [{'name': 'طريق الملك عبدالعزيز', 'points': [[24.01, 46.01]]}]}
+        with patch.object(maps, 'find_place_near', side_effect=AssertionError('unexpected')):
+            maps._snap_road_landmarks(items, project, 24.0, 46.0)
+        self.assertEqual((items[0]['lat'], items[0]['lng']), (24.6, 46.0))
+
+    def test_landmark_merge_keeps_the_manual_position_flag(self):
+        merged = maps._merge_landmark_data([], [
+            {'name': 'طريق الملك عبدالعزيز', 'lat': 24.0, 'lng': 46.0, 'manual_position': True}])
+        self.assertTrue(merged[0]['manual_position'])
+
+    def test_curated_road_entries_take_the_places_point_in_arabic(self):
+        geo = {'success': True, 'lat': 24.6, 'lng': 46.0}
+        with patch.dict(maps.CURATED_CITY_LANDMARKS, {'جدة': [{'name': 'طريق الملك عبدالعزيز', 'category': 'المحاور'}]}), \
+                patch.object(maps, 'geocode_address', return_value=dict(geo)), \
+                patch.object(maps, 'find_place_near',
+                             return_value={'lat': 24.02, 'lng': 46.02, 'name': 'King Abdulaziz Rd'}) as search, \
+                patch.object(maps, 'get_nearest_category_landmarks', return_value=[]), \
+                patch.object(maps, 'get_drive_matrix', return_value=[]):
+            maps._CURATED_GEOCODE_CACHE.clear()
+            landmarks = maps.get_curated_city_landmarks('جدة', 24.0, 46.0, language='ar')
+        self.assertEqual((landmarks[0]['lat'], landmarks[0]['lng']), (24.02, 46.02))
+        self.assertEqual(search.call_args.kwargs['language'], 'ar')
 
 
 if __name__ == '__main__':

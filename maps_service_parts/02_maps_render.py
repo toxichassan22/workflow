@@ -1326,6 +1326,18 @@ _ROAD_NAME_PREFIXES = ('طريق', 'شارع', 'الطريق', 'الشارع', '
                        'boulevard', 'blvd', 'drive', 'dr', 'lane', 'route', 'corridor')
 
 
+def is_road_name(value):
+    """A landmark label that names a road rather than a point place.
+
+    Arabic names carry the word first («طريق الملك عبدالعزيز») while English
+    ones trail it («King Fahd Road»), so both ends count.
+    """
+    text = re.sub(r'\s+', ' ', str(value or '').strip().casefold())
+    return any(
+        text == prefix or text.startswith(prefix + ' ') or text.endswith(' ' + prefix)
+        for prefix in _ROAD_NAME_PREFIXES)
+
+
 def _road_name_key(name):
     """Normalise a road name so the same road is not drawn twice under two spellings."""
     text = _strip_arabic_diacritics(name).strip()

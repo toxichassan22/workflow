@@ -10,6 +10,7 @@
       tr.dataset.rowSource = row.row_source || row.rowSource || (row.name ? 'ai' : 'manual');
       tr.dataset.lat = row.lat ?? row.latitude ?? '';
       tr.dataset.lng = row.lng ?? row.longitude ?? '';
+      tr.dataset.manualPosition = row.manual_position ? '1' : '';
 
       const nameTd = document.createElement('td');
       const nameInput = document.createElement(cfg.road ? 'textarea' : 'input');

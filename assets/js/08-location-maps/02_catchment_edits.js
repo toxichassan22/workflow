@@ -90,6 +90,7 @@
         if (!coordinates) return;
         item.lat = coordinates[0];
         item.lng = coordinates[1];
+        item.manual_position = true;
         if (Array.isArray(initialLabel)) {
           tenantCatchmentEditDraft.labelPositions[name] = [
             Number(initialLabel[0]) + coordinates[0] - startLat,
@@ -126,7 +127,10 @@
       const updatedByName = new Map(tenantProjectData.catchment_map_landmarks.map(item => [item.name, item]));
       tenantProjectData.city_landmarks_data = (Array.isArray(tenantProjectData.city_landmarks_data) ? tenantProjectData.city_landmarks_data : []).map(item => {
         const updated = updatedByName.get(item?.name);
-        return updated ? { ...item, lat: updated.lat, lng: updated.lng } : item;
+        if (!updated) return item;
+        const next = { ...item, lat: updated.lat, lng: updated.lng };
+        if (updated.manual_position) next.manual_position = true;
+        return next;
       });
       tenantCatchmentEditMode = false;
       tenantCatchmentEditDraft = null;
@@ -234,6 +238,7 @@
         if (!coordinates) return;
         item.lat = coordinates[0];
         item.lng = coordinates[1];
+        item.manual_position = true;
         if (Array.isArray(initialLabel)) {
           tenantLandmarksEditDraft.labelPositions[name] = [
             Number(initialLabel[0]) + coordinates[0] - startLat,
@@ -270,7 +275,10 @@
       const updatedByName = new Map(tenantProjectData.landmark_map_items.map(item => [item.name, item]));
       tenantProjectData.nearby_landmarks_data = (Array.isArray(tenantProjectData.nearby_landmarks_data) ? tenantProjectData.nearby_landmarks_data : []).map(item => {
         const updated = updatedByName.get(item?.name);
-        return updated ? { ...item, lat: updated.lat, lng: updated.lng } : item;
+        if (!updated) return item;
+        const next = { ...item, lat: updated.lat, lng: updated.lng };
+        if (updated.manual_position) next.manual_position = true;
+        return next;
       });
       tenantNearbyLandmarks = tenantProjectData.nearby_landmarks_data;
       refreshLocationTables();

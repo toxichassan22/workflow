@@ -264,6 +264,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # Preserve the selected table order through geocoding and filtering so marker
     # numbering stays aligned with the approved rows.
     def _resolve_map_landmarks(rows, search_radius_m, maximum_distance_m=None):
+        # Road rows carry a stored point that may be a remote endpoint of the
+        # feature — re-anchor them to the drawn road path (or the nearest
+        # Places candidate) before trusting any stored coordinate.
+        _snap_road_landmarks(rows, project_data, lat, lng, language=map_lang,
+                             search_radius_m=search_radius_m)
         resolved = []
         for landmark in rows:
             if landmark.get('lat') is None or landmark.get('lng') is None:
@@ -401,10 +406,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             if fitted_zoom:
                 landmarks_zoom = fitted_zoom
                 print(f'[LANDMARKS] {len(shown_landmarks)} landmarks within {radius_km:.1f} km, zoom {landmarks_zoom}')
-        # A frame the user picked live beats the content fit — the certified
-        # raster must be exactly what they approved.
-        landmarks_zoom = _manual_viewport_zoom('landmarks', landmarks_zoom)
-        landmarks_center_lat, landmarks_center_lng = _manual_viewport_center('landmarks', map_center_lat, map_center_lng)
+        # The landmarks map is a fixed auto frame: a stored manual viewport from
+        # the interactive era no longer applies — the content fit is the frame.
+        landmarks_center_lat, landmarks_center_lng = map_center_lat, map_center_lng
         result['zooms']['landmarks'] = landmarks_zoom
         result['centers']['landmarks'] = _map_frame_center(landmarks_center_lat, landmarks_center_lng, map_sizes['landmarks'])
         landmarks_mt = map_styles['landmarks']
@@ -541,12 +545,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         if fitted_zoom:
             catchment_zoom = fitted_zoom
             print(f"[CATCHMENT] {len(rings)} rings + {len(city_landmarks)} landmarks within {max(ring_km, landmark_km):.1f} km, zoom {catchment_zoom}")
-        # Same manual-viewport rule as the other maps: approve freezes the live
-        # frame, so the override lands after the content fit. The site keeps its
-        # ring anchor separately from the frame centre.
-        catchment_zoom = _manual_viewport_zoom('catchment', catchment_zoom)
-        catchment_center_lat, catchment_center_lng = _manual_viewport_center('catchment', lat, lng)
-        catchment_manual_frame = 'catchment' in manual_types
+        # Catchment is fixed too — always the content-fitted frame centred on
+        # the site; a stored manual frame is leftover from the interactive era.
+        catchment_center_lat, catchment_center_lng = lat, lng
+        catchment_manual_frame = False
         result['zooms']['catchment'] = catchment_zoom
         result['centers']['catchment'] = _map_frame_center(catchment_center_lat, catchment_center_lng, map_sizes['catchment'])
         catchment_mt = map_styles['catchment']
@@ -596,9 +598,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                     'center_lat': catchment_center_lat,
                     'center_lng': catchment_center_lng,
                     'viewport_size': _map_size_metadata(map_sizes['catchment']),
-                    # Recompose must not refit a frame the client picked —
-                    # the flag survives on the row because overlay payloads
-                    # do not carry the viewport-overrides map.
+                    # Catchment is a fixed map — no client frame is baked in.
                     'manual_viewport': catchment_manual_frame,
                     'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': MAP_LABEL_RENDER_VERSION,

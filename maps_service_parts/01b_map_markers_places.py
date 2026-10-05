@@ -415,7 +415,7 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=Non
             })
         if not candidates:
             return None
-        roadish = any(query == prefix or query.startswith(prefix + ' ') for prefix in _ROAD_NAME_PREFIXES)
+        roadish = is_road_name(query)
         if roadish and any(candidate['route'] for candidate in candidates):
             candidates = [candidate for candidate in candidates if candidate['route']]
         best = min(candidates, key=lambda candidate: candidate['distance'])

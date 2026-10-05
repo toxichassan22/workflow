@@ -777,15 +777,19 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None, language='ar'):
         if geo is None:
             geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id,
                                   usage_ctx=ambient_ctx)
-            if language == 'en' and geo.get('success'):
+            if geo.get('success') and (language == 'en' or is_road_name(name)):
                 # Google's own English display name for the landmark — the deck
                 # then carries "King Abdulaziz International Airport" rather
-                # than the Arabic curated label.
-                place = find_place_near(name, lat, lng, radius_m=80000, language='en',
+                # than the Arabic curated label. Roads run this check in every
+                # language too: the geocoder's single point can sit at a remote
+                # endpoint, while the Places candidate nearest the site is the
+                # stretch this map means.
+                place = find_place_near(name, lat, lng, radius_m=80000, language=language,
                                         usage_ctx=ambient_ctx)
                 if place and place.get('name'):
                     geo = dict(geo)
-                    geo['localized_name'] = place['name']
+                    if language == 'en':
+                        geo['localized_name'] = place['name']
                     if place.get('lat') is not None and place.get('lng') is not None:
                         geo['lat'] = place['lat']
                         geo['lng'] = place['lng']

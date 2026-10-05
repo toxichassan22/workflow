@@ -704,12 +704,16 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('def _manual_viewport_zoom(', maps_source)
         self.assertIn('def _manual_viewport_center(', maps_source)
         self.assertIn('map_key not in zoom_overrides', maps_source)
-        # All four maps honour the recorded viewport; catchment rings stay
-        # anchored to the site even when the frame was panned off-centre.
-        self.assertIn("_manual_viewport_zoom('landmarks'", maps_source)
-        self.assertIn("_manual_viewport_zoom('catchment'", maps_source)
-        self.assertIn("_manual_viewport_center('landmarks'", maps_source)
-        self.assertIn("_manual_viewport_center('catchment'", maps_source)
+        # Only the two adjustable maps honour a recorded viewport; catchment
+        # and landmarks are fixed rasters whose frame always refits to content.
+        self.assertIn("_manual_viewport_zoom('overview'", maps_source)
+        self.assertIn("_manual_viewport_zoom('access'", maps_source)
+        self.assertIn("_manual_viewport_center('overview'", maps_source)
+        self.assertIn("_manual_viewport_center('access'", maps_source)
+        self.assertNotIn("_manual_viewport_zoom('landmarks'", maps_source)
+        self.assertNotIn("_manual_viewport_zoom('catchment'", maps_source)
+        self.assertNotIn("_manual_viewport_center('landmarks'", maps_source)
+        self.assertNotIn("_manual_viewport_center('catchment'", maps_source)
         self.assertIn('site_lat=lat, site_lng=lng', maps_source)
         # The idle listener is debounced by Google — an approve click landing
         # before it must still see the live camera, or the bake freezes the
@@ -1108,7 +1112,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
         maps_source = read_module_source('maps_service.py')
         self.assertIn('landmark_km', maps_source)
-        self.assertIn('zoom_for_radius_km(lat, max(ring_km, landmark_km))', maps_source)
+        self.assertIn('zoom_for_radius_km(lat, max(ring_km, landmark_km * 1.1))', maps_source)
         self.assertIn('landmark_radius_m / 1000.0', maps_source)
         self.assertNotIn('LANDMARKS_MAX_RADIUS_KM', maps_source)
 
@@ -1291,7 +1295,9 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
         self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
         Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
-        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 14, 'center_lat': 24.0, 'center_lng': 46.0,
+        # Zoom 16 is the frame the landmarks content fits to — the sidecar then
+        # already matches and the recompose only re-seats markers and labels.
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 16, 'center_lat': 24.0, 'center_lng': 46.0,
                     'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': service.MAP_LABEL_RENDER_VERSION}
         with self.app.app_context():
