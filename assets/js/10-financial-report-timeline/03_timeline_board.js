@@ -32,8 +32,8 @@
       div.innerHTML = `
         <h3 class="tenant-section-title">الجدول الزمني للمشروع</h3>
         <div class="tenant-grid" style="grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">
-          <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="tlStartDate" data-key="timeline_start_date" data-type="text" onchange="recalcTimeline()"></div>
-          <div class="tenant-field"><label>تاريخ النهاية</label><input type="date" id="tlEndDate" data-key="timeline_end_date" data-type="text" onchange="recalcTimeline()"></div>
+          <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="tlStartDate" data-key="timeline_start_date" data-type="text" onchange="recalcTimeline()" oninput="recalcTimeline()"></div>
+          <div class="tenant-field"><label>تاريخ النهاية</label><input type="date" id="tlEndDate" data-key="timeline_end_date" data-type="text" onchange="recalcTimeline()" oninput="recalcTimeline()"></div>
           <div class="tenant-field"><label>مدة المشروع</label><input type="text" id="tlDuration" readonly class="readonly-highlight"></div>
         </div>
         <input type="hidden" id="tlYears" data-key="timeline_years" data-type="number">
@@ -46,9 +46,9 @@
         <div id="timelinePhaseEditor" class="tl-editor" hidden>
           <div class="tl-editor-title">بيانات المرحلة</div>
           <div class="tenant-grid" style="grid-template-columns:2fr 1fr 1fr;gap:12px">
-            <div class="tenant-field"><label>اسم المرحلة</label><input type="text" id="tlPhaseName" list="tlPhaseNames"></div>
-            <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="tlPhaseStart" onchange="timelineEditorLiveUpdate()"></div>
-            <div class="tenant-field"><label>تاريخ النهاية</label><input type="date" id="tlPhaseEnd" onchange="timelineEditorLiveUpdate()"></div>
+            <div class="tenant-field"><label>اسم المرحلة</label><input type="text" id="tlPhaseName" list="tlPhaseNames" oninput="timelineEditorLiveUpdate()"></div>
+            <div class="tenant-field"><label>تاريخ البداية</label><input type="date" id="tlPhaseStart" oninput="timelineEditorLiveUpdate()" onchange="timelineEditorLiveUpdate()"></div>
+            <div class="tenant-field"><label>تاريخ النهاية</label><input type="date" id="tlPhaseEnd" oninput="timelineEditorLiveUpdate()" onchange="timelineEditorLiveUpdate()"></div>
           </div>
           <div class="tenant-field"><label>الملاحظات</label><input type="text" id="tlPhaseNotes"></div>
           <div class="tl-editor-meta"><span id="tlPhaseDurationText"></span><span id="tlPhaseError" class="tl-editor-error"></span></div>
@@ -240,6 +240,7 @@
       const boardWidth = Math.max(520, spanDays * TIMELINE_AXIS_PX_PER_DAY);
       board.style.minWidth = boardWidth + 'px';
       board.dataset.axisStart = String(axisStart);
+      board.dataset.axisWidth = String(axisWidthPx);
       const dayToPx = offsetDays => Math.round(offsetDays * TIMELINE_AXIS_PX_PER_DAY);
 
       // The project band makes an out-of-period phase visible instead of silently letting it
@@ -406,15 +407,46 @@
       const editor = document.getElementById('timelinePhaseEditor');
       if (editor) editor.hidden = true;
       timelineEditingIndex = -1;
+      // Discard the live preview: a cancel leaves the card showing the stored dates again.
+      renderTimelineBoard();
     }
 
+    // The card being edited previews the tentative name/dates live — the duration and the
+    // bar on the board move while the client types, before they ever hit «حفظ».
     function timelineEditorLiveUpdate() {
       const start = parseTimelineDate(document.getElementById('tlPhaseStart')?.value);
       const end = parseTimelineDate(document.getElementById('tlPhaseEnd')?.value);
+      const valid = !!(start && end && end.ms >= start.ms);
       const duration = document.getElementById('tlPhaseDurationText');
-      if (duration) duration.textContent = (start && end && end.ms >= start.ms) ? timelineDurationText(start.ms, end.ms) : '';
+      if (duration) duration.textContent = valid ? timelineDurationText(start.ms, end.ms) : '';
       const error = document.getElementById('tlPhaseError');
       if (error) error.textContent = (start && end && end.ms < start.ms) ? 'تاريخ النهاية قبل تاريخ البداية' : '';
+      if (timelineEditingIndex < 0) return;
+      const board = document.getElementById('timelineBoard');
+      const card = board?.querySelector('.tl-card[data-index="' + timelineEditingIndex + '"]');
+      if (!card) return;
+      const name = card.querySelector('.tl-card-name');
+      if (name) name.textContent = (document.getElementById('tlPhaseName')?.value || '').trim() || '—';
+      const axisStart = Number(board.dataset.axisStart);
+      const axisWidthPx = Number(board.dataset.axisWidth);
+      if (!valid || !Number.isFinite(axisStart) || !Number.isFinite(axisWidthPx)) return;
+      const startPx = (start.ms - axisStart) / TIMELINE_DAY_MS * TIMELINE_AXIS_PX_PER_DAY;
+      const endPx = startPx + timelineSpanDays(start.ms, end.ms) * TIMELINE_AXIS_PX_PER_DAY;
+      let cardLeft, cardWidth;
+      if (endPx <= 0) {
+        cardLeft = 0;
+        cardWidth = TIMELINE_CARD_MIN_PX;
+      } else if (startPx >= axisWidthPx) {
+        cardLeft = Math.max(0, axisWidthPx - TIMELINE_CARD_MIN_PX);
+        cardWidth = TIMELINE_CARD_MIN_PX;
+      } else {
+        cardLeft = Math.max(0, Math.round(startPx));
+        cardWidth = Math.max(TIMELINE_CARD_MIN_PX, Math.min(axisWidthPx, Math.round(endPx)) - cardLeft);
+      }
+      card.style.insetInlineStart = cardLeft + 'px';
+      card.style.inlineSize = cardWidth + 'px';
+      const dur = card.querySelector('.tl-card-dur');
+      if (dur) dur.textContent = timelineDurationText(start.ms, end.ms);
     }
 
     function saveTimelinePhaseEditor() {
