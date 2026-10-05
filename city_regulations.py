@@ -7,10 +7,13 @@ never read them — feeding Jeddah's tables into a Riyadh analysis once made
 the model reconcile two different cities' codes inside one prompt.
 
 For a non-local city this module either supplies that city's own official
-regulation PDFs — discovered once through the OpenRouter ``web`` plugin
-(Exa engine, which runs the search on OpenRouter's side for every request)
-and cached under ``regulations/<city>/`` — or tells the caller plainly that
-no verified regulations exist. In the second case the model's own knowledge
+regulation PDFs and caches them under ``regulations/<city>/``, or tells the
+caller plainly that no verified regulations exist. Sources are tried in two
+tiers: a curated registry of known-official document URLs
+(``NATIONAL_REGULATION_URLS`` + ``CITY_REGULATION_URLS``) is fetched first —
+deterministically, with no model involvement — and only when the registry has
+nothing for the city does an OpenRouter ``web`` plugin (Exa) search run, still
+restricted to government hosts. In the failure case the model's own knowledge
 stays marked as ``model_knowledge`` instead of being laundered through
 another city's document.
 """
@@ -77,6 +80,29 @@ _ALEF_VARIANTS = str.maketrans({'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ى': 'ي'})
 # Official hosts outside the *.gov.sa suffix that still count as government
 # sources; extra domains can be appended via CITY_REGULATION_EXTRA_HOSTS.
 _OFFICIAL_HOSTS = {'riyadh.sa', 'www.riyadh.sa', 'momrah.net', 'www.momrah.net'}
+
+# Curated registry of verified official documents, fetched before any search.
+# The national ministry document (قرار وزاري 4500943139, اشتراطات إنشاء
+# المباني السكنية 1446هـ) states it is binding on all amanat, so it ships as
+# the baseline for every foreign city; city entries add that amanah's own
+# official code volumes. Extend a city list rather than trusting search.
+NATIONAL_REGULATION_URLS = (
+    'https://momah.gov.sa/sites/default/files/2024-07/'
+    'ashtratat%20a%27nsha%20almbany%20alsknyt%20m%60%20alqrar.pdf',
+)
+CITY_REGULATION_URLS = {
+    'riyadh': (
+        'https://eservices.alriyadh.gov.sa/Documents/BuildingCodes/T3.1%20v2.2.pdf',
+        'https://cts.alriyadh.gov.sa/Documents/BuildingCodes/T5.2%20v2.0.pdf',
+    ),
+}
+
+# A downloaded file only counts as a regulation document when its text
+# mentions regulation vocabulary; an unrelated government PDF is rejected.
+_REGULATION_KEYWORDS = (
+    'اشتراط', 'إشتراط', 'نظام', 'ضوابط', 'لائحة', 'لايحة',
+    'كود البناء', 'الأمانة', 'الامانة', 'البلدية',
+)
 
 _FILENAME_SAFE = re.compile(r'[^\w.\-]+', re.UNICODE)
 
@@ -255,20 +281,48 @@ def _safe_pdf_name(url, slug, index):
     return base[:96]
 
 
-def download_city_regulation_pdfs(urls, slug):
+def _pdf_looks_like_regulations(data):
+    """Reject government PDFs that are not regulation documents.
+
+    Some hosts serve scanned/image PDFs whose text layer is empty; those pass
+    on name hints so a genuine scanned لائحة is not dropped for lacking text.
+    """
+    try:
+        import fitz
+        doc = fitz.open(stream=data, filetype='pdf')
+        try:
+            text = ' '.join(
+                doc[index].get_text() for index in range(min(3, len(doc))))
+        finally:
+            doc.close()
+    except Exception:
+        return False
+    if not text.strip():
+        return True
+    return any(keyword in text for keyword in _REGULATION_KEYWORDS)
+
+
+def download_city_regulation_pdfs(urls, slug, tier='search', cap=None):
     """Fetch bounded PDF bodies for official URLs into the city cache dir."""
     directory = city_docs_dir(slug)
     os.makedirs(directory, exist_ok=True)
     saved = []
     warnings = []
     sources = load_city_sources(slug)
-    for index, url in enumerate(urls[:CITY_REGULATION_MAX_DOCS]):
+    limit = cap or CITY_REGULATION_MAX_DOCS
+    for index, url in enumerate(urls[:limit]):
         try:
             with requests.get(
                     url, timeout=CITY_REGULATION_TIMEOUT, stream=True,
                     headers={'User-Agent': 'Landloom-RegulationFetch/1.0'}) as resp:
                 if resp.status_code != 200:
                     warnings.append(f'تعذر تنزيل ملف اشتراطات (HTTP {resp.status_code}): {url}')
+                    continue
+                # A redirect may leave the approved host — re-check the final URL.
+                if not is_official_regulation_url(resp.url or url):
+                    warnings.append(
+                        f'تم رفض ملف اشتراطات لأن رابطه النهائي ليس حكوميًا: '
+                        f'{resp.url or url}')
                     continue
                 buffer = io.BytesIO()
                 for chunk in resp.iter_content(65536):
@@ -280,11 +334,16 @@ def download_city_regulation_pdfs(urls, slug):
                     warnings.append(f'ملف اشتراطات أكبر من الحد المسموح فتم تخطيه: {url}')
                     continue
                 data = buffer.getvalue()
+                final_url = resp.url or url
         except Exception as error:
             warnings.append(f'تعذر تنزيل ملف اشتراطات: {error}')
             continue
         if not data.startswith(b'%PDF'):
             warnings.append(f'الرابط لا يشير إلى ملف PDF صالح فتم تخطيه: {url}')
+            continue
+        if not _pdf_looks_like_regulations(data):
+            warnings.append(
+                f'الملف الحكومي ليس مستند اشتراطات فتم تخطيه: {url}')
             continue
         filename = _safe_pdf_name(url, slug, index + 1)
         path = os.path.join(directory, filename)
@@ -294,8 +353,15 @@ def download_city_regulation_pdfs(urls, slug):
         except OSError as error:
             warnings.append(f'تعذر حفظ ملف الاشتراطات: {error}')
             continue
+        import hashlib
         sources[filename] = {
             'url': url,
+            'final_url': final_url,
+            'host': urlsplit(final_url).hostname or '',
+            'city': slug,
+            'tier': tier,
+            'sha256': hashlib.sha256(data).hexdigest(),
+            'size_bytes': len(data),
             'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         }
         saved.append(path)
@@ -317,10 +383,31 @@ def ensure_city_regulation_paths(slug, city, chat_fn=None, usage_ctx=None):
         return [], [
             f'لا توجد اشتراطات موثقة لمدينة «{label}» والجلب التلقائي معطل '
             '(CITY_REGULATION_FETCH=0).']
+    registry_urls = []
+    for url in (list(CITY_REGULATION_URLS.get(slug) or ())
+                + list(NATIONAL_REGULATION_URLS)):
+        if url not in registry_urls:
+            registry_urls.append(url)
+    warnings = []
+    paths = []
+    if registry_urls:
+        paths, registry_warnings = download_city_regulation_pdfs(
+            registry_urls, slug, tier='registry', cap=len(registry_urls))
+        warnings.extend(registry_warnings)
+        if paths:
+            print(f'[CITY REGULATIONS] {slug}: fetched {len(paths)} '
+                  'official registry document(s): '
+                  + ', '.join(os.path.basename(path) for path in paths))
+            return paths, warnings
+        warnings.append(
+            f'تعذر تنزيل مستندات الاشتراطات الرسمية المسجلة لمدينة «{label}»؛ '
+            'سيتم تجربة البحث عن بديل رسمي.')
     if chat_fn is None:
-        return [], ['جلب اشتراطات المدينة غير متاح في هذا السياق.']
-    urls, warnings = discover_city_regulation_urls(
+        warnings.append('جلب اشتراطات المدينة غير متاح في هذا السياق.')
+        return [], warnings
+    urls, search_warnings = discover_city_regulation_urls(
         slug, label, chat_fn, usage_ctx=usage_ctx)
+    warnings.extend(search_warnings)
     official = [url for url in urls if is_official_regulation_url(url)]
     dropped = len(urls) - len(official)
     if dropped:
@@ -330,7 +417,8 @@ def ensure_city_regulation_paths(slug, city, chat_fn=None, usage_ctx=None):
             f'لم يُعثر على ملف اشتراطات رسمي لمدينة «{label}»؛ '
             'قيم الاشتراطات ستبقى مبنية على معرفة النموذج غير الموثقة.')
         return [], warnings
-    paths, download_warnings = download_city_regulation_pdfs(official, slug)
+    paths, download_warnings = download_city_regulation_pdfs(
+        official, slug, tier='search')
     warnings.extend(download_warnings)
     if not paths:
         warnings.append(
