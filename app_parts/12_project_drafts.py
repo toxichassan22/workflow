@@ -1043,34 +1043,6 @@ def _sanitize_save_workflow_claims(tenant_id, draft_id, draft_data, stored_data)
     return draft_data
 
 
-def _frame_matches_baked(creative, map_type):
-    """True when a stored viewport override still describes the baked raster.
-
-    A map approval certifies the rendered frame — a live-camera override that
-    diverges from ``map_baked_frames`` means the flag covers a view nobody
-    baked, so the claim is refused."""
-    overrides = creative.get('map_viewport_overrides')
-    if not isinstance(overrides, dict) or not overrides.get(map_type):
-        return True
-    baked = (creative.get('map_baked_frames') or {}).get(map_type) or {}
-    zooms = creative.get('map_zooms') or {}
-    centers = creative.get('map_centers') or {}
-    zoom = zooms.get(map_type)
-    center = centers.get(map_type) or {}
-    try:
-        if zoom is not None and baked.get('zoom') is not None \
-                and int(round(float(zoom))) != int(round(float(baked['zoom']))):
-            return False
-        for axis in ('lat', 'lng'):
-            live_val, baked_val = center.get(axis), baked.get(axis)
-            if live_val is not None and baked_val is not None \
-                    and abs(float(live_val) - float(baked_val)) > 1e-4:
-                return False
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
 def _sanitize_map_approval_claims(tenant_id, draft_id, draft_data, stored_data):
     """A map_approvals=true claim only stands on a real raster artifact whose
     stored frame still matches — anything else reverts to the stored flag."""

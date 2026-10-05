@@ -326,7 +326,8 @@ class PresentationRevisionApiTests(unittest.TestCase):
             'placeholders': {'##MAP_LANDMARKS##': str(fresh_image)},
             'landmarks': [], 'landmarks_matrix': [{'name': 'New Mall'}],
             'landmark_map_items': fresh_items,
-            'zooms': {'landmarks': 15}, 'centers': {'landmarks': {'lat': 24.7, 'lng': 46.6}},
+            'zooms': {'landmarks': 15},
+            'centers': {'landmarks': {'lat': 24.7, 'lng': 46.6, 'width': 974, 'height': 548}},
         }
         payload = {'presentationId': created['presentationId'], 'mapType': 'landmarks',
                    'projectData': {'draftId': 'regen-draft', 'landmark_map_items': fresh_items},
@@ -343,7 +344,9 @@ class PresentationRevisionApiTests(unittest.TestCase):
         self.assertEqual(stored['projectData']['landmarks_matrix'], [{'name': 'New Mall'}])
         self.assertEqual(stored['projectData']['landmark_map_items'], fresh_items)
         self.assertEqual(creative['map_zooms']['landmarks'], 15)
-        self.assertEqual(creative['map_centers']['landmarks'], {'lat': 24.7, 'lng': 46.6})
+        self.assertEqual(creative['map_centers']['landmarks'], {'lat': 24.7, 'lng': 46.6, 'width': 974, 'height': 548})
+        self.assertEqual(creative['map_baked_frames']['landmarks'],
+                         {'lat': 24.7, 'lng': 46.6, 'zoom': 15, 'width': 974, 'height': 548})
         self.assertEqual(creative['map_placeholders']['##MAP_OVERVIEW##'], '/maps/old_overview.png')
         self.assertTrue(creative['map_placeholders']['##MAP_LANDMARKS##'].endswith('fresh_landmarks.png'))
 

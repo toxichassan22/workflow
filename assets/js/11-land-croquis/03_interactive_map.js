@@ -78,6 +78,18 @@
       return (frame && Number.isFinite(Number(frame.zoom))) ? frame : null;
     }
 
+    function interactiveViewportSize(mapType) {
+      if (!tenantInteractiveMounted || tenantInteractiveMapType !== mapType) return null;
+      const holder = document.getElementById('mapLiveView');
+      const width = Math.round(Number(holder?.clientWidth));
+      const height = Math.round(Number(holder?.clientHeight));
+      return width >= 64 && height >= 64 && width <= 2048 && height <= 2048 ? { width, height } : null;
+    }
+
+    function interactiveFrameSizeChanged(frame, size) {
+      return !!size && (!frame || Number(frame.width) !== Number(size.width) || Number(frame.height) !== Number(size.height));
+    }
+
     // Loads the Maps JS API once. Resolves false (and keeps the static-image
     // path) when no browser key is configured or the loader script fails. Only
     // success is memoized — a transient miss must not kill interactive mode
@@ -225,9 +237,12 @@
       } else {
         const baked = interactiveBakedFrame(mapType);
         tenantInteractiveFrameDirty[mapType] = !baked
-          || Math.abs(Number(baked.lat) - lat) > 1e-4
-          || Math.abs(Number(baked.lng) - lng) > 1e-4
+          || Math.abs(Number(baked.lat) - lat) > 1e-6
+          || Math.abs(Number(baked.lng) - lng) > 1e-6
           || Number(baked.zoom) !== Math.round(Number(zoom));
+      }
+      if (interactiveFrameSizeChanged(interactiveBakedFrame(mapType), interactiveViewportSize(mapType))) {
+        tenantInteractiveFrameDirty[mapType] = true;
       }
       syncInteractiveFrameDirtyHint();
     }
@@ -366,8 +381,8 @@
       if (tenantInteractiveSuppressIdle) {
         const expected = tenantInteractiveSuppressIdle;
         tenantInteractiveSuppressIdle = null;
-        if (Math.abs(Number(expected.lat) - lat) < 1e-4
-            && Math.abs(Number(expected.lng) - lng) < 1e-4
+        if (Math.abs(Number(expected.lat) - lat) < 1e-6
+            && Math.abs(Number(expected.lng) - lng) < 1e-6
             && Math.round(Number(expected.zoom)) === Math.round(zoom)) return;
       }
       recordInteractiveFrame(mapType, lat, lng, zoom);
@@ -385,11 +400,14 @@
       // must not mint a viewport override or flip the dirty flag.
       const recordedCenter = (tenantCreativeImages.map_centers || {})[mapType];
       const recordedZoom = (tenantCreativeImages.map_zooms || {})[mapType];
+      const size = interactiveViewportSize(mapType);
       if (recordedCenter && recordedZoom === roundedZoom
           && Math.abs(Number(recordedCenter.lat) - lat) < 1e-6
-          && Math.abs(Number(recordedCenter.lng) - lng) < 1e-6) return;
+          && Math.abs(Number(recordedCenter.lng) - lng) < 1e-6
+          && !interactiveFrameSizeChanged(recordedCenter, size)
+          && !interactiveFrameSizeChanged(interactiveBakedFrame(mapType), size)) return;
       tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: roundedZoom };
-      tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: { lat, lng } };
+      tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: { lat, lng, ...(size || {}) } };
       const baked = interactiveBakedFrame(mapType);
       const mapView = (typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS : [])
         .find(item => item.mapType === mapType);
@@ -398,11 +416,11 @@
       // evaluation already decided (a generated raster with an override but no
       // baked record mounts dirty so its next approval re-bakes) — that verdict
       // stands, while a never-generated map has nothing to diverge from.
-      const diverged = baked
+      const diverged = interactiveFrameSizeChanged(baked, size) || (baked
         ? (baked.zoom !== roundedZoom
-          || Math.abs(Number(baked.lat) - lat) > 1e-4
-          || Math.abs(Number(baked.lng) - lng) > 1e-4)
-        : (mapGenerated && tenantInteractiveFrameDirty[mapType] === true);
+          || Math.abs(Number(baked.lat) - lat) > 1e-6
+          || Math.abs(Number(baked.lng) - lng) > 1e-6)
+        : (mapGenerated && tenantInteractiveFrameDirty[mapType] === true));
       tenantInteractiveFrameDirty[mapType] = diverged;
       // The override flag means "the user picked this frame": mint it on real
       // divergence, on a map with no baked frame yet, or keep one already set —
@@ -462,7 +480,9 @@
       const frame = {
         zoom: Number.isFinite(Number(zoom)) ? Number(zoom) : prev.zoom,
         lat: center && Number.isFinite(Number(center.lat)) ? Number(center.lat) : prev.lat,
-        lng: center && Number.isFinite(Number(center.lng)) ? Number(center.lng) : prev.lng
+        lng: center && Number.isFinite(Number(center.lng)) ? Number(center.lng) : prev.lng,
+        width: center && Number.isFinite(Number(center.width)) ? Number(center.width) : prev.width,
+        height: center && Number.isFinite(Number(center.height)) ? Number(center.height) : prev.height
       };
       tenantCreativeImages.map_baked_frames = {
         ...(tenantCreativeImages.map_baked_frames || {}),
@@ -486,9 +506,10 @@
         && Number.isFinite(Number(liveZoom));
       if (liveKnown && Number.isFinite(Number(frame.zoom))) {
         tenantInteractiveFrameDirty[mapType] =
-          Math.abs(Number(frame.lat) - Number(liveCenter.lat)) > 1e-4
-          || Math.abs(Number(frame.lng) - Number(liveCenter.lng)) > 1e-4
-          || Number(frame.zoom) !== Math.round(Number(liveZoom));
+          Math.abs(Number(frame.lat) - Number(liveCenter.lat)) > 1e-6
+          || Math.abs(Number(frame.lng) - Number(liveCenter.lng)) > 1e-6
+          || Number(frame.zoom) !== Math.round(Number(liveZoom))
+          || interactiveFrameSizeChanged(frame, liveCenter.width && liveCenter.height ? liveCenter : null);
       } else {
         tenantInteractiveFrameDirty[mapType] = false;
       }
