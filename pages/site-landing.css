@@ -189,19 +189,24 @@ body.js .opening-track { height: 280vh; }
   padding: 148px 0 96px;
 }
 
-/* The Saudi Arabia outline sits in the back, behind the headline block —
-   oversized, stroke-only, quiet enough that the slogans stay the focus. */
-.hero-map {
+/* The Saudi Arabia outline lives inside the top bar, behind the brand and
+   nav — oversized and stroke-only so the links stay readable; its lower edge
+   bleeds into the hero top. */
+.topbar-map {
   position: absolute;
-  inset-inline-start: -5%;
-  top: 54%;
+  inset-inline: 0;
+  top: 50%;
   transform: translateY(-50%);
-  width: min(800px, 82%);
+  width: min(780px, 96%);
+  height: 190px;
+  margin-inline: auto;
   color: rgba(24, 164, 147, .55);
-  opacity: .16;
+  opacity: .18;
   pointer-events: none;
   z-index: 0;
 }
+
+.site-topbar.on-dark .wrap { position: relative; z-index: 1; }
 
 .hero .wrap {
   position: relative;
