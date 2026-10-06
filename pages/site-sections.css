@@ -463,7 +463,8 @@ body.js .flow.in::after { transform: scaleX(1); }
 
 @media (max-width: 980px) {
   .hero .wrap { grid-template-columns: 1fr; gap: 38px; }
-  .topbar-map { width: min(560px, 120%); height: 150px; }
+  .hero-map { inset-inline-start: 50%; transform: translate(-50%, -50%); width: min(700px, 110%); opacity: .12; }
+  html[dir="rtl"] .hero-map { transform: translate(50%, -50%); }
   .hero-visual { max-width: 480px; margin: 12px auto 0; }
   .features { grid-template-columns: 1fr 1fr; }
   .about-split { grid-template-columns: minmax(0, 1fr); gap: 30px; }
@@ -490,7 +491,7 @@ body.js .flow.in::after { transform: scaleX(1); }
 
 @media (max-width: 620px) {
   .hero { padding: 106px 0 56px; }
-  .topbar-map { width: min(460px, 130%); height: 120px; opacity: .14; }
+  .hero-map { top: 46%; opacity: .1; }
   .hero .kicker { font-size: 12px; padding: 4px 13px; margin-bottom: 16px; }
   .hero h1 { font-size: clamp(27px, 8.4vw, 31px); }
   .hero p.lead { font-size: 15.5px; margin-bottom: 26px; }
