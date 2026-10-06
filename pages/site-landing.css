@@ -190,15 +190,15 @@ body.js .opening-track { height: 280vh; }
 }
 
 /* The Saudi Arabia outline sits in the back, behind the headline block —
-   oversized, stroke-only, quiet enough that the slogans stay the focus. */
+   oversized and quiet, but the teal stroke reads clearly at a glance. The
+   color is baked into the SVG; external <img> ignores currentColor. */
 .hero-map {
   position: absolute;
   inset-inline-start: -5%;
   top: 54%;
   transform: translateY(-50%);
   width: min(800px, 82%);
-  color: rgba(24, 164, 147, .55);
-  opacity: .16;
+  opacity: .55;
   pointer-events: none;
   z-index: 0;
 }

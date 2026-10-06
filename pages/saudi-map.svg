@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 640" role="img" aria-label="Map of Saudi Arabia">
   <!-- Simplified Saudi Arabia outline, drawn as one closed path. Used only as
-       a faint hero backdrop on the landing page — stroke and fill colors are
-       currentColor so the page controls them from CSS. -->
-  <path fill="none" stroke="currentColor" stroke-width="6"
+       a hero backdrop on the landing page — an external SVG cannot inherit
+       currentColor from the page, so the muted teal is baked in. -->
+  <path fill="#18A493" fill-opacity="0.07" stroke="#2FC4AE" stroke-width="7"
     stroke-linejoin="round" stroke-linecap="round" d="M36.5 138.3
     L76 133 L133 76 L163.4 57 L190 34.2 L201.4 32.3
     L247 41.8 L304 57 L323 72.2 L368.6 98.8 L410.4 121.6 L437 136.8 L476.9 148.2
