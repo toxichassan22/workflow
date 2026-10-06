@@ -24,6 +24,14 @@ def api_update_branding():
     # client-sent path must never choose the file on disk.
     data = {key: value for key, value in data.items()
             if key != 'watermark_path'}
+    # company_name_en is an account field on the tenants row, not a
+    # tenant_branding column — it must be routed there or the update drops
+    # silently and the field comes back empty after a refresh.
+    if 'company_name_en' in data:
+        company_name_en = str(data.pop('company_name_en') or '').strip()
+        if len(company_name_en) > 120:
+            return jsonify({'error': 'Invalid company name_en'}), 400
+        db.update_tenant(g.tenant_id, company_name_en=company_name_en or None)
     db.update_branding(g.tenant_id, **data)
     branding = db.get_branding(g.tenant_id)
     return jsonify({'success': True, 'branding': branding})

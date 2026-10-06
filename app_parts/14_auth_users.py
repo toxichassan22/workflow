@@ -594,6 +594,7 @@ def api_login():
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
+                'companyNameEn': tenant.get('company_name_en'),
                 'email': tenant['email'],
                 'isAdmin': bool(tenant.get('is_admin')),
                 'plan': tenant.get('plan', 'free'),
@@ -645,6 +646,7 @@ def api_login():
             'tenant': {
                 'id': tenant['id'],
                 'companyName': tenant['company_name'],
+                'companyNameEn': tenant.get('company_name_en'),
                 'email': tenant['email'],
                 'isAdmin': False,
                 'plan': tenant.get('plan', 'free'),
@@ -733,6 +735,7 @@ def api_me():
         'tenant': {
             'id': t['id'],
             'companyName': t['company_name'],
+            'companyNameEn': t.get('company_name_en'),
             'email': t['email'],
             'isAdmin': bool(g.is_admin),
             'plan': t.get('plan', 'free'),

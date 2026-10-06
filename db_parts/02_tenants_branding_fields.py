@@ -276,9 +276,19 @@ def delete_tenant(tenant_id):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_branding(tenant_id):
-    """Get branding settings for a tenant."""
+    """Get branding settings for a tenant.
+
+    ``company_name_en`` lives on the tenants row (the account record), not
+    on tenant_branding, so it is joined in here — every branding consumer
+    (settings screen, slides, PDFs) reads the same stored value.
+    """
     conn = get_db()
-    row = conn.execute('SELECT * FROM tenant_branding WHERE tenant_id = ?', (tenant_id,)).fetchone()
+    row = conn.execute(
+        '''SELECT b.*, t.company_name_en
+           FROM tenant_branding b
+           LEFT JOIN tenants t ON t.id = b.tenant_id
+           WHERE b.tenant_id = ?''',
+        (tenant_id,)).fetchone()
     return dict(row) if row else None
 
 

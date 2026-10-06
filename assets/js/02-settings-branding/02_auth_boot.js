@@ -471,6 +471,10 @@
       if (!data || !data.success || !data.branding) return false;
       tenantBranding = data.branding;
       const b = data.branding;
+      if (tenantUser) {
+        tenantUser.companyNameEn = b.company_name_en || '';
+        updateTenantTopbar();
+      }
       // The workspace keeps the platform palette: company colors reach the
       // generated slides only, so no CSS variables are written here.
       // Logo: an uploaded logo wins; otherwise the company initial stands in
