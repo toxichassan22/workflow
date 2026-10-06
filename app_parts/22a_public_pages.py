@@ -27,14 +27,72 @@ def public_page_assets(path):
     return _serve_public_page(path)
 
 
+# ── Editable legal pages ────────────────────────────────────────────────────
+# terms.html / privacy.html carry the default copy between LEGAL_*_START/END
+# markers inside lang="ar"/lang="en" divs. A desk-saved override lives in
+# platform_settings under legal_<name> ({'ar': html, 'en': html, ...}) and is
+# spliced in at serve time — no client fetch, no flash of stale text, and the
+# baked copy stays the fallback when nothing is stored.
+
+LEGAL_DOCS = ('terms', 'privacy')
+_LEGAL_MARKERS = {
+    'ar': ('<!--LEGAL_AR_START-->', '<!--LEGAL_AR_END-->'),
+    'en': ('<!--LEGAL_EN_START-->', '<!--LEGAL_EN_END-->'),
+}
+
+
+def _legal_setting_key(name):
+    return 'legal_' + name
+
+
+def _serve_legal_page(name):
+    path = os.path.join(os.path.dirname(__file__), 'pages', name + '.html')
+    with open(path, encoding='utf-8') as fh:
+        html = fh.read()
+    stored = db.get_platform_setting(_legal_setting_key(name))
+    if isinstance(stored, dict):
+        for lang, (start, end) in _LEGAL_MARKERS.items():
+            body = stored.get(lang)
+            if not isinstance(body, str) or not body.strip():
+                continue
+            i, j = html.find(start), html.find(end)
+            if i != -1 and j != -1 and j > i:
+                html = html[:i + len(start)] + '\n' + body + '\n      ' + html[j:]
+    resp = Response(html, mimetype='text/html')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
 @app.route('/terms')
 def public_terms():
-    return _serve_public_page('terms.html')
+    return _serve_legal_page('terms')
 
 
 @app.route('/privacy')
 def public_privacy():
-    return _serve_public_page('privacy.html')
+    return _serve_legal_page('privacy')
+
+
+@app.route('/api/admin/legal/<name>', methods=['PUT'])
+@require_admin
+def api_admin_save_legal(name):
+    """Desk-edited Arabic/English copy for a public legal page."""
+    if name not in LEGAL_DOCS:
+        return jsonify({'error': 'Unknown document'}), 404
+    data = request.json or {}
+    doc = {}
+    for lang in ('ar', 'en'):
+        body = data.get(lang)
+        if not isinstance(body, str) or not body.strip():
+            return jsonify({'error': 'Arabic and English content are both required'}), 400
+        if len(body) > 200000:
+            return jsonify({'error': 'Content is too large'}), 400
+        doc[lang] = body
+    doc['updated_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    doc['updated_by'] = _landloom_actor_name() or ''
+    saved = db.set_platform_setting(_legal_setting_key(name), doc)
+    _record_audit_event('legal.updated', 'platform_settings', _legal_setting_key(name))
+    return jsonify({'success': True, 'document': saved})
 
 
 @app.route('/about')
@@ -88,3 +146,21 @@ def api_admin_list_join_requests():
     """Recorded leads for the desk; a listing UI can sit on this later."""
     rows = db.list_join_requests(status=request.args.get('status'))
     return jsonify({'success': True, 'requests': rows})
+
+
+JOIN_REQUEST_STATUSES = ('new', 'contacted', 'closed')
+
+
+@app.route('/api/admin/join-requests/<request_id>/status', methods=['POST'])
+@require_admin
+def api_admin_update_join_request(request_id):
+    """Desk triage for access leads: new -> contacted -> closed."""
+    status = (request.json or {}).get('status')
+    if status not in JOIN_REQUEST_STATUSES:
+        return jsonify({'error': 'Invalid status'}), 400
+    row = db.update_join_request_status(request_id, status)
+    if not row:
+        return jsonify({'error': 'Not found'}), 404
+    _record_audit_event('join_request.status', 'join_request', request_id,
+                        metadata={'status': status})
+    return jsonify({'success': True, 'request': row})

@@ -8,6 +8,8 @@
   <meta name="description" content="لاند لوم تحوّل بيانات مشروعك العقاري إلى عروض تقديمية ودراسات موقع وسوق ونماذج مالية بعلامتك التجارية — بالعربية والإنجليزية.">
   <link rel="icon" href="/assets/landloom-logo.png" type="image/png">
   <link rel="stylesheet" href="/pages/site.css">
+  <link rel="stylesheet" href="/pages/site-landing.css">
+  <link rel="stylesheet" href="/pages/site-sections.css">
   <script src="/pages/site.js" defer></script>
 </head>
 
@@ -20,7 +22,7 @@
         <b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b>
       </div>
       <p class="op-welcome"><span lang="ar">مرحبًا بك</span><span lang="en">Welcome</span></p>
-      <p class="op-brand" dir="ltr"><span class="op-typed">LANDLOOM </span><span class="op-typed op-ai">AI</span><i class="op-caret"></i></p>
+      <p class="op-brand" dir="ltr"><span class="op-typed">LANDLOOM</span><i class="op-caret"></i></p>
       <i class="op-cue"></i>
     </div>
   </div>
@@ -29,11 +31,12 @@
     <div class="wrap">
       <a class="site-brand" href="/">
         <img src="/assets/landloom-logo-white.png" alt="LandLoom">
+        <span class="brand-beta"><span lang="ar">نسخة تجريبية</span><span lang="en">Beta version</span></span>
       </a>
       <nav class="site-nav">
         <a href="/#features"><span lang="ar">المزايا</span><span lang="en">Features</span></a>
         <a href="/#join"><span lang="ar">اطلب حسابًا</span><span lang="en">Request access</span></a>
-        <a href="/about"><span lang="ar">من نحن</span><span lang="en">About</span></a>
+        <a href="/#about"><span lang="ar">من نحن</span><span lang="en">About</span></a>
         <button class="lang-toggle" type="button" data-lang-toggle><span lang="ar">English</span><span lang="en">العربية</span></button>
         <a class="btn glass small keep" href="/app" data-authed-ar="فتح مساحة العمل" data-authed-en="Open workspace"><span lang="ar">دخول</span><span lang="en">Sign in</span></a>
       </nav>
@@ -41,13 +44,14 @@
   </header>
 
   <section class="hero">
+    <img class="hero-map" src="/pages/saudi-map.svg" alt="" aria-hidden="true">
     <div class="orbs soft" aria-hidden="true">
       <i></i><i></i><i></i><i></i>
       <b></b><b></b><b></b><b></b><b></b><b></b>
     </div>
     <div class="wrap">
       <div>
-        <span class="kicker"><span lang="ar">منصة توليد العروض والدراسات العقارية</span><span lang="en">The real-estate proposals &amp; studies platform</span></span>
+        <span class="kicker"><span lang="ar">منصة توليد العروض والدراسات العقارية</span><span lang="en">The real-estate proposal &amp; study platform</span></span>
         <h1><span lang="ar">من بيانات الأرض إلى <em class="hl">عرض استثماري جاهز للاعتماد</em></span><span lang="en">From land data to an <em class="hl">approval-ready investment proposal</em></span></h1>
         <p class="lead">
           <span lang="ar">لاند لوم تولّد دراسات الموقع والسوق والنماذج المالية والخرائط وشرائح العرض — بهوية شركتك، بالعربية والإنجليزية، وفي مسار اعتماد واحد موثّق.</span>
@@ -59,7 +63,7 @@
         </div>
         <p class="trust">
           <span lang="ar">حسابات الشركات تُنشأ عبر فريقنا — إعداد كامل بهوية شركتك من اليوم الأول.</span>
-          <span lang="en">Company accounts are provisioned by our team — fully set up with your brand from day one.</span>
+          <span lang="en">Our team sets up every company account — fully branded for you from day one.</span>
         </p>
       </div>
 
@@ -131,7 +135,7 @@
         <div class="feature-card">
           <span class="num">03</span>
           <h3><span lang="ar">النموذج المالي</span><span lang="en">Financial model</span></h3>
-          <p><span lang="ar">جدوى مالية بتدفقات نقدية ومؤشرات استثمارية قابلة للتصدير.</span><span lang="en">Feasibility cash-flows and investment metrics, exportable.</span></p>
+          <p><span lang="ar">جدوى مالية بتدفقات نقدية ومؤشرات استثمارية قابلة للتصدير.</span><span lang="en">Feasibility cash flows and investment metrics, ready to export.</span></p>
         </div>
         <div class="feature-card">
           <span class="num">04</span>
@@ -141,7 +145,7 @@
         <div class="feature-card">
           <span class="num">05</span>
           <h3><span lang="ar">اعتمادات ومراجعة</span><span lang="en">Approvals &amp; review</span></h3>
-          <p><span lang="ar">كل محتوى مولّد يمرّ على اعتماد صريح قبل أن يدخل العرض — مسار مراجعة موثّق.</span><span lang="en">Every generated artifact passes explicit approval before it enters the deck — a documented review trail.</span></p>
+          <p><span lang="ar">كل محتوى مولّد يمرّ على اعتماد صريح قبل أن يدخل العرض — مسار مراجعة موثّق.</span><span lang="en">Every piece of generated content passes an explicit approval before it reaches the deck — a documented review trail.</span></p>
         </div>
         <div class="feature-card">
           <span class="num">06</span>
@@ -152,12 +156,34 @@
     </div>
   </section>
 
-  <section class="section" id="showcase">
+  <section class="section" id="about">
+    <div class="wrap">
+      <div class="about-split">
+        <div class="about-copy" data-reveal>
+          <span class="eyebrow"><span lang="ar">من نحن</span><span lang="en">ABOUT US</span></span>
+          <h2><span lang="ar">أسبوعان من العمل — في مسار واحد</span><span lang="en">Two weeks of work — one flow</span></h2>
+          <p class="lead">
+            <span lang="ar">لاند لوم منصة سحابية تخدم شركات التطوير والاستشارات والوساطة العقارية. إعداد عرض عقاري احترافي كان يستغرق أسابيع موزّعة بين محللين ومصممين ومراجعين؛ لاند لوم تجمع هذه المراحل في مسار واحد موثّق: تدخل البيانات، تولّد المنصة المحتوى، يعتمده فريقك، ثم يصدّر العرض النهائي بهويتك.</span>
+            <span lang="en">LandLoom is a cloud platform for real-estate development, consulting and brokerage companies. A professional proposal once took weeks split across analysts, designers and reviewers; LandLoom brings those stages into one documented flow — data goes in, the platform generates the content, your team approves it, and the final deck ships under your brand.</span>
+          </p>
+        </div>
+        <ul class="about-points" data-reveal-group>
+          <li><span lang="ar">تحليل موقع الأرض ومحيطها ومعالمها على خرائط تفاعلية</span><span lang="en">Site, surroundings and landmark analysis on interactive maps</span></li>
+          <li><span lang="ar">دراسة سوق بالمؤشرات والمنافسين في نطاق المشروع</span><span lang="en">Market study with indicators and competitors in the project's catchment</span></li>
+          <li><span lang="ar">نموذج مالي بتدفقات نقدية ومؤشرات استثمارية</span><span lang="en">Financial model with cash flows and investment metrics</span></li>
+          <li><span lang="ar">شرائح عرض بشعارك وألوانك تُصدَّر PowerPoint أو PDF</span><span lang="en">Branded slides in your logo and colors, exported to PowerPoint or PDF</span></li>
+          <li><span lang="ar">إدارة فريق بصلاحيات واعتمادات موثّقة لكل محتوى مولّد</span><span lang="en">Team management with permissions and a documented approval trail</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt" id="showcase">
     <div class="wrap">
       <div class="section-title" data-reveal>
         <span class="eyebrow"><span lang="ar">المعرض</span><span lang="en">SHOWCASE</span></span>
-        <h2><span lang="ar">ملفات صُممت عبر المنصة</span><span lang="en">Files designed through the platform</span></h2>
-        <p><span lang="ar">عيّنات من العروض والدراسات التي تولّدها المنصة بعلامات عملائها.</span><span lang="en">Samples of the decks and studies the platform generates under its clients' brands.</span></p>
+        <h2><span lang="ar">ملفات صُممت عبر المنصة</span><span lang="en">Decks produced on the platform</span></h2>
+        <p><span lang="ar">عيّنات من العروض والدراسات التي تولّدها المنصة بعلامات عملائها.</span><span lang="en">Samples of the decks and studies the platform generates under each client's brand.</span></p>
       </div>
       <div class="showcase" data-reveal>
         <aside class="file-list" id="showcaseFiles" role="tablist"></aside>
@@ -177,7 +203,7 @@
     <div class="wrap">
       <div class="brand-split">
         <div data-reveal>
-          <h2><span lang="ar">نفس المنصة — هوية كل شركة</span><span lang="en">Same platform — every company's own identity</span></h2>
+          <h2><span lang="ar">نفس المنصة — هوية كل شركة</span><span lang="en">One platform — every company's own brand</span></h2>
           <p class="lead">
             <span lang="ar">كل مخرج يخرج باسمك لا باسمنا: شعارك على الغلاف والترويسة، ألوانك، خطوطك، ولغة العرض التي تختارها لكل مشروع.</span>
             <span lang="en">Every output ships under your name, not ours: your logo on the cover and headers, your colors, your fonts, and the proposal language you pick per project.</span>
@@ -252,7 +278,7 @@
         <h2><span lang="ar">اطلب حسابًا</span><span lang="en">Request access</span></h2>
         <p class="sub">
           <span lang="ar">الحسابات تُنشأ عبر فريقنا — اترك بياناتك وسيتواصل معك.</span>
-          <span lang="en">Accounts are provisioned by our team — leave your details and we will reach out.</span>
+          <span lang="en">Our team sets up every account — leave your details and we'll reach out.</span>
         </p>
         <form id="joinRequestForm" novalidate>
           <div class="hp-field" aria-hidden="true">
@@ -297,11 +323,11 @@
         <a href="/#join"><span lang="ar">اطلب حسابًا</span><span lang="en">Request access</span></a>
         <a href="/terms"><span lang="ar">شروط الاستخدام</span><span lang="en">Terms of Use</span></a>
         <a href="/privacy"><span lang="ar">سياسة الخصوصية</span><span lang="en">Privacy Policy</span></a>
-        <a href="/about"><span lang="ar">من نحن</span><span lang="en">About Us</span></a>
+        <a href="/#about"><span lang="ar">من نحن</span><span lang="en">About Us</span></a>
       </nav>
       <div class="copyright">
-        <span lang="ar">© 2026 لاند لوم — جميع الحقوق محفوظة</span>
-        <span lang="en">© 2026 LandLoom — All rights reserved</span>
+        <span lang="ar">جميع الحقوق محفوظة لمنصة LandLoom © 2026</span>
+        <span lang="en">© 2026 LandLoom Platform — All rights reserved</span>
       </div>
     </div>
   </footer>

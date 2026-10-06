@@ -157,6 +157,10 @@
             if (!tenantUser.isAdmin) return false;
             await openAdminTicketsPage();
             return true;
+          case 'tenantAdminJoinPage':
+            if (!tenantUser.isAdmin) return false;
+            await openAdminJoinPage();
+            return true;
           case 'tenantAdminPackagesPage':
             if (!tenantUser.isAdmin) return false;
             await openAdminPackagesPage();
@@ -340,6 +344,8 @@
           await openAdminRechargePage();
         } else if (requestedPage === 'tenantAdminTicketsPage') {
           await openAdminTicketsPage();
+        } else if (requestedPage === 'tenantAdminJoinPage') {
+          await openAdminJoinPage();
         } else if (requestedPage === 'tenantAdminPackagesPage') {
           await openAdminPackagesPage();
         } else if (requestedPage === 'tenantAdminPlatformPage') {

@@ -35,6 +35,17 @@ def create_join_request(name, company, email, phone=None, message=None):
     return dict(row)
 
 
+def update_join_request_status(request_id, status):
+    """Move a lead through the desk's triage: new -> contacted -> closed."""
+    conn = get_db()
+    conn.execute(
+        'UPDATE join_requests SET status = ? WHERE id = ?', (status, request_id))
+    conn.commit()
+    row = conn.execute(
+        'SELECT * FROM join_requests WHERE id = ?', (request_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def list_join_requests(status=None, limit=200):
     conn = get_db()
     if status:

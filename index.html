@@ -49,8 +49,10 @@
   <!-- ═══════════════════ Tenant Multi-Tenant UI ═══════════════════ -->
   <div id="tenantAuthPage" class="tenant-auth">
     <div class="auth-card">
+      <button type="button" class="lang-toggle-btn auth-lang-toggle" onclick="toggleAppLanguage()">English</button>
       <div class="auth-brand">
         <img class="auth-brand-logo" src="/assets/landloom-logo.png" alt="LandLoom">
+        <span class="auth-brand-beta" data-i18n="auth.beta">نسخة تجريبية</span>
         <p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>
       </div>
       <div class="auth-body">
@@ -58,14 +60,14 @@
 
         <div id="loginError" class="auth-error"></div>
         <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
-          <label>البريد الإلكتروني</label>
+          <label data-i18n="auth.email">البريد الإلكتروني</label>
           <input type="email" id="loginEmail" autocomplete="email" required>
-          <label>كلمة المرور</label>
+          <label data-i18n="auth.password">كلمة المرور</label>
           <div style="position:relative">
-            <input type="password" id="loginPassword" placeholder="كلمة المرور" required style="padding-left:64px">
+            <input type="password" id="loginPassword" placeholder="كلمة المرور" data-i18n-ph="auth.password" required style="padding-left:64px">
             <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:#07182C;font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
           </div>
-          <button type="submit" class="auth-btn">دخول</button>
+          <button type="submit" class="auth-btn" data-i18n="auth.login">دخول</button>
         </form>
         <form id="loginOtpForm" class="auth-form" onsubmit="handleLoginOtpVerify(event)" style="display:none">
           <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:14px;text-align:center;color:#475569;font-weight:600" data-i18n="auth.otp_hint_generic">رمز التحقق مرسل إلى البريد الإلكتروني</p>
@@ -117,6 +119,9 @@
             <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
               data-nav-page="tenantAdminTicketsPage" onclick="openAdminTicketsPage()"
               data-i18n="nav.support_desk">الدعم الفني</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminJoinPage" onclick="openAdminJoinPage()"
+              data-i18n="nav.join_requests">طلبات الانضمام</button>
             <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
               data-nav-page="tenantNotificationsPage" onclick="openNotificationsPage()"
               data-i18n="nav.notifications">الإشعارات</button>
@@ -1248,6 +1253,34 @@
       </div>
     </section>
 
+    <!-- Join requests: leads from the public request-access form -->
+    <section id="tenantAdminJoinPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.join_requests">طلبات الانضمام</h2>
+        </div>
+        <select id="adminJoinStatusFilter" onchange="adminLoadJoinRequests()" class="tenant-filter-select">
+          <option value="" data-i18n="admin.filter_all_statuses">كل الحالات</option>
+          <option value="new" data-i18n="admin.join_status_new">جديدة</option>
+          <option value="contacted" data-i18n="admin.join_status_contacted">تم التواصل</option>
+          <option value="closed" data-i18n="admin.join_status_closed">مغلقة</option>
+        </select>
+      </div>
+      <div class="ops-stat-grid">
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatJoinNew">0</h3>
+          <p data-i18n="admin.join_new_stat">طلبات جديدة</p>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.join_inbox">طلبات الوصول من الصفحة الرئيسية</h3>
+        </div>
+        <div id="adminJoinRequestsList"></div>
+      </div>
+    </section>
+
     <!-- Packages catalog: the super-admin's dedicated desk -->
     <section id="tenantAdminPackagesPage" class="tenant-page">
       <div class="tenant-page-heading">
@@ -1382,6 +1415,31 @@
           <button type="submit" class="btn primary" id="adminRejectionReasonSubmit" data-i18n="admin.rejection_reason_add">إضافة سبب</button>
           <button type="button" class="btn ghost" id="adminRejectionReasonCancel" style="display:none" onclick="adminCancelRejectionReasonEdit()">إلغاء</button></div>
         </form>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.legal_pages_title">الصفحات القانونية</h3>
+        </div>
+        <div class="tenant-grid">
+          <div class="tenant-field">
+            <label for="adminLegalDoc" data-i18n="admin.legal_doc">الصفحة</label>
+            <select id="adminLegalDoc" onchange="adminLegalSelectDoc()">
+              <option value="terms" data-i18n="admin.legal_terms">شروط الاستخدام</option>
+              <option value="privacy" data-i18n="admin.legal_privacy">سياسة الخصوصية</option>
+            </select>
+          </div>
+        </div>
+        <div class="tenant-field">
+          <label for="adminLegalAr" data-i18n="admin.legal_ar">المحتوى بالعربية (HTML)</label>
+          <textarea id="adminLegalAr" rows="14" dir="rtl" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
+        </div>
+        <div class="tenant-field" style="margin-top:12px">
+          <label for="adminLegalEn" data-i18n="admin.legal_en">المحتوى بالإنجليزية (HTML)</label>
+          <textarea id="adminLegalEn" rows="14" dir="ltr" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
+        </div>
+        <div class="sag-modal-actions">
+          <button type="button" class="btn primary" onclick="adminSaveLegalDoc()" data-i18n="admin.legal_save">حفظ المحتوى</button>
+        </div>
       </div>
     </section>
 

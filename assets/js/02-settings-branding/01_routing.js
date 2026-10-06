@@ -25,6 +25,7 @@
       tenantCompaniesPage: 'admin/companies',
       tenantAdminRechargePage: 'admin/recharges',
       tenantAdminTicketsPage: 'admin/tickets',
+      tenantAdminJoinPage: 'admin/join-requests',
       tenantAdminPackagesPage: 'admin/packages',
       tenantAdminPlatformPage: 'admin/platform'
     };
@@ -72,7 +73,8 @@
 
     const TENANT_ADMIN_ONLY_PAGES = new Set([
       'tenantAdminPage', 'tenantCompaniesPage', 'tenantAdminRechargePage',
-      'tenantAdminTicketsPage', 'tenantAdminPackagesPage', 'tenantAdminPlatformPage'
+      'tenantAdminTicketsPage', 'tenantAdminJoinPage', 'tenantAdminPackagesPage',
+      'tenantAdminPlatformPage'
     ]);
 
     function enforceTenantRouteGuard(pageId, urlSlug) {
@@ -206,6 +208,7 @@
       tenantCompaniesPage: 'openTenantCompanies',
       tenantAdminRechargePage: 'openAdminRechargePage',
       tenantAdminTicketsPage: 'openAdminTicketsPage',
+      tenantAdminJoinPage: 'openAdminJoinPage',
       tenantAdminPackagesPage: 'openAdminPackagesPage',
       tenantAdminPlatformPage: 'openAdminPlatformPage',
       tenantLandloomOpsPage: 'openLandloomOpsPage',
@@ -625,6 +628,7 @@
       tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
       tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
       tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
+      tenantAdminJoinPage: ['page.join_requests', 'طلبات الانضمام'],
       tenantAdminPackagesPage: ['page.packages', 'الباقات'],
       tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'],
       tenantLandloomOpsPage: ['page.operations', 'العمليات']

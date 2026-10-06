@@ -800,7 +800,7 @@
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
       await Promise.all([llLoadRejectionReasons(), llLoadFxRate(),
-        adminLoadFeatureCatalog()]);
+        adminLoadFeatureCatalog(), adminLoadLegalDoc()]);
     }
 
     /* The feature pool lives in platform settings; the packages page shares

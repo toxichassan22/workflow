@@ -101,6 +101,7 @@
       const map = isAdmin ? {
         recharge_request: () => openAdminRechargePage(),
         support_ticket: () => openAdminTicketsPage(),
+        join_request: () => openAdminJoinPage(),
         tenant: () => openTenantCompanies(),
         subscription: (n) => openNotificationsPage().then(() => prefillAnnounceForTenant(n)),
       } : {

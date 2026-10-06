@@ -1342,7 +1342,7 @@
 
     .tenant-auth {
       --login-navy: #07182C;
-      --login-turq: #03E1CE;
+      --login-turq: #0D8B7D;
       display: none;
       position: fixed;
       inset: 0;
@@ -1418,7 +1418,7 @@
 
     .auth-form {
       display: none;
-      text-align: right;
+      text-align: start;
     }
 
     .auth-form.active {
@@ -1446,8 +1446,8 @@
     }
 
     .auth-form input:focus {
-      border-color: #03E1CE;
-      box-shadow: 0 0 0 3px rgba(3, 225, 206, .25);
+      border-color: #0D8B7D;
+      box-shadow: 0 0 0 3px rgba(13, 139, 125, .15);
     }
 
     .auth-btn {
@@ -1458,7 +1458,7 @@
       font-size: 16px;
       font-weight: 800;
       cursor: pointer;
-      background: #03E1CE;
+      background: #0D8B7D;
       color: #07182C;
       font-family: inherit;
       transition: .2s;

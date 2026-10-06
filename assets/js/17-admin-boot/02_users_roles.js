@@ -857,7 +857,7 @@
       if (!input) return;
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      if (btn) btn.textContent = show ? 'إخفاء' : 'إظهار';
+      if (btn) btn.textContent = show ? WFT('auth.hide', 'إخفاء') : WFT('auth.show', 'إظهار');
     }
 
     function togglePasswordSetupVisibility(inputId, btn) {

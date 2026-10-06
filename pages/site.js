@@ -158,7 +158,7 @@
   /* ── Opening sequence: scroll-scrubbed ───────────────────────────────────
      The track is a tall in-flow section whose stage sticks to the viewport;
      real scroll position drives everything — the welcome lifts out through
-     the first stretch, the caret fades in, and LANDLOOM AI types letter by
+     the first stretch, the caret fades in, and LANDLOOM types letter by
      letter across the second stretch (scroll back up and it deletes). Escape
      jumps past the whole thing. Reduced-motion drops the track in CSS. */
 
@@ -173,14 +173,12 @@
     var welcomeEl = track.querySelector('.op-welcome');
     var brandEl = track.querySelector('.op-brand');
     var typedEl = track.querySelector('.op-typed');
-    var typedAi = track.querySelector('.op-typed.op-ai');
     var cueEl = track.querySelector('.op-cue');
     var brandText = '';
     Array.prototype.forEach.call(track.querySelectorAll('.op-typed'), function (el) {
       brandText += el.textContent;
       el.textContent = '';
     });
-    var splitAt = brandText.lastIndexOf(' ') + 1;
 
     var typed = -1;
     var raf = 0;
@@ -202,13 +200,12 @@
       }
       if (cueEl) cueEl.style.opacity = (1 - clamp(p / .07, 0, 1)).toFixed(3);
 
-      // Brand fades in p .30 → .38, then types across p .38 → .88.
+      // Brand fades in p .30 -> .38, then types across p .38 -> .88.
       if (brandEl) brandEl.style.opacity = clamp((p - .30) / .08, 0, 1).toFixed(3);
       if (typedEl) {
         var n = Math.round(clamp((p - .38) / .5, 0, 1) * brandText.length);
         if (n !== typed) {
-          typedEl.textContent = brandText.slice(0, Math.min(n, splitAt));
-          if (typedAi) typedAi.textContent = brandText.slice(splitAt, Math.max(splitAt, n));
+          typedEl.textContent = brandText.slice(0, n);
           typed = n;
         }
       }

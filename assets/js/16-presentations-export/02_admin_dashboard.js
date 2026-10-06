@@ -111,6 +111,7 @@
         const items = [
           { label: WFT('admin.pending_recharges', 'طلبات شحن بانتظار المراجعة'), count: workflows.pending_recharges || 0, action: 'openAdminRechargePage()' },
           { label: WFT('admin.pending_tickets', 'تذاكر دعم مفتوحة من الشركات'), count: workflows.open_support_tickets || 0, action: 'openAdminTicketsPage()' },
+          { label: WFT('admin.pending_join_requests', 'طلبات انضمام جديدة من الموقع'), count: workflows.pending_join_requests || 0, action: 'openAdminJoinPage()' },
         ];
         pendingEl.innerHTML = items.map(item =>
           '<div class="tenant-presentation-card admin-action-card">' +
@@ -1290,11 +1291,15 @@
       const pendingEl = document.getElementById('sagPendingActions');
       if (statsEl) statsEl.innerHTML = '';
       if (pendingEl) showInlineLoader(pendingEl, WFT('common.loading', 'جاري التحميل...'));
-      const [overviewData, tenantsData] = await Promise.all([
+      const [overviewData, tenantsData, joinData] = await Promise.all([
         api('GET', '/api/admin/operational-overview').catch(() => null),
-        api('GET', '/api/admin/tenants').catch(() => null)
+        api('GET', '/api/admin/tenants').catch(() => null),
+        api('GET', '/api/admin/join-requests?status=new').catch(() => null)
       ]);
       const overview = (overviewData && overviewData.overview) || {};
+      overview.workflows = overview.workflows || {};
+      overview.workflows.pending_join_requests =
+        (joinData && joinData.success && Array.isArray(joinData.requests)) ? joinData.requests.length : 0;
       sagAllTenants = (tenantsData && tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
       sagLastOverview = overview;
       renderAdminDashboard(overview);

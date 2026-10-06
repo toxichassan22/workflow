@@ -102,9 +102,9 @@
     applyAll('data-i18n-title', function (el, s) { el.setAttribute('title', s); });
     applyAll('data-i18n-aria', function (el, s) { el.setAttribute('aria-label', s); });
     try {
-      var btn = document.getElementById('langToggleBtn');
-      if (btn) {
-        btn.textContent = (lang === 'ar') ? t('lang.switch_to_english') : t('lang.switch_to_arabic');
+      var btns = document.querySelectorAll('#langToggleBtn, .lang-toggle-btn');
+      for (var bi = 0; bi < btns.length; bi++) {
+        btns[bi].textContent = (lang === 'ar') ? t('lang.switch_to_english') : t('lang.switch_to_arabic');
       }
     } catch (e) { /* button absent on some views */ }
     try {

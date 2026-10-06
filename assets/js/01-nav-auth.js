@@ -274,6 +274,7 @@
       tenantCompaniesPage: '/app/admin/companies',
       tenantAdminRechargePage: '/app/admin/recharges',
       tenantAdminTicketsPage: '/app/admin/tickets',
+      tenantAdminJoinPage: '/app/admin/join-requests',
       tenantAdminPackagesPage: '/app/admin/packages',
       tenantAdminPlatformPage: '/app/admin/platform'
     };
