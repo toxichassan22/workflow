@@ -96,9 +96,10 @@ a { color: var(--p); }
   gap: 1px;
   text-decoration: none;
   line-height: 1.1;
+  flex-shrink: 0;
 }
 
-.site-brand img { height: 32px; width: auto; }
+.site-brand img { height: clamp(22px, 3vw, 32px); width: auto; }
 
 /* The «beta version» tag sits directly under the wordmark. */
 .brand-beta {
@@ -185,7 +186,7 @@ a { color: var(--p); }
   gap: 16px 28px;
 }
 
-.site-footer img { height: 32px; opacity: .95; }
+.site-footer img { height: 32px; width: auto; opacity: .95; flex-shrink: 0; }
 
 .site-footer nav { display: flex; gap: 20px; margin-inline-start: auto; flex-wrap: wrap; }
 .site-footer nav a { color: #C7D4E0; text-decoration: none; font-size: 14px; font-weight: 600; }
@@ -210,6 +211,7 @@ a { color: var(--p); }
   align-items: center;
   gap: 12px;
   text-decoration: none;
+  flex-shrink: 0;
 }
 
 .sag-label { font-size: 12.5px; font-weight: 800; color: var(--teal-bright); }
@@ -228,6 +230,7 @@ a { color: var(--p); }
   .wrap { padding: 0 18px; }
 
   .site-nav { gap: 10px; }
+  .site-nav a[href="/app"] { display: none; }
 
   .site-footer { padding: 36px 0 26px; }
   .site-footer .wrap { justify-content: center; text-align: center; }
