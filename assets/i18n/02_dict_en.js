@@ -144,6 +144,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "financial.warn_operating_exit_outside_roi": "Operating exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
   "financial.warn_sale_exit_outside_irr": "Sale exit in year {year} is outside the selected IRR window.",
   "financial.warn_operating_exit_outside_irr": "Operating exit in year {year} is outside the selected IRR window.",
+  "financial.warn_operating_exit_before_start": "The operating exit year precedes the operation start year; operating revenues show zero in all years.",
   "list.load_failed": "Failed to load the list",
   "list.retry": "Retry",
   "admin.pending_actions": "Actions needing attention",

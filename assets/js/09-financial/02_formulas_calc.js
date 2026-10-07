@@ -4,7 +4,7 @@
 
     function calcRevenueByMethod(method, qty, price, period, occ, baseRevenue = 0) {
       occ = (occ || 0) / 100;
-      if (method === 'areaSale') return qty * price;
+      if (method === 'areaSale' || method === 'unitSale') return qty * price;
       if (method === 'dailyRent') return qty * price * 365 * occ;
       if (method === 'monthlyAreaRent') return qty * price * 12 * occ;
       if (method === 'monthlyUnitRent') return qty * price * 12 * occ;
@@ -19,7 +19,7 @@
       return qty * price * period * occ;
     }
     function formulaText(method) {
-      const map = { areaSale: 'المساحة البيعية × سعر البيع للمتر', dailyRent: 'عدد الوحدات × السعر اليومي × 365 × الإشغال', monthlyAreaRent: 'المساحة × إيجار المتر الشهري × 12 × الإشغال', monthlyUnitRent: 'عدد الوحدات × الإيجار الشهري × 12 × الإشغال', areaRent: 'المساحة × إيجار المتر السنوي × الإشغال', unitRent: 'عدد الوحدات × الإيجار السنوي × الإشغال', weeklyUnit: 'الوحدات × السعر الأسبوعي × الأسابيع × التشغيل', tickets: 'عدد الزوار × سعر التذكرة', commission: 'قيمة العمليات × نسبة العمولة', subscription: 'عدد المشتركين × قيمة الاشتراك', fixed: 'قيمة ثابتة', percentRevenue: 'إجمالي الإيرادات × النسبة', areaCost: 'المساحة × تكلفة المتر', unitCost: 'العدد × تكلفة الوحدة', percentExecution: 'تكلفة التنفيذ × النسبة', monthlyDuration: 'التكلفة الشهرية × المدة', monthlyFixed: 'القيمة الشهرية × 12', staffSalary: 'عدد الموظفين × الراتب × 12', annualFixed: 'قيمة سنوية ثابتة', perUnit: 'عدد الوحدات × تكلفة الوحدة', perM2: 'المساحة × تكلفة المتر', qtyPrice: 'الكمية × السعر', areaPrice: 'المساحة × سعر المتر', percentCost: 'إجمالي التكلفة × النسبة', recurring: 'القيمة الأساسية سنويًا', custom: 'فورمولا مخصصة' };
+      const map = { areaSale: 'المساحة البيعية × سعر البيع للمتر', unitSale: 'عدد الوحدات × سعر البيع للوحدة', dailyRent: 'عدد الوحدات × السعر اليومي × 365 × الإشغال', monthlyAreaRent: 'المساحة × إيجار المتر الشهري × 12 × الإشغال', monthlyUnitRent: 'عدد الوحدات × الإيجار الشهري × 12 × الإشغال', areaRent: 'المساحة × إيجار المتر السنوي × الإشغال', unitRent: 'عدد الوحدات × الإيجار السنوي × الإشغال', weeklyUnit: 'الوحدات × السعر الأسبوعي × الأسابيع × التشغيل', tickets: 'عدد الزوار × سعر التذكرة', commission: 'قيمة العمليات × نسبة العمولة', subscription: 'عدد المشتركين × قيمة الاشتراك', fixed: 'قيمة ثابتة', percentRevenue: 'إجمالي الإيرادات × النسبة', areaCost: 'المساحة × تكلفة المتر', unitCost: 'العدد × تكلفة الوحدة', percentExecution: 'تكلفة التنفيذ × النسبة', monthlyDuration: 'التكلفة الشهرية × المدة', monthlyFixed: 'القيمة الشهرية × 12', staffSalary: 'عدد الموظفين × الراتب × 12', annualFixed: 'قيمة سنوية ثابتة', perUnit: 'عدد الوحدات × تكلفة الوحدة', perM2: 'المساحة × تكلفة المتر', qtyPrice: 'الكمية × السعر', areaPrice: 'المساحة × سعر المتر', percentCost: 'إجمالي التكلفة × النسبة', recurring: 'القيمة الأساسية سنويًا', custom: 'فورمولا مخصصة' };
       return map[method] || 'حسب الاختيار';
     }
     function annualGrowthFactor(year, rate) { return Math.pow(1 + (rate || 0) / 100, year - 1); }
@@ -153,6 +153,22 @@
     }
     function getLinkedComponentForRevenueRow(tr) { const sel = tr.querySelector('[data-field="component"] select'); const idx = sel ? (sel.value || '') : (tr?.dataset?.componentId || ''); if (idx === '') return null; return getComponentRowsData().find(c => String(c.id) === String(idx)) || null; }
     function getRevenueQuantity(tr) { const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); if (source === 'componentRevenueArea' || source === 'componentArea') return comp ? comp.revenueArea : 0; if (source === 'componentBuiltArea') return comp ? comp.builtArea : 0; if (source === 'componentUnits') return comp ? comp.units : 0; return parseNumber(tr.querySelector('[data-field="qty"] input')?.value); }
+    function getRevenueRowMethod(tr) { return tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; }
+    // A revenue row is sale revenue when its method is a sale method, or when it is linked
+    // to a component whose investmentModel is 'sale' — the component type owns the bucket.
+    function isSaleRevenueRow(tr) {
+      const method = getRevenueRowMethod(tr);
+      if (method === 'areaSale' || method === 'unitSale') return true;
+      if (method === 'percentRevenue') return false;
+      return getLinkedComponentForRevenueRow(tr)?.investmentModel === 'sale';
+    }
+    // Explicit sale methods never feed the operating stream; a sale-linked row only leaves
+    // it while sale mode is on (under rental-only mode it still counts as operating).
+    function isOperatingRevenueRow(tr) {
+      const method = getRevenueRowMethod(tr);
+      if (method === 'percentRevenue' || method === 'areaSale' || method === 'unitSale') return false;
+      return !(getLinkedComponentForRevenueRow(tr)?.investmentModel === 'sale' && projectModeFlags().sales);
+    }
     function updateAutoQtyPreview(tr) { const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); const qtyInput = tr.querySelector('[data-field="qty"] input'); if (!qtyInput) return; if (source === 'componentRevenueArea' || source === 'componentArea') qtyInput.value = money(comp ? comp.revenueArea : 0); else if (source === 'componentBuiltArea') qtyInput.value = money(comp ? comp.builtArea : 0); else if (source === 'componentUnits') qtyInput.value = money(comp ? comp.units : 0); }
 
     function setWrapVisible(id, visible) { const el = document.getElementById(id); if (!el) return; el.classList.toggle('dynamic-off', !visible); el.querySelectorAll('input,select,textarea').forEach(x => x.disabled = !visible); }
@@ -230,6 +246,7 @@
         const method = tr.querySelector('[data-field="method"] select')?.value; const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); tr.dataset.componentId = tr.querySelector('[data-field="component"] select')?.value || ''; if (source !== 'manual') updateAutoQtyPreview(tr);
         const visible = {
           areaSale: { qty: true, price: true, period: false, occupancy: false, qtyHelp: 'المساحة البيعية', priceHelp: 'سعر البيع للمتر' },
+          unitSale: { qty: true, price: true, period: false, occupancy: false, qtyHelp: 'عدد الوحدات', priceHelp: 'سعر بيع الوحدة' },
           dailyRent: { qty: true, price: true, period: false, occupancy: true, qtyHelp: 'عدد الوحدات', priceHelp: 'السعر اليومي' },
           monthlyAreaRent: { qty: true, price: true, period: false, occupancy: true, qtyHelp: 'المساحة', priceHelp: 'إيجار المتر الشهري' },
           monthlyUnitRent: { qty: true, price: true, period: false, occupancy: true, qtyHelp: 'عدد الوحدات', priceHelp: 'الإيجار الشهري للوحدة' },
@@ -312,7 +329,7 @@
       document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid', !valid);
       return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, builtExceeded, openExceeded };
     }
-    function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => tr.querySelector('[data-field="method"] select')?.value !== 'areaSale'); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
+    function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => !isSaleRevenueRow(tr)); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
     document.addEventListener('wf:lang', () => {
       try { updateRevenueComponentOptions(); } catch (e) { /* ignore */ }
       try { updateGraceRevenueOptions(); } catch (e) { /* ignore */ }
@@ -456,8 +473,8 @@
       revRows.forEach(tr => {
         const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent';
         const res = calculateRevenueBase(tr, 0);
-        if (method === 'areaSale' && modeFlags.sales) { saleRevenueTotal += res; saleAreaTotal += getRevenueQuantity(tr); }
-        else if (method !== 'percentRevenue' && modeFlags.rental) operatingRevenueBase += res;
+        if (isSaleRevenueRow(tr) && modeFlags.sales) { saleRevenueTotal += res; const comp = getLinkedComponentForRevenueRow(tr); saleAreaTotal += comp ? comp.revenueArea : (method === 'areaSale' ? getRevenueQuantity(tr) : 0); }
+        else if (isOperatingRevenueRow(tr) && modeFlags.rental) operatingRevenueBase += res;
         const c1 = tr.querySelector('.revResult'), c2 = tr.querySelector('.revenueFormula'); if (c1) c1.textContent = money(res); if (c2) c2.textContent = formulaText(method);
       });
       revRows.forEach(tr => {
@@ -551,7 +568,7 @@
       for (let year = 1; year <= totalYears; year++) {
         const inOperation = modeFlags.rental && year >= operationStartYear && (exitMethod === 'none' || year <= operatingExitYear), operationYear = inOperation ? year - developmentYears : 0, occupancyReach = inOperation ? occupancyReachForYear(operationYear) : 0, saleRevenue = (modeFlags.sales && year >= salesStartYear && year < Math.min(totalYears + 1, salesStartYear + salesYears)) ? saleRevenueTotal / Math.max(1, Math.min(salesYears, totalYears - salesStartYear + 1)) : 0;
         let revBaseAnnual = 0, revTotalAnnual = 0;
-        revRows.forEach(tr => { const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; if (method !== 'percentRevenue' && method !== 'areaSale' && inOperation) { const base = calculateRevenueBase(tr, 0); revBaseAnnual += base * occupancyReach; revTotalAnnual += base * occupancyReach; } });
+        revRows.forEach(tr => { if (isOperatingRevenueRow(tr) && inOperation) { const base = calculateRevenueBase(tr, 0); revBaseAnnual += base * occupancyReach; revTotalAnnual += base * occupancyReach; } });
         revRows.forEach(tr => { const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; if (method === 'percentRevenue' && inOperation) { revTotalAnnual += calculateRevenueBase(tr, revBaseAnnual); } });
 
         let extRevenueAnnual = 0, extOpexAnnual = 0;
@@ -569,7 +586,7 @@
         if (operationYear === 1) {
           revenueY1 = operatingRevenue; opexY1 = opexAnnual; noiY1 = noi;
           let fullBaseAnnual = 0, fullRevenueAnnual = 0;
-          revRows.forEach(tr => { const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; if (method !== 'percentRevenue' && method !== 'areaSale') { const base = calculateRevenueBase(tr, 0); fullBaseAnnual += base; fullRevenueAnnual += base; } });
+          revRows.forEach(tr => { if (isOperatingRevenueRow(tr)) { const base = calculateRevenueBase(tr, 0); fullBaseAnnual += base; fullRevenueAnnual += base; } });
           revRows.forEach(tr => { const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; if (method === 'percentRevenue') fullRevenueAnnual += calculateRevenueBase(tr, fullBaseAnnual); });
           let fullExternalRevenue = 0, fullExternalOpex = 0;
           if (externalOn) externalRows.forEach(tr => { const exType = tr.querySelector('[data-field="type"] select')?.value || 'revenue', startYear = parseNumber(tr.querySelector('[data-field="startYear"] input')?.value) || 1, endYear = parseNumber(tr.querySelector('[data-field="endYear"] input')?.value) || totalYears, growth = parseNumber(tr.querySelector('[data-field="growth"] input')?.value); if (year >= startYear && year <= endYear) { const ex = calculateExternalRow(tr, fullRevenueAnnual, costTotal); const amount = ex.value * annualGrowthFactor(year - startYear + 1, growth); if (exType === 'revenue') fullExternalRevenue += amount; if (exType === 'opex') fullExternalOpex += amount; } });
@@ -643,7 +660,7 @@
       if (exitMethod !== 'none' && operatingExitYear > roiEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_roi', 'التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: operatingExitYear }));
       if (saleExitMethod !== 'none' && saleExitYear > irrEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_irr', 'التخارج البيعي في السنة {year} خارج فترة IRR المختارة.', { year: saleExitYear }));
       if (exitMethod !== 'none' && operatingExitYear > irrEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_irr', 'التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة.', { year: operatingExitYear }));
-      if (exitMethod === 'capRate' && operatingExitYear < operationStartYear) warnings.push('سنة التخارج التشغيلي تسبق بدء التشغيل؛ لا يوجد NOI صالح لتطبيق معدل الرسملة.');
+      if (exitMethod !== 'none' && operatingExitYear < operationStartYear) warnings.push(warnT('financial.warn_operating_exit_before_start', 'سنة التخارج التشغيلي تسبق بدء التشغيل؛ إيرادات التشغيل تظهر صفرًا في جميع السنوات.'));
       if (landCostIncluded > 0 && landContributionType === 'none') warnings.push('قيمة الأرض داخلة في تكلفة المشروع لكنها مستبعدة من التدفقات؛ قد يؤدي ذلك إلى تضخيم مؤشرات العائد.');
       if (projectIrr === null) warnings.push('لا يمكن حساب Project IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');
       if (irrVal === null) warnings.push('لا يمكن حساب Equity IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');

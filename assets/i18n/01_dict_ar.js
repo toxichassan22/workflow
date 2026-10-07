@@ -144,6 +144,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "financial.warn_operating_exit_outside_roi": "التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
   "financial.warn_sale_exit_outside_irr": "التخارج البيعي في السنة {year} خارج فترة IRR المختارة.",
   "financial.warn_operating_exit_outside_irr": "التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة.",
+  "financial.warn_operating_exit_before_start": "سنة التخارج التشغيلي تسبق بدء التشغيل؛ إيرادات التشغيل تظهر صفرًا في جميع السنوات.",
   "list.load_failed": "تعذر تحميل القائمة",
   "list.retry": "إعادة المحاولة",
   "admin.pending_actions": "إجراءات تحتاج انتباهك",
