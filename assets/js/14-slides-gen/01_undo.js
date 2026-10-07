@@ -544,6 +544,7 @@
       container.appendChild(stage);
       oldCard.replaceWith(container);
       autoFitSlideContent(stage);
+      if (typeof tgrRefit === 'function') tgrRefit();
       enableSlideInlineEditing(stage, index);
       enableSlideElementDragging(stage, index);
       restoreSlideEditSelection(stage, index);
