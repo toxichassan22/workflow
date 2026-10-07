@@ -19,8 +19,8 @@ import html as _html_lib
 # ── Platform brand ────────────────────────────────────────────────────────────
 # The wordmark palette sampled from assets/landloom-logo(-white).png.
 BRAND_NAVY = '#07182c'        # the «LandLoom» wordmark
-BRAND_TEAL = '#03e1ce'        # the «AI» accent
-BRAND_TEAL_DEEP = '#0d9488'   # readable teal for links/text on white
+BRAND_TEAL = '#17c8e3'        # the «AI» accent
+BRAND_TEAL_DEEP = '#0a829b'   # readable teal for links/text on white
 
 
 def brand_assets():
@@ -85,14 +85,14 @@ def build_base_email(
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
               <tr>
                 <td width="58" valign="top">
-                  <div style="width: 52px; height: 52px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.10);"></div>
-                  <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.55); margin-top: 12px; margin-right: 24px;"></div>
+                  <div style="width: 52px; height: 52px; border-radius: 50%; background-color: rgba(23, 200, 227, 0.10);"></div>
+                  <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(23, 200, 227, 0.55); margin-top: 12px; margin-right: 24px;"></div>
                 </td>
                 <td align="center" style="text-align: center;">
                   {hero_logo}
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto 16px auto;">
                     <tr>
-                      <td align="center" style="background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(3, 225, 206, 0.45); border-radius: 24px; padding: 4px 16px; font-size: 11px; font-weight: 800; color: #ffffff; letter-spacing: 1.2px; text-transform: uppercase;">
+                      <td align="center" style="background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(23, 200, 227, 0.45); border-radius: 24px; padding: 4px 16px; font-size: 11px; font-weight: 800; color: #ffffff; letter-spacing: 1.2px; text-transform: uppercase;">
                         {h_tag}
                       </td>
                     </tr>
@@ -103,8 +103,8 @@ def build_base_email(
                   {f'<div style="margin-top: 12px; font-size: 15px; color: rgba(255, 255, 255, 0.92); font-weight: 500; line-height: 1.6; max-width: 480px; margin-left: auto; margin-right: auto;">{h_sub}</div>' if h_sub else ''}
                 </td>
                 <td width="58" valign="bottom" align="left">
-                  <div style="width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(3, 225, 206, 0.45); margin-bottom: 16px;"></div>
-                  <div style="width: 48px; height: 48px; border-radius: 50%; background-color: rgba(3, 225, 206, 0.08);"></div>
+                  <div style="width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(23, 200, 227, 0.45); margin-bottom: 16px;"></div>
+                  <div style="width: 48px; height: 48px; border-radius: 50%; background-color: rgba(23, 200, 227, 0.08);"></div>
                 </td>
               </tr>
             </table>
@@ -431,7 +431,7 @@ def render_login_otp_email(recipient, otp_code, device_info=None, expiry_mins=10
             {otp_code}
           </div>
           <div style="margin-top: 12px;">
-            <span style="display: inline-block; background-color: rgba(3, 225, 206, 0.14); border: 1px solid rgba(3, 225, 206, 0.35); border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 700; color: {BRAND_TEAL};">
+            <span style="display: inline-block; background-color: rgba(23, 200, 227, 0.14); border: 1px solid rgba(23, 200, 227, 0.35); border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 700; color: {BRAND_TEAL};">
               صلاحية الرمز: {expiry_mins} دقائق
             </span>
           </div>

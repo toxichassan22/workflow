@@ -688,7 +688,7 @@
       setValue('settingsTagline', b.tagline || '');
       setValue('settingsTaglineEn', b.tagline_en || '');
       setValue('settingsPrimaryColor', b.primary_color || '#07182C');
-      setValue('settingsSecondaryColor', b.secondary_color || '#03E1CE');
+      setValue('settingsSecondaryColor', b.secondary_color || '#254B66');
       setValue('settingsAccentColor', b.accent_color || '#6DA3C3');
       setValue('settingsBackgroundColor', b.background_color || '#F4F9FC');
       setValue('settingsTextColor', b.text_color || '#333333');

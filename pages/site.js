@@ -270,7 +270,7 @@
   var SHOWCASE_FILES = [
     { name: 'واحة النخيل السكنية', meta: 'عرض مشروع سكني · 6 شرائح', accent: '#0F4C81', slug: 'nakheel', count: 6 },
     { name: 'حي الياسمين', meta: 'تحليل أرض وخرائط · 9 شرائح', accent: '#1E7A4F', slug: 'yasmin', count: 9 },
-    { name: 'برج الرواف التجاري', meta: 'دراسة مالية · 18 شريحة', accent: '#0D8B7D', slug: 'rawaf', count: 18 },
+    { name: 'برج الرواف التجاري', meta: 'دراسة مالية · 18 شريحة', accent: '#0FA9C4', slug: 'rawaf', count: 18 },
     { name: 'مجمع الضياء اللوجستي', meta: 'دراسة سوق · 18 شريحة', accent: '#B45A1B', slug: 'diyaa', count: 18 },
     { name: 'فندق مرافق البوتيك', meta: 'جدول زمني · 6 شرائح', accent: '#6D3FA3', slug: 'marafiq', count: 6 }
   ];

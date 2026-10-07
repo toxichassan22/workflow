@@ -735,7 +735,7 @@
     :root {
       --p: #07182C;
       --pd: #04101F;
-      --g: #03E1CE;
+      --g: #17C8E3;
       --bg: #F0F7FB;
       --card: #fff;
       --txt: #252525;
@@ -1342,7 +1342,7 @@
 
     .tenant-auth {
       --login-navy: #07182C;
-      --login-turq: #0D8B7D;
+      --login-turq: #0FA9C4;
       display: none;
       position: fixed;
       inset: 0;
@@ -1446,8 +1446,8 @@
     }
 
     .auth-form input:focus {
-      border-color: #0D8B7D;
-      box-shadow: 0 0 0 3px rgba(13, 139, 125, .15);
+      border-color: #0FA9C4;
+      box-shadow: 0 0 0 3px rgba(15, 169, 196, .18);
     }
 
     .auth-btn {
@@ -1458,7 +1458,7 @@
       font-size: 16px;
       font-weight: 800;
       cursor: pointer;
-      background: #0D8B7D;
+      background: linear-gradient(135deg, #0FA9C4, #17C8E3);
       color: #07182C;
       font-family: inherit;
       transition: .2s;

@@ -395,7 +395,7 @@
     .pkg-card--featured .pkg-badge {
       background: var(--sidebar-accent);
       border-color: var(--sidebar-accent);
-      color: #05323a;
+      color: #07182C;
     }
 
     .pkg-card--featured .pkg-credit-label {
@@ -460,7 +460,7 @@
     .pkg-card--featured .pkg-buy {
       background: var(--sidebar-accent);
       border-color: var(--sidebar-accent);
-      color: #05323a;
+      color: #07182C;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
     }
 
