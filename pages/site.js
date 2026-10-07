@@ -174,6 +174,14 @@
     var brandEl = track.querySelector('.op-brand');
     var typedEl = track.querySelector('.op-typed');
     var cueEl = track.querySelector('.op-cue');
+    var mapPath = track.querySelector('.op-map-path');
+    var pinEl = track.querySelector('.op-pin');
+    var mapLen = 0;
+    if (mapPath && mapPath.getTotalLength) {
+      mapLen = mapPath.getTotalLength();
+      mapPath.style.strokeDasharray = mapLen;
+      mapPath.style.strokeDashoffset = mapLen;
+    }
     var brandText = '';
     Array.prototype.forEach.call(track.querySelectorAll('.op-typed'), function (el) {
       brandText += el.textContent;
@@ -199,6 +207,21 @@
         welcomeEl.style.filter = we > 0 ? 'blur(' + (9 * we).toFixed(1) + 'px)' : '';
       }
       if (cueEl) cueEl.style.opacity = (1 - clamp(p / .07, 0, 1)).toFixed(3);
+
+      // The map outline draws across the middle stretch (welcome exits ->
+      // typing nearly done), its fill washes in over the last part, and the
+      // Riyadh pin pops once the country is drawn.
+      if (mapPath) {
+        var draw = clamp((p - .26) / .52, 0, 1);
+        mapPath.style.strokeDashoffset = (mapLen * (1 - draw)).toFixed(1);
+        mapPath.style.fillOpacity = (.07 * clamp((draw - .55) / .45, 0, 1)).toFixed(3);
+      }
+      if (pinEl) {
+        var ps = clamp((p - .80) / .08, 0, 1);
+        pinEl.style.opacity = ps.toFixed(3);
+        pinEl.style.transform = 'scale(' + (.45 + .55 * ps).toFixed(3) + ')';
+        pinEl.classList.toggle('show', ps >= 1);
+      }
 
       // Brand fades in p .30 -> .38, then types across p .38 -> .88.
       if (brandEl) brandEl.style.opacity = clamp((p - .30) / .08, 0, 1).toFixed(3);

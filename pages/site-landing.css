@@ -129,6 +129,33 @@ body.js .opening-track { height: 280vh; }
   100% { transform: translateY(15px); opacity: 0; }
 }
 
+/* ── Opening map ───────────────────────────────────────────────────────────
+   The Saudi outline sits behind the wordmark and draws itself as the user
+   scrolls — same scrub contract as the typing, so it un-draws on the way
+   back up. A turquoise pin pulses over Riyadh once the draw completes:
+   "a Saudi platform" said with geometry, not words. Without JS the stroke
+   simply stays drawn — a quiet backdrop for the static banner. */
+
+.op-map {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(84vw, 116vh);
+  height: auto;
+  transform: translateY(7vh);
+  z-index: 1;
+}
+
+.op-pin { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.op-pin-core { fill: var(--teal-bright); filter: drop-shadow(0 0 10px rgba(23, 200, 227, .8)); }
+.op-pin-ring { fill: none; stroke: var(--teal-bright); stroke-width: 2.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.op-pin.show .op-pin-ring { animation: pinPulse 2.1s ease-out infinite; }
+
+@keyframes pinPulse {
+  0% { transform: scale(.5); opacity: .85; }
+  100% { transform: scale(4.6); opacity: 0; }
+}
+
 /* ── Orbs: blurred teal glows + rising micro-bubbles ───────────────────────
    Shared by the opening, the hero and the join band so the deep-navy world
    reads as one continuous space. Positions/sizes come from nth-of-type
