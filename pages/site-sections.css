@@ -622,7 +622,6 @@ body.js .flow.in::after { transform: scaleX(1); }
 
 @media (max-width: 620px) {
   .hero { padding: 106px 0 56px; }
-  .hero .kicker { font-size: 12px; padding: 4px 13px; margin-bottom: 16px; }
   .hero h1 { font-size: clamp(27px, 8.4vw, 31px); }
   .hero p.lead { font-size: 15.5px; margin-bottom: 10px; }
   .hero p.sub-lead { font-size: 13.5px; margin-bottom: 26px; }
@@ -718,12 +717,11 @@ body.js .flow.in::after { transform: scaleX(1); }
   /* Hero entrance fires when site.js marks body.entered — the IntersectionObserver
      trips as the hero scrolls into view. Without JS the elements simply sit in
      their natural visible state. */
-  body.entered .hero .kicker, body.entered .hero h1, body.entered .hero .lead,
+  body.entered .hero h1, body.entered .hero .lead,
   body.entered .hero .sub-lead, body.entered .hero-actions {
     animation: riseIn .7s ease both;
   }
-  body.entered .hero .kicker { animation-delay: .12s; }
-  body.entered .hero h1 { animation-delay: .22s; }
+  body.entered .hero h1 { animation-delay: .12s; }
   body.entered .hero .lead { animation-delay: .38s; }
   body.entered .hero .sub-lead { animation-delay: .46s; }
   body.entered .hero-actions { animation-delay: .56s; }
