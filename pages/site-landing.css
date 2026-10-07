@@ -151,27 +151,6 @@ body.intro-done .intro {
   will-change: filter;
 }
 
-.intro-underline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  display: flex;
-  justify-content: center;
-  z-index: 3;
-  pointer-events: none;
-}
-
-.intro-underline i {
-  display: block;
-  width: min(430px, 52vw);
-  height: 3px;
-  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * .8);
-  background: linear-gradient(90deg, transparent, var(--teal-bright), transparent);
-  transform: scaleX(0);
-  border-radius: 3px;
-}
-
 /* ── Orbs: blurred teal glows + rising micro-bubbles ───────────────────────
    Shared by the opening, the hero and the join band so the deep-navy world
    reads as one continuous space. Positions/sizes come from nth-of-type

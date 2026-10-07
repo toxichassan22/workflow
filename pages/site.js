@@ -180,7 +180,6 @@
       });
     });
     var brand = document.getElementById('introBrand');
-    var uline = document.getElementById('introUline');
     if (!path || !cam) {
       // Markup mismatch — never leave a dead overlay covering the page.
       intro.parentNode.removeChild(intro);
@@ -251,11 +250,9 @@
       brand.style.opacity = seg(t, 3720, 4280).toFixed(3);
       brand.style.letterSpacing = lerp(.85, .14, bp).toFixed(3) + 'em';
       brand.style.filter = 'blur(' + lerp(12, 0, bp).toFixed(1) + 'px)';
-
-      uline.style.transform = 'scaleX(' + ease(seg(t, 4700, 5100)).toFixed(3) + ')';
     }
 
-    var DUR = 5600;
+    var DUR = 5200;
     var t0 = performance.now();
     var skipped = false;
     var done = false;
