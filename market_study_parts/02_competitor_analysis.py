@@ -181,6 +181,7 @@ def build_consultant_system_prompt(offer_lang=None):
         '2. أعد قائمة جديدة تحل محل الجدول الحالي بالكامل.\n'
         '3. اختر المنافسين الأقرب من حيث: نوع الاستخدام، مستوى المشروع، الموقع، المساحات، الأسعار، حالة المشروع.\n'
         f'4. حاول توفير {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إذا كانوا متاحين.\n'
+        '   وللمشروع متعدد المحاور يكون هذا الحد لكل محور من محاور مكوناته على حدة، مع تعليم كل منافس بالمحور الذي يقيسه.\n'
         '5. إذا لم يتوفر العدد الكافي وسّع نطاق البحث تدريجيًا مع توضيح ذلك.\n'
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
         '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
@@ -392,6 +393,11 @@ def _project_input_block(payload):
 def build_competitors_user_prompt(payload, existing_competitors, mode='generate', offer_lang='ar'):
     existing = existing_competitors if isinstance(existing_competitors, list) else []
     named = [row for row in existing if _norm(row.get('name'))]
+    axes = project_competitor_axes(payload)
+    axis_labels = [benchmark_axis_label(axis, offer_lang) for axis in axes]
+    axis_list = '، '.join(axis_labels)
+    multi_axis = len(axes) > 1
+    needs_benchmarks = any(axis['key'] != 'general' for axis in axes)
 
     def is_complete(row):
         price_type = _norm(row.get('price_type'))
@@ -400,9 +406,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         area_mode = 'range' if _norm(row.get('area_mode')) == 'range' or row.get('area_from') or row.get('area_to') else 'fixed'
         area_complete = (bool(_norm(row.get('area_from'))) and bool(_norm(row.get('area_to')))
                          if area_mode == 'range' else bool(_norm(row.get('area_sqm'))))
-        return all(_norm(row.get(key)) for key in (
+        return (all(_norm(row.get(key)) for key in (
             'project_type', 'status', 'classification', 'operation_type', 'price_type', 'source'
         )) and area_complete and price_complete
+            and (not needs_benchmarks or bool(row.get('benchmarks'))))
 
     incomplete = [row for row in named if not is_complete(row)]
     today = date.today().isoformat()
@@ -426,16 +433,28 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'name verbatim in its source spelling.\n\n'
         if en else ''
     )
+    benchmark_directive = (
+        f'لكل منافس املأ benchmarks بقيمة أو أكثر حصرًا من محاور مشروعنا: {axis_list} — '
+        'المحور الذي يقيسه المنافس من مكونات مشروعنا، والمنافس متعدد الاستخدامات يحمل أكثر من قيمة. '
+        if needs_benchmarks else ''
+    )
     if mode == 'fill':
         task = (
             'المستخدم كتب أسماء منافسين وطلب إكمال بياناتهم. '
             'أبق الاسم كما هو، ولا تحذف صفًا، واملأ الحقول الناقصة فقط من مصادر موثوقة. '
             'إن لم تجد معلومة اترك الحقل فارغًا أو اكتب غير متوفر من مصدر موثوق في المصدر.'
+            + benchmark_directive
         )
     else:
+        axis_requirement = (
+            f'المشروع متعدد المحاور — أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل '
+            f'لكل محور ({"، ".join(f"{label}: {COMPETITOR_MIN_DIRECT}" for label in axis_labels)}) إن أمكن. '
+            if multi_axis else
+            f'أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إن أمكن. '
+        )
         task = (
             'ولّد قائمة منافسين جديدة كاملة تحل محل الجدول الحالي. '
-            f'أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إن أمكن. '
+            + axis_requirement + benchmark_directive +
             'اقتصر على مشاريع مذكورة بالاسم في صفحات نتائج البحث المسترجعة — ابحث عن قوائم '
             'ومقالات وصفحات مطوّرين تسمّي مجمعات ومشاريع حقيقية في المدينة، ولا تكتب اسمًا '
             'من ذاكرتك: كل صف يُفحص آليًا، وأي اسم لا يظهر في أي صفحة مسترجعة يُعلَّم '
@@ -526,6 +545,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "area_to": "نهاية النطاق أو فارغ للقيمة الثابتة",\n'
         f'      "status": "{enum["status"]}",\n'
         f'      "classification": "{enum["classification"]}",\n'
+        f'      "benchmarks": ["{axis_labels[0]}"]' + (f' — قيم حصرية من: {axis_list}' if needs_benchmarks else '') + ',\n'
         f'      "operation_type": "{enum["operation_type"]}",\n'
         '      "price_type": "",\n'
         '      "price_value": "",\n'
@@ -754,6 +774,12 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     lng = _clean_numeric(_first_nonempty(
         row.get('lng'), row.get('lon'), row.get('longitude'), row.get('خط الطول')))
     conflict_warnings = row.get('conflict_warnings') if isinstance(row.get('conflict_warnings'), list) else []
+    raw_benchmarks = (row.get('benchmarks') or row.get('benchmark_axes')
+                      or row.get('measured_against') or row.get('serves_components')
+                      or row.get('يُقاس على') or row.get('يقاس على'))
+    benchmark_items = raw_benchmarks if isinstance(raw_benchmarks, (list, tuple)) else [raw_benchmarks]
+    benchmarks = _unique_values(
+        part for item in benchmark_items for part in _split_multi_values(item))
     result = {
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
@@ -765,6 +791,7 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'area_cache': {'area_sqm': area_sqm, 'area_from': area_from, 'area_to': area_to},
         'status': status,
         'classification': classification,
+        'benchmarks': benchmarks,
         'logo_file_id': _norm(row.get('logo_file_id') or row.get('logoFileId')),
         'logo_path': _norm(row.get('logo_path') or row.get('logoPath')),
         'logo_url': logo_url,

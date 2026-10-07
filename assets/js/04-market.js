@@ -99,7 +99,7 @@
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>
-                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
                 <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
               </tr></thead>
               <tbody></tbody>

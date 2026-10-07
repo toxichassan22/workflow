@@ -425,6 +425,11 @@ _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'lon': 'lng',
     'longitude': 'lng',
     'خط الطول': 'lng',
+    'benchmarks': 'benchmarks',
+    'benchmark_axes': 'benchmarks',
+    'measured_against': 'benchmarks',
+    'يُقاس على': 'benchmarks',
+    'يقاس على': 'benchmarks',
 }
 
 _COMPETITOR_SOURCE_FIELD_LABELS = {
@@ -445,6 +450,7 @@ _COMPETITOR_SOURCE_FIELD_LABELS = {
     'distance_km': 'المسافة من موقع المشروع',
     'lat': 'خط العرض',
     'lng': 'خط الطول',
+    'benchmarks': 'يُقاس على',
 }
 
 

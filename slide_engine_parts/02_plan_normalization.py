@@ -1501,7 +1501,8 @@ def _market_study_facts(project_data):
         row = {key: value for key, value in competitor.items()
                if key not in ('id', 'field_sources', 'source_urls', 'row_source', 'logo_file_id',
                               'logo_path', 'logo_url', 'logo_source_url', 'conflict_warnings',
-                              'logo_import_warning', 'price_cache', 'area_cache') and value not in (None, '', [])}
+                              'logo_import_warning', 'price_cache', 'area_cache',
+                              'benchmarks') and value not in (None, '', [])}
         if competitor.get('logo_file_id') or competitor.get('logo_path') or competitor.get('logo_url'):
             row['شعار المنافس'] = f'##COMPETITOR_LOGO_{index}##'
         if row:

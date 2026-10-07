@@ -1,5 +1,88 @@
 /* 05-market-competitors.js - index.html lines 11653-12627, shared global scope, classic scripts in order */
 
+    // Benchmark axes mirror market_study.project_competitor_axes — each
+    // revenue-bearing component use needs COMPETITOR_MIN_DIRECT competitors
+    // of its own, tagged in the row's benchmarks field.
+    const MARKET_USE_AXIS_DEFS = {
+      residential: { label: 'سكني', labelEn: 'Residential' },
+      office: { label: 'مكاتب', labelEn: 'Offices' },
+      retail: { label: 'تجزئة ومحلات', labelEn: 'Retail' },
+      hospitality: { label: 'فندقي', labelEn: 'Hospitality' },
+      industrial: { label: 'صناعي', labelEn: 'Industrial' },
+      logistics: { label: 'لوجستي', labelEn: 'Logistics' },
+      entertainment: { label: 'ترفيهي', labelEn: 'Entertainment' },
+      commercial: { label: 'تجاري', labelEn: 'Commercial' },
+      other: { label: 'أخرى', labelEn: 'Other' },
+      general: { label: 'عام', labelEn: 'General' }
+    };
+    const MARKET_NON_COMPETING_USES = ['parking', 'services'];
+    const MARKET_SUBTYPE_AXIS_KEYS = {
+      'سكني': 'residential', 'مكاتب': 'office',
+      'تجزئة ومحلات': 'retail', 'مطاعم ومقاهي': 'retail', 'مركز تجاري': 'retail',
+      'فندق': 'hospitality', 'شقق مخدومة': 'hospitality', 'منتجع': 'hospitality',
+      'مساكن فندقية': 'hospitality',
+      'مصنع': 'industrial', 'مجمع صناعي': 'industrial',
+      'مستودعات': 'logistics', 'مركز لوجستي': 'logistics'
+    };
+    const MARKET_MAIN_AXIS_KEYS = {
+      'سكني': 'residential', 'تجاري': 'commercial', 'فندقي': 'hospitality',
+      'صناعي ولوجستي': 'industrial'
+    };
+
+    function marketBenchmarkAxes() {
+      const axes = [];
+      const add = (key, base, label, name) => {
+        const def = MARKET_USE_AXIS_DEFS[base];
+        if (!def) return;
+        const existing = axes.find(axis => axis.key === key);
+        if (existing) {
+          if (name && !existing.names.includes(name)) existing.names.push(name);
+          return;
+        }
+        axes.push({ key, label: label || def.label, labelEn: base === 'other' ? (label || def.labelEn) : def.labelEn, names: name ? [name] : [] });
+      };
+      const components = typeof getComponentRowsData === 'function' ? getComponentRowsData() : [];
+      components.forEach(component => {
+        if (String(component.investmentModel || '') === 'nonRevenue') return;
+        const use = String(component.useType || '').trim();
+        if (!use || MARKET_NON_COMPETING_USES.includes(use)) return;
+        const name = String(component.name || '').trim();
+        if (MARKET_USE_AXIS_DEFS[use]) add(use, use, '', name);
+        else add('other:' + (name || 'أخرى'), 'other', name || 'أخرى', name);
+      });
+      if (!axes.length) {
+        (typeof selectedProjectSubtypes === 'function' ? selectedProjectSubtypes() : []).forEach(subtype => {
+          const key = MARKET_SUBTYPE_AXIS_KEYS[subtype];
+          if (key) add(key, key, '', subtype);
+        });
+      }
+      if (!axes.length) {
+        (typeof selectedProjectTypeMains === 'function' ? selectedProjectTypeMains() : []).forEach(main => {
+          const key = MARKET_MAIN_AXIS_KEYS[main];
+          if (key) add(key, key, '', main);
+        });
+      }
+      if (!axes.length) add('general', 'general', '', '');
+      return axes;
+    }
+
+    function marketBenchmarkAxisLabel(axis) {
+      return marketProjectIsEnglish() ? (axis.labelEn || axis.label) : axis.label;
+    }
+
+    function marketBenchmarkValues(row = {}) {
+      const raw = row.benchmarks || row.benchmark_axes || row.measured_against || row['يُقاس على'] || [];
+      const list = Array.isArray(raw) ? raw : String(raw).split(/[,،;|]/);
+      return list.map(value => String(value || '').trim()).filter(Boolean);
+    }
+
+    function syncMarketBenchmarksColumn() {
+      const show = marketBenchmarkAxes().length > 1;
+      document.querySelectorAll('#marketCompetitorsTable [data-benchmarks-col], #marketCompetitorsTable [data-field="benchmarks_cell"]').forEach(el => {
+        el.style.display = show ? '' : 'none';
+      });
+    }
+
     function renderCompetitorAreaInputs(tr, row = {}) {
       const cell = tr.querySelector('[data-field="area_cell"]');
       if (!cell) return;
@@ -252,6 +335,16 @@
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = marketPriceTypesForOperation(operation);
       tr.dataset.previousPriceType = priceType;
+      const benchAxes = marketBenchmarkAxes();
+      const benchSelected = marketBenchmarkValues(row);
+      const benchOptions = Array.from(new Set(
+        benchAxes.map(marketBenchmarkAxisLabel).concat(benchSelected)));
+      const benchmarksHtml = '<select data-field="benchmarks" multiple size="' +
+        Math.min(Math.max(benchAxes.length, 1), 4) + '">' +
+        benchOptions.map(value =>
+          '<option value="' + escapeHtml(value) + '"' +
+          (benchSelected.includes(value) ? ' selected' : '') + '>' + escapeHtml(value) + '</option>'
+        ).join('') + '</select>';
       let warnings = [];
       try { warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { warnings = []; }
       const warningsHtml = warnings.map(item => {
@@ -283,6 +376,7 @@
         '<td data-field="logo_cell"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_PROJECT_TYPES_EN : MARKET_PROJECT_TYPES, marketTranslateCompetitorValue(row.project_type)) + '</select></td>' +
         '<td><select data-field="classification">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_CLASSIFICATIONS_EN : MARKET_COMPETITOR_CLASSIFICATIONS, marketTranslateCompetitorValue(row.classification)) + '</select></td>' +
+        '<td data-field="benchmarks_cell">' + benchmarksHtml + '</td>' +
         '<td data-field="area_cell"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_STATUSES_EN : MARKET_COMPETITOR_STATUSES, marketTranslateCompetitorValue(row.status)) + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
@@ -321,6 +415,7 @@
         persistMarketStudyFromDom();
       });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      syncMarketBenchmarksColumn();
       refreshDynamicI18n(tr);
     }
 
@@ -382,6 +477,7 @@
         area_cache,
         status: read('status'),
         classification: read('classification'),
+        benchmarks: Array.from(tr.querySelector('[data-field="benchmarks"]')?.selectedOptions || []).map(option => option.value).filter(Boolean),
         logo_file_id: tr.dataset.logoFileId || '',
         logo_path: tr.dataset.logoPath || '',
         logo_url: tr.dataset.logoUrl || '',

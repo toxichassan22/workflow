@@ -101,25 +101,70 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     named_generated = [row for row in generated
                        if isinstance(row, dict) and str(row.get('name') or '').strip()]
     # Expansion passes: a thin list usually means the model settled for the
-    # first pages it saw. Each pass takes a different angle — the web plugin
-    # derives fresh queries from the prompt — so later rounds surface projects
-    # the generic first query missed. Stop at the minimum or when a pass
-    # answers cleanly yet adds nothing.
+    # first pages it saw. The minimum is per benchmark axis — a mixed-use
+    # project needs COMPETITOR_MIN_DIRECT direct competitors for every
+    # component — so deficient axes get their own targeted query first, then
+    # the generic angles as a backstop. Stop when every axis is covered or a
+    # pass answers cleanly yet adds nothing.
     _scope = market_study.competitor_scope_text(payload)
     _ptype = str(payload.get('projectType') or payload.get('project_type') or 'عقاري')
     _city = str(payload.get('city') or '')
     _district = str(payload.get('district') or '')
-    expansion_angles = [
+    axes = market_study.project_competitor_axes(payload)
+    multi_axis = len(axes) > 1
+    min_per_axis = market_study.COMPETITOR_MIN_DIRECT
+    needs_benchmarks = any(axis['key'] != 'general' for axis in axes)
+    axis_label_list = '، '.join(
+        market_study.benchmark_axis_label(axis, offer_lang) for axis in axes)
+
+    def _axis_deficits():
+        counts = {axis['key']: 0 for axis in axes}
+        for item in named_generated:
+            for key in market_study.competitor_row_axis_keys(
+                    item, axes, offer_lang=offer_lang):
+                if key in counts:
+                    counts[key] += 1
+        return [axis for axis in axes if counts[axis['key']] < min_per_axis]
+
+    axis_queries = {
+        axis['key']: f'{axis["search"]} في {_city} قرب {_district or "موقع المشروع"}'
+        for axis in axes if axis['key'] != 'general'}
+    generic_angles = [
         f'قوائم وأخبار أفضل المشاريع العقارية في {_city} قرب {_district or "موقع المشروع"}',
         f'مشاريع عقارية مسماة (كمبوند، برج، مجمع، مخطط، وجهة سكنية) في أحياء {_city} المجاورة لـ {_district or "موقع المشروع"}',
         f'مشاريع كبار المطورين العقاريين في {_city} — قائمة أو تحت الإنشاء',
     ]
     seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
+    tried_axes = set()
+    generic_round = 0
     round_no = 0
-    while (mode != 'fill' and _market_search_ran(res)
-           and len(named_generated) < market_study.COMPETITOR_MIN_DIRECT
-           and round_no < len(expansion_angles)):
+    max_rounds = len(axis_queries) + len(generic_angles)
+    while mode != 'fill' and _market_search_ran(res) and round_no < max_rounds:
+        deficits = _axis_deficits()
+        if not deficits:
+            break
+        deficit_labels = '، '.join(
+            market_study.benchmark_axis_label(axis, offer_lang) for axis in deficits)
+        target = next((axis for axis in deficits
+                       if axis['key'] in axis_queries and axis['key'] not in tried_axes), None)
+        if target is not None:
+            tried_axes.add(target['key'])
+            angle = axis_queries[target['key']]
+            priority = (
+                'أولوية هذه الجولة منافسو محور '
+                f'«{market_study.benchmark_axis_label(target, offer_lang)}» — '
+                'علّمهم في benchmarks بقيمة المحور نفسه.')
+        elif generic_round < len(generic_angles):
+            angle = generic_angles[generic_round]
+            generic_round += 1
+            priority = (
+                f'المحاور الناقصة حاليًا: {deficit_labels} — أعطها الأولوية وعلّم كل '
+                'منافس بقيمة محوره في benchmarks.' if multi_axis else '')
+        else:
+            break
         report(24 + round_no,
+               f'عدد منافسي محور {deficit_labels} أقل من الحد الأدنى — بحث إضافي ({round_no + 1})...'
+               if multi_axis else
                f'عدد المنافسين أقل من الحد الأدنى — بحث إضافي ({round_no + 1}) عن مشاريع مسماة أخرى...')
         known = '، '.join(str(row.get('name') or '') for row in named_generated) or 'لا يوجد'
         expansion_prompt = (
@@ -127,11 +172,14 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             + (f' — {_district}' if _district else '')
             + f'. نطاق المنافسين: {_scope}.\n'
             + f'المنافسون المسجلون حتى الآن: {known}.\n'
-            + f'ابحث في الويب عن: {expansion_angles[round_no]} — مشاريع مسماة '
+            + f'ابحث في الويب عن: {angle} — مشاريع مسماة '
               'حقيقية لم ترد في القائمة. يجوز إدراج مشاريع أبعد قليلًا مع '
               'distance_km الحقيقية، ولا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
-              'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
-              '"operation_type":"","price_type":"","price":"","source_urls":[]}]} '
+            + (priority + '\n' if priority else '')
+            + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
+               if needs_benchmarks else '')
+            + 'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
+              '"benchmarks":[],"operation_type":"","price_type":"","price":"","source_urls":[]}]} '
               'مع بقية الحقول المعتادة عند توفرها.'
               + (' Write every field value in English using the allowed English enum '
                  'values (status: Operating/Under Construction/Off-Plan; classification: '

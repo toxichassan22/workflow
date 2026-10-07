@@ -209,6 +209,92 @@ MISSING_VALUE_PHRASE_EN = 'not available from a reliable source'
 
 COMPETITOR_MIN_DIRECT = 5
 
+# Benchmark axes — every revenue-bearing project component is an axis the
+# competitor table must cover with COMPETITOR_MIN_DIRECT direct competitors of
+# its own, each tagged in the row's benchmarks field. 'search' seeds the
+# targeted expansion query for a deficient axis.
+COMPONENT_USE_AXES = {
+    'residential': {'label': 'سكني', 'label_en': 'Residential',
+                    'search': 'مشاريع ومجمعات سكنية مسمّاة (أبراج سكنية، كمبوندات، مخططات)'},
+    'office': {'label': 'مكاتب', 'label_en': 'Offices',
+               'search': 'أبراج ومجمعات مكاتب إدارية مسمّاة'},
+    'retail': {'label': 'تجزئة ومحلات', 'label_en': 'Retail',
+               'search': 'مراكز تجارية ومشاريع تجزئة ومحلات مسمّاة'},
+    'hospitality': {'label': 'فندقي', 'label_en': 'Hospitality',
+                    'search': 'فنادق وشقق مخدومة ومنتجعات مسمّاة'},
+    'industrial': {'label': 'صناعي', 'label_en': 'Industrial',
+                   'search': 'مشاريع ومجمعات صناعية مسمّاة'},
+    'logistics': {'label': 'لوجستي', 'label_en': 'Logistics',
+                  'search': 'مستودعات ومراكز لوجستية مسمّاة'},
+    'entertainment': {'label': 'ترفيهي', 'label_en': 'Entertainment',
+                      'search': 'وجهات ومشاريع ترفيهية مسمّاة'},
+    'commercial': {'label': 'تجاري', 'label_en': 'Commercial',
+                   'search': 'مشاريع تجارية مسمّاة (مكاتب، مراكز تجارية، تجزئة)'},
+    'other': {'label': 'أخرى', 'label_en': 'Other',
+              'search': 'مشاريع عقارية مسمّاة من النشاط نفسه'},
+    'general': {'label': 'عام', 'label_en': 'General',
+                'search': 'مشاريع عقارية مسمّاة من النوع نفسه'},
+}
+
+# Component uses that never need their own competitors (support facilities).
+COMPONENT_NON_COMPETING_USES = ('parking', 'services')
+
+# Mixed-use subtype labels and project main types mapped onto axis keys — the
+# fallback sources when the components table is empty.
+MIXED_COMPONENT_AXIS_KEYS = {
+    'سكني': 'residential',
+    'مكاتب': 'office',
+    'تجزئة ومحلات': 'retail', 'مطاعم ومقاهي': 'retail', 'مركز تجاري': 'retail',
+    'فندق': 'hospitality', 'شقق مخدومة': 'hospitality', 'منتجع': 'hospitality',
+    'مساكن فندقية': 'hospitality',
+    'مصنع': 'industrial', 'مجمع صناعي': 'industrial',
+    'مستودعات': 'logistics', 'مركز لوجستي': 'logistics',
+}
+PROJECT_MAIN_AXIS_KEYS = {
+    'سكني': 'residential', 'تجاري': 'commercial', 'فندقي': 'hospitality',
+    'صناعي ولوجستي': 'industrial',
+}
+
+# Values the model may write in a row's benchmarks field (matched after
+# _fold_choice, so Arabic and English both land).
+BENCHMARK_AXIS_ALIASES = {
+    'residential': {'سكني', 'سكنية', 'إسكان', 'وحدات سكنية', 'شقق سكنية',
+                    'residential', 'housing', 'residential units'},
+    'office': {'مكاتب', 'مكتب', 'إداري', 'مكاتب إدارية',
+               'office', 'offices', 'office space'},
+    'retail': {'تجزئة', 'تجزئة ومحلات', 'محلات', 'تجاري', 'مركز تجاري', 'مول',
+               'مطاعم', 'مطاعم ومقاهي', 'مقاهي',
+               'retail', 'mall', 'shops', 'restaurants', 'f&b'},
+    'commercial': {'تجاري', 'مكاتب', 'تجزئة', 'محلات', 'مركز تجاري', 'مطاعم',
+                   'commercial', 'office', 'retail'},
+    'hospitality': {'فندقي', 'فندق', 'فنادق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية',
+                    'hospitality', 'hotel', 'hotels', 'serviced apartments', 'resort'},
+    'industrial': {'صناعي', 'مصنع', 'مصانع', 'مجمع صناعي', 'صناعي ولوجستي',
+                   'industrial', 'factory', 'factories'},
+    'logistics': {'لوجستي', 'مستودعات', 'مخازن', 'مركز لوجستي', 'لوجستية',
+                  'logistics', 'warehouse', 'warehouses'},
+    'entertainment': {'ترفيهي', 'ترفيه', 'ترفيهية', 'entertainment'},
+    'general': {'عام', 'general'},
+}
+
+# A competitor row that never got benchmarks tagged is attributed by its
+# project_type instead; 'متعدد الاستخدامات' benchmarks every axis.
+BENCHMARK_PROJECT_TYPE_FALLBACK = {
+    'سكني': {'residential'},
+    'residential': {'residential'},
+    'تجاري': {'office', 'retail', 'commercial'},
+    'commercial': {'office', 'retail', 'commercial'},
+    'فندقي': {'hospitality'},
+    'hospitality': {'hospitality'},
+    'hotel': {'hospitality'},
+    'صناعي ولوجستي': {'industrial', 'logistics'},
+    'industrial & logistics': {'industrial', 'logistics'},
+    'industrial and logistics': {'industrial', 'logistics'},
+    'متعدد الاستخدامات': '*',
+    'mixed-use': '*',
+    'mixed use': '*',
+}
+
 SUMMARY_LABEL = 'تحليل السوق'
 SUMMARY_SECTIONS = [
     {'key': 'market_definition', 'label': 'تعريف السوق'},
