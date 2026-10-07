@@ -1,0 +1,295 @@
+/* Landing-only styles, part 3: the mini product visuals — small pure-CSS
+   mockups (sheets, bars, chips, progress fills, a merge bracket) that sit at
+   the foot of the feature cards, inside the flow pipeline and beside the
+   sources feed. No icons, no SVG — shapes and text only. Loaded after
+   site-sections.css on landing.html only; the legal pages never see it. */
+
+/* Vis slots: feature cards pin their mock to the foot so all six cards share
+   one bottom line; flow steps center theirs inside a fixed band so the five
+   cells read as one aligned pipeline. */
+.fc-vis { margin-top: auto; padding-top: 18px; }
+.flow-vis { min-height: 66px; display: flex; flex-direction: column; justify-content: center; }
+
+/* ── Atoms ───────────────────────────────────────────────────────────────── */
+
+.vsheet {
+  background: #F7FAFC;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.vline {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: #E2EBF2;
+  width: calc(var(--w, .6) * 100%);
+}
+.vline + .vline { margin-top: 6px; }
+.vline.hi { background: var(--teal-soft); }
+
+.vx-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 9px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.vpill {
+  flex: none;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 3px 9px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.vpill.ok { color: var(--teal-dark); background: var(--teal-soft); border: 1px solid rgba(15, 169, 196, .4); }
+.vpill.wait { color: var(--muted); background: #fff; border: 1px solid var(--line); }
+
+/* ── Compare: the traditional path against the platform (feature 1, navy) ── */
+
+.vx-compare { display: grid; gap: 12px; max-width: 460px; }
+.vx-row { display: grid; gap: 5px; }
+.vx-k { font-size: 11.5px; font-weight: 700; color: #AFC4D6; }
+.vx-track { height: 10px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.vx-track i { display: block; height: 100%; border-radius: inherit; width: calc(var(--w, .5) * 100%); background: #5F7A93; }
+.vx-track i.on { background: linear-gradient(90deg, var(--teal), var(--teal-bright)); box-shadow: 0 0 14px rgba(23, 200, 227, .35); }
+
+/* ── Descending bars: repeated cost coming down (feature 2) ──────────────── */
+
+.vx-bars { display: flex; align-items: flex-end; gap: 8px; height: 62px; border-bottom: 2px solid var(--line); }
+.vx-bars i { flex: 1; height: calc(var(--h, .5) * 100%); border-radius: 5px 5px 0 0; background: linear-gradient(180deg, #C9D8E4, #DEE8F0); }
+.vx-bars i.on { background: linear-gradient(180deg, var(--teal-bright), var(--teal-dark)); box-shadow: 0 6px 16px rgba(15, 169, 196, .25); }
+
+/* ── Merge: three inputs feed a bus that feeds one study (feature 3) ──────
+   Source chips each touch a stub on the collector rail; one stub leaves the
+   rail's midpoint into the target chip. All logical-sided, so the diagram
+   converges right→left in Arabic and left→right in English. */
+
+.vx-merge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px auto;
+  grid-template-rows: repeat(3, auto);
+  row-gap: 8px;
+  align-items: center;
+}
+.vx-merge .vx-chip { display: flex; align-items: center; justify-content: center; position: relative; text-align: center; grid-column: 1; }
+.vx-merge .vx-chip:not(.tgt)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  inset-inline-end: -14px;
+  width: 13px;
+  border-top: 1.5px solid rgba(15, 169, 196, .55);
+}
+.vx-brkt {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: stretch;
+  position: relative;
+  background: radial-gradient(circle 3.4px at center, var(--teal) 98%, transparent 102%) no-repeat;
+}
+.vx-brkt::before {
+  content: '';
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  inset-inline-start: 50%;
+  width: 0;
+  border-inline-start: 1.5px solid rgba(15, 169, 196, .55);
+}
+.vx-brkt::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 0;
+  width: 13px;
+  border-top: 1.5px solid rgba(15, 169, 196, .55);
+}
+.vx-merge .tgt { grid-column: 3; grid-row: 1 / -1; color: var(--teal-dark); background: var(--teal-soft); border-color: rgba(15, 169, 196, .5); }
+
+/* ── Cited sheet: a marked line with its sources tagged (feature 4) ──────── */
+
+.vx-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.vx-tags > span {
+  position: relative;
+  margin-top: 13px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--teal-dark);
+  background: #fff;
+  border: 1px solid rgba(15, 169, 196, .45);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.vx-tags > span::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  inset-inline-start: 50%;
+  width: 0;
+  height: 13px;
+  border-inline-start: 2px dotted rgba(15, 169, 196, .6);
+}
+
+/* ── Review rows: a content line with its approval state (feature 5, flow 4) */
+
+.vx-review { display: grid; gap: 8px; }
+.vr { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.vr .vline { flex: 1; margin: 0; }
+
+/* ── Brand strip: a slide that takes the tenant's palette (feature 6) ──────
+   The swatch dots reuse the real showcase tenants' accents — the deck takes
+   each client's colors, which is the point the card makes. */
+
+.vx-brand { display: grid; grid-template-columns: minmax(0, 230px) minmax(0, 1fr); gap: 22px; align-items: center; }
+.vb-slide { background: #fff; aspect-ratio: 16 / 9; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 12px 30px rgba(8, 38, 70, .12); }
+.vb-band { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--p), var(--teal-bright)); }
+.vb-head { display: flex; align-items: center; gap: 7px; margin-bottom: 2px; }
+.vb-mark { flex: none; width: 15px; height: 15px; border-radius: 4px; background: var(--p); }
+.vb-head .vline { flex: 1; margin: 0; }
+.vb-swatches { display: flex; gap: 8px; margin-bottom: 12px; }
+.vb-swatches i { width: 17px; height: 17px; border-radius: 50%; background: var(--c, #ccc); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(8, 38, 70, .18); }
+.vb-langs { display: flex; gap: 6px; }
+
+/* ── Flow step mocks ─────────────────────────────────────────────────────── */
+
+/* Step 1 — a small project form: two fields and a submit bar. */
+.vx-form { display: grid; gap: 7px; }
+.vf { position: relative; height: 16px; border: 1px solid var(--line); border-radius: 6px; background: #FBFDFF; }
+.vf::after { content: ''; position: absolute; top: 5px; inset-inline-start: 7px; width: calc(var(--w, .55) * 100%); height: 4px; border-radius: 2px; background: #DFE8EF; }
+.vbtn { height: 15px; width: 46%; border-radius: 6px; background: linear-gradient(135deg, var(--teal), var(--teal-dark)); }
+
+/* Step 2 — a dashed drop zone holding the uploaded files as chips. */
+.vu-drop { border: 1.5px dashed rgba(15, 169, 196, .55); border-radius: 10px; background: rgba(15, 169, 196, .05); padding: 9px 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Step 3 — analysis work as filling progress tracks. */
+.vx-prog { display: grid; gap: 8px; }
+.vp { height: 8px; border-radius: 5px; background: #EAF1F6; overflow: hidden; }
+.vp i { display: block; height: 100%; border-radius: inherit; width: calc(var(--w, .5) * 100%); background: linear-gradient(90deg, var(--teal), var(--teal-bright)); }
+
+/* Step 5 — the approved document leaving as a tagged export. */
+.vx-export { display: flex; align-items: center; gap: 10px; }
+.vx-export .vsheet { flex: 1; }
+.ve-tag { flex: none; direction: ltr; font-size: 10.5px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--teal), var(--teal-dark)); border-radius: 6px; padding: 4px 9px; box-shadow: 0 4px 12px rgba(15, 169, 196, .3); }
+
+/* ── Sources → study: the document the seven feeds converge into ───────────
+   Sticky on desktop so the source rows keep "arriving" at it while the list
+   scrolls; its ::before stub lands on the collector rail exactly (half the
+   72px column gap on each side). On small screens it lands after the rows
+   as the section's summary card. */
+
+.method-study { position: relative; }
+
+@media (min-width: 981px) {
+  .method-study { position: sticky; top: 108px; }
+  .method-study::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    inset-inline-start: -36px;
+    width: 36px;
+    border-top: 1.5px solid rgba(23, 200, 227, .45);
+  }
+}
+
+.ms-doc {
+  background: linear-gradient(160deg, #0C2748, #081E38);
+  border: 1px solid rgba(23, 200, 227, .25);
+  border-radius: 18px;
+  padding: 20px 22px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, .35), 0 0 44px rgba(15, 169, 196, .06);
+}
+
+.ms-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+}
+.ms-title { font-size: 13px; font-weight: 800; color: #EAF3F9; }
+.ms-tag {
+  margin-inline-start: auto;
+  direction: ltr;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--teal-bright);
+  border: 1px solid rgba(23, 200, 227, .45);
+  background: rgba(23, 200, 227, .1);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.ms-lines { margin-bottom: 14px; }
+.ms-lines i { display: block; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .12); }
+.ms-lines i + i { margin-top: 6px; }
+.ms-lines i:nth-child(1) { width: 74%; }
+.ms-lines i:nth-child(2) { width: 58%; }
+.ms-lines i:nth-child(3) { width: 66%; }
+
+.ms-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; }
+.ms-chips li {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #DCEBF4;
+  border: 1px solid rgba(23, 200, 227, .5);
+  background: rgba(23, 200, 227, .12);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 980px) {
+  .flow-vis { min-height: 0; max-width: 300px; }
+}
+
+@media (max-width: 620px) {
+  .vx-brand { grid-template-columns: 1fr; }
+  .vb-slide { max-width: 250px; }
+}
+
+/* ── Motion ────────────────────────────────────────────────────────────────
+   Same contract as site-sections.css: every animation is gated on body.js
+   plus the section's .in marker, so a scriptless or reduced-motion visit
+   renders everything in its final state. */
+
+@media (prefers-reduced-motion: no-preference) {
+
+  /* Compare + progress fills grow from empty once their section reveals;
+     each later track follows the one above it. */
+  .vx-track i, .vp i { transition: width .85s ease; }
+  body.js .features:not(.in) .vx-track i { width: 0; }
+  body.js .flow:not(.in) .vp i { width: 0; }
+  body.js .features.in .vx-row:nth-child(2) .vx-track i { transition-delay: .22s; }
+  body.js .flow.in .vp:nth-child(2) i { transition-delay: .18s; }
+  body.js .flow.in .vp:nth-child(3) i { transition-delay: .34s; }
+
+  /* Cost bars grow up from the baseline, left to right in reading order. */
+  .vx-bars i { transition: transform .7s ease; transform-origin: 50% 100%; }
+  body.js .features:not(.in) .vx-bars i { transform: scaleY(0); }
+  body.js .features.in .vx-bars i:nth-of-type(2) { transition-delay: .07s; }
+  body.js .features.in .vx-bars i:nth-of-type(3) { transition-delay: .14s; }
+  body.js .features.in .vx-bars i:nth-of-type(4) { transition-delay: .21s; }
+  body.js .features.in .vx-bars i:nth-of-type(5) { transition-delay: .28s; }
+
+  /* The study's source slots light one after another — the feeds arriving. */
+  .ms-chips li { transition: color .45s ease, background-color .45s ease, border-color .45s ease; }
+  body.js .method-study:not(.in) .ms-chips li { color: #8AA0B5; border-color: rgba(255, 255, 255, .16); background: rgba(255, 255, 255, .05); }
+  body.js .method-study.in .ms-chips li:nth-child(2) { transition-delay: .15s; }
+  body.js .method-study.in .ms-chips li:nth-child(3) { transition-delay: .3s; }
+  body.js .method-study.in .ms-chips li:nth-child(4) { transition-delay: .45s; }
+  body.js .method-study.in .ms-chips li:nth-child(5) { transition-delay: .6s; }
+  body.js .method-study.in .ms-chips li:nth-child(6) { transition-delay: .75s; }
+  body.js .method-study.in .ms-chips li:nth-child(7) { transition-delay: .9s; }
+}
