@@ -48,7 +48,7 @@ def zoom_for_extent(lat, north_km, south_km, east_km, west_km, size=(1280, 720),
 
 
 def catchment_frame_fit(lat, lng, ring_km, landmarks, size=(1280, 720)):
-    """Frame the catchment map on the directional spread of rings + landmarks.
+    """Frame the map on the directional spread of rings + landmarks.
 
     The old fit wrapped a site-centred circle around the farthest landmark, so a
     checked row 60 km north of the site also dragged 60 km of empty map into the
@@ -56,6 +56,10 @@ def catchment_frame_fit(lat, lng, ring_km, landmarks, size=(1280, 720)):
     row drawable while the frame hugs the real spread, recentring on the content
     instead of the site. Returns (zoom, center_lat, center_lng) or None when
     there is nothing to fit.
+
+    The ring is a full circle around the site, so it seeds every direction —
+    bands past the city radius are already dropped by ``catchment_rings`` and
+    the shared fit here is reused for the landmarks map with ``ring_km=0``.
     """
     try:
         lat, lng = float(lat), float(lng)
@@ -63,23 +67,31 @@ def catchment_frame_fit(lat, lng, ring_km, landmarks, size=(1280, 720)):
     except (TypeError, ValueError):
         return None
     cos_lat = math.cos(math.radians(lat))
+    had_landmark = False
     for item in landmarks or []:
         try:
             item_lat = float(item.get('lat'))
             item_lng = float(item.get('lng'))
         except (TypeError, ValueError, AttributeError):
             continue
+        had_landmark = True
         dlat_km = (item_lat - lat) * 111.32 * 1.1
         dlng_km = (item_lng - lng) * 111.32 * max(0.01, cos_lat) * 1.1
         north = max(north, dlat_km)
         south = max(south, -dlat_km)
         east = max(east, dlng_km)
         west = max(west, -dlng_km)
-    if north + south <= 0 or east + west <= 0:
+    if not had_landmark and north + south <= 0:
         return None
+    # A per-direction floor keeps the anchor inside the frame and mirrors the
+    # old minimum-radius behaviour for rows that cluster around the site.
+    floor_km = 0.6
+    north, south = max(north, floor_km), max(south, floor_km)
+    east, west = max(east, floor_km), max(west, floor_km)
     zoom = zoom_for_extent(lat, north, south, east, west, size=size)
     if zoom is None:
         return None
+    zoom = min(17, zoom)
     center_lat = lat + ((north - south) / 2.0) / 111.32
     center_lng = lng + ((east - west) / 2.0) / (111.32 * max(0.01, cos_lat))
     return zoom, center_lat, center_lng

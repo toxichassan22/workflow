@@ -739,6 +739,11 @@ def catchment_rings(zones, limit=3):
     if not candidates:
         return []
     candidates.sort(key=lambda item: item['km'])
+    # The farthest row used to set the outer band, so one 30–65 km destination
+    # zoomed the frame out to a region and the site turned into a dot. Bands
+    # stay inside the city radius; farther rows remain in the zones table.
+    # Keep the nearest ring when every row sits past the cap.
+    candidates = [item for item in candidates if item['km'] <= CATCHMENT_RING_MAX_KM] or candidates[:1]
     if len(candidates) <= limit:
         chosen = candidates
     else:
@@ -1432,18 +1437,21 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
     """Draw only approved main-road geometry and labels."""
     def _draw_road_label(draw, px, py, text, label_scale=1.0, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
         label_scale = max(0.6, min(1.8, float(label_scale or 1)))
+        # Sizes mirror the DOM overlay: 13px font and 4px/8px padding per scale
+        # unit on a 1000px-wide box, so the baked label matches the preview.
+        unit = img_w / 1000.0
         if not font:
-            font = _get_arabic_font(max(12, round(24 * label_scale)))
+            font = _get_arabic_font(max(12, round(13 * label_scale * unit)))
 
         reshaped_text = _reshape_arabic_text(text)
         bbox = draw.textbbox((0, 0), reshaped_text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        pad_x = max(7, round(12 * label_scale))
-        pad_y = max(4, round(7 * label_scale))
+        pad_x = max(7, round(8 * label_scale * unit))
+        pad_y = max(4, round(4 * label_scale * unit))
         rect = [int(px - tw // 2 - pad_x), int(py - th // 2 - pad_y), int(px + tw // 2 + pad_x), int(py + th // 2 + pad_y)]
 
-        draw.rounded_rectangle(rect, radius=max(5, round(8 * label_scale)), fill=bg_color, outline=border_color, width=2)
+        draw.rounded_rectangle(rect, radius=max(5, round(6 * unit)), fill=bg_color, outline=border_color, width=max(1, round(1 * unit)))
         draw.text((int(px - tw // 2), int(py - th // 2 - 2)), reshaped_text, fill='#FFFFFF', font=font)
 
     def _offset_label_point(point, route_segment, img_w, img_h, distance=52):

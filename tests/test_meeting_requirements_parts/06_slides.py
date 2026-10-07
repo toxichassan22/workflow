@@ -967,9 +967,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
         self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
         Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
-        # Zoom 10 already covers the default 28 km catchment rings, so the
+        # Zoom 11 already covers the capped default catchment rings (the 16 km
+        # band — the default 28 km ring is past the city-radius cap), so the
         # editable sidecar is kept and only the markers are recomposed.
-        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 10, 'center_lat': 24.0, 'center_lng': 46.0,
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 11, 'center_lat': 24.0, 'center_lng': 46.0,
                     'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
                     'map_label_version': service.MAP_LABEL_RENDER_VERSION}
         landmarks = [

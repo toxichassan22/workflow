@@ -212,7 +212,7 @@ SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
-MAP_LABEL_RENDER_VERSION = 'named-labels-v3-access-context'
+MAP_LABEL_RENDER_VERSION = 'named-labels-v4-dom-parity'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -225,6 +225,10 @@ ACCESS_ROADMAP_STYLES = [
 ]
 MAP_REGEN_ZOOM_OFFSETS = (1, -1, 2, -2, 0)
 ACCESS_MAP_CONTEXT_RADIUS_KM = 0.6
+# A destination ring wider than this zooms the whole catchment frame out to a
+# regional view — a 65 km row shrank the site to a dot. Farther rows stay
+# listed in the zones table; the concentric bands keep a readable city radius.
+CATCHMENT_RING_MAX_KM = 20.0
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 

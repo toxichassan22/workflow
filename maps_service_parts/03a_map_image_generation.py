@@ -397,18 +397,25 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     if 'landmarks' in enabled_maps:
         # The landmark view uses only the selected nearby table rows and fits that content.
         shown_landmarks = [item for item in landmarks if item.get('distance_meters')]
-        if shown_landmarks:
-            radius_km = max(item['distance_meters'] for item in shown_landmarks) / 1000.0
-            # The frame must cover everything the resolver kept — a tighter cap
-            # drew far-but-valid selections off-canvas and dropped them silently.
-            radius_km = max(0.6, min(landmark_radius_m / 1000.0, radius_km * 1.1))
-            fitted_zoom = zoom_for_radius_km(lat, radius_km)
-            if fitted_zoom:
-                landmarks_zoom = fitted_zoom
-                print(f'[LANDMARKS] {len(shown_landmarks)} landmarks within {radius_km:.1f} km, zoom {landmarks_zoom}')
+        # The frame must cover everything the resolver kept — a tighter cap
+        # drew far-but-valid selections off-canvas and dropped them silently.
+        frame_items = shown_landmarks or landmarks
+        radius_km = landmark_radius_m / 1000.0
+        frame_items = [
+            item for item in frame_items
+            if item.get('lat') is not None and item.get('lng') is not None
+            and _distance_meters(lat, lng, item['lat'], item['lng']) <= radius_km * 1000.0
+        ] or frame_items
         # The landmarks map is a fixed auto frame: a stored manual viewport from
         # the interactive era no longer applies — the content fit is the frame.
-        landmarks_center_lat, landmarks_center_lng = map_center_lat, map_center_lng
+        # Same directional fit as the catchment map: the old site-centred radius
+        # around the farthest row mirrored empty space into the opposite half.
+        frame_fit = catchment_frame_fit(lat, lng, 0, frame_items)
+        if frame_fit:
+            landmarks_zoom, landmarks_center_lat, landmarks_center_lng = frame_fit
+            print(f'[LANDMARKS] directional fit over {len(frame_items)} rows, zoom {landmarks_zoom}')
+        else:
+            landmarks_center_lat, landmarks_center_lng = map_center_lat, map_center_lng
         result['zooms']['landmarks'] = landmarks_zoom
         result['centers']['landmarks'] = _map_frame_center(landmarks_center_lat, landmarks_center_lng, map_sizes['landmarks'])
         landmarks_mt = map_styles['landmarks']

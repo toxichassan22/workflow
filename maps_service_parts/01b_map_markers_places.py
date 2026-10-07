@@ -1,84 +1,282 @@
-def _draw_pin_marker(color='#6B1C23', label=None, size=44, is_site=False, label_text=None):
-    """Generate a high-quality, anti-aliased pin marker Image using high-res rendering and Lanczos downscaling."""
-    canvas_size = size * 6
-    canvas = Image.new('RGBA', (canvas_size, canvas_size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
+# Map marker and place-label drawing. The browser preview renders pins and
+# labels as a DOM overlay sized in container-width units (cqw), so every size
+# here is derived from the image width the same way (unit = img_w/1000) — the
+# approved raster keeps the design the client saw instead of a fixed-pixel
+# variant that shrinks when the 2560px image is displayed small.
+def _draw_marker_shape(draw, px, py, unit, img_h, is_site, label=None, occupied=None):
+    """Draw the marker the DOM overlay shows, with its bottom edge at (px, py).
 
-    ccx = canvas_size // 2
-    _r, _g, _b = _parse_color(color)
-
+    Site: the same flat oval the preview SVG draws (non-uniform viewBox, so the
+    radius fractions track width and height separately).
+    Landmarks: the 22px numbered circle with a white ring — no teardrop tail.
+    """
     if is_site:
-        pin_r = (size // 3) * 4
-        tri_h = pin_r
-        ccy = canvas_size - 20 - pin_r - tri_h
+        # CSS: circle r=2.2/1.25 on a 100x100 viewBox with preserveAspectRatio=none.
+        outer_rx, outer_ry = 22 * unit, 22 * img_h / 1000.0
+        inner_rx, inner_ry = 12.5 * unit, 12.5 * img_h / 1000.0
+        draw.ellipse(
+            [px - outer_rx, py - outer_ry, px + outer_rx, py + outer_ry],
+            fill=(107, 28, 35, 61),
+            outline=(255, 255, 255, 235),
+            width=max(1, round(0.7 * unit)),
+        )
+        draw.ellipse(
+            [px - inner_rx, py - inner_ry, px + inner_rx, py + inner_ry],
+            fill=(107, 28, 35, 255),
+        )
+        if occupied is not None:
+            occupied.append((px - outer_rx, py - outer_ry, px + outer_rx, py + outer_ry))
+        return
 
-        # Drop shadow
-        shadow_w = pin_r
-        shadow_h = pin_r // 3
-        draw.ellipse([ccx - shadow_w, canvas_size - 25 - shadow_h, ccx + shadow_w, canvas_size - 25], fill=(0, 0, 0, 50))
+    # .map-place-marker: 22px circle, 2px white border, bottom edge on the point.
+    outer_r = 11 * unit
+    border = max(2, round(2 * unit))
+    cy = py - outer_r
+    # DOM box-shadow 0 2px 5px rgba(0,0,0,.35)
+    shadow_r = outer_r + 1.2 * unit
+    draw.ellipse(
+        [px - shadow_r, cy - shadow_r + 0.8 * unit, px + shadow_r, cy + shadow_r + 0.8 * unit],
+        fill=(0, 0, 0, 90),
+    )
+    draw.ellipse(
+        [px - outer_r, cy - outer_r, px + outer_r, cy + outer_r],
+        fill=(255, 255, 255, 255),
+    )
+    inner_r = outer_r - border
+    draw.ellipse(
+        [px - inner_r, cy - inner_r, px + inner_r, cy + inner_r],
+        fill=(139, 32, 32, 255),
+    )
+    if label:
+        number_font = _get_arabic_font(max(9, round(10 * unit)))
+        bbox = draw.textbbox((0, 0), str(label), font=number_font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text(
+            (int(px - tw / 2 - bbox[0]), int(cy - th / 2 - bbox[1])),
+            str(label),
+            fill='#FFFFFF',
+            font=number_font,
+        )
+    if occupied is not None:
+        occupied.append((px - outer_r, cy - outer_r, px + outer_r, cy + outer_r))
 
-        # Triangle pointer
-        draw.polygon([(ccx - pin_r // 2, ccy + pin_r - 8),
-                      (ccx + pin_r // 2, ccy + pin_r - 8),
-                      (ccx, ccy + pin_r + tri_h)], fill=color)
 
-        # Outer white border
-        border_w = 8
-        draw.ellipse([ccx - pin_r - border_w, ccy - pin_r - border_w,
-                      ccx + pin_r + border_w, ccy + pin_r + border_w], fill='#FFFFFF')
+def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied, preferred_point=None):
+    """Draw the navy name pill the DOM overlay shows (.map-place-label).
 
-        # Main circle body
-        draw.ellipse([ccx - pin_r, ccy - pin_r, ccx + pin_r, ccy + pin_r], fill=color)
+    Font, padding, radius and offsets scale with the image width like the
+    overlay's cqw units, so a name keeps the same size on the approved raster
+    that it had in the preview — no shrink-to-fit for longer names.
+    """
+    clean_text = _strip_arabic_diacritics(str(text or '').strip())
+    if not clean_text:
+        return None
 
-        # Inner white inverted triangle
-        inner_size = pin_r // 2
-        draw.polygon([(ccx - inner_size, ccy - inner_size // 2 - 8),
-                      (ccx + inner_size, ccy - inner_size // 2 - 8),
-                      (ccx, ccy + inner_size // 2 - 8)], fill='#FFFFFF')
+    unit = img_w / 1000.0
+    font = _get_arabic_font(max(10, round(12 * unit)))
+    shaped_text = _reshape_arabic_text(clean_text)
+    text_bbox = draw.textbbox((0, 0), shaped_text, font=font)
 
-        if label_text:
-            font = _get_arabic_font(60)
-            shaped_label = _reshape_arabic_text(label_text)
-            bbox = draw.textbbox((0, 0), shaped_label, font=font)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            tx = ccx - tw // 2
-            ty = ccy + pin_r + tri_h + 10
-            pad = 20
-            draw.rounded_rectangle([tx - pad, ty - 8, tx + tw + pad, ty + th + 12], radius=16, fill=color)
-            draw.text((tx, ty), shaped_label, fill='#FFFFFF', font=font)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    pad_x = 7 * unit
+    pad_y = 3 * unit
+    label_width = text_width + pad_x * 2
+    label_height = text_height + pad_y * 2
+
+    gap = 4 * unit
+    side = 20 * unit
+    candidates = [
+        (px - label_width / 2, anchor_y + gap),
+        (px - label_width / 2, anchor_y - label_height - side),
+        (px + side, anchor_y - label_height / 2),
+        (px - label_width - side, anchor_y - label_height / 2),
+        (px + side, anchor_y + gap + 11 * unit),
+        (px - label_width - side, anchor_y + gap + 11 * unit),
+        (px + side, anchor_y - label_height - side - gap),
+        (px - label_width - side, anchor_y - label_height - side - gap),
+    ]
+
+    margin = 3 * unit
+    rect = None
+    if preferred_point:
+        left = max(margin, min(img_w - label_width - margin, preferred_point[0] - label_width / 2))
+        top = max(margin, min(img_h - label_height - margin, preferred_point[1] - label_height / 2))
+        rect = (left, top, left + label_width, top + label_height)
     else:
-        pin_r = (size // 4) * 4
-        tri_h = (pin_r * 2) // 3
-        ccy = canvas_size - 20 - pin_r - tri_h
+        for left, top in candidates:
+            left = max(margin, min(img_w - label_width - margin, left))
+            top = max(margin, min(img_h - label_height - margin, top))
+            candidate = (left, top, left + label_width, top + label_height)
+            if not any(_rects_overlap(candidate, box) for box in occupied):
+                rect = candidate
+                break
+    if rect is None:
+        for distance in (35, 55, 78, 105):
+            dy = distance * unit
+            for left, top in (
+                (px - label_width / 2, anchor_y + gap + dy),
+                (px - label_width / 2, anchor_y - label_height - gap - dy),
+            ):
+                left = max(margin, min(img_w - label_width - margin, left))
+                top = max(margin, min(img_h - label_height - margin, top))
+                candidate = (left, top, left + label_width, top + label_height)
+                if not any(_rects_overlap(candidate, box) for box in occupied):
+                    rect = candidate
+                    break
+            if rect is not None:
+                break
+    if rect is None:
+        left = max(margin, min(img_w - label_width - margin, px - label_width / 2))
+        top = max(margin, min(img_h - label_height - margin, anchor_y + gap))
+        rect = (left, top, left + label_width, top + label_height)
 
-        # Drop shadow
-        shadow_w = pin_r
-        shadow_h = pin_r // 3
-        draw.ellipse([ccx - shadow_w, canvas_size - 25 - shadow_h, ccx + shadow_w, canvas_size - 25], fill=(0, 0, 0, 50))
+    left, top, right, bottom = [int(round(v)) for v in rect]
+    radius = 6 * unit
+    # DOM box-shadow 0 1px 3px rgba(0,0,0,.18)
+    draw.rounded_rectangle(
+        [left, top + int(round(0.4 * unit)), right, bottom + int(round(0.4 * unit))],
+        radius=radius,
+        fill=(0, 0, 0, 46),
+    )
+    draw.rounded_rectangle(
+        [left, top, right, bottom],
+        radius=radius,
+        fill=(37, 75, 102, 255),
+        outline=(240, 230, 210, 255),
+        width=max(1, round(1 * unit)),
+    )
+    draw.text(
+        (int(left + pad_x - text_bbox[0]), int(top + pad_y - text_bbox[1])),
+        shaped_text,
+        fill='#FFFFFF',
+        font=font,
+    )
+    occupied.append(rect)
+    return (left + (right - left) / 2, top + (bottom - top) / 2)
 
-        # Triangle pointer
-        draw.polygon([(ccx - pin_r // 2, ccy + pin_r - 8),
-                      (ccx + pin_r // 2, ccy + pin_r - 8),
-                      (ccx, ccy + pin_r + tri_h)], fill=color)
 
-        # Outer white border
-        border_w = 6
-        draw.ellipse([ccx - pin_r - border_w, ccy - pin_r - border_w,
-                      ccx + pin_r + border_w, ccy + pin_r + border_w], fill='#FFFFFF')
+def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, size=(1280, 720), scale=2):
+    """
+    Overlay the preview's flat site/landmark markers on a map image.
+    markers_list: list of dicts with keys: lat, lng, color, label, name, type ('site' or 'landmark')
+    """
+    try:
+        img = Image.open(image_path).convert('RGBA')
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        img_w, img_h = img.size
+        unit = img_w / 1000.0
+        center_x, center_y = img_w // 2, img_h // 2
+        rendered_markers = []
+        occupied_labels = []
+        for m in markers_list:
+            m_lat = m.get('lat')
+            m_lng = m.get('lng')
+            if m_lat is None or m_lng is None:
+                continue
+            dx, dy = _latlng_to_pixel_offset(m_lat, m_lng, center_lat, center_lng, zoom, scale=scale)
+            px = center_x + dx
+            py = center_y + dy
+            if 0 <= px <= img_w and 0 <= py <= img_h:
+                name = m.get('name') or m.get('label_text')
+                is_site = m.get('type') == 'site'
+                _draw_marker_shape(
+                    draw, px, py, unit, img_h, is_site,
+                    label=m.get('label'), occupied=occupied_labels,
+                )
+                rendered_markers.append((px, py, name, is_site))
 
-        # Main circle body
-        draw.ellipse([ccx - pin_r, ccy - pin_r, ccx + pin_r, ccy + pin_r], fill=color)
+        for px, py, name, is_site in rendered_markers:
+            if name and not is_site:
+                _draw_marker_name_label(draw, px, py, name, img_w, img_h, occupied_labels)
+        img = Image.alpha_composite(img, overlay)
+        img.save(image_path, 'PNG')
+        return True
+    except Exception as e:
+        print(f"[MAP MARKERS ERROR] {e}")
+        return False
 
-        if label:
-            font = _get_arabic_font(int(pin_r * 1.1))
-            bbox = draw.textbbox((0, 0), str(label), font=font)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            tx = ccx - tw // 2
-            ty = ccy - th // 2 - 8
-            draw.text((tx, ty), str(label), fill='#FFFFFF', font=font)
 
-    resized = canvas.resize((size, size), Image.Resampling.LANCZOS)
-    return resized
+def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks, label_positions=None, scale=2,
+                            site_lat=None, site_lng=None):
+    """Draw the catchment/landmarks markers the DOM preview shows.
+
+    Rows without coordinates are filtered before numbering so the baked
+    numbers match the preview indices exactly.
+    """
+    try:
+        img = Image.open(image_path).convert('RGBA')
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        img_w, img_h = img.size
+        unit = img_w / 1000.0
+        center_x, center_y = img_w // 2, img_h // 2
+        positions = label_positions or {}
+        if isinstance(positions, str):
+            try:
+                positions = json.loads(positions)
+            except (TypeError, ValueError):
+                positions = {}
+        drawable = []
+        for item in landmarks:
+            if item.get('lat') is None or item.get('lng') is None:
+                if item.get('name'):
+                    print(f"[MAP] landmark '{item.get('name')}' has no coordinates — skipped")
+                continue
+            drawable.append(item)
+        marker_items = _build_markers(
+            site_lat if site_lat is not None else center_lat,
+            site_lng if site_lng is not None else center_lng,
+            drawable,
+        )
+        occupied = []
+        rendered = []
+        for marker in marker_items:
+            marker_lat = marker.get('lat')
+            marker_lng = marker.get('lng')
+            if marker_lat is None or marker_lng is None:
+                continue
+            dx, dy = _latlng_to_pixel_offset(marker_lat, marker_lng, center_lat, center_lng, zoom, scale=scale)
+            px = center_x + dx
+            py = center_y + dy
+            if not (0 <= px <= img_w and 0 <= py <= img_h):
+                if marker.get('type') != 'site':
+                    print(f"[MAP] landmark '{marker.get('name')}' falls outside the frame at zoom {zoom} — skipped")
+                continue
+            is_site = marker.get('type') == 'site'
+            _draw_marker_shape(draw, px, py, unit, img_h, is_site, label=marker.get('label'), occupied=occupied)
+            if is_site or not marker.get('name'):
+                continue
+            preferred = positions.get(marker['name']) if isinstance(positions, dict) else None
+            preferred_point = None
+            if isinstance(preferred, (list, tuple)) and len(preferred) >= 2:
+                try:
+                    label_dx, label_dy = _latlng_to_pixel_offset(
+                        float(preferred[0]), float(preferred[1]), center_lat, center_lng, zoom, scale=scale
+                    )
+                    preferred_point = (center_x + label_dx, center_y + label_dy)
+                except (TypeError, ValueError):
+                    preferred_point = None
+            label_pixel = _draw_marker_name_label(
+                draw, px, py, marker['name'], img_w, img_h, occupied, preferred_point=preferred_point
+            )
+            item = next((dict(value) for value in landmarks if value.get('name') == marker['name']), {'name': marker['name']})
+            if label_pixel:
+                item['label_point'] = list(_pixel_to_latlng(
+                    label_pixel[0], label_pixel[1], img_w, img_h, center_lat, center_lng, zoom, scale=scale
+                ))
+            rendered.append(item)
+        img = Image.alpha_composite(img, overlay)
+        img.save(image_path, 'PNG')
+        return rendered
+    except Exception as error:
+        print(f'[CATCHMENT MARKERS ERROR] {error}')
+        return []
+
+
+def _rects_overlap(a, b):
+    return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
 
 
 def _parse_color(color):
@@ -114,223 +312,6 @@ def _apply_map_overlay(image_path, dark_factor=0.35, gradient=True):
     except Exception as e:
         print(f"[MAP OVERLAY ERROR] {e}")
         return False
-
-
-def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied, preferred_point=None):
-    clean_text = _strip_arabic_diacritics(str(text or '').strip())
-    if not clean_text:
-        return None
-
-    max_text_width = min(360, max(180, img_w - 48))
-    font = None
-    shaped_text = ''
-    text_bbox = None
-    for font_size in (22, 20, 18, 16, 14):
-        candidate_font = _get_arabic_font(font_size)
-        candidate_text = _reshape_arabic_text(clean_text)
-        candidate_bbox = draw.textbbox((0, 0), candidate_text, font=candidate_font)
-        if candidate_bbox[2] - candidate_bbox[0] <= max_text_width:
-            font = candidate_font
-            shaped_text = candidate_text
-            text_bbox = candidate_bbox
-            break
-    if font is None:
-        font = _get_arabic_font(14)
-        shaped_text = _reshape_arabic_text(clean_text)
-        text_bbox = draw.textbbox((0, 0), shaped_text, font=font)
-
-    text_width = text_bbox[2] - text_bbox[0]
-    text_height = text_bbox[3] - text_bbox[1]
-    pad_x = 12
-    pad_y = 7
-    label_width = text_width + pad_x * 2
-    label_height = text_height + pad_y * 2
-    candidates = [
-        (px - label_width / 2, anchor_y + 12),
-        (px - label_width / 2, anchor_y - label_height - 52),
-        (px + 52, anchor_y - label_height / 2),
-        (px - label_width - 52, anchor_y - label_height / 2),
-        (px + 52, anchor_y + 42),
-        (px - label_width - 52, anchor_y + 42),
-        (px + 52, anchor_y - label_height - 64),
-        (px - label_width - 52, anchor_y - label_height - 64),
-    ]
-    rect = None
-    if preferred_point:
-        left = max(8, min(img_w - label_width - 8, preferred_point[0] - label_width / 2))
-        top = max(8, min(img_h - label_height - 8, preferred_point[1] - label_height / 2))
-        rect = (left, top, left + label_width, top + label_height)
-    else:
-        for left, top in candidates:
-            left = max(8, min(img_w - label_width - 8, left))
-            top = max(8, min(img_h - label_height - 8, top))
-            candidate_rect = (left, top, left + label_width, top + label_height)
-            if not any(
-                not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
-                     or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
-                for other in occupied
-            ):
-                rect = candidate_rect
-                break
-    if rect is None:
-        for distance in (90, 140, 200, 270):
-            for angle in range(0, 360, 45):
-                radians = math.radians(angle)
-                left = max(8, min(img_w - label_width - 8, px + math.cos(radians) * distance - label_width / 2))
-                top = max(8, min(img_h - label_height - 8, anchor_y + math.sin(radians) * distance - label_height / 2))
-                candidate_rect = (left, top, left + label_width, top + label_height)
-                if not any(
-                    not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
-                         or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
-                    for other in occupied
-                ):
-                    rect = candidate_rect
-                    break
-            if rect is not None:
-                break
-    if rect is None:
-        left = max(8, min(img_w - label_width - 8, px - label_width / 2))
-        top = max(8, min(img_h - label_height - 8, anchor_y + 12))
-        rect = (left, top, left + label_width, top + label_height)
-
-    left, top, right, bottom = [int(round(value)) for value in rect]
-    draw.rounded_rectangle(
-        [left, top, right, bottom],
-        radius=8,
-        fill=(37, 75, 102, 245),
-        outline=(240, 230, 210, 255),
-        width=2,
-    )
-    draw.text(
-        (left + pad_x - text_bbox[0], top + pad_y - text_bbox[1]),
-        shaped_text,
-        fill='#FFFFFF',
-        font=font,
-    )
-    occupied.append((left, top, right, bottom))
-    return ((left + right) / 2, (top + bottom) / 2)
-
-
-def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, size=(1280, 720), scale=2):
-    """
-    Overlay custom markers on a map image.
-    markers_list: list of dicts with keys: lat, lng, color, label, name, type ('site' or 'landmark')
-    """
-    try:
-        img = Image.open(image_path).convert('RGBA')
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        img_w, img_h = img.size
-        center_x, center_y = img_w // 2, img_h // 2
-        rendered_markers = []
-        occupied_labels = []
-        for m in markers_list:
-            m_lat = m.get('lat')
-            m_lng = m.get('lng')
-            if m_lat is None or m_lng is None:
-                continue
-            dx, dy = _latlng_to_pixel_offset(m_lat, m_lng, center_lat, center_lng, zoom, scale=scale)
-            px = center_x + dx
-            py = center_y + dy
-            if 0 <= px <= img_w and 0 <= py <= img_h:
-                color = m.get('color', '#C0392B')
-                label = m.get('label')
-                name = m.get('name') or m.get('label_text')
-                is_site = m.get('type') == 'site'
-                pin_size = 120 if is_site else 72
-                pin_img = _draw_pin_marker(color=color, label=label, size=pin_size, is_site=is_site)
-
-                px_paste = int(px - pin_size // 2)
-                py_paste = int(py - pin_size)
-                overlay.paste(pin_img, (px_paste, py_paste), pin_img)
-                occupied_labels.append((px_paste, py_paste, px_paste + pin_size, py_paste + pin_size))
-                rendered_markers.append((px, py_paste, name, is_site))
-
-        for px, py_paste, name, is_site in rendered_markers:
-            if name and not is_site:
-                _draw_marker_name_label(draw, px, py_paste, name, img_w, img_h, occupied_labels)
-        img = Image.alpha_composite(img, overlay)
-        img.save(image_path, 'PNG')
-        return True
-    except Exception as e:
-        print(f"[MAP MARKERS ERROR] {e}")
-        return False
-
-
-def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks, label_positions=None, scale=2,
-                            site_lat=None, site_lng=None):
-    try:
-        img = Image.open(image_path).convert('RGBA')
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        img_w, img_h = img.size
-        center_x, center_y = img_w // 2, img_h // 2
-        positions = label_positions or {}
-        if isinstance(positions, str):
-            try:
-                positions = json.loads(positions)
-            except (TypeError, ValueError):
-                positions = {}
-        marker_items = _build_markers(
-            site_lat if site_lat is not None else center_lat,
-            site_lng if site_lng is not None else center_lng,
-            landmarks,
-        )
-        occupied = []
-        rendered = []
-        for marker in marker_items:
-            marker_lat = marker.get('lat')
-            marker_lng = marker.get('lng')
-            if marker_lat is None or marker_lng is None:
-                if marker.get('type') != 'site':
-                    print(f"[MAP] landmark '{marker.get('name')}' has no coordinates — skipped")
-                continue
-            dx, dy = _latlng_to_pixel_offset(marker_lat, marker_lng, center_lat, center_lng, zoom, scale=scale)
-            px = center_x + dx
-            py = center_y + dy
-            if not (0 <= px <= img_w and 0 <= py <= img_h):
-                if marker.get('type') != 'site':
-                    print(f"[MAP] landmark '{marker.get('name')}' falls outside the frame at zoom {zoom} — skipped")
-                continue
-            is_site = marker.get('type') == 'site'
-            pin_size = 120 if is_site else 72
-            pin = _draw_pin_marker(
-                color=marker.get('color', MARKER_COLOR_LANDMARK),
-                label=marker.get('label'),
-                size=pin_size,
-                is_site=is_site,
-            )
-            left = int(px - pin_size // 2)
-            top = int(py - pin_size)
-            overlay.paste(pin, (left, top), pin)
-            occupied.append((left, top, left + pin_size, top + pin_size))
-            if is_site or not marker.get('name'):
-                continue
-            preferred = positions.get(marker['name']) if isinstance(positions, dict) else None
-            preferred_point = None
-            if isinstance(preferred, (list, tuple)) and len(preferred) >= 2:
-                try:
-                    label_dx, label_dy = _latlng_to_pixel_offset(
-                        float(preferred[0]), float(preferred[1]), center_lat, center_lng, zoom, scale=scale
-                    )
-                    preferred_point = (center_x + label_dx, center_y + label_dy)
-                except (TypeError, ValueError):
-                    preferred_point = None
-            label_pixel = _draw_marker_name_label(
-                draw, px, py, marker['name'], img_w, img_h, occupied, preferred_point=preferred_point
-            )
-            item = next((dict(value) for value in landmarks if value.get('name') == marker['name']), {'name': marker['name']})
-            if label_pixel:
-                item['label_point'] = list(_pixel_to_latlng(
-                    label_pixel[0], label_pixel[1], img_w, img_h, center_lat, center_lng, zoom, scale=scale
-                ))
-            rendered.append(item)
-        img = Image.alpha_composite(img, overlay)
-        img.save(image_path, 'PNG')
-        return rendered
-    except Exception as error:
-        print(f'[CATCHMENT MARKERS ERROR] {error}')
-        return []
 
 
 def classify_landmark_category(types, language='ar'):

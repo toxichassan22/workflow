@@ -487,8 +487,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         # The catchment map is a fixed frame fitted to content — a wider stored
         # frame only ever meant the fit was stretched by a badly resolved
         # landmark, so the recompose refits and recentres on the real spread.
-        frame_fit = catchment_frame_fit(
-            lat, lng, ring_km, landmarks, size=_stored_map_viewport_size(metadata))
+        frame_fit = catchment_frame_fit(lat, lng, ring_km, landmarks)
         if frame_fit:
             frame_zoom, frame_center_lat, frame_center_lng = frame_fit
         else:
@@ -639,40 +638,6 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
     # endpoint kilometres out would otherwise pin the marker off-frame.
     _snap_road_landmarks(landmarks, project_data, site_lat, site_lng,
                          language=map_lang, search_radius_m=20000)
-    # The landmarks frame mirrors generation: content-fitted over the selected
-    # landmarks and centred on the plot (or the site when no boundary exists).
-    frame_lat, frame_lng = site_lat, site_lng
-    poly_data = project_data.get('location_polygon')
-    try:
-        if isinstance(poly_data, str):
-            poly_pts = [
-                tuple(float(v.strip()) for v in pt.split(',', 1))
-                for pt in poly_data.split(';') if ',' in pt
-            ]
-        elif isinstance(poly_data, list):
-            poly_pts = [(float(pt[0]), float(pt[1])) for pt in poly_data if len(pt) >= 2]
-        else:
-            poly_pts = []
-        if len(poly_pts) >= 3:
-            centroid_lat = sum(point[0] for point in poly_pts) / len(poly_pts)
-            centroid_lng = sum(point[1] for point in poly_pts) / len(poly_pts)
-            if (min(_distance_meters(site_lat, site_lng, p[0], p[1]) for p in poly_pts) <= 500
-                    or _distance_meters(site_lat, site_lng, centroid_lat, centroid_lng) <= 500):
-                frame_lat = (min(p[0] for p in poly_pts) + max(p[0] for p in poly_pts)) / 2
-                frame_lng = (min(p[1] for p in poly_pts) + max(p[1] for p in poly_pts)) / 2
-    except (TypeError, ValueError, IndexError):
-        pass
-    landmark_km = 0.0
-    for item in landmarks:
-        try:
-            landmark_km = max(landmark_km, _distance_meters(
-                site_lat, site_lng, float(item.get('lat')), float(item.get('lng'))) / 1000.0)
-        except (TypeError, ValueError):
-            continue
-    needed_zoom = (
-        zoom_for_radius_km(site_lat, max(0.6, min(20.0, landmark_km * 1.1)))
-        if landmark_km else None
-    )
     for final_type, editable_type in (
         ('landmarks', 'landmarks_editable'),
         ('landmarks_satellite', 'landmarks_satellite_editable'),
@@ -690,8 +655,12 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             zoom = int(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if needed_zoom is not None:
-            frame_zoom, frame_center_lat, frame_center_lng = needed_zoom, frame_lat, frame_lng
+        # The landmarks frame mirrors generation: the same directional content
+        # fit — a site-centred radius around the farthest row mirrored empty
+        # space into the opposite half of the frame.
+        frame_fit = catchment_frame_fit(site_lat, site_lng, 0, landmarks)
+        if frame_fit:
+            frame_zoom, frame_center_lat, frame_center_lng = frame_fit
         else:
             frame_zoom, frame_center_lat, frame_center_lng = zoom, center_lat, center_lng
         if existing is not None:

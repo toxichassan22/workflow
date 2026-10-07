@@ -248,6 +248,10 @@
           : 'ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله');
         return false;
       }
+      // A table edit still inside its debounce window must land first — once
+      // the approval flag is set the recompose path refuses to touch the
+      // raster, so a click that outruns the timer would certify a stale map.
+      if (typeof flushMapTableRecompose === 'function') await flushMapTableRecompose();
       // The dirty flag is only as fresh as the last idle — pull the live
       // camera now so a pan followed by an instant click still bakes the
       // frame the client is looking at, not the pre-pan one.
@@ -736,7 +740,7 @@
         const hoverAttrs = tenantRoadEditMode
           ? ' onmouseenter="highlightMapPlacePair(\'road\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'road\',decodeURIComponent(\'' + encodedName + '\'),false)"'
           : '';
-        return '<div class="map-road-label' + mapPlaceLinkClass('road', path.name) + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px"' +
+        return '<div class="map-road-label' + mapPlaceLinkClass('road', path.name) + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;font-size:' + (1.3 * scale).toFixed(3) + 'cqw;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px;padding:' + (0.4 * scale).toFixed(3) + 'cqw ' + (0.8 * scale).toFixed(3) + 'cqw"' +
           (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + escapeHtml(path.name) + deleteAction + '</div>';
       }).join('');
     }
@@ -763,7 +767,7 @@
         const numChip = tenantCatchmentEditMode ? '<span class="map-place-label-num">' + index + '</span>' : '';
         const marker = '<div class="map-place-marker' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
           (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + index + '</div>';
-        const label = '<div class="map-place-label' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+        const label = '<div class="map-place-label' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;font-size:1.2cqw;padding:3px 7px;padding:.3cqw .7cqw"' +
           (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
         return marker + label;
       }).join('');
@@ -788,7 +792,7 @@
         const numChip = tenantLandmarksEditMode ? '<span class="map-place-label-num">' + (index + 1) + '</span>' : '';
         const marker = '<div class="map-place-marker' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
           (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + (index + 1) + '</div>';
-        const label = '<div class="map-place-label' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+        const label = '<div class="map-place-label' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;font-size:1.2cqw;padding:3px 7px;padding:.3cqw .7cqw"' +
           (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
         return marker + label;
       }).join('');

@@ -192,16 +192,24 @@
     .map-place-label {
       position: absolute;
       transform: translate(-50%, -50%);
+      /* cqw = % of the preview box width, so the overlay keeps the same design
+         the server bakes into the final raster at any display size. */
       padding: 4px 8px;
+      padding: .4cqw .8cqw;
       border: 1px solid #f0e6d2;
+      border-width: 1px;
+      border-width: .1cqw;
       border-radius: 6px;
+      border-radius: .6cqw;
       background: #254b66;
       color: #fff;
       font-size: 13px;
+      font-size: 1.3cqw;
       font-weight: 700;
       line-height: 1.25;
       white-space: nowrap;
       box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+      box-shadow: 0 .1cqw .3cqw rgba(0, 0, 0, .18);
       direction: rtl;
       pointer-events: none;
       transform-origin: center;
@@ -217,19 +225,25 @@
     .map-place-marker {
       position: absolute;
       width: 22px;
+      width: 2.2cqw;
       height: 22px;
+      height: 2.2cqw;
       transform: translate(-50%, -100%);
       display: flex;
       align-items: center;
       justify-content: center;
       border: 2px solid #fff;
+      border-width: 2px;
+      border-width: .2cqw;
       border-radius: 50%;
       background: #8b2020;
       color: #fff;
       font-size: 10px;
+      font-size: 1cqw;
       font-weight: 800;
       line-height: 1;
       box-shadow: 0 2px 5px rgba(0, 0, 0, .35);
+      box-shadow: 0 .2cqw .5cqw rgba(0, 0, 0, .35);
       pointer-events: none;
       z-index: 3;
     }
@@ -244,13 +258,18 @@
       align-items: center;
       justify-content: center;
       min-width: 15px;
+      min-width: 1.5cqw;
       height: 15px;
+      height: 1.5cqw;
       padding: 0 3px;
+      padding: 0 .3cqw;
       margin-inline-end: 5px;
+      margin-inline-end: .5cqw;
       border-radius: 50%;
       background: #d4a359;
       color: #254b66;
       font-size: 9px;
+      font-size: .9cqw;
       font-weight: 800;
       line-height: 1;
       vertical-align: middle;
@@ -260,11 +279,13 @@
     .map-road-label.map-place-linked {
       border-color: #ffb020;
       box-shadow: 0 0 0 2px rgba(255, 176, 32, .55), 0 1px 3px rgba(0, 0, 0, .18);
+      box-shadow: 0 0 0 .2cqw rgba(255, 176, 32, .55), 0 .1cqw .3cqw rgba(0, 0, 0, .18);
     }
 
     .map-place-marker.map-place-linked {
       border-color: #ffb020;
       box-shadow: 0 0 0 3px rgba(255, 176, 32, .55), 0 2px 5px rgba(0, 0, 0, .35);
+      box-shadow: 0 0 0 .3cqw rgba(255, 176, 32, .55), 0 .2cqw .5cqw rgba(0, 0, 0, .35);
     }
 
     .map-place-link-line {
@@ -288,16 +309,23 @@
     .map-road-label-delete {
       position: absolute;
       top: -12px;
+      top: -1.2cqw;
       left: -10px;
+      left: -1cqw;
       width: auto;
       min-width: 0;
       padding: 2px 5px;
+      padding: .2cqw .5cqw;
       border: 1px solid #fff;
+      border-width: 1px;
+      border-width: .1cqw;
       border-radius: 5px;
+      border-radius: .5cqw;
       background: #8b2020;
       color: #fff;
       font: inherit;
       font-size: 8px;
+      font-size: .8cqw;
       line-height: 1.2;
       cursor: pointer;
       pointer-events: auto;
