@@ -6,9 +6,9 @@
 .btn.accent {
   background: linear-gradient(135deg, var(--teal), var(--teal-bright));
   color: var(--ink);
-  box-shadow: 0 12px 30px rgba(15, 196, 184, .18);
+  box-shadow: 0 12px 30px rgba(15, 169, 196, .18);
 }
-.btn.accent:hover { background: linear-gradient(135deg, var(--teal-bright), #3FE3D5); box-shadow: 0 16px 38px rgba(15, 196, 184, .22); }
+.btn.accent:hover { background: linear-gradient(135deg, var(--teal-bright), #4FD7ED); box-shadow: 0 16px 38px rgba(15, 169, 196, .22); }
 .btn.glass {
   background: rgba(255, 255, 255, .09);
   border-color: rgba(255, 255, 255, .3);
@@ -67,7 +67,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(3, 225, 206, .07), transparent 62%);
+  background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(23, 200, 227, .07), transparent 62%);
   opacity: 0;
   transition: opacity .3s;
   pointer-events: none;
@@ -89,8 +89,8 @@ html[dir="rtl"] .feature-card::before { transform-origin: 100% 50%; }
 html[dir="ltr"] .feature-card::before { transform-origin: 0 50%; }
 
 .feature-card:hover {
-  border-color: rgba(15, 196, 184, .4);
-  box-shadow: 0 22px 50px rgba(8, 38, 70, .1), 0 0 34px rgba(15, 196, 184, .05);
+  border-color: rgba(15, 169, 196, .4);
+  box-shadow: 0 22px 50px rgba(8, 38, 70, .1), 0 0 34px rgba(15, 169, 196, .05);
 }
 .feature-card:hover::before { transform: scaleX(1); }
 
@@ -257,7 +257,7 @@ body.js .flow.in::after { transform: scaleX(1); }
   color: #fff;
   font-weight: 800;
   font-size: 15px;
-  box-shadow: 0 0 0 7px #F4F9FB, 0 0 22px rgba(3, 225, 206, .25);
+  box-shadow: 0 0 0 7px #F4F9FB, 0 0 22px rgba(23, 200, 227, .25);
 }
 
 .flow-card {
@@ -304,19 +304,19 @@ body.js .flow.in::after { transform: scaleX(1); }
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(3, 225, 206, .08), transparent 62%);
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(23, 200, 227, .08), transparent 62%);
   opacity: 0;
   transition: opacity .3s;
   pointer-events: none;
 }
 
-.file-item:hover { border-color: rgba(15, 196, 184, .4); transform: translateY(-2px); }
+.file-item:hover { border-color: rgba(15, 169, 196, .4); transform: translateY(-2px); }
 .file-item:hover::after { opacity: 1; }
 
 .file-item.active {
   border-color: var(--teal);
-  background: rgba(15, 196, 184, .06);
-  box-shadow: 0 10px 30px rgba(15, 196, 184, .08);
+  background: rgba(15, 169, 196, .06);
+  box-shadow: 0 10px 30px rgba(15, 169, 196, .08);
 }
 
 .file-item .f-dot {
@@ -333,11 +333,11 @@ body.js .flow.in::after { transform: scaleX(1); }
 .file-item .f-meta { display: block; font-size: 11.5px; color: var(--muted); }
 
 .deck-viewer {
-  border: 1px solid rgba(3, 225, 206, .2);
+  border: 1px solid rgba(23, 200, 227, .2);
   border-radius: 18px;
   background: linear-gradient(160deg, #0B2745, #071B31);
   padding: 18px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .45), 0 0 60px rgba(15, 196, 184, .04);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45), 0 0 60px rgba(15, 169, 196, .04);
 }
 
 .deck-stage {
@@ -376,8 +376,8 @@ body.js .flow.in::after { transform: scaleX(1); }
 
 .deck-counter {
   font-size: 13px; font-weight: 800; color: var(--teal-bright);
-  background: rgba(3, 225, 206, .1);
-  border: 1px solid rgba(3, 225, 206, .2);
+  background: rgba(23, 200, 227, .1);
+  border: 1px solid rgba(23, 200, 227, .2);
   border-radius: 999px; padding: 5px 16px;
 }
 
@@ -402,7 +402,7 @@ body.js .flow.in::after { transform: scaleX(1); }
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(800px 320px at 15% 0%, rgba(15, 196, 184, .1) 0%, transparent 55%),
+    radial-gradient(800px 320px at 15% 0%, rgba(15, 169, 196, .1) 0%, transparent 55%),
     radial-gradient(700px 300px at 85% 100%, rgba(109, 163, 195, .1) 0%, transparent 55%),
     linear-gradient(160deg, #0A2038 0%, var(--ink) 70%);
   padding: 80px 0;
@@ -418,8 +418,8 @@ body.js .flow.in::after { transform: scaleX(1); }
   padding: 40px;
   box-shadow:
     var(--shadow-deep),
-    0 0 0 1px rgba(15, 196, 184, .08),
-    0 0 90px rgba(15, 196, 184, .08);
+    0 0 0 1px rgba(15, 169, 196, .08),
+    0 0 90px rgba(15, 169, 196, .08);
 }
 
 .join-card h2 { margin: 0 0 6px; font-size: 25px; color: var(--ink); font-weight: 800; }

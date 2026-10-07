@@ -28,14 +28,15 @@
   --card: #FFFFFF;
   --accent: #6DA3C3;
   --accent-bright: #9CC6DE;
-  /* Brand turquoise #03E1CE — the ~5% accent in the brand ratio (navy
-     #07182C ~50%, white ~45%). The mid tone carries gradients and borders
-     on white, dark stays readable for small text, bright is the logo color
-     itself and lives mostly on navy, soft is the light wash. */
-  --teal: #0FC4B8;
-  --teal-dark: #0A8578;
-  --teal-bright: #03E1CE;
-  --teal-soft: #DEFBF7;
+  /* Brand turquoise — the ~5% accent in the brand ratio (navy #07182C ~50%,
+     white ~45%). The on-screen bright is #17C8E3: the logo's literal #03E1CE
+     leans green at fill sizes, so surfaces run its bluer twin. Mid carries
+     gradients and borders on white, dark stays readable for small text,
+     soft is the light wash. */
+  --teal: #0FA9C4;
+  --teal-dark: #0A829B;
+  --teal-bright: #17C8E3;
+  --teal-soft: #DFF6FB;
   --r: 16px;
   --shadow: 0 14px 40px rgba(7, 24, 44, .08);
   --shadow-deep: 0 30px 70px rgba(4, 16, 31, .35);
