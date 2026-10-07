@@ -148,13 +148,14 @@
 
   /* ── Opening: auto-played cinematic ──────────────────────────────────────
      On entry the camera pushes in over the map while the Saudi border draws
-     itself, a beacon lands on Riyadh, and LANDLOOM collapses out of a wide
-     tracking blur into its lockup — then the overlay zooms through and the
-     hero takes over. One rAF clock scrubs the whole timeline; click or
-     Escape skips to the last frame. body.intro-done fires the CSS exit and
-     releases the hero entrance (initHeroEnter listens for ll:intro-done).
-     Reduced-motion removes the overlay outright; without JS it never shows
-     (body.js gates .intro's display). */
+     itself, marker pins rain down across it — the last lands on Riyadh —
+     and LANDLOOM collapses out of a wide tracking blur into its
+     lockup, then the overlay zooms through and the hero takes over. One rAF
+     clock scrubs the whole timeline; click or Escape skips to the last
+     frame. body.intro-done fires the CSS exit and releases the hero
+     entrance (initHeroEnter listens for ll:intro-done). Reduced-motion
+     removes the overlay outright; without JS it never shows (body.js gates
+     .intro's display). */
 
   function initOpening() {
     var intro = document.getElementById('intro');
@@ -167,8 +168,17 @@
     var path = document.getElementById('introPath');
     var cam = document.getElementById('introCam');
     var sweep = document.getElementById('introSweep');
-    var beacon = document.getElementById('introBeacon');
-    var pin = document.getElementById('introPin');
+    var pins = [];
+    intro.querySelectorAll('.intro-pin').forEach(function (el) {
+      pins.push({
+        el: el,
+        x: parseFloat(el.getAttribute('data-x')) || 0,
+        y: parseFloat(el.getAttribute('data-y')) || 0,
+        body: el.querySelector('.pin-body'),
+        shadow: el.querySelector('.pin-shadow'),
+        ring: el.querySelector('.pin-hit')
+      });
+    });
     var brand = document.getElementById('introBrand');
     var uline = document.getElementById('introUline');
     var sloganEl = document.getElementById('introSlogan');
@@ -187,7 +197,6 @@
     function seg(t, a, b) { return clamp((t - a) / (b - a), 0, 1); }
     function ease(p) { return 1 - Math.pow(1 - p, 3); }
     function eio(p) { return p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
-    function eob(p) { var c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }
     function lerp(a, b, p) { return a + (b - a) * p; }
     function eoquint(p) { return 1 - Math.pow(1 - p, 5); }
 
@@ -206,30 +215,52 @@
       // One diagonal light pass crosses the stage mid-draw.
       sweep.style.transform = 'translateX(' + lerp(-140, 520, eio(seg(t, 800, 2150))).toFixed(1) + '%)';
 
-      // Beacon column rises from the pin point, then eases back.
-      var bl = ease(seg(t, 2700, 3020));
-      beacon.setAttribute('y2', (310 - 150 * bl).toFixed(1));
-      beacon.style.opacity = (bl * (1 - .6 * seg(t, 3400, 4100))).toFixed(3);
+      // Markers rain down over the drawn territory — an accelerating fall,
+      // a squash and one decaying hop on impact, and a ground ring that
+      // ripples out once. The last pin lands on Riyadh and keeps pulsing.
+      var lastLand = 0;
+      for (var i = 0; i < pins.length; i++) {
+        var p = pins[i];
+        var pt0 = 2450 + i * 140;
+        var pp = seg(t, pt0, pt0 + 430);
+        var bb = seg(t, pt0 + 430, pt0 + 850);
+        var yOff = -170 * (1 - pp * pp);
+        var sq = 0;
+        if (pp >= 1) {
+          yOff = -14 * Math.sin(bb * Math.PI) * (1 - bb * .7);
+          sq = Math.sin(Math.min(bb * 2.4, 1) * Math.PI);
+        }
+        if (i === pins.length - 1) lastLand = pt0 + 430;
+        p.el.style.opacity = seg(t, pt0, pt0 + 130).toFixed(3);
+        p.el.setAttribute('transform', 'translate(' + p.x + ' ' + (p.y + yOff).toFixed(2) + ')');
+        if (p.body) {
+          p.body.setAttribute('transform',
+            'scale(' + (1 + .1 * sq).toFixed(3) + ' ' + (1 - .2 * sq).toFixed(3) + ')');
+        }
+        if (p.shadow) p.shadow.style.opacity = (.4 * pp).toFixed(3);
+        if (p.ring) {
+          var rp = seg(t, pt0 + 410, pt0 + 930);
+          p.ring.style.opacity = ((1 - rp) * .75 * (pp >= 1 ? 1 : 0)).toFixed(3);
+          p.ring.setAttribute('transform', 'scale(' + lerp(.45, 2.5, ease(rp)).toFixed(3) + ')');
+        }
+      }
+      if (pins.length) pins[pins.length - 1].el.classList.toggle('show', t >= lastLand);
 
-      var ps = seg(t, 2750, 3150);
-      pin.style.opacity = ps;
-      pin.style.transform = 'scale(' + Math.max(eob(ps), .001).toFixed(3) + ')';
-      pin.classList.toggle('show', ps >= 1);
-
-      // Wordmark: ultra-tracked blur collapses into the final lockup.
-      var bp = eio(seg(t, 2300, 3350));
-      brand.style.opacity = seg(t, 2300, 2850).toFixed(3);
+      // Wordmark: ultra-tracked blur collapses into the final lockup —
+      // revealed only after the last pin has landed.
+      var bp = eio(seg(t, 3720, 4700));
+      brand.style.opacity = seg(t, 3720, 4280).toFixed(3);
       brand.style.letterSpacing = lerp(.85, .14, bp).toFixed(3) + 'em';
       brand.style.filter = 'blur(' + lerp(12, 0, bp).toFixed(1) + 'px)';
 
-      uline.style.transform = 'scaleX(' + ease(seg(t, 3300, 3720)).toFixed(3) + ')';
+      uline.style.transform = 'scaleX(' + ease(seg(t, 4700, 5100)).toFixed(3) + ')';
 
-      var sl = ease(seg(t, 3550, 4150));
+      var sl = ease(seg(t, 4920, 5520));
       sloganEl.style.opacity = sl.toFixed(3);
       sloganEl.style.transform = 'translateY(' + ((1 - sl) * 16).toFixed(1) + 'px)';
     }
 
-    var DUR = 5000;
+    var DUR = 5950;
     var t0 = performance.now();
     var skipped = false;
     var done = false;

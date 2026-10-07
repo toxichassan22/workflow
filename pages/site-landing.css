@@ -29,7 +29,8 @@
 
 /* ── Opening: auto-played cinematic intro ─────────────────────────────────
    On entry the camera pushes in over the map while the Saudi border draws
-   itself, a beacon lands on Riyadh, and LANDLOOM collapses out of a wide
+   itself, marker pins rain down across it — the last lands on Riyadh —
+   and LANDLOOM collapses out of a wide
    tracking blur into its lockup — then the whole overlay zooms through and
    hands off to the hero. site.js initOpening() scrubs the timeline on a
    rAF clock; click or Escape skips; body.intro-done fires the exit. The
@@ -80,9 +81,9 @@ body.intro-done .intro {
   will-change: transform;
 }
 
-/* The map shifts up-right so the Riyadh pin lands in clear space above the
-   wordmark instead of behind it — the beacon column then rises into open
-   navy, and the southern border bleeds off below the slogan. */
+/* The map shifts up-right so the falling pins land in clear space around
+   the wordmark instead of behind it, and the southern border bleeds off
+   below the slogan. */
 .intro-map {
   position: absolute;
   inset: 0;
@@ -93,13 +94,6 @@ body.intro-done .intro {
 }
 
 .intro-map path { vector-effect: non-scaling-stroke; }
-
-#introBeacon {
-  stroke: var(--teal-bright);
-  stroke-width: 2.5;
-  opacity: 0;
-  filter: drop-shadow(0 0 8px rgba(23, 200, 227, .8));
-}
 
 .intro-sweep {
   position: absolute;
@@ -114,8 +108,14 @@ body.intro-done .intro {
   will-change: transform;
 }
 
-.intro-pin { opacity: 0; transform-box: fill-box; transform-origin: center; }
-.intro-pin-core { fill: var(--teal-bright); filter: drop-shadow(0 0 10px rgba(23, 200, 227, .8)); }
+/* Marker pins: teardrop bodies that JS drops onto the drawn map — the
+   fall, squash and ground ring are all driven from initOpening's clock.
+   Only the Riyadh marker keeps a persistent pulse (the .show rings). */
+.intro-pin { opacity: 0; }
+.pin-drop { fill: var(--teal-bright); filter: drop-shadow(0 0 9px rgba(23, 200, 227, .5)); }
+.pin-hole { fill: var(--ink); opacity: .92; }
+.pin-shadow { fill: #020A14; opacity: 0; }
+.pin-hit { fill: none; stroke: var(--teal-bright); stroke-width: 2; opacity: 0; }
 .intro-pin-ring, .intro-pin-ring2 {
   fill: none;
   stroke: var(--teal-bright);
