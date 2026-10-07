@@ -167,6 +167,7 @@
     var cueEl = track.querySelector('.op-cue');
     var mapPath = track.querySelector('.op-map-path');
     var pinEl = track.querySelector('.op-pin');
+    var sloganEl = track.querySelector('.op-slogan');
     var mapLen = 0;
     if (mapPath && mapPath.getTotalLength) {
       mapLen = mapPath.getTotalLength();
@@ -212,6 +213,13 @@
         pinEl.style.opacity = ps.toFixed(3);
         pinEl.style.transform = 'scale(' + (.45 + .55 * ps).toFixed(3) + ')';
         pinEl.classList.toggle('show', ps >= 1);
+      }
+      // Closing beat: once the country is drawn and the brand typed out,
+      // the tagline rises in under the wordmark.
+      if (sloganEl) {
+        var sg = clamp((p - .90) / .08, 0, 1);
+        sloganEl.style.opacity = sg.toFixed(3);
+        sloganEl.style.transform = 'translateY(' + (16 * (1 - sg)).toFixed(1) + 'px)';
       }
 
       // Brand fades in p .30 -> .38, then types across p .38 -> .88.

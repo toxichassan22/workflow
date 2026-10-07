@@ -230,7 +230,7 @@ a { color: var(--p); }
   .wrap { padding: 0 18px; }
 
   .site-nav { gap: 10px; }
-  .site-nav a[href="/app"] { display: none; }
+  .site-nav a[href$="#join"] { display: none; }
 
   .site-footer { padding: 36px 0 26px; }
   .site-footer .wrap { justify-content: center; text-align: center; }

@@ -146,6 +146,20 @@ body.js .opening-track { height: 280vh; }
   z-index: 1;
 }
 
+.op-slogan {
+  position: absolute;
+  z-index: 2;
+  top: calc(50% + clamp(66px, 12vh, 118px));
+  inset-inline: 24px;
+  margin: 0;
+  text-align: center;
+  font-size: clamp(15px, 1.9vw, 21px);
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: #C3D8E6;
+  text-shadow: 0 0 30px rgba(23, 200, 227, .16);
+}
+
 .op-pin { opacity: 0; transform-box: fill-box; transform-origin: center; }
 .op-pin-core { fill: var(--teal-bright); filter: drop-shadow(0 0 10px rgba(23, 200, 227, .8)); }
 .op-pin-ring { fill: none; stroke: var(--teal-bright); stroke-width: 2.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
