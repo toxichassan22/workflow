@@ -1,8 +1,8 @@
 /* Public pages: language toggle (lang-tagged markup, one CSS rule hides the
-   inactive half), the landing "request access" form, and the page's motion —
-   scroll reveals, metric counters, mockup tilt, the outputs marquee and the
-   scrolled topbar. External file only — the site CSP allows no inline
-   scripts, and every effect sits behind prefers-reduced-motion. */
+   inactive half), the landing "request a demo" form, and the page's motion —
+   scroll reveals, metric counters, mockup tilt and the scrolled topbar.
+   External file only — the site CSP allows no inline scripts, and every
+   effect sits behind prefers-reduced-motion. */
 (function () {
   'use strict';
 
@@ -134,15 +134,6 @@
         el.style.setProperty('--my', ((ev.clientY - r.top) / r.height * 100).toFixed(1) + '%');
       });
     });
-  }
-
-  function initMarquee() {
-    var track = document.querySelector('.outputs-marquee');
-    var set = track && track.querySelector('.mq-set');
-    if (!track || !set || reduceMotion) return;
-    var clone = set.cloneNode(true);
-    clone.setAttribute('aria-hidden', 'true');
-    track.appendChild(clone);
   }
 
   function initTopbar() {
@@ -426,7 +417,6 @@
   initReveal();
   initTilt();
   initSpotlight();
-  initMarquee();
   initTopbar();
   initShowcase();
   initOpening();

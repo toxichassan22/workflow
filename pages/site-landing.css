@@ -1,6 +1,6 @@
 /* Landing-only styles, part 1: the cinematic half — the transparent topbar,
-   the scroll-driven opening, orbs, the hero with its Saudi map backdrop, the
-   product mockup and the outputs marquee. Loaded after site.css on
+   the scroll-driven opening, orbs, the hero and the
+   product mockup. Loaded after site.css on
    landing.html only; sections, join form and motion live in
    site-sections.css. */
 
@@ -216,20 +216,6 @@ body.js .opening-track { height: 280vh; }
   padding: 148px 0 96px;
 }
 
-/* The Saudi Arabia outline sits in the back, behind the headline block —
-   oversized and quiet, but the teal stroke reads clearly at a glance. The
-   color is baked into the SVG; external <img> ignores currentColor. */
-.hero-map {
-  position: absolute;
-  inset-inline-start: -5%;
-  top: 54%;
-  transform: translateY(-50%);
-  width: min(800px, 82%);
-  opacity: .55;
-  pointer-events: none;
-  z-index: 0;
-}
-
 .hero .wrap {
   position: relative;
   z-index: 1;
@@ -271,7 +257,15 @@ body.js .opening-track { height: 280vh; }
   font-size: 18.5px;
   color: #AFC4D6;
   max-width: 560px;
+  margin: 0 0 14px;
+}
+
+.hero p.sub-lead {
+  font-size: 15px;
+  color: #8AA0B5;
+  max-width: 580px;
   margin: 0 0 32px;
+  line-height: 1.85;
 }
 
 .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
@@ -366,54 +360,4 @@ body.js .opening-track { height: 280vh; }
 @keyframes chipFloat {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10px); }
-}
-
-/* ── Outputs strip ───────────────────────────────────────────────────────── */
-
-.outputs {
-  border-bottom: 1px solid rgba(15, 169, 196, .2);
-  background:
-    radial-gradient(760px 220px at 50% -30%, rgba(15, 169, 196, .08) 0%, transparent 62%),
-    linear-gradient(180deg, #04101F 0%, #082239 100%);
-  padding: 30px 0 34px;
-}
-
-.outputs .wrap {
-  display: flex; align-items: center; gap: 14px;
-}
-
-.outputs-track {
-  overflow: hidden;
-  flex: 1;
-  min-width: 0;
-  direction: ltr;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
-}
-
-.outputs-marquee {
-  display: flex;
-  width: max-content;
-}
-
-.mq-set {
-  display: flex;
-  gap: 18px;
-  padding-inline-end: 18px;
-}
-
-.outputs .label {
-  font-size: 13px; font-weight: 800; color: #4FA79B;
-  margin-inline-end: 8px; white-space: nowrap;
-}
-
-.output-chip {
-  border: 1px solid rgba(255, 255, 255, .16);
-  background: rgba(255, 255, 255, .05);
-  border-radius: 999px;
-  padding: 6px 15px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #D9E8F1;
-  white-space: nowrap;
 }
