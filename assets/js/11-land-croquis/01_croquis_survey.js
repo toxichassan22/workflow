@@ -731,27 +731,6 @@
       return true;
     }
 
-    async function saveMapPreviewState() {
-      tenantProjectData.tenantCreativeImages = tenantCreativeImages;
-      if (tenantPresentationId) {
-        const resp = await api('PUT', '/api/presentations/' + encodeURIComponent(tenantPresentationId), {
-          projectData: tenantProjectData,
-          expectedRevision: tenantPresentationRevision
-        });
-        if (resp && resp.revision) {
-          tenantPresentationRevision = Number(resp.revision) || tenantPresentationRevision;
-        }
-      } else if (tenantProjectData.draftId && typeof saveProjectAsDraftNow === 'function') {
-        // Regenerating a map is an explicit user action. Persist the new image URL
-        // immediately for drafts; otherwise reload restores the previous placeholder.
-        // A failed save keeps the workspace but must be said, or the map looks
-        // persisted while a reload quietly drops it.
-        if (!(await saveProjectAsDraftNow(true))) toast(WFT('map.save_state_failed', 'تعذر حفظ حالة الخريطة على الخادم'));
-      } else {
-        triggerAutoSaveDraft();
-      }
-    }
-
     // A full regen must serialize over every other map write: a second regen
     // click, a pan/zoom regen, or a table-edit recompose running in parallel all
     // land on the same per-project server lock and their state merges interleave
@@ -774,11 +753,12 @@
         JSON.stringify([zooms[mapType] || null, centers[mapType] || null, !!overrides[mapType]]);
     }
 
-    function regenerateMapPreview(mapType) {
+    function regenerateMapPreview(mapType, approving = false) {
+      if (tenantMapApprovalBusy(mapType) && !approving) return Promise.resolve(false);
       const key = mapRegenRequestKey(mapType);
       const inflight = tenantMapRegenInflight[key];
       if (inflight) return inflight;
-      const run = tenantMapRegenChain.then(() => regenerateMapPreviewOnce(mapType));
+      const run = tenantMapRegenChain.then(() => regenerateMapPreviewOnce(mapType, approving));
       const tracked = run.finally(() => {
         if (tenantMapRegenInflight[key] === tracked) delete tenantMapRegenInflight[key];
       });
@@ -796,9 +776,9 @@
       return run;
     }
 
-    async function regenerateMapPreviewOnce(mapType) {
+    async function regenerateMapPreviewOnce(mapType, approving = false) {
       if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
-      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit(mapType)) return false;
+      if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit(mapType, approving)) return false;
       if (!isUsableMapCoordinate(tenantProjectData.location_lat, true)
           || !isUsableMapCoordinate(tenantProjectData.location_lng, false)) {
         toast(WFT('location.analyze_link_first', 'حلل رابط الموقع أولًا قبل توليد الخرائط'));
@@ -855,6 +835,7 @@
           [...view.keys, ...(view.editableKeys || [])].forEach(key => { delete nextPlaceholders[key]; });
         });
         tenantCreativeImages.map_placeholders = { ...nextPlaceholders, ...(data.placeholders || {}) };
+        noteMapRenderVersion(mapType, data);
         // The response carries a fresh frame for every map type, but only this type
         // was re-rendered — merging all of them would overwrite a manual viewport
         // picked on another map (and leave its stored image disagreeing with the
@@ -910,10 +891,12 @@
         // A fresh raster inside an approved section voids what the section
         // certified — same release every other location mutation performs.
         if (typeof releaseLocationSectionApproval === 'function') releaseLocationSectionApproval();
-        await saveMapPreviewState();
+        const saved = await saveMapPreviewState();
         renderMapPreviewGallery(true);
         renderLocationWorkflowState();
         selectMapPreviewView(mapType);
+        if (!saved) return false;
+        if (typeof tenantMapRecomposeFailures !== 'undefined') delete tenantMapRecomposeFailures[mapType];
         toast(WFT('location.map_generated', 'تم توليد الخريطة'));
         return true;
       } catch (error) {

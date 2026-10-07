@@ -6,7 +6,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
-const source = ['01_croquis_survey.js', '02_map_edits.js', '03_interactive_map.js']
+const source = ['01_croquis_survey.js', '02_map_edits.js', '02a_map_approval_viewport.js', '03_interactive_map.js']
   .map(name => fs.readFileSync(path.join(root, 'assets/js/11-land-croquis', name), 'utf8')).join('\n');
 const formSource = fs.readFileSync(path.join(root, 'assets/js/08-location-maps/02_catchment_edits.js'), 'utf8');
 const markup = formSource.slice(formSource.indexOf('<div id="mapPreviewImage"'), formSource.indexOf('<p id="mapFrameDirtyHint"'));

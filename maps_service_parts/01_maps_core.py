@@ -207,12 +207,12 @@ SATELLITE_WIDE_STYLES = [
 # Professional maroon color palette matching reference examples
 MARKER_COLOR_SITE = '#6B1C23'      # Dark maroon for site pin
 MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
-SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
-SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
+SITE_FILL_COLOR = (107, 28, 35, 71)     # Keep the building imagery visible beneath the highlight
+SITE_BORDER_COLOR = (107, 28, 35, 255)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
-MAP_LABEL_RENDER_VERSION = 'named-labels-v4-dom-parity'
+MAP_LABEL_RENDER_VERSION = 'named-labels-v5-preview-parity'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -228,7 +228,7 @@ ACCESS_MAP_CONTEXT_RADIUS_KM = 0.6
 # A destination ring wider than this zooms the whole catchment frame out to a
 # regional view — a 65 km row shrank the site to a dot. Farther rows stay
 # listed in the zones table; the concentric bands keep a readable city radius.
-CATCHMENT_RING_MAX_KM = 20.0
+CATCHMENT_RING_MAX_KM = 10.0
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 

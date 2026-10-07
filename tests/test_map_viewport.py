@@ -106,17 +106,23 @@ class MapViewportTests(unittest.TestCase):
                         self.assertEqual(result['centers'][map_type], center)
                         self.assertEqual(result['zooms'][map_type], 18)
                         self.assert_frame(path, (24.0, 46.0), 18, size)
+                        expected_viewport = size
                     elif map_type == 'catchment':
                         # Fixed map: the stored viewport is ignored — the frame
-                        # refits around the rings (the 16 km band — the default
-                        # 28 km ring is past the city-radius cap).
-                        self.assertEqual(result['zooms'][map_type], maps.zoom_for_radius_km(24.0, 16.0))
-                        self.assert_frame(path, (24.0, 46.0), result['zooms'][map_type], size)
+                        # refits around the rings at the canonical size (the
+                        # 8 km band — the default 16/28 km rings are past the
+                        # city-radius cap).
+                        expected_zoom = maps.catchment_frame_fit(24.0, 46.0, 8.0, [])[0]
+                        self.assertEqual(result['zooms'][map_type], expected_zoom)
+                        self.assert_frame(path, (24.0, 46.0), expected_zoom, maps.FIXED_MAP_VIEWPORT_SIZE)
+                        expected_viewport = maps.FIXED_MAP_VIEWPORT_SIZE
                     else:
                         self.assertEqual(result['zooms'][map_type], auto_zooms['landmarks'])
-                        self.assert_frame(path, (24.0, 46.0), result['zooms'][map_type], size)
+                        self.assert_frame(path, (24.0, 46.0), result['zooms'][map_type], maps.FIXED_MAP_VIEWPORT_SIZE)
+                        expected_viewport = maps.FIXED_MAP_VIEWPORT_SIZE
                     metadata = add_image.call_args.args[-1]
-                    self.assertEqual(metadata['viewport_size'], {'width': size[0], 'height': size[1]})
+                    self.assertEqual(metadata['viewport_size'],
+                                     {'width': expected_viewport[0], 'height': expected_viewport[1]})
 
     def test_explicit_live_frame_can_pan_more_than_three_kilometres(self):
         self.generation_patches()
@@ -134,9 +140,9 @@ class MapViewportTests(unittest.TestCase):
             with self.subTest(map_type=map_type):
                 center = {'lat': 24.05, 'lng': 46.05, 'width': 974, 'height': 548}
                 project = self.project(map_type, center)
-                project['map_zooms'][map_type] = 12
+                project['map_zooms'][map_type] = 9
                 result = maps._generate_all_map_images(project, 'tenant-test')
-                self.assertNotEqual(result['zooms'][map_type], 12)
+                self.assertNotEqual(result['zooms'][map_type], 9)
                 self.assertEqual(result['centers'][map_type]['lat'], 24.0)
                 self.assertEqual(result['centers'][map_type]['lng'], 46.0)
 
@@ -226,17 +232,27 @@ class MapViewportTests(unittest.TestCase):
                 with patch('db.get_map_images', return_value=[row]), patch('db.update_map_image'):
                     result = getattr(maps, 'recompose_' + map_type + '_map')(
                         self.project(map_type, center), 'tenant-test', draft_id='viewport-test')
-                self.assertEqual(result['centers'][map_type], center)
-                if map_type == 'catchment':
-                    # The catchment frame is fixed and content-fitted: a stored
-                    # manual viewport is interactive-era residue, so the
-                    # recompose refits around the rings (the 16 km band — the
-                    # default 28 km ring is past the city-radius cap).
-                    self.assertEqual(result['zooms'][map_type], maps.zoom_for_radius_km(24.0, 16.0))
-                else:
+                if map_type in ('overview', 'access'):
+                    self.assertEqual(result['centers'][map_type], center)
                     self.assertEqual(result['zooms'][map_type], 18)
+                    expected_image = (1948, 1096)
+                else:
+                    # Fixed maps rebuild at the canonical viewport whenever the
+                    # stored raster is a legacy size — the manual frame is
+                    # interactive-era residue.
+                    self.assertEqual(result['centers'][map_type],
+                                     {'lat': 24.0, 'lng': 46.0, 'width': 1280, 'height': 720})
+                    expected_image = (2560, 1440)
+                    if map_type == 'catchment':
+                        # The catchment frame refits around the rings (the 8 km
+                        # band — the default 16/28 km rings are past the cap).
+                        self.assertEqual(result['zooms'][map_type],
+                                         maps.catchment_frame_fit(24.0, 46.0, 8.0, [])[0])
+                    else:
+                        # No resolved landmarks → the stored frame stands.
+                        self.assertEqual(result['zooms'][map_type], 18)
                 with Image.open(result['placeholders']['##MAP_' + map_type.upper() + '##']) as image:
-                    self.assertEqual(image.size, (1948, 1096))
+                    self.assertEqual(image.size, expected_image)
 
     def test_road_landmark_snaps_to_the_drawn_path_point_nearest_the_site(self):
         items = [{'name': 'طريق الملك عبدالعزيز', 'lat': 24.6, 'lng': 46.0}]

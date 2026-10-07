@@ -289,6 +289,7 @@
     // extra steps or warnings.
     const tenantMapRecomposeTimers = {};
     const tenantMapRecomposeInflight = {};
+    const tenantMapRecomposeFailures = {};
     // mapType -> promise that resolves once a recompose's server request ends.
     // Set inside the enqueued task, so a recompose merely queued on the shared
     // map-write chain is not "applying" yet — and a running regen must never
@@ -316,28 +317,31 @@
     }
 
     function runMapTableRecompose(mapType) {
-      delete tenantMapRecomposeTimers[mapType];
-      // A timer queued before a location invalidation must not fire after it —
-      // that overlay would stamp the stale raster with the new site's metadata.
-      const recomposeBase = MAP_RECOMPOSE_TOKENS[mapType];
-      if (!recomposeBase) return Promise.resolve();
-      const recomposePlaceholders = (tenantCreativeImages && tenantCreativeImages.map_placeholders) || {};
-      const recomposeStem = recomposeBase.slice(0, -2);
-      if (![recomposeBase, recomposeStem + '_SATELLITE##', recomposeStem + '_ROADMAP##']
-          .some(t => recomposePlaceholders[t])) return Promise.resolve();
       if (tenantMapRecomposeInflight[mapType]) {
         scheduleMapRecomposeType(mapType);
         return tenantMapRecomposeInflight[mapType];
       }
+      clearTimeout(tenantMapRecomposeTimers[mapType]);
+      delete tenantMapRecomposeTimers[mapType];
+      // A timer queued before a location invalidation must not fire after it —
+      // that overlay would stamp the stale raster with the new site's metadata.
+      const recomposeBase = MAP_RECOMPOSE_TOKENS[mapType];
+      if (!recomposeBase) return Promise.resolve(false);
+      const recomposePlaceholders = (tenantCreativeImages && tenantCreativeImages.map_placeholders) || {};
+      const recomposeStem = recomposeBase.slice(0, -2);
+      if (![recomposeBase, recomposeStem + '_SATELLITE##', recomposeStem + '_ROADMAP##']
+          .some(t => recomposePlaceholders[t])) return Promise.resolve(false);
       // An open edit session owns this raster — its confirm path applies it.
       if ((mapType === 'landmarks' && tenantLandmarksEditMode)
           || (mapType === 'catchment' && tenantCatchmentEditMode)
-          || (mapType === 'access' && tenantRoadEditMode)) return Promise.resolve();
+          || (mapType === 'access' && tenantRoadEditMode)) return Promise.resolve(false);
       const apply = { landmarks: applyLandmarksMapEdits, catchment: applyCatchmentMapEdits, access: applyAccessMapEdits }[mapType];
-      if (typeof apply !== 'function') return Promise.resolve();
+      if (typeof apply !== 'function') return Promise.resolve(false);
+      const scope = String(tenantPresentationId || tenantProjectData.draftId || '');
       const run = (async () => {
+        let success = false;
         try {
-          if (typeof saveMapPreviewState === 'function') await saveMapPreviewState();
+          if (typeof saveMapPreviewState === 'function' && (await saveMapPreviewState()) === false) return false;
           // Run on the shared map-write chain — a recompose posting while a
           // full regen is in flight can land after it and overwrite the fresh
           // map state with the pre-regen one.
@@ -349,12 +353,12 @@
               done();
             });
           };
-          if (typeof enqueueTenantMapWrite === 'function') {
-            await enqueueTenantMapWrite(applyTask);
-          } else {
-            await applyTask();
-          }
+          success = (typeof enqueueTenantMapWrite === 'function'
+            ? await enqueueTenantMapWrite(applyTask) : await applyTask()) === true;
+          return success;
         } finally {
+          if (success) delete tenantMapRecomposeFailures[mapType];
+          else tenantMapRecomposeFailures[mapType] = scope;
           delete tenantMapRecomposeInflight[mapType];
         }
       })();
@@ -362,13 +366,24 @@
       return run;
     }
 
-    async function flushMapTableRecompose() {
-      const pending = Object.keys(tenantMapRecomposeTimers);
-      pending.forEach(mapType => clearTimeout(tenantMapRecomposeTimers[mapType]));
-      const runs = pending.map(mapType => runMapTableRecompose(mapType));
-      // An apply already in flight still leaves the outgoing payload one
-      // raster behind — wait for those alongside the freshly scheduled runs.
-      await Promise.all([...runs, ...Object.values(tenantMapRecomposeInflight)]);
+    async function flushMapTableRecompose(mapType) {
+      const keys = state => Object.keys(state).filter(type => !mapType || type === mapType);
+      let success = true;
+      while (true) {
+        const inflight = keys(tenantMapRecomposeInflight).map(type => tenantMapRecomposeInflight[type]);
+        if (inflight.length) {
+          if ((await Promise.all(inflight)).some(result => result === false)) success = false;
+          continue;
+        }
+        const pending = keys(tenantMapRecomposeTimers);
+        if (!pending.length) return success && !keys(tenantMapRecomposeFailures)
+          .some(type => tenantMapRecomposeFailures[type] === String(tenantPresentationId || tenantProjectData.draftId || ''));
+        pending.forEach(type => clearTimeout(tenantMapRecomposeTimers[type]));
+        const runs = pending.map(type => runMapTableRecompose(type));
+        // An apply already in flight still leaves the outgoing payload one
+        // raster behind — wait for those alongside the freshly scheduled runs.
+        if ((await Promise.all(runs)).some(result => result === false)) success = false;
+      }
     }
 
     // A full regen of mapType supersedes that map's queued table recompose: the
@@ -413,7 +428,8 @@
         const roadModeLocked = key === 'main_roads' && tenantRoadEditMode;
         const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
         const landmarksModeLocked = key === 'nearby_landmarks' && tenantLandmarksEditMode;
-        const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked;
+        const modeLocked = roadModeLocked || catchmentModeLocked || landmarksModeLocked
+          || tenantMapApprovalBusy(LOCATION_TABLE_FIELDS[key]?.mapType);
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea')
           .forEach(control => { control.disabled = modeLocked; });
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] button')
@@ -490,6 +506,9 @@
         updateTenantCatchmentControls();
         updateTenantLandmarksControls();
         updateTenantMapInteractionState();
+        if (tenantMapApprovalBusy(view.mapType)) {
+          controls.querySelectorAll('button').forEach(button => { button.disabled = true; });
+        }
       }
       renderMapPreviewGallery();
       // The selected map can be picked while map_placeholders is still empty

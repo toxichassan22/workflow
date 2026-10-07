@@ -506,6 +506,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "land.docs.overflow": "Maximum {n} files — {m} extra file(s) ignored",
   "map.save_state_failed": "Could not save the map state on the server",
   "map.edit_apply_failed": "Could not apply the edits to the map",
+  "map.approval_busy": "Map approval in progress",
   "notif.cat.platform": "Platform",
   "form.client_entered_only": "Client-Entered Only",
   "timeline.saved_at": "Saved ({time})",

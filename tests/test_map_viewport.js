@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const parts = ['01_croquis_survey.js', '02_map_edits.js', '03_interactive_map.js'];
+const parts = ['01_croquis_survey.js', '02_map_edits.js', '02a_map_approval_viewport.js', '03_interactive_map.js'];
 const source = parts.map(name => fs.readFileSync(path.join(root, 'assets/js/11-land-croquis', name), 'utf8')).join('\n');
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -22,6 +22,7 @@ function preview(mapType, width = 974, height = 548, bakedSize = { width: 1280, 
     map_zooms: { [mapType]: live.zoom },
     map_centers: { [mapType]: { lat: live.lat, lng: live.lng } },
     map_baked_frames: { [mapType]: { ...live, ...bakedSize } },
+    map_renderer_version: 'current', map_render_versions: { [mapType]: 'current' },
     map_approvals: {}, map_viewport_overrides: {}
   };
   const state = vm.createContext({
@@ -55,7 +56,7 @@ function preview(mapType, width = 974, height = 548, bakedSize = { width: 1280, 
       image.naturalWidth = width * 2;
       image.naturalHeight = height * 2;
       return {
-        success: true,
+        success: true, mapRenderVersion: 'current',
         placeholders: { ['##MAP_' + body.mapType.toUpperCase() + '##']: '/uploads/maps/baked.png' },
         zooms: { [body.mapType]: body.projectData.map_zooms[body.mapType] },
         centers: { [body.mapType]: { ...frame, width, height } }

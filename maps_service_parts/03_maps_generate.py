@@ -273,7 +273,9 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             continue
         if not _overlay_markers(final_path, center_lat, center_lng, zoom, _build_markers(lat, lng), size=_stored_map_viewport_size(metadata)):
             continue
-        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'highlight_site': bool(highlight_site)}
+        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'highlight_site': bool(highlight_site),
+                         'map_label_version': MAP_LABEL_RENDER_VERSION,
+                         'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION}
         final = by_type.get(final_type)
         if final:
             update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
@@ -401,6 +403,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             'access_roads': rendered_roads,
             'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
             'map_label_version': MAP_LABEL_RENDER_VERSION,
+            'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
         }
         final = by_type.get(final_type)
         if final:
@@ -445,16 +448,13 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
     lng = _extract_coordinate(project_data.get('location_lng') or project_data.get('locationLng') or project_data.get('lng'))
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
-    landmarks = project_data.get('catchment_map_landmarks') or []
-    if isinstance(landmarks, str):
-        try:
-            landmarks = json.loads(landmarks)
-        except (TypeError, ValueError):
-            landmarks = []
-    if not isinstance(landmarks, list):
-        landmarks = []
+    landmarks = _recompose_landmark_items(
+        project_data, 'catchment_map_landmarks', 'catchment_landmarks', by_type.values(),
+        lat, lng, 'city_landmarks_data')
     draw_compass = True
-    rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
+    draw_inset = True
+    zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
+    rings = catchment_rings(zones)
     map_lang = map_language(project_data)
     ring_km = max([ring['km'] for ring in rings] + [0.0])
     # A stored road point can sit at the feature's remote endpoint — snap those
@@ -502,19 +502,25 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             except (TypeError, ValueError, json.JSONDecodeError):
                 existing_zoom, existing_center = None, None
             # Only an identical frame skips the rebuild — a wider stored one is
-            # exactly the stale-extent case this refit exists to repair.
+            # exactly the stale-extent case this refit exists to repair. The
+            # sidecar must also still be the canonical fixed size: a legacy
+            # phone-viewport raster gets rebuilt instead of stretched.
             if (existing_zoom is not None and existing_zoom == frame_zoom
                     and existing_center is not None
+                    and existing_meta.get('catchment_rings') == rings
                     and _distance_meters(existing_center[0], existing_center[1],
-                                         frame_center_lat, frame_center_lng) < 25):
+                                         frame_center_lat, frame_center_lng) < 25
+                    and _static_map_image_matches(existing['file_path'], FIXED_MAP_VIEWPORT_SIZE)):
                 continue
         active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
+        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, FIXED_MAP_VIEWPORT_SIZE, styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
+            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=FIXED_MAP_VIEWPORT_SIZE)
             if not cached_base:
-                continue
+                # The rebuild was required — composing over the stale frame
+                # would certify the wrong extent, so the recompose fails.
+                return {'error': 'تعذر جلب صورة الخريطة الأساسية'}
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
         shutil.copyfile(cached_base, editable_path)
         if active_maptype == 'satellite':
@@ -525,12 +531,15 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
                                   site_lat=lat, site_lng=lng)
         if draw_compass:
             _draw_compass(editable_path, position='top-right', language=map_lang)
+        if draw_inset:
+            _draw_inset_map(editable_path, lat, lng, inset_size=180, language=map_lang)
         editable_placeholder = (
             str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
             if final else str(existing.get('placeholder') or '')
         )
         metadata = {**metadata, 'zoom': frame_zoom, 'center_lat': frame_center_lat,
-                    'center_lng': frame_center_lng, 'manual_viewport': False}
+                    'center_lng': frame_center_lng, 'manual_viewport': False,
+                    'viewport_size': _map_size_metadata(FIXED_MAP_VIEWPORT_SIZE)}
         if existing is not None:
             update_map_image(existing['id'], tenant_id, editable_path, editable_placeholder, metadata)
             editable_id = existing['id']
@@ -566,7 +575,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         # (map predates editable sidecars, or its table rows were never
         # geocoded). Redraw the render set stored on the row instead of wiping
         # the markers off the approved image.
-        draw_landmarks = landmarks if landmarks else (metadata.get('catchment_landmarks') or [])
+        draw_landmarks = landmarks
         label_positions = project_data.get('catchment_label_positions')
         if not label_positions:
             label_positions = {item['name']: item['label_point'] for item in draw_landmarks
@@ -575,7 +584,13 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             final_path, center_lat, center_lng, zoom, draw_landmarks,
             label_positions, scale=2, site_lat=lat, site_lng=lng
         )
-        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'catchment_landmarks': current_landmarks}
+        if current_landmarks is None:
+            return {'error': 'تعذر رسم معالم خريطة المنطقة'}
+        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'catchment_landmarks': current_landmarks,
+                         'zones': zones, 'catchment_rings': rings,
+                         'viewport_size': _map_size_metadata(FIXED_MAP_VIEWPORT_SIZE),
+                         'map_label_version': MAP_LABEL_RENDER_VERSION,
+                         'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION}
         final = by_type.get(final_type)
         if final:
             update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
@@ -584,7 +599,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
         placeholders[final_placeholder] = final_path
         placeholders[editable['placeholder']] = editable['file_path']
-        centers['catchment'] = _stored_map_frame_center(center_lat, center_lng, metadata)
+        centers['catchment'] = _stored_map_frame_center(center_lat, center_lng, next_metadata)
         zooms['catchment'] = zoom
         if not rendered_landmarks:
             rendered_landmarks = current_landmarks
@@ -624,15 +639,11 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
     site_lng = _extract_coordinate(project_data.get('location_lng') or project_data.get('locationLng') or project_data.get('lng'))
     if site_lat is None or site_lng is None:
         return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
-    landmarks = project_data.get('landmark_map_items') or []
-    if isinstance(landmarks, str):
-        try:
-            landmarks = json.loads(landmarks)
-        except (TypeError, ValueError):
-            landmarks = []
-    if not isinstance(landmarks, list):
-        landmarks = []
+    landmarks = _recompose_landmark_items(
+        project_data, 'landmark_map_items', 'landmark_map_items', by_type.values(),
+        site_lat, site_lng, 'nearby_landmarks_data')
     draw_compass = True
+    draw_inset = True
     map_lang = map_language(project_data)
     # Road-named rows keep their drawn-road anchor near the site — a geocoded
     # endpoint kilometres out would otherwise pin the marker off-frame.
@@ -673,19 +684,23 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             except (TypeError, ValueError, json.JSONDecodeError):
                 existing_zoom, existing_center = None, None
             # Identical frame → keep the editable; a wider one is the stale
-            # extent this refit repairs.
+            # extent this refit repairs. A legacy-sized raster also rebuilds —
+            # fixed maps always compose at the canonical viewport.
             if (existing_zoom is not None and existing_zoom == frame_zoom
                     and existing_center is not None
                     and _distance_meters(existing_center[0], existing_center[1],
-                                         frame_center_lat, frame_center_lng) < 25):
+                                         frame_center_lat, frame_center_lng) < 25
+                    and _static_map_image_matches(existing['file_path'], FIXED_MAP_VIEWPORT_SIZE)):
                 continue
         active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
         styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
-        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, _stored_map_viewport_size(metadata), styles, language=map_lang)
+        cached_base = _map_cache_path(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, None, None, FIXED_MAP_VIEWPORT_SIZE, styles, language=map_lang)
         if not os.path.isfile(cached_base):
-            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=_stored_map_viewport_size(metadata))
+            cached_base = _fetch_map_base(frame_center_lat, frame_center_lng, active_maptype, frame_zoom, styles, tenant_id, language=map_lang, size=FIXED_MAP_VIEWPORT_SIZE)
             if not cached_base:
-                continue
+                # Same stale-frame guard as the catchment recompose: no clean
+                # base at the fitted frame means no certified render.
+                return {'error': 'تعذر جلب صورة الخريطة الأساسية'}
         editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
         shutil.copyfile(cached_base, editable_path)
         if active_maptype == 'satellite':
@@ -693,12 +708,15 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             _apply_map_overlay(editable_path, dark_factor=0.20)
         if draw_compass:
             _draw_compass(editable_path, position='top-right', language=map_lang)
+        if draw_inset:
+            _draw_inset_map(editable_path, site_lat, site_lng, inset_size=180, language=map_lang)
         editable_placeholder = (
             str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
             if final else str(existing.get('placeholder') or '')
         )
         metadata = {**metadata, 'zoom': frame_zoom, 'center_lat': frame_center_lat,
-                    'center_lng': frame_center_lng, 'manual_viewport': False}
+                    'center_lng': frame_center_lng, 'manual_viewport': False,
+                    'viewport_size': _map_size_metadata(FIXED_MAP_VIEWPORT_SIZE)}
         if existing is not None:
             update_map_image(existing['id'], tenant_id, editable_path, editable_placeholder, metadata)
             editable_id = existing['id']
@@ -732,7 +750,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
         shutil.copyfile(editable['file_path'], final_path)
         # Same empty-payload guard as the catchment recompose: fall back to the
         # render set stored on the row rather than wiping the approved markers.
-        draw_landmarks = landmarks if landmarks else (metadata.get('landmark_map_items') or [])
+        draw_landmarks = landmarks
         label_positions = project_data.get('landmark_label_positions')
         if not label_positions:
             label_positions = {item['name']: item['label_point'] for item in draw_landmarks
@@ -741,7 +759,12 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             final_path, center_lat, center_lng, zoom, draw_landmarks,
             label_positions, scale=2, site_lat=site_lat, site_lng=site_lng
         )
-        next_metadata = {**metadata, 'lat': site_lat, 'lng': site_lng, 'landmark_map_items': current_landmarks}
+        if current_landmarks is None:
+            return {'error': 'تعذر رسم معالم الخريطة'}
+        next_metadata = {**metadata, 'lat': site_lat, 'lng': site_lng, 'landmark_map_items': current_landmarks,
+                         'viewport_size': _map_size_metadata(FIXED_MAP_VIEWPORT_SIZE),
+                         'map_label_version': MAP_LABEL_RENDER_VERSION,
+                         'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION}
         final = by_type.get(final_type)
         if final:
             update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
@@ -750,7 +773,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
         update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
         placeholders[final_placeholder] = final_path
         placeholders[editable['placeholder']] = editable['file_path']
-        centers['landmarks'] = _stored_map_frame_center(center_lat, center_lng, metadata)
+        centers['landmarks'] = _stored_map_frame_center(center_lat, center_lng, next_metadata)
         zooms['landmarks'] = zoom
         if not rendered_landmarks:
             rendered_landmarks = current_landmarks
@@ -778,326 +801,3 @@ def recompose_landmarks_map(project_data, tenant_id, presentation_id=None, draft
             return _recompose_landmarks_map(project_data, tenant_id, effective_id,
                                             draft_id=draft_id)
 
-
-def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True, usage_flow=None):
-    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
-    lock_key = (str(tenant_id), str(effective_id))
-    with _MAP_GENERATION_LOCKS_GUARD:
-        lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
-    with lock:
-        flow = usage_flow if usage_flow in MAPS_USAGE_FLOWS else 'maps'
-        scope_ctx = maps_usage_ctx(
-            flow, tenant_id=tenant_id, presentation_id=presentation_id,
-            draft_id=draft_id or (project_data or {}).get('draftId') or (project_data or {}).get('draft_id'))
-        with maps_usage_scope(scope_ctx):
-            return _generate_all_map_images(project_data, tenant_id, presentation_id, force, branding, draft_id, highlight_site)
-
-
-def _unique_map_path(tenant_id, presentation_id, image_type):
-    """Generate a unique file path for a map image."""
-    safe_tenant = str(tenant_id).replace('-', '')[:12]
-    pres_part = str(presentation_id).replace('-', '')[:12] if presentation_id else 'draft'
-    filename = f"{safe_tenant}_{pres_part}_{image_type}_{uuid.uuid4().hex[:8]}.png"
-    return os.path.join(MAPS_DIR, filename)
-
-
-def _extract_coordinate(value):
-    """Extract float coordinate from string or number."""
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        val_str = value.strip()
-        if not val_str:
-            return None
-        match = re.search(r'(-?\d+\.\d+)', val_str)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                pass
-    return None
-
-
-def _parse_landmarks_text(text, language='ar'):
-    """Parse landmark text into structured list with name, duration_minutes, and distance_km."""
-    if not text:
-        return []
-    landmarks = []
-    for line in text.strip().split('\n'):
-        line = line.strip().lstrip('-').lstrip('•').strip()
-        if not line:
-            continue
-
-        duration = None
-        distance = None
-
-        dur_match = re.search(r'(\d+)\s*(?:دقيقة|دقائق|د|min|mins|minutes)', line, re.IGNORECASE)
-        if dur_match:
-            duration = int(dur_match.group(1))
-
-        dist_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:كم|كـم|km|kms|kilometer|kilometers)', line, re.IGNORECASE)
-        if dist_match:
-            distance = float(dist_match.group(1))
-
-        clean_name = line
-        if dur_match:
-            clean_name = clean_name.replace(dur_match.group(0), '')
-        if dist_match:
-            clean_name = clean_name.replace(dist_match.group(0), '')
-
-        category = ''
-        category_match = re.search(r'(?:^|\s)[—\-]\s*(ترفيهي|تعليمي|صحي|تجاري|ديني(?: ومركزي)?|ثقافي/سياحي|حكومي/خدمي|اجتماعي/خدمي|Leisure|Education|Health|Retail|Religious|Culture/Tourism|Government/Services|Social/Services|Shopping|Transport|Public transit|Main corridor|Waterfront|Future development|Heritage & tourism|Business & logistics|Sports & events|Events|Coastal areas|Religious & central|Holy sites|Major projects|Religious tourism|Business & finance|Business & tech|Business & government|City center|Tourism & landmarks|Exhibitions & events|Nature & leisure|Logistics|Industry & logistics|Major landmark|Landmark)\s*(?:[—\-]|$)', clean_name, re.IGNORECASE)
-        if category_match:
-            category = category_match.group(1)
-            clean_name = clean_name.replace(category_match.group(0), ' ')
-        clean_name = re.sub(r'[\-\(\)\,\،\s—–]+', ' ', clean_name).strip()
-        if not clean_name:
-            clean_name = line
-
-        landmarks.append({
-            'name': clean_name,
-            'category': category,
-            'duration_minutes': duration,
-            'distance_km': distance,
-            'distance_text': f"{distance} {_distance_unit(language)}" if distance is not None else None,
-            'lat': None,
-            'lng': None,
-        })
-    return landmarks
-
-
-def _landmark_row_selected(item):
-    """Twin of slide_engine._landmark_row_selected — keep both in sync.
-
-    Tolerant of string flags from older drafts («true», «1», «yes»); a checked
-    row must render however it was stored.
-    """
-    for key in ('show_on_map', 'selected'):
-        value = (item or {}).get(key)
-        if value is True or str(value or '').strip().lower() in {'true', '1', 'yes'}:
-            return True
-    return False
-
-
-def select_map_landmark_rows(structured, limit=7):
-    """Return the approved landmark rows for a map without changing their input order.
-
-    Every checked row renders — the client picks the count; with no selection the
-    first ``limit`` rows show like before.
-    """
-    if isinstance(structured, str):
-        try:
-            structured = json.loads(structured)
-        except (TypeError, ValueError):
-            return []
-    if not isinstance(structured, list):
-        return []
-
-    rows = [dict(item) for item in structured if isinstance(item, dict)]
-    selected = [item for item in rows if _landmark_row_selected(item)]
-    try:
-        row_limit = max(0, min(7, int(limit)))
-    except (TypeError, ValueError):
-        row_limit = 7
-    if selected:
-        return selected
-    return rows[:row_limit]
-
-
-def _merge_landmark_data(landmarks, structured):
-    if isinstance(structured, str):
-        try:
-            structured = json.loads(structured)
-        except (TypeError, ValueError):
-            return landmarks
-    if not isinstance(structured, list):
-        return landmarks
-
-    def normalized_name(value):
-        return re.sub(r'\s+', ' ', _strip_arabic_diacritics(str(value or '')).strip()).casefold()
-
-    def numeric(value):
-        if value in (None, ''):
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    by_name = {normalized_name(item.get('name')): item for item in landmarks if item.get('name')}
-    for item in structured:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get('name') or item.get('title') or item.get('description') or '').strip()
-        key = normalized_name(name)
-        if not key:
-            continue
-        target = by_name.get(key)
-        if target is None:
-            target = {
-                'name': name,
-                'category': item.get('category') or item.get('type') or '',
-                'duration_minutes': item.get('duration_minutes') or item.get('duration_min'),
-                'distance_km': item.get('distance_km') or item.get('distance'),
-                'distance_text': item.get('distance_text'),
-                'lat': None,
-                'lng': None,
-            }
-            landmarks.append(target)
-            by_name[key] = target
-        else:
-            target['name'] = name or target.get('name')
-            if item.get('category') or item.get('type'):
-                target['category'] = item.get('category') or item.get('type')
-            for field in ('duration_minutes', 'duration_min', 'distance_km', 'distance', 'distance_text'):
-                if target.get(field) in (None, '') and item.get(field) not in (None, ''):
-                    target[field] = item[field]
-
-        latitude = numeric(item.get('lat') or item.get('latitude'))
-        longitude = numeric(item.get('lng') or item.get('longitude'))
-        if latitude is not None and longitude is not None:
-            target['lat'] = latitude
-            target['lng'] = longitude
-        distance_meters = numeric(item.get('distance_meters'))
-        if distance_meters is not None:
-            target['distance_meters'] = round(distance_meters)
-        if item.get('manual_position'):
-            target['manual_position'] = True
-    return landmarks
-
-
-def _snap_road_landmarks(items, project_data, site_lat, site_lng, language='ar', search_radius_m=50000):
-    """Re-anchor road-named landmark rows near the site.
-
-    A road name geocodes to a single point that can sit at the feature's remote
-    end — the marker then lands kilometres out and the fitted frame zooms out to
-    cover it. When the same road is drawn on the access map, its stored path is
-    the truth: the marker belongs at the path's closest point to the site.
-    Undrawn roads re-resolve through the Places candidate nearest the site.
-    Markers the user placed by hand (``manual_position``) are never moved.
-    """
-    if not isinstance(items, list):
-        return
-    paths = []
-    for key in ('manual_road_paths', 'access_roads_data'):
-        raw = (project_data or {}).get(key)
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (TypeError, ValueError):
-                raw = []
-        for entry in raw or []:
-            if not isinstance(entry, dict):
-                continue
-            road_name = str(entry.get('name') or '').strip()
-            points = []
-            for point in entry.get('points') or []:
-                try:
-                    points.append((float(point[0]), float(point[1])))
-                except (TypeError, ValueError, IndexError):
-                    continue
-            if road_name and points:
-                paths.append((road_name, points))
-    for item in items:
-        if not isinstance(item, dict) or item.get('manual_position'):
-            continue
-        names = [item.get('name'), item.get('name_src')]
-        if not any(is_road_name(name) for name in names if name):
-            continue
-        old_lat, old_lng = item.get('lat'), item.get('lng')
-        match = next((
-            points for road_name, points in paths
-            if any(is_same_road_name(name, road_name) for name in names if name)), None)
-        if match:
-            item['lat'], item['lng'] = min(
-                match, key=lambda pt: _distance_meters(site_lat, site_lng, pt[0], pt[1]))
-        else:
-            place = find_place_near(item.get('name'), site_lat, site_lng,
-                                    radius_m=search_radius_m, language=language)
-            if not (place and place.get('lat') is not None and place.get('lng') is not None):
-                continue
-            item['lat'], item['lng'] = place['lat'], place['lng']
-        item['distance_meters'] = round(_distance_meters(
-            site_lat, site_lng, float(item['lat']), float(item['lng'])))
-        moved_m = None
-        try:
-            moved_m = _distance_meters(float(old_lat), float(old_lng), float(item['lat']), float(item['lng']))
-        except (TypeError, ValueError):
-            moved_m = None
-        if moved_m is None or moved_m > 250:
-            # The stored label point was drawn beside the old marker — a moved
-            # pin would leave it stranded off-frame, so the label re-seats.
-            item.pop('label_point', None)
-            for labels_key in ('catchment_label_positions', 'landmark_label_positions'):
-                labels = (project_data or {}).get(labels_key)
-                if isinstance(labels, dict):
-                    labels.pop(item.get('name'), None)
-            print(f"[LANDMARKS] road marker '{item.get('name')}' snapped near the site")
-
-
-def _parse_catchment_zones(text):
-    """Parse catchment zones text into zone objects.
-
-    Supports both the legacy formats ("10 دقائق", "5 دقائق: مجمع الراشد") and the
-    structured table format ("مجمع الراشد — 4.2 كم — 5 دقائق")."""
-    default_zones = [{'minutes': 10, 'km': 8}, {'minutes': 20, 'km': 16}, {'minutes': 35, 'km': 28}]
-    if not text:
-        return default_zones
-    if isinstance(text, list):
-        zones = []
-        for item in text:
-            if not isinstance(item, dict):
-                continue
-            km = item.get('km') or item.get('distance_km') or item.get('distance')
-            minutes = item.get('minutes') or item.get('duration_minutes') or item.get('duration_min')
-            try:
-                minutes = int(float(minutes)) if minutes not in (None, '') else None
-            except (TypeError, ValueError):
-                minutes = None
-            try:
-                km = float(km) if km not in (None, '') else None
-            except (TypeError, ValueError):
-                km = None
-            if km is None and minutes:
-                km = minutes * 0.8 / 1.60934
-            if not km or km <= 0:
-                continue
-            zone = {'minutes': minutes, 'km': km}
-            label = str(item.get('label') or item.get('name') or item.get('area') or '').strip()
-            if label:
-                zone['label'] = label
-            zones.append(zone)
-        return zones or default_zones
-    if not isinstance(text, str):
-        return default_zones
-    zones = []
-    for line in text.strip().split('\n'):
-        line = line.strip().lstrip('-').lstrip('•').strip()
-        if not line:
-            continue
-        dur_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:دقيقة|دقائق|min|mins|minutes)', line, re.IGNORECASE)
-        dist_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:كم|كـم|km|kms|kilometer|kilometers)', line, re.IGNORECASE)
-        if dur_match:
-            minutes = int(float(dur_match.group(1)))
-        else:
-            digits = ''.join([c for c in line if c.isdigit()])
-            if not digits:
-                continue
-            minutes = int(digits)
-        zone = {'minutes': minutes, 'km': minutes * 0.8 / 1.60934}
-        if dist_match:
-            zone['km'] = float(dist_match.group(1))
-        label = line
-        if dur_match:
-            label = label.replace(dur_match.group(0), '')
-        if dist_match:
-            label = label.replace(dist_match.group(0), '')
-        label = re.sub(r'^[\s:：\-—–,،]+|[\s:：\-—–,،]+$', '', label).strip()
-        if label:
-            zone['label'] = label
-        zones.append(zone)
-    if not zones:
-        return default_zones
-    return zones

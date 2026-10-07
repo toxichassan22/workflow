@@ -687,7 +687,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn("mapType === 'overview' || mapType === 'access'", viewport_fn)
         self.assertNotIn("'catchment'", viewport_fn)
         self.assertNotIn("'landmarks'", viewport_fn)
-        regen_body = index_source.split('async function regenerateMapPreviewOnce(mapType)', 1)[1].split('function ', 1)[0]
+        regen_body = index_source.split('async function regenerateMapPreviewOnce(', 1)[1].split('function ', 1)[0]
         self.assertIn('payload.map_zooms', regen_body)
         self.assertIn('payload.map_centers', regen_body)
         self.assertIn('payload.map_viewport_overrides', regen_body)
@@ -720,7 +720,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         # pre-pan frame.
         self.assertIn('function recordInteractiveFrame(', index_source)
         self.assertIn('function syncInteractiveLiveFrame()', index_source)
-        approve_body = index_source.split('async function approveTenantMap(', 1)[1].split('function ', 1)[0]
+        approve_body = index_source.split('async function approveTenantMapOnce(', 1)[1].split('function ', 1)[0]
         self.assertIn('syncInteractiveLiveFrame()', approve_body)
         # A recompose returns the raster's stored frame; merging it under a
         # viewport override would erase the live camera record and the pending
@@ -966,18 +966,23 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         final_file.close()
         self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
         self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
-        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
-        # Zoom 11 already covers the capped default catchment rings (the 16 km
-        # band — the default 28 km ring is past the city-radius cap), so the
-        # editable sidecar is kept and only the markers are recomposed.
-        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 11, 'center_lat': 24.0, 'center_lng': 46.0,
-                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
-                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
+        Image.new('RGB', (2560, 1440), '#ddd8cf').save(editable_path)
         landmarks = [
             {'name': 'مكان أول', 'lat': 24.001, 'lng': 46.001},
             {'name': 'مكان ثان', 'lat': 24.0011, 'lng': 46.0011},
             {'name': 'مكان ثالث', 'lat': 24.0012, 'lng': 46.0012},
         ]
+        # The stored frame must equal the recomputed content fit — same zoom,
+        # same center, same ring content, canonical raster size — or the
+        # sidecar counts as stale and the recompose fetches a fresh base. A
+        # project with no zones rows frames on the default drive-time bands.
+        rings = service.catchment_rings(service._parse_catchment_zones(''))
+        ring_km = max([ring['km'] for ring in rings] + [0.0])
+        frame_zoom, frame_lat, frame_lng = service.catchment_frame_fit(24.0, 46.0, ring_km, landmarks)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': frame_zoom, 'center_lat': frame_lat, 'center_lng': frame_lng,
+                    'catchment_rings': rings, 'viewport_size': {'width': 1280, 'height': 720},
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
         with self.app.app_context():
             db.add_map_image(self.tenant_a, 'catchment_editable', editable_path, '##MAP_CATCHMENT_EDITABLE##',
                              'draft_quick-catchment-compose', metadata)
@@ -1058,7 +1063,9 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                 }, self.tenant_a, draft_id='catchment-legacy-sidecar')
-            provider.assert_called_once()
+            # Two provider reads: the base map plus the fixed inset, the same
+            # chrome the overview rebuild already restored.
+            self.assertEqual(provider.call_count, 2)
         self.assertNotIn('error', composed)
         self.assertIn('##MAP_CATCHMENT_EDITABLE##', composed['placeholders'])
         self.assertIn('##MAP_CATCHMENT##', composed['placeholders'])
@@ -1114,7 +1121,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         maps_source = read_module_source('maps_service.py')
         self.assertIn('def catchment_frame_fit(', maps_source)
         self.assertIn('def zoom_for_extent(', maps_source)
-        self.assertIn('landmark_radius_m / 1000.0', maps_source)
+        # Landmarks reuse the shared directional fit with no ring — the same
+        # resolved list frames and draws, so a far row widens the frame instead
+        # of being capped away.
+        self.assertIn('catchment_frame_fit(site_lat, site_lng, 0, landmarks)', maps_source)
         self.assertNotIn('LANDMARKS_MAX_RADIUS_KM', maps_source)
 
     def test_landmarks_recompose_rebuilds_missing_sidecar_from_provider_base(self):
@@ -1145,7 +1155,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                 }, self.tenant_a, draft_id='landmarks-legacy-sidecar')
-            provider.assert_called_once()
+            self.assertEqual(provider.call_count, 2)
         self.assertNotIn('error', composed)
         self.assertIn('##MAP_LANDMARKS_EDITABLE##', composed['placeholders'])
         self.assertIn('##MAP_LANDMARKS##', composed['placeholders'])
@@ -1295,7 +1305,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         final_file.close()
         self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
         self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
-        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        Image.new('RGB', (2560, 1440), '#ddd8cf').save(editable_path)
         # Zoom 16 is the frame the landmarks content fits to — the sidecar then
         # already matches and the recompose only re-seats markers and labels.
         metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 16, 'center_lat': 24.0, 'center_lng': 46.0,
@@ -1469,10 +1479,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('labels_overlay = Image.new', source)
         self.assertIn('distance=52', source)
         self.assertIn('candidates = preferred_candidates or visible_candidates', source)
-        self.assertIn('ly1 = offset_point[1] - 30', source)
+        self.assertIn('ly1 = offset_point[1] - label_half_height', source)
         self.assertLess(
-            source.index('draw.line(segment, fill=gold_color, width=9)'),
-            source.index('_draw_road_label(labels_draw')
+            source.index('draw.line(segment, fill=gold_color, width=max(1, round(9 * unit))'),
+            source.index('_draw_road_label(labels_overlay')
         )
         self.assertIn('function withCacheBust(url)', index_source)
         self.assertIn('payload.refresh_maps = true', index_source)

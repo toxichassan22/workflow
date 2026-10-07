@@ -506,6 +506,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "land.docs.overflow": "الحد الأقصى {n} ملفات — تم تجاهل {m} ملف إضافي",
   "map.save_state_failed": "تعذر حفظ حالة الخريطة على الخادم",
   "map.edit_apply_failed": "تعذر حفظ التعديلات على الخريطة",
+  "map.approval_busy": "الخريطة قيد الاعتماد",
   "notif.cat.platform": "المنصة",
   "form.client_entered_only": "إدخال العميل",
   "timeline.saved_at": "محفوظ ({time})",

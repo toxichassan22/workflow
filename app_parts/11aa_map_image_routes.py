@@ -152,6 +152,11 @@ def api_generate_single_map_image():
         if 'highlightSite' in data:
             creative['map_highlight_site'] = bool(highlight_site)
         creative['maps_persisted'] = True
+        creative['map_renderer_version'] = maps_service.MAP_LABEL_RENDER_VERSION
+        creative['map_render_versions'] = {
+            **(creative.get('map_render_versions') if isinstance(creative.get('map_render_versions'), dict) else {}),
+            map_type: maps_service.MAP_LABEL_RENDER_VERSION,
+        }
         # Recompose responses carry only their map's resolved key, so a missing
         # key means "not redrawn" — never store the empty fallback over it.
         if map_type == 'landmarks':
@@ -205,6 +210,7 @@ def api_generate_single_map_image():
         **(_presentation_revision_response(revision_result) if revision_result else {}),
         'success': True,
         'mapType': map_type,
+        'mapRenderVersion': maps_service.MAP_LABEL_RENDER_VERSION,
         'placeholders': placeholders,
         'landmarks': result.get('landmarks', []),
         'landmarks_matrix': result.get('landmarks_matrix', []),

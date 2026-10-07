@@ -171,8 +171,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     center_overrides = {
         key: value for key, value in center_overrides.items() if key in manual_types
     } if isinstance(center_overrides, dict) else {}
-    map_sizes = {key: _map_viewport_size(center_overrides.get(key)) or (1280, 720)
-                 for key in ('overview', 'access', 'catchment', 'landmarks')}
+    map_sizes = {key: (_map_viewport_size(center_overrides.get(key)) if key in ('overview', 'access') else None)
+                 or FIXED_MAP_VIEWPORT_SIZE for key in ('overview', 'access', 'catchment', 'landmarks')}
     # A regenerate must not re-frame a map whose extent is derived from a real boundary:
     # shifting the zoom by two levels shrank the plot back to a dot. A manual viewport
     # wins over the seed shift too — the user asked for that exact frame.
@@ -399,13 +399,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         shown_landmarks = [item for item in landmarks if item.get('distance_meters')]
         # The frame must cover everything the resolver kept — a tighter cap
         # drew far-but-valid selections off-canvas and dropped them silently.
-        frame_items = shown_landmarks or landmarks
-        radius_km = landmark_radius_m / 1000.0
-        frame_items = [
-            item for item in frame_items
-            if item.get('lat') is not None and item.get('lng') is not None
-            and _distance_meters(lat, lng, item['lat'], item['lng']) <= radius_km * 1000.0
-        ] or frame_items
+        frame_items = _resolved_map_landmarks(shown_landmarks or landmarks, lat, lng, landmark_radius_m)
         # The landmarks map is a fixed auto frame: a stored manual viewport from
         # the interactive era no longer applies — the content fit is the frame.
         # Same directional fit as the catchment map: the old site-centred radius
@@ -448,7 +442,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
                 shutil.copyfile(landmarks_path, editable_path)
                 rendered_landmarks = _draw_catchment_markers(
-                    landmarks_path, landmarks_center_lat, landmarks_center_lng, landmarks_zoom, shown_landmarks or landmarks,
+                    landmarks_path, landmarks_center_lat, landmarks_center_lng, landmarks_zoom, frame_items,
                     project_data.get('landmark_label_positions'), scale=2, site_lat=marker_lat, site_lng=marker_lng
                 )
                 if not result['landmark_map_items']:
@@ -613,6 +607,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                     'map_label_version': MAP_LABEL_RENDER_VERSION,
                     'highlight_site': bool(highlight_site),
                     'zones': zones,
+                    'catchment_rings': rings,
                     'landmarks_matrix': result.get('landmarks_matrix') or [],
                     'catchment_landmarks': rendered_landmarks,
                 }

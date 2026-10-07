@@ -68,6 +68,7 @@
         map_catchment_landmarks: [],
         map_landmark_items: [],
         map_baked_frames: {},
+        map_render_versions: {},
         map_approvals: {},
         map_lat: null,
         map_lng: null,
@@ -209,7 +210,11 @@
     function updateTenantMapInteractionState() {
       const modeActive = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget;
       if (interactiveMapActive()) {
-        try { tenantInteractiveMap.setOptions({ draggableCursor: modeActive ? 'crosshair' : 'grab' }); } catch (e) { /* map gone */ }
+        try {
+          const busy = tenantMapApprovalBusy(tenantSelectedMapType);
+          tenantInteractiveMap.setOptions({ draggableCursor: modeActive ? 'crosshair' : 'grab',
+            draggable: !busy, gestureHandling: busy ? 'none' : 'auto' });
+        } catch (e) { /* map gone */ }
         return;
       }
       const image = document.querySelector('#mapPreviewImage img');
@@ -217,181 +222,11 @@
       image.style.cursor = modeActive ? 'crosshair' : (mapViewportPanAllowed() ? 'grab' : 'default');
     }
 
-    // Only the land and roads maps take a manual viewport: the live preview
-    // mounts for them and the recorded frame is what the next bake (and the
-    // approval) freezes. Catchment and landmarks are fixed auto-framed
-    // rasters — their edit sessions move labels and markers on the stored
-    // image, never the frame itself.
-    function mapViewportAdjustable(mapType) {
-      return mapType === 'overview' || mapType === 'access';
-    }
-
-    // Per-map approval: the flag certifies the stored raster exactly as the
-    // client framed it — approving while the live view is dirty bakes that
-    // frame first, and any later frame/content change drops the flag again.
-    function tenantMapApproved(mapType) {
-      return !!(tenantCreativeImages.map_approvals && tenantCreativeImages.map_approvals[mapType]);
-    }
-
-    async function approveTenantMap(mapType) {
-      // Two-tier model: each generated map approves on its own artifact — the
-      // site analysis is a sibling generated-content approval, not a gate, and
-      // the section approval is what requires all of them together.
-      if (!mapOverlayHasBase(mapType)) return false;
-      // Two-tier order: the section certifies everything inside it, so a map
-      // cannot (re)approve inside an already-approved section — its live frame
-      // is also frozen there, and approving would freeze the stale raster
-      // instead of what is on screen. Unapprove the section first.
-      if (tenantProjectSectionStatuses && tenantProjectSectionStatuses.location === 'approved') {
-        toast(typeof WFT === 'function'
-          ? WFT('location.section_unapprove_first_map', 'ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله')
-          : 'ألغ اعتماد قسم الموقع قبل اعتماد خريطة بداخله');
-        return false;
-      }
-      // A table edit still inside its debounce window must land first — once
-      // the approval flag is set the recompose path refuses to touch the
-      // raster, so a click that outruns the timer would certify a stale map.
-      if (typeof flushMapTableRecompose === 'function') await flushMapTableRecompose();
-      // The dirty flag is only as fresh as the last idle — pull the live
-      // camera now so a pan followed by an instant click still bakes the
-      // frame the client is looking at, not the pre-pan one.
-      if (typeof syncInteractiveLiveFrame === 'function') syncInteractiveLiveFrame();
-      if (tenantInteractiveFrameDirty[mapType]) {
-        const baked = await regenerateMapPreview(mapType);
-        if (!baked) return false;
-      }
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: true };
-      await saveMapPreviewState();
-      toast('تم اعتماد الخريطة');
-      // Re-selecting swaps the mounted live map for the certified raster the
-      // approval just froze — nothing on the preview stays interactive.
-      if (tenantSelectedMapType === mapType) selectMapPreviewView(mapType);
-      renderMapPreviewGallery(true);
-      renderLocationWorkflowState();
-      return true;
-    }
-
-    async function unapproveTenantMap(mapType) {
-      if (!tenantMapApproved(mapType)) return;
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
-      // The section approval required every map's flag — dropping one inside an
-      // approved section must drop the section too, same as any other mutation.
-      if (typeof releaseLocationSectionApproval === 'function') releaseLocationSectionApproval();
-      await saveMapPreviewState();
-      toast('تم إلغاء اعتماد الخريطة');
-      // Re-selecting remounts the live map on the released frame so editing
-      // can resume right away.
-      if (tenantSelectedMapType === mapType) selectMapPreviewView(mapType);
-      renderMapPreviewGallery(true);
-      renderLocationWorkflowState();
-    }
-
-    // Shared gate for every path that would alter an approved raster.
-    function mapApprovalBlocksEdit(mapType) {
-      if (!tenantMapApproved(mapType)) return false;
-      toast(typeof WFT === 'function'
-        ? WFT('location.map_unapprove_first', 'ألغ اعتماد الخريطة قبل تعديلها أو إعادة توليدها')
-        : 'ألغ اعتماد الخريطة قبل تعديلها أو إعادة توليدها');
-      return true;
-    }
-
-    // Drag-to-pan is only safe on a frame we can convert clicks against: a known
-    // zoom and centre. Every drawing/editing mode keeps priority.
-    function mapViewportPanAllowed() {
-      if (!mapViewportAdjustable(tenantSelectedMapType)) return false;
-      if (tenantMapApproved(tenantSelectedMapType)) return false;
-      if (tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantCatchmentEditMode || tenantLandmarksEditMode || tenantLandmarkPlacementTarget) return false;
-      return !!(tenantMapPreviewState && tenantMapPreviewState.frameAccurate);
-    }
-
-    let tenantMapViewportBusy = false;
-
-    // Clears a hand-picked zoom/center so the next render frames this map
-    // automatically again — without it a stray pan would pin the frame forever.
-    // Fixed maps keep this escape hatch: a viewport pinned while they were
-    // still adjustable must stay releasable or the frame is stuck forever.
-    function resetMapViewport(mapType) {
-      if (tenantMapViewportBusy) return;
-      if (mapApprovalBlocksEdit(mapType)) return;
-      if (!(tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
-      const overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}) };
-      delete overrides[mapType];
-      tenantCreativeImages.map_viewport_overrides = overrides;
-      const zooms = { ...(tenantCreativeImages.map_zooms || {}) };
-      delete zooms[mapType];
-      tenantCreativeImages.map_zooms = zooms;
-      const centers = { ...(tenantCreativeImages.map_centers || {}) };
-      delete centers[mapType];
-      tenantCreativeImages.map_centers = centers;
-      regenerateMapPreview(mapType);
-    }
-
-    function startMapViewportPan(event) {
-      if (event.button !== 0 || tenantMapViewportBusy || !mapViewportPanAllowed()) return;
-      if (tenantMapApproved(tenantSelectedMapType)) return;
-      const box = document.getElementById('mapPreviewImage');
-      const img = box?.querySelector('img');
-      if (!box || !img || !img.src) return;
-      const pan = { startX: event.clientX, startY: event.clientY, dx: 0, dy: 0 };
-      const parts = [img, box.querySelector('#mapPolygonOverlay'), box.querySelector('#mapLabelOverlay')].filter(Boolean);
-      const move = moveEvent => {
-        pan.dx = moveEvent.clientX - pan.startX;
-        pan.dy = moveEvent.clientY - pan.startY;
-        if (Math.abs(pan.dx) + Math.abs(pan.dy) > 3) {
-          parts.forEach(el => { el.style.transform = 'translate(' + pan.dx + 'px,' + pan.dy + 'px)'; });
-          img.style.cursor = 'grabbing';
-        }
-      };
-      const stop = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', stop);
-        window.removeEventListener('pointercancel', stop);
-        parts.forEach(el => { el.style.transform = ''; });
-        img.style.cursor = '';
-        const dx = pan.dx;
-        const dy = pan.dy;
-        if (Math.abs(dx) + Math.abs(dy) < 12) return;
-        const rect = img.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        // The image point that lands under the centre becomes the new map centre.
-        const coords = tenantMapCoordinatesFromClient(rect.left + rect.width / 2 - dx, rect.top + rect.height / 2 - dy, img);
-        if (!coords) return;
-        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [tenantSelectedMapType]: { lat: coords[0], lng: coords[1] } };
-        tenantCreativeImages.map_viewport_overrides = { ...(tenantCreativeImages.map_viewport_overrides || {}), [tenantSelectedMapType]: true };
-        tenantMapViewportBusy = true;
-        regenerateMapPreview(tenantSelectedMapType).finally(() => { tenantMapViewportBusy = false; });
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', stop);
-      window.addEventListener('pointercancel', stop);
-    }
-
-    // An overlay composes onto the raster that already exists for this map; after
-    // a location invalidation there is none, and posting anyway would stamp the
-    // old site's image with the new site's metadata.
-    function mapOverlayHasBase(mapType) {
-      const view = (typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS : [])
-        .find(v => v.mapType === mapType);
-      return !!(view && mapPreviewStoredUrl(view));
-    }
-
-    // A recompose answers with the raster's stored frame. Under a viewport
-    // override that frame is stale next to the live camera — merging it would
-    // overwrite map_centers/map_zooms, and the user's unsaved pan would then
-    // compare clean against the baked frame and never reach the bake.
-    function mergeRecomposeMapFrame(mapType, data) {
-      // Fixed maps take the refit frame even with a stale override flag —
-      // a leftover flag from the adjustable era must not pin them wide.
-      if (mapViewportAdjustable(mapType) && (tenantCreativeImages.map_viewport_overrides || {})[mapType]) return;
-      if (data.zooms && data.zooms[mapType] !== undefined)
-        tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), [mapType]: data.zooms[mapType] };
-      if (data.centers && data.centers[mapType] !== undefined)
-        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), [mapType]: data.centers[mapType] };
-    }
-
     async function applyOverviewMapEdits() {
       if (!mapOverlayHasBase('overview') || tenantMapApproved('overview')) return false;
       try {
+        const creative = tenantCreativeImages;
+        const scope = mapPreviewScopeKey();
         const payload = slimMapProjectData(tenantProjectData);
         payload.draftId = tenantProjectData.draftId;
         const data = await api('POST', '/api/generate-map-image', {
@@ -401,16 +236,18 @@
           highlightSite: shouldHighlightTenantSite(),
           overlayOnly: true
         });
-        if (!data.success) return false;
+        if (!data.success || !mapPreviewScopeMatches(creative, scope)) return false;
         if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
         tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
         mergeRecomposeMapFrame('overview', data);
         if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('overview', data.zooms?.overview, data.centers?.overview);
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
-        await saveMapPreviewState();
+        const saved = await saveMapPreviewState();
+        if (!mapPreviewScopeMatches(creative, scope)) return false;
         renderMapPreviewGallery(true);
-        return true;
+        if (tenantSelectedMapType === 'overview') selectMapPreviewView('overview');
+        return saved;
       } catch (error) {
         console.warn('[OVERVIEW MAP OVERLAY]', error);
         triggerAutoSaveDraft();
@@ -421,6 +258,8 @@
     async function applyAccessMapEdits() {
       if (!mapOverlayHasBase('access') || tenantMapApproved('access')) return false;
       try {
+          const creative = tenantCreativeImages;
+          const scope = mapPreviewScopeKey();
           const payload = slimMapProjectData(tenantProjectData);
           payload.draftId = tenantProjectData.draftId;
           const data = await api('POST', '/api/generate-map-image', {
@@ -429,7 +268,7 @@
             presentationId: tenantPresentationId,
             overlayOnly: true
           });
-          if (!data.success) return false;
+          if (!data.success || !mapPreviewScopeMatches(creative, scope)) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           mergeRecomposeMapFrame('access', data);
@@ -445,9 +284,11 @@
           tenantProjectData.access_road_label_positions = positions;
           tenantProjectData.access_road_label_sizes = sizes;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
-          await saveMapPreviewState();
+          const saved = await saveMapPreviewState();
+          if (!mapPreviewScopeMatches(creative, scope)) return false;
           renderMapPreviewGallery(true);
-          return true;
+          if (tenantSelectedMapType === 'access') selectMapPreviewView('access');
+          return saved;
         } catch (error) {
           console.warn('[ACCESS MAP OVERLAY]', error);
           triggerAutoSaveDraft();
@@ -469,6 +310,8 @@
       if (!mapOverlayHasBase('catchment') || tenantMapApproved('catchment')) return Promise.resolve(false);
       return (async () => {
         try {
+          const creative = tenantCreativeImages;
+          const scope = mapPreviewScopeKey();
           const payload = slimMapProjectData(tenantProjectData);
           payload.draftId = tenantProjectData.draftId;
           const data = await api('POST', '/api/generate-map-image', {
@@ -477,7 +320,7 @@
             presentationId: tenantPresentationId,
             overlayOnly: true
           });
-          if (!data.success) return false;
+          if (!data.success || !mapPreviewScopeMatches(creative, scope)) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           mergeRecomposeMapFrame('catchment', data);
@@ -508,9 +351,11 @@
           });
           tenantProjectData.catchment_label_positions = positions;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
-          await saveMapPreviewState();
+          const saved = await saveMapPreviewState();
+          if (!mapPreviewScopeMatches(creative, scope)) return false;
           renderMapPreviewGallery(true);
-          return true;
+          if (tenantSelectedMapType === 'catchment') selectMapPreviewView('catchment');
+          return saved;
         } catch (error) {
           console.warn('[CATCHMENT MAP OVERLAY]', error);
           triggerAutoSaveDraft();
@@ -532,6 +377,8 @@
       if (!mapOverlayHasBase('landmarks') || tenantMapApproved('landmarks')) return Promise.resolve(false);
       return (async () => {
         try {
+          const creative = tenantCreativeImages;
+          const scope = mapPreviewScopeKey();
           const payload = slimMapProjectData(tenantProjectData);
           payload.draftId = tenantProjectData.draftId;
           const data = await api('POST', '/api/generate-map-image', {
@@ -540,7 +387,7 @@
             presentationId: tenantPresentationId,
             overlayOnly: true
           });
-          if (!data.success) return false;
+          if (!data.success || !mapPreviewScopeMatches(creative, scope)) return false;
           if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           mergeRecomposeMapFrame('landmarks', data);
@@ -570,9 +417,11 @@
           });
           tenantProjectData.landmark_label_positions = positions;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
-          await saveMapPreviewState();
+          const saved = await saveMapPreviewState();
+          if (!mapPreviewScopeMatches(creative, scope)) return false;
           renderMapPreviewGallery(true);
-          return true;
+          if (tenantSelectedMapType === 'landmarks') selectMapPreviewView('landmarks');
+          return saved;
         } catch (error) {
           console.warn('[LANDMARKS MAP OVERLAY]', error);
           triggerAutoSaveDraft();
@@ -842,15 +691,14 @@
           '<text x="' + x + '%" y="' + y + '%" dy="-2.2" text-anchor="middle" font-size="3" font-weight="700" fill="#6B1C23">' + (index + 1) + '</text>';
       }).join('') : '';
       const boundaryMarkup = points.length
-        ? '<polyline points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.28)' : 'none') + '" stroke="#6B1C23" stroke-width="0.65"></polyline>' + pointMarkup
+        ? '<polyline class="map-site-boundary" points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.28)' : 'none') + '" stroke="#6B1C23" stroke-width="0.65" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' + pointMarkup
         : '';
       const savedPin = [Number(tenantProjectData.location_lat), Number(tenantProjectData.location_lng)];
       const draftPin = tenantMapPinMode && tenantMapDraftPinHistory.length ? tenantMapDraftPinHistory[tenantMapDraftPinHistory.length - 1] : savedPin;
       let pinMarkup = '';
       if ((showPin || showAccessPin || showCatchment || showLandmarks) && draftPin.every(Number.isFinite)) {
         const [pinX, pinY] = toPoint(draftPin).split(',');
-        pinMarkup = '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="2.2" fill="rgba(107,28,35,.24)" stroke="#fff" stroke-width="0.7"></circle>' +
-          '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="1.25" fill="#6B1C23" stroke="#6B1C23" stroke-width="0.35"><title>موقع المبنى</title></circle>';
+        pinMarkup = '<div class="map-site-marker" style="left:' + pinX + '%;top:' + pinY + '%" title="موقع المبنى"></div>';
       }
       const selectedRoadName = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
         ? String(tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || '')
@@ -862,8 +710,8 @@
         const pathClass = 'map-road-path' +
           (selectedRoadName && accessRoadNameKey(label) === accessRoadNameKey(selectedRoadName) ? ' map-road-path-selected' : '') +
           mapPlaceLinkClass('road', label);
-        return '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8"></polyline>' +
-          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>';
+        return '<polyline class="map-road-casing" points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' +
+          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>' + escapeHtml(label) + '</title></polyline>';
       }).join('') : '';
       const linkLinePairs = (showLandmarks && tenantLandmarksEditMode)
         ? landmarkItems.map(item => ['landmark', item])
@@ -887,7 +735,7 @@
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
       }).join('');
-      overlay.innerHTML = boundaryMarkup + roadMarkup + linkLineMarkup + roadPointMarkup + pinMarkup;
+      overlay.innerHTML = boundaryMarkup + roadMarkup + linkLineMarkup + roadPointMarkup;
       if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);
       else if (showCatchment) renderCatchmentLabels(catchmentItems, toPoint);
       else if (showLandmarks) renderLandmarksLabels(landmarkItems, toPoint);
@@ -895,6 +743,7 @@
         labelLayer.innerHTML = '';
         labelLayer.style.pointerEvents = 'none';
       }
+      if (labelLayer && pinMarkup) labelLayer.insertAdjacentHTML('afterbegin', pinMarkup);
     }
 
     function removeTenantPolygonPoint(index) {

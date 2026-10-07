@@ -26,7 +26,7 @@ except Exception:
 from datetime import datetime
 from urllib.parse import urlencode
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 MAPS_DIR = os.path.join(os.path.dirname(__file__), 'uploads', 'maps')

@@ -10,6 +10,7 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
     placeholders = {}
     map_zooms = {}
     map_centers = {}
+    map_render_versions = {}
     map_highlight_site = None
     seen_types = set()
     seen_placeholders = set()
@@ -32,6 +33,9 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         except ValueError:
             rel_path = 'uploads/maps/' + os.path.basename(path)
         placeholders[placeholder] = '/' + rel_path
+        base_type = image_type.split('_', 1)[0]
+        if base_type in {'overview', 'access', 'catchment', 'landmarks'}:
+            map_render_versions.setdefault(base_type, metadata.get('map_label_version'))
 
         # Frame geometry (site pin, zoom, center) is a fact about the persisted file
         # itself, so it stays trustworthy even when a later renderer version changed
@@ -88,6 +92,11 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
     merged_placeholders.update(placeholders)
     creative['map_placeholders'] = merged_placeholders
     creative['maps_persisted'] = bool(merged_placeholders)
+    creative['map_renderer_version'] = maps_service.MAP_LABEL_RENDER_VERSION
+    creative['map_render_versions'] = {
+        **(creative.get('map_render_versions') if isinstance(creative.get('map_render_versions'), dict) else {}),
+        **map_render_versions,
+    }
     if map_highlight_site is not None:
         creative['map_highlight_site'] = map_highlight_site
     if map_zooms:
