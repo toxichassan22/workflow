@@ -181,7 +181,6 @@
     });
     var brand = document.getElementById('introBrand');
     var uline = document.getElementById('introUline');
-    var sloganEl = document.getElementById('introSlogan');
     if (!path || !cam) {
       // Markup mismatch — never leave a dead overlay covering the page.
       intro.parentNode.removeChild(intro);
@@ -254,13 +253,9 @@
       brand.style.filter = 'blur(' + lerp(12, 0, bp).toFixed(1) + 'px)';
 
       uline.style.transform = 'scaleX(' + ease(seg(t, 4700, 5100)).toFixed(3) + ')';
-
-      var sl = ease(seg(t, 4920, 5520));
-      sloganEl.style.opacity = sl.toFixed(3);
-      sloganEl.style.transform = 'translateY(' + ((1 - sl) * 16).toFixed(1) + 'px)';
     }
 
-    var DUR = 5950;
+    var DUR = 5600;
     var t0 = performance.now();
     var skipped = false;
     var done = false;

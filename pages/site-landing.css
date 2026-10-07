@@ -83,7 +83,7 @@ body.intro-done .intro {
 
 /* The map shifts up-right so the falling pins land in clear space around
    the wordmark instead of behind it, and the southern border bleeds off
-   below the slogan. */
+   below the lockup. */
 .intro-map {
   position: absolute;
   inset: 0;
@@ -170,28 +170,6 @@ body.intro-done .intro {
   background: linear-gradient(90deg, transparent, var(--teal-bright), transparent);
   transform: scaleX(0);
   border-radius: 3px;
-}
-
-.intro-slogan {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  display: flex;
-  justify-content: center;
-  z-index: 3;
-  margin: 0;
-  pointer-events: none;
-}
-
-.intro-slogan-in {
-  display: inline-block;
-  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * 1.06);
-  font-size: clamp(1rem, 2.1vw, 1.45rem);
-  font-weight: 300;
-  color: var(--teal-soft);
-  opacity: 0;
-  transform: translateY(16px);
 }
 
 /* ── Orbs: blurred teal glows + rising micro-bubbles ───────────────────────
