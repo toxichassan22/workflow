@@ -438,7 +438,7 @@
     }
 
     function projectNumberKeepsPrecision(key) {
-      return /(?:^|_)(?:lat|lng|latitude|longitude|date|year|phone|mobile|deed|plot|document|id|number)(?:_|$)/i.test(String(key || ''));
+      return /(?:^|_)(?:lat|lng|latitude|longitude|date|year|phone|mobile|deed|plot|document|id|number|area|sqm)(?:_|$)/i.test(String(key || ''));
     }
 
     function normalizedProjectNumber(key, value) {
