@@ -56,7 +56,12 @@ html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
 
 body.js .intro { display: flex; }
 
-body.intro-done .intro { animation: introExit .85s cubic-bezier(.55, 0, .8, .4) .05s forwards; }
+/* pointer-events die with intro-done so the exiting overlay never swallows
+   clicks, and initOpening removes the node outright once the exit plays. */
+body.intro-done .intro {
+  pointer-events: none;
+  animation: introExit .85s cubic-bezier(.55, 0, .8, .4) .05s forwards;
+}
 
 @keyframes introExit {
   to { transform: scale(1.14); opacity: 0; filter: blur(10px); }

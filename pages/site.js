@@ -242,6 +242,11 @@
       document.documentElement.classList.remove('intro-lock');
       document.body.classList.add('intro-done');
       document.dispatchEvent(new CustomEvent('ll:intro-done'));
+      // The overlay is gone visually after the exit animation — drop it from
+      // the DOM so it can never keep a transparent click-catcher on screen.
+      window.setTimeout(function () {
+        if (intro.parentNode) intro.parentNode.removeChild(intro);
+      }, 1200);
     }
 
     function loop(now) {
