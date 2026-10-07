@@ -650,9 +650,11 @@
 
       const period = timelineProjectPeriod();
       // «مدة تطوير المشروع» counts the annual buckets the period touches: thirteen months is
-      // two development years, four months is one.
+      // two development years, four months is one. The span is the elapsed days, not the
+      // inclusive count — a whole-year period is N*365.25 elapsed days plus one inclusively,
+      // which used to ceil into the N+1 bucket (a 3-year project showed 4).
       const nextDevYears = period
-        ? String(Math.max(1, Math.ceil(timelineSpanDays(period.start.ms, period.end.ms) / 365.25)))
+        ? String(Math.max(1, Math.ceil((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS))))
         : '';
       let devYearsChanged = false;
       if (devYearsInput && devYearsInput.value !== nextDevYears) {

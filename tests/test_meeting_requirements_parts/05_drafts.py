@@ -551,8 +551,11 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         # The duration mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
         # showing 4 while the timeline said 5, in a box the user cannot edit.
         self.assertNotIn('if (namedStages.length && devYearsInput', index_source)
-        self.assertIn('String(Math.max(1, Math.ceil(timelineSpanDays(period.start.ms, period.end.ms) / 365.25)))',
+        # The span is elapsed days, not the inclusive day count: a clean 3-year period is
+        # 1096 inclusive days, and ceiling that over 365.25 showed 4 while the timeline said 3.
+        self.assertIn('String(Math.max(1, Math.ceil((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS))))',
                       index_source)
+        self.assertNotIn('Math.ceil(timelineSpanDays(period.start.ms, period.end.ms) / 365.25)', index_source)
         self.assertIn('if (devYearsChanged) recalculate();', index_source)
 
     def test_mirrored_financial_inputs_never_show_a_figure_their_source_lacks(self):
