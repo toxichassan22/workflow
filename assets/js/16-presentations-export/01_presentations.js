@@ -362,7 +362,7 @@
       // The draft carries the same snapshot including the slides, so back it up
       // in parallel: a presentation-save failure must never lose the open
       // workspace, and the two big uploads no longer serialize after each other.
-      const backupPromise = saveProjectAsDraftNow(true, false)
+      const backupPromise = saveProjectAsDraft(true, false)
         .then(backupSaved => {
           if (!backupSaved) console.error('[DRAFT BACKUP] save reported failure');
         })

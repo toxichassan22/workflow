@@ -72,7 +72,7 @@
         // flag marks this as the job's own checkpoint write, not a user edit.
         // The boolean comes back so a caller can tell a persisted checkpoint
         // from one that silently failed.
-        return await saveProjectAsDraftNow(true, false, true, projectData);
+        return await saveProjectAsDraft(true, false, true, projectData);
       } catch (error) {
         console.error('[SLIDE CHECKPOINT]', error);
         return false;
@@ -245,7 +245,7 @@
         // this run will send, and only the slides still left are reserved.
         if (!options.approvalGranted) {
           if (typeof showGenerationApprovalModal === 'function') {
-            if (resumeRequested && !(await saveProjectAsDraftNow(true, false))) return;
+            if (resumeRequested && !(await saveProjectAsDraft(true, false))) return;
             isGeneratingTenantSlides = false;
             const approved = await showGenerationApprovalModal({
               draftId: tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id),

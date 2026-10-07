@@ -138,6 +138,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "designer_agent.slide_state_skipped": "تخطّى",
   "status.under_construction": "تحت الإنشاء",
   "presentation.conflict_confirm": "توجد نسخة أحدث محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟",
+  "draft.conflict_confirm": "توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟",
   "app.title": "منصة العروض التقديمية | مولّد عروض المشاريع",
   "financial.warn_sale_exit_outside_roi": "التخارج البيعي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
   "financial.warn_operating_exit_outside_roi": "التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",

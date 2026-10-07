@@ -43,7 +43,7 @@ async function verify(page, mapType, zoom) {
       LOCATION_TABLE_FIELDS: {},
       hasPermission: () => true, isUsableMapCoordinate: () => true,
       slimMapProjectData: data => ({ ...data }), collectTenantFormData: async () => ({}),
-      serializeLocationTable() {}, saveProjectAsDraftNow: async () => true,
+      serializeLocationTable() {}, saveProjectAsDraft: async () => true,
       mapPreviewStoredUrl: view => window.tenantCreativeImages.map_placeholders[view.keys[0]] || '',
       mapPreviewIsVisible: () => true, mapPreviewIsGenerated: () => true,
       shouldHighlightTenantSite: () => true, mapsSignature: () => 'signature',

@@ -245,7 +245,7 @@ async function testCheckpointPreservesInputs() {
     tenantCreativeImages: {}, tenantVisualConceptState: null,
     tempCoverImage: null, tempMoodboardImages: {}, tenantNearbyLandmarks: [],
     tenantProjectSectionStatuses: { basic: 'approved' }, draftEditCounter: 0,
-    tenantDraftDirty: true, tenantArchiveCache: null,
+    tenantDraftDirty: true, tenantArchiveCache: null, draftSaveChain: Promise.resolve(),
     LOCATION_TABLE_FIELDS: {}, VISUAL_CONCEPT_EXTERNAL_SLOTS: [],
     document: { getElementById: () => null },
     renumberTenantSlides() {}, serializeLocationTable() {}, designerChatPersistence: () => ({}), toast() {},
@@ -258,7 +258,7 @@ async function testCheckpointPreservesInputs() {
     },
   };
   vm.createContext(state);
-  for (const name of ['saveProjectAsDraftNow', 'tenantSlidePlanFingerprint',
+  for (const name of ['saveProjectAsDraft', 'saveProjectAsDraftNow', 'tenantSlidePlanFingerprint',
     'tenantSlideGenerationOptions', 'saveTenantSlideGenerationCheckpoint']) {
     const match = new RegExp('^    (?:async )?function ' + name + '\\(', 'm').exec(source);
     assert(match, name);

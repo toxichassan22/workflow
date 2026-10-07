@@ -534,7 +534,7 @@
       resetDesignerChatForNewPresentation();
       // A paid run must not start on data the server never received — when the
       // pre-save fails the save function already said why, and the run stops.
-      if (!(await saveProjectAsDraftNow(true, false))) return;
+      if (!(await saveProjectAsDraft(true, false))) return;
 
       if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
@@ -836,7 +836,7 @@
       // A paid run must not start on data the server never received — the shared
       // save path carries expectedRevision and reports failure, and the run stops.
       resetDesignerChatForNewPresentation();
-      if (!(await saveProjectAsDraftNow(true, false))) return;
+      if (!(await saveProjectAsDraft(true, false))) return;
 
       // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
       const gateApproved = await showGenerationApprovalModal({

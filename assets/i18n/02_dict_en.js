@@ -138,6 +138,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "designer_agent.slide_state_skipped": "Skipped",
   "status.under_construction": "Under construction",
   "presentation.conflict_confirm": "A newer version is saved on the server (revision {rev}). Do you want to overwrite it with your current changes?",
+  "draft.conflict_confirm": "A newer version of the draft is saved on the server (revision {rev}). Do you want to overwrite it with your current changes?",
   "app.title": "Proposal Platform | Project Proposal Generator",
   "financial.warn_sale_exit_outside_roi": "Sale exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
   "financial.warn_operating_exit_outside_roi": "Operating exit in year {year} is outside the ROI window and is therefore excluded from ROI.",

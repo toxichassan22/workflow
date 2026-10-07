@@ -139,8 +139,11 @@
 
     let draftSaveChain = Promise.resolve();
 
-    function saveProjectAsDraft(silent = false) {
-      const task = () => saveProjectAsDraftNow(silent);
+    // One chain owns every draft write: a save launched while another is still
+    // in flight would send the same expectedRevision and collide with the first
+    // one's CAS update. Nothing calls saveProjectAsDraftNow directly.
+    function saveProjectAsDraft(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null) {
+      const task = () => saveProjectAsDraftNow(silent, syncPresentation, slideCheckpoint, checkpointProjectData);
       draftSaveChain = draftSaveChain.catch(() => undefined).then(task);
       return draftSaveChain;
     }
@@ -257,10 +260,27 @@
         const savedPresentationTitle = tenantPresentationTitle;
         const savedWorkspaceRef = tenantProjectData;
         const savedEditCounter = draftEditCounter;
-        const resp = await api('POST', '/api/project-draft',
-          { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
-            slideCheckpoint, expectedRevision: tenantDraftRevision },
-          false, { onProgress });
+        // Every save declares the revision its snapshot was built on. A conflict
+        // means another copy wrote since our last read — background writes
+        // (checkpoints, generation pre-saves) must not bury that newer copy, so
+        // only an interactive save may land on top of it, after the user
+        // confirms. The same answer commitTenantPresentation gives.
+        let resp = null;
+        let expectedRev = tenantDraftRevision;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          resp = await api('POST', '/api/project-draft',
+            { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
+              slideCheckpoint, expectedRevision: expectedRev },
+            false, { onProgress });
+          if (!resp || resp.success || resp.error_code !== 'DRAFT_REVISION_CONFLICT') break;
+          const serverRevision = Number(resp.currentRevision);
+          if (attempt > 0 || silent || slideCheckpoint
+              || !Number.isInteger(serverRevision) || typeof confirm !== 'function'
+              || !confirm(WFT('draft.conflict_confirm',
+                'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
+                { rev: serverRevision }))) break;
+          expectedRev = serverRevision;
+        }
         // The response describes the workspace captured above. A draft-id ack
         // belongs to the draft row, so it lands whenever the same draft is
         // still open — an edit meanwhile does not invalidate it — while the

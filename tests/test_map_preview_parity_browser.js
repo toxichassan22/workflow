@@ -41,7 +41,7 @@ async function verify(page, data) {
       tenantProjectSectionStatuses: {}, tenantPresentationId: null, tenantPresentationRevision: 0,
       LOCATION_TABLE_FIELDS: {}, hasPermission: () => true,
       isUsableMapCoordinate: (value, latitude) => Number.isFinite(Number(value)),
-      slimMapProjectData: value => ({ ...value }), saveProjectAsDraftNow: async () => true,
+      slimMapProjectData: value => ({ ...value }), saveProjectAsDraft: async () => true,
       shouldHighlightTenantSite: () => true, mapsSignature: () => 'signature',
       mapPreviewStoredUrl: view => window.tenantCreativeImages.map_placeholders[view.keys[0]] || '',
       mapPreviewIsVisible: () => true, mapPreviewIsGenerated: () => true,

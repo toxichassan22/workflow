@@ -58,7 +58,7 @@ function preview(mapType = 'catchment') {
       main_roads: { mapType: 'access' }, catchment_areas: { mapType: 'catchment' }
     },
     slimMapProjectData: data => plain(data),
-    saveProjectAsDraftNow: async () => true,
+    saveProjectAsDraft: async () => true,
     mapsSignature: () => 'signature', shouldHighlightTenantSite: () => true,
     mapPreviewStoredUrl: view => creative.map_placeholders[view.keys[0]] || '',
     mapPreviewIsVisible: () => true, mapPreviewIsGenerated: () => true,
@@ -160,7 +160,7 @@ test('a failed final render leaves the legacy artifact unapproved', async () => 
 
 test('a failed approval save rolls the local flag back', async () => {
   const fixture = preview();
-  fixture.state.saveProjectAsDraftNow = async () => false;
+  fixture.state.saveProjectAsDraft = async () => false;
   assert.equal(await fixture.state.approveTenantMap('catchment'), false);
   assert.notEqual(fixture.creative.map_approvals.catchment, true);
 });
@@ -188,7 +188,7 @@ test('a failed unapproval save restores the artifact and section approval', asyn
   fixture.state.tenantProjectSectionStatuses.location = 'approved';
   fixture.state.releaseLocationSectionApproval = () => { fixture.state.tenantProjectSectionStatuses.location = 'draft'; };
   fixture.state.applySectionStatuses = statuses => Object.assign(fixture.state.tenantProjectSectionStatuses, statuses);
-  fixture.state.saveProjectAsDraftNow = async () => false;
+  fixture.state.saveProjectAsDraft = async () => false;
   assert.equal(await fixture.state.unapproveTenantMap('catchment'), false);
   assert.equal(fixture.creative.map_approvals.catchment, true);
   assert.equal(fixture.state.tenantProjectSectionStatuses.location, 'approved');

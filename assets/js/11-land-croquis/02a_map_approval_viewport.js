@@ -77,12 +77,12 @@
           if (saved && resp.revision) {
             tenantPresentationRevision = Number(resp.revision) || tenantPresentationRevision;
           }
-        } else if (tenantProjectData.draftId && typeof saveProjectAsDraftNow === 'function') {
+        } else if (tenantProjectData.draftId && typeof saveProjectAsDraft === 'function') {
           // Regenerating a map is an explicit user action. Persist the new image URL
           // immediately for drafts; otherwise reload restores the previous placeholder.
           // A failed save keeps the workspace but must be said, or the map looks
           // persisted while a reload quietly drops it.
-          saved = !!(await saveProjectAsDraftNow(true));
+          saved = !!(await saveProjectAsDraft(true));
         } else {
           triggerAutoSaveDraft();
         }

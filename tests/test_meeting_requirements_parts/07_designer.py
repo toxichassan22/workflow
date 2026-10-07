@@ -68,7 +68,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         index_source = read_frontend_text()
         update_source = index_source.split('async function saveExistingPresentation', 1)[1].split(
             'async function regeneratePresentationMaps', 1)[0]
-        self.assertLess(update_source.index('saveProjectAsDraftNow(true, false)'),
+        self.assertLess(update_source.index('saveProjectAsDraft(true, false)'),
                         update_source.index('renumberTenantSlides();'))
 
     def test_export_rebuilds_legacy_plan_without_image_tokens(self):
