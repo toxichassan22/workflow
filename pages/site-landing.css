@@ -1,5 +1,5 @@
 /* Landing-only styles, part 1: the cinematic half — the transparent topbar,
-   the scroll-driven opening, orbs, the hero and the
+   the auto-played opening, orbs, the hero and the
    product mockup. Loaded after site.css on
    landing.html only; sections, join form and motion live in
    site-sections.css. */
@@ -27,24 +27,26 @@
 
 .site-topbar.on-dark .lang-toggle:hover { border-color: rgba(255, 255, 255, .55); }
 
-/* ── Opening sequence: scroll-driven welcome → typed brand ─────────────────
-   .opening-track is a tall in-flow section; .opening sticks to the viewport
-   while scroll progress scrubs the welcome out and types LANDLOOM letter
-   by letter — scroll down to type, scroll back up to delete. Without JS the
-   track stays one screen tall — a plain navy banner before the page. Reduced
-   motion drops it entirely (rule at the bottom of site-sections.css). */
+/* ── Opening: auto-played cinematic intro ─────────────────────────────────
+   On entry the camera pushes in over the map while the Saudi border draws
+   itself, a beacon lands on Riyadh, and LANDLOOM collapses out of a wide
+   tracking blur into its lockup — then the whole overlay zooms through and
+   hands off to the hero. site.js initOpening() scrubs the timeline on a
+   rAF clock; click or Escape skips; body.intro-done fires the exit. The
+   overlay only exists with JS (body.js gates display) so a scriptless load
+   lands straight on the page, and reduced motion drops it entirely (rule
+   at the bottom of site-sections.css). */
 
-.opening-track { height: 100vh; }
-body.js .opening-track { height: 280vh; }
+html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
 
-.opening {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  height: 100svh;
-  display: flex;
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: none;
   align-items: center;
   justify-content: center;
+  perspective: 1200px;
   overflow: hidden;
   background:
     radial-gradient(1100px 540px at 78% -12%, rgba(15, 169, 196, .14) 0%, transparent 55%),
@@ -52,122 +54,135 @@ body.js .opening-track { height: 280vh; }
     linear-gradient(160deg, #0A2038 0%, var(--ink) 55%, #04101F 100%);
 }
 
-.op-welcome {
+body.js .intro { display: flex; }
+
+body.intro-done .intro { animation: introExit .85s cubic-bezier(.55, 0, .8, .4) .05s forwards; }
+
+@keyframes introExit {
+  to { transform: scale(1.14); opacity: 0; filter: blur(10px); }
+}
+
+.intro-stage {
   position: relative;
-  z-index: 2;
-  margin: 0;
-  color: #fff;
-  font-weight: 800;
-  font-size: clamp(46px, 7.5vw, 96px);
-  line-height: 1.25;
-  letter-spacing: .01em;
-  text-shadow: 0 0 64px rgba(23, 200, 227, .18);
-  will-change: opacity, transform, filter;
+  width: min(84vw, calc(74vh * 1.375));
+  aspect-ratio: 880 / 640;
 }
 
-.op-brand {
-  position: absolute;
-  z-index: 2;
-  inset-inline: 24px;
-  margin: 0;
-  text-align: center;
-  direction: ltr;
-  color: #fff;
-  font-weight: 800;
-  font-size: clamp(34px, 9vw, 116px);
-  line-height: 1.1;
-  letter-spacing: .05em;
-  text-shadow: 0 0 74px rgba(23, 200, 227, .15);
-  opacity: 0;
-  white-space: nowrap;
-}
-
-.op-typed { white-space: nowrap; }
-
-.op-caret {
-  display: inline-block;
-  width: .085em;
-  height: .8em;
-  margin-inline-start: .08em;
-  border-radius: .06em;
-  background: var(--teal-bright);
-  box-shadow: 0 0 20px rgba(23, 200, 227, .4);
-  vertical-align: -.07em;
-  animation: caretBlink .95s steps(1) infinite;
-}
-
-@keyframes caretBlink { 50% { opacity: 0; } }
-
-.op-cue {
-  position: absolute;
-  bottom: 34px;
-  left: 50%;
-  margin-left: -13px;
-  width: 26px;
-  height: 42px;
-  border: 2px solid rgba(255, 255, 255, .38);
-  border-radius: 14px;
-}
-
-.op-cue::after {
-  content: '';
-  position: absolute;
-  top: 7px;
-  left: 50%;
-  margin-left: -2px;
-  width: 4px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--teal-bright);
-  box-shadow: 0 0 10px rgba(23, 200, 227, .35);
-  animation: cueDot 1.7s ease-in-out infinite;
-}
-
-@keyframes cueDot {
-  0% { transform: translateY(0); opacity: 1; }
-  70% { transform: translateY(15px); opacity: 0; }
-  100% { transform: translateY(15px); opacity: 0; }
-}
-
-/* ── Opening map ───────────────────────────────────────────────────────────
-   The Saudi outline sits behind the wordmark and draws itself as the user
-   scrolls — same scrub contract as the typing, so it un-draws on the way
-   back up. A turquoise pin pulses over Riyadh once the draw completes:
-   "a Saudi platform" said with geometry, not words. Without JS the stroke
-   simply stays drawn — a quiet backdrop for the static banner. */
-
-.op-map {
+.intro-cam {
   position: absolute;
   inset: 0;
-  margin: auto;
-  width: min(84vw, 116vh);
-  height: auto;
-  transform: translateY(7vh);
-  z-index: 1;
+  transform-style: preserve-3d;
+  will-change: transform;
 }
 
-.op-slogan {
+.intro-map {
   position: absolute;
-  z-index: 2;
-  top: calc(50% + clamp(66px, 12vh, 118px));
-  inset-inline: 24px;
-  margin: 0;
-  text-align: center;
-  font-size: clamp(15px, 1.9vw, 21px);
-  font-weight: 600;
-  letter-spacing: .02em;
-  color: #C3D8E6;
-  text-shadow: 0 0 30px rgba(23, 200, 227, .16);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-.op-pin { opacity: 0; transform-box: fill-box; transform-origin: center; }
-.op-pin-core { fill: var(--teal-bright); filter: drop-shadow(0 0 10px rgba(23, 200, 227, .8)); }
-.op-pin-ring { fill: none; stroke: var(--teal-bright); stroke-width: 2.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
-.op-pin.show .op-pin-ring { animation: pinPulse 2.1s ease-out infinite; }
+.intro-map path { vector-effect: non-scaling-stroke; }
+
+#introBeacon {
+  stroke: var(--teal-bright);
+  stroke-width: 2.5;
+  opacity: 0;
+  filter: drop-shadow(0 0 8px rgba(23, 200, 227, .8));
+}
+
+.intro-sweep {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  width: 34%;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 15%, rgba(160, 235, 255, .13) 48%, rgba(255, 255, 255, .05) 55%, transparent 85%);
+  transform: translateX(-140%);
+  will-change: transform;
+}
+
+.intro-pin { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.intro-pin-core { fill: var(--teal-bright); filter: drop-shadow(0 0 10px rgba(23, 200, 227, .8)); }
+.intro-pin-ring, .intro-pin-ring2 {
+  fill: none;
+  stroke: var(--teal-bright);
+  stroke-width: 2.5;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.intro-pin.show .intro-pin-ring { animation: pinPulse 2.1s ease-out infinite; }
+.intro-pin.show .intro-pin-ring2 { animation: pinPulse 2.1s ease-out .6s infinite; }
 
 @keyframes pinPulse {
-  0% { transform: scale(.5); opacity: .85; }
-  100% { transform: scale(4.6); opacity: 0; }
+  0% { transform: scale(.6); opacity: .9; }
+  80% { opacity: 0; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+
+.intro-brand {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  margin: 0;
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(3rem, 9vw, 6.4rem);
+  letter-spacing: .85em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  will-change: filter;
+}
+
+.intro-underline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: flex;
+  justify-content: center;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.intro-underline i {
+  display: block;
+  width: min(430px, 52vw);
+  height: 3px;
+  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * .8);
+  background: linear-gradient(90deg, transparent, var(--teal-bright), transparent);
+  transform: scaleX(0);
+  border-radius: 3px;
+}
+
+.intro-slogan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: flex;
+  justify-content: center;
+  z-index: 3;
+  margin: 0;
+  pointer-events: none;
+}
+
+.intro-slogan-in {
+  display: inline-block;
+  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * 1.06);
+  font-size: clamp(1rem, 2.1vw, 1.45rem);
+  font-weight: 300;
+  color: var(--teal-soft);
+  opacity: 0;
+  transform: translateY(16px);
 }
 
 /* ── Orbs: blurred teal glows + rising micro-bubbles ───────────────────────

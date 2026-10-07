@@ -786,5 +786,5 @@ body.js .flow.in::after { transform: scaleX(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .opening-track { display: none; }
+  .intro { display: none; }
 }

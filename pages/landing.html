@@ -15,34 +15,38 @@
 
 <body>
 
-  <div class="opening-track" id="opening" aria-hidden="true">
-    <div class="opening">
-      <div class="orbs">
-        <i></i><i></i><i></i><i></i><i></i><i></i>
-        <b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b>
+  <div class="intro" id="intro" aria-hidden="true">
+    <div class="orbs">
+      <i></i><i></i><i></i><i></i><i></i><i></i>
+      <b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b>
+    </div>
+    <div class="intro-stage">
+      <div class="intro-cam" id="introCam">
+        <svg class="intro-map" viewBox="0 0 880 640" aria-hidden="true">
+          <path id="introPath" fill="#17C8E3" fill-opacity="0" stroke="#3FD2EC" stroke-width="6"
+            stroke-linejoin="round" stroke-linecap="round" d="M36.5 138.3
+            L76 133 L133 76 L163.4 57 L190 34.2 L201.4 32.3
+            L247 41.8 L304 57 L323 72.2 L368.6 98.8 L410.4 121.6 L437 136.8 L476.9 148.2
+            L520.6 163.4 L550.2 190 L581.4 209 L595.1 228 L613.7 250 L638.4 281.2
+            L646 317.9 L668 332.7
+            L703 345.8 L760 364.8 L798 383.8 L823.5 391
+            L760 456 L718.2 486.4 L684 532
+            L608 547.2 L532 566.2 L475 589 L418 592.8 L361 596.6 L330.6 609.9
+            L315.4 585.2 L292.6 554.8 L277.4 524.4 L250.8 490.2 L220.4 456 L197.6 433.2
+            L178.6 399 L159.6 361 L144.4 323 L125.4 288.8 L102.6 243.2 L76 197.6
+            L45.6 163.4 Z"/>
+          <line id="introBeacon" x1="500" y1="310" x2="500" y2="310"/>
+          <g class="intro-pin" id="introPin">
+            <circle class="intro-pin-ring2" cx="500" cy="310" r="13"/>
+            <circle class="intro-pin-ring" cx="500" cy="310" r="13"/>
+            <circle class="intro-pin-core" cx="500" cy="310" r="7"/>
+          </g>
+        </svg>
+        <div class="intro-brand" dir="ltr" id="introBrand">LANDLOOM</div>
+        <div class="intro-underline"><i id="introUline"></i></div>
+        <p class="intro-slogan"><span class="intro-slogan-in" id="introSlogan"><span lang="ar">منصة إعداد دراسات الفرص العقارية</span><span lang="en">A Platform for Preparing Real Estate Opportunity Studies</span></span></p>
       </div>
-      <svg class="op-map" viewBox="0 0 880 640" aria-hidden="true">
-        <path class="op-map-path" fill="#17C8E3" fill-opacity="0" stroke="#3FD2EC" stroke-width="6"
-          stroke-linejoin="round" stroke-linecap="round" d="M36.5 138.3
-          L76 133 L133 76 L163.4 57 L190 34.2 L201.4 32.3
-          L247 41.8 L304 57 L323 72.2 L368.6 98.8 L410.4 121.6 L437 136.8 L476.9 148.2
-          L520.6 163.4 L550.2 190 L581.4 209 L595.1 228 L613.7 250 L638.4 281.2
-          L646 317.9 L668 332.7
-          L703 345.8 L760 364.8 L798 383.8 L823.5 391
-          L760 456 L718.2 486.4 L684 532
-          L608 547.2 L532 566.2 L475 589 L418 592.8 L361 596.6 L330.6 609.9
-          L315.4 585.2 L292.6 554.8 L277.4 524.4 L250.8 490.2 L220.4 456 L197.6 433.2
-          L178.6 399 L159.6 361 L144.4 323 L125.4 288.8 L102.6 243.2 L76 197.6
-          L45.6 163.4 Z"/>
-        <g class="op-pin">
-          <circle class="op-pin-ring" cx="500" cy="310" r="11"/>
-          <circle class="op-pin-core" cx="500" cy="310" r="7"/>
-        </g>
-      </svg>
-      <p class="op-welcome"><span lang="ar">مرحبًا بك</span><span lang="en">Welcome</span></p>
-      <p class="op-brand" dir="ltr"><span class="op-typed">LANDLOOM</span><i class="op-caret"></i></p>
-      <p class="op-slogan"><span lang="ar">منصة إعداد دراسات الفرص العقارية</span><span lang="en">A Platform for Preparing Real Estate Opportunity Studies</span></p>
-      <i class="op-cue"></i>
+      <div class="intro-sweep" id="introSweep"></div>
     </div>
   </div>
 

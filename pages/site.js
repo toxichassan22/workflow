@@ -146,128 +146,149 @@
     onScroll();
   }
 
-  /* ── Opening sequence: scroll-scrubbed ───────────────────────────────────
-     The track is a tall in-flow section whose stage sticks to the viewport;
-     real scroll position drives everything — the welcome lifts out through
-     the first stretch, the caret fades in, and LANDLOOM types letter by
-     letter across the second stretch (scroll back up and it deletes). Escape
-     jumps past the whole thing. Reduced-motion drops the track in CSS. */
+  /* ── Opening: auto-played cinematic ──────────────────────────────────────
+     On entry the camera pushes in over the map while the Saudi border draws
+     itself, a beacon lands on Riyadh, and LANDLOOM collapses out of a wide
+     tracking blur into its lockup — then the overlay zooms through and the
+     hero takes over. One rAF clock scrubs the whole timeline; click or
+     Escape skips to the last frame. body.intro-done fires the CSS exit and
+     releases the hero entrance (initHeroEnter listens for ll:intro-done).
+     Reduced-motion removes the overlay outright; without JS it never shows
+     (body.js gates .intro's display). */
 
   function initOpening() {
-    var track = document.getElementById('opening');
-    if (!track) return;
+    var intro = document.getElementById('intro');
+    if (!intro) return;
     if (reduceMotion) {
-      track.parentNode.removeChild(track);
+      intro.parentNode.removeChild(intro);
       return;
     }
 
-    var welcomeEl = track.querySelector('.op-welcome');
-    var brandEl = track.querySelector('.op-brand');
-    var typedEl = track.querySelector('.op-typed');
-    var cueEl = track.querySelector('.op-cue');
-    var mapPath = track.querySelector('.op-map-path');
-    var pinEl = track.querySelector('.op-pin');
-    var sloganEl = track.querySelector('.op-slogan');
-    var mapLen = 0;
-    if (mapPath && mapPath.getTotalLength) {
-      mapLen = mapPath.getTotalLength();
-      mapPath.style.strokeDasharray = mapLen;
-      mapPath.style.strokeDashoffset = mapLen;
+    var path = document.getElementById('introPath');
+    var cam = document.getElementById('introCam');
+    var sweep = document.getElementById('introSweep');
+    var beacon = document.getElementById('introBeacon');
+    var pin = document.getElementById('introPin');
+    var brand = document.getElementById('introBrand');
+    var uline = document.getElementById('introUline');
+    var sloganEl = document.getElementById('introSlogan');
+    if (!path || !cam) {
+      // Markup mismatch — never leave a dead overlay covering the page.
+      intro.parentNode.removeChild(intro);
+      document.body.classList.add('intro-done');
+      document.dispatchEvent(new CustomEvent('ll:intro-done'));
+      return;
     }
-    var brandText = '';
-    Array.prototype.forEach.call(track.querySelectorAll('.op-typed'), function (el) {
-      brandText += el.textContent;
-      el.textContent = '';
-    });
-
-    var typed = -1;
-    var raf = 0;
+    var len = path.getTotalLength();
+    path.style.strokeDasharray = len;
+    path.style.strokeDashoffset = len;
 
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+    function seg(t, a, b) { return clamp((t - a) / (b - a), 0, 1); }
+    function ease(p) { return 1 - Math.pow(1 - p, 3); }
+    function eio(p) { return p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+    function eob(p) { var c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }
+    function lerp(a, b, p) { return a + (b - a) * p; }
+    function eoquint(p) { return 1 - Math.pow(1 - p, 5); }
 
-    function render() {
-      raf = 0;
-      var rect = track.getBoundingClientRect();
-      var span = rect.height - window.innerHeight;
-      var p = span > 0 ? clamp(-rect.top / span, 0, 1) : 0;
+    function render(t) {
+      // Camera: the scene starts zoomed and reclined, then levels out flat.
+      var cp = eoquint(seg(t, 0, 2900));
+      cam.style.transform =
+        'translateY(' + lerp(9, 0, cp).toFixed(2) + '%) ' +
+        'rotateX(' + lerp(26, 0, cp).toFixed(2) + 'deg) ' +
+        'scale(' + lerp(1.55, 1, cp).toFixed(4) + ')';
 
-      // Welcome holds through p .10, then lifts out by p .32.
-      var we = clamp((p - .10) / .22, 0, 1);
-      if (welcomeEl) {
-        welcomeEl.style.opacity = (1 - we).toFixed(3);
-        welcomeEl.style.transform = 'translateY(' + (-70 * we).toFixed(1) + 'px) scale(' + (1 + .06 * we).toFixed(3) + ')';
-        welcomeEl.style.filter = we > 0 ? 'blur(' + (9 * we).toFixed(1) + 'px)' : '';
-      }
-      if (cueEl) cueEl.style.opacity = (1 - clamp(p / .07, 0, 1)).toFixed(3);
+      var draw = eio(seg(t, 350, 2700));
+      path.style.strokeDashoffset = len * (1 - draw);
+      path.style.fillOpacity = (.07 * seg(t, 2400, 3000)).toFixed(3);
 
-      // The map outline draws across the middle stretch (welcome exits ->
-      // typing nearly done), its fill washes in over the last part, and the
-      // Riyadh pin pops once the country is drawn.
-      if (mapPath) {
-        var draw = clamp((p - .26) / .52, 0, 1);
-        mapPath.style.strokeDashoffset = (mapLen * (1 - draw)).toFixed(1);
-        mapPath.style.fillOpacity = (.07 * clamp((draw - .55) / .45, 0, 1)).toFixed(3);
-      }
-      if (pinEl) {
-        var ps = clamp((p - .80) / .08, 0, 1);
-        pinEl.style.opacity = ps.toFixed(3);
-        pinEl.style.transform = 'scale(' + (.45 + .55 * ps).toFixed(3) + ')';
-        pinEl.classList.toggle('show', ps >= 1);
-      }
-      // Closing beat: once the country is drawn and the brand typed out,
-      // the tagline rises in under the wordmark.
-      if (sloganEl) {
-        var sg = clamp((p - .90) / .08, 0, 1);
-        sloganEl.style.opacity = sg.toFixed(3);
-        sloganEl.style.transform = 'translateY(' + (16 * (1 - sg)).toFixed(1) + 'px)';
-      }
+      // One diagonal light pass crosses the stage mid-draw.
+      sweep.style.transform = 'translateX(' + lerp(-140, 520, eio(seg(t, 800, 2150))).toFixed(1) + '%)';
 
-      // Brand fades in p .30 -> .38, then types across p .38 -> .88.
-      if (brandEl) brandEl.style.opacity = clamp((p - .30) / .08, 0, 1).toFixed(3);
-      if (typedEl) {
-        var n = Math.round(clamp((p - .38) / .5, 0, 1) * brandText.length);
-        if (n !== typed) {
-          typedEl.textContent = brandText.slice(0, n);
-          typed = n;
-        }
-      }
+      // Beacon column rises from the pin point, then eases back.
+      var bl = ease(seg(t, 2700, 3020));
+      beacon.setAttribute('y2', (310 - 150 * bl).toFixed(1));
+      beacon.style.opacity = (bl * (1 - .6 * seg(t, 3400, 4100))).toFixed(3);
+
+      var ps = seg(t, 2750, 3150);
+      pin.style.opacity = ps;
+      pin.style.transform = 'scale(' + Math.max(eob(ps), .001).toFixed(3) + ')';
+      pin.classList.toggle('show', ps >= 1);
+
+      // Wordmark: ultra-tracked blur collapses into the final lockup.
+      var bp = eio(seg(t, 2300, 3350));
+      brand.style.opacity = seg(t, 2300, 2850).toFixed(3);
+      brand.style.letterSpacing = lerp(.85, .14, bp).toFixed(3) + 'em';
+      brand.style.filter = 'blur(' + lerp(12, 0, bp).toFixed(1) + 'px)';
+
+      uline.style.transform = 'scaleX(' + ease(seg(t, 3300, 3720)).toFixed(3) + ')';
+
+      var sl = ease(seg(t, 3550, 4150));
+      sloganEl.style.opacity = sl.toFixed(3);
+      sloganEl.style.transform = 'translateY(' + ((1 - sl) * 16).toFixed(1) + 'px)';
     }
 
-    function onScroll() {
-      if (!raf) raf = window.requestAnimationFrame(render);
+    var DUR = 5000;
+    var t0 = performance.now();
+    var skipped = false;
+    var done = false;
+
+    document.documentElement.classList.add('intro-lock');
+
+    function finish() {
+      if (done) return;
+      done = true;
+      document.documentElement.classList.remove('intro-lock');
+      document.body.classList.add('intro-done');
+      document.dispatchEvent(new CustomEvent('ll:intro-done'));
     }
 
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
+    function loop(now) {
+      var t = skipped ? DUR : now - t0;
+      render(Math.min(t, DUR));
+      if (t >= DUR) { finish(); return; }
+      window.requestAnimationFrame(loop);
+    }
+
+    function skip() { skipped = true; }
+    intro.addEventListener('click', skip);
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape' && track.getBoundingClientRect().bottom > 0) {
-        window.scrollTo(0, track.offsetTop + track.offsetHeight);
-      }
+      if ((ev.key === 'Escape' || ev.key === ' ') && !done) skip();
     });
-    render();
+    render(0);
+    window.requestAnimationFrame(loop);
   }
 
   /* ── Hero entrance ───────────────────────────────────────────────────────
      body.entered fires the hero's staggered riseIn/deckIn animations and the
-     metric counters. It trips when the hero scrolls ~a fifth into view —
-     which is right after the opening track ends. Pages without a hero get it
+     metric counters. It trips when the hero scrolls ~a fifth into view — but
+     only after the intro overlay has zoomed through (ll:intro-done), so the
+     entrance never plays unseen behind it. Pages without a hero get it
      immediately. */
 
   function initHeroEnter() {
     var hero = document.querySelector('.hero');
-    if (!hero || !('IntersectionObserver' in window)) {
-      document.body.classList.add('entered');
-      initCounters();
-      return;
-    }
-    var io = new IntersectionObserver(function (entries) {
-      if (entries[0].isIntersecting) {
+    function go() {
+      if (!hero || !('IntersectionObserver' in window)) {
         document.body.classList.add('entered');
         initCounters();
-        io.disconnect();
+        return;
       }
-    }, { threshold: .22 });
-    io.observe(hero);
+      var io = new IntersectionObserver(function (entries) {
+        if (entries[0].isIntersecting) {
+          document.body.classList.add('entered');
+          initCounters();
+          io.disconnect();
+        }
+      }, { threshold: .22 });
+      io.observe(hero);
+    }
+    if (document.getElementById('intro') && !document.body.classList.contains('intro-done')) {
+      document.addEventListener('ll:intro-done', go, { once: true });
+    } else {
+      go();
+    }
   }
 
   /* ── Showcase: interactive deck viewer ─────────────────────────────────── */
