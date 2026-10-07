@@ -15,7 +15,7 @@
       other: { label: 'أخرى', labelEn: 'Other' },
       general: { label: 'عام', labelEn: 'General' }
     };
-    const MARKET_NON_COMPETING_USES = ['parking', 'services'];
+    const MARKET_NON_COMPETING_USES = ['parking', 'services', 'openArea'];
     const MARKET_SUBTYPE_AXIS_KEYS = {
       'سكني': 'residential', 'مكاتب': 'office',
       'تجزئة ومحلات': 'retail', 'مطاعم ومقاهي': 'retail', 'مركز تجاري': 'retail',

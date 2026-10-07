@@ -1050,6 +1050,7 @@ USE_TYPE_LABELS = {
     'parking': 'مواقف سيارات',
     'industrial': 'صناعي',
     'logistics': 'لوجستي / مستودعات',
+    'openArea': 'مساحة مفتوحة',
     'other': 'أخرى',
 }
 

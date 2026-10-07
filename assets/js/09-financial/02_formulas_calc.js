@@ -131,7 +131,7 @@
       const optionsHtml = '<option value="">غير مرتبط بمكون</option>' + components.map(c => {
         const fallbackMatch = String(c.name || '').match(/^مكون (\d+)$/);
         const displayName = fallbackMatch ? (trDynamicI18n('مكون') + ' ' + fallbackMatch[1]) : c.name;
-        return `<option value="${c.id}">${displayName} — ${trDynamicI18n('مبني')} ${money(c.builtArea)} ${trDynamicI18n('م²')} | ${trDynamicI18n('بيعي/تأجيري')} ${money(c.revenueArea)} ${trDynamicI18n('م²')} | ${money(c.units)} ${trDynamicI18n('وحدة')}</option>`;
+        return `<option value="${c.id}">${displayName} — ${trDynamicI18n(c.useType === 'openArea' ? 'مساحة مفتوحة' : 'مبني')} ${money(c.builtArea)} ${trDynamicI18n('م²')} | ${trDynamicI18n('بيعي/تأجيري')} ${money(c.revenueArea)} ${trDynamicI18n('م²')} | ${money(c.units)} ${trDynamicI18n('وحدة')}</option>`;
       }).join('');
       document.querySelectorAll('#revenueTable tbody tr').forEach(tr => {
         const sel = tr.querySelector('[data-field="component"] select'); if (!sel) return;
@@ -283,12 +283,34 @@
       document.querySelectorAll('#scheduleTable tbody tr').forEach(tr => { const year = parseNumber(tr.dataset.stageYear || 1); if (year > developmentYears) tr.dataset.stageYear = String(developmentYears) });
     }
     function validateComponentAreas() {
-      const limit = Math.max(0, num('builtUpAreaAbove')); const used = [...document.querySelectorAll('#componentsTable tbody tr')].reduce((s, tr) => s + Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value)), 0); const remaining = limit - used, valid = used <= limit + .01;
-      const panel = document.getElementById('componentAreaValidation'); if (panel) { panel.classList.toggle('error', !valid); panel.innerHTML = valid ? `<span>تم تخصيص</span> <b>${money(used)}</b> <span>م²</span> <span>من أصل</span> <b>${money(limit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(remaining)}</b> <span>م²</span>.` : `<span>خطأ:</span> <span>مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار</span> <b>${money(-remaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>` }
+      const limit = Math.max(0, num('builtUpAreaAbove'));
+      // A «مساحة مفتوحة» component occupies land, not floor space: its area settles against
+      // the open-area budget (الأرض − المغطاة) instead of the above-ground BUA pool.
+      const openLimit = Math.max(0, num('openArea'));
+      let used = 0, openUsed = 0;
+      document.querySelectorAll('#componentsTable tbody tr').forEach(tr => {
+        const area = Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value));
+        if (tr.querySelector('[data-field="useType"] select')?.value === 'openArea') openUsed += area; else used += area;
+      });
+      const remaining = limit - used, openRemaining = openLimit - openUsed;
+      const builtExceeded = used > limit + .01, openExceeded = openUsed > openLimit + .01;
+      const valid = !builtExceeded && !openExceeded;
+      const openLine = openUsed > 0 || openExceeded ? `<br><span>المساحات المفتوحة:</span> <span>تم تخصيص</span> <b>${money(openUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(openLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(openRemaining)}</b> <span>م²</span>.` : '';
+      const panel = document.getElementById('componentAreaValidation');
+      if (panel) {
+        panel.classList.toggle('error', !valid);
+        const builtLine = builtExceeded
+          ? `<span>خطأ:</span> <span>مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار</span> <b>${money(-remaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>`
+          : `<span>تم تخصيص</span> <b>${money(used)}</b> <span>م²</span> <span>من أصل</span> <b>${money(limit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(remaining)}</b> <span>م²</span>.`;
+        const openError = openExceeded
+          ? `<br><span>خطأ:</span> <span>مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض بمقدار</span> <b>${money(-openRemaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>`
+          : '';
+        panel.innerHTML = builtLine + (openExceeded ? openError : openLine);
+      }
       // The .area-invalid rule already exists in the stylesheet; without this toggle the block
       // never got its red border, so the only cue was the text panel.
       document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid', !valid);
-      return { valid, used, limit, remaining };
+      return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, builtExceeded, openExceeded };
     }
     function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => tr.querySelector('[data-field="method"] select')?.value !== 'areaSale'); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
     document.addEventListener('wf:lang', () => {
@@ -422,9 +444,11 @@
         const builtArea = parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea = parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
         const model = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
+        const openRow = tr.querySelector('[data-field="useType"] select')?.value === 'openArea';
         if (model === 'sale') componentSaleArea += revenueArea;
         if (['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(model)) leasable += revenueArea;
-        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT('fin.comp_result', '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
+        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT(openRow ? 'fin.comp_result_open' : 'fin.comp_result', openRow ? '{model} | مفتوحة {area} م²' : '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
+        const builtHelp = tr.querySelector('[data-field="builtArea"] .miniHelp'); if (builtHelp) builtHelp.textContent = openRow ? 'تخصم من المساحة المفتوحة' : '';
       });
 
       let operatingRevenueBase = 0, saleRevenueTotal = 0, saleAreaTotal = 0;
@@ -697,7 +721,11 @@
       setVal('graceTotalDiscount', money(totalGraceDiscount));
 
       const areaState = validateComponentAreas();
-      if (!areaState.valid && warningBox) { warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.'); renderAnalysisWarnings(); }
+      if (!areaState.valid && warningBox) {
+        if (areaState.builtExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.');
+        if (areaState.openExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض.');
+        renderAnalysisWarnings();
+      }
 
       const tb = document.querySelector('#cashflowTable tbody');
       if (tb) {

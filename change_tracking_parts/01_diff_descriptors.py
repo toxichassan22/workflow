@@ -406,6 +406,7 @@ BLOB_VALUE_LABELS = {
     'residential': 'سكني', 'commercial': 'تجاري', 'offices': 'مكاتب',
     'retail': 'تجزئة', 'hotel': 'فندقي', 'hospitality': 'فندقي',
     'mixed': 'مختلط', 'services': 'خدمات', 'industrial': 'صناعي',
+    'openArea': 'مساحة مفتوحة',
     'manual': 'إدخال يدوي', 'componentRevenueArea': 'المساحة البيعية / التأجيرية',
     'componentArea': 'المساحة البيعية / التأجيرية', 'componentBuiltArea': 'المساحة المبنية',
     'componentUnits': 'عدد الوحدات', 'yes': 'نعم', 'no': 'لا',
