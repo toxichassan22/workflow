@@ -75,12 +75,16 @@ body.intro-done .intro { animation: introExit .85s cubic-bezier(.55, 0, .8, .4) 
   will-change: transform;
 }
 
+/* The map shifts up-right so the Riyadh pin lands in clear space above the
+   wordmark instead of behind it — the beacon column then rises into open
+   navy, and the southern border bleeds off below the slogan. */
 .intro-map {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
+  transform: translate(5%, -16%) scale(1.03);
 }
 
 .intro-map path { vector-effect: non-scaling-stroke; }
