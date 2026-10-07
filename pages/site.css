@@ -198,7 +198,25 @@ a { color: var(--p); }
   padding-top: 18px;
   font-size: 13px;
   color: #8FA3B5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
 }
+
+.sag-credit {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.sag-label { font-size: 12.5px; font-weight: 800; color: var(--teal-bright); }
+
+.sag-credit img { height: 38px; width: auto; opacity: .92; }
+.sag-credit:hover img { opacity: 1; }
+.sag-credit:hover .sag-label { color: #fff; }
 
 /* ── Responsive (shared chrome only) ─────────────────────────────────────── */
 
@@ -214,6 +232,7 @@ a { color: var(--p); }
   .site-footer { padding: 36px 0 26px; }
   .site-footer .wrap { justify-content: center; text-align: center; }
   .site-footer nav { margin-inline-start: 0; justify-content: center; }
+  .copyright { justify-content: center; text-align: center; }
 
   .legal-body { padding: 40px 18px 56px; }
   .legal-body h1 { font-size: 25px; }
