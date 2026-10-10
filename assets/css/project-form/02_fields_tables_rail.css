@@ -987,8 +987,8 @@
       bottom: 84px;
       inset-inline-end: 18px;
       z-index: 451;
-      width: min(360px, calc(100vw - 24px));
-      height: min(480px, calc(100vh - 24px));
+      width: min(520px, calc(100vw - 24px));
+      height: min(680px, calc(100vh - 24px));
       display: flex;
       flex-direction: column;
       gap: 10px;
