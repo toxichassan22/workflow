@@ -75,6 +75,7 @@ class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
         self.assertIn('القيمة المعتمدة التي أدخلها العميل', prompt)
         self.assertIn('القيمة الموثقة في المستندات', prompt)
         self.assertIn('التعارضات', prompt)
+        self.assertIn('مخصص لقسم الأرض والكروكي فقط', prompt)
 
     def test_land_chat_context_includes_distribution_and_facts(self):
         """_land_chat_context groups every land/croquis data source the chat
@@ -114,9 +115,9 @@ class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
         self.assertTrue(all(t['role'] in ('user', 'assistant') for t in history))
 
     def test_land_chat_frontend_is_scoped_to_land_croquis(self):
-        """The chat part exists only inside the land_croquis section, its
-        textarea survives the section-approval lock, and it talks to the
-        scoped endpoint."""
+        """The chat part exists only inside the land_croquis section: a
+        floating button opens a small popup, its textarea survives the
+        section-approval lock, and it talks to the scoped endpoint."""
         js = read_frontend_text()
         self.assertIn('11-land-croquis/04_land_chat.js', js)
         mount = js.index('function mountLandChat')
@@ -124,6 +125,15 @@ class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
         self.assertIn("'/api/land-chat'", js)
         self.assertIn('data-section-lock-ignore', js[mount:send])
         self.assertIn('landChatBusy', js[mount:send])
+        # The popup is a FAB + panel anchored to the bottom inline-end corner.
+        self.assertIn('landChatFab', js[mount:send])
+        self.assertIn('landChatPanel', js[mount:send])
+        self.assertIn('function toggleLandChat', js)
+        part = (ROOT / 'assets' / 'js' / '11-land-croquis' / '04_land_chat.js'
+                ).read_text(encoding='utf-8')
+        self.assertIn('id="landChatPanel" hidden', part)
+        self.assertIn('inset-inline-end', (ROOT / 'assets' / 'css' / 'project-form'
+                                           / '02_fields_tables_rail.css').read_text(encoding='utf-8'))
         # The only mount call site sits inside the land_croquis-only block.
         catchment = (ROOT / 'assets' / 'js' / '08-location-maps' / '02_catchment_edits.js'
                      ).read_text(encoding='utf-8')

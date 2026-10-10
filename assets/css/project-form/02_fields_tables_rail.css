@@ -948,20 +948,74 @@
       border: 1px solid #e5e7eb;
     }
 
-    .land-chat-card {
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      background: #f8fafc;
-      padding: 14px;
+    .land-chat-wrap {
+      display: contents;
+    }
+
+    .land-chat-fab {
+      position: fixed;
+      bottom: 18px;
+      inset-inline-end: 18px;
+      z-index: 450;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 18px;
+      background: #07182c;
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(7, 24, 44, .28);
+    }
+
+    .land-chat-fab.open {
+      background: var(--teal-dark, #0a829b);
+    }
+
+    .land-chat-panel {
+      position: fixed;
+      bottom: 70px;
+      inset-inline-end: 18px;
+      z-index: 450;
+      width: min(360px, calc(100vw - 36px));
+      max-height: min(480px, calc(100vh - 110px));
       display: flex;
       flex-direction: column;
       gap: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      padding: 12px;
+      box-shadow: 0 18px 48px rgba(7, 24, 44, .25);
+    }
+
+    .land-chat-panel[hidden] {
+      display: none;
+    }
+
+    .land-chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
     }
 
     .land-chat-title {
       font-size: 14px;
       font-weight: 800;
       color: var(--p, #07182c);
+    }
+
+    .land-chat-close {
+      border: 0;
+      background: none;
+      color: #64748b;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 4px 8px;
     }
 
     .land-chat-messages {

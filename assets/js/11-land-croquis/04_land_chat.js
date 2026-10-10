@@ -1,6 +1,7 @@
 /* 11-land-croquis/04_land_chat.js — scoped Q&A chat pinned inside the
- * land/croquis section (temporary feature). The server answers only from the
- * recorded land data and must state uncertainty instead of guessing. */
+ * land/croquis section (temporary feature). A floating button opens a small
+ * popup at the bottom corner; the server answers only from the recorded land
+ * data and must state uncertainty instead of guessing. */
 
     const LAND_CHAT_HISTORY_KEPT = 10;
     let landChatBusy = false;
@@ -11,19 +12,24 @@
     }
 
     function mountLandChat(sectionDiv) {
-      if (!sectionDiv || document.getElementById('landChatCard')) return;
-      const field = document.createElement('div');
-      field.className = 'tenant-field full';
-      field.innerHTML = '<div class="land-chat-card" id="landChatCard">' +
+      if (!sectionDiv || document.getElementById('landChatFab')) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'land-chat-wrap';
+      wrap.innerHTML =
+        '<button type="button" class="land-chat-fab" id="landChatFab" onclick="toggleLandChat()">شات الأرض والكروكي</button>' +
+        '<div class="land-chat-panel" id="landChatPanel" hidden>' +
+        '<div class="land-chat-header">' +
         '<div class="land-chat-title">شات الأرض والكروكي</div>' +
+        '<button type="button" class="land-chat-close" onclick="toggleLandChat(false)">إغلاق</button>' +
+        '</div>' +
         '<div class="land-chat-messages" id="landChatMessages"></div>' +
         '<div class="land-chat-input-row">' +
         '<textarea id="landChatInput" class="land-chat-input" rows="1" ' +
         'placeholder="اسأل عن بيانات الأرض والكروكي..." data-i18n-ph="land_chat.placeholder" data-section-lock-ignore="1"></textarea>' +
         '<button type="button" class="btn primary land-chat-send" id="landChatSend" onclick="sendLandChat()">إرسال</button>' +
         '</div></div>';
-      sectionDiv.appendChild(field);
-      const input = field.querySelector('#landChatInput');
+      sectionDiv.appendChild(wrap);
+      const input = wrap.querySelector('#landChatInput');
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -31,6 +37,19 @@
         }
       });
       renderLandChatMessages();
+    }
+
+    function toggleLandChat(force) {
+      const panel = document.getElementById('landChatPanel');
+      if (!panel) return;
+      const open = typeof force === 'boolean' ? force : panel.hidden;
+      panel.hidden = !open;
+      const fab = document.getElementById('landChatFab');
+      if (fab) fab.classList.toggle('open', open);
+      if (open) {
+        const input = document.getElementById('landChatInput');
+        if (input) input.focus();
+      }
     }
 
     function renderLandChatMessages() {
