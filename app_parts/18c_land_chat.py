@@ -61,6 +61,7 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- فرّق دائمًا بين القيمة الموثقة في المستندات والقيمة المعتمدة التي أدخلها العميل، وسمِّ كلًا منهما عند ذكره.\n'
     '- فسّر واشرح أي اشتراط أو قيمة أو مصطلح غير واضح في البيانات عندما يطلب المستخدم، واربط الاشتراط بشريحة مساحة الأرض أو نوع المشروع عند الحاجة.\n'
     '- عند الإجابة من نصوص الاشتراطات انسبها دائمًا إلى «ملفات الأمانة» فقط، ولا تذكر أسماء ملفات أو أرقام صفحات أو مستندات داخلية إطلاقًا.\n'
+    '- اكتب المعادلات كنص عادي يقرؤه الإنسان (مثال: مسطح البناء = 7.0 × المساحة = 56000 م²)، وممنوع صيغ LaTeX أو رموزها مثل $ و \\times و \\text.\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
     '- لا تقترح تعديلات ولا تنفذ إجراءات على البيانات — الإجابة معلوماتية فقط.'
@@ -227,6 +228,37 @@ def _land_chat_context(project_data, message=''):
     return context
 
 
+def _land_chat_plain_math(text):
+    """The chat UI renders plain text — the model sometimes emits LaTeX
+    ($…$, \\text{…}, \\times) which reads as code to a human. Unwrap the
+    common forms into readable inline math."""
+    if not isinstance(text, str) or ('$' not in text and '\\' not in text):
+        return text
+    text = re.sub(r'\\\\', ' ', text)
+    text = re.sub(
+        r'\\(?:text|mathrm|mathbf|mathit|mathsf|textbf|operatorname|rm)'
+        r'\{([^{}]*)\}', r'\1', text)
+    text = re.sub(r'\\frac\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', text)
+    text = re.sub(r'\\sqrt\{([^{}]*)\}', r'√(\1)', text)
+    text = re.sub(
+        r'\\(times|cdot|div|leq|geq|neq|approx|pm)\b',
+        lambda m: {'times': '×', 'cdot': '×', 'div': '÷', 'leq': '≤',
+                   'geq': '≥', 'neq': '≠', 'approx': '≈', 'pm': '±'}[m.group(1)],
+        text)
+    text = re.sub(r'\\le\b', '≤', text)
+    text = re.sub(r'\\ge\b', '≥', text)
+    text = re.sub(r'\\left|\\right', '', text)
+    text = text.replace('\\%', '%').replace('\\&', '&')
+    text = re.sub(r'\$\$([\s\S]*?)\$\$', r'\1', text)
+    text = re.sub(r'\$([^$]+)\$', r'\1', text)
+    text = re.sub(r'\\[\[\](){}]', '', text)
+    text = re.sub(r'\\[a-zA-Z]+', ' ', text)
+    text = text.replace('$', '')
+    text = re.sub(r'[{}]', '', text)
+    text = re.sub(r'[ \t]{2,}', ' ', text)
+    return text.strip()
+
+
 def _land_chat_history(raw):
     history = []
     for item in (raw if isinstance(raw, list) else [])[-10:]:
@@ -263,7 +295,7 @@ def api_land_chat():
         response = call_text_chat(
             LAND_CHAT_SYSTEM_PROMPT, user_content, max_tokens=2500,
             usage_ctx=_usage_ctx_optional('ai_text', data))
-        reply = extract_chat_content(response, 'LAND-CHAT')
+        reply = _land_chat_plain_math(extract_chat_content(response, 'LAND-CHAT'))
     except Exception as exc:
         app.logger.exception('Land chat failed')
         fatal = _ai_fatal_http_response(exc)
