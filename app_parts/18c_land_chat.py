@@ -51,7 +51,7 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- الحقائق التنظيمية الموثقة: قواعد المنطقة الرسمية إن وُجدت ونقاط المراجعة.\n'
     '- السجل الكامل للمنطقة التنظيمية الموثقة: كل شرائح المساحات ومعاملاتها واستثناءاتها وقيودها لمنطقة القطعة إن طُبقت.\n'
     '- القواعد العامة الموثقة لاشتراطات المدينة: الجداول والقواعد المشتركة (المواقف، الارتدادات، الارتفاعات، الملاحق…) إن توفرت للمدينة.\n'
-    '- نصوص الصفحات المطابقة من ملفات الاشتراطات الرسمية للمدينة: مصدر القواعد الكامل مختارًا بحسب سؤال المستخدم.\n'
+    '- نصوص الاشتراطات الموثقة من ملفات الأمانة: مقتطفات النص الكامل للوائح البلدية مختارة بحسب سؤال المستخدم.\n'
     '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، التغطية المعتمدة، معامل البناء المعتمد).\n'
     'قواعد إلزامية:\n'
     '- أجب بلغة سؤال المستخدم نفسها بوضوح وبإيجاز — العربية إن كتب بالعربية، والإنجليزية إن كتب بها.\n'
@@ -60,11 +60,45 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '(مثل «البيانات المتاحة لا تذكر عدد الأدوار المسموح لمعامل التميّز») بدل تخمينها — ممنوع التضليل أو الافتراض.\n'
     '- فرّق دائمًا بين القيمة الموثقة في المستندات والقيمة المعتمدة التي أدخلها العميل، وسمِّ كلًا منهما عند ذكره.\n'
     '- فسّر واشرح أي اشتراط أو قيمة أو مصطلح غير واضح في البيانات عندما يطلب المستخدم، واربط الاشتراط بشريحة مساحة الأرض أو نوع المشروع عند الحاجة.\n'
-    '- عند الإجابة من نصوص ملفات الاشتراطات اذكر اسم الملف ورقم الصفحة المرفقين بكل نص.\n'
+    '- عند الإجابة من نصوص الاشتراطات انسبها دائمًا إلى «ملفات الأمانة» فقط، ولا تذكر أسماء ملفات أو أرقام صفحات أو مستندات داخلية إطلاقًا.\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
     '- لا تقترح تعديلات ولا تنفذ إجراءات على البيانات — الإجابة معلوماتية فقط.'
 )
+
+
+_LAND_CHAT_DOC_KEY_RE = re.compile(r'doc(\d+)(.*)')
+_LAND_CHAT_DOC_STR_RE = re.compile(r'\bdoc(\d+)\b')
+_LAND_CHAT_FILE_TOKEN_RE = re.compile(
+    r'اشتراطات\s*\d+(?:\.\w+)?|[\w-]+\.pdf\b|clean_\w+')
+
+
+def _land_chat_scrub_rule_refs(value):
+    """Recursively drop internal citation keys (source/sources/_doc) from a
+    regulation payload, rename the doc1/doc2 value keys, and rewrite file-name
+    mentions inside string values, so the chat can only ever describe these
+    rules as «ملفات الأمانة» — never internal file names or transcription ids."""
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                cleaned[key] = _land_chat_scrub_rule_refs(item)
+                continue
+            if key in ('source', 'sources', '_doc'):
+                continue
+            doc_match = _LAND_CHAT_DOC_KEY_RE.fullmatch(key)
+            if doc_match:
+                suffix = doc_match.group(2).replace('_', ' ').strip()
+                key = 'وثيقة الأمانة ' + doc_match.group(1) + (
+                    f' ({suffix})' if suffix else '')
+            cleaned[key] = _land_chat_scrub_rule_refs(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_land_chat_scrub_rule_refs(item) for item in value]
+    if isinstance(value, str):
+        value = _LAND_CHAT_DOC_STR_RE.sub(r'وثيقة الأمانة \1', value)
+        return _LAND_CHAT_FILE_TOKEN_RE.sub('ملفات الأمانة', value)
+    return value
 
 
 def _land_chat_regulation_evidence(message, source):
@@ -97,8 +131,10 @@ def _land_chat_regulation_evidence(message, source):
          for record in records),
         key=lambda record: (-record['score'], record['page']))
     top = [record for record in scored if record['score'] > 0][:REGULATION_MAX_SNIPPETS]
+    # Neutral headers only — the client must always see the source named
+    # «ملفات الأمانة», never internal file names or page numbers.
     return '\n\n'.join(
-        f"--- {record['name']} — صفحة {record['page']} ---\n"
+        f"--- مقتطف من ملفات الأمانة ---\n"
         f"{(record['text'] or '')[:REGULATION_SNIPPET_CHARS]}"
         for record in top)
 
@@ -164,7 +200,7 @@ def _land_chat_context(project_data, message=''):
         facts = {}
     if isinstance(facts, dict) and facts:
         facts.pop('survey_coordinate_count', None)
-        context['الحقائق التنظيمية الموثقة'] = facts
+        context['الحقائق التنظيمية الموثقة'] = _land_chat_scrub_rule_refs(facts)
         if facts.get('regulatory_zone'):
             # The digest matched a verified zone — feed the whole zone record,
             # not only the matched row, so the other bands and exceptions
@@ -174,7 +210,8 @@ def _land_chat_context(project_data, message=''):
             except Exception:
                 zone_record = None
             if isinstance(zone_record, dict) and zone_record:
-                context['السجل الكامل للمنطقة التنظيمية الموثقة'] = zone_record
+                context['السجل الكامل للمنطقة التنظيمية الموثقة'] = (
+                    _land_chat_scrub_rule_refs(zone_record))
             # The shared city rules apply to this parcel too — without them the
             # chat can quote a value but never explain the regulation behind it.
             try:
@@ -182,11 +219,11 @@ def _land_chat_context(project_data, message=''):
             except Exception:
                 general = None
             if isinstance(general, dict) and general:
-                context['القواعد العامة الموثقة لاشتراطات المدينة'] = {
-                    key: value for key, value in general.items() if key != '_doc'}
+                context['القواعد العامة الموثقة لاشتراطات المدينة'] = (
+                    _land_chat_scrub_rule_refs(general))
     evidence = _land_chat_regulation_evidence(message, source)
     if evidence:
-        context['نصوص الصفحات المطابقة من ملفات الاشتراطات'] = evidence
+        context['نصوص الاشتراطات الموثقة من ملفات الأمانة'] = evidence
     return context
 
 
