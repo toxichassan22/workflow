@@ -198,5 +198,12 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "طول الحد (م)": "Boundary length (m)",
   "عرض الشارع (م)": "Street width (m)",
   "المعالم والمواقع المحسوبة للقيادة": "Landmarks & places with computed drive times",
-  "تعذر جلب المعالم": "Could not fetch landmarks"
+  "تعذر جلب المعالم": "Could not fetch landmarks",
+  "شات الأرض والكروكي": "Land & Croquis Chat",
+  "شات مخصص لبيانات الأرض والكروكي — يغطي معاملات البناء والأدوار المسموحة والارتدادات والإحداثيات والتوزيعات.": "A dedicated chat for land and croquis data — covers building coefficients, permitted floors, setbacks, coordinates, and distributions.",
+  "اسأل عن بيانات الأرض والكروكي...": "Ask about the land and croquis data...",
+  "يكتب…": "Typing…",
+  "تعذر الحصول على إجابة الآن.": "Could not get an answer right now.",
+  "اكتب السؤال أولاً": "Enter the question first",
+  "تعذر الحصول على إجابة": "Could not get an answer"
 }/*I18N_EN_AUTO_END*/);

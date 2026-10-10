@@ -714,5 +714,6 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "pkg.validity_days": "Validity: {days} days",
   "pkg.validity_open": "Validity: no fixed expiry",
   "pkg.price_line": "{name} — {credit} points{price}",
-  "pkg.price_sar_suffix": " — SAR {price}"
+  "pkg.price_sar_suffix": " — SAR {price}",
+  "land_chat.placeholder": "Ask about the land and croquis data..."
 }/*I18N_EN_END*/;

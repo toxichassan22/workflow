@@ -316,6 +316,7 @@
           return;
         }
         inputs.forEach(inp => {
+          if (inp.hasAttribute('data-section-lock-ignore')) return;
           if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio', 'approved_floor_area_ratio'].includes(inp.dataset.key)) {
             inp.disabled = true;
           }

@@ -789,6 +789,7 @@
           sectionDiv.appendChild(analysisResultsField);
           sectionDiv.appendChild(coordinatesField);
           sectionDiv.appendChild(directionsField);
+          if (typeof mountLandChat === 'function') mountLandChat(sectionDiv);
         }
 
         return sectionDiv;
