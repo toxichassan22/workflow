@@ -324,7 +324,7 @@
       const fieldSpecs = [
         { key: 'approved_floor_count', label: 'الأدوار المعتمدة', message: 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.' },
         { key: 'approved_coverage_ratio', label: 'التغطية المعتمدة (%)', message: 'يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.' },
-        { key: 'approved_floor_area_ratio', label: 'معامل البناء المعتمد (FAR)', message: 'يرجى إدخال معامل البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.' },
+        { key: 'approved_floor_area_ratio', label: 'معامل مسطح البناء المعتمد (FAR)', message: 'يرجى إدخال معامل مسطح البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.' },
         { key: 'approved_financial_area', label: 'المساحة المعتمدة للدراسة المالية (م²)', message: 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.' }
       ];
       const errors = [];
@@ -581,7 +581,7 @@
           } else if (f.fieldKey === 'approved_coverage_ratio' && !input.placeholder) {
             input.placeholder = 'يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.';
           } else if (f.fieldKey === 'approved_floor_area_ratio' && !input.placeholder) {
-            input.placeholder = 'يرجى إدخال معامل البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.';
+            input.placeholder = 'يرجى إدخال معامل مسطح البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.';
           } else if (f.fieldKey === 'approved_financial_area' && !input.placeholder) {
             input.placeholder = 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.';
           }

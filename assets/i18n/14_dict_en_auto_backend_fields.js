@@ -48,7 +48,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "المساحة المعتمدة للدراسة المالية": "Approved area for the financial study",
   "عدد الأدوار المعتمدة": "Approved floor count",
   "نسبة التغطية المعتمدة": "Approved coverage ratio",
-  "معامل البناء المعتمد (FAR)": "Approved building coefficient (FAR)",
+  "معامل مسطح البناء المعتمد (FAR)": "Approved building coefficient (FAR)",
   "معامل البناء المعتمد": "Approved building coefficient",
   "معامل البناء": "Building coefficient",
   "عدد الواجهات على الشارع واتجاهاتها": "Number of street frontages and their directions",

@@ -725,7 +725,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"المساحة المعتمدة للدراسة المالية: {facts.get('approved_financial_area')}\n"
         f"عدد الأدوار المعتمدة: {facts.get('approved_floor_count')}\n"
         f"نسبة التغطية المعتمدة: {facts.get('approved_coverage_ratio')}\n"
-        f"معامل البناء المعتمد (FAR): {facts.get('approved_floor_area_ratio')}\n"
+        f"معامل مسطح البناء المعتمد (FAR): {facts.get('approved_floor_area_ratio')}\n"
         f"عدد الواجهات على الشارع: {facts.get('facades_count')}\n"
         f"اتجاهات الواجهات: {facts.get('facades_directions')}\n"
         f"الاستخدامات المسموحة: {facts.get('allowed_uses')}\n"

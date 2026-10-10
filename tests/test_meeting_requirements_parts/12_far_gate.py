@@ -33,7 +33,7 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         fields = self.app.test_client().get(
             '/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
         field = next(item for item in fields if item['fieldKey'] == 'approved_floor_area_ratio')
-        self.assertEqual(field['fieldLabel'], 'معامل البناء المعتمد (FAR)')
+        self.assertEqual(field['fieldLabel'], 'معامل مسطح البناء المعتمد (FAR)')
         self.assertEqual(field['fieldType'], 'number')
         self.assertTrue(field['isRequired'])
         self.assertEqual(field['sectionKey'], 'land_croquis')

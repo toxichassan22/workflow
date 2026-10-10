@@ -329,7 +329,7 @@ def _site_context_lines(payload):
         rows.append(f"- نسبة التغطية المعتمدة: {coverage}")
     floor_area_ratio = payload.get('approvedFloorAreaRatio') or payload.get('approved_floor_area_ratio')
     if floor_area_ratio:
-        rows.append(f"- معامل البناء المعتمد (FAR): {floor_area_ratio}")
+        rows.append(f"- معامل مسطح البناء المعتمد (FAR): {floor_area_ratio}")
     setbacks = payload.get('setbacks')
     if isinstance(setbacks, str) and setbacks.strip():
         rows.append(f"- الارتدادات: {setbacks.strip()}")
