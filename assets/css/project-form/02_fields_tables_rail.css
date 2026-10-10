@@ -95,14 +95,23 @@
     .survey-coordinates-table td:nth-child(1),
     .survey-coordinates-table th:nth-child(2),
     .survey-coordinates-table td:nth-child(2) {
-      width: 16%;
+      width: 15%;
     }
 
     .survey-coordinates-table th:nth-child(3),
     .survey-coordinates-table td:nth-child(3),
     .survey-coordinates-table th:nth-child(4),
     .survey-coordinates-table td:nth-child(4) {
-      width: 34%;
+      width: 31%;
+    }
+
+    .survey-coordinates-table th:nth-child(5),
+    .survey-coordinates-table td:nth-child(5) {
+      width: 8%;
+    }
+
+    .survey-coordinates-table .survey-coordinates-actions {
+      white-space: nowrap;
     }
 
     .survey-coordinates-table input {

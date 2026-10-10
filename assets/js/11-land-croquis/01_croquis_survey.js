@@ -195,12 +195,16 @@
       if (hadValue && parsed === null) return;
       const normalized = Array.isArray(parsed) ? parsed : [];
       panel.innerHTML = '<div class="survey-coordinates-head">' +
-        '<strong class="survey-coordinates-title">جدول الإحداثيات</strong></div>' +
-        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th></tr></thead><tbody></tbody></table></div>';
+        '<strong class="survey-coordinates-title">جدول الإحداثيات</strong>' +
+        '<button type="button" class="btn ghost small" id="addSurveyCoordinateButton">إضافة نقطة</button></div>' +
+        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>الإجراءات</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
-      if (!normalized.length) {
-        tbody.innerHTML = '<tr><td colspan="4" class="survey-coordinates-empty">سيظهر جدول الإحداثيات بعد تحليل المستندات.</td></tr>';
-      }
+      const showEmptyRow = () => {
+        if (!tbody.querySelector('tr')) {
+          tbody.innerHTML = '<tr><td colspan="5" class="survey-coordinates-empty">لا توجد إحداثيات مدخلة.</td></tr>';
+        }
+      };
+      showEmptyRow();
       const addRow = row => {
         tbody.querySelector('.survey-coordinates-empty')?.closest('tr')?.remove();
         const tr = document.createElement('tr');
@@ -208,11 +212,22 @@
         tr.innerHTML = cell('parcel_id', row?.parcel_id || row?.parcelId || '', 'P-1') +
           cell('point', row?.point || row?.point_number || '', '1') +
           cell('eastings', row?.eastings ?? row?.easting ?? '', '510180.849') +
-          cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840');
+          cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840') +
+          '<td class="survey-coordinates-actions"><input type="hidden" data-coordinate-field="source" value="' + escapeHtml(row?.source || 'regulation_table') + '">' +
+          '<button type="button" class="btn ghost danger small" data-remove-coordinate>حذف</button></td>';
         tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyCoordinates));
+        tr.querySelector('[data-remove-coordinate]').addEventListener('click', () => {
+          tr.remove();
+          showEmptyRow();
+          syncSurveyCoordinates();
+        });
         tbody.appendChild(tr);
       };
       normalized.forEach(addRow);
+      panel.querySelector('#addSurveyCoordinateButton').addEventListener('click', () => {
+        addRow({ source: 'manual' });
+        tbody.querySelector('tr:last-child input')?.focus();
+      });
       const hidden = document.getElementById('surveyCoordinatesData');
       if (hidden) hidden.value = JSON.stringify(normalized);
       tenantProjectData.survey_coordinates = normalized;

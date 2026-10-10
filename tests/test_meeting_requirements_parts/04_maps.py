@@ -186,7 +186,9 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         index_source = read_frontend_text()
         self.assertIn('surveyCoordinatesPanel', index_source)
         self.assertIn('surveyDirectionsPanel', index_source)
-        self.assertNotIn('addSurveyCoordinateButton', index_source)
+        # Manual entry is allowed again: owners can append coordinate rows by
+        # hand next to whatever the document analysis extracted.
+        self.assertIn('addSurveyCoordinateButton', index_source)
         self.assertIn('data-key="survey_coordinates"', index_source)
         self.assertIn('data-key="directions_table"', index_source)
         self.assertIn("f.fieldKey === 'land_documents_files'", index_source)
