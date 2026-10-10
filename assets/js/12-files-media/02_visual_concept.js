@@ -1497,12 +1497,14 @@
       const checked = await checkVisualConceptPlansDistribution('ai');
       if (!checked) return;
       const distribution = visualConceptPlansWorkflowState().distribution;
-      const blocking = visualConceptDistributionBlocking(distribution);
-      // A blocker sol marked fixable=false is a program-vs-regulation conflict —
-      // no table edit resolves it, so the loop skips the futile repair call and
-      // the verdict stays on screen pointing at the upstream source.
+      // Repair runs on every finding the server considers fixable — blocking or
+      // advisory — plus sol's issue notes, mirroring `repairable or issues` in
+      // the endpoint. A clean bill skips the pass, and a verdict marked
+      // fixable=false points at the approved program itself, not a row edit.
+      const repairable = (distribution.checks || []).filter(
+        (item) => item && item.result !== 'مطابق' && item.fixable !== false);
       if (!(distribution.rows || []).length
-          || !blocking.some((item) => item.fixable !== false)) return;
+          || !(repairable.length || (distribution.issues || []).length)) return;
       const repaired = await repairVisualConceptPlansDistribution();
       if (repaired) await checkVisualConceptPlansDistribution('ai');
     }
