@@ -1,0 +1,63 @@
+.financial-parking {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--border, #DCE3EB);
+  border-inline-start: 3px solid var(--teal-bright, #17C8E3);
+  border-radius: 12px;
+  background: var(--white, #FFFFFF);
+  color: var(--navy, #07182C);
+}
+.financial-parking-header,
+.financial-parking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.financial-parking-header h4 {
+  margin: 0;
+}
+.financial-parking-summary {
+  margin: 16px 0;
+}
+.financial-parking-summary input {
+  font-weight: 700;
+}
+.financial-parking-reference {
+  display: block;
+  margin-top: 6px;
+  max-width: 440px;
+  color: var(--text-muted, #526174);
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+.financial-parking-notes {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  line-height: 1.7;
+}
+.financial-parking-status {
+  margin-top: 10px;
+}
+.financial-parking-location {
+  margin-top: 8px;
+}
+.financial-parking-location label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.financial-parking-location[hidden],
+.financial-parking [hidden] {
+  display: none !important;
+}
+@media (max-width: 680px) {
+  .financial-parking {
+    padding: 12px;
+  }
+  .financial-parking-header > button {
+    width: 100%;
+  }
+}

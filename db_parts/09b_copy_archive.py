@@ -99,6 +99,18 @@ def sanitize_copied_draft_data(data, file_id_map=None):
         cleaned['visual_concept'] = json.dumps(concept, ensure_ascii=False) if was_string else concept
     elif 'visual_concept' in cleaned:
         cleaned['visual_concept'] = concept
+    financial = cleaned.get('financial_study_model')
+    financial_was_string = isinstance(financial, str)
+    if financial_was_string:
+        try:
+            financial = json.loads(financial)
+        except (TypeError, ValueError):
+            financial = None
+    if isinstance(financial, dict) and isinstance(financial.get('parkingPlan'), dict):
+        financial['parkingPlan']['approved'] = False
+        financial['parkingPlan'].pop('approvedBy', None)
+        financial['parkingPlan'].pop('approvedAt', None)
+        cleaned['financial_study_model'] = json.dumps(financial, ensure_ascii=False) if financial_was_string else financial
     return cleaned
 
 

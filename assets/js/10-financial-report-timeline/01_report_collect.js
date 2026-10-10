@@ -95,6 +95,8 @@
         tables,
         projection: roundFinancialSavedResults(window.__financialProjection || {}),
         dynamicRows: collectFinancialDynamicRows(),
+        parkingPlan: typeof financialParkingPlan === 'function' && financialParkingPlan().id ? financialParkingPlan() : undefined,
+        parkingSnapshot: typeof financialParkingSnapshot === 'function' && financialParkingPlan().id ? financialParkingSnapshot() : undefined,
         financialCalcData: (() => {
           try { return JSON.parse(document.getElementById('financialCalcData')?.value || '{}'); } catch (e) { return {}; }
         })()
@@ -254,7 +256,7 @@
 
     async function validateFinancialStudyBeforeProceed() {
       if (!document.getElementById('section-financial-calc')) return true;
-      const response = await api('POST', '/api/financial-study/validate', { financialModel: collectFinancialStudyModel() });
+      const response = await api('POST', '/api/financial-study/validate', { financialModel: collectFinancialStudyModel(), draftId: tenantProjectData.draftId || null, presentationId: tenantPresentationId || null });
       if (response?.success) return true;
       focusFinancialValidation(response?.validation);
       toast(response?.validation?.[0]?.message || 'استكمل المدخلات المالية المطلوبة أولًا');

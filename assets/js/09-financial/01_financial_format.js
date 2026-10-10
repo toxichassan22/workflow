@@ -257,6 +257,7 @@
           <br><button type="button" class="btn ghost" onclick="addComponent()">+ إضافة مكون</button>
           <p class="help formula">المساحة المبنية هي المساحة الفعلية المخصصة للمكون، أما المساحة البيعية/التأجيرية فهي الجزء الذي يحقق الإيراد. عند إضافة مكون جديد يقترح النموذج عدد الوحدات × مساحة الوحدة، ويمكن تعديل المساحتين يدويًا.</p>
           <div id="componentAreaValidation" class="validation-panel"><span id="componentBuiltAreaTotal">0</span> م² مخصصة من أصل <span id="componentBuiltAreaLimit">0</span> م² — المتبقي <span id="componentBuiltAreaRemaining">0</span> م².</div>
+          ${financialParkingMarkup()}
         </div>
 
         <div class="finance-block">
@@ -522,9 +523,13 @@
     }
 
     function addComponent(d = {}) {
-      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea))); tr.innerHTML = `
-    <td data-field="name"><input value="${d.name || ''}" placeholder="مثال: معارض سيارات"></td>
-    <td data-field="useType"><select>${selectHtml(useTypes, d.useType || 'retail')}</select></td>
+      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea)));
+      tr.dataset.parkingPlanId = d.parkingPlanId || '';
+      tr.dataset.floorRange = d.floorRange || '';
+      const parkingLocations = [{ v: 'aboveGround', t: 'فوق الأرض' }, { v: 'basement', t: 'بدروم' }, { v: 'surface', t: 'سطحية' }];
+      tr.innerHTML = `
+    <td data-field="name"><input value="${escapeHtml(d.name || '')}" placeholder="مثال: معارض سيارات"></td>
+    <td data-field="useType"><select>${selectHtml(useTypes, d.useType || 'retail')}</select><div data-field="parkingLocation" class="financial-parking-location" ${d.useType === 'parking' ? '' : 'hidden'}><label>موقع المواقف</label><select>${selectHtml(parkingLocations, d.parkingLocation || 'aboveGround')}</select></div></td>
     <td data-field="units"><input type="number" value="${units}"></td>
     <td data-field="unitArea"><input type="number" value="${unitArea}"></td>
     <td data-field="builtArea"><input type="number" value="${builtArea}"><span class="help input miniHelp"></span></td>

@@ -383,6 +383,10 @@
     }
 
     async function setSectionStatus(sectionKey, status) {
+      if (sectionKey === 'section-financial-calc' && status === 'approved' && typeof financialParkingError === 'function') {
+        const error = financialParkingError();
+        if (error) { toast(financialParkingText(error)); return; }
+      }
       if (sectionKey === 'location' && status === 'approved') {
         // Tier-1 content approval: the site analysis text is the only AI output
         // in this section; maps are Google renders and carry no approval state.

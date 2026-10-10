@@ -920,6 +920,7 @@
       const snapshot = parseFinancialStudySnapshot(raw) || (Array.isArray(fallbackComponents) && fallbackComponents.length ? { dynamicRows: { components: fallbackComponents } } : null);
       if (!snapshot) return;
       const financialRoot = document.getElementById('section-financial-calc');
+      if (typeof hydrateFinancialParkingPlan === 'function') hydrateFinancialParkingPlan(snapshot);
       if (typeof enhanceNumericInputs === 'function' && financialRoot) enhanceNumericInputs(financialRoot);
       Object.entries(snapshot.inputs || {}).forEach(([id, value]) => setFinancialSnapshotInput(id, value));
       const rows = { ...(snapshot.dynamicRows || {}) };

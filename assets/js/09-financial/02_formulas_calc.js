@@ -123,7 +123,11 @@
         const investmentModel = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
         const leasable = ['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(investmentModel);
         const id = tr.dataset.componentKey || (tr.dataset.componentKey = 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2));
-        return { idx, id, name, useType, units, unitArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable };
+        const parking = useType === 'parking' || tr.dataset.parkingPlanId ? {
+          parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value || 'aboveGround',
+          parkingPlanId: tr.dataset.parkingPlanId || '', floorRange: tr.dataset.floorRange || ''
+        } : {};
+        return { idx, id, name, useType, units, unitArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, ...parking };
       });
     }
     function updateRevenueComponentOptions() {
@@ -309,7 +313,8 @@
       document.querySelectorAll('#componentsTable tbody tr').forEach(tr => {
         const area = Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value));
         const rowType = tr.querySelector('[data-field="useType"] select')?.value;
-        if (rowType === 'openArea') openUsed += area; else if (rowType === 'basement') basementUsed += area; else used += area;
+        const pool = financialComponentAreaPool({ useType: rowType, parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value });
+        if (pool === 'surface') openUsed += area; else if (pool === 'basement') basementUsed += area; else used += area;
       });
       const remaining = limit - used, openRemaining = openLimit - openUsed, basementRemaining = basementLimit - basementUsed;
       const builtExceeded = used > limit + .01, openExceeded = openUsed > openLimit + .01, basementExceeded = basementUsed > basementLimit + .01;
@@ -467,7 +472,8 @@
         const builtArea = parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea = parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
         const model = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
-        const openRow = tr.querySelector('[data-field="useType"] select')?.value === 'openArea', basementRow = tr.querySelector('[data-field="useType"] select')?.value === 'basement';
+        const pool = financialComponentAreaPool({ useType: tr.querySelector('[data-field="useType"] select')?.value, parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value });
+        const openRow = pool === 'surface', basementRow = pool === 'basement';
         if (model === 'sale') componentSaleArea += revenueArea;
         if (['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(model)) leasable += revenueArea;
         const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT(openRow ? 'fin.comp_result_open' : basementRow ? 'fin.comp_result_basement' : 'fin.comp_result', openRow ? '{model} | مفتوحة {area} م²' : basementRow ? '{model} | بدروم {area} م²' : '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
@@ -798,5 +804,6 @@
            unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
          });
        }
+       renderFinancialParking();
        refreshDynamicI18n(document.getElementById('section-financial-calc'));
      }

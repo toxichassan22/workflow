@@ -141,6 +141,7 @@ def _visual_concept_plans_context_from_request(data):
     context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
+    _financial_parking_refresh_context(context, project_data)
     _visual_concept_plan_context_ensure_idea(context, project_data)
     return project_data, workflow, boundary, points, context
 
@@ -191,6 +192,7 @@ def api_visual_concept_plans_distribution():
         result = {}
     if not isinstance(result, dict) or not result.get('rows'):
         result = _visual_concept_plan_fallback_distribution(context, regulations)
+    result['rows'] = _financial_parking_merge_distribution_rows(result.get('rows') or [], context)
     distribution = _visual_concept_plan_normalize_distribution(result, context, regulations)
     return jsonify({'success': True, 'distribution': distribution, 'planContext': context})
 
