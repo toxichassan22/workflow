@@ -231,6 +231,21 @@ test('the requirements table shows the computed rate line and keeps the quote as
   assert(!output.innerHTML.includes('>نص الاشتراط الكامل<'));
 });
 
+test('an approved proposal collapses the panel to the suggest button', () => {
+  const f = fixture();
+  const plan = f.proposal(true);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const details = { hidden: false };
+  const byId = f.context.document.getElementById;
+  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {}
+    : id === 'financialParkingDetails' ? details : byId(id);
+  f.context.renderFinancialParking();
+  assert.equal(details.hidden, true);
+  plan.approved = false;
+  f.context.renderFinancialParking();
+  assert.equal(details.hidden, false);
+});
+
 test('rendered proposal data cannot inject markup', () => {
   const f = fixture();
   const plan = f.proposal();

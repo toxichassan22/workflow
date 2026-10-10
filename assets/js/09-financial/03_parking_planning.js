@@ -156,7 +156,7 @@
       const suggest = document.getElementById('financialParkingSuggest');
       if (suggest) suggest.disabled = financialParkingBusy || presentationMode || sectionLocked;
       const details = document.getElementById('financialParkingDetails');
-      if (details) details.hidden = !plan.id;
+      if (details) details.hidden = !plan.id || plan.approved === true;
       if (status) status.textContent = financialParkingText(financialParkingBusy ? 'جاري إعداد اقتراح المواقف...' : !plan.id ? 'لا يوجد اقتراح مواقف.'
         : stale ? 'تغيّرت بيانات المشروع أو الاشتراطات التي بُني عليها اقتراح المواقف.'
         : plan.approved && !error ? 'اقتراح المواقف معتمد.' : plan.canApply ? 'اقتراح المواقف بانتظار الاعتماد.' : 'اقتراح المواقف غير مكتمل.');
