@@ -163,6 +163,51 @@ class FinancialParkingTests(unittest.TestCase):
                 self.project['financial_study_model']['dynamicRows']['components'][0]['units'] = value
                 self.assertFalse(self.build()['canApply'])
 
+    def _apartments_clause(self, quote):
+        self.project['regulatory_constraints'] = (
+            'موقف لكل 25 م² من مسطحات المحلات والمعارض والمكاتب والمطاعم، ' + quote + '.')
+        self.rules = {'rules': [
+            {'componentId': 'housing', 'basis': 'units', 'spaces': 1, 'per': 1,
+             'combination': 'max', 'sourceQuote': quote},
+            {'componentId': 'housing', 'basis': 'builtArea', 'spaces': 1, 'per': 150,
+             'combination': 'max', 'sourceQuote': quote},
+            {'componentId': 'retail', 'basis': 'builtArea', 'spaces': 1, 'per': 25,
+             'sourceQuote': 'موقف لكل 25 م² من مسطحات المحلات والمعارض والمكاتب والمطاعم'},
+        ]}
+
+    def test_one_clause_quote_documents_both_whichever_is_greater_alternatives(self):
+        self._apartments_clause('وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر')
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan)
+        self.assertEqual(plan['requirements'][0]['spaces'], 100)
+        self.assertEqual(plan['requirements'][0]['basis'], 'units')
+        self.assertEqual(plan['requiredSpaces'], 160)
+
+    def test_a_verified_alternative_missing_its_quantity_warns_not_blocks(self):
+        self._apartments_clause('وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر')
+        self.project['financial_study_model']['dynamicRows']['components'][0]['units'] = ''
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan)
+        self.assertEqual(plan['requirements'][0]['spaces'], 100)
+        self.assertEqual(plan['requirements'][0]['basis'], 'builtArea')
+        self.assertTrue(any('البديل المتاح' in warning for warning in plan['warnings']))
+
+    def test_an_unverifiable_alternative_still_blocks_the_component(self):
+        self._apartments_clause('وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر')
+        self.rules['rules'][0]['spaces'] = 5
+        plan = self.build()
+        self.assertFalse(plan['canApply'])
+        self.assertIsNone(plan['requirements'][0]['spaces'])
+
+    def test_summed_rules_still_require_every_quantity(self):
+        self._apartments_clause('وموقف لكل وحدة سكنية وموقف لكل 150 م² للصالات')
+        self.project['financial_study_model']['dynamicRows']['components'][0]['units'] = ''
+        for rule in self.rules['rules']:
+            rule['combination'] = 'sum'
+        plan = self.build()
+        self.assertFalse(plan['canApply'])
+        self.assertIsNone(plan['requirements'][0]['spaces'])
+
 
 if __name__ == '__main__':
     unittest.main()

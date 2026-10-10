@@ -145,8 +145,11 @@ def _rule_spaces(rule, component, snapshot, source_texts):
     if fixed and not _number_in_quote(fixed, quote) or threshold and not _number_in_quote(threshold, quote):
         return None
     normalized = _quote_text(quote)
+    unit_rate = bool(re.search(
+        r'لكل\s+(?:وحدة|وحدتين|وحدات|شقة|شقتين|شقق|غرفة|غرفتين|غرف|فيلا|فيلتين|مسكن|مساكن)'
+        r'|per\s+(?:unit|apartment|room|dwelling|villa)', normalized))
     area_word = bool(re.search(r'م\s*2|متر|مساحة|sqm|square|\bm2\b|area', normalized))
-    if basis == 'units' and (area_word or not re.search(r'وحد|غرف|شقق|شقة|فيل|unit|room|dwelling|apartment', normalized)):
+    if basis == 'units' and not unit_rate:
         return None
     if basis != 'units' and not area_word:
         return None
@@ -154,24 +157,28 @@ def _rule_spaces(rule, component, snapshot, source_texts):
         return None
     if basis == 'revenueArea' and not re.search(r'بيعي|تأجير|تاجير|saleable|leasable|lettable', normalized):
         return None
-    quantity = snapshot['landArea'] if basis == 'landArea' else component.get(basis)
-    if quantity is None or quantity <= 0 or basis == 'units' and not float(quantity).is_integer():
-        return None
-    value = Decimal(str(fixed)) + max(Decimal(0), Decimal(str(quantity)) - Decimal(str(threshold))) * Decimal(str(spaces)) / Decimal(str(per))
-    count = int(value.to_integral_value(rounding=ROUND_CEILING))
     visitor_percent = parking_number(rule.get('visitorPercent', 0))
     visitor_quote = str(rule.get('visitorSourceQuote') or '').strip()
     if visitor_percent is None or visitor_percent > 100:
         return None
+    if visitor_percent and (
+            not _source_quote(visitor_quote, source_texts) or not _number_in_quote(visitor_percent, visitor_quote)):
+        return None
+    result = {'spaces': None, 'basis': basis, 'quantity': None, 'spacesPer': spaces,
+              'per': per, 'fixedSpaces': fixed, 'threshold': threshold, 'sourceQuote': quote,
+              'visitorPercent': visitor_percent, 'visitorSourceQuote': visitor_quote}
+    quantity = snapshot['landArea'] if basis == 'landArea' else component.get(basis)
+    result['quantity'] = quantity
+    if quantity is None or quantity <= 0 or basis == 'units' and not float(quantity).is_integer():
+        return result
+    value = Decimal(str(fixed)) + max(Decimal(0), Decimal(str(quantity)) - Decimal(str(threshold))) * Decimal(str(spaces)) / Decimal(str(per))
+    count = int(value.to_integral_value(rounding=ROUND_CEILING))
     if visitor_percent:
-        if not _source_quote(visitor_quote, source_texts) or not _number_in_quote(visitor_percent, visitor_quote):
-            return None
         count += int((Decimal(count) * Decimal(str(visitor_percent)) / 100).to_integral_value(rounding=ROUND_CEILING))
     if count > 1000000:
         return None
-    return {'spaces': count, 'basis': basis, 'quantity': quantity, 'spacesPer': spaces,
-            'per': per, 'fixedSpaces': fixed, 'threshold': threshold,
-            'sourceQuote': quote, 'visitorPercent': visitor_percent, 'visitorSourceQuote': visitor_quote}
+    result['spaces'] = count
+    return result
 
 
 def _plan_allocations(snapshot, response, required, area_per_space, source_texts, plan_id):
@@ -266,23 +273,33 @@ def build_parking_plan(project, response, plan_id):
     facts = parking_object(parking_object(project).get('parking_regulation_facts'))
     source_texts += [str(facts[key]) for key in ('parking_requirements', 'regulatory_constraints', 'zone_rules') if facts.get(key)]
     rules = response.get('rules') if isinstance(response.get('rules'), list) else []
-    requirements, missing = [], []
+    requirements, missing, quantity_notes = [], [], []
     demand = [row for row in snapshot['components']
               if row['useType'] not in NON_PARKING_DEMAND_USES and not is_parking_component(row)]
     for component in demand:
+        label = component['name'] or component['id']
         selected = [rule for rule in rules if isinstance(rule, dict) and rule.get('componentId') == component['id']]
         calculated = [_rule_spaces(rule, component, snapshot, source_texts) for rule in selected]
-        valid = bool(calculated) and all(item is not None for item in calculated)
-        if not valid:
-            missing.append('اشتراط المواقف أو أساس حسابه غير موثق للمكون: ' + (component['name'] or component['id']))
-        combined = (sum(item['spaces'] for item in calculated)
-                    if valid and all(rule.get('combination') == 'sum' for rule in selected)
-                    else max((item['spaces'] for item in calculated), default=0) if valid else None)
-        first = calculated[0] if valid else {}
+        verified = [item for item in calculated if item is not None]
+        computable = [item for item in verified if item['spaces'] is not None]
+        summing = bool(selected) and all(rule.get('combination') == 'sum' for rule in selected)
+        combined, first = None, verified[0] if verified else {}
+        if not calculated or len(verified) != len(calculated):
+            missing.append('اشتراط المواقف أو أساس حسابه غير موثق للمكون: ' + label)
+        elif not computable or summing and len(computable) != len(verified):
+            missing.append('كمية أساس اشتراط المواقف غير متوفرة للمكون: ' + label)
+        else:
+            combined = (sum(item['spaces'] for item in computable) if summing
+                        else max(item['spaces'] for item in computable))
+            first = computable[0]
+            if len(computable) != len(verified):
+                quantity_notes.append(
+                    'احتُسب اشتراط المكون «' + label + '» من البديل المتاح؛ '
+                    'بديل موثق آخر يفتقد الكمية المعتمدة.')
         requirements.append({'componentId': component['id'], 'name': component['name'],
                              'spaces': combined, 'quantity': first.get('quantity'),
-                             'basis': first.get('basis'), 'rules': calculated if valid else [],
-                             'sourceQuote': '\n'.join(item['sourceQuote'] for item in calculated) if valid else ''})
+                             'basis': first.get('basis'), 'rules': verified if combined is not None else [],
+                             'sourceQuote': '\n'.join(item['sourceQuote'] for item in computable)})
     if not demand:
         missing.append('مكونات المشروع التي تتطلب مواقف غير متوفرة.')
     documented_area = parking_number(response.get('grossAreaPerSpace'))
@@ -302,6 +319,7 @@ def build_parking_plan(project, response, plan_id):
     allocations = _plan_allocations(snapshot, response, required if not missing else 0,
                                     area_per_space, source_texts, plan_id)
     plan.update(allocations)
+    plan['warnings'] = quantity_notes + plan['warnings']
     plan['parkingArea'] = round(sum(row['builtArea'] for row in plan['components']), 2)
     plan['canApply'] = not missing and not plan['unallocatedSpaces'] and (snapshot['landArea'] or 0) > 0
     if missing:
