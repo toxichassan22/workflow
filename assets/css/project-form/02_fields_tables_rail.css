@@ -987,8 +987,8 @@
       bottom: 84px;
       inset-inline-end: 18px;
       z-index: 451;
-      width: min(520px, calc(100vw - 24px));
-      height: min(680px, calc(100vh - 24px));
+      width: min(420px, calc(100vw - 24px));
+      height: min(560px, calc(100vh - 24px));
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -1002,6 +1002,24 @@
 
     .land-chat-panel[hidden] {
       display: none;
+    }
+
+    .land-chat-resize {
+      position: absolute;
+      inset-inline-end: 0;
+      bottom: 0;
+      width: 22px;
+      height: 22px;
+      cursor: nwse-resize;
+      touch-action: none;
+      z-index: 2;
+      background: linear-gradient(135deg, transparent 58%, rgba(100, 116, 139, .5) 58%);
+      border-end-end-radius: 13px;
+    }
+
+    .land-chat-resize:dir(rtl) {
+      cursor: nesw-resize;
+      background: linear-gradient(225deg, transparent 58%, rgba(100, 116, 139, .5) 58%);
     }
 
     .land-chat-header {

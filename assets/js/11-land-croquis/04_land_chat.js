@@ -5,6 +5,7 @@
 
     const LAND_CHAT_HISTORY_KEPT = 10;
     const LAND_CHAT_POS_KEY = 'landChatFabPos';
+    const LAND_CHAT_SIZE_KEY = 'landChatPanelSize';
     const LAND_CHAT_FAB_SIZE = 56;
     let landChatBusy = false;
     const landChatMessages = [];
@@ -65,8 +66,8 @@
       const fab = document.getElementById('landChatFab');
       if (!panel || panel.hidden || !fab) return;
       const rect = fab.getBoundingClientRect();
-      const width = Math.min(360, window.innerWidth - 24);
-      const height = Math.min(480, window.innerHeight - 24);
+      const width = panel.offsetWidth || Math.min(420, window.innerWidth - 24);
+      const height = panel.offsetHeight || Math.min(560, window.innerHeight - 24);
       const gap = 10;
       let top = rect.top - gap - height;
       if (top < 12) top = rect.bottom + gap;
@@ -134,6 +135,58 @@
       });
     }
 
+    function landChatBindResize(panel) {
+      const grip = panel.querySelector('#landChatResize');
+      if (!grip) return;
+      let startX = 0;
+      let startY = 0;
+      let startW = 0;
+      let startH = 0;
+      let startLeft = 0;
+      let pointerId = null;
+      grip.addEventListener('pointerdown', (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        pointerId = event.pointerId;
+        startX = event.clientX;
+        startY = event.clientY;
+        const rect = panel.getBoundingClientRect();
+        startW = rect.width;
+        startH = rect.height;
+        startLeft = rect.left;
+        try { grip.setPointerCapture(pointerId); } catch (error) {}
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      grip.addEventListener('pointermove', (event) => {
+        if (event.pointerId !== pointerId) return;
+        const rtl = getComputedStyle(panel).direction === 'rtl';
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        let width = Math.max(300, Math.min(startW + (rtl ? -dx : dx), window.innerWidth - 24));
+        const height = Math.max(260, Math.min(startH + dy, window.innerHeight - 24));
+        if (rtl) {
+          // The grip sits on the left edge — keep the right edge fixed.
+          const left = Math.max(8, Math.min(startLeft + dx, window.innerWidth - width - 8));
+          panel.style.left = left + 'px';
+          width = Math.min(width, window.innerWidth - left - 8);
+        } else {
+          width = Math.min(width, window.innerWidth - startLeft - 8);
+        }
+        panel.style.width = width + 'px';
+        panel.style.height = height + 'px';
+      });
+      const finish = (event) => {
+        if (event.pointerId !== pointerId) return;
+        pointerId = null;
+        try {
+          const rect = panel.getBoundingClientRect();
+          localStorage.setItem(LAND_CHAT_SIZE_KEY, JSON.stringify({ width: rect.width, height: rect.height }));
+        } catch (error) {}
+      };
+      grip.addEventListener('pointerup', finish);
+      grip.addEventListener('pointercancel', finish);
+    }
+
     function mountLandChat(sectionDiv) {
       if (!sectionDiv || document.getElementById('landChatFab')) return;
       const wrap = document.createElement('div');
@@ -159,11 +212,21 @@
         '<div class="land-chat-confirm-body">سيبدأ الشات محادثة جديدة عند فتحه مرة أخرى.</div>' +
         '<button type="button" class="land-chat-confirm-end" id="landChatConfirmEnd" onclick="confirmEndLandChat()">إنهاء المحادثة</button>' +
         '<button type="button" class="land-chat-confirm-return" id="landChatConfirmReturn" onclick="hideLandChatEndConfirm()">العودة إلى المحادثة</button>' +
-        '</div></div></div>';
+        '</div></div>' +
+        '<div class="land-chat-resize" id="landChatResize" aria-hidden="true"></div></div>';
       sectionDiv.appendChild(wrap);
       const fab = wrap.querySelector('#landChatFab');
       landChatBindFabDrag(fab);
       landChatApplyFabPosition(landChatFabPosition(), false);
+      const panel = wrap.querySelector('#landChatPanel');
+      landChatBindResize(panel);
+      try {
+        const size = JSON.parse(localStorage.getItem(LAND_CHAT_SIZE_KEY) || 'null');
+        if (size && Number.isFinite(size.width) && Number.isFinite(size.height)) {
+          panel.style.width = Math.min(size.width, window.innerWidth - 24) + 'px';
+          panel.style.height = Math.min(size.height, window.innerHeight - 24) + 'px';
+        }
+      } catch (error) {}
       const input = wrap.querySelector('#landChatInput');
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
