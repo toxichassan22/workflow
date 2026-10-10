@@ -33,6 +33,14 @@ def _load(name):
     return _CACHE[name]
 
 
+def general_rules():
+    """The city-wide verified rules (parking, setbacks, heights, annexes…).
+
+    Shared rules that apply on top of every zone — the land chat reads them so
+    it can explain a requirement, not just quote the applicable digest."""
+    return _load('general.json')
+
+
 def _num(value):
     if value is None:
         return None

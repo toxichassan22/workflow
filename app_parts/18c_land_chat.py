@@ -8,12 +8,15 @@
 LAND_CHAT_FIELD_LABELS = (
     ('project_name', 'اسم المشروع'),
     ('project_type', 'نوع المشروع'),
+    ('project_subtype', 'الأنواع الفرعية للمشروع'),
+    ('project_stage', 'مرحلة المشروع الحالية'),
     ('city', 'المدينة'),
     ('district', 'الحي'),
     ('croquis_land_area', 'مساحة الأرض حسب الكروكي (م²)'),
     ('approved_financial_area', 'المساحة المعتمدة للدراسة المالية (م²)'),
     ('plot_number_croquis', 'رقم القطعة'),
     ('plan_number', 'رقم المخطط'),
+    ('subdivision_number', 'رقم القسم'),
     ('deed_number', 'رقم الصك أو المرجع'),
     ('deed_date', 'تاريخ الصك'),
     ('boundary_lengths', 'أطوال الأضلاع وحدود الأرض'),
@@ -21,6 +24,8 @@ LAND_CHAT_FIELD_LABELS = (
     ('north_direction', 'اتجاه الشمال'),
     ('facades_count', 'عدد الواجهات المطلة على شوارع'),
     ('facades_directions', 'اتجاهات الواجهات'),
+    ('zoning_code', 'كود التنظيم'),
+    ('land_use', 'استخدام الأرض'),
     ('building_ratio_coverage', 'نسبة البناء والتغطية'),
     ('setbacks', 'الارتدادات'),
     ('building_ratio_setbacks', 'نسب البناء والارتدادات'),
@@ -29,6 +34,9 @@ LAND_CHAT_FIELD_LABELS = (
     ('approved_coverage_ratio', 'التغطية المعتمدة'),
     ('approved_floor_area_ratio', 'معامل مسطح البناء المعتمد (FAR)'),
     ('allowed_uses', 'الاستخدامات المسموحة'),
+    ('allowed_uses_restrictions', 'الاستخدامات والقيود التنظيمية المسجلة'),
+    ('parking_requirements', 'اشتراطات المواقف'),
+    ('entrances_exits_requirements', 'اشتراطات المداخل والمخارج'),
     ('land_use_status', 'حالة استخدام المشروع'),
     ('regulatory_constraints', 'القيود التنظيمية'),
     ('land_and_building_summary', 'ملخص بيانات الأرض والاشتراطات'),
@@ -41,13 +49,15 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- الإحداثيات وجدول الاتجاهات كما سُجلّا.\n'
     '- تحليل مستندات الأرض: القيم المستخرجة من الكروكي والرخصة والاشتراطات (نسب البناء والتغطية، معاملات FAR والأدوار الموثقة لكل شريحة) مع التعارضات المسجلة.\n'
     '- الحقائق التنظيمية الموثقة: قواعد المنطقة الرسمية إن وُجدت ونقاط المراجعة.\n'
+    '- القواعد العامة الموثقة لاشتراطات المدينة: الجداول والقواعد المشتركة (المواقف، الارتدادات، الارتفاعات، الملاحق…) إن توفرت للمدينة.\n'
     '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، التغطية المعتمدة، معامل البناء المعتمد).\n'
     'قواعد إلزامية:\n'
-    '- أجب بالعربية بوضوح وبإيجاز.\n'
+    '- أجب بلغة سؤال المستخدم نفسها بوضوح وبإيجاز — العربية إن كتب بالعربية، والإنجليزية إن كتب بها.\n'
     '- استند فقط إلى البيانات المرفقة؛ لا تستنتج قيمة غير موجودة ولا تعمّم اشتراطات من خارجها.\n'
     '- إذا كانت المعلومة غير موجودة في البيانات أو غير مؤكدة، صرّح بذلك في الإجابة نفسها '
     '(مثل «البيانات المتاحة لا تذكر عدد الأدوار المسموح لمعامل التميّز») بدل تخمينها — ممنوع التضليل أو الافتراض.\n'
     '- فرّق دائمًا بين القيمة الموثقة في المستندات والقيمة المعتمدة التي أدخلها العميل، وسمِّ كلًا منهما عند ذكره.\n'
+    '- فسّر واشرح أي اشتراط أو قيمة أو مصطلح غير واضح في البيانات عندما يطلب المستخدم، واربط الاشتراط بشريحة مساحة الأرض أو نوع المشروع عند الحاجة.\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
     '- لا تقترح تعديلات ولا تنفذ إجراءات على البيانات — الإجابة معلوماتية فقط.'
@@ -116,6 +126,17 @@ def _land_chat_context(project_data):
     if isinstance(facts, dict) and facts:
         facts.pop('survey_coordinate_count', None)
         context['الحقائق التنظيمية الموثقة'] = facts
+        if facts.get('regulatory_zone'):
+            # The digest matched a verified zone, so the shared city rules apply
+            # to this parcel too — without them the chat can quote a value but
+            # never explain the regulation behind it.
+            try:
+                general = regulation_digest.general_rules()
+            except Exception:
+                general = None
+            if isinstance(general, dict) and general:
+                context['القواعد العامة الموثقة لاشتراطات المدينة'] = {
+                    key: value for key, value in general.items() if key != '_doc'}
     return context
 
 
@@ -143,7 +164,7 @@ def api_land_chat():
         return jsonify({'success': False, 'error': 'اكتب السؤال أولاً',
                         'error_code': 'MESSAGE_REQUIRED'}), 400
     project_data = clean_project_data(data.get('projectData') or {})
-    context_json = json.dumps(_land_chat_context(project_data), ensure_ascii=False, default=str)[:14000]
+    context_json = json.dumps(_land_chat_context(project_data), ensure_ascii=False, default=str)[:40000]
     prior = ''
     history = _land_chat_history(data.get('history'))
     if history:
