@@ -34,7 +34,7 @@ FRONTEND_JS_ORDER = (
     '06-team.js', '07-project-form/01_form_sections.js',
     '07-project-form/02_section_versions.js', '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
-    '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',
+    '09-financial/02_formulas_calc.js',
     '10-financial-report-timeline/01_report_collect.js',
     '10-financial-report-timeline/02_timeline_sidebar.js',
     '10-financial-report-timeline/03_timeline_board.js', '11-land-croquis/01_croquis_survey.js',
