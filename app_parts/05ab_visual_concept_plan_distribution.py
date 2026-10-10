@@ -401,9 +401,65 @@ def _visual_concept_plan_surgical_rows(old_rows, new_rows, editable_ids, allowed
     return merged
 
 
-def _visual_concept_plan_normalize_distribution(raw, context, regulations):
+def _visual_concept_plan_backfill_distribution_rows(rows, context):
+    """Fill empty units_per_floor / floor_area_sqm on a fresh proposal from the
+    recorded program: a component's required units and area spread evenly across
+    the floors its rows span, so the suggestion already satisfies the study
+    instead of shipping blank cells the totals check then flags. Rows the model
+    filled keep their values — a partially-filled component's missing rows only
+    take the remainder."""
+    grouped = {}
+    order = []
+    for row in rows:
+        key = _visual_concept_plan_component_key(
+            _visual_concept_plan_component_base(row.get('component')))
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(row)
+    required = {}
+    for comp in context.get('components') or []:
+        name = _visual_concept_plan_sanitize_text(comp.get('name'))
+        key = (_visual_concept_plan_component_key(_visual_concept_plan_component_base(name))
+               or _visual_concept_plan_component_key(name))
+        if key:
+            required.setdefault(key, comp)
+    for key in order:
+        comp = required.get(key) or next(
+            (item for item_key, item in required.items()
+             if key in item_key or item_key in key), None)
+        if not comp:
+            continue
+        floor_counts = {
+            id(row): (_visual_concept_plan_floor_range(row.get('floor_range')) or {}).get('count', 1)
+            for row in grouped[key]}
+        for comp_field, row_field in (('units', 'units_per_floor'),
+                                      ('builtArea', 'floor_area_sqm')):
+            wanted = _visual_concept_number(
+                comp.get('units') if comp_field == 'units'
+                else (comp.get('builtArea') or comp.get('unitArea')))
+            if not wanted:
+                continue
+            missing = [row for row in grouped[key]
+                       if not isinstance(row.get(row_field), (int, float))]
+            missing_floors = sum(floor_counts[id(row)] for row in missing)
+            if not missing_floors:
+                continue
+            claimed = sum(row[row_field] * floor_counts[id(row)]
+                          for row in grouped[key]
+                          if isinstance(row.get(row_field), (int, float)))
+            per_floor = round((wanted - claimed) / missing_floors, 2)
+            if per_floor <= 0:
+                continue
+            for row in missing:
+                row[row_field] = per_floor
+
+
+def _visual_concept_plan_normalize_distribution(raw, context, regulations, backfill=False):
     """Normalize the distribution table (proposed or client-edited) and attach the
-    deterministic totals + checks so every edit re-verifies the same way."""
+    deterministic totals + checks so every edit re-verifies the same way.
+    `backfill` is for the fresh proposal only — on client-edited tables an empty
+    cell is a deliberate deletion, never refilled."""
     source = raw if isinstance(raw, dict) else {}
     rows = []
     for item in (source.get('rows') if isinstance(source.get('rows'), list) else []):
@@ -427,6 +483,8 @@ def _visual_concept_plan_normalize_distribution(raw, context, regulations):
             'circulation': _visual_concept_plan_sanitize_text(
                 item.get('circulation') or item.get('services'))[:400],
         })
+    if backfill:
+        _visual_concept_plan_backfill_distribution_rows(rows, context)
     totals = _visual_concept_plan_distribution_totals(rows, context)
     return {
         'rows': rows,

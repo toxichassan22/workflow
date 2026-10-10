@@ -153,3 +153,38 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
             [built, covered], [], context, {})
         self.assertTrue(any(c['item'] == 'إجمالي المسطحات يتجاوز معامل البناء'
                             for c in checks))
+
+    def test_proposal_backfills_units_and_areas_from_the_recorded_program(self):
+        """A model proposal that ships blank units/area cells gets them filled
+        from the recorded program — the component's required units and area
+        spread evenly across the floors its rows span — so the suggestion
+        already satisfies the study instead of surfacing deltas for the client
+        to fix by hand. Filled rows keep their values; the missing ones take
+        the remainder."""
+        module = self.application_module
+        context = {'land_area': 10000, 'floor_area_ratio': '7',
+                   'components': [
+                       {'name': 'شقق سكنية', 'units': 80, 'builtArea': 9600},
+                       {'name': 'المعارض التجارية', 'builtArea': 2100}]}
+        raw = {'rows': [
+            {'building': 'أ', 'floor_range': '1-8', 'component': 'شقق سكنية'},
+            {'building': 'أ', 'floor_range': 'أرضي', 'component': 'المعارض التجارية'},
+            {'building': 'ب', 'floor_range': 'أرضي', 'component': 'المعارض التجارية'}]}
+        rows = module._visual_concept_plan_normalize_distribution(
+            raw, context, {}, backfill=True)['rows']
+        self.assertEqual(rows[0]['units_per_floor'], 10)
+        self.assertEqual(rows[0]['floor_area_sqm'], 1200)
+        self.assertEqual(rows[1]['floor_area_sqm'], 1050)
+        self.assertEqual(rows[2]['floor_area_sqm'], 1050)
+        filled = {'rows': [
+            {'building': 'أ', 'floor_range': '1-4', 'component': 'شقق سكنية',
+             'units_per_floor': 15, 'floor_area_sqm': 1000},
+            {'building': 'ب', 'floor_range': '1-4', 'component': 'شقق سكنية'}]}
+        remainder = module._visual_concept_plan_normalize_distribution(
+            filled, context, {}, backfill=True)['rows'][1]
+        self.assertEqual(remainder['units_per_floor'], 5)
+        self.assertEqual(remainder['floor_area_sqm'], 1400)
+        # The check path never refills: a cell the client cleared stays empty.
+        cleared = module._visual_concept_plan_normalize_distribution(
+            raw, context, {})['rows']
+        self.assertIsNone(cleared[0]['units_per_floor'])

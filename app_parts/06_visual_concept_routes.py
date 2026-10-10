@@ -193,7 +193,8 @@ def api_visual_concept_plans_distribution():
     if not isinstance(result, dict) or not result.get('rows'):
         result = _visual_concept_plan_fallback_distribution(context, regulations)
     result['rows'] = _financial_parking_merge_distribution_rows(result.get('rows') or [], context)
-    distribution = _visual_concept_plan_normalize_distribution(result, context, regulations)
+    distribution = _visual_concept_plan_normalize_distribution(
+        result, context, regulations, backfill=True)
     return jsonify({'success': True, 'distribution': distribution, 'planContext': context})
 
 
