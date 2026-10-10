@@ -63,6 +63,7 @@ FRONTEND_JS_ORDER = (
     '11-land-croquis/02_map_edits.js', '11-land-croquis/02a_map_approval_viewport.js',
     '11-land-croquis/03_interactive_map.js', '12-files-media/01_files_media.js',
     '12-files-media/02_visual_concept.js',
+    '12-files-media/03_visual_concept_sketch.js',
     '13-visual/01_visual_concept_page.js',
     '13-visual/02_slides_progress.js',
     '13-visual/03_tenant_slide_generation.js', '14-slides-gen/01_undo.js',

@@ -59,6 +59,7 @@
         angleHtml + '</div>';
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
+      renderVisualConceptSketches();
       const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
       bindRoot.querySelectorAll('[data-visual-caption]').forEach(input => {
         input.addEventListener('input', () => {
@@ -163,7 +164,7 @@
     }
 
     function showVisualConceptView(view) {
-      const allowed = new Set(['home', 'external', 'internal', 'plans2d']);
+      const allowed = new Set(['home', 'external', 'internal', 'plans2d', 'sketches']);
       const next = allowed.has(view) ? view : 'home';
       document.querySelectorAll('#section-visual-concept [data-visual-concept-view], #tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
         node.hidden = node.dataset.visualConceptView !== next;

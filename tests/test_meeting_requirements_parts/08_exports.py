@@ -628,7 +628,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn('data-visual-plan-title', index_source)
         self.assertNotIn('data-visual-plan-description', index_source)
         self.assertNotIn('visualConceptPlansGenerateButton', index_source)
-        self.assertIn("new Set(['home', 'external', 'internal', 'plans2d'])", index_source)
+        self.assertIn("new Set(['home', 'external', 'internal', 'plans2d', 'sketches'])", index_source)
         self.assertIn('plans2d: plans', index_source)
         self.assertIn('<h3>المخططات</h3>', index_source)
         self.assertNotIn('المخططات 2D', index_source)

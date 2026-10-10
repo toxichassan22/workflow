@@ -313,6 +313,11 @@
               <h3>المخططات</h3>
               <span class="visual-concept-home-status" id="visualConceptHomePlansStatus">لا توجد مخططات</span>
             </button>
+            <button type="button" class="visual-concept-home-card" data-visual-concept-target="sketches">
+              <span class="visual-concept-home-badge">القسم الرابع</span>
+              <h3>السكتشات</h3>
+              <span class="visual-concept-home-status" id="visualConceptHomeSketchesStatus">لا توجد سكتشات</span>
+            </button>
           </div>
         </div>
         <div id="visualConceptExternalView" class="visual-concept-section" data-visual-concept-view="external" hidden>
@@ -386,6 +391,15 @@
           <div class="visual-concept-actions">
             <button type="button" class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
           </div>
+        </div>
+        <div id="visualConceptSketchesView" class="visual-concept-section" data-visual-concept-view="sketches" hidden>
+          <div class="visual-concept-view-head">
+            <div>
+              <h3>السكتشات</h3>
+            </div>
+            <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
+          </div>
+          <div id="visualConceptSketchesWorkspace" class="visual-concept-page"></div>
         </div>
         <input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">
       `;

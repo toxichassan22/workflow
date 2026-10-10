@@ -52,13 +52,26 @@ def _sanitize_visual_concept(concept):
     slots = cleaned.get('slots')
     if isinstance(slots, dict):
         cleaned['slots'] = {
-            slot_id: ({key: val for key, val in slot.items()
-                       if key not in VISUAL_SLOT_APPROVAL_KEYS}
-                      if isinstance(slot, dict) else slot)
+            slot_id: _sanitize_visual_slot(slot)
             for slot_id, slot in slots.items()
         }
     for marker in ('stated', 'approved', 'approvedImageUrl'):
         cleaned.pop(marker, None)
+    return cleaned
+
+
+def _sanitize_visual_slot(slot):
+    """Strip one slot's approval markers — including the nested sketch mirror,
+    which carries the same generated-image approval keys one level down while
+    keeping the client's instruction text."""
+    if not isinstance(slot, dict):
+        return slot
+    cleaned = {key: val for key, val in slot.items()
+               if key not in VISUAL_SLOT_APPROVAL_KEYS}
+    sketch = cleaned.get('sketch')
+    if isinstance(sketch, dict):
+        cleaned['sketch'] = {key: val for key, val in sketch.items()
+                             if key not in VISUAL_SLOT_APPROVAL_KEYS}
     return cleaned
 
 

@@ -30,7 +30,7 @@
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '', sketch: emptyVisualConceptSketch() };
     }
 
     function visualConceptDefaultSlotLabel(slotId) {
@@ -383,7 +383,8 @@
           sourceFileId: String(slot.sourceFileId || ''),
           sourceFileName: String(slot.sourceFileName || ''),
           label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80),
-          caption: String(slot.caption || '').slice(0, 400)
+          caption: String(slot.caption || '').slice(0, 400),
+          sketch: normalizeVisualConceptSketch(slot.sketch)
         };
       });
       if (!stated.cover && tenantCreativeImages.cover) {
@@ -1712,4 +1713,5 @@
         const plans = visualConceptPlans();
         plansStatus.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
       }
+      updateVisualConceptSketchesHomeStatus();
     }

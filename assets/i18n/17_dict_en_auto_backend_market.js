@@ -79,6 +79,8 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "وصف التصور البصري مطلوب": "A visual-concept prompt is required",
   "اعتمد الصورة الرئيسية قبل توليد التصور البصري": "Approve the cover image before generating the visual concept",
   "تعذر توليد صورة التصور البصري": "Could not generate the visual-concept image",
+  "تعذر توليد السكتش": "Could not generate the sketch",
+  "لا توجد صورة أصلية صالحة لتوليد السكتش": "No valid source image to generate the sketch from",
   "أكمل الحقول الناقصة قبل تعديل التصور البصري": "Complete the missing fields before editing the visual concept",
   "اعتمد الصورة الرئيسية قبل تعديل التصور البصري": "Approve the cover image before editing the visual concept",
   "تعذر تعديل وصف التصور البصري": "Could not edit the visual-concept prompt",
