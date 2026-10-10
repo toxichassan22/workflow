@@ -118,7 +118,7 @@
             <div><label for="parkingAdditionalBasementArea">مساحة البدروم الإضافية المقترحة م²</label><input id="parkingAdditionalBasementArea" readonly></div>
           </div>
           <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>أساس احتساب المواقف</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
-          <div class="financial-parking-notes"><div><label for="parkingAreaBasis">أساس مساحة المواقف</label><textarea id="parkingAreaBasis" readonly rows="2"></textarea></div><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="3"></textarea></div></div>
+          <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
           <div class="financial-parking-actions"><button type="button" id="financialParkingApprove" class="btn primary" data-section-lock-ignore="1" onclick="approveFinancialParking()">اعتماد اقتراح المواقف</button><button type="button" id="financialParkingDiscard" class="btn ghost" data-section-lock-ignore="1" onclick="discardFinancialParking()">حذف اقتراح المواقف</button></div>
         </div>
       </section>`;
@@ -172,11 +172,9 @@
         const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
         return '<tr><td>' + escapeHtml(row.name || '') + '</td><td>' + escapeHtml(financialParkingText(basis)) + '</td><td>'
           + (row.quantity == null ? '—' : money(row.quantity)) + '</td><td>' + (row.spaces == null ? escapeHtml(financialParkingText('غير موثق')) : money(row.spaces))
-          + '</td><td><span class="financial-parking-reference">' + escapeHtml(row.sourceQuote || '') + '</span></td></tr>';
+          + '</td><td><span class="financial-parking-reference" title="' + escapeHtml(row.sourceQuote || '') + '">' + escapeHtml(financialParkingText(row.summary || row.sourceQuote || '')) + '</span></td></tr>';
       }).join('');
-      const areaBasis = document.getElementById('parkingAreaBasis');
-      if (areaBasis) areaBasis.value = financialParkingText(plan.areaBasis || '');
-      const noteLines = [...(plan.missing || []), ...(plan.warnings || [])].filter(Boolean).map(financialParkingText);
+      const noteLines = [plan.areaBasis, ...(plan.missing || []), ...(plan.warnings || [])].filter(Boolean).map(financialParkingText);
       const notes = document.getElementById('financialParkingNotes');
       if (notes) notes.value = noteLines.join('\n');
       const notesWrap = document.getElementById('financialParkingNotesWrap');

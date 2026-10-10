@@ -214,6 +214,23 @@ test('switching projects during the pre-save cannot target the newly opened draf
   assert.equal(f.context.requests.length, 0);
 });
 
+test('the requirements table shows the computed rate line and keeps the quote as a tooltip', () => {
+  const f = fixture();
+  const plan = f.proposal();
+  plan.requirements = [{ name: 'شقق سكنية', basis: 'units', quantity: 100, spaces: 100,
+    summary: 'الأكبر من: موقف لكل وحدة، أو موقف لكل 150 م² مبنية', sourceQuote: 'نص الاشتراط الكامل' }];
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const output = { innerHTML: '' };
+  const query = f.context.document.querySelector;
+  const byId = f.context.document.getElementById;
+  f.context.document.querySelector = selector => selector === '#parkingRequirementsTable tbody' ? output : query(selector);
+  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {} : byId(id);
+  f.context.renderFinancialParking();
+  assert(output.innerHTML.includes('الأكبر من: موقف لكل وحدة'));
+  assert(output.innerHTML.includes('title="نص الاشتراط الكامل"'));
+  assert(!output.innerHTML.includes('>نص الاشتراط الكامل<'));
+});
+
 test('rendered proposal data cannot inject markup', () => {
   const f = fixture();
   const plan = f.proposal();

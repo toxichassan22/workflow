@@ -250,9 +250,15 @@ def api_suggest_financial_parking():
     plan = financial_parking.build_parking_plan(project, parsed, _uuid.uuid4().hex)
     if old_plan:
         plan['previousBasementAreaTarget'] = old_plan.get('basementAreaTarget')
-    if parsed.get('missing'):
+    missing_notes = parsed.get('missing') or []
+    if not isinstance(missing_notes, list):
+        missing_notes = [missing_notes]
+    if missing_notes:
         plan['warnings'].append('توجد اشتراطات متعارضة أو بيانات إضافية غير موثقة.')
-        plan['canApply'] = False
+        for note in missing_notes:
+            text = str(note).strip()
+            if text and text not in plan['warnings']:
+                plan['warnings'].append(text)
     model['parkingPlan'] = plan
     model['parkingSnapshot'] = snapshot
     project.pop('parking_regulation_facts', None)

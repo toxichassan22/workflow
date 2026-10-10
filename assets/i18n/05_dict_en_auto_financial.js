@@ -519,7 +519,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الكمية المعتمدة": "Recorded quantity",
   "عدد المواقف المطلوبة": "Required parking spaces",
   "الاشتراط الموثق": "Documented requirement",
-  "أساس مساحة المواقف": "Parking area basis",
   "ملاحظات اقتراح المواقف": "Parking proposal notes",
   "اعتماد اقتراح المواقف": "Approve parking proposal",
   "إلغاء اعتماد اقتراح المواقف": "Unapprove parking proposal",

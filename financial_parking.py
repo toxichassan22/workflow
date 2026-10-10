@@ -181,6 +181,48 @@ def _rule_spaces(rule, component, snapshot, source_texts):
     return result
 
 
+def _unit_noun(quote, per):
+    forms = (('وحدة', 'وحدتين', 'وحدات'), ('شقة', 'شقتين', 'شقق'),
+             ('غرفة', 'غرفتين', 'غرف'), ('فيلا', 'فيلتين', 'فلل'),
+             ('مسكن', 'مسكنين', 'مساكن'))
+    mentions = re.findall(r'لكل\s+(\S+)', _quote_text(quote))
+    family = forms[0]
+    for candidate in forms:
+        if any(word in mentions for word in candidate):
+            family = candidate
+            break
+    return family[0 if per == 1 else 1 if per == 2 else 2]
+
+
+def _rate_text(item):
+    spaces, per = item['spacesPer'], item['per']
+    head = 'موقف' if spaces == 1 else 'موقفان' if spaces == 2 else f'{spaces:g} مواقف'
+    if item['basis'] == 'units':
+        unit = _unit_noun(item['sourceQuote'], per)
+        text = head + ' لكل ' + (unit if per <= 2 else f'{per:g} {unit}')
+    else:
+        unit = {'builtArea': 'م² مبنية', 'revenueArea': 'م² بيعية/تأجيرية',
+                'landArea': 'م² أرض'}[item['basis']]
+        text = f'{head} لكل {per:g} {unit}'
+    suffixes = []
+    if item['threshold']:
+        suffixes.append(f'بعد أول {item["threshold"]:g}')
+    if item['fixedSpaces']:
+        suffixes.append(f'+{item["fixedSpaces"]:g} ثابتة')
+    if item['visitorPercent']:
+        suffixes.append(f'+{item["visitorPercent"]:g}% زوار')
+    return text + ('؛ ' + '؛ '.join(suffixes) if suffixes else '')
+
+
+def _requirement_summary(items, summing):
+    parts = [_rate_text(item) for item in items]
+    if not parts:
+        return ''
+    if summing:
+        return ' + '.join(parts)
+    return parts[0] if len(parts) == 1 else 'الأكبر من: ' + '، أو '.join(parts)
+
+
 def _plan_allocations(snapshot, response, required, area_per_space, source_texts, plan_id):
     rows = snapshot['components']
     used = {location: 0 for location in PARKING_LOCATIONS}
@@ -299,7 +341,8 @@ def build_parking_plan(project, response, plan_id):
         requirements.append({'componentId': component['id'], 'name': component['name'],
                              'spaces': combined, 'quantity': first.get('quantity'),
                              'basis': first.get('basis'), 'rules': verified if combined is not None else [],
-                             'sourceQuote': '\n'.join(item['sourceQuote'] for item in computable)})
+                             'summary': _requirement_summary(computable, summing) if combined is not None else '',
+                             'sourceQuote': '\n'.join(dict.fromkeys(item['sourceQuote'] for item in computable))})
     if not demand:
         missing.append('مكونات المشروع التي تتطلب مواقف غير متوفرة.')
     documented_area = parking_number(response.get('grossAreaPerSpace'))

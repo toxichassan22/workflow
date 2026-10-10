@@ -162,6 +162,14 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertEqual(model['inputs']['basementArea'], 600)
         self.assertEqual(len(model['dynamicRows']['components']), 2)
 
+    def test_provider_conflict_notes_warn_the_approver_without_blocking(self):
+        self.rules['missing'] = ['تعارض موثق بين القيد الحالي والجدول في معدل الشقق.']
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        self.assertTrue(plan['canApply'])
+        self.assertIn('تعارض موثق بين القيد الحالي والجدول في معدل الشقق.', plan['warnings'])
+        self.assertEqual(self.approve(plan).status_code, 200)
+
     def test_provider_error_never_leaves_an_empty_or_approved_proposal(self):
         with patch.object(self.application, 'call_text_chat', side_effect=RuntimeError('provider failed')):
             response = self.client.post('/api/financial-study/parking/suggest', headers=self.headers,

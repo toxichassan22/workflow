@@ -182,6 +182,10 @@ class FinancialParkingTests(unittest.TestCase):
         self.assertEqual(plan['requirements'][0]['spaces'], 100)
         self.assertEqual(plan['requirements'][0]['basis'], 'units')
         self.assertEqual(plan['requiredSpaces'], 160)
+        self.assertEqual(plan['requirements'][0]['summary'],
+                         'الأكبر من: موقف لكل وحدة، أو موقف لكل 150 م² مبنية')
+        self.assertEqual(plan['requirements'][1]['summary'], 'موقف لكل 25 م² مبنية')
+        self.assertNotIn('\n', plan['requirements'][0]['sourceQuote'])
 
     def test_a_verified_alternative_missing_its_quantity_warns_not_blocks(self):
         self._apartments_clause('وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر')
@@ -190,6 +194,7 @@ class FinancialParkingTests(unittest.TestCase):
         self.assertTrue(plan['canApply'], plan)
         self.assertEqual(plan['requirements'][0]['spaces'], 100)
         self.assertEqual(plan['requirements'][0]['basis'], 'builtArea')
+        self.assertEqual(plan['requirements'][0]['summary'], 'موقف لكل 150 م² مبنية')
         self.assertTrue(any('البديل المتاح' in warning for warning in plan['warnings']))
 
     def test_an_unverifiable_alternative_still_blocks_the_component(self):
