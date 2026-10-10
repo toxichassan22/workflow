@@ -200,6 +200,8 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
     components = _visual_concept_components(source)
     context = {
         'project_name': _visual_concept_text(_visual_concept_read(source, 'project_name', 'projectName'), 160),
+        'project_idea': _visual_concept_plan_sanitize_text(
+            _visual_concept_text(_visual_concept_read(source, 'project_idea', 'projectIdea'), 4000)),
         'city': _visual_concept_text(_visual_concept_read(source, 'city'), 80),
         'district': _visual_concept_text(_visual_concept_read(source, 'district'), 100),
         'land_brief': _visual_concept_plan_sanitize_text(
@@ -221,6 +223,17 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
         'verification': verification if isinstance(verification, dict) else {},
         'colors': [{'use': use, 'color': color} for use, color in VISUAL_CONCEPT_PLAN_COLORS],
     }
+    return context
+
+
+def _visual_concept_plan_context_ensure_idea(context, project_data):
+    """Backfill the recorded project idea into a cached planContext — workflows
+    saved before the idea joined the context would still distribute the project
+    as one undifferentiated mass without it."""
+    if isinstance(context, dict) and not context.get('project_idea'):
+        context['project_idea'] = _visual_concept_plan_sanitize_text(
+            _visual_concept_text(
+                _visual_concept_read(project_data, 'project_idea', 'projectIdea'), 4000))
     return context
 
 
@@ -249,6 +262,7 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         'APPROVED PLAN CONTEXT — use only these recorded facts; do not invent or recalculate values.\n'
         f"Project: {context.get('project_name') or 'unnamed'}\n"
         f"Location: {location or 'not recorded'}\n"
+        f"Recorded project idea: {context.get('project_idea') or 'not recorded'}\n"
         f"Recorded land brief: {context.get('land_brief') or 'not recorded'}\n"
         f"Land area: {context.get('land_area') or 'not recorded'}\n"
         f"Secondary recorded area figure (not the design basis when it differs): {context.get('design_area') or 'not recorded'}\n"

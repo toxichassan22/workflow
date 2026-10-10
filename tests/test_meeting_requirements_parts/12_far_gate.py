@@ -55,3 +55,46 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         self.assertEqual(facts['approved_floor_area_ratio'], '6.5')
         missing_keys = {item['key'] for item in module._visual_concept_missing_fields(facts)}
         self.assertNotIn('approved_floor_area_ratio', missing_keys)
+
+    def test_plans_distribution_prompt_carries_project_idea(self):
+        """The recorded idea («3 مجمعات») is what tells the planner how many
+        buildings to spread the program across — it must reach the distribution
+        prompt even when the workflow hands back a planContext cached before the
+        idea joined it, and the system prompt must tell the model to honour the
+        recorded building count instead of collapsing into one mass."""
+        module = self.application_module
+        client = self.app.test_client()
+        points = [
+            {'point': 'P1', 'eastings': 1, 'northings': 1},
+            {'point': 'P2', 'eastings': 2, 'northings': 1},
+            {'point': 'P3', 'eastings': 2, 'northings': 2},
+        ]
+        idea = 'المشروع عبارة عن 3 مجمعات سكنية متوسطة الارتفاع'
+        project_data = {
+            'project_name': 'The View',
+            'project_idea': idea,
+            'project_components_data': [
+                {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800},
+            ],
+        }
+        cached_context = module._visual_concept_plan_context({'project_name': 'The View'}, [])
+        cached_context.pop('project_idea', None)
+        workflow = {'verification': {'approved': True},
+                    'boundary': {'approved': True, 'points': points},
+                    'planContext': cached_context}
+        captured = {}
+
+        def fake_chat(system_prompt, user_prompt, **kwargs):
+            captured['system'] = system_prompt
+            captured['user'] = user_prompt
+            return {'choices': [{'message': {'content': '{"rows": []}'}}]}
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+            response = client.post('/api/visual-concept/plans-distribution',
+                                   headers=self._headers(self.token_a),
+                                   json={'projectData': project_data,
+                                         'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn('3 مجمعات', captured['user'])
+        self.assertIn('مجمع', captured['system'])
+        self.assertEqual(response.get_json()['planContext']['project_idea'], idea)

@@ -1060,6 +1060,7 @@ def _visual_concept_request_bundle(data, slot_id):
         context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
         context = context or _visual_concept_plan_context(project_data, boundary_points, workflow.get('verification'))
         context['boundary_points'] = boundary_points or context.get('boundary_points') or []
+        _visual_concept_plan_context_ensure_idea(context, project_data)
         if is_plan:
             facts['plan_description'] = _visual_concept_text(
                 data.get('planDescription') or data.get('plan_description'), 2000)

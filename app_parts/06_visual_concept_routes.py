@@ -141,6 +141,7 @@ def _visual_concept_plans_context_from_request(data):
     context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
+    _visual_concept_plan_context_ensure_idea(context, project_data)
     return project_data, workflow, boundary, points, context
 
 
@@ -164,6 +165,10 @@ def api_visual_concept_plans_distribution():
         '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح. '
         'component هو اسم المكوّن كما ورد في بيانات المشروع حرفيًا — بالعربية دون ترجمة '
         'أو إعادة صياغة ودون اسم الدور — الدور موجود في floor_range. '
+        'عمود building هو المبنى أو المجمع الذي يقع فيه الصف: إذا نصّت فكرة المشروع '
+        'أو بياناته على عدد من المباني أو المجمعات فوزّع الصفوف على نفس العدد وسمّ كل '
+        'مبنى كما ورد في الفكرة (مجمع 1، مجمع 2…) ولا تدمج المشروع كله في كتلة واحدة، '
+        'وإذا سجّلت بيانات المشروع اسم مبنى على مكوّن فالتزم به. '
         'التزم بسقوف الارتفاع ونسبة التغطية والارتدادات الموثقة، ووزّع الوحدات بحيث يطابق إجماليها '
         'الوحدات والمساحات المطلوبة في بيانات المشروع، وراعِ العلاقات بين الاستخدامات (فصل مداخل '
         'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
