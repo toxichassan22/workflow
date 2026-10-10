@@ -40,11 +40,14 @@ def api_visual_concept_sketch():
     project_name = _visual_concept_text(
         _visual_concept_read(project_data, 'project_name', 'projectName'), 200) or 'the project'
     prompt = (
-        f'Redraw the attached image of {project_name} as a clean architectural hand sketch. '
-        'Confident black ink outlines with light pencil hatching on white paper, monochrome, '
-        'preserving the exact composition, viewpoint, proportions and geometry of the source '
-        'image. Keep every visible architectural element and simplify photographic textures '
-        'into line work. No text, no logos, no watermarks, no color washes, no people.'
+        f'Re-draw the attached image of {project_name} as a hand-drawn architectural '
+        'design-studio sketch: loose confident pen-and-pencil line work on warm '
+        'cream-toned paper, visible freehand strokes, quick cross-hatching for shadows '
+        'and materials, landscape and entourage in expressive sketch strokes. Preserve '
+        'the exact composition, viewpoint, proportions and geometry of the source image '
+        '— the same camera angle and framing with every visible architectural element. '
+        'Monochrome sketch on toned paper; no photorealistic rendering, no color washes, '
+        'no text, no logos, no watermarks, no people.'
         + (f' Client note to apply: {instruction}' if instruction else '')
     )
     image = call_images_api(prompt, [source_ref], model=VISUAL_CONCEPT_IMAGE_MODEL,
