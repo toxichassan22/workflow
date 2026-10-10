@@ -49,7 +49,9 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- الإحداثيات وجدول الاتجاهات كما سُجلّا.\n'
     '- تحليل مستندات الأرض: القيم المستخرجة من الكروكي والرخصة والاشتراطات (نسب البناء والتغطية، معاملات FAR والأدوار الموثقة لكل شريحة) مع التعارضات المسجلة.\n'
     '- الحقائق التنظيمية الموثقة: قواعد المنطقة الرسمية إن وُجدت ونقاط المراجعة.\n'
+    '- السجل الكامل للمنطقة التنظيمية الموثقة: كل شرائح المساحات ومعاملاتها واستثناءاتها وقيودها لمنطقة القطعة إن طُبقت.\n'
     '- القواعد العامة الموثقة لاشتراطات المدينة: الجداول والقواعد المشتركة (المواقف، الارتدادات، الارتفاعات، الملاحق…) إن توفرت للمدينة.\n'
+    '- نصوص الصفحات المطابقة من ملفات الاشتراطات الرسمية للمدينة: مصدر القواعد الكامل مختارًا بحسب سؤال المستخدم.\n'
     '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، التغطية المعتمدة، معامل البناء المعتمد).\n'
     'قواعد إلزامية:\n'
     '- أجب بلغة سؤال المستخدم نفسها بوضوح وبإيجاز — العربية إن كتب بالعربية، والإنجليزية إن كتب بها.\n'
@@ -58,13 +60,50 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '(مثل «البيانات المتاحة لا تذكر عدد الأدوار المسموح لمعامل التميّز») بدل تخمينها — ممنوع التضليل أو الافتراض.\n'
     '- فرّق دائمًا بين القيمة الموثقة في المستندات والقيمة المعتمدة التي أدخلها العميل، وسمِّ كلًا منهما عند ذكره.\n'
     '- فسّر واشرح أي اشتراط أو قيمة أو مصطلح غير واضح في البيانات عندما يطلب المستخدم، واربط الاشتراط بشريحة مساحة الأرض أو نوع المشروع عند الحاجة.\n'
+    '- عند الإجابة من نصوص ملفات الاشتراطات اذكر اسم الملف ورقم الصفحة المرفقين بكل نص.\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
     '- لا تقترح تعديلات ولا تنفذ إجراءات على البيانات — الإجابة معلوماتية فقط.'
 )
 
 
-def _land_chat_context(project_data):
+def _land_chat_regulation_evidence(message, source):
+    """Top-scored page snippets from the municipal اشتراطات PDFs themselves.
+
+    The digest covers the zone's recorded numbers; the files answer everything
+    else — premium-FAR tiers, exceptions and conditional rules the digest never
+    recorded. Runs only for the verified local city so Jeddah's files never
+    bleed into another municipality's answers."""
+    try:
+        analysis = source.get('land_documents_analysis')
+        if isinstance(analysis, str):
+            analysis = _visual_concept_parse_json(analysis, {})
+        analysis = analysis if isinstance(analysis, dict) else {}
+        parcels = analysis.get('parcels') if isinstance(analysis.get('parcels'), list) else []
+        parcel = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+        facts_input = _visual_concept_plan_site_facts(source, analysis, parcel)
+        site_city_slug, _site_city_label = city_regulations.resolve_site_city(
+            facts_input.get('city'))
+        if not city_regulations.is_local_city(site_city_slug):
+            return ''
+        records = _build_regulation_page_index()
+    except Exception:
+        return ''
+    if not records:
+        return ''
+    query_tokens = _regulation_search_tokens(message, facts_input)
+    scored = sorted(
+        ({**record, 'score': _score_regulation_page(record['text'], query_tokens)}
+         for record in records),
+        key=lambda record: (-record['score'], record['page']))
+    top = [record for record in scored if record['score'] > 0][:REGULATION_MAX_SNIPPETS]
+    return '\n\n'.join(
+        f"--- {record['name']} — صفحة {record['page']} ---\n"
+        f"{(record['text'] or '')[:REGULATION_SNIPPET_CHARS]}"
+        for record in top)
+
+
+def _land_chat_context(project_data, message=''):
     """Everything the land chat may answer from, grouped for the prompt."""
     source = project_data if isinstance(project_data, dict) else {}
     context = {}
@@ -127,9 +166,17 @@ def _land_chat_context(project_data):
         facts.pop('survey_coordinate_count', None)
         context['الحقائق التنظيمية الموثقة'] = facts
         if facts.get('regulatory_zone'):
-            # The digest matched a verified zone, so the shared city rules apply
-            # to this parcel too — without them the chat can quote a value but
-            # never explain the regulation behind it.
+            # The digest matched a verified zone — feed the whole zone record,
+            # not only the matched row, so the other bands and exceptions
+            # (premium FAR tiers, road rules…) stay answerable.
+            try:
+                zone_record = regulation_digest.zone_rules(facts.get('regulatory_zone'))
+            except Exception:
+                zone_record = None
+            if isinstance(zone_record, dict) and zone_record:
+                context['السجل الكامل للمنطقة التنظيمية الموثقة'] = zone_record
+            # The shared city rules apply to this parcel too — without them the
+            # chat can quote a value but never explain the regulation behind it.
             try:
                 general = regulation_digest.general_rules()
             except Exception:
@@ -137,6 +184,9 @@ def _land_chat_context(project_data):
             if isinstance(general, dict) and general:
                 context['القواعد العامة الموثقة لاشتراطات المدينة'] = {
                     key: value for key, value in general.items() if key != '_doc'}
+    evidence = _land_chat_regulation_evidence(message, source)
+    if evidence:
+        context['نصوص الصفحات المطابقة من ملفات الاشتراطات'] = evidence
     return context
 
 
@@ -164,7 +214,7 @@ def api_land_chat():
         return jsonify({'success': False, 'error': 'اكتب السؤال أولاً',
                         'error_code': 'MESSAGE_REQUIRED'}), 400
     project_data = clean_project_data(data.get('projectData') or {})
-    context_json = json.dumps(_land_chat_context(project_data), ensure_ascii=False, default=str)[:40000]
+    context_json = json.dumps(_land_chat_context(project_data, message), ensure_ascii=False, default=str)[:60000]
     prior = ''
     history = _land_chat_history(data.get('history'))
     if history:

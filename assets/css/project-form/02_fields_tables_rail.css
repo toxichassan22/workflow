@@ -962,8 +962,8 @@
       border: 0;
       border-radius: 50%;
       padding: 0;
-      background: var(--teal-bright, #17c8e3);
-      color: var(--p, #07182c);
+      background: var(--p, #07182c);
+      color: var(--teal-bright, #17c8e3);
       font: inherit;
       font-size: 15px;
       font-weight: 900;
@@ -979,8 +979,7 @@
     }
 
     .land-chat-fab.open {
-      background: var(--teal-dark, #0a829b);
-      color: #fff;
+      box-shadow: 0 0 0 3px var(--teal-bright, #17c8e3), 0 8px 24px rgba(7, 24, 44, .28);
     }
 
     .land-chat-panel {
@@ -1030,10 +1029,11 @@
       background: none;
       color: #64748b;
       font: inherit;
-      font-size: 12px;
-      font-weight: 700;
+      font-size: 17px;
+      font-weight: 900;
+      line-height: 1;
       cursor: pointer;
-      padding: 4px 8px;
+      padding: 5px 10px;
       border-radius: 8px;
     }
 

@@ -24,7 +24,8 @@
     }
 
     function landChatDefaultFabPosition() {
-      const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+      const host = document.body || document.documentElement;
+      const rtl = getComputedStyle(host).direction === 'rtl';
       return landChatClampFabPosition(
         rtl ? 18 : window.innerWidth - 18 - LAND_CHAT_FAB_SIZE,
         window.innerHeight - 18 - LAND_CHAT_FAB_SIZE);
@@ -44,11 +45,14 @@
       const fab = document.getElementById('landChatFab');
       if (!fab) return;
       const clamped = landChatClampFabPosition(pos.left, pos.top);
-      fab.style.left = clamped.left + 'px';
-      fab.style.top = clamped.top + 'px';
+      // inset-inline-end must be cleared BEFORE left/top: in RTL it maps to the
+      // physical left edge, and the last declaration wins the edge — so setting
+      // it after style.left silently discards the position.
+      fab.style.insetInlineEnd = 'auto';
       fab.style.right = 'auto';
       fab.style.bottom = 'auto';
-      fab.style.insetInlineEnd = 'auto';
+      fab.style.left = clamped.left + 'px';
+      fab.style.top = clamped.top + 'px';
       if (persist) {
         try { localStorage.setItem(LAND_CHAT_POS_KEY, JSON.stringify(clamped)); } catch (error) {}
       }
@@ -68,11 +72,11 @@
       if (top < 12) top = rect.bottom + gap;
       top = Math.max(12, Math.min(top, window.innerHeight - height - 12));
       const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12));
-      panel.style.left = left + 'px';
-      panel.style.top = top + 'px';
+      panel.style.insetInlineEnd = 'auto';
       panel.style.right = 'auto';
       panel.style.bottom = 'auto';
-      panel.style.insetInlineEnd = 'auto';
+      panel.style.left = left + 'px';
+      panel.style.top = top + 'px';
     }
 
     function landChatBindFabDrag(fab) {
@@ -140,8 +144,8 @@
         '<div class="land-chat-header">' +
         '<div class="land-chat-title">شات الأرض والكروكي</div>' +
         '<div class="land-chat-actions">' +
-        '<button type="button" class="land-chat-action" id="landChatMinimize" onclick="toggleLandChat(false)">إخفاء</button>' +
-        '<button type="button" class="land-chat-action" id="landChatEnd" onclick="showLandChatEndConfirm()">إنهاء</button>' +
+        '<button type="button" class="land-chat-action" id="landChatMinimize" title="إخفاء" aria-label="إخفاء" onclick="toggleLandChat(false)">&gt;&lt;</button>' +
+        '<button type="button" class="land-chat-action" id="landChatEnd" title="إنهاء" aria-label="إنهاء" onclick="showLandChatEndConfirm()">×</button>' +
         '</div></div>' +
         '<div class="land-chat-messages" id="landChatMessages"></div>' +
         '<div class="land-chat-input-row">' +

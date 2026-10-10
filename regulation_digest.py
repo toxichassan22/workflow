@@ -41,6 +41,16 @@ def general_rules():
     return _load('general.json')
 
 
+def zone_rules(zone_key):
+    """The full verified record of one zone: every area band, road exception
+    and general constraint. ``build_regulation_digest`` returns only the row
+    the parcel falls into; the chat needs the whole table to explain the
+    other bands."""
+    if not zone_key:
+        return {}
+    return _load('zones.json')['zones'].get(zone_key) or {}
+
+
 def _num(value):
     if value is None:
         return None
