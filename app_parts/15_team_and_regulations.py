@@ -404,6 +404,7 @@ def normalize_croquis_fields(resp_json, text_content=""):
     resp_json.pop('approved_floor_count', None)
     resp_json.pop('approved_floors', None)
     resp_json.pop('approved_coverage_ratio', None)
+    resp_json.pop('approved_floor_area_ratio', None)
 
     # 4. Facades count normalization & fallback (Pure Number: 1, 2, 3, 4)
     raw_facades = resp_json.get('facades_count', '')

@@ -583,6 +583,7 @@
       delete fields.approved_floor_count;
       delete fields.approved_floors;
       delete fields.approved_coverage_ratio;
+      delete fields.approved_floor_area_ratio;
       delete fields.land_use_status;
       return fields;
     }

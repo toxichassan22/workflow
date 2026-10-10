@@ -174,6 +174,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "يتم جلب بيانات الموقع والطرق والمعالم فقط...": "Fetching location, arterial roads and landmarks data...",
   "يتم حساب المسافة ومدة القيادة من Google Maps...": "Calculating distance and drive time from Google Maps...",
   "يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.": "Please enter the approved total built-up area for the financial study.",
+  "يرجى إدخال معامل البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.": "Please enter the approved building coefficient for the project according to zoning regulations.",
   "يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.": "Please enter the approved number of floors according to zoning regulations.",
   "يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.": "Please enter the approved building coverage ratio according to zoning regulations.",
   "يرجى رفع الكروكي والرخصة وأي مستندات مساندة داخل الخانة أولًا": "Please upload the croquis, permit, and any supporting documents in the box first",

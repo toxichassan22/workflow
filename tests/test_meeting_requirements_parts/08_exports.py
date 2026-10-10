@@ -824,6 +824,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             'approved_financial_area': 8500,
             'approved_floor_count': 12,
             'approved_coverage_ratio': 60,
+            'approved_floor_area_ratio': 6,
             'facades_count': 2,
             'facades_directions': 'شرق وغرب',
             'allowed_uses': 'تجاري مكتبي',

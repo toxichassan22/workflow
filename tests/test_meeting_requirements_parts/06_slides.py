@@ -1505,7 +1505,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
 
     def test_client_entered_land_fields_are_highlighted(self):
         index_source = read_frontend_text()
-        self.assertIn("TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'])", index_source)
+        self.assertIn("TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio', 'approved_floor_area_ratio'])", index_source)
         self.assertIn('tenant-client-required-field', index_source)
         self.assertIn('tenant-client-complete-field', index_source)
         self.assertIn('tenant-client-required-badge', index_source)

@@ -316,7 +316,7 @@
           return;
         }
         inputs.forEach(inp => {
-          if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'].includes(inp.dataset.key)) {
+          if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio', 'approved_floor_area_ratio'].includes(inp.dataset.key)) {
             inp.disabled = true;
           }
         });
@@ -364,7 +364,7 @@
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
-          const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors', 'approved_coverage_ratio']);
+          const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors', 'approved_coverage_ratio', 'approved_floor_area_ratio']);
           const safeFilledFields = Object.fromEntries(Object.entries(filledFields).filter(([key]) => !clientOnlyFields.has(key)));
           if (Array.isArray(data.warnings) && data.warnings.length) {
             toast(WFT('land.landmarks_partial', 'اكتمل التحليل، لكن تعذر جلب بعض المعالم: {warnings}', { warnings: data.warnings.map(w => wfTr(w)).join(' | ') }));

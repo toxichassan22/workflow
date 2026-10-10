@@ -209,6 +209,7 @@
         maxFloorsHeight: field('max_floors_height'),
         approvedFloorCount: field('approved_floor_count'),
         approvedCoverageRatio: field('approved_coverage_ratio'),
+        approvedFloorAreaRatio: field('approved_floor_area_ratio'),
         allowedUses: field('allowed_uses'),
         landUseStatus: tenantProjectData.land_use_status || '',
         regulatoryConstraints: field('regulatory_constraints'),

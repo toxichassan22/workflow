@@ -221,6 +221,7 @@ VISUAL_CONCEPT_REQUIRED_FIELDS = (
     ('approved_financial_area', 'المساحة المعتمدة للدراسة المالية'),
     ('approved_floor_count', 'عدد الأدوار المعتمدة'),
     ('approved_coverage_ratio', 'نسبة التغطية المعتمدة'),
+    ('approved_floor_area_ratio', 'معامل البناء المعتمد'),
     ('facades', 'عدد الواجهات على الشارع واتجاهاتها'),
     ('allowed_uses', 'الاستخدامات المسموحة'),
     ('directions_table', 'جدول الاتجاهات'),
@@ -508,6 +509,7 @@ def _visual_concept_facts(project_data):
         'approved_financial_area': _visual_concept_text(_visual_concept_read(source, 'approved_financial_area'), 80),
         'approved_floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count'), 40),
         'approved_coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio'), 40),
+        'approved_floor_area_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_floor_area_ratio'), 40),
         'facades_count': facades_count,
         'facades_directions': facades_directions,
         'allowed_uses': _visual_concept_text(_visual_concept_read(source, 'allowed_uses'), 4000),
@@ -544,6 +546,8 @@ def _visual_concept_missing_fields(facts, slot_id='cover'):
         missing.append({'key': 'approved_floor_count', 'label': 'عدد الأدوار المعتمدة'})
     if _visual_concept_number(facts.get('approved_coverage_ratio')) in (None, 0):
         missing.append({'key': 'approved_coverage_ratio', 'label': 'نسبة التغطية المعتمدة'})
+    if _visual_concept_number(facts.get('approved_floor_area_ratio')) in (None, 0):
+        missing.append({'key': 'approved_floor_area_ratio', 'label': 'معامل البناء المعتمد'})
     if not facts.get('facades_count') or not facts.get('facades_directions'):
         missing.append({'key': 'facades', 'label': 'عدد الواجهات على الشارع واتجاهاتها'})
     if not facts.get('allowed_uses'):
@@ -721,6 +725,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"المساحة المعتمدة للدراسة المالية: {facts.get('approved_financial_area')}\n"
         f"عدد الأدوار المعتمدة: {facts.get('approved_floor_count')}\n"
         f"نسبة التغطية المعتمدة: {facts.get('approved_coverage_ratio')}\n"
+        f"معامل البناء المعتمد (FAR): {facts.get('approved_floor_area_ratio')}\n"
         f"عدد الواجهات على الشارع: {facts.get('facades_count')}\n"
         f"اتجاهات الواجهات: {facts.get('facades_directions')}\n"
         f"الاستخدامات المسموحة: {facts.get('allowed_uses')}\n"

@@ -934,6 +934,7 @@
         allowedUses: tenantProjectData.allowed_uses || '',
         approvedFloorCount: tenantProjectData.approved_floor_count || financial.floorCount || '',
         approvedCoverageRatio: tenantProjectData.approved_coverage_ratio || financial.coverageRate || '',
+        approvedFloorAreaRatio: tenantProjectData.approved_floor_area_ratio || '',
         setbacks: tenantProjectData.setbacks || '',
         mainRoads: tenantProjectData.main_roads || '',
         nearbyLandmarks,

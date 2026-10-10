@@ -791,7 +791,7 @@ def _extract_land_specs_data(project_data):
     if bldg_ratio and not bldg_ratio.endswith('%') and bldg_ratio.isdigit():
         bldg_ratio += '%'
 
-    far = _val('far', 'nsba_albna__far', 'floor_area_ratio')
+    far = _val('approved_floor_area_ratio', 'far', 'nsba_albna__far', 'floor_area_ratio')
     setbacks = _val('setbacks', 'building_setbacks', fallback='حسب كود البناء والاشتراطات البلدية')
     max_floors = _val('max_floors_height', 'max_floors', 'max_height', 'floors_allowed')
     allowed_uses = _val('allowed_uses', 'permitted_uses', 'zoning', 'land_use', fallback='تجاري / سكني استثماري')

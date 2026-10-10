@@ -207,8 +207,10 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
         'land_area': _visual_concept_text(_visual_concept_read(source, 'croquis_land_area', 'land_area', 'total_area_sqm'), 80),
         'design_area': _visual_concept_text(_visual_concept_read(source, 'approved_financial_area', 'land_area', 'total_area_sqm'), 80),
         'coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio', 'coverage_ratio'), 120),
+        'floor_area_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_floor_area_ratio', 'floor_area_ratio'), 40),
         'open_area': _visual_concept_text(_visual_concept_read(source, 'open_area', 'open_spaces', 'open_space_area'), 120),
         'floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count', 'max_floors_height', 'table_floors'), 120),
+        'approved_floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count'), 40),
         'north_direction': _visual_concept_text(_visual_concept_read(source, 'north_direction'), 80),
         'directions': directions,
         'surrounding_streets': _visual_concept_text(_visual_concept_read(source, 'surrounding_streets'), 1800),
@@ -251,6 +253,7 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         f"Land area: {context.get('land_area') or 'not recorded'}\n"
         f"Secondary recorded area figure (not the design basis when it differs): {context.get('design_area') or 'not recorded'}\n"
         f"Coverage ratio: {context.get('coverage_ratio') or 'not recorded'}\n"
+        f"Approved building coefficient (FAR): {context.get('floor_area_ratio') or 'not recorded'}\n"
         f"Open area: {context.get('open_area') or 'not recorded'}\n"
         f"Approved floor count/height: {context.get('floor_count') or 'not recorded'}\n"
         f"North direction: {context.get('north_direction') or 'not recorded'}\n"
@@ -1192,6 +1195,7 @@ def _visual_concept_plan_fallback_verification(context):
         ('مساحة الأرض', context.get('land_area'), regulations.get('croquis_land_area')),
         ('نسبة التغطية', context.get('coverage_ratio'), regulations.get('coverage_ratio') or regulations.get('building_ratio_coverage')),
         ('عدد الأدوار', context.get('floor_count'), regulations.get('table_floors') or regulations.get('max_floors_height')),
+        ('معامل البناء', context.get('floor_area_ratio'), regulations.get('floor_area_ratio')),
         ('الارتدادات', context.get('setbacks'), regulations.get('setbacks') or regulations.get('building_ratio_setbacks')),
         ('الإحداثيات', len(context.get('boundary_points') or []), regulations.get('survey_coordinate_count') or 0),
         ('مكونات المشروع', len(context.get('components') or []), len(context.get('components') or [])),
@@ -1500,7 +1504,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                         'result': 'متعارض', 'severity': 'high',
                         'row_ids': [row_a.get('id'), row_b.get('id')]})
 
-    cap = _visual_concept_plan_regulation_floor_cap(regulations)
+    cap = _visual_concept_number(context.get('approved_floor_count')) or _visual_concept_plan_regulation_floor_cap(regulations)
     if cap:
         for row, parsed in parsed_rows:
             if parsed and parsed['kind'] == 'range' and parsed['hi'] > cap:
@@ -1521,7 +1525,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     'item': 'مساحة الدور تتجاوز حد التغطية',
                     'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
                     'result': 'يحتاج تأكيد', 'severity': 'medium', 'row_ids': [row.get('id')]})
-    far = _visual_concept_number(regulations.get('floor_area_ratio'))
+    far = _visual_concept_number(context.get('floor_area_ratio')) or _visual_concept_number(regulations.get('floor_area_ratio'))
     if not far:
         far_match = re.search(r'معامل[^\d]{0,15}(\d+(?:[.,]\d+)?)',
                               str(regulations.get('zone_rules') or '') + ' ' +
