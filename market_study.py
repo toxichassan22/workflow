@@ -237,7 +237,7 @@ COMPONENT_USE_AXES = {
 }
 
 # Component uses that never need their own competitors (support facilities).
-COMPONENT_NON_COMPETING_USES = ('parking', 'services', 'openarea')
+COMPONENT_NON_COMPETING_USES = ('parking', 'services', 'openarea', 'basement')
 
 # Mixed-use subtype labels and project main types mapped onto axis keys — the
 # fallback sources when the components table is empty.

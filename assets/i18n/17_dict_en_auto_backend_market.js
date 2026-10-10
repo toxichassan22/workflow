@@ -89,7 +89,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "قيمة الأتعاب الإضافية مطلوبة": "The additional fees value is required",
   "جدول خصومات فترة السماح مطلوب": "The grace-period discount schedule is required",
   "أضف بندًا خارجيًا واحدًا على الأقل": "Add at least one external line item",
-  "مجموع مساحات مكونات المشروع يتجاوز مسطحات البناء فوق الأرض": "Total component areas exceed above-ground buildable area",
+  "مجموع مساحات مكونات المشروع يتجاوز مسطحات البناء فوق الأرض أو مساحة البدرومات أو المساحات المفتوحة للأرض": "Total component areas exceed above-ground buildable area, basement area, or the land's open area",
   "لا يمكن تصدير الدراسة قبل استكمال المدخلات المطلوبة": "The study cannot be exported before the required inputs are completed",
   "تعذر إنشاء ملف الدراسة المالية:": "Could not create the financial-study file:"
 }/*I18N_EN_AUTO_END*/);

@@ -131,7 +131,7 @@
       const optionsHtml = '<option value="">غير مرتبط بمكون</option>' + components.map(c => {
         const fallbackMatch = String(c.name || '').match(/^مكون (\d+)$/);
         const displayName = fallbackMatch ? (trDynamicI18n('مكون') + ' ' + fallbackMatch[1]) : c.name;
-        return `<option value="${c.id}">${displayName} — ${trDynamicI18n(c.useType === 'openArea' ? 'مساحة مفتوحة' : 'مبني')} ${money(c.builtArea)} ${trDynamicI18n('م²')} | ${trDynamicI18n('بيعي/تأجيري')} ${money(c.revenueArea)} ${trDynamicI18n('م²')} | ${money(c.units)} ${trDynamicI18n('وحدة')}</option>`;
+        return `<option value="${c.id}">${displayName} — ${trDynamicI18n(c.useType === 'openArea' ? 'مساحة مفتوحة' : c.useType === 'basement' ? 'بدروم' : 'مبني')} ${money(c.builtArea)} ${trDynamicI18n('م²')} | ${trDynamicI18n('بيعي/تأجيري')} ${money(c.revenueArea)} ${trDynamicI18n('م²')} | ${money(c.units)} ${trDynamicI18n('وحدة')}</option>`;
       }).join('');
       document.querySelectorAll('#revenueTable tbody tr').forEach(tr => {
         const sel = tr.querySelector('[data-field="component"] select'); if (!sel) return;
@@ -302,17 +302,20 @@
     function validateComponentAreas() {
       const limit = Math.max(0, num('builtUpAreaAbove'));
       // A «مساحة مفتوحة» component occupies land, not floor space: its area settles against
-      // the open-area budget (الأرض − المغطاة) instead of the above-ground BUA pool.
-      const openLimit = Math.max(0, num('openArea'));
-      let used = 0, openUsed = 0;
+      // the open-area budget (الأرض − المغطاة) instead of the above-ground BUA pool. A
+      // «بدروم» component settles against the basement BUA input (مساحة البدرومات).
+      const openLimit = Math.max(0, num('openArea')), basementLimit = Math.max(0, num('basementArea'));
+      let used = 0, openUsed = 0, basementUsed = 0;
       document.querySelectorAll('#componentsTable tbody tr').forEach(tr => {
         const area = Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value));
-        if (tr.querySelector('[data-field="useType"] select')?.value === 'openArea') openUsed += area; else used += area;
+        const rowType = tr.querySelector('[data-field="useType"] select')?.value;
+        if (rowType === 'openArea') openUsed += area; else if (rowType === 'basement') basementUsed += area; else used += area;
       });
-      const remaining = limit - used, openRemaining = openLimit - openUsed;
-      const builtExceeded = used > limit + .01, openExceeded = openUsed > openLimit + .01;
-      const valid = !builtExceeded && !openExceeded;
+      const remaining = limit - used, openRemaining = openLimit - openUsed, basementRemaining = basementLimit - basementUsed;
+      const builtExceeded = used > limit + .01, openExceeded = openUsed > openLimit + .01, basementExceeded = basementUsed > basementLimit + .01;
+      const valid = !builtExceeded && !openExceeded && !basementExceeded;
       const openLine = openUsed > 0 || openExceeded ? `<br><span>المساحات المفتوحة:</span> <span>تم تخصيص</span> <b>${money(openUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(openLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(openRemaining)}</b> <span>م²</span>.` : '';
+      const basementLine = basementUsed > 0 || basementExceeded ? `<br><span>البدرومات:</span> <span>تم تخصيص</span> <b>${money(basementUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(basementLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(basementRemaining)}</b> <span>م²</span>.` : '';
       const panel = document.getElementById('componentAreaValidation');
       if (panel) {
         panel.classList.toggle('error', !valid);
@@ -322,12 +325,15 @@
         const openError = openExceeded
           ? `<br><span>خطأ:</span> <span>مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض بمقدار</span> <b>${money(-openRemaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>`
           : '';
-        panel.innerHTML = builtLine + (openExceeded ? openError : openLine);
+        const basementError = basementExceeded
+          ? `<br><span>خطأ:</span> <span>مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات بمقدار</span> <b>${money(-basementRemaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>`
+          : '';
+        panel.innerHTML = builtLine + (basementExceeded ? basementError : basementLine) + (openExceeded ? openError : openLine);
       }
       // The .area-invalid rule already exists in the stylesheet; without this toggle the block
       // never got its red border, so the only cue was the text panel.
       document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid', !valid);
-      return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, builtExceeded, openExceeded };
+      return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, basementUsed, basementLimit, basementRemaining, builtExceeded, openExceeded, basementExceeded };
     }
     function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => !isSaleRevenueRow(tr)); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
     document.addEventListener('wf:lang', () => {
@@ -461,11 +467,11 @@
         const builtArea = parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea = parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
         const model = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
-        const openRow = tr.querySelector('[data-field="useType"] select')?.value === 'openArea';
+        const openRow = tr.querySelector('[data-field="useType"] select')?.value === 'openArea', basementRow = tr.querySelector('[data-field="useType"] select')?.value === 'basement';
         if (model === 'sale') componentSaleArea += revenueArea;
         if (['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(model)) leasable += revenueArea;
-        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT(openRow ? 'fin.comp_result_open' : 'fin.comp_result', openRow ? '{model} | مفتوحة {area} م²' : '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
-        const builtHelp = tr.querySelector('[data-field="builtArea"] .miniHelp'); if (builtHelp) builtHelp.textContent = openRow ? 'تخصم من المساحة المفتوحة' : '';
+        const cell = tr.querySelector('.compResult'); if (cell) cell.textContent = WFT(openRow ? 'fin.comp_result_open' : basementRow ? 'fin.comp_result_basement' : 'fin.comp_result', openRow ? '{model} | مفتوحة {area} م²' : basementRow ? '{model} | بدروم {area} م²' : '{model} | مبني {area} م²', { model: wfTr({ sale: 'وحدات بيعية', dailyRent: 'إيجار يومي', monthlyRent: 'إيجار شهري', annualRent: 'إيجار سنوي', operating: 'تأجير آخر', nonRevenue: 'بدون إيراد' }[model]), area: money(builtArea) });
+        const builtHelp = tr.querySelector('[data-field="builtArea"] .miniHelp'); if (builtHelp) builtHelp.textContent = openRow ? 'تخصم من المساحة المفتوحة' : basementRow ? 'تخصم من مساحة البدرومات' : '';
       });
 
       let operatingRevenueBase = 0, saleRevenueTotal = 0, saleAreaTotal = 0;
@@ -741,6 +747,7 @@
       if (!areaState.valid && warningBox) {
         if (areaState.builtExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.');
         if (areaState.openExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض.');
+        if (areaState.basementExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات.');
         renderAnalysisWarnings();
       }
 

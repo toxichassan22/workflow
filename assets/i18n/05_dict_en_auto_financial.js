@@ -497,6 +497,11 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "خارج فترة IRR المختارة.": "outside the selected IRR period.",
   "خارج فترة ROI، ولذلك لا يدخل في ROI.": "outside the ROI period, so it is not included in the ROI.",
   "خطأ:": "Error:",
+  "البدرومات:": "Basements:",
+  "تخصم من مساحة البدرومات": "Deducted from the basement area",
+  "مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات بمقدار": "Total basement component areas exceed the basement area by",
+  "تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات.": "Approval and print locked: total basement component areas exceed the basement area.",
+  "لا يمكن الطباعة: مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات": "Cannot print: total basement component areas exceed the basement area",
   "0 ر.س": "0 SAR",
   "0 م²": "0 m²"
 }/*I18N_EN_AUTO_END*/);

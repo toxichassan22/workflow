@@ -1051,6 +1051,7 @@ USE_TYPE_LABELS = {
     'industrial': 'صناعي',
     'logistics': 'لوجستي / مستودعات',
     'openArea': 'مساحة مفتوحة',
+    'basement': 'بدروم',
     'other': 'أخرى',
 }
 
