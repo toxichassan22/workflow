@@ -576,7 +576,7 @@
       if (!planResponse?.success || !planResponse.plan) {
         // The gate already escrowed its hold — release it like the full-file
         // run does, or the points stay reserved and the draft stays locked.
-        await settleGenerationRun(false, 'تعذر إعداد خطة القسم');
+        await settleGenerationRun(false, planResponse?.error || 'تعذر إعداد خطة القسم');
         toast(planResponse?.error || 'تعذر إعداد عرض القسم');
         return;
       }
@@ -873,7 +873,7 @@
         } else {
           // The gate already escrowed the hold: a dead plan releases it and
           // returns the draft from 'generating' instead of stranding both.
-          await settleGenerationRun(false, 'تعذر إعداد خطة الشرائح');
+          await settleGenerationRun(false, planResponse.error || 'تعذر إعداد خطة الشرائح');
           const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
           console.error('[SLIDE PLAN]', planResponse);
           toast(errorMessage);

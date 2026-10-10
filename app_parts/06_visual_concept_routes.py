@@ -487,6 +487,9 @@ def api_visual_concept_prompt():
         })
     except Exception as exc:
         app.logger.exception('Visual concept prompt failed')
+        fatal = _ai_fatal_http_response(exc)
+        if fatal is not None:
+            return fatal
         return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري',
                         'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
@@ -530,6 +533,9 @@ def api_visual_concept_generate():
     image = call_images_api(prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
     if not image:
+        fatal = _ai_fatal_http_response(last_images_api_error())
+        if fatal is not None:
+            return fatal
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد صورة التصور البصري', 'error_code': 'IMAGE_FAILED'}), 503
@@ -596,6 +602,9 @@ def api_visual_concept_chat():
         })
     except Exception as exc:
         app.logger.exception('Visual concept chat failed')
+        fatal = _ai_fatal_http_response(exc)
+        if fatal is not None:
+            return fatal
         return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
                         'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
@@ -632,6 +641,7 @@ def api_designer_generate():
         designer_slide_ctx = _usage_ctx('slide', request.json)
         # Run slides in parallel with 4 concurrent workers
         results = [None] * slide_count
+        first_fatal = None
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_idx = {}
             for i in range(slide_count):
@@ -645,7 +655,14 @@ def api_designer_generate():
                     results[idx] = future.result()
                 except Exception as exc:
                     print(f"[DESIGNER] Slide {idx + 1} worker failed: {exc}")
+                    if getattr(exc, 'fatal_ai_error', False) and first_fatal is None:
+                        first_fatal = exc
                     results[idx] = ''
+
+        # A deterministic refusal (wallet/key) must not be retried slide by
+        # slide or degraded into a partial deck — fail with the real cause.
+        if first_fatal is not None:
+            raise first_fatal
 
         missing = [idx + 1 for idx, html in enumerate(results) if not html]
         if missing:
@@ -705,6 +722,9 @@ def api_designer_generate():
 
     except Exception as e:
         print(f"[DESIGNER ERROR] {str(e)}")
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

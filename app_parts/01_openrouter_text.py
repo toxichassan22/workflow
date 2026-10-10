@@ -107,7 +107,7 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                 try:
                     if db.tenant_trial_state(tenant).get('state') == 'expired':
                         return {'message': 'انتهت الفترة التجريبية للشركة — جدد الاشتراك لاستئناف التوليد',
-                                'error_code': 'TRIAL_EXPIRED'}
+                                'error_code': 'TRIAL_EXPIRED', 'fatal': True, 'http_status': 403}
                 except Exception as exc:
                     print(f"[TRIAL] gate check failed for {tid}: {exc}")
             if not REQUIRE_TENANT_OPENROUTER_KEY:
@@ -122,7 +122,8 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                 # Strict mode exists to stop unkeyed companies spending on the
                 # platform key — a lookup error that opens the gate defeats it.
                 return {'message': 'تعذر التحقق من مفتاح AI للشركة الآن',
-                        'error_code': 'TENANT_KEY_CHECK_FAILED'}
+                        'error_code': 'TENANT_KEY_CHECK_FAILED', 'fatal': True,
+                        'http_status': 503}
             if raw:
                 return None
             # The refusal reason matters for support: no row, a deactivated row,
@@ -158,7 +159,7 @@ def _tenant_key_gate(usage_ctx=None, tenant_id=None):
                         _PROVISION_ATTEMPT_AT.pop(tid, None)
                         return None
             return {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
-                    'error_code': 'NO_TENANT_KEY'}
+                    'error_code': 'NO_TENANT_KEY', 'fatal': True, 'http_status': 503}
     except Exception as exc:
         print(f"[OPENROUTER KEY] gate failed open: {exc}")
         return None
@@ -967,6 +968,9 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
             generation_id, error_usage = _extract_openrouter_usage(data)
             _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
+            fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
+            if fatal is not None:
+                return {"error": fatal}
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"
                 return {"error": error}
@@ -1018,6 +1022,10 @@ def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_to
     def _attempt():
         try:
             resp = call_text_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references, usage_ctx=usage_ctx)
+            if _ai_fatal_error_dict(resp) is not None:
+                # A deterministic refusal (wallet/key/trial) cannot be raced
+                # around — every parallel attempt hits it identically.
+                return resp
             if not _has_chat_choices(resp):
                 return None
             content = extract_chat_content(resp, 'TEXT-PARALLEL')
@@ -1141,6 +1149,9 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
         error = data.get('error', {}) if isinstance(data, dict) else data
         print(f"[OPENROUTER STREAM HTTP ERROR] status={response.status_code} model={model_name} error={error}")
         _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
+        if fatal is not None:
+            return {"error": fatal}
         if isinstance(error, dict) and 'message' in error:
             error['message'] = f"[{response.status_code}] {error['message']}"
             return {"error": error}

@@ -465,7 +465,9 @@ def _designer_legacy_apply(plan, actions, message, data, slides, project_data,
 
             image = persist_generated_image(image_raw, tenant_id)
             if not image:
-                raise RuntimeError('تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.')
+                err = last_images_api_error() or {}
+                raise RuntimeError(_client_safe_llm_error(
+                    str(err.get('message') or 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.')))
             targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
             position = params.get('position', 'surgical')
             for idx in targets:

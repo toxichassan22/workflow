@@ -53,11 +53,14 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         search_context={'city': payload.get('city'), 'country': 'SA'})
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
-        reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
+        fatal = _ai_fatal_error_dict(res)
+        credit = (fatal is not None or _is_company_credit_error(provider_error or '')
+                  or 'afford' in (provider_error or '').lower())
+        wallet_msg = ((fatal or {}).get('message') or provider_error or '').strip()
         return {
             'success': False,
-            'error': 'تعذر توليد المنافسين.',
-            'failureReason': reason,
+            'error': wallet_msg if credit and wallet_msg else 'تعذر توليد المنافسين.',
+            'failureReason': 'insufficient_credit' if credit else parse_error,
             'providerError': provider_error,
         }
     # Every grounded call's retrieved pages are evidence — collect them across
@@ -334,11 +337,15 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
-        reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
+        fatal = _ai_fatal_error_dict(res)
+        credit = (fatal is not None or _is_company_credit_error(provider_error or '')
+                  or 'afford' in (provider_error or '').lower())
+        wallet_msg = ((fatal or {}).get('message') or provider_error or '').strip()
         return {
             'success': False,
-            'error': 'تعذر توليد ملخص السوق. لم يُستبدل النص الحالي.',
-            'failureReason': reason,
+            'error': wallet_msg if credit and wallet_msg
+                     else 'تعذر توليد ملخص السوق. لم يُستبدل النص الحالي.',
+            'failureReason': 'insufficient_credit' if credit else parse_error,
             'providerError': provider_error,
         }
     normalized = market_study.normalize_summary(parsed)
@@ -423,6 +430,17 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                 'message': payload.get('error') or 'اكتملت دراسة السوق',
             })
         except Exception as exc:
+            if getattr(exc, 'fatal_ai_error', False):
+                _write_market_job(tenant_id, job_id, {
+                    'status': 'failed',
+                    'success': False,
+                    'kind': kind,
+                    'error': _client_safe_llm_error(
+                        getattr(exc, 'ai_message', '') or str(exc)),
+                    'error_code': getattr(exc, 'error_code', None) or 'GENERATION_FAILED',
+                    'failureReason': 'billing_refused',
+                })
+                return
             _write_market_job(tenant_id, job_id, {
                 'status': 'failed',
                 'success': False,

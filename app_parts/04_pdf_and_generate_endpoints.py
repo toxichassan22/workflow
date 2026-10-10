@@ -835,6 +835,11 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
             response = call_text_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=usage_ctx or _usage_ctx('slide'))
+            fatal = _ai_fatal_error_dict(response)
+            if fatal is not None:
+                raise FatalAICallError(
+                    fatal.get('message'), error_code=fatal.get('error_code'),
+                    http_status=fatal.get('http_status'))
             if 'choices' not in response or not response.get('choices'):
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -1012,6 +1017,9 @@ def api_generate():
 
     except Exception as e:
         print(f"[GENERATE ERROR] {str(e)}")
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1076,6 +1084,12 @@ def api_generate_images():
         moodboard_prompts.append(f"Angle {len(moodboard_prompts)+1} view of {project_name} in {location}{ref_style}. Professional architectural photography.")
 
     for i, prompt in enumerate(moodboard_prompts):
+        # A spend-capacity refusal will not heal inside this loop — stop
+        # before the remaining prompts burn more dead provider calls.
+        last_err = last_images_api_error()
+        if isinstance(last_err, dict) and (last_err.get('fatal')
+                                         or last_err.get('error_code') in _FATAL_AI_ERROR_CODES):
+            break
         print(f"[IMAGES] Generating moodboard {i+1}/{target_count} (ref: {'yes' if reference_image else 'no'})...")
         if reference_image:
             img = persist_generated_image(call_image_api_with_reference(reference_image, prompt, usage_ctx=img_ctx), getattr(g, 'tenant_id', None))
@@ -1092,6 +1106,9 @@ def api_generate_images():
     requested_cover = include_cover
     # Only fail if nothing usable came back; otherwise preserve partial results with a warning.
     if requested_cover and not has_cover and not has_moodboard:
+        fatal = _ai_fatal_http_response(last_images_api_error())
+        if fatal is not None:
+            return fatal
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
             return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد الصور حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'}), 400

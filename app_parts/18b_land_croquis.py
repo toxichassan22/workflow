@@ -619,11 +619,15 @@ def _execute_extract_croquis():
         if not raw_resp.strip():
             # Report what the provider actually said. "Check your API keys" was misleading when the
             # real cause was an insufficient credit balance for the reserved max_tokens.
-            insufficient_credit = 'afford' in model_error or 'credit' in model_error.lower()
+            insufficient_credit = ('afford' in model_error or 'credit' in model_error.lower()
+                                   or _is_company_credit_error(model_error or '')
+                                   or _ai_fatal_error_dict(res) is not None)
             blocked_format = bool(_JSON_MODE_BLOCK_RE.search(model_error or ''))
             if insufficient_credit:
-                message = ('رصيد شركتك لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
-                           'اشحن المحفظة ثم أعد المحاولة.')
+                fatal_err = _ai_fatal_error_dict(res) or {}
+                message = (str(fatal_err.get('message') or '').strip()
+                           or 'رصيد شركتك لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
+                              'اشحن المحفظة ثم أعد المحاولة.')
                 return jsonify({
                     'success': False,
                     'error': message,

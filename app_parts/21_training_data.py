@@ -509,7 +509,11 @@ def api_training_chat():
         reply = extract_chat_content(response, 'SUPER-AGENT')
     except Exception as e:
         print(f'[SUPER-AGENT] AI reply failed: {e}')
-        reply = 'أهلاً! أنا وكيل الإدارة الذكي الخاص بشركتك. أقدر أساعدك في إعدادات الشركة — من الألوان والخطوط والحقول حتى قواعد التوليد وفريق العمل.'
+        if getattr(e, 'fatal_ai_error', False) or _is_company_credit_error(e):
+            # A drained wallet must read as a drained wallet, not a greeting.
+            reply = _client_safe_llm_error(getattr(e, 'ai_message', '') or str(e))
+        else:
+            reply = 'أهلاً! أنا وكيل الإدارة الذكي الخاص بشركتك. أقدر أساعدك في إعدادات الشركة — من الألوان والخطوط والحقول حتى قواعد التوليد وفريق العمل.'
 
     # ── Execute any actions embedded in the reply ─────────────────────────
     actions_executed = []

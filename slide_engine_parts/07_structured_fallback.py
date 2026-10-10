@@ -318,6 +318,44 @@ def _validate_market_visual_design(html, slide):
     return None
 
 
+class FatalSlideGenerationError(Exception):
+    """Deterministic refusal from the text provider (wallet/key/trial).
+
+    Retrying or silently shipping the deterministic fallback would hide the
+    real cause behind a vague «تعذر التوليد», so the engine stops at once.
+    Duck-typed with app.FatalAICallError — the engine cannot import app
+    globals — via `fatal_ai_error` plus error_code/http_status/ai_message.
+    """
+    fatal_ai_error = True
+
+    def __init__(self, message, error_code=None, http_status=None):
+        super().__init__(str(message or 'تعذر توليد الشريحة'))
+        self.error_code = error_code
+        self.http_status = http_status
+        self.ai_message = str(message or '')
+
+
+# Codes the text provider stamps on deterministic refusals (gate/credits) —
+# mirrors _FATAL_AI_ERROR_CODES in app_parts/01b_ai_error_handling.py, which
+# this module cannot import.
+_FATAL_PROVIDER_ERROR_CODES = {
+    'INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS', 'PROVIDER_CREDITS_EXHAUSTED',
+    'TRIAL_EXPIRED', 'NO_TENANT_KEY', 'TENANT_KEY_CHECK_FAILED',
+    'BILLING_CHECK_UNAVAILABLE',
+}
+
+
+def _fatal_provider_error(response):
+    """The deterministic refusal inside a provider response dict, else None."""
+    if not isinstance(response, dict):
+        return None
+    err = response.get('error')
+    if isinstance(err, dict) and (
+            err.get('fatal') or err.get('error_code') in _FATAL_PROVIDER_ERROR_CODES):
+        return err
+    return None
+
+
 def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_text_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
@@ -447,6 +485,11 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         try:
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
             response = call_text_fn(system_prompt, user_msg + retry_note, max_tokens=6000)
+            fatal = _fatal_provider_error(response)
+            if fatal is not None:
+                raise FatalSlideGenerationError(
+                    fatal.get('message'), error_code=fatal.get('error_code'),
+                    http_status=fatal.get('http_status'))
             if 'choices' not in response or not response['choices']:
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -529,6 +572,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
             return roots[0]
         except Exception as e:
+            if getattr(e, 'fatal_ai_error', False):
+                raise
             print(f"[SLIDE-{slide_num}] Exception: {e}")
 
     if free_market_model_html:

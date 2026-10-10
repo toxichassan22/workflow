@@ -873,6 +873,10 @@ def extract_chat_content(response, label="CHAT"):
             msg = err.get('message', json.dumps(err, ensure_ascii=False))
         else:
             msg = str(err)
+        if isinstance(err, dict) and (err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES):
+            raise FatalAICallError(msg, error_code=err.get('error_code'),
+                                   http_status=err.get('http_status'),
+                                   provider_message=err.get('provider_message'))
         raise Exception(f"{label} API error: {msg}")
     if 'choices' not in response or not isinstance(response['choices'], list) or not response['choices']:
         raise Exception(f"{label} returned no choices. Response: {json.dumps(response, ensure_ascii=False)[:500]}")

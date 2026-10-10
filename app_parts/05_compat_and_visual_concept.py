@@ -109,6 +109,9 @@ def api_generate_main_image():
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             # AI4: Return descriptive Arabic error based on config state
+            fatal = _ai_fatal_http_response(last_images_api_error())
+            if fatal is not None:
+                return fatal
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})
@@ -137,6 +140,9 @@ def api_generate_slide_image():
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
+            fatal = _ai_fatal_http_response(last_images_api_error())
+            if fatal is not None:
+                return fatal
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})
@@ -164,6 +170,9 @@ def api_generate_image_single():
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
+            fatal = _ai_fatal_http_response(last_images_api_error())
+            if fatal is not None:
+                return fatal
             if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
                 return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'})
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'error_code': 'IMAGE_FAILED'})

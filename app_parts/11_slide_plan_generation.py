@@ -166,6 +166,18 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
             print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
             break
         except Exception as e:
+            # A deterministic refusal (wallet/key/trial) must not hide behind a
+            # deterministic fallback plan — the file would "succeed" on empty
+            # credit and the client would never see the real cause.
+            if getattr(e, 'fatal_ai_error', False) or \
+                    getattr(e, 'error_code', None) in _FATAL_AI_ERROR_CODES:
+                return {
+                    'success': False,
+                    'error': _client_safe_llm_error(
+                        getattr(e, 'ai_message', '') or str(e)),
+                    'error_code': getattr(e, 'error_code', None) or 'GENERATION_FAILED',
+                    'http_status': getattr(e, 'http_status', None) or 503,
+                }
             last_error = e
             print(f"[SLIDE-PLAN ATTEMPT {attempt} FAILED] {e}")
             if attempt < max_attempts:
@@ -314,6 +326,16 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images,
             })
         except Exception as exc:
             print(f'[SLIDE-PLAN JOB FAILED] {exc}')
+            if getattr(exc, 'fatal_ai_error', False):
+                _write_job('.plan_jobs', tenant_id, job_id, {
+                    'status': 'failed',
+                    'success': False,
+                    'error': _client_safe_llm_error(
+                        getattr(exc, 'ai_message', '') or str(exc)),
+                    'error_code': getattr(exc, 'error_code', None) or 'GENERATION_FAILED',
+                    'failureReason': 'billing_refused',
+                })
+                return
             _write_job('.plan_jobs', tenant_id, job_id, {
                 'status': 'failed',
                 'success': False,
@@ -381,7 +403,7 @@ def api_slide_plan():
             project_data, g.tenant_id, branding, images,
             target_section_keys=target_section_keys,
         )
-        return jsonify(payload), 200 if payload.get('success') else 400
+        return jsonify(payload), 200 if payload.get('success') else int(payload.get('http_status') or 400)
 
     job_id = str(_uuid.uuid4())
     fallback_plan = _emergency_slide_plan(
@@ -736,7 +758,13 @@ def api_generate_slide_single():
     # (contrast, surface, readability), so extra attempts mostly re-design the
     # same slide while the meter runs. Exhausted attempts fall back to the
     # deterministic renderer inside generate_single_slide.
-    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_text_fn, max_retries=1, project_data=project_data)
+    try:
+        html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_text_fn, max_retries=1, project_data=project_data)
+    except Exception as exc:
+        fatal = _ai_fatal_http_response(exc)
+        if fatal is not None:
+            return fatal
+        raise
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.
@@ -806,6 +834,16 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
                 })
         except Exception as exc:
             print(f'[SLIDE GENERATION JOB FAILED] {exc}')
+            if getattr(exc, 'fatal_ai_error', False):
+                _write_job('.slide_jobs', tenant_id, job_id, {
+                    'status': 'failed',
+                    'success': False,
+                    'error': _client_safe_llm_error(
+                        getattr(exc, 'ai_message', '') or str(exc)),
+                    'error_code': getattr(exc, 'error_code', None) or 'GENERATION_FAILED',
+                    'failureReason': 'billing_refused',
+                })
+                return
             _write_job('.slide_jobs', tenant_id, job_id, {
                 'status': 'failed',
                 'success': False,
@@ -951,6 +989,9 @@ def api_generate_slides():
         })
     except Exception as e:
         print(f"[GENERATE-SLIDES ERROR] {e}")
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         return jsonify({'error': str(e)}), 500
 
 

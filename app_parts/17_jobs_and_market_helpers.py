@@ -370,9 +370,8 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                         unverified_response = last_response
                     continue
                 return last_response, ''
-            affordable = _AFFORDABLE_TOKENS_RE.search(last_error or '')
-            if affordable:
-                quoted = int(affordable.group(1))
+            quoted = _chat_affordable_tokens(last_response) or 0
+            if quoted:
                 candidate = max(2000, int(quoted * 0.85))
                 if candidate < cap:
                     retry_cap = candidate

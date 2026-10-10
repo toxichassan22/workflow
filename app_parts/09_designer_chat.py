@@ -652,6 +652,12 @@ def api_generate_cover_prompt():
         return jsonify({'success': True, 'prompt': prompt})
 
     except Exception as e:
+        # A deterministic refusal (wallet/key) is not a prompt-authoring
+        # failure — a generic fallback prompt would hide it behind a
+        # fake success and defer the same refusal to the image call.
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         # Fallback to basic prompt
         fallback = f"Professional architectural photography of a modern luxury {project_type} building in {location}, {project_name}. Elegant contemporary design with premium finishes, glass facade, warm golden hour lighting, landscaped surroundings. Shot from a low angle to emphasize grandeur. High resolution, no text, no watermarks, no people."
         print(f"[COVER PROMPT] model call failed, using fallback: {str(e)}")

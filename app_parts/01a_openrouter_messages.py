@@ -67,6 +67,9 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
             generation_id, error_usage = _extract_openrouter_usage(data)
             _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
+            fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
+            if fatal is not None:
+                return {"error": fatal}
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"
                 return {"error": error}
@@ -98,6 +101,12 @@ def openrouter_response_message(response, label='AGENT'):
     """
     if not isinstance(response, dict) or 'error' in response:
         err = response.get('error') if isinstance(response, dict) else None
+        fatal = _ai_fatal_error_dict(response)
+        if fatal is not None:
+            raise FatalAICallError(fatal.get('message'),
+                                   error_code=fatal.get('error_code'),
+                                   http_status=fatal.get('http_status'),
+                                   provider_message=fatal.get('provider_message'))
         raise RuntimeError(f'[{label}] ' + (json.dumps(err, ensure_ascii=False)
                            if isinstance(err, dict) else str(err or 'empty provider response')))
     choices = response.get('choices')

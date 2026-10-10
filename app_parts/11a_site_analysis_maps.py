@@ -744,6 +744,10 @@ def api_site_analysis():
                 reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
             analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
         except Exception as primary_error:
+            # A deterministic refusal (wallet/key) cannot be routed around —
+            # the fallback call would hit the same refusal for nothing.
+            if getattr(primary_error, 'fatal_ai_error', False):
+                raise
             if not _has_any_openrouter_key(_usage_ctx('site', data)):
                 raise
             print(f'[SITE ANALYSIS PRIMARY ERROR] {primary_error}. Trying direct OpenRouter fallback...')
@@ -770,6 +774,9 @@ def api_site_analysis():
         })
     except Exception as error:
         print(f'[SITE ANALYSIS AI ERROR] {error}')
+        fatal = _ai_fatal_http_response(error)
+        if fatal is not None:
+            return fatal
         return jsonify({
             'success': False,
             'error': 'تعذر تشغيل خدمة تحليل AI للموقع: ' + str(error),

@@ -468,6 +468,14 @@
       };
     }
 
+    // Billing/provider refusals the planner must surface verbatim: hiding one
+    // behind the emergency fallback plan would only defer the same refusal to
+    // the first paid slide call.
+    const TENANT_GENERATION_FATAL_CODES = new Set([
+      'INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS', 'PROVIDER_CREDITS_EXHAUSTED',
+      'TRIAL_EXPIRED', 'NO_TENANT_KEY', 'TENANT_KEY_CHECK_FAILED', 'BILLING_CHECK_UNAVAILABLE'
+    ]);
+
     let tenantSlidePlanRequest = null;
     function requestTenantSlidePlan(projectData, onProgress, sectionKey = '') {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
@@ -488,6 +496,9 @@
           if (!(res && res.jobId && !res.plan)) return res;
           const completed = await pollTenantSlidePlanJob(res.jobId, onProgress);
           if (completed?.plan || !res.fallbackPlan) return completed;
+          if (completed && completed.success === false && TENANT_GENERATION_FATAL_CODES.has(completed.error_code)) {
+            return completed;
+          }
           return {
             success: true,
             plan: { ...res.fallbackPlan, source: 'fallback', source_error: completed?.error || 'planner_timeout' },

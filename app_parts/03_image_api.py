@@ -759,15 +759,18 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
 
     Image-only models (e.g. gpt-image-2.5-*) reject /chat/completions and take
     input_references as {'type': 'image_url', 'image_url': {'url': ...}} objects.
+    Returns None on any failure; last_images_api_error() carries the cause.
     """
     ctx = usage_ctx or _usage_ctx('image')
+    _IMAGES_API_ERRORS.value = None
     gate = _tenant_key_gate(ctx)
     if gate is not None:
-        print(f"[IMAGE ERROR] {gate['message']}")
-        return None
+        return _images_api_fail(gate, log=f"[IMAGE ERROR] {gate['message']}")
     if not _has_any_openrouter_key(ctx):
-        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
-        return None
+        return _images_api_fail(
+            {'message': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.',
+             'error_code': 'NO_API_KEY', 'fatal': True, 'http_status': 503},
+            log='[IMAGE ERROR] OPENROUTER_KEY is not configured')
     # ISS-020: reference ownership is checked against the ctx tenant — the
     # worker threads these calls run on have no request context.
     prepared = _normalize_image_references(references, tenant_id=(ctx or {}).get('tenant_id'))
@@ -794,33 +797,52 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
             attempt_id,
             'ok' if response.status_code < 400 and 'error' not in data else 'error',
             img_usage, generation_id)
+        fatal = _provider_credit_error_dict(
+            data.get('error') if isinstance(data, dict) else None,
+            response.status_code, ctx)
+        if fatal is not None:
+            return _images_api_fail(
+                fatal,
+                log=f"[IMAGE ERROR] provider credit refusal (HTTP {response.status_code})")
         if response.status_code == 401:
-            print('[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)')
-            return None
+            return _images_api_fail(
+                {'message': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.'},
+                log='[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)')
         if response.status_code == 402:
-            print('[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)')
-            return None
+            return _images_api_fail(
+                {'message': _COMPANY_CREDIT_EXHAUSTED_MSG,
+                 'error_code': 'INSUFFICIENT_CREDITS', 'fatal': True, 'http_status': 402},
+                log='[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)')
         if response.status_code == 429:
-            print('[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)')
-            return None
+            return _images_api_fail(
+                {'message': 'خدمة توليد الصور مشغولة حاليًا — أعد المحاولة بعد قليل.'},
+                log='[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)')
         if 'error' in data:
             err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
-            print(f'[IMAGE ERROR] OpenRouter images API error: {err_msg}')
-            return None
+            return _images_api_fail(
+                {'message': _client_safe_llm_error(err_msg)},
+                log=f'[IMAGE ERROR] OpenRouter images API error: {err_msg}')
         image_url = _image_response_url(data)
         if image_url:
             return image_url
-        print(f'[IMAGE ERROR] Images API returned no image (status {response.status_code}). Response: {str(data)[:300]}')
+        return _images_api_fail(
+            {'message': 'تعذر توليد الصورة — المزود لم يرجع صورة.'},
+            log=f'[IMAGE ERROR] Images API returned no image (status {response.status_code}). Response: {str(data)[:300]}')
     except requests.exceptions.Timeout:
-        print('[IMAGE ERROR] OpenRouter API request timed out')
         _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        return _images_api_fail(
+            {'message': 'انتهت مهلة توليد الصورة — أعد المحاولة لاحقًا.'},
+            log='[IMAGE ERROR] OpenRouter API request timed out')
     except requests.exceptions.ConnectionError:
-        print('[IMAGE ERROR] Cannot connect to OpenRouter API')
         _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        return _images_api_fail(
+            {'message': 'انقطع الاتصال بمزود الصور — أعد المحاولة لاحقًا.'},
+            log='[IMAGE ERROR] Cannot connect to OpenRouter API')
     except Exception as e:
-        print('[IMAGE ERROR]', str(e))
         _settle_ai_attempt_record(attempt_id, 'error', {}, None)
-    return None
+        return _images_api_fail(
+            {'message': 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.'},
+            log=str(e))
 
 
 def call_image_api_with_references(prompt, references=None, usage_ctx=None):

@@ -643,7 +643,7 @@
         pumpSlideLaunches();
         await generationDone;
         if (generationFailure) {
-          await settleGenerationRun(false, 'فشل التوليد');
+          await settleGenerationRun(false, (generationFailure && generationFailure.error) || 'فشل التوليد');
           return;
         }
 

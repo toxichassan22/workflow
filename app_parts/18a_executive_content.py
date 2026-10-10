@@ -63,18 +63,27 @@ def api_generate_executive_content():
                 )
                 if isinstance(response, dict) and 'error' in response:
                     msg = _chat_error_message(response)
-                    affordable = _AFFORDABLE_TOKENS_RE.search(msg)
+                    affordable = _chat_affordable_tokens(response)
                     if affordable:
-                        retry_cap = max(8000, int(int(affordable.group(1)) * 0.85))
+                        retry_cap = max(8000, int(affordable * 0.85))
                         if retry_cap < cap:
                             print(f'[EXECUTIVE CONTENT] provider cap refused={cap}; retrying with {retry_cap}')
                             cap = retry_cap
                             continue
+                    refusal = _ai_fatal_error_dict(response)
+                    if refusal is not None:
+                        raise FatalAICallError(
+                            msg, error_code=refusal.get('error_code'),
+                            http_status=refusal.get('http_status'))
                     raise RuntimeError(msg)
                 raw = _get_chat_response_text(response) or extract_chat_content(response, 'EXECUTIVE-CONTENT')
                 break
             except Exception as primary_error:
                 last_error = primary_error
+                # A deterministic refusal (wallet/key) cannot be routed around —
+                # the fallback call would hit the same refusal for nothing.
+                if getattr(primary_error, 'fatal_ai_error', False):
+                    raise
                 if not _has_any_openrouter_key(_usage_ctx('executive', data)):
                     raise
                 print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
@@ -90,9 +99,9 @@ def api_generate_executive_content():
                 )
                 if isinstance(fallback, dict) and 'error' in fallback:
                     msg = _chat_error_message(fallback)
-                    affordable = _AFFORDABLE_TOKENS_RE.search(msg)
+                    affordable = _chat_affordable_tokens(fallback)
                     if affordable:
-                        retry_cap = max(8000, int(int(affordable.group(1)) * 0.85))
+                        retry_cap = max(8000, int(affordable * 0.85))
                         if retry_cap < cap:
                             print(f'[EXECUTIVE CONTENT] fallback cap refused={cap}; retrying with {retry_cap}')
                             cap = retry_cap
@@ -115,6 +124,9 @@ def api_generate_executive_content():
         return jsonify({'success': True, 'block': key, 'text': text})
     except Exception as error:
         print(f'[EXECUTIVE CONTENT AI ERROR] {error}')
+        fatal = _ai_fatal_http_response(error)
+        if fatal is not None:
+            return fatal
         return jsonify({
             'success': False,
             'error': 'تعذر توليد المحتوى التنفيذي: ' + str(error),

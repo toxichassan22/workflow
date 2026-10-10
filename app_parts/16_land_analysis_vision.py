@@ -36,10 +36,10 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
                 continue
             return res, cap, ''
         message = _chat_error_message(res)
-        affordable = _AFFORDABLE_TOKENS_RE.search(message)
+        affordable = _chat_affordable_tokens(res)
         if affordable:
             # Leave a margin: the quoted allowance shrinks as the prompt itself consumes credit.
-            retry_cap = max(minimum, int(int(affordable.group(1)) * 0.85))
+            retry_cap = max(minimum, int(affordable * 0.85))
             if retry_cap >= cap:
                 break
             print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')

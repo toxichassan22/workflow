@@ -554,6 +554,9 @@ def api_ai_input_builder():
         return jsonify({'success': True, 'suggestions': cleaned})
     except Exception as e:
         print(f"[AI-INPUT-BUILDER ERROR] {e}")
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         return jsonify({'error': str(e)}), 500
 
 
@@ -667,6 +670,9 @@ def api_ai_build_fields():
         return jsonify({'success': True, 'created': created, 'errors': errors, 'count': len(created)})
     except Exception as e:
         print(f"[AI-BUILD-FIELDS ERROR] {e}")
+        fatal = _ai_fatal_http_response(e)
+        if fatal is not None:
+            return fatal
         return jsonify({'error': str(e)}), 500
 
 

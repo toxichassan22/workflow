@@ -297,7 +297,13 @@ def _agent_exec_generate_image(task, ctx, session, feedback=''):
     except Exception as exc:
         return False, None, f'image_generation_failed:{exc}', None
     if not image:
-        return False, 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.', 'image_generation_failed', None
+        err = last_images_api_error() or {}
+        detail = str(err.get('message') or '').strip()
+        reply = (_client_safe_llm_error(detail) if detail
+                 else 'تعذر توليد الصورة حاليًا — أعد المحاولة لاحقًا.')
+        # The detail rides in the reason so _is_billing_error_text can see a
+        # drained wallet and stop the run instead of reporting a generic fail.
+        return False, reply, f'image_generation_failed:{detail or reply}'[:300], None
     position = str(params.get('position') or 'surgical')
     caption = comp_name or prompt[:60]
     caption_markup = (f'<div data-visual-media-caption="1" style="font-size:12px;color:#c5a059;'
