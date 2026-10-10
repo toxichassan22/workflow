@@ -192,6 +192,36 @@ def _visual_concept_plan_regulation_facts(project_data):
     return facts
 
 
+# Volatile land/program scalars — one table feeds both the fresh context build
+# and the per-request refresh, so a cached planContext can never keep judging a
+# value the client has since edited (FAR, coverage, areas, setbacks…).
+_VISUAL_PLAN_VOLATILE_FIELDS = (
+    ('project_name', ('project_name', 'projectName'), 160, False),
+    ('project_idea', ('project_idea', 'projectIdea'), 4000, True),
+    ('city', ('city',), 80, False),
+    ('district', ('district',), 100, False),
+    ('land_brief', ('land_and_building_summary',), 6000, True),
+    ('land_area', ('croquis_land_area', 'land_area', 'total_area_sqm'), 80, False),
+    ('design_area', ('approved_financial_area', 'land_area', 'total_area_sqm'), 80, False),
+    ('coverage_ratio', ('approved_coverage_ratio', 'coverage_ratio'), 120, False),
+    ('floor_area_ratio', ('approved_floor_area_ratio', 'floor_area_ratio'), 40, False),
+    ('open_area', ('open_area', 'open_spaces', 'open_space_area'), 120, False),
+    ('floor_count', ('approved_floor_count', 'max_floors_height', 'table_floors'), 120, False),
+    ('approved_floor_count', ('approved_floor_count',), 40, False),
+    ('north_direction', ('north_direction',), 80, False),
+    ('surrounding_streets', ('surrounding_streets',), 1800, False),
+    ('setbacks', ('setbacks', 'building_ratio_setbacks'), 1800, False),
+)
+
+
+def _visual_concept_plan_volatile_fields(source):
+    fields = {}
+    for target, keys, limit, sanitize in _VISUAL_PLAN_VOLATILE_FIELDS:
+        text = _visual_concept_text(_visual_concept_read(source, *keys), limit)
+        fields[target] = _visual_concept_plan_sanitize_text(text) if sanitize else text
+    return fields
+
+
 def _visual_concept_plan_context(project_data, boundary_points=None, verification=None):
     source = project_data if isinstance(project_data, dict) else {}
     points = _visual_concept_plan_boundary_points(
@@ -199,24 +229,8 @@ def _visual_concept_plan_context(project_data, boundary_points=None, verificatio
     directions = _visual_concept_directions(source)
     components = _visual_concept_components(source)
     context = {
-        'project_name': _visual_concept_text(_visual_concept_read(source, 'project_name', 'projectName'), 160),
-        'project_idea': _visual_concept_plan_sanitize_text(
-            _visual_concept_text(_visual_concept_read(source, 'project_idea', 'projectIdea'), 4000)),
-        'city': _visual_concept_text(_visual_concept_read(source, 'city'), 80),
-        'district': _visual_concept_text(_visual_concept_read(source, 'district'), 100),
-        'land_brief': _visual_concept_plan_sanitize_text(
-            _visual_concept_text(_visual_concept_read(source, 'land_and_building_summary'), 6000)),
-        'land_area': _visual_concept_text(_visual_concept_read(source, 'croquis_land_area', 'land_area', 'total_area_sqm'), 80),
-        'design_area': _visual_concept_text(_visual_concept_read(source, 'approved_financial_area', 'land_area', 'total_area_sqm'), 80),
-        'coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio', 'coverage_ratio'), 120),
-        'floor_area_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_floor_area_ratio', 'floor_area_ratio'), 40),
-        'open_area': _visual_concept_text(_visual_concept_read(source, 'open_area', 'open_spaces', 'open_space_area'), 120),
-        'floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count', 'max_floors_height', 'table_floors'), 120),
-        'approved_floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count'), 40),
-        'north_direction': _visual_concept_text(_visual_concept_read(source, 'north_direction'), 80),
+        **_visual_concept_plan_volatile_fields(source),
         'directions': directions,
-        'surrounding_streets': _visual_concept_text(_visual_concept_read(source, 'surrounding_streets'), 1800),
-        'setbacks': _visual_concept_text(_visual_concept_read(source, 'setbacks', 'building_ratio_setbacks'), 1800),
         'components': components,
         'boundary_points': points,
         'regulations': _visual_concept_plan_regulation_facts(source),
@@ -394,7 +408,7 @@ _VISUAL_PLAN_USE_CATEGORIES = (
       'خدمات', 'تشغيل', 'ميكانيكا', 'صيانة')),
     ('landscape', 'Landscape/Open space',
      ('landscape', 'open space', 'green', 'park', 'plaza',
-      'لاندسكيب', 'فراغات', 'حدائق', 'مسطحات', 'بلازا')),
+      'لاندسكيب', 'فراغات', 'حدائق', 'مسطحات', 'بلازا', 'ممشى', 'خضراء')),
 )
 _VISUAL_PLAN_USE_ORDER = {key: index for index, (key, _label, _kw)
                           in enumerate(_VISUAL_PLAN_USE_CATEGORIES)}

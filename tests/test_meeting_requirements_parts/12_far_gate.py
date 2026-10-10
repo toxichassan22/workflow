@@ -98,3 +98,58 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         self.assertIn('3 مجمعات', captured['user'])
         self.assertIn('مجمع', captured['system'])
         self.assertEqual(response.get_json()['planContext']['project_idea'], idea)
+
+    def test_cached_plan_context_refreshes_live_far_and_land_values(self):
+        """A planContext cached at verify time must not keep judging edits made
+        since: the refresh re-reads the volatile land fields — approved FAR,
+        coverage, land area, floors — from the live payload on every request, so
+        a client who raises a distinguished parcel's FAR to 7 is no longer
+        judged against the 6 the cache was built with."""
+        module = self.application_module
+        stale = module._visual_concept_plan_context(
+            {'approved_floor_area_ratio': '6', 'croquis_land_area': '24912.95'})
+        live = {'approved_floor_area_ratio': '7', 'croquis_land_area': '24912.95',
+                'project_components_data': [
+                    {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800}]}
+        data = {'projectData': live,
+                'plansWorkflow': {'boundary': {'approved': True, 'points': [
+                    {'point': 'P1', 'eastings': 1, 'northings': 1},
+                    {'point': 'P2', 'eastings': 2, 'northings': 1},
+                    {'point': 'P3', 'eastings': 2, 'northings': 2}]},
+                                  'planContext': stale}}
+        _project, _workflow, _boundary, _points, context = \
+            module._visual_concept_plans_context_from_request(data)
+        self.assertEqual(context['floor_area_ratio'], '7')
+        self.assertEqual(context['land_area'], '24912.95')
+        self.assertTrue(context['components'])
+        # The deterministic check judges the refreshed FAR: inside 7 but outside
+        # the stale 6 must draw no «معامل البناء» finding.
+        rows = [{'id': 'r1', 'building': 'A', 'floor_range': '1-8',
+                 'component': 'شقق', 'floor_area_sqm': 20000}]
+        checks = module._visual_concept_plan_distribution_checks(
+            rows, [], context, context.get('regulations') or {})
+        self.assertFalse(any(c['item'] == 'إجمالي المسطحات يتجاوز معامل البناء'
+                             for c in checks))
+
+    def test_open_use_rows_do_not_inflate_the_far_total(self):
+        """ممشى ومساحات خضراء on «أرضي» are land program, not built floor area —
+        a green buffer row must not push a plan that fits the approved FAR over
+        the cap, while a covered use of the same size still trips it."""
+        module = self.application_module
+        self.assertEqual(
+            module._visual_concept_plan_use_category(
+                {'name': 'ممشى ومساحات خضراء'})[1], 'landscape')
+        context = {'land_area': 24912.95, 'floor_area_ratio': '7', 'components': []}
+        built = {'id': 'r1', 'building': 'A', 'floor_range': '1-8',
+                 'component': 'شقق', 'floor_area_sqm': 21000}
+        green = {'id': 'r2', 'building': '', 'floor_range': 'أرضي',
+                 'component': 'ممشى ومساحات خضراء', 'floor_area_sqm': 11000}
+        checks = module._visual_concept_plan_distribution_checks(
+            [built, green], [], context, {})
+        self.assertFalse(any(c['item'] == 'إجمالي المسطحات يتجاوز معامل البناء'
+                             for c in checks))
+        covered = dict(green, component='قاعة احتفالات')
+        checks = module._visual_concept_plan_distribution_checks(
+            [built, covered], [], context, {})
+        self.assertTrue(any(c['item'] == 'إجمالي المسطحات يتجاوز معامل البناء'
+                            for c in checks))

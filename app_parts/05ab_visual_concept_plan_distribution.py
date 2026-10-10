@@ -284,11 +284,15 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                               str(regulations.get('building_ratio') or ''))
         far = _visual_concept_number(far_match.group(1)) if far_match else None
     if land and far:
-        total_built = sum(
-            row.get('floor_area_sqm') * (parsed['count'] if parsed else 1)
-            for row, parsed in parsed_rows
+        # Open uses (ممشى، مسطحات خضراء…) are land program, not built floor
+        # area — like site/basement rows they never count toward the FAR total.
+        far_rows = [
+            (row, parsed) for row, parsed in parsed_rows
             if isinstance(row.get('floor_area_sqm'), (int, float))
-            and (not parsed or parsed['kind'] not in ('basement', 'site')))
+            and (not parsed or parsed['kind'] not in ('basement', 'site'))
+            and _visual_concept_plan_use_category({'name': row.get('component')})[1] != 'landscape']
+        total_built = sum(row['floor_area_sqm'] * (parsed['count'] if parsed else 1)
+                          for row, parsed in far_rows)
         cap_area = land * far
         if total_built > cap_area * 1.02:
             checks.append({
@@ -296,9 +300,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 'detail': (f'مجموع مساحات الأدوار {total_built:g} م² يتجاوز حد المعامل '
                            f'{cap_area:g} م² ({far:g} × أرض {land:g} م²) — قلّل مساحات الأدوار'),
                 'result': 'يحتاج تأكيد', 'severity': 'medium',
-                'row_ids': [row.get('id') for row, parsed in parsed_rows
-                            if isinstance(row.get('floor_area_sqm'), (int, float))
-                            and (not parsed or parsed['kind'] not in ('basement', 'site'))]})
+                'row_ids': [row.get('id') for row, _parsed in far_rows]})
     for total in totals:
         for delta_key, label in (('delta_units', 'الوحدات'), ('delta_area', 'المساحة')):
             delta = total.get(delta_key)

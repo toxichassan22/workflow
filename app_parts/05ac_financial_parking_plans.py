@@ -2,25 +2,26 @@ import financial_parking
 
 
 def _financial_parking_refresh_context(context, project_data):
-    model = financial_parking.parking_object((project_data or {}).get('financial_study_model'))
+    source = project_data if isinstance(project_data, dict) else {}
+    # The planContext cached at verify time must not keep judging edits made
+    # since — volatile fields are re-read from the live project data on every
+    # call, not only when a parking plan happens to exist.
+    if source:
+        context.update(_visual_concept_plan_volatile_fields(source))
+        context['directions'] = _visual_concept_directions(source)
+        context['components'] = _visual_concept_components(source)
+        context['regulations'] = _visual_concept_plan_regulation_facts(source)
+    model = financial_parking.parking_object(source.get('financial_study_model'))
     plan = financial_parking.parking_object(model.get('parkingPlan'))
     if not plan and not any(row.get('parkingPlanId') for row in financial_parking.parking_model_components(model)):
         return context
-    context['components'] = _visual_concept_components(project_data)
     context['parking'] = {
-        'planId': plan.get('id'), 'approved': not financial_parking.parking_plan_error(project_data),
+        'planId': plan.get('id'), 'approved': not financial_parking.parking_plan_error(source),
         'requiredSpaces': plan.get('requiredSpaces'), 'existingSpaces': plan.get('existingSpaces'),
         'additionalSpaces': plan.get('additionalSpaces'), 'parkingArea': plan.get('parkingArea'),
         'areaPerSpace': plan.get('areaPerSpace'), 'areaIsEstimate': plan.get('areaIsEstimate'),
         'areaBasis': plan.get('areaBasis'), 'footprintArea': plan.get('footprintArea'),
     }
-    for target, keys in (
-            ('coverage_ratio', ('approved_coverage_ratio', 'coverage_ratio')),
-            ('floor_count', ('approved_floor_count', 'max_floors_height', 'table_floors')),
-            ('approved_floor_count', ('approved_floor_count',)),
-            ('design_area', ('approved_financial_area', 'land_area'))):
-        context[target] = _visual_concept_text(_visual_concept_read(project_data, *keys), 120)
-    context['regulations'] = _visual_concept_plan_regulation_facts(project_data)
     return context
 
 
