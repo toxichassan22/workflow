@@ -84,41 +84,41 @@
 .feature-card h3 { margin: 0 0 8px; font-size: 17.5px; color: var(--ink); font-weight: 800; }
 .feature-card p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; }
 
-/* ── Flow: vertical interactive steps ──────────────────────────────────────
-   Five steps stacked vertically; each header is a button whose press unfolds
-   a product mockup — an app window (chrome bar, side nav, screen body) that
-   shows what the step looks like inside the system, styled like the hero's
-   market-study card. Panels collapse only under body.js — a scriptless page
-   keeps every mockup visible. */
+/* ── Flow: a vertical timeline of product mockups ──────────────────────────
+   The five steps sit as nodes on a continuous rail — number markers ride the
+   line, and pressing a step unfolds its app-window mockup (chrome bar, side
+   nav, screen body) in the text column below. Panels collapse only under
+   body.js — a scriptless page keeps every mockup visible. */
 
 .flow {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-width: 1000px;
+  max-width: 1040px;
   margin: 0 auto;
 }
 
-.flow-step {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: #fff;
-  transition: border-color .2s, box-shadow .2s;
-}
+.flow-step { position: relative; padding: 16px 0; }
 
-.flow-step:hover { border-color: rgba(15, 169, 196, .4); }
-
-.flow-step.open {
-  border-color: rgba(15, 169, 196, .55);
-  box-shadow: 0 18px 44px rgba(8, 38, 70, .08);
+/* The rail: one segment per step so the first starts at its marker and the
+   last ends at its marker — no stubs hanging above or below the timeline. */
+.flow-step::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 19px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(15, 169, 196, .22);
 }
+.flow-step:first-child::before { top: 26px; }
+.flow-step:last-child::before { bottom: calc(100% - 26px); }
 
 .flow-head {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: 20px;
   width: 100%;
-  padding: 20px 22px;
+  padding: 4px 0;
   border: 0;
   background: none;
   font-family: inherit;
@@ -126,23 +126,27 @@
   cursor: pointer;
 }
 
-.flow-head:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: -2px; }
+.flow-head:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: 2px; border-radius: 8px; }
 
 .flow-head .num {
   flex: none;
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
-  margin-top: 2px;
+  margin-top: 4px;
   border-radius: 50%;
   background: #fff;
-  border: 1px solid rgba(15, 169, 196, .55);
+  border: 1.5px solid rgba(15, 169, 196, .55);
   color: var(--teal-dark);
   font-weight: 800;
   font-size: 15px;
   direction: ltr;
+  /* The white halo masks the rail behind the marker. */
+  box-shadow: 0 0 0 6px #fff;
 }
 
 .flow-step.open .flow-head .num {
@@ -152,8 +156,9 @@
 }
 
 .flow-head-body { flex: 1; min-width: 0; }
-.flow-title { display: block; font-size: 16.5px; font-weight: 800; color: var(--ink); line-height: 1.5; }
-.flow-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.flow-title { display: block; font-size: 17px; font-weight: 800; color: var(--ink); line-height: 1.5; transition: color .15s; }
+.flow-head:hover .flow-title { color: var(--teal-dark); }
+.flow-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 13.5px; line-height: 1.75; max-width: 660px; }
 
 .flow-tag {
   flex: none;
@@ -177,7 +182,8 @@ body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
 
 /* App-window mockup: navy frame, chrome bar, side nav, white screen body. */
 .shot {
-  margin: 0 16px 16px;
+  margin: 16px 0 18px;
+  margin-inline-start: 58px;
   background: linear-gradient(160deg, #0B2745, #071B31);
   border: 1px solid rgba(23, 200, 227, .2);
   border-radius: 16px;
@@ -691,9 +697,16 @@ body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
   .section-title p { font-size: 15px; }
   .features { grid-template-columns: 1fr; }
   .feature-card { padding: 22px; }
-  .flow-head { padding: 16px 14px; gap: 12px; }
+  .flow-step { padding: 12px 0; }
+  .flow-step::before { inset-inline-start: 17px; }
+  .flow-step:first-child::before { top: 22px; }
+  .flow-step:last-child::before { bottom: calc(100% - 22px); }
+  .flow-head { gap: 14px; }
+  .flow-head .num { width: 34px; height: 34px; font-size: 14px; }
+  .flow-title { font-size: 15.5px; }
+  .flow-desc { font-size: 12.5px; }
   .flow-tag { display: none; }
-  .shot { margin: 0 10px 10px; padding: 8px; border-radius: 12px; }
+  .shot { margin: 12px 0 14px; margin-inline-start: 48px; padding: 8px; border-radius: 12px; }
   .shot-body { padding: 14px; }
   .shot-grid { grid-template-columns: 1fr; }
   .shot-crumb { font-size: 11px; }
