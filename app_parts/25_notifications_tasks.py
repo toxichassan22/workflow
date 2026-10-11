@@ -5,21 +5,6 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def _notify_tenant_admins(tenant_id, title, body, entity_type=None, entity_id=None):
-    """In-app + email notification to every active company admin of the tenant."""
-    try:
-        # The company admin reads its feed under the tenant-admin address —
-        # employees must not see platform-access escalations in theirs.
-        tenant = db.get_tenant_by_id(tenant_id)
-        db.create_notification(
-            tenant_id, title, body, category='general',
-            user_id='tenant-admin:' + str(tenant_id),
-            entity_type=entity_type, entity_id=entity_id,
-            email_to=(tenant or {}).get('email'))
-    except Exception as exc:
-        print(f'[ACCESS REQUEST] client notification failed: {exc}')
-
-
 def _notify_super_admins(title, body, entity_type=None, entity_id=None, category='platform'):
     """A platform event lands in every active super admin's feed — the admin
     tenant's own notification stream, visible to all of its logins."""

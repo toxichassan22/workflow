@@ -163,60 +163,6 @@ class IdentityDbTests(unittest.TestCase):
         self.assertEqual(warned.get('status'), 'approved')
         self.assertTrue(warned.get('is_self_approval'))
 
-    # ── d07: admin access requests and grants ────────────────────────────
-
-    def test_admin_access_request_lifecycle(self):
-        self.assertEqual(
-            db.create_admin_access_request('admin-t', 'tenant-1', 'bogus', None, 'سبب', 24, 'مشرف').get('error'),
-            'invalid_scope')
-        self.assertEqual(
-            db.create_admin_access_request('admin-t', 'tenant-1', 'tenant', None, ' ', 24, 'مشرف').get('error'),
-            'reason_required')
-        req = db.create_admin_access_request(
-            'admin-t', 'tenant-1', 'tenant', None, 'دعم عميل', 24, 'مشرف المنصة')
-        self.assertEqual(req['status'], 'pending')
-        # No grant yet.
-        self.assertIsNone(db.active_admin_access_grant('tenant-1', scope='presentation', target_id='p1'))
-        # Only the target tenant may decide.
-        self.assertEqual(
-            db.decide_admin_access_request(req['id'], 'tenant-2', 'approved', 'x', 'X').get('error'),
-            'request_not_found')
-        approved = db.decide_admin_access_request(
-            req['id'], 'tenant-1', 'approved', 'user-1', 'مدير الشركة', hours=4)
-        self.assertEqual(approved['status'], 'approved')
-        self.assertTrue(approved['expires_at'])
-        grant = db.active_admin_access_grant('tenant-1', scope='presentation', target_id='p1')
-        self.assertEqual(grant['id'], req['id'])
-        db.mark_admin_access_used(grant['id'])
-        used = db.get_admin_access_request(req['id'])
-        self.assertEqual(used['access_count'], 1)
-        self.assertTrue(used['first_accessed_at'])
-        revoked = db.revoke_admin_access_request(req['id'], 'tenant-1', 'مدير الشركة')
-        self.assertEqual(revoked['status'], 'revoked')
-        self.assertIsNone(db.active_admin_access_grant('tenant-1'))
-
-    def test_admin_access_scoped_grant_and_expiry(self):
-        req = db.create_admin_access_request(
-            'admin-t', 'tenant-1', 'presentation', 'pres-1', 'مراجعة', 1, 'مشرف')
-        db.decide_admin_access_request(req['id'], 'tenant-1', 'approved', 'u', 'U')
-        # A presentation-scoped grant covers only its target.
-        self.assertTrue(db.active_admin_access_grant('tenant-1', 'presentation', 'pres-1'))
-        self.assertIsNone(db.active_admin_access_grant('tenant-1', 'presentation', 'pres-2'))
-        self.assertIsNone(db.active_admin_access_grant('tenant-1', 'draft', 'draft-1'))
-        # Expiry: force the grant into the past and re-check.
-        conn = db.get_db()
-        conn.execute("UPDATE admin_access_requests SET expires_at = '2000-01-01' WHERE id = ?",
-                     (req['id'],))
-        conn.commit()
-        self.assertIsNone(db.active_admin_access_grant('tenant-1', 'presentation', 'pres-1'))
-        self.assertEqual(db.get_admin_access_request(req['id'])['status'], 'expired')
-        # Denied requests never grant.
-        req2 = db.create_admin_access_request(
-            'admin-t', 'tenant-1', 'tenant', None, 'سبب', 24, 'مشرف')
-        denied = db.decide_admin_access_request(req2['id'], 'tenant-1', 'denied', 'u', 'U', note='لا')
-        self.assertEqual(denied['status'], 'denied')
-        self.assertIsNone(db.active_admin_access_grant('tenant-1'))
-
     # ── t23: expanded SoD matrix ─────────────────────────────────────────
 
     def test_sod_matrix_flags_cross_gate_and_post_approval_edit(self):
@@ -592,76 +538,32 @@ class IdentityApiTests(unittest.TestCase):
                                  headers=self.headers(emp_token))
         self.assertEqual(denied.status_code, 403)
 
-    # ── d07 over HTTP ────────────────────────────────────────────────────
+    # ── Admin read panes over client content ─────────────────────────────
 
-    def test_admin_content_requires_client_grant(self):
+    def test_admin_reads_client_content_directly(self):
+        """Access is arranged with the company outside the system — the read
+        panes serve the platform admin without an in-system grant."""
         conn = db.get_db()
         conn.execute(
             "INSERT INTO presentations (id, tenant_id, title, status) "
             "VALUES ('pres-c', ?, 'عرض سري', 'approved')", (self.tenant_id,))
         conn.commit()
-        denied = self.client.get(
+        pres = self.client.get(
             f'/api/admin/tenants/{self.tenant_id}/presentations/pres-c',
             headers=self.headers(self.admin_token))
-        self.assertEqual(denied.status_code, 403)
-        self.assertEqual(denied.get_json()['error_code'], 'access_grant_required')
-        # Activity carries client field values, so it is gated the same way.
-        denied_act = self.client.get(
+        self.assertEqual(pres.status_code, 200, pres.get_json())
+        activity = self.client.get(
             f'/api/admin/tenants/{self.tenant_id}/activity',
             headers=self.headers(self.admin_token))
-        self.assertEqual(denied_act.status_code, 403)
-
-        created = self.client.post(
-            f'/api/admin/tenants/{self.tenant_id}/access-requests',
-            headers=self.headers(self.admin_token),
-            json={'scope': 'tenant', 'reason': 'تشخيص مشكلة', 'hours': 24})
-        self.assertEqual(created.status_code, 201, created.get_json())
-        request_id = created.get_json()['request']['id']
-
-        # The client sees it and approves.
-        listed = self.client.get('/api/access-requests', headers=self.headers(self.admin_user_token))
-        self.assertTrue(any(r['id'] == request_id for r in listed.get_json()['requests']))
-        decided = self.client.post(
-            f'/api/access-requests/{request_id}/decision',
-            headers=self.headers(self.admin_user_token),
-            json={'decision': 'approved'})
-        self.assertEqual(decided.status_code, 200, decided.get_json())
-
-        allowed = self.client.get(
-            f'/api/admin/tenants/{self.tenant_id}/presentations/pres-c',
-            headers=self.headers(self.admin_token))
-        self.assertEqual(allowed.status_code, 200, allowed.get_json())
-
-        # Revoking the grant closes access again.
-        revoked = self.client.post(
-            f'/api/access-requests/{request_id}/revoke',
-            headers=self.headers(self.admin_user_token), json={})
-        self.assertEqual(revoked.status_code, 200)
-        denied2 = self.client.get(
-            f'/api/admin/tenants/{self.tenant_id}/presentations/pres-c',
-            headers=self.headers(self.admin_token))
-        self.assertEqual(denied2.status_code, 403)
-
-    def test_client_deny_leaves_content_closed(self):
-        created = self.client.post(
-            f'/api/admin/tenants/{self.tenant_id}/access-requests',
-            headers=self.headers(self.admin_token),
-            json={'scope': 'tenant', 'reason': 'دعم', 'hours': 24})
-        request_id = created.get_json()['request']['id']
-        decided = self.client.post(
-            f'/api/access-requests/{request_id}/decision',
-            headers=self.headers(self.admin_user_token),
-            json={'decision': 'denied', 'note': 'غير مسموح'})
-        self.assertEqual(decided.get_json()['request']['status'], 'denied')
-        self.assertIsNone(db.active_admin_access_grant(self.tenant_id))
-        # A plain employee cannot decide access requests.
+        self.assertEqual(activity.status_code, 200, activity.get_json())
+        # A non-admin session still cannot reach the pane.
         uid = self._employee('emp3@x.test')
         emp_token = auth.create_token(self.tenant_id, 'emp3@x.test', user_id=uid,
                                       user_name='موظف', user_role='employee')
-        forbidden = self.client.post(
-            f'/api/access-requests/{request_id}/decision',
-            headers=self.headers(emp_token), json={'decision': 'approved'})
-        self.assertEqual(forbidden.status_code, 403)
+        forbidden = self.client.get(
+            f'/api/admin/tenants/{self.tenant_id}/presentations/pres-c',
+            headers=self.headers(emp_token))
+        self.assertIn(forbidden.status_code, (401, 403))
 
     # ── Policies over HTTP ───────────────────────────────────────────────
 

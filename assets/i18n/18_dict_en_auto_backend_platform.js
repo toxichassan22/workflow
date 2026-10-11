@@ -96,7 +96,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "جلسة التحقق غير صالحة": "The verification session is invalid",
   "الجهة غير موجودة": "Entity not found",
   "أرسل confirm=true لحذف المفاتيح اليتيمة": "Send confirm=true to delete orphan keys",
-  "الاطّلاع على محتوى العميل يتطلب إذن اطّلاع معتمدًا من مدير الشركة": "Viewing client content requires view permission approved by the company manager",
   "العنصر غير موجود": "Item not found",
   "الشركة غير موجودة": "Company not found",
   "المرفق غير معروف": "Unknown attachment",

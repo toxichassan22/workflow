@@ -499,12 +499,6 @@ def api_get_project_file(file_id):
     if not stored and getattr(g, 'is_admin', False):
         stored = db.get_project_file_by_id(str(file_id))
         resolve_tenant = (stored or {}).get('tenant_id') or g.tenant_id
-        if stored:
-            # d07: cross-tenant file reads need an active client-approved grant.
-            grant = _require_admin_content_access(
-                resolve_tenant, scope='file', target_id=str(file_id))
-            if isinstance(grant, tuple):
-                return grant
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
     if resolve_tenant == g.tenant_id and not _project_file_in_scope(stored):

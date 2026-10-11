@@ -114,7 +114,6 @@
         recharge_request: opsTab('recharge'),
         wallet: opsTab('recharge'),
         generation_job: () => openTenantPresentations(),
-        admin_access_request: () => openTenantUsers(),
       };
       return map[n.entity_type] || null;
     }

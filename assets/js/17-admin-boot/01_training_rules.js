@@ -683,7 +683,6 @@
       }).join('') : '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
       list.innerHTML = reportBanner + usersHtml;
       renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
-      renderTenantAccessRequests();
       populateInviteScopePickers();
     }
 
@@ -722,61 +721,6 @@
       } else {
         toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
       }
-    }
-
-    async function renderTenantAccessRequests() {
-      const box = document.getElementById('tenantAccessRequests');
-      if (!box) return;
-      const data = await api('GET', '/api/access-requests').catch(() => null);
-      const requests = (data && data.requests) || [];
-      if (!requests.length) {
-        box.innerHTML = '<p class="tenant-hint">' + escapeHtml(WFT('users.access_requests_empty', 'لا توجد طلبات اطّلاع')) + '</p>';
-        return;
-      }
-      const statusLabels = {
-        pending: WFT('users.access_pending', 'قيد الانتظار'), approved: WFT('users.access_approved', 'معتمد'),
-        denied: WFT('users.access_denied', 'مرفوض'), expired: WFT('users.access_expired', 'منتهي'),
-        revoked: WFT('users.access_revoked', 'ملغي'),
-      };
-      const scopeLabels = {
-        tenant: WFT('users.access_scope_tenant', 'كل محتوى الشركة'),
-        presentation: WFT('users.access_scope_presentation', 'عرض تقديمي محدد'),
-        file: WFT('users.access_scope_file', 'ملف محدد'),
-      };
-      box.innerHTML = requests.map(r => {
-        const state = '<span>' + escapeHtml(statusLabels[r.status] || r.status) + '</span>';
-        const scope = '<span>' + escapeHtml(scopeLabels[r.scope] || scopeLabels.tenant) + '</span>' +
-          (r.target_id ? ' — ' + escapeHtml(r.target_id) : '');
-        const expiry = r.expires_at ? ' | <span>' + escapeHtml(WFT('users.access_expires', 'ينتهي')) + ':</span> ' + escapeHtml(String(r.expires_at).slice(0, 16).replace('T', ' ')) : '';
-        let actions = '';
-        if (r.status === 'pending') {
-          actions = '<button type="button" class="btn small green" onclick="decideAccessRequest(\'' + r.id + '\', \'approved\')">' + escapeHtml(WFT('users.access_approve', 'اعتماد')) + '</button>' +
-            '<button type="button" class="btn small danger" onclick="decideAccessRequest(\'' + r.id + '\', \'denied\')">' + escapeHtml(WFT('users.access_deny', 'رفض')) + '</button>';
-        } else if (r.status === 'approved') {
-          actions = '<button type="button" class="btn small danger" onclick="revokeAccessRequest(\'' + r.id + '\')">' + escapeHtml(WFT('users.access_revoke', 'إلغاء الاطّلاع')) + '</button>';
-        }
-        return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
-          '<div><h3 style="font-size:14px">' + escapeHtml(r.requested_by_name || '') + ' — ' + scope + '</h3>' +
-          '<div class="meta">' + state + ' | ' + escapeHtml(r.reason || '') + expiry + '</div></div>' +
-          '<div class="tenant-actions" style="gap:6px">' + actions + '</div></div>';
-      }).join('');
-    }
-
-    async function decideAccessRequest(requestId, decision) {
-      const data = await api('POST', '/api/access-requests/' + requestId + '/decision', { decision });
-      if (data && data.success) {
-        toast(decision === 'approved' ? WFT('users.access_approved_ok', 'اعتُمد الاطّلاع') : WFT('users.access_denied_ok', 'رُفض الاطّلاع'));
-        renderTenantAccessRequests();
-      } else {
-        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
-      }
-    }
-
-    async function revokeAccessRequest(requestId) {
-      if (!confirm(WFT('users.access_revoke_confirm', 'إلغاء الاطّلاع المعتمد؟'))) return;
-      const data = await api('POST', '/api/access-requests/' + requestId + '/revoke', {});
-      if (data && data.success) { toast(WFT('users.access_revoked_ok', 'أُلغي الاطّلاع')); renderTenantAccessRequests(); }
-      else { toast((data && data.error) || WFT('common.error', 'حدث خطأ')); }
     }
 
     async function populateInviteScopePickers() {

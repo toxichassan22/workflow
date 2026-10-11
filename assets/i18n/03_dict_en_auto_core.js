@@ -849,7 +849,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "سعر الصرف USD/SAR": "Exchange rate USD/SAR",
   "طلب شحن جديد": "New top-up request",
   "طلب شحن رصيد جديد": "New balance top-up request",
-  "طلبات اطّلاع مدير المنصة على المحتوى": "Platform admin content access requests",
   "طلبات الشحن من الشركات": "Top-up requests from companies",
   "عرض الكل": "Show all",
   "فلترة حسب الحالة": "Filter by status",
@@ -874,6 +873,5 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "نشاط الشركة": "Company activity",
   "نشاط المنصة": "Platform activity",
   "نظرة عامة": "Overview",
-  "طلب مؤقت من مدير المنصة لعرض محتوى شركتك للقراءة فقط — لا يمنحه أي تحكم إداري في حسابك، والمحتوى لا يظهر له إلا بعد اعتمادك، وتنتهي صلاحية الإذن تلقائيًا": "Temporary request for the platform manager to read your company content — it grants no administrative control over your account, the content stays hidden until you approve it, and the permit expires automatically",
   "كلمة المرور (اختياري)": "Password (optional)"
 }/*I18N_EN_AUTO_END*/);

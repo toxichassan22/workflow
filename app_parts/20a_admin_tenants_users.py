@@ -5,9 +5,8 @@
 # Super-admin tenant and tenant-user administration: company
 # create/list/update/delete, tenant detail and user management, per-user
 # permissions and field sections, reset-password, and the read panes over a
-# tenant's drafts, presentations, exports, activity and agent — the reads
-# run under _require_admin_content_access so client content is only served
-# under an active grant.
+# tenant's drafts, presentations, exports, activity and agent — read-only
+# support views the platform admin opens directly.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -461,66 +460,6 @@ def _admin_tenant_or_404(tenant_id):
     return tenant, None
 
 
-def _access_scope_label(scope, target_id=None, tenant_id=None):
-    """Human label naming exactly what a content-view grant covers — the
-    approving company admin sees the file/project name, not a bare scope key."""
-    base = {'tenant': 'كل محتوى الشركة',
-            'presentation': 'عرض تقديمي',
-            'file': 'ملف',
-            'draft': 'ملف مشروع'}.get(scope, 'محتوى الشركة')
-    name = None
-    try:
-        if scope == 'draft' and target_id:
-            name = (db.get_project_draft_by_id(tenant_id, target_id) or {}).get('title')
-        elif scope == 'presentation' and target_id:
-            name = (db.get_presentation(target_id, tenant_id=tenant_id) or {}).get('title')
-        elif scope == 'file' and target_id:
-            name = (db.get_project_file_by_id(str(target_id)) or {}).get('original_name')
-    except Exception:
-        name = None
-    return f'{base} «{name}»' if name else base
-
-
-def _require_admin_content_access(tenant_id, scope, target_id=None):
-    """d07: a platform admin may read client content only under an active grant.
-
-    Returns the grant row when access is allowed, otherwise a ready
-    (response, status) tuple explaining that a client-approved access request
-    is required. Each allowed access is counted, audited in the *client's*
-    audit log, and the first use notifies the client.
-    """
-    grant = db.active_admin_access_grant(tenant_id, scope=scope, target_id=target_id)
-    if not grant:
-        return (jsonify({
-            'error': 'الاطّلاع على محتوى العميل يتطلب إذن اطّلاع معتمدًا من مدير الشركة',
-            'error_code': 'access_grant_required',
-            'tenant_id': tenant_id,
-        }), 403)
-    db.mark_admin_access_used(grant['id'])
-    try:
-        db.record_audit_event(
-            tenant_id=tenant_id,
-            action='admin_content.access',
-            entity_type=scope,
-            entity_id=target_id or tenant_id,
-            user_id=None,
-            user_name=grant.get('requested_by_name') or 'مدير النظام',
-            user_role='platform_admin',
-            entity_name=None,
-            new_value={'grant_id': grant['id'], 'scope': scope, 'target_id': target_id},
-            metadata={'reason': grant.get('reason'), 'access_count': int(grant.get('access_count') or 0) + 1},
-        )
-    except Exception as exc:
-        print(f'[ACCESS GRANT] audit write failed: {exc}')
-    if not grant.get('first_accessed_at'):
-        _notify_tenant_admins(
-            tenant_id, 'مدير المنصة اطّلع على محتوى شركتك',
-            'اطّلع مدير المنصة على ' + _access_scope_label(scope, target_id, tenant_id)
-            + ' للقراءة فقط بموجب الإذن المعتمد — السبب: ' + (grant.get('reason') or ''),
-            entity_type='admin_access_request', entity_id=grant['id'])
-    return grant
-
-
 def _admin_tenant_user_or_404(tenant_id, user_id):
     tenant, error = _admin_tenant_or_404(tenant_id)
     if error:
@@ -638,14 +577,10 @@ def api_admin_tenant_exports(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>/activity', methods=['GET'])
 @require_admin
 def api_admin_tenant_activity(tenant_id):
-    """Recent change history across any tenant — its diff details carry real
-    content, so an active client-approved access grant is required (d07)."""
+    """Recent change history across any tenant — read-only support view."""
     _, error = _admin_tenant_or_404(tenant_id)
     if error:
         return error
-    grant = _require_admin_content_access(tenant_id, scope='tenant')
-    if isinstance(grant, tuple):
-        return grant
     return jsonify({'success': True, 'activity': db.get_tenant_recent_activity(tenant_id)})
 
 
@@ -670,14 +605,10 @@ def api_admin_tenant_agent(tenant_id):
 @app.route('/api/admin/tenants/<tenant_id>/presentations/<pres_id>', methods=['GET'])
 @require_admin
 def api_admin_tenant_presentation(tenant_id, pres_id):
-    """Full read-only presentation of any tenant — requires an active,
-    client-approved access grant (d07)."""
+    """Full read-only presentation of any tenant — support view."""
     _, error = _admin_tenant_or_404(tenant_id)
     if error:
         return error
-    grant = _require_admin_content_access(tenant_id, scope='presentation', target_id=pres_id)
-    if isinstance(grant, tuple):
-        return grant
     pres = db.get_presentation(pres_id, tenant_id=tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404

@@ -344,7 +344,7 @@
       renderSagTenants(filtered);
     }
 
-    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity', 'access', 'agent'];
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity', 'agent'];
 
     function sagTenantPaneId(tab) {
       return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
@@ -364,7 +364,7 @@
         if (pane) pane.style.display = active ? '' : 'none';
         if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
       });
-      if (['drafts', 'presentations', 'exports', 'activity', 'access', 'agent'].includes(tab)) {
+      if (['drafts', 'presentations', 'exports', 'activity', 'agent'].includes(tab)) {
         sagLoadTenantDataPane(sagCurrentTenantId, tab);
       }
     }
@@ -375,27 +375,20 @@
         presentations: 'sagTenantPresentationsList',
         exports: 'sagTenantExportsList',
         activity: 'sagTenantActivityList',
-        access: 'sagTenantAccessList',
         agent: 'sagTenantAgentList'
       };
       const host = document.getElementById(bodies[tab]);
       if (!host || !tenantId || host.dataset.loaded === '1') return;
       showInlineLoader(host, 'جاري التحميل...');
-      const url = tab === 'access'
-        ? '/api/admin/access-requests?tenant_id=' + encodeURIComponent(tenantId)
-        : '/api/admin/tenants/' + tenantId + '/' + tab;
-      const data = await api('GET', url).catch(() => ({ success: false }));
+      const data = await api('GET', '/api/admin/tenants/' + tenantId + '/' + tab).catch(() => ({ success: false }));
       if (!data || !data.success) {
-        host.innerHTML = (data && data.error_code === 'access_grant_required')
-          ? '<p class="tenant-hint">' + escapeHtml(WFT('admin.access_needed', 'الاطّلاع على محتوى الشركة يتطلب إذنًا معتمدًا من مديرها')) + '</p>'
-          : '<p class="tenant-hint">تعذر التحميل</p>';
+        host.innerHTML = '<p class="tenant-hint">تعذر التحميل</p>';
         return;
       }
       host.dataset.loaded = '1';
       if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
       else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
-      else if (tab === 'access') host.innerHTML = renderSagTenantAccess(data.requests || []);
       else if (tab === 'agent') host.innerHTML = renderSagTenantAgent(data);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
     }
@@ -443,49 +436,6 @@
       return html;
     }
 
-    function renderSagTenantAccess(requests) {
-      if (!requests.length) return '<p class="tenant-hint">' + escapeHtml(WFT('admin.access_empty', 'لا توجد طلبات اطّلاع')) + '</p>';
-      const statusLabels = {
-        pending: WFT('users.access_pending', 'قيد الانتظار'), approved: WFT('users.access_approved', 'معتمد'),
-        denied: WFT('users.access_denied', 'مرفوض'), expired: WFT('users.access_expired', 'منتهي'),
-        revoked: WFT('users.access_revoked', 'ملغي'),
-      };
-      const scopeLabels = {
-        tenant: WFT('users.access_scope_tenant', 'كل محتوى الشركة'),
-        presentation: WFT('users.access_scope_presentation', 'عرض تقديمي محدد'),
-        file: WFT('users.access_scope_file', 'ملف محدد'),
-      };
-      return requests.map(r => {
-        const expiry = r.expires_at ? ' | <span>' + escapeHtml(WFT('users.access_expires', 'ينتهي')) + ':</span> ' + escapeHtml(String(r.expires_at).slice(0, 16).replace('T', ' ')) : '';
-        return '<div class="tenant-presentation-card"><div><h3 style="font-size:14px">' + escapeHtml(scopeLabels[r.scope] || scopeLabels.tenant) +
-          (r.target_id ? ' — ' + escapeHtml(r.target_id) : '') + '</h3>' +
-          '<div class="meta"><span>' + escapeHtml(statusLabels[r.status] || r.status) + '</span> | ' +
-          escapeHtml(r.reason || '') + expiry + '</div></div></div>';
-      }).join('');
-    }
-
-    async function sagCreateAccessRequest(event, tenantId) {
-      event.preventDefault();
-      const payload = {
-        scope: document.getElementById('sagAccessScope').value,
-        targetId: document.getElementById('sagAccessTarget').value.trim() || null,
-        reason: document.getElementById('sagAccessReason').value.trim(),
-        hours: parseInt(document.getElementById('sagAccessHours').value, 10) || 24,
-      };
-      if (!payload.reason) { toast(WFT('admin.access_reason_required', 'السبب مطلوب')); return; }
-      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/access-requests', payload);
-      if (data && data.success) {
-        toast(WFT('admin.access_requested', 'أُرسل طلب الاطّلاع'));
-        document.getElementById('sagAccessReason').value = '';
-        document.getElementById('sagAccessTarget').value = '';
-        const host = document.getElementById('sagTenantAccessList');
-        if (host) host.dataset.loaded = '';
-        sagLoadTenantDataPane(tenantId, 'access');
-      } else {
-        toast((data && data.error) || WFT('common.error', 'حدث خطأ'));
-      }
-    }
-
     function renderSagTenantDrafts(drafts) {
       if (!drafts.length) return '<p class="tenant-hint">لا توجد ملفات مشاريع</p>';
       return drafts.map(d => {
@@ -519,12 +469,7 @@
       try {
         const data = await api('GET', '/api/admin/tenants/' + tenantId + '/presentations/' + presId);
         if (!data.success) {
-          if (data.error_code === 'access_grant_required') {
-            toast(WFT('admin.access_needed', 'الاطّلاع على محتوى الشركة يتطلب إذنًا معتمدًا من مديرها'));
-            if (sagCurrentTenantId === tenantId) showSagTenantTab('access');
-          } else {
-            toast(data.error || 'تعذر تحميل العرض');
-          }
+          toast(data.error || 'تعذر تحميل العرض');
           return;
         }
         sagPreviewSlides = ((data.presentation && data.presentation.slidesData) || []).filter(s => s && s.html);
@@ -657,7 +602,6 @@
         '<button type="button" id="sagTabBtnPresentations" class="btn small ghost" onclick="showSagTenantTab(\'presentations\')">العروض</button>' +
         '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
         '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
-        '<button type="button" id="sagTabBtnAccess" class="btn small ghost" onclick="showSagTenantTab(\'access\')">' + escapeHtml(WFT('admin.access_tab', 'طلبات الاطّلاع على المحتوى')) + '</button>' +
         '<button type="button" id="sagTabBtnAgent" class="btn small ghost" onclick="showSagTenantTab(\'agent\')">تدريب AI والوكيل</button>' +
         '</div>' +
         '<div id="sagTenantTabCompany">' +
@@ -719,18 +663,6 @@
         '<h3 class="dash-section-title">التصديرات</h3><div id="sagTenantExportsList"></div></div>' +
         '<div id="sagTenantTabActivity" style="display:none">' +
         '<h3 class="dash-section-title">سجل التعديلات</h3><div id="sagTenantActivityList"></div></div>' +
-        '<div id="sagTenantTabAccess" style="display:none">' +
-        '<h3 class="dash-section-title">' + escapeHtml(WFT('admin.access_tab', 'طلبات الاطّلاع على المحتوى')) + '</h3>' +
-        '<form onsubmit="sagCreateAccessRequest(event, \'' + tenantId + '\')" style="margin-bottom:14px"><div class="tenant-grid">' +
-        '<div class="tenant-field"><label for="sagAccessScope">' + escapeHtml(WFT('admin.access_scope', 'النطاق')) + '</label><select id="sagAccessScope">' +
-        '<option value="tenant">' + escapeHtml(WFT('admin.access_scope_tenant', 'كل محتوى الشركة')) + '</option>' +
-        '<option value="presentation">' + escapeHtml(WFT('admin.access_scope_presentation', 'عرض محدد')) + '</option>' +
-        '<option value="file">' + escapeHtml(WFT('admin.access_scope_file', 'ملف محدد')) + '</option></select></div>' +
-        '<div class="tenant-field"><label for="sagAccessTarget">' + escapeHtml(WFT('admin.access_target', 'معرف الهدف')) + '</label><input id="sagAccessTarget" dir="ltr"></div>' +
-        '<div class="tenant-field"><label for="sagAccessHours">' + escapeHtml(WFT('admin.access_hours', 'المدة بالساعات')) + '</label><input type="number" id="sagAccessHours" min="1" max="72" value="24" dir="ltr"></div>' +
-        '<div class="tenant-field full"><label for="sagAccessReason">' + escapeHtml(WFT('admin.access_reason', 'السبب')) + '</label><input id="sagAccessReason" maxlength="300" required></div>' +
-        '</div><div class="sag-modal-actions"><button type="submit" class="btn primary">' + escapeHtml(WFT('admin.access_request_btn', 'إرسال طلب اطّلاع')) + '</button></div></form>' +
-        '<div id="sagTenantAccessList"></div></div>' +
         '<div id="sagTenantTabAgent" style="display:none">' +
         '<h3 class="dash-section-title">تدريب AI والوكيل</h3><div id="sagTenantAgentList"></div></div>' +
         '</div>';
