@@ -4,11 +4,12 @@
    landing.html only; sections, join form and motion live in
    site-sections.css. */
 
-/* ── Transparent top bar over the dark hero ──────────────────────────────── */
+/* ── Transparent top bar over the dark hero ────────────────────────────────
+   Sticky (the base rule), so in the flow it sits right after the intro —
+   below the fold while the opening plays, then it rides up with the hero
+   and docks at the top. Never overlays the cinematic. */
 
 .site-topbar.on-dark {
-  position: absolute;
-  inset-inline: 0;
   background: transparent;
   border-bottom: 0;
   backdrop-filter: none;

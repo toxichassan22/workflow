@@ -653,10 +653,11 @@ html[dir="rtl"] .about-points li::before { border-radius: 0 10px 10px 0; }
 
 }
 
-/* The fixed-on-scroll bar is functional, not decorative motion — it stays
-   available for reduced-motion users too; only its transition is gated. */
+/* The pinned-on-scroll bar is functional, not decorative motion — it stays
+   available for reduced-motion users too; only its transition is gated.
+   The bar is sticky so it docks itself; .scrolled only trades the
+   transparent over-hero look for the opaque one. */
 .site-topbar.on-dark.scrolled {
-  position: fixed;
   background: rgba(7, 24, 44, .88);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(255, 255, 255, .09);
