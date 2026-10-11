@@ -72,6 +72,65 @@
       padding-bottom: 8px !important;
     }
 
+    /* Top tab bar: the study's numbered sections navigate as pills while inactive
+       blocks stay in the DOM hidden via .fin-tab-off — never the hidden attribute,
+       which belongs to conditional mode logic, and never inline display:none, which
+       the PDF collector reads as «exclude this part». */
+    #section-financial-calc .fin-tabs {
+      display: flex !important;
+      flex-wrap: nowrap !important;
+      gap: 8px !important;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      padding: 4px 2px 12px !important;
+      margin: 0 0 6px !important;
+      border-bottom: 2px solid #eef5fb !important;
+      position: sticky !important;
+      top: 0 !important;
+      background: #fff !important;
+      z-index: 30 !important;
+      scrollbar-width: thin !important;
+      border-radius: 0 !important;
+    }
+
+    #section-financial-calc .fin-tab {
+      flex: 0 0 auto !important;
+      width: auto !important;
+      min-width: 0 !important;
+      appearance: none !important;
+      border: 1px solid var(--line) !important;
+      background: var(--soft) !important;
+      color: #5b5652 !important;
+      border-radius: 999px !important;
+      padding: 8px 16px !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+      font-family: inherit !important;
+      line-height: 1.4 !important;
+      cursor: pointer !important;
+      white-space: nowrap !important;
+      box-shadow: none !important;
+    }
+
+    #section-financial-calc .fin-tab:hover {
+      border-color: var(--blue) !important;
+      color: var(--p) !important;
+    }
+
+    #section-financial-calc .fin-tab.active {
+      background: var(--p) !important;
+      border-color: var(--p) !important;
+      color: #fff !important;
+    }
+
+    #section-financial-calc .fin-tab[hidden] {
+      display: none !important;
+    }
+
+    #section-financial-calc .finance-block.fin-tab-off {
+      display: none !important;
+    }
+
     #section-financial-calc .grid {
       display: grid !important;
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;

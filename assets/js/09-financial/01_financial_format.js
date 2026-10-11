@@ -185,6 +185,8 @@
         <h3 class="tenant-section-title">الدراسة المالية والمؤشرات</h3>
         <p class="hint">نموذج موحد يجمع مكونات المشروع والوحدات البيعية والوحدات المؤجرة يوميًا وشهريًا وسنويًا، ويوزع التكاليف والمبيعات والتمويل على سنوات المشروع تلقائيًا.</p>
 
+        <div class="fin-tabs" id="finTabsBar" role="tablist"></div>
+
         <div class="finance-block" id="unitNatureBlock">
           <h3>1. طبيعة وحدات المشروع</h3>
           <div class="grid four"><div><label>هل وحدات المشروع بيعية أم تأجيرية؟</label><select id="unitRevenueMode" onchange="calculateAll()"><option value="mixed">مختلطة: بيعية وتأجيرية</option><option value="sale">بيعية فقط</option><option value="rental">تأجيرية فقط</option><option value="nonRevenue">بدون إيراد</option></select><span class="help input">يحدد حقول البيع أو التأجير التي تظهر في الدراسة والتقرير.</span></div></div>
@@ -415,7 +417,7 @@
         <div class="finance-block" id="externalBlock"><h3>12. بنود خارجية مرنة</h3><div class="section-switch"><label>تطبيق بنود خارجية مرنة؟</label><select id="externalEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div><div id="externalDetails"><div class="table-wrap"><table id="externalTable"><thead><tr><th>اسم البند</th><th>نوع البند</th><th>طريقة الحساب</th><th>القيمة الأساسية</th><th>الكمية</th><th>السعر/النسبة</th><th>يبدأ سنة</th><th>ينتهي سنة</th><th>نمو %</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div><br><button type="button" class="btn ghost" onclick="addExternal()">+ إضافة بند خارجي</button></div></div>
 
         <div class="finance-block" id="exitBlock">
-          <h3>13. التخارج والنتائج</h3>
+          <h3>13. التخارج</h3>
           <div class="grid four">
             <div><label>تطبيق التخارج؟</label><select id="exitEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div id="saleExitMethodWrap"><label>طريقة التخارج البيعي</label><select id="saleExitMethod" onchange="calculateAll()"><option value="none">بدون تخارج بيعي إضافي</option><option value="remainingArea">المساحة المتبقية × سعر البيع</option><option value="fixed">قيمة بيعية ثابتة</option></select></div>
@@ -437,6 +439,10 @@
           </div>
           <div id="saleExitStatusNote" class="calculation-note" hidden></div>
           <div id="analysisWarnings" class="analysis-warning"></div>
+        </div>
+
+        <div class="finance-block" id="resultsBlock">
+          <h3>النتائج</h3>
           <div class="cards" id="resultsCards">
             <div class="metric"><span>تكلفة المشروع قبل التمويل</span><strong id="resProjectCostBeforeFinance">0</strong></div>
             <div class="metric"><span>إجمالي تكلفة المشروع شامل التمويل</span><strong id="resProjectCost">0</strong></div>
@@ -513,6 +519,7 @@
         createProjectSectionHeader('section-financial-calc', 'الدراسة المالية والمؤشرات')
       );
       form.appendChild(div);
+      setupFinancialTabs(div);
       enhanceNumericInputs(div);
 
       setTimeout(() => {
@@ -520,6 +527,72 @@
         syncFinancialFromLand();
         calculateAll();
       }, 50);
+    }
+
+    // Tabs are a pure view layer: every block stays in the DOM (ids, listeners and the
+    // report walk all keep working) and only a fin-tab-off class hides the inactive ones —
+    // deliberately not `hidden`, which conditional mode logic and the PDF collector own.
+    function activateFinancialTab(root, index) {
+      if (!root) return;
+      root.querySelectorAll('#finTabsBar .fin-tab').forEach(btn => {
+        const active = Number(btn.dataset.finTab) === index;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        if (active) btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+      root.querySelectorAll(':scope > .finance-block[data-fin-tab]').forEach(block => {
+        block.classList.toggle('fin-tab-off', Number(block.dataset.finTab) !== index);
+      });
+    }
+
+    function activateFinancialTabForElement(el) {
+      const block = el?.closest?.('.finance-block[data-fin-tab]');
+      if (block) activateFinancialTab(block.closest('#section-financial-calc'), Number(block.dataset.finTab));
+    }
+
+    function setupFinancialTabs(root) {
+      const bar = root.querySelector('#finTabsBar');
+      const blocks = [...root.querySelectorAll(':scope > .finance-block')];
+      if (!bar || !blocks.length) return;
+      // One tab per numbered input section; #resultsBlock and everything after it
+      // (sensitivity, clarifications, export) share the final «النتائج» tab.
+      const resultsIndex = blocks.findIndex(block => block.id === 'resultsBlock');
+      const tabs = [];
+      blocks.forEach((block, i) => {
+        const index = resultsIndex === -1 ? i : Math.min(i, resultsIndex);
+        block.dataset.finTab = index;
+        let tab = tabs[index];
+        if (!tab) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'fin-tab';
+          btn.dataset.finTab = index;
+          btn.setAttribute('role', 'tab');
+          btn.setAttribute('data-section-lock-ignore', '');
+          btn.textContent = block.querySelector('h3')?.textContent.trim() || '';
+          btn.addEventListener('click', () => activateFinancialTab(root, index));
+          bar.appendChild(btn);
+          tab = { index, btn, members: [] };
+          tabs[index] = tab;
+        }
+        tab.members.push(block);
+      });
+      // Project mode hides whole blocks (grace for sale-only, developer bonus for
+      // rental-only); mirror that onto the tabs so a hidden section leaves no dead tab.
+      const syncTabs = () => {
+        tabs.forEach(tab => {
+          tab.btn.hidden = !tab.members.some(block => !block.hidden && !block.classList.contains('conditional-off'));
+        });
+        const active = tabs.find(tab => tab.btn.classList.contains('active'));
+        if (active?.btn.hidden) {
+          const firstVisible = tabs.find(tab => !tab.btn.hidden);
+          if (firstVisible) activateFinancialTab(root, firstVisible.index);
+        }
+      };
+      const observer = new MutationObserver(syncTabs);
+      blocks.forEach(block => observer.observe(block, { attributes: true, attributeFilter: ['hidden', 'class'] }));
+      activateFinancialTab(root, 0);
+      syncTabs();
     }
 
     function addComponent(d = {}) {

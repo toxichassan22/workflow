@@ -250,6 +250,7 @@
       const first = Array.isArray(validation) ? validation[0] : null;
       if (!first?.field) return;
       const target = document.getElementById(first.field) || document.querySelector('[data-field="' + first.field + '"]');
+      if (typeof activateFinancialTabForElement === 'function') activateFinancialTabForElement(target);
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       target?.focus?.();
     }
