@@ -207,6 +207,7 @@ def _visual_plan_create_scene(data, context=None):
     if not _visual_plan_notes_review_valid(data, context):
         raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
     program = _visual_plan_program(contract, context)
+    visual_plan_scene.check_program_feasibility(contract, program)
     reference_url = _visual_concept_render_plan_boundary_reference(contract['geometry']['surveyPoints'], g.tenant_id)
     references = _visual_concept_reference_uris(urls=[reference_url], tenant_id=g.tenant_id) if reference_url else []
     system_prompt = (

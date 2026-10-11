@@ -42,6 +42,31 @@ def entry_position(entry, scene):
     return [edge['a'][i] + (edge['b'][i] - edge['a'][i]) * entry['position'] for i in (0, 1)]
 
 
+def _coverage_cap(contract):
+    coverage = finite_number(str(contract.get('coverageRatio') or '').replace('%', ''))
+    land_area = finite_number(contract.get('landArea'))
+    if coverage is None or land_area is None or land_area <= 0:
+        return None
+    return land_area * (coverage / 100 if coverage > 1 else coverage)
+
+
+def check_program_feasibility(contract, program):
+    """Refuse a building program no layout could satisfy, before any model call:
+    the sum of mandatory above-ground footprints already exceeds the recorded
+    coverage cap regardless of footprint shapes or placement (basement-only
+    masses are exempt — they sit below ground and may overlap)."""
+    cap = _coverage_cap(contract)
+    if cap is None:
+        return
+    required = sum(building['footprintArea'] for building in program['buildings']
+                   if not building.get('basementOnly'))
+    if required > cap + 0.5:
+        raise PlanGeometryError(
+            f'مجموع البصمات المطلوبة {required:g} م² يتجاوز حد التغطية المسجل {cap:g} م² — '
+            'لا يوجد ترتيب كتل يحقق التوزيع؛ قلّل أكبر مساحة دور بكل مبنى أو راجع نسبة التغطية.',
+            'PLANS_COVERAGE_CONFLICT')
+
+
 def validate_scene(scene, contract, program):
     if not isinstance(scene, dict) or scene.get('geometry') != contract['geometry']:
         raise PlanGeometryError('حدود المشهد لا تطابق مرجع الأرض الثابت.', 'PLANS_BOUNDARY_CHANGED')
@@ -79,11 +104,9 @@ def validate_scene(scene, contract, program):
             if any(polygons_overlap(polygon, previous) for previous in footprints):
                 raise PlanGeometryError('بصمات المباني تتداخل.', 'PLANS_BUILDING_OVERLAP')
             footprints.append(polygon)
-    coverage = finite_number(str(contract.get('coverageRatio') or '').replace('%', ''))
-    land_area = finite_number(contract.get('landArea'))
-    if coverage is not None and land_area is not None and land_area > 0:
-        ratio = coverage / 100 if coverage > 1 else coverage
-        if sum(abs(signed_area(polygon)) for polygon in footprints) > land_area * ratio + 0.5:
+    cap = _coverage_cap(contract)
+    if cap is not None:
+        if sum(abs(signed_area(polygon)) for polygon in footprints) > cap + 0.5:
             raise PlanGeometryError('إجمالي بصمات المباني يتجاوز نسبة التغطية المسجلة.', 'PLANS_COVERAGE_CONFLICT')
     street_sides = {row['direction'] for row in contract['directions'] if row['street']}
     entries = scene.get('entries', [])

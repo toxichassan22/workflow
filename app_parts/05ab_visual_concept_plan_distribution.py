@@ -326,6 +326,22 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     'item': 'مساحة الدور تتجاوز حد التغطية',
                     'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
                     'result': 'يحتاج تأكيد', 'severity': 'medium', 'row_ids': [row.get('id')]})
+        required = 0.0
+        for entries in by_building.values():
+            probes = {parsed['lo'] for parsed, _row in entries} | {parsed['hi'] for parsed, _row in entries}
+            areas = [sum(row['floor_area_sqm'] for parsed, row in entries
+                         if isinstance(row.get('floor_area_sqm'), (int, float))
+                         and parsed['lo'] <= probe <= parsed['hi'])
+                     for probe in probes]
+            required += max(areas, default=0)
+        if required > footprint_cap + 0.5:
+            checks.append({
+                'item': 'إجمالي بصمات المباني يتجاوز حد التغطية',
+                'detail': (f'مجموع البصمات المطلوبة للمباني فوق الأرض {required:g} م² يتجاوز حد التغطية '
+                           f'{footprint_cap:g} م² — لا يوجد ترتيب كتل يحقق التوزيع؛ '
+                           'قلّل أكبر مساحة دور بكل مبنى أو راجع نسبة التغطية'),
+                'result': 'متعارض', 'severity': 'high',
+                'row_ids': [row.get('id') for entries in by_building.values() for _parsed, row in entries]})
     far = _visual_concept_number(context.get('floor_area_ratio')) or _visual_concept_number(regulations.get('floor_area_ratio'))
     if not far:
         far_match = re.search(r'معامل[^\d]{0,15}(\d+(?:[.,]\d+)?)',
