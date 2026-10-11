@@ -5,8 +5,10 @@
 # exterior → interior → sketches. Each paid route re-checks the chain before a
 # provider call: the posted sectionApprovals flag plus, when the visual_concept
 # mirror ships with the request, the underlying item approvals it certifies.
-# A flag without its items never passes, mirroring the frontend reconciler
-# that drops it on persist.
+# Plans is the all-items leg (the exterior model consumes the three-diagram
+# set); the later sections certify whatever subset the client generated, so
+# one approved artifact is enough. A flag without its items never passes,
+# mirroring the frontend reconciler that drops it on persist.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 VISUAL_CONCEPT_SECTION_ORDER = ('plans2d', 'external', 'internal', 'sketches')
@@ -42,9 +44,11 @@ def _visual_concept_section_approvals(data):
 
 def _visual_concept_section_items_approved(data, section_id):
     """Re-derives the section's required items so a hand-edited flag cannot
-    certify content the same request does not show. Routes that drop the
-    mirror (sketches) skip this — the flag stands alone there, the same trust
-    level as the approvedImageUrl values the rest of the flow accepts."""
+    certify content the same request does not show. Plans needs the full
+    three-diagram set; exterior and interior certify whatever subset the
+    client generated, so one approved artifact is enough. Routes that drop
+    the mirror (sketches) skip this — the flag stands alone there, the same
+    trust level as the approvedImageUrl values the rest of the flow accepts."""
     if section_id == 'plans2d':
         return len(_visual_concept_plan_image_urls(data)) >= 3
     slots = _visual_concept_posted_state(data).get('slots')
@@ -52,13 +56,14 @@ def _visual_concept_section_items_approved(data, section_id):
     if not slots:
         return True
     if section_id == 'external':
-        return all(
+        return any(
             isinstance(slots.get(key), dict) and str(slots[key].get('approvedImageUrl') or '').strip()
             for key in VISUAL_CONCEPT_EXTERNAL_SLOTS)
     if section_id == 'internal':
-        interior = [key for key in slots if _visual_concept_is_internal_slot(key)]
-        return bool(interior) and all(
-            str(slots[key].get('approvedImageUrl') or '').strip() for key in interior)
+        return any(
+            _visual_concept_is_internal_slot(key)
+            and str(slots[key].get('approvedImageUrl') or '').strip()
+            for key in slots)
     return True
 
 
@@ -87,7 +92,7 @@ def _visual_concept_section_gate(data, required):
                 'section': required}
     if not _visual_concept_section_items_approved(data, required):
         return {'success': False,
-                'error': 'اعتماد القسم يتطلب اعتماد كل محتواه',
+                'error': 'اعتماد القسم لا يطابق محتواه المعتمد',
                 'error_code': 'SECTION_ITEMS_INCOMPLETE',
                 'section': required}
     return None

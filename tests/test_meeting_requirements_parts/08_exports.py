@@ -1160,7 +1160,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(interior_no_section.get_json()['error_code'], 'SECTION_APPROVAL_REQUIRED')
         self.assertEqual(interior_no_section.get_json()['section'], 'external')
 
-        # A posted flag whose mirror shows unapproved items fails the strict
+        # A posted flag whose mirror shows no approved item fails the strict
         # re-check instead of certifying stale content.
         interior_stale_flag = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
             'slotId': 'interior_comp-1',
@@ -1172,12 +1172,38 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
                 'visual_concept': {
                     'sectionApprovals': {'external': True},
-                    'slots': {'cover': {'approvedImageUrl': '/uploads/creative/cover.png'}},
+                    'slots': {'cover': {'imageUrl': '/uploads/creative/cover_draft.png'}},
                 },
             },
         })
         self.assertEqual(interior_stale_flag.status_code, 400, interior_stale_flag.get_json())
         self.assertEqual(interior_stale_flag.get_json()['error_code'], 'SECTION_ITEMS_INCOMPLETE')
+
+        # The client picks how many exterior images to generate — a single
+        # approved one (not necessarily the hero) certifies the section, so
+        # the gate passes and the request reaches the provider call.
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,BBBB') as subset_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+            interior_subset = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'interior_comp-1',
+                'prompt': 'Apartment interior',
+                'componentId': 'comp-1',
+                'coverImage': '/uploads/creative/cover.png',
+                'projectData': {
+                    **facts,
+                    'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+                    'visual_concept': {
+                        'sectionApprovals': {'external': True},
+                        'slots': {
+                            'cover': {'imageUrl': '/uploads/creative/cover_draft.png'},
+                            'right': {'approvedImageUrl': '/uploads/creative/right.png'},
+                        },
+                    },
+                },
+            })
+        self.assertEqual(interior_subset.status_code, 200, interior_subset.get_json())
+        self.assertTrue(subset_call.called)
 
         sketch_no_section = client.post('/api/visual-concept/sketch', headers=self._headers(self.token_a), json={
             'slotId': 'cover',

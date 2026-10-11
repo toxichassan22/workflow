@@ -70,7 +70,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "اعتمد قسم المخططات أولاً": "Approve the plans section first",
   "اعتمد قسم التصور الخارجي أولاً": "Approve the exterior concept section first",
   "اعتمد قسم التصور الداخلي أولاً": "Approve the interior concept section first",
-  "اعتماد القسم يتطلب اعتماد كل محتواه": "Section approval requires every generated item to be approved",
+  "اعتماد القسم لا يطابق محتواه المعتمد": "The section approval does not match its approved content",
   "قسم التصور غير معتمد": "The concept section is not approved",
   "اختر مكونًا فعليًا من الدراسة المالية": "Choose a real component from the financial study",
   "تعذر تعديل حدود الأرض بالذكاء الاصطناعي": "Could not edit the land boundary with AI",

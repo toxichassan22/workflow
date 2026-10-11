@@ -2,9 +2,12 @@
 
     /* ── Major-section approvals, the workflow's second tier. The workspace runs
        as a strict sequence — plans → exterior → interior → sketches — and each
-       leg carries one durable flag that certifies every generated item inside
-       it. Approving a leg is refused while any of its items is unapproved, and
-       each flag unlocks only the next leg. The flags live in
+       leg carries one durable flag that certifies its generated content.
+       Plans is the all-items leg: the exterior model consumes the full
+       three-diagram set, so every plan must be approved. The later legs
+       certify whatever subset the user chose to generate — one approved
+       artifact (one exterior image, one interior view, one sketch) is enough,
+       and each flag unlocks only the next leg. The flags live in
        tenantVisualConceptState.sectionApprovals and are reconciled on every
        persist, so revoked or regenerated content can never leave a stale
        approval behind. ── */
@@ -40,48 +43,45 @@
       return WFT('vc.sec.locked_until', 'مقفل حتى اعتماد قسم {name}', { name: visualConceptSectionLabel(gate) });
     }
 
-    // The generated items a section approval certifies. Anything on this list
-    // without an approved artifact keeps approval refused — and drops an
-    // existing flag on the next persist pass. An empty section has nothing to
-    // certify, so it stays refused too.
-    function visualConceptSectionItemCount(id) {
+    // The approved artifacts a section flag certifies. Plans needs the full
+    // three-diagram set; the later sections certify whatever subset the user
+    // chose to generate, so a single approved artifact is enough there.
+    function visualConceptSectionApprovedCount(id) {
       const slots = tenantVisualConceptState?.slots || {};
-      if (id === 'plans2d') return VISUAL_CONCEPT_PLAN_KINDS.length;
-      if (id === 'external') return VISUAL_CONCEPT_EXTERNAL_SLOTS.length;
-      if (id === 'internal') return Object.keys(slots).filter(isVisualConceptInteriorSlot).length;
-      if (id === 'sketches') return visualConceptSketchSourceIds().length;
+      if (id === 'plans2d') {
+        return VISUAL_CONCEPT_PLAN_KINDS
+          .filter(item => durableImageUrl(slots[item.id]?.approvedImageUrl)).length;
+      }
+      if (id === 'external') {
+        return VISUAL_CONCEPT_EXTERNAL_SLOTS
+          .filter(item => durableImageUrl(slots[item.id]?.approvedImageUrl)).length;
+      }
+      if (id === 'internal') {
+        return Object.keys(slots)
+          .filter(key => isVisualConceptInteriorSlot(key) && durableImageUrl(slots[key]?.approvedImageUrl))
+          .length;
+      }
+      if (id === 'sketches') {
+        return visualConceptSketchSourceIds().filter(srcId => {
+          const sketch = slots[srcId]?.sketch || {};
+          return sketch.status === 'approved' && durableImageUrl(sketch.approvedImageUrl);
+        }).length;
+      }
       return 0;
     }
 
+    // What still blocks a section approval. Plans lists its unapproved
+    // diagrams by name; the optional sections report one state line when they
+    // hold no approved artifact at all.
     function visualConceptSectionBlockers(id) {
       const slots = tenantVisualConceptState?.slots || {};
-      const labels = [];
       if (id === 'plans2d') {
-        VISUAL_CONCEPT_PLAN_KINDS.forEach(item => {
-          if (!durableImageUrl(slots[item.id]?.approvedImageUrl)) labels.push(visualConceptSlotLabel(item.id));
-        });
-      } else if (id === 'external') {
-        VISUAL_CONCEPT_EXTERNAL_SLOTS.forEach(item => {
-          if (!durableImageUrl(slots[item.id]?.approvedImageUrl)) labels.push(visualConceptSlotLabel(item.id));
-        });
-      } else if (id === 'internal') {
-        Object.keys(slots).filter(isVisualConceptInteriorSlot).sort().forEach(viewId => {
-          if (!durableImageUrl(slots[viewId]?.approvedImageUrl)) labels.push(visualConceptSketchSourceLabel(viewId));
-        });
-      } else if (id === 'sketches') {
-        visualConceptSketchSourceIds().forEach(srcId => {
-          const sketch = slots[srcId]?.sketch || {};
-          if (sketch.status !== 'approved' || !durableImageUrl(sketch.approvedImageUrl)) {
-            labels.push(visualConceptSketchSourceLabel(srcId));
-          }
-        });
-      } else {
-        return [id];
+        return VISUAL_CONCEPT_PLAN_KINDS
+          .filter(item => !durableImageUrl(slots[item.id]?.approvedImageUrl))
+          .map(item => visualConceptSlotLabel(item.id));
       }
-      if (!labels.length && !visualConceptSectionItemCount(id)) {
-        labels.push(WFT('vc.sec.empty', 'لا يوجد محتوى'));
-      }
-      return labels;
+      if (!VISUAL_CONCEPT_SECTION_IDS.includes(id)) return [id];
+      return visualConceptSectionApprovedCount(id) ? [] : [WFT('vc.sec.no_approved', 'لا توجد عناصر معتمدة بعد')];
     }
 
     // Reconciler: a section flag never outlives the content it certifies, and a
@@ -110,10 +110,12 @@
         text = visualConceptSectionLockReason(id);
       } else if (blockers.length) {
         cls = 'waiting';
-        text = WFT('vc.sec.waiting', 'بانتظار اعتماد: {items}', { items: blockers.join('، ') });
+        text = id === 'plans2d'
+          ? WFT('vc.sec.waiting', 'بانتظار اعتماد: {items}', { items: blockers.join('، ') })
+          : blockers[0];
       } else {
         cls = 'ready';
-        text = WFT('vc.sec.ready', 'اكتمل اعتماد محتوى القسم');
+        text = WFT('vc.sec.ready', 'يوجد محتوى معتمد في القسم');
       }
       const button = locked ? ''
         : (approved
@@ -139,8 +141,9 @@
       }
       const blockers = visualConceptSectionBlockers(id);
       if (blockers.length) {
-        showVisualConceptLockNotice(
-          WFT('vc.sec.blocked', 'لا يكتمل اعتماد القسم قبل اعتماد: {items}', { items: blockers.join('، ') }));
+        showVisualConceptLockNotice(id === 'plans2d'
+          ? WFT('vc.sec.blocked', 'لا يكتمل اعتماد القسم قبل اعتماد: {items}', { items: blockers.join('، ') })
+          : blockers[0]);
         return;
       }
       tenantVisualConceptState.sectionApprovals[id] = true;
