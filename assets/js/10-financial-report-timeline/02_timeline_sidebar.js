@@ -1,4 +1,4 @@
-    // The land/croquis section is the single source of truth for the approved area, floor count
+ص    // The land/croquis section is the single source of truth for the approved area, floor count
     // and coverage ratio; the financial study mirrors them read-only so the two cannot disagree.
     function syncFinancialFromLand() {
       const landAreaInput = document.getElementById('landArea');
@@ -268,10 +268,12 @@
         // confirms. The same answer commitTenantPresentation gives.
         let resp = null;
         let expectedRev = tenantDraftRevision;
+        if (typeof bestUseOptionalStatuses === 'function') {
+          tenantProjectSectionStatuses = bestUseOptionalStatuses(tenantProjectSectionStatuses);
+        }
         for (let attempt = 0; attempt < 2; attempt++) {
           resp = await api('POST', '/api/project-draft',
-            { draftData: snapshot, sectionStatuses: typeof bestUseOptionalStatuses === 'function'
-                ? bestUseOptionalStatuses(tenantProjectSectionStatuses) : tenantProjectSectionStatuses, status: 'draft',
+            { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
               slideCheckpoint, expectedRevision: expectedRev },
             false, { onProgress });
           if (!resp || resp.success || resp.error_code !== 'DRAFT_REVISION_CONFLICT') break;
