@@ -7,7 +7,8 @@ def _visual_concept_plan_floor_range(text):
     if not value:
         return None
     lowered = value.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).lower()
-    if re.search(r'مساحة\s*مفتوحة|سطحية|سطحي|surface|\bsite\b|open\s*area', lowered):
+    if re.search(r'مساح[ةه]?(?:ات)?\s*(?:ال)?مفتوح[ةه]?|سطحية|سطحي|surface|\bsite\b|open\s*(?:area|space)'
+                 r'|الموقع\s*العام', lowered):
         return {'kind': 'site', 'lo': 0, 'hi': 0, 'count': 1}
     if re.search(r'roof|سطح|روف|ملحق|ملاحق', lowered):
         return {'kind': 'roof', 'lo': 0, 'hi': 0, 'count': 1}
@@ -269,6 +270,13 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 'detail': (f'«{row.get("component") or "مكوّن"}» مساحة مفتوحة في الدراسة — '
                            f'صيغة الدور «{row.get("floor_range") or "—"}» تحوّله لكتلة بناء؛ '
                            'استخدم «مساحة مفتوحة» وأسنده للموقع العام'),
+                'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
+        elif parsed is None:
+            checks.append({
+                'item': 'صيغة الدور غير مفهومة',
+                'detail': (f'«{row.get("component") or "مكوّن"}» — «{row.get("floor_range") or "—"}» '
+                           'ليست صيغة معروفة؛ استخدم «أرضي» أو نطاقًا رقميًا أو «بدروم N» '
+                           'أو «ميزانين» أو «ملحق علوي» أو «مساحة مفتوحة»'),
                 'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
         if is_site_row or not parsed or parsed['kind'] in ('basement', 'roof', 'site'):
             continue

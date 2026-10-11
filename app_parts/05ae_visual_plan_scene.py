@@ -9,8 +9,12 @@ def _visual_plan_program(contract, context):
                  or _visual_concept_plan_regulation_floor_cap(context.get('regulations') or {}))
     for row in contract['distribution']['rows']:
         parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
+        if parsed is None and _visual_concept_plan_row_site(row, site_keys):
+            parsed = {'kind': 'site', 'lo': 0, 'hi': 0, 'count': 1}
         if parsed is None:
-            raise visual_plan_geometry.PlanGeometryError('نطاق أدوار أحد المكونات غير مكتمل.', 'PLANS_DISTRIBUTION_INCOMPLETE')
+            raise visual_plan_geometry.PlanGeometryError(
+                'نطاق أدوار «' + str(row.get('component') or 'مكوّن')[:80] + '» غير مكتمل.',
+                'PLANS_DISTRIBUTION_INCOMPLETE')
         if parsed['count'] > 200 or parsed['hi'] > 200:
             raise visual_plan_geometry.PlanGeometryError('نطاق الأدوار يتجاوز حجم الرسم المتاح.', 'PLANS_DISTRIBUTION_INCOMPLETE')
         if floor_cap and parsed['kind'] in ('range', 'ground', 'mezzanine') and parsed['hi'] > floor_cap:
