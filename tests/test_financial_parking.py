@@ -122,6 +122,49 @@ class FinancialParkingTests(unittest.TestCase):
         project['financial_study_model']['dynamicRows']['components'][0]['units'] = 120
         self.assertIsNotNone(financial_parking.parking_plan_error(project))
 
+    def test_editing_a_generated_row_keeps_the_approval(self):
+        plan = self.build()
+        plan['approved'] = True
+        project = copy.deepcopy(self.project)
+        project['financial_study_model'] = financial_parking.apply_parking_plan(
+            project['financial_study_model'], plan)
+        generated = [row for row in project['financial_study_model']
+                     ['dynamicRows']['components'] if row.get('parkingPlanId')]
+        generated[0]['units'] = 1
+        generated[0]['notes'] = 'تعديل العميل'
+        self.assertIsNone(financial_parking.parking_plan_error(project))
+        generated[0]['parkingPlanId'] = 'other-plan'
+        self.assertEqual(financial_parking.parking_plan_error(project), 'PARKING_COMPONENTS_CHANGED')
+
+    def test_approval_preserves_client_edits_to_generated_rows(self):
+        plan = self.build()
+        model = self.project['financial_study_model']
+        model['dynamicRows']['components'].append({
+            'id': 'parking_regulatory_basement', 'name': 'مواقف السيارات — البدروم',
+            'useType': 'parking', 'parkingLocation': 'basement', 'units': 25,
+            'unitArea': 30, 'builtArea': 750, 'revenueArea': 0,
+            'investmentModel': 'nonRevenue', 'parkingPlanId': 'plan-1',
+            'floorRange': 'بدروم 1', 'notes': 'ملاحظة العميل'})
+        applied = financial_parking.apply_parking_plan(model, plan)
+        parking = [row for row in applied['dynamicRows']['components'] if row.get('parkingPlanId')]
+        self.assertEqual(parking, [{'id': 'parking_regulatory_basement',
+            'name': 'مواقف السيارات — البدروم', 'useType': 'parking',
+            'parkingLocation': 'basement', 'units': 25, 'unitArea': 30,
+            'builtArea': 750, 'revenueArea': 0, 'investmentModel': 'nonRevenue',
+            'parkingPlanId': 'plan-1', 'floorRange': 'بدروم 1', 'notes': 'ملاحظة العميل'}])
+
+    def test_generated_rows_carry_the_documented_requirement_in_notes(self):
+        plan = self.build()
+        self.assertTrue(plan['components'])
+        for row in plan['components']:
+            self.assertIn(str(row['units']), row['notes'])
+            self.assertIn('130', row['notes'])
+            self.assertIn('شقق سكنية', row['notes'])
+            self.assertIn('موقف لكل وحدة', row['notes'])
+            self.assertIn('محلات تجارية', row['notes'])
+            self.assertIn('موقف لكل 50 م² مبنية', row['notes'])
+            self.assertIn('«', row['notes'])
+
     def test_basement_distribution_has_integer_spaces_and_exact_totals(self):
         self.project['approved_coverage_ratio'] = 100
         self.project['financial_study_model']['inputs'].update(coverageRate=100, basementArea=0)

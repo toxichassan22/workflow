@@ -223,7 +223,22 @@ def _requirement_summary(items, summing):
     return parts[0] if len(parts) == 1 else 'الأكبر من: ' + '، أو '.join(parts)
 
 
-def _plan_allocations(snapshot, response, required, area_per_space, source_texts, plan_id):
+def _requirement_notes(requirements, required, allocated):
+    lines = [f'يغطي {allocated:g} من إجمالي {required:g} موقفًا مطلوبة.']
+    for item in requirements:
+        if item.get('spaces') is None:
+            continue
+        name = str(item.get('name') or item.get('componentId') or '').strip()
+        summary = str(item.get('summary') or '').strip()
+        quote = str(item.get('sourceQuote') or '').strip()
+        line = (name + ': ' + summary).rstrip(' :')
+        if quote:
+            line += ' — «' + quote + '»'
+        lines.append(line)
+    return '\n'.join(lines)
+
+
+def _plan_allocations(snapshot, response, required, area_per_space, source_texts, plan_id, requirements=()):
     rows = snapshot['components']
     used = {location: 0 for location in PARKING_LOCATIONS}
     existing = 0
@@ -300,6 +315,7 @@ def _plan_allocations(snapshot, response, required, area_per_space, source_texts
             'units': count, 'unitArea': area_per_space, 'builtArea': round(count * area_per_space, 2),
             'revenueArea': 0, 'investmentModel': 'nonRevenue',
             'parkingPlanId': plan_id, 'floorRange': floor_range,
+            'notes': _requirement_notes(requirements, required, count),
         })
     return {'existingSpaces': existing, 'additionalSpaces': additional,
             'unallocatedSpaces': remaining, 'components': components,
@@ -360,7 +376,7 @@ def build_parking_plan(project, response, plan_id):
             'areaBasis': ('مساحة الموقف شاملة الحركة وفق الاشتراط الموثق.' if area_documented
                           else 'تقدير تخطيطي: 30 م² لكل موقف شاملة الحركة والخدمات، وليس اشتراطًا تنظيميًا.')}
     allocations = _plan_allocations(snapshot, response, required if not missing else 0,
-                                    area_per_space, source_texts, plan_id)
+                                    area_per_space, source_texts, plan_id, requirements)
     plan.update(allocations)
     plan['warnings'] = quantity_notes + plan['warnings']
     plan['parkingArea'] = round(sum(row['builtArea'] for row in plan['components']), 2)
@@ -386,8 +402,13 @@ def remove_parking_plan(model):
 
 
 def apply_parking_plan(model, plan):
+    # Generated rows are client-editable, so approval keeps the rows as they
+    # stand in the model instead of restoring the proposal's original values.
+    kept = [copy.deepcopy(row) for row in parking_model_components(model)
+            if str(row.get('parkingPlanId') or '') == str(plan.get('id'))]
     model = remove_parking_plan(model)
-    model['dynamicRows']['components'].extend(copy.deepcopy(plan.get('components') or []))
+    model['dynamicRows']['components'].extend(
+        kept or copy.deepcopy(plan.get('components') or []))
     model['inputs']['basementArea'] = plan['basementAreaTarget']
     model['parkingPlan'] = copy.deepcopy(plan)
     if isinstance(model.get('financialCalcData'), dict):
@@ -405,11 +426,9 @@ def parking_plan_error(project):
         return 'PARKING_APPROVAL_REQUIRED'
     if parking_snapshot_hash(parking_snapshot(project)) != plan.get('sourceHash'):
         return 'PARKING_INPUTS_CHANGED'
-    keys = ('id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea',
-            'investmentModel', 'parkingLocation', 'parkingPlanId', 'floorRange')
-    normalized = lambda rows: sorted(
-        [{key: row.get(key) for key in keys} for row in rows], key=lambda row: str(row['id']))
-    if normalized(actual) != normalized(plan.get('components') or []):
+    # The client freely edits generated rows, so approval survives their edits;
+    # only rows stamped by a different proposal still conflict with this plan.
+    if any(str(row.get('parkingPlanId')) != str(plan.get('id')) for row in actual):
         return 'PARKING_COMPONENTS_CHANGED'
     return None
 

@@ -137,13 +137,18 @@ def _financial_parking_invalidate_visuals(project, old_plan, new_plan):
         workflow['prompts'] = {'site': '', 'uses': '', 'massing': ''}
         distribution = workflow.get('distribution')
         if isinstance(distribution, dict):
+            applied_rows = [row for row in financial_parking.parking_model_components(
+                project.get('financial_study_model')) if row.get('parkingPlanId')]
             names = {row.get('name') for plan in (old_plan, new_plan) if isinstance(plan, dict)
                      for row in plan.get('components') or []}
+            names |= {row.get('name') for row in applied_rows}
             distribution['rows'] = [row for row in distribution.get('rows') or []
                                     if isinstance(row, dict) and row.get('component') not in names]
             if new_plan and new_plan.get('approved'):
+                plan_rows = [row for row in applied_rows
+                             if str(row.get('parkingPlanId')) == str(new_plan.get('id'))]
                 distribution['rows'].extend(financial_parking.parking_distribution_rows(
-                    new_plan.get('components') or [], new_plan.get('footprintArea')))
+                    plan_rows or new_plan.get('components') or [], new_plan.get('footprintArea')))
             distribution.update(approved=False, aiReviewed=False, totals=[], checks=[], issues=[])
     slots = concept.get('slots')
     if isinstance(slots, dict):
@@ -261,6 +266,11 @@ def api_suggest_financial_parking():
                 plan['warnings'].append(text)
     model['parkingPlan'] = plan
     model['parkingSnapshot'] = snapshot
+    # The proposal lands in the components table at once as editable rows; the
+    # client reviews or adjusts them, and approval keeps whatever they changed.
+    model['dynamicRows']['components'].extend(copy.deepcopy(plan['components']))
+    if isinstance(model.get('financialCalcData'), dict):
+        model['financialCalcData']['components'] = copy.deepcopy(model['dynamicRows']['components'])
     project.pop('parking_regulation_facts', None)
     return _financial_parking_store(draft, project, model, old_plan=old_plan)
 

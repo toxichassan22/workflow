@@ -250,7 +250,7 @@
           <div id="componentsAllowedUsesNote" class="tenant-hint" style="margin:0 0 10px;font-weight:700;line-height:1.7" hidden></div>
           <div class="table-wrap">
             <table id="componentsTable">
-              <thead><tr><th>اسم المكون</th><th>نوع الاستخدام</th><th>عدد الوحدات</th><th>مساحة الوحدة م²</th><th>المساحة المبنية م²</th><th>المساحة البيعية / التأجيرية م²</th><th>نموذج الاستفادة</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead>
+              <thead><tr><th>اسم المكون</th><th>نوع الاستخدام</th><th>عدد الوحدات</th><th>مساحة الوحدة م²</th><th>المساحة المبنية م²</th><th>المساحة البيعية / التأجيرية م²</th><th>نموذج الاستفادة</th><th>الملاحظات</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -535,10 +535,11 @@
     <td data-field="builtArea"><input type="number" value="${builtArea}"><span class="help input miniHelp"></span></td>
     <td data-field="revenueArea"><input type="number" value="${revenueArea}"></td>
     <td data-field="investmentModel"><select>${selectHtml(investmentModels, model)}</select></td>
+    <td data-field="notes"><textarea rows="2" class="component-notes">${escapeHtml(d.notes || '')}</textarea></td>
     <td class="row-result compResult">محسوب</td>
     <td>${rowActionsHtml()}</td>`;
       tb.appendChild(tr);
-      tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll));
+      tr.querySelectorAll('input,select,textarea').forEach(x => x.addEventListener('input', calculateAll));
       enhanceNumericInputs(tr);
       if (!window.__batchLoading) calculateAll()
     }

@@ -78,12 +78,15 @@ class FinancialParkingApiTests(unittest.TestCase):
             'draftId': self.draft_id, 'planId': plan['id'], 'approved': approved,
             'expectedRevision': self.draft()['revision']})
 
-    def test_suggestion_uses_scoped_saved_inputs_and_is_not_applied_implicitly(self):
+    def test_suggestion_uses_scoped_saved_inputs_and_lands_unapproved_in_the_table(self):
         response, provider = self.suggest(projectData={'regulatory_constraints': 'موقف لكل 1 م²'})
         plan = response['financialModel']['parkingPlan']
         self.assertEqual(plan['requiredSpaces'], 130)
         self.assertFalse(plan['approved'])
-        self.assertEqual(len(response['financialModel']['dynamicRows']['components']), 2)
+        generated = [row for row in response['financialModel']['dynamicRows']['components']
+                     if row.get('parkingPlanId')]
+        self.assertEqual(generated, plan['components'])
+        self.assertEqual(len(response['financialModel']['dynamicRows']['components']), 2 + len(generated))
         self.assertEqual(response['financialModel']['inputs']['basementArea'], 600)
         self.assertEqual(provider.call_args.kwargs['usage_ctx']['draft_id'], self.draft_id)
         self.assertEqual(provider.call_args.kwargs['usage_ctx']['tenant_id'], self.tenant)
@@ -102,6 +105,45 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200, again.get_json())
         self.assertEqual(again.get_json()['financialModel']['dynamicRows']['components'], model['dynamicRows']['components'])
         self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
+
+    def test_approval_preserves_client_edits_to_generated_rows(self):
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        rows = payload['financial_study_model']['dynamicRows']['components']
+        edited = next(row for row in rows if row.get('id') == plan['components'][0]['id'])
+        edited.update(units=edited['units'] + 7, notes='ملاحظة العميل')
+        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        approved = self.approve(plan)
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        parking = [row for row in approved.get_json()['financialModel']['dynamicRows']['components']
+                   if row.get('parkingPlanId')]
+        self.assertEqual(len(parking), len(plan['components']))
+        kept = next(row for row in parking if row['id'] == edited['id'])
+        self.assertEqual(kept['units'], edited['units'])
+        self.assertEqual(kept['notes'], 'ملاحظة العميل')
+
+    def test_editing_generated_rows_after_approval_keeps_the_plan_approved(self):
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        approved = self.approve(plan)
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        parking = [row for row in payload['financial_study_model']['dynamicRows']['components']
+                   if row.get('parkingPlanId')]
+        parking[0]['units'] += 5
+        parking[0]['notes'] = 'تعديل العميل'
+        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        draft = self.draft()
+        self.assertTrue(draft['draft_data']['financial_study_model']['parkingPlan']['approved'])
+        self.assertIsNone(financial_parking.parking_plan_error(draft['draft_data']))
+        parking[0]['parkingPlanId'] = 'forged-plan'
+        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        draft = self.draft()
+        self.assertFalse(draft['draft_data']['financial_study_model']['parkingPlan']['approved'])
 
     def test_all_section_approval_paths_refuse_a_pending_parking_artifact(self):
         self.suggest()

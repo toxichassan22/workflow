@@ -96,31 +96,19 @@
       if (!plan.id) return actual.length ? 'اعتماد اقتراح المواقف مطلوب قبل اعتماد الدراسة المالية أو تصديرها.' : '';
       if (plan.approved !== true || !plan.canApply) return 'اعتماد اقتراح المواقف مطلوب قبل اعتماد الدراسة المالية أو تصديرها.';
       if (financialParkingStable(financialParkingSnapshot()) !== financialParkingStable(plan.sourceSnapshot)) return 'تغيّرت بيانات المشروع أو الاشتراطات التي بُني عليها اقتراح المواقف.';
-      const keys = ['id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'investmentModel', 'parkingLocation', 'parkingPlanId', 'floorRange'];
-      const normalized = items => items.map(item => Object.fromEntries(keys.map(key => [key, item[key] ?? null])))
-        .sort((first, second) => String(first.id).localeCompare(String(second.id)));
-      return financialParkingStable(normalized(actual)) === financialParkingStable(normalized(plan.components || []))
+      return actual.every(row => String(row.parkingPlanId) === String(plan.id))
         ? '' : 'مكونات المواقف الحالية لا تطابق الاقتراح المعتمد.';
     }
 
     function financialParkingMarkup() {
       return `<section id="financialParkingPanel" class="financial-parking" aria-labelledby="financialParkingTitle">
         <div class="financial-parking-header"><h4 id="financialParkingTitle">المواقف المقترحة</h4>
-          <button type="button" id="financialParkingSuggest" class="btn ghost" onclick="suggestFinancialParking()">اقتراح المواقف بالذكاء الاصطناعي</button></div>
+          <div class="financial-parking-actions">
+            <button type="button" id="financialParkingSuggest" class="btn ghost" onclick="suggestFinancialParking()">اقتراح المواقف بالذكاء الاصطناعي</button>
+            <button type="button" id="financialParkingApprove" class="btn primary" data-section-lock-ignore="1" onclick="approveFinancialParking()" hidden>اعتماد اقتراح المواقف</button>
+            <button type="button" id="financialParkingDiscard" class="btn ghost" data-section-lock-ignore="1" onclick="discardFinancialParking()" hidden>حذف اقتراح المواقف</button>
+          </div></div>
         <div id="financialParkingStatus" class="tenant-hint financial-parking-status" role="status" aria-live="polite"></div>
-        <div id="financialParkingDetails" hidden>
-          <div class="grid four financial-parking-summary">
-            <div><label for="parkingRequiredSpaces">إجمالي المواقف المطلوبة</label><input id="parkingRequiredSpaces" readonly></div>
-            <div><label for="parkingExistingSpaces">المواقف المدخلة سابقًا</label><input id="parkingExistingSpaces" readonly></div>
-            <div><label for="parkingAdditionalSpaces">المواقف الإضافية المقترحة</label><input id="parkingAdditionalSpaces" readonly></div>
-            <div><label for="parkingProposedArea">مساحة المواقف المقترحة م²</label><input id="parkingProposedArea" readonly></div>
-            <div><label for="parkingAreaPerSpace">مساحة الموقف شاملة الحركة م²</label><input id="parkingAreaPerSpace" readonly></div>
-            <div><label for="parkingAdditionalBasementArea">مساحة البدروم الإضافية المقترحة م²</label><input id="parkingAdditionalBasementArea" readonly></div>
-          </div>
-          <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>أساس احتساب المواقف</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
-          <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
-          <div class="financial-parking-actions"><button type="button" id="financialParkingApprove" class="btn primary" data-section-lock-ignore="1" onclick="approveFinancialParking()">اعتماد اقتراح المواقف</button><button type="button" id="financialParkingDiscard" class="btn ghost" data-section-lock-ignore="1" onclick="discardFinancialParking()">حذف اقتراح المواقف</button></div>
-        </div>
       </section>`;
     }
 
@@ -155,42 +143,36 @@
       const sectionLocked = tenantProjectSectionStatuses['section-financial-calc'] === 'approved';
       const suggest = document.getElementById('financialParkingSuggest');
       if (suggest) suggest.disabled = financialParkingBusy || presentationMode || sectionLocked;
-      const details = document.getElementById('financialParkingDetails');
-      if (details) details.hidden = !plan.id || plan.approved === true;
+      const generated = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : []).filter(row => row.parkingPlanId);
+      const extras = [];
+      if (plan.id) {
+        if (plan.areaBasis) extras.push(plan.areaBasis);
+        (plan.missing || []).forEach(item => extras.push(item));
+        (plan.warnings || []).forEach(item => extras.push(item));
+        if (plan.approved === true && !error && plan.requiredSpaces != null) {
+          const recorded = generated.reduce((sum, row) => sum + (financialParkingNumber(row.units) || 0), 0);
+          if (recorded < plan.requiredSpaces) extras.push('المواقف المسجلة في الجدول أقل من المطلوب بالاشتراط.');
+        }
+      }
       if (status) status.textContent = financialParkingText(financialParkingBusy ? 'جاري إعداد اقتراح المواقف...' : !plan.id ? 'لا يوجد اقتراح مواقف.'
         : stale ? 'تغيّرت بيانات المشروع أو الاشتراطات التي بُني عليها اقتراح المواقف.'
-        : plan.approved && !error ? 'اقتراح المواقف معتمد.' : plan.canApply ? 'اقتراح المواقف بانتظار الاعتماد.' : 'اقتراح المواقف غير مكتمل.');
-      const setValue = (id, value) => { const input = document.getElementById(id); if (input) input.value = !plan.id ? '' : value == null ? '—' : money(value); };
-      setValue('parkingRequiredSpaces', plan.requiredSpaces);
-      setValue('parkingExistingSpaces', plan.existingSpaces);
-      setValue('parkingAdditionalSpaces', plan.additionalSpaces);
-      setValue('parkingProposedArea', plan.parkingArea);
-      setValue('parkingAreaPerSpace', plan.areaPerSpace);
-      setValue('parkingAdditionalBasementArea', plan.id ? Math.max(0, (plan.basementAreaTarget || 0) - (plan.baseBasementArea || 0)) : null);
-      const body = document.querySelector('#parkingRequirementsTable tbody');
-      if (body) body.innerHTML = (plan.requirements || []).map(row => {
-        const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
-        return '<tr><td>' + escapeHtml(row.name || '') + '</td><td>' + escapeHtml(financialParkingText(basis)) + '</td><td>'
-          + (row.quantity == null ? '—' : money(row.quantity)) + '</td><td>' + (row.spaces == null ? escapeHtml(financialParkingText('غير موثق')) : money(row.spaces))
-          + '</td><td><span class="financial-parking-reference" title="' + escapeHtml(row.sourceQuote || '') + '">' + escapeHtml(financialParkingText(row.summary || row.sourceQuote || '')) + '</span></td></tr>';
-      }).join('');
-      const noteLines = [plan.areaBasis, ...(plan.missing || []), ...(plan.warnings || [])].filter(Boolean).map(financialParkingText);
-      const notes = document.getElementById('financialParkingNotes');
-      if (notes) notes.value = noteLines.join('\n');
-      const notesWrap = document.getElementById('financialParkingNotesWrap');
-      if (notesWrap) notesWrap.hidden = !noteLines.length;
+        : plan.approved && !error ? 'اقتراح المواقف معتمد.' : plan.canApply ? 'اقتراح المواقف بانتظار الاعتماد.' : 'اقتراح المواقف غير مكتمل.')
+        + (extras.length ? ' ' + extras.map(financialParkingText).join(' ') : '');
       const approve = document.getElementById('financialParkingApprove');
       if (approve) {
+        approve.hidden = !plan.id;
         approve.textContent = financialParkingText(plan.approved ? 'إلغاء اعتماد اقتراح المواقف' : 'اعتماد اقتراح المواقف');
         approve.disabled = financialParkingBusy || presentationMode || (!plan.approved && (!plan.canApply || stale));
       }
       const discard = document.getElementById('financialParkingDiscard');
-      if (discard) discard.disabled = financialParkingBusy || presentationMode;
+      if (discard) {
+        discard.hidden = !plan.id;
+        discard.disabled = financialParkingBusy || presentationMode;
+      }
       document.querySelectorAll('#componentsTable tbody tr').forEach(row => {
         const parking = row.querySelector('[data-field="useType"] select')?.value === 'parking';
         const location = row.querySelector('[data-field="parkingLocation"]');
         if (location) location.hidden = !parking;
-        if (row.dataset.parkingPlanId) row.querySelectorAll('input,select,button').forEach(control => { control.disabled = true; });
       });
       if (plan.approved && error) {
         const signature = plan.id + financialParkingStable(snapshot);

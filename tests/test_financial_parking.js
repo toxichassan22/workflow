@@ -54,6 +54,7 @@ function fixture() {
   const body = { appendChild: row => rows.push(row) };
   vm.runInContext(source, context);
   context.calculateAll = () => {};
+  const realAddComponent = context.addComponent;
   context.addComponent = component => add(component);
   function add(component) {
     const controls = Object.fromEntries(Object.entries(component).map(([key, value]) => [key, field(value,
@@ -77,7 +78,7 @@ function fixture() {
       name: 'مواقف السيارات — البدروم', useType: 'parking', parkingLocation: 'basement',
       units: 130, unitArea: 30, builtArea: 3900, revenueArea: 0, investmentModel: 'nonRevenue',
       parkingPlanId: 'plan-1', floorRange: 'بدروم 1-2' }] });
-  return { context, rows, inputs, add, snapshot, proposal };
+  return { context, rows, inputs, add, snapshot, proposal, realAddComponent };
 }
 
 async function until(predicate) {
@@ -129,18 +130,20 @@ test('collection keeps proposal ownership, parking location and floor allocation
   assert.equal(model.dynamicRows.components.at(-1).units, 130);
 });
 
-test('editing the program or a generated parking row invalidates the approval', () => {
+test('editing a generated row keeps the approval; only drift or a foreign plan conflicts', () => {
   const f = fixture();
   const plan = f.proposal(true);
   f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
   f.add(plan.components[0]);
   f.inputs.basementArea.value = '3900';
   assert.equal(f.context.financialParkingError(), '');
+  f.rows.at(-1).querySelector('[data-field="units"] input').value = '129';
+  assert.equal(f.context.financialParkingError(), '');
+  f.rows.at(-1).dataset.parkingPlanId = 'other-plan';
+  assert.match(f.context.financialParkingError(), /لا تطابق/);
+  f.rows.at(-1).dataset.parkingPlanId = 'plan-1';
   f.rows[0].querySelector('[data-field="units"] input').value = '120';
   assert.match(f.context.financialParkingError(), /تغيّرت/);
-  f.rows[0].querySelector('[data-field="units"] input').value = '100';
-  f.rows.at(-1).querySelector('[data-field="units"] input').value = '129';
-  assert.match(f.context.financialParkingError(), /لا تطابق/);
 });
 
 test('a failed pre-save cannot start a billable proposal request', async () => {
@@ -214,50 +217,59 @@ test('switching projects during the pre-save cannot target the newly opened draf
   assert.equal(f.context.requests.length, 0);
 });
 
-test('the requirements table shows the computed rate line and keeps the quote as a tooltip', () => {
+test('generated rows carry the documented requirement in collected notes', () => {
   const f = fixture();
-  const plan = f.proposal();
-  plan.requirements = [{ name: 'شقق سكنية', basis: 'units', quantity: 100, spaces: 100,
-    summary: 'الأكبر من: موقف لكل وحدة، أو موقف لكل 150 م² مبنية', sourceQuote: 'نص الاشتراط الكامل' }];
-  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
-  const output = { innerHTML: '' };
-  const query = f.context.document.querySelector;
-  const byId = f.context.document.getElementById;
-  f.context.document.querySelector = selector => selector === '#parkingRequirementsTable tbody' ? output : query(selector);
-  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {} : byId(id);
-  f.context.renderFinancialParking();
-  assert(output.innerHTML.includes('الأكبر من: موقف لكل وحدة'));
-  assert(output.innerHTML.includes('title="نص الاشتراط الكامل"'));
-  assert(!output.innerHTML.includes('>نص الاشتراط الكامل<'));
+  f.add({ id: 'parking-1', name: 'مواقف السيارات — البدروم', useType: 'parking',
+    parkingLocation: 'basement', units: 130, unitArea: 30, builtArea: 3900,
+    revenueArea: 0, investmentModel: 'nonRevenue', parkingPlanId: 'plan-1',
+    floorRange: 'بدروم 1-2', notes: 'شقق سكنية: موقف لكل وحدة — «موقف لكل وحدة»' });
+  const row = f.context.getComponentRowsData().at(-1);
+  assert.equal(row.parkingPlanId, 'plan-1');
+  assert.match(row.notes, /موقف لكل وحدة/);
+  assert.match(row.notes, /«/);
 });
 
-test('an approved proposal collapses the panel to the suggest button', () => {
+test('a suggestion lands in the components table as rows of its own', () => {
   const f = fixture();
-  const plan = f.proposal(true);
-  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
-  const details = { hidden: false };
+  const plan = f.proposal();
+  const snapshot = f.context.financialParkingStable(f.snapshot());
+  const response = { success: true, draftId: 'draft-1', revision: 2,
+    financialModel: { inputs: { basementArea: 600 },
+      dynamicRows: { components: plan.components }, parkingPlan: plan } };
+  assert.equal(f.context.financialParkingReceive(response, snapshot, 'draft-1'), true);
+  assert.equal(f.rows.length, 3);
+  assert.equal(f.rows.at(-1).dataset.parkingPlanId, 'plan-1');
+});
+
+test('approve and discard actions only show while a proposal exists', () => {
+  const f = fixture();
+  const approve = { hidden: true, textContent: '', disabled: false };
+  const discard = { hidden: true, disabled: false };
   const byId = f.context.document.getElementById;
   f.context.document.getElementById = id => id === 'financialParkingPanel' ? {}
-    : id === 'financialParkingDetails' ? details : byId(id);
+    : id === 'financialParkingApprove' ? approve
+    : id === 'financialParkingDiscard' ? discard
+    : id === 'financialParkingStatus' ? { textContent: '' }
+    : byId(id);
   f.context.renderFinancialParking();
-  assert.equal(details.hidden, true);
-  plan.approved = false;
+  assert.equal(approve.hidden, true);
+  assert.equal(discard.hidden, true);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal();
   f.context.renderFinancialParking();
-  assert.equal(details.hidden, false);
+  assert.equal(approve.hidden, false);
+  assert.equal(discard.hidden, false);
+  assert.equal(approve.textContent, 'اعتماد اقتراح المواقف');
+  f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal(true);
+  f.context.renderFinancialParking();
+  assert.equal(approve.textContent, 'إلغاء اعتماد اقتراح المواقف');
 });
 
-test('rendered proposal data cannot inject markup', () => {
+test('generated-row notes render escaped inside the editable textarea', () => {
   const f = fixture();
-  const plan = f.proposal();
-  plan.requirements = [{ name: '<img src=x>', sourceQuote: '<script>bad()</script>', spaces: 130 }];
-  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
-  const output = { innerHTML: '' };
-  const query = f.context.document.querySelector;
-  const byId = f.context.document.getElementById;
-  f.context.document.querySelector = selector => selector === '#parkingRequirementsTable tbody' ? output : query(selector);
-  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {} : byId(id);
-  f.context.renderFinancialParking();
-  assert(!output.innerHTML.includes('<script>'));
-  assert(!output.innerHTML.includes('<img'));
-  assert(output.innerHTML.includes('&lt;script&gt;'));
+  const element = { dataset: {}, innerHTML: '', querySelectorAll: () => [] };
+  f.context.document.createElement = () => element;
+  f.realAddComponent({ name: 'مواقف', useType: 'parking', units: 1,
+    notes: '<script>bad()</script>' });
+  assert(element.innerHTML.includes('&lt;script&gt;'));
+  assert(!element.innerHTML.includes('<script>'));
 });

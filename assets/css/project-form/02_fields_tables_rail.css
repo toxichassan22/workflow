@@ -539,6 +539,13 @@
       resize: vertical !important;
     }
 
+    #section-financial-calc textarea.component-notes {
+      min-height: 44px !important;
+      padding: 8px 10px !important;
+      font-size: 13px !important;
+      line-height: 1.5 !important;
+    }
+
     #section-financial-calc #financialClarifications {
       font-size: 13px !important;
       line-height: 1.6 !important;

@@ -122,12 +122,13 @@
         const useType = tr.querySelector('[data-field="useType"] select')?.value || 'retail';
         const investmentModel = tr.querySelector('[data-field="investmentModel"] select')?.value || 'nonRevenue';
         const leasable = ['dailyRent', 'monthlyRent', 'annualRent', 'operating'].includes(investmentModel);
+        const notes = tr.querySelector('[data-field="notes"] textarea')?.value || '';
         const id = tr.dataset.componentKey || (tr.dataset.componentKey = 'p_' + Date.now() + '_' + Math.random().toString(16).slice(2));
         const parking = useType === 'parking' || tr.dataset.parkingPlanId ? {
           parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value || 'aboveGround',
           parkingPlanId: tr.dataset.parkingPlanId || '', floorRange: tr.dataset.floorRange || ''
         } : {};
-        return { idx, id, name, useType, units, unitArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, ...parking };
+        return { idx, id, name, useType, units, unitArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, notes, ...parking };
       });
     }
     function updateRevenueComponentOptions() {

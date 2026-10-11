@@ -532,6 +532,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "اعتماد اقتراح المواقف مطلوب قبل اعتماد الدراسة المالية أو تصديرها.": "The parking proposal must be approved before approving or exporting the financial study.",
   "تغيّرت بيانات المشروع أو الاشتراطات التي بُني عليها اقتراح المواقف.": "The project data or regulations used for the parking proposal have changed.",
   "مكونات المواقف الحالية لا تطابق الاقتراح المعتمد.": "The current parking components do not match the approved proposal.",
+  "المواقف المسجلة في الجدول أقل من المطلوب بالاشتراط.": "The parking recorded in the table is below the documented requirement.",
   "تغيّرت البيانات الحالية أثناء إعداد اقتراح المواقف؛ لم تُستبدل مدخلاتك.": "The current data changed while the parking proposal was being prepared; your inputs were not replaced.",
   "تعذر إعداد اقتراح المواقف.": "Could not prepare the parking proposal.",
   "اقتراح المواقف غير متوفر أو تغيّر.": "The parking proposal is unavailable or has changed.",

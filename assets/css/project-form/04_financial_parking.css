@@ -18,26 +18,6 @@
 .financial-parking-header h4 {
   margin: 0;
 }
-.financial-parking-summary {
-  margin: 16px 0;
-}
-.financial-parking-summary input {
-  font-weight: 700;
-}
-.financial-parking-reference {
-  display: block;
-  margin-top: 6px;
-  max-width: 440px;
-  color: var(--text-muted, #526174);
-  white-space: pre-wrap;
-  line-height: 1.65;
-}
-.financial-parking-notes {
-  display: grid;
-  gap: 6px;
-  margin: 12px 0;
-  line-height: 1.7;
-}
 .financial-parking-status {
   margin-top: 10px;
 }
@@ -57,7 +37,10 @@
   .financial-parking {
     padding: 12px;
   }
-  .financial-parking-header > button {
+  .financial-parking-header .financial-parking-actions {
     width: 100%;
+  }
+  .financial-parking-actions button {
+    flex: 1;
   }
 }
