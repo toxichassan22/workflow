@@ -1,4 +1,5 @@
 import copy
+import math
 import re
 
 from visual_plan_geometry import (DIRECTION_VECTORS, EPSILON, PlanGeometryError, finite_number,
@@ -49,8 +50,15 @@ def validate_scene(scene, contract, program):
         raise PlanGeometryError('الواجهة الرئيسية أو الارتدادات لا تطابق الكروكي.', 'PLANS_CONTEXT_CHANGED')
     source = {building['id']: building for building in program['buildings']}
     buildings = scene.get('buildings')
-    if not isinstance(buildings, list) or len(buildings) != len(source):
+    if not isinstance(buildings, list):
         raise PlanGeometryError('المباني لا تطابق التوزيع المعتمد.', 'PLANS_PROGRAM_CHANGED')
+    placed_ids = {building.get('id') for building in buildings if isinstance(building, dict)}
+    missing = [source[key]['name'] for key in source if key not in placed_ids]
+    if len(buildings) != len(source) or missing:
+        raise PlanGeometryError(
+            'المباني لا تطابق التوزيع المعتمد'
+            + (' — لم تصل بصمات: ' + '، '.join(missing) if missing else '') + '.',
+            'PLANS_PROGRAM_CHANGED')
     seen, footprints = set(), []
     for building in buildings:
         if not isinstance(building, dict) or building.get('id') not in source or building['id'] in seen:
@@ -122,6 +130,36 @@ def validate_scene(scene, contract, program):
     return scene
 
 
+def _basement_footprint(geometry, area):
+    """Deterministic footprint for a basement-only mass the layout omitted: an
+    axis-aligned rect of the exact recorded area searched inside the largest
+    parcel. Basements carry no setbacks and may overlap other masses, so any
+    in-parcel position validates — the layout model only picks a shape."""
+    wanted = finite_number(area)
+    if not wanted or wanted <= 0:
+        return None
+    parcels = sorted(geometry['parcels'], key=lambda item: -abs(signed_area(item['polygon'])))
+    for parcel in parcels:
+        poly = parcel['polygon']
+        min_x = min(point[0] for point in poly)
+        max_x = max(point[0] for point in poly)
+        min_y = min(point[1] for point in poly)
+        max_y = max(point[1] for point in poly)
+        for ratio in (1.0, 1.3, 1.7, 2.3, 0.77, 0.59, 0.44, 3.1, 0.32, 4.0, 0.25):
+            width = math.sqrt(wanted * ratio)
+            height = wanted / width
+            if width > max_x - min_x or height > max_y - min_y:
+                continue
+            for fy in range(21):
+                for fx in range(21):
+                    x = min_x + (max_x - min_x - width) * fx / 20
+                    y = min_y + (max_y - min_y - height) * fy / 20
+                    rect = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]]
+                    if polygon_inside(rect, poly):
+                        return rect
+    return None
+
+
 def make_scene(contract, program, layout, version=1):
     if not isinstance(layout, dict) or set(layout) - {'buildings', 'entries', 'openAreas', 'reply'}:
         raise PlanGeometryError('نتيجة تخطيط المشهد تحتوي بيانات غير مسموحة.', 'PLANS_LAYOUT_INVALID')
@@ -139,6 +177,13 @@ def make_scene(contract, program, layout, version=1):
         buildings.append({**copy.deepcopy(by_id[raw['id']]),
                           'footprint': validate_polygon(raw.get('footprint'), 24),
                           'facades': {side: facade_style(style) for side, style in facades.items()}})
+    placed = {building['id'] for building in buildings}
+    for item in program['buildings']:
+        if item['id'] in placed or not item.get('basementOnly'):
+            continue
+        footprint = _basement_footprint(contract['geometry'], item['footprintArea'])
+        if footprint is not None:
+            buildings.append({**copy.deepcopy(item), 'footprint': footprint, 'facades': {}})
     entries = copy.deepcopy(layout.get('entries') or [])
     if not entries and buildings and any(row['street'] and row['direction'] == contract['primaryFrontage']['direction'] for row in contract['directions']):
         entries = [{'id': 'main_entry', 'buildingId': buildings[0]['id'], 'kind': 'main',
