@@ -6,8 +6,9 @@
 # provider call: the posted sectionApprovals flag plus, when the visual_concept
 # mirror ships with the request, the underlying item approvals it certifies.
 # Plans is the all-items leg (the exterior model consumes the three-diagram
-# set); the later sections certify whatever subset the client generated, so
-# one approved artifact is enough. A flag without its items never passes,
+# set); the later sections certify whatever subset the client generated —
+# including none (an untouched section approves as skipped). What a flag never
+# certifies is a pending draft: anything generated but unapproved blocks it,
 # mirroring the frontend reconciler that drops it on persist.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -43,27 +44,31 @@ def _visual_concept_section_approvals(data):
 
 
 def _visual_concept_section_items_approved(data, section_id):
-    """Re-derives the section's required items so a hand-edited flag cannot
-    certify content the same request does not show. Plans needs the full
-    three-diagram set; exterior and interior certify whatever subset the
-    client generated, so one approved artifact is enough. Routes that drop
-    the mirror (sketches) skip this — the flag stands alone there, the same
-    trust level as the approvedImageUrl values the rest of the flow accepts."""
+    """Re-derives what the section flag certifies so a hand-edited flag cannot
+    stand in for content the same request does not show. Plans needs the full
+    three-diagram set; the later sections certify whatever subset the client
+    generated — including none — so an untouched slot never blocks, but a
+    pending draft (imageUrl present, approvedImageUrl absent) always does.
+    Routes that drop the mirror (sketches) skip this — the flag stands alone
+    there, the same trust level as the approvedImageUrl values the rest of
+    the flow accepts."""
     if section_id == 'plans2d':
         return len(_visual_concept_plan_image_urls(data)) >= 3
     slots = _visual_concept_posted_state(data).get('slots')
     slots = slots if isinstance(slots, dict) else {}
     if not slots:
         return True
+
+    def _pending(slot):
+        return (isinstance(slot, dict)
+                and str(slot.get('imageUrl') or '').strip()
+                and not str(slot.get('approvedImageUrl') or '').strip())
+
     if section_id == 'external':
-        return any(
-            isinstance(slots.get(key), dict) and str(slots[key].get('approvedImageUrl') or '').strip()
-            for key in VISUAL_CONCEPT_EXTERNAL_SLOTS)
+        return not any(_pending(slots.get(key)) for key in VISUAL_CONCEPT_EXTERNAL_SLOTS)
     if section_id == 'internal':
-        return any(
-            _visual_concept_is_internal_slot(key)
-            and str(slots[key].get('approvedImageUrl') or '').strip()
-            for key in slots)
+        return not any(_pending(slots.get(key)) for key in slots
+                       if _visual_concept_is_internal_slot(key))
     return True
 
 

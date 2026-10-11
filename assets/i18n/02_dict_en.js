@@ -634,7 +634,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "vc.sec.blocked": "Section approval still requires: {items}",
   "vc.sec.approved_toast": "{name} section approved",
   "vc.sec.unapproved_toast": "{name} section approval revoked",
-  "vc.sec.no_approved": "No approved items yet",
+  "vc.sec.no_content": "No section content yet",
   "vc.component_fallback": "Component",
   "vc.edit_running": "Editing the image",
   "vc.edit_running_detail": "Applying the edit to the same image without changing its other details...",

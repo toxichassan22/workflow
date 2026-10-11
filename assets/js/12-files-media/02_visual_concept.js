@@ -586,8 +586,11 @@
         if (planKind === 'massing') return 'مقفل حتى اعتماد مخططي الموقع العام وتوزيع الأدوار.';
       }
       if (isVisualConceptInteriorSlot(slotId)) {
-        if (!visualConceptInteriorComponents().length) return 'لا توجد مكونات في الدراسة المالية بعد.';
-        return visualConceptSectionLockReason('internal');
+        if (!visualConceptSectionApproved('external')) return visualConceptSectionLockReason('internal');
+        if (!durableImageUrl(tenantVisualConceptState?.slots?.cover?.approvedImageUrl)) {
+          return 'مقفل حتى اعتماد الصورة الرئيسية.';
+        }
+        return 'لا توجد مكونات في الدراسة المالية بعد.';
       }
       if (visualConceptSectionLocked('external')) return visualConceptSectionLockReason('external');
       return 'مقفل حتى اعتماد الصورة الرئيسية.';
@@ -607,7 +610,12 @@
         return false;
       }
       if (isVisualConceptInteriorSlot(slotId)) {
-        return !visualConceptSectionApproved('external') || !visualConceptInteriorComponents().length;
+        // Interior renders consume the approved hero as their building
+        // reference — a skipped (empty) exterior section leaves that input
+        // missing even though the section flag is set.
+        return !visualConceptSectionApproved('external')
+          || !durableImageUrl(tenantVisualConceptState.slots.cover?.approvedImageUrl)
+          || !visualConceptInteriorComponents().length;
       }
       // Exterior renders stay locked until the plans section is approved as a
       // whole; the angles still wait for the hero image on top of that.
@@ -655,7 +663,6 @@
       const referenceCard = document.getElementById('visualConceptInteriorReferenceCard');
       if (!host) return;
       const components = visualConceptInteriorComponents();
-      const externalApproved = visualConceptSectionApproved('external');
       if (select) {
         const current = selectedVisualConceptInteriorComponentId();
         select.innerHTML = components.length
@@ -684,7 +691,7 @@
         id,
         label: WFT('vc.internal_concept', 'تصور داخلي: {name} — صورة {n}', { name: component?.name || WFT('vc.component_fallback', 'المكون'), n: index + 1 }),
         group: 'internal'
-      }, !externalApproved)).join('');
+      }, visualConceptSlotLocked(id))).join('');
       const canAdd = viewIds.length < VISUAL_CONCEPT_MAX_INTERIOR_IMAGES;
       host.innerHTML = '<div class="visual-concept-interior-stack">' + cards + '</div>' +
         (canAdd ? '<div class="visual-concept-actions" style="margin-top:12px"><button type="button" class="btn ghost small" data-visual-action="add-interior">إضافة صورة داخلية</button></div>' : '');

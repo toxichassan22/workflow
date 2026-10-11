@@ -1170,8 +1170,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(interior_no_section.get_json()['error_code'], 'SECTION_APPROVAL_REQUIRED')
         self.assertEqual(interior_no_section.get_json()['section'], 'external')
 
-        # A posted flag whose mirror shows no approved item fails the strict
-        # re-check instead of certifying stale content.
+        # A posted flag whose mirror shows a pending draft fails the strict
+        # re-check instead of certifying content that was never approved.
         interior_stale_flag = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
             'slotId': 'interior_comp-1',
             'prompt': 'Apartment interior',
@@ -1190,8 +1190,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(interior_stale_flag.get_json()['error_code'], 'SECTION_ITEMS_INCOMPLETE')
 
         # The client picks how many exterior images to generate — a single
-        # approved one (not necessarily the hero) certifies the section, so
-        # the gate passes and the request reaches the provider call.
+        # approved one certifies the section and untouched slots never block,
+        # so the gate passes and the request reaches the provider call.
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,BBBB') as subset_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
                 patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
@@ -1206,7 +1206,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                     'visual_concept': {
                         'sectionApprovals': {'external': True},
                         'slots': {
-                            'cover': {'imageUrl': '/uploads/creative/cover_draft.png'},
+                            'cover': {},
                             'right': {'approvedImageUrl': '/uploads/creative/right.png'},
                         },
                     },
@@ -1214,6 +1214,28 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             })
         self.assertEqual(interior_subset.status_code, 200, interior_subset.get_json())
         self.assertTrue(subset_call.called)
+
+        # Skipping works too: the flag over a wholly untouched section is a
+        # clean skip — nothing generated means nothing left to certify.
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,BBBB') as skip_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+            interior_skipped = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'interior_comp-1',
+                'prompt': 'Apartment interior',
+                'componentId': 'comp-1',
+                'coverImage': '/uploads/creative/cover.png',
+                'projectData': {
+                    **facts,
+                    'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+                    'visual_concept': {
+                        'sectionApprovals': {'external': True},
+                        'slots': {key: {} for key in ('cover', 'right', 'left', 'top', 'back')},
+                    },
+                },
+            })
+        self.assertEqual(interior_skipped.status_code, 200, interior_skipped.get_json())
+        self.assertTrue(skip_call.called)
 
         sketch_no_section = client.post('/api/visual-concept/sketch', headers=self._headers(self.token_a), json={
             'slotId': 'cover',

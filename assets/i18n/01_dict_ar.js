@@ -634,7 +634,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "vc.sec.blocked": "لا يكتمل اعتماد القسم قبل اعتماد: {items}",
   "vc.sec.approved_toast": "تم اعتماد قسم {name}",
   "vc.sec.unapproved_toast": "تم إلغاء اعتماد قسم {name}",
-  "vc.sec.no_approved": "لا توجد عناصر معتمدة بعد",
+  "vc.sec.no_content": "لا يوجد محتوى في القسم",
   "vc.component_fallback": "المكون",
   "vc.edit_running": "جاري تعديل الصورة",
   "vc.edit_running_detail": "يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...",

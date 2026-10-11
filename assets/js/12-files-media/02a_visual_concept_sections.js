@@ -5,12 +5,13 @@
        leg carries one durable flag that certifies its generated content.
        Plans is the all-items leg: the exterior model consumes the full
        three-diagram set, so every plan must be approved. The later legs
-       certify whatever subset the user chose to generate — one approved
-       artifact (one exterior image, one interior view, one sketch) is enough,
-       and each flag unlocks only the next leg. The flags live in
-       tenantVisualConceptState.sectionApprovals and are reconciled on every
-       persist, so revoked or regenerated content can never leave a stale
-       approval behind. ── */
+       certify whatever subset the user chose to generate — including none at
+       all: an untouched section approves as skipped. What a flag never
+       certifies is a pending draft — anything generated but not yet approved
+       blocks the flag until it is approved too. Each flag unlocks only the
+       next leg. The flags live in tenantVisualConceptState.sectionApprovals
+       and are reconciled on every persist, so revoked or regenerated content
+       can never leave a stale approval behind. ── */
 
     const VISUAL_CONCEPT_SECTION_IDS = ['plans2d', 'external', 'internal', 'sketches'];
 
@@ -70,9 +71,27 @@
       return 0;
     }
 
+    // Generated-but-unapproved artifacts inside a section. Their existence is
+    // what a section flag cannot certify — an untouched slot is just content
+    // the user chose not to make.
+    function visualConceptSectionPendingIds(id) {
+      const slots = tenantVisualConceptState?.slots || {};
+      const pending = slot => durableImageUrl(slot?.imageUrl) && !durableImageUrl(slot?.approvedImageUrl);
+      if (id === 'external') {
+        return VISUAL_CONCEPT_EXTERNAL_SLOTS.filter(item => pending(slots[item.id])).map(item => item.id);
+      }
+      if (id === 'internal') {
+        return Object.keys(slots).filter(key => isVisualConceptInteriorSlot(key) && pending(slots[key])).sort();
+      }
+      if (id === 'sketches') {
+        return visualConceptSketchSourceIds().filter(srcId => pending(slots[srcId]?.sketch || {}));
+      }
+      return [];
+    }
+
     // What still blocks a section approval. Plans lists its unapproved
-    // diagrams by name; the optional sections report one state line when they
-    // hold no approved artifact at all.
+    // diagrams by name (all three are required); the optional sections list
+    // only their pending drafts — no drafts, nothing to certify, approvable.
     function visualConceptSectionBlockers(id) {
       const slots = tenantVisualConceptState?.slots || {};
       if (id === 'plans2d') {
@@ -81,7 +100,9 @@
           .map(item => visualConceptSlotLabel(item.id));
       }
       if (!VISUAL_CONCEPT_SECTION_IDS.includes(id)) return [id];
-      return visualConceptSectionApprovedCount(id) ? [] : [WFT('vc.sec.no_approved', 'لا توجد عناصر معتمدة بعد')];
+      return visualConceptSectionPendingIds(id).map(srcId => id === 'sketches'
+        ? WFT('vcsketch.mirror_of', 'سكتش — {name}', { name: visualConceptSketchSourceLabel(srcId) })
+        : visualConceptSketchSourceLabel(srcId));
     }
 
     // Reconciler: a section flag never outlives the content it certifies, and a
@@ -110,12 +131,12 @@
         text = visualConceptSectionLockReason(id);
       } else if (blockers.length) {
         cls = 'waiting';
-        text = id === 'plans2d'
-          ? WFT('vc.sec.waiting', 'بانتظار اعتماد: {items}', { items: blockers.join('، ') })
-          : blockers[0];
+        text = WFT('vc.sec.waiting', 'بانتظار اعتماد: {items}', { items: blockers.join('، ') });
       } else {
         cls = 'ready';
-        text = WFT('vc.sec.ready', 'يوجد محتوى معتمد في القسم');
+        text = visualConceptSectionApprovedCount(id)
+          ? WFT('vc.sec.ready', 'يوجد محتوى معتمد في القسم')
+          : WFT('vc.sec.no_content', 'لا يوجد محتوى في القسم');
       }
       const button = locked ? ''
         : (approved
@@ -141,9 +162,8 @@
       }
       const blockers = visualConceptSectionBlockers(id);
       if (blockers.length) {
-        showVisualConceptLockNotice(id === 'plans2d'
-          ? WFT('vc.sec.blocked', 'لا يكتمل اعتماد القسم قبل اعتماد: {items}', { items: blockers.join('، ') })
-          : blockers[0]);
+        showVisualConceptLockNotice(
+          WFT('vc.sec.blocked', 'لا يكتمل اعتماد القسم قبل اعتماد: {items}', { items: blockers.join('، ') }));
         return;
       }
       tenantVisualConceptState.sectionApprovals[id] = true;
