@@ -95,6 +95,15 @@ class VisualPlanGeometryTests(unittest.TestCase):
         rows[0]['direction'] = 'west'
         self.assertEqual(primary_frontage('الواجهة الشمالية الرئيسية على الشارع.', '', rows)['direction'], 'north')
 
+    def test_recorded_main_facade_field_disambiguates_frontage(self):
+        rows = [{'direction': 'east', 'description': 'Street', 'street': True},
+                {'direction': 'north', 'description': 'Street', 'street': True}]
+        self.assertEqual(primary_frontage('', '', rows, main_direction='شرقية')['direction'], 'east')
+        self.assertEqual(primary_frontage('Main facade faces west. Main facade faces north.', '', rows,
+                                          main_direction='الواجهة الشرقية')['direction'], 'east')
+        self.assertEqual(primary_frontage('', '', rows, main_direction='جنوبية')['status'], 'conflicting')
+        self.assertEqual(primary_frontage('', '', rows, main_direction='شرقية وغربية')['status'], 'unresolved')
+
     def test_conflicting_primary_facades_and_neighbor_frontage_do_not_pass(self):
         rows = [{'direction': 'north', 'description': 'Street', 'street': True},
                 {'direction': 'west', 'description': 'Neighbor', 'street': False}]

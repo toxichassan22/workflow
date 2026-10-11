@@ -9,6 +9,12 @@ def api_visual_concept_plans_verify():
         return _billing_guard
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     context = _visual_concept_plan_context(project_data)
+    if ((context.get('primary_frontage') or {}).get('status') == 'unresolved'
+            and (context.get('land_brief') or context.get('croquis_regulatory_constraints'))):
+        summary, constraints, site_rows, _holders, _main = _visual_plan_site_parts(project_data)
+        resolved = _visual_plan_resolve_primary_frontage(summary, constraints, site_rows, data)
+        if resolved:
+            context['primary_frontage'] = resolved
     regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
     context['regulations'] = regulations
 

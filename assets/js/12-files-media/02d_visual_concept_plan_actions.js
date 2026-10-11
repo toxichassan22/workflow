@@ -388,6 +388,9 @@
         }
         const workflow = visualConceptPlansWorkflowState();
         workflow.notesReview = normalizeVisualConceptPlansWorkflow({ notesReview: response.notesReview }).notesReview;
+        if (response.primaryFrontage && typeof response.primaryFrontage === 'object') {
+          workflow.planContext = { ...(workflow.planContext || {}), primary_frontage: response.primaryFrontage };
+        }
         workflow.sourceStamp = stamp;
         markVisualConceptDirty();
         renderVisualConceptPage();

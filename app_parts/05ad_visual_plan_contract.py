@@ -6,7 +6,7 @@ import visual_plan_geometry as visual_plan_geometry
 VISUAL_PLAN_SCENE_VERSION = 1
 
 
-def _visual_plan_refresh_site_context(context, project_data):
+def _visual_plan_site_parts(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     analysis = visual_plan_context.parsed(source.get('land_documents_analysis'), {})
     analysis = analysis if isinstance(analysis, dict) else {}
@@ -18,11 +18,92 @@ def _visual_plan_refresh_site_context(context, project_data):
     constraints = visual_plan_context.text(visual_plan_context.first_value(
         (source, parcel, analysis), 'regulatory_constraints', 'allowed_uses_restrictions'))
     rows = visual_plan_context.direction_rows(source, analysis, parcel)
+    main = visual_plan_context.first_value(
+        holders, 'main_facade_direction', 'primary_facade_direction', 'main_frontage_direction')
+    return summary, constraints, rows, holders, main
+
+
+def _visual_plan_refresh_site_context(context, project_data):
+    summary, constraints, rows, holders, main = _visual_plan_site_parts(project_data)
     context['land_brief'] = _visual_concept_plan_sanitize_text(summary)
     context['croquis_regulatory_constraints'] = _visual_concept_plan_sanitize_text(constraints)
     context['primary_frontage'] = visual_plan_context.primary_frontage(
-        summary, constraints, rows, visual_plan_context.first_value(holders, 'facades_directions'))
+        summary, constraints, rows, visual_plan_context.first_value(holders, 'facades_directions'), main)
     return context
+
+
+def _visual_plan_frontage_hint(workflow):
+    """A frontage resolved earlier under identical inputs — verify-time AI
+    resolution rides planContext, and a sealed scene carries it too. Adopted
+    verbatim so the rebuilt contract stays identical to what was issued; the
+    stamp clears planContext whenever the inputs move, and the scene token is
+    verified right after."""
+    workflow = workflow if isinstance(workflow, dict) else {}
+    for holder in (workflow.get('planContext'), workflow.get('scene')):
+        if not isinstance(holder, dict):
+            continue
+        candidate = holder.get('primary_frontage') or holder.get('primaryFrontage')
+        if not isinstance(candidate, dict) or candidate.get('direction') not in visual_plan_context.DIRECTION_WORDS:
+            continue
+        evidence = candidate.get('evidence') if isinstance(candidate.get('evidence'), list) else []
+        return {'direction': candidate['direction'],
+                'status': _visual_concept_text(candidate.get('status'), 40) or 'resolved',
+                'evidence': [_visual_concept_text(item, 400) for item in evidence[:6]]}
+    return None
+
+
+def _visual_plan_record_frontage(data, facade):
+    """Persist an AI-resolved frontage into the posted workflow context so the
+    input signature rebuilt during sealing sees the same contract."""
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else None
+    if workflow is None:
+        workflow = {}
+        data['plansWorkflow'] = workflow
+    plan_context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else {}
+    workflow['planContext'] = plan_context
+    plan_context['primary_frontage'] = dict(facade)
+
+
+def _visual_plan_apply_frontage(contract, facade):
+    """Adopt a resolved frontage into the contract and re-derive the setbacks it
+    labels (front/rear/side map onto compass directions only once a frontage
+    exists) so the contract stays identical to a rebuilt one carrying the hint."""
+    contract['primaryFrontage'] = dict(facade)
+    contract['setbacks'] = visual_plan_context.recorded_setbacks(
+        contract.get('setbackText'), contract.get('directions') or [], facade['direction'])
+
+
+def _visual_plan_resolve_primary_frontage(summary, constraints, rows, data):
+    """Ask the text model to name the recorded main facade when the deterministic
+    scan found no evidence at all. Conflicting evidence stays a hard error — the
+    model is never used to paper over a contradiction."""
+    system_prompt = (
+        'أنت مدقق مستندات أرض. حدد جهة الواجهة الرئيسية للأرض من النصوص الموثقة فقط. '
+        'الواجهة الرئيسية هي الجهة التي نصّ المستند على أنها رئيسية، أو فرضت عليها '
+        'الاشتراطات المداخل الرئيسية، أو وُصفت بأنها المحور أو الشارع الرئيسي للأرض. '
+        'إذا لم يوجد نص يحددها بوضوح، أو وجدت إشارات متعارضة، أعد none — لا تخمّن '
+        'من عرض الشارع أو عدد الواجهات. '
+        'أعد JSON فقط: {"direction":"north|south|east|west|none","evidence":"الجملة الدالة كما وردت"}.'
+    )
+    user_prompt = ('النصوص الموثقة:\n' + json.dumps(
+        {'summary': summary, 'constraints': constraints, 'directions': rows}, ensure_ascii=False))
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=3000,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        result = parse_json_object(_get_chat_response_text(response))
+    except Exception:
+        return None
+    direction = visual_plan_context.direction_key(result.get('direction')) if isinstance(result, dict) else ''
+    if not direction:
+        return None
+    streets = {row['direction'] for row in rows if isinstance(row, dict) and row.get('street')}
+    if streets and direction not in streets:
+        return None
+    evidence = _visual_concept_plan_sanitize_text(_visual_concept_text(result.get('evidence'), 400))
+    return {'direction': direction, 'status': 'ai_resolved',
+            'evidence': [evidence] if evidence else []}
 
 
 def _visual_plan_notes(data):
@@ -42,6 +123,10 @@ def _visual_plan_prompt_context(data):
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
     context = _visual_concept_plan_context(project, boundary.get('points'))
     _financial_parking_refresh_context(context, project)
+    if not (context.get('primary_frontage') or {}).get('direction'):
+        hint = _visual_plan_frontage_hint(workflow)
+        if hint:
+            context['primary_frontage'] = hint
     return context
 
 
@@ -52,6 +137,11 @@ def _visual_plan_contract(data, context=None):
     context = context or _visual_concept_plan_context(project, boundary.get('points'))
     _financial_parking_refresh_context(context, project)
     contract = visual_plan_context.croquis_contract(project, context, boundary.get('points'))
+    if not contract['primaryFrontage'].get('direction'):
+        hint = _visual_plan_frontage_hint(workflow)
+        if hint:
+            _visual_plan_apply_frontage(contract, hint)
+            context['primary_frontage'] = dict(hint)
     source_points = visual_plan_context.first_value((project,), 'survey_coordinates', 'regulation_coordinates')
     contract['recordedSurvey'] = visual_plan_geometry.read_points(source_points) if source_points else contract['geometry']['surveyPoints']
     contract['projectName'] = context.get('project_name') or ''
@@ -100,6 +190,14 @@ def _visual_plan_notes_review_valid(data, context=None):
 
 def _visual_plan_review_notes(data, context=None):
     contract, context = _visual_plan_contract(data, context)
+    if (contract['primaryFrontage'].get('status') == 'unresolved'
+            and (contract.get('landBrief') or contract.get('regulatoryConstraints'))):
+        resolved = _visual_plan_resolve_primary_frontage(
+            contract.get('landBrief') or '', contract.get('regulatoryConstraints') or '',
+            contract.get('directions') or [], data)
+        if resolved:
+            _visual_plan_apply_frontage(contract, resolved)
+            _visual_plan_record_frontage(data, resolved)
     notes = contract['clientNotes']
     lines = [line.strip() for line in notes.splitlines() if line.strip()]
     if len(lines) > 30:
@@ -148,7 +246,7 @@ def _visual_plan_review_notes(data, context=None):
     review['inputSignature'] = signature
     review['token'] = _visual_plan_token('notes', data, signature,
                                        {key: review[key] for key in ('verified', 'canProceed', 'checks', 'issues')})
-    return review
+    return review, contract['primaryFrontage']
 
 
 def _visual_concept_render_plan_boundary_reference(points, tenant_id):

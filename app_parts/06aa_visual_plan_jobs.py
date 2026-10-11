@@ -35,7 +35,8 @@ def _visual_plan_execute(kind, data, slot_id=''):
                       'prompt': _visual_concept_plan_drawing_prompt(_visual_concept_plan_kind(slot_id), context, model),
                       'engine': 'surveyed_geometry' if scene else 'deterministic', 'reply': ''}
         elif kind == 'notes':
-            result = {'success': True, 'notesReview': _visual_plan_review_notes(data)}
+            review, frontage = _visual_plan_review_notes(data)
+            result = {'success': True, 'notesReview': review, 'primaryFrontage': frontage}
         elif kind == 'edit':
             result = _visual_plan_edit_scene(data, slot_id)
         elif kind == 'render':

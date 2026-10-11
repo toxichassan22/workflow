@@ -252,7 +252,7 @@ def _execute_extract_croquis():
             '  "parcels": [{\n'
             '    "parcel_id": "P-1", "plot_number": "", "plan_number": "", "subdivision_number": "",\n'
             '    "deed_number": "", "deed_date": "", "area_sqm": null,\n'
-            '    "facades_count": null, "facades_directions": "",\n'
+            '    "facades_count": null, "facades_directions": "", "main_facade_direction": "",\n'
             '    "directions": {\n'
             '      "north": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"},\n'
             '      "south": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "setback": "", "source": "regulation_table"},\n'
@@ -296,6 +296,10 @@ def _execute_extract_croquis():
             "يُمنع منعًا تامًا كتابة أي كلمة اتجاه هنا.\n"
             "- facades_directions: اتجاهات تلك الواجهات فقط (مثل: شمالية، غربية). "
             "لا تكتب الاتجاهات الأربعة كلها إلا إذا كانت القطعة فعلًا مطلة على أربعة شوارع.\n"
+            "- main_facade_direction: اتجاه الواجهة الرئيسية بكلمة اتجاه واحدة (شمالية، جنوبية، شرقية، غربية). "
+            "سجّله فقط إذا نصّ مستند على جهة رئيسية — «الواجهة الرئيسية» أو «الجهة الرئيسية» أو فرضٍ "
+            "للمداخل الرئيسية على جهة بعينها أو وصفها بأنها المحور أو الشارع الرئيسي للأرض. "
+            "إن لم يوجد نص يحددها فاتركه فارغًا ولا تستنتجه من عرض الشارع أو عدد الواجهات.\n"
             "- في directions املأ street_name و street_width_m للحدود المطلة على شوارع، "
             "واذكر في uses أن الحد يجاور قطعة/جار للحدود غير المطلة على شارع.\n"
             "- setback داخل كل اتجاه: الارتداد المخصص لذلك الاتجاه بالمتر. جدول الجهات والحدود في الكروكي أو الرخصة "

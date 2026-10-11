@@ -38,6 +38,19 @@ def direction_key(value):
                  if re.fullmatch(pattern, candidate, re.IGNORECASE)), '')
 
 
+def stated_direction(value):
+    """A recorded direction field: an exact direction word, or a short phrase
+    containing exactly one direction. More than one direction stays unresolved."""
+    candidate = text(value)
+    key = direction_key(candidate)
+    if key:
+        return key
+    found = list(dict.fromkeys(
+        key for key, pattern in DIRECTION_WORDS.items()
+        if re.search(pattern, candidate, re.IGNORECASE)))
+    return found[0] if len(found) == 1 else ''
+
+
 def first_value(holders, *keys):
     return next((holder[key] for holder in holders if isinstance(holder, dict)
                  for key in keys if holder.get(key) not in (None, '', [], {})), '')
@@ -70,7 +83,7 @@ def direction_rows(project, analysis, parcel):
     return rows
 
 
-def primary_frontage(summary, constraints, rows, facade_directions=''):
+def primary_frontage(summary, constraints, rows, facade_directions='', main_direction=''):
     candidates = []
     for prose in (summary, constraints):
         for fragment in re.split(r'[\n.;؛]', text(prose)):
@@ -94,6 +107,13 @@ def primary_frontage(summary, constraints, rows, facade_directions=''):
                                        if re.search(pattern, text(facade_directions), re.IGNORECASE)))
     streets = streets or stated_facades
     directions = list(dict.fromkeys(item[0] for item in candidates))
+    stated_main = stated_direction(main_direction)
+    if stated_main:
+        if streets and stated_main not in streets:
+            return {'direction': '', 'status': 'conflicting',
+                    'evidence': [item[1] for item in candidates] + [text(main_direction)]}
+        evidence = [item[1] for item in candidates if item[0] == stated_main] or [text(main_direction)]
+        return {'direction': stated_main, 'status': 'recorded', 'evidence': evidence}
     if len(directions) > 1:
         return {'direction': '', 'status': 'conflicting', 'evidence': [item[1] for item in candidates]}
     if directions:
@@ -154,7 +174,9 @@ def croquis_contract(project, context, points=None):
     if len(summary) > 32000 or len(constraints) > 32000:
         raise PlanGeometryError('بيانات الكروكي النصية تتجاوز حجم المعالجة المتاح.', 'PLANS_CONTEXT_TOO_LARGE')
     rows = direction_rows(project, analysis, parcel)
-    facade = primary_frontage(summary, constraints, rows, first_value(holders, 'facades_directions'))
+    facade = primary_frontage(
+        summary, constraints, rows, first_value(holders, 'facades_directions'),
+        first_value(holders, 'main_facade_direction', 'primary_facade_direction', 'main_frontage_direction'))
     raw_points = points or first_value(holders, 'survey_coordinates', 'regulation_coordinates')
     geometry = boundary_geometry(raw_points)
     setback_text = text(first_value((project, parcel, analysis), 'setbacks', 'building_ratio_setbacks'))

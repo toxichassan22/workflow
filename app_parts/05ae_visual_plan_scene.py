@@ -91,6 +91,15 @@ def _visual_plan_scene_from_request(data):
 
 def _visual_plan_create_scene(data, context=None):
     contract, context = _visual_plan_contract(data, context)
+    if (contract['primaryFrontage'].get('status') == 'unresolved'
+            and (contract.get('landBrief') or contract.get('regulatoryConstraints'))):
+        resolved = _visual_plan_resolve_primary_frontage(
+            contract.get('landBrief') or '', contract.get('regulatoryConstraints') or '',
+            contract.get('directions') or [], data)
+        if resolved:
+            _visual_plan_apply_frontage(contract, resolved)
+            _visual_plan_record_frontage(data, resolved)
+            context['primary_frontage'] = dict(resolved)
     if not contract['primaryFrontage']['direction']:
         raise visual_plan_geometry.PlanGeometryError('الواجهة الرئيسية غير محددة بوضوح في الكروكي والملخص.', 'PLANS_MAIN_FRONTAGE_REQUIRED')
     if not _visual_plan_notes_review_valid(data, context):

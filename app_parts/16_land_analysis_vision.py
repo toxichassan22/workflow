@@ -508,6 +508,7 @@ PARCEL_PLACEHOLDER_KEYS = (
     'coverage_ratio', 'floor_area_ratio', 'table_floors', 'max_floors_height',
     'parking_requirements', 'entrances_exits_requirements', 'allowed_uses',
     'allowed_uses_restrictions', 'regulatory_constraints', 'land_use_status', 'summary',
+    'main_facade_direction',
 )
 
 
@@ -898,6 +899,7 @@ def _normalize_land_document_result(resp_json, text_content='', project_type='')
             'approved_financial_area_sqm': None,
             'facades_count': legacy.get('facades_count'),
             'facades_directions': legacy.get('facades_directions', ''),
+            'main_facade_direction': legacy.get('main_facade_direction', ''),
             'directions': directions,
             'north_direction': legacy.get('north_direction', ''),
             'building_ratio_coverage': legacy.get('building_ratio_coverage', ''),
