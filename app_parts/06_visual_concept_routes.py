@@ -120,6 +120,14 @@ def api_visual_concept_plans_boundary():
                 system_prompt, user_prompt, temperature=None, max_tokens=4000,
                 model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
                 response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+            fatal = _ai_fatal_error_dict(response)
+            if fatal is not None:
+                fatal_response = _ai_fatal_http_response(response)
+                if fatal_response is not None:
+                    return fatal_response
+                return jsonify({'success': False, 'error': _client_safe_llm_error(fatal.get('message'))}), 503
+            if isinstance(response, dict) and response.get('error'):
+                return jsonify({'success': False, 'error': _client_safe_llm_error(_chat_error_message(response))}), 503
             parsed = parse_json_object(_get_chat_response_text(response))
             ai_points = _visual_concept_plan_boundary_points(parsed.get('points') if isinstance(parsed, dict) else [])
             if ai_points:

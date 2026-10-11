@@ -45,7 +45,7 @@ def _visual_plan_execute(kind, data, slot_id=''):
             return {'success': False, 'error_code': 'PLANS_OPERATION_INVALID'}, 400
         return result, 200
     except visual_plan_geometry.PlanGeometryError as error:
-        status = 503 if error.code == 'PLANS_NOTES_CHECK_FAILED' else 400
+        status = 503 if error.code in ('PLANS_NOTES_CHECK_FAILED', 'PLANS_PROVIDER_FAILED') else 400
         return {'success': False, 'error': str(error), 'error_code': error.code}, status
     except (TypeError, ValueError) as error:
         app.logger.warning('Visual plan data refused: %s', type(error).__name__)

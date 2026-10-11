@@ -92,9 +92,14 @@ def _visual_plan_resolve_primary_frontage(summary, constraints, rows, data):
             system_prompt, user_prompt, temperature=None, max_tokens=3000,
             model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
-        result = parse_json_object(_get_chat_response_text(response))
     except Exception:
         return None
+    fatal = _ai_fatal_error_dict(response)
+    if fatal is not None:
+        raise FatalAICallError(fatal.get('message'), error_code=fatal.get('error_code'),
+                               http_status=fatal.get('http_status'),
+                               provider_message=fatal.get('provider_message'))
+    result = parse_json_object(_get_chat_response_text(response))
     direction = visual_plan_context.direction_key(result.get('direction')) if isinstance(result, dict) else ''
     if not direction:
         return None
@@ -224,6 +229,14 @@ def _visual_plan_review_notes(data, context=None):
             system_prompt, user_prompt, temperature=None, max_tokens=5000,
             model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+        fatal = _ai_fatal_error_dict(response)
+        if fatal is not None:
+            raise FatalAICallError(fatal.get('message'), error_code=fatal.get('error_code'),
+                                   http_status=fatal.get('http_status'),
+                                   provider_message=fatal.get('provider_message'))
+        if isinstance(response, dict) and response.get('error'):
+            raise visual_plan_geometry.PlanGeometryError(
+                _client_safe_llm_error(_chat_error_message(response)), 'PLANS_NOTES_CHECK_FAILED')
         result = parse_json_object(_get_chat_response_text(response))
         raw_checks = result.get('checks') if isinstance(result, dict) else None
         if not isinstance(raw_checks, list) or len(raw_checks) != len(lines):

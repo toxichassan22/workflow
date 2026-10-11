@@ -136,18 +136,37 @@ def _visual_plan_create_scene(data, context=None):
                    + json.dumps(program, ensure_ascii=False))
     feedback = ''
     error = None
+    cap = 7000
     for attempt in range(2):
         response = call_openrouter_chat(
-            system_prompt, user_prompt + feedback, temperature=None, max_tokens=7000,
+            system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
             model=SLIDE_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
             image_references=references or None, usage_ctx=_usage_ctx('image', data))
-        proposed = parse_json_object(_get_chat_response_text(response))
+        fatal = _ai_fatal_error_dict(response)
+        if fatal is not None:
+            raise FatalAICallError(fatal.get('message'), error_code=fatal.get('error_code'),
+                                   http_status=fatal.get('http_status'),
+                                   provider_message=fatal.get('provider_message'))
+        if isinstance(response, dict) and response.get('error'):
+            error = visual_plan_geometry.PlanGeometryError(
+                _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
+            continue
+        text_out = _get_chat_response_text(response)
+        proposed = parse_json_object(text_out)
+        choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
+        finish = str(choice.get('native_finish_reason') or choice.get('finish_reason') or '').lower()
         try:
             scene = visual_plan_scene.make_scene(contract, program, proposed, VISUAL_PLAN_SCENE_VERSION)
             return _visual_plan_seal_scene(data, scene, context), context, reference_url
         except visual_plan_geometry.PlanGeometryError as failure:
             error = failure
-            feedback = '\nThe previous proposal failed geometry validation: ' + str(failure) + '\nCorrect only the proposed scene; the fixed contract remains unchanged.'
+            if finish == 'length' or not text_out.strip():
+                cap *= 2
+            received = ', '.join(sorted(proposed.keys())) if isinstance(proposed, dict) and proposed else 'none'
+            app.logger.warning('Visual plan layout refused (%s, finish=%s, keys=%s)', failure, finish, received)
+            feedback = ('\nThe previous proposal failed geometry validation: ' + str(failure)
+                        + '\nIt contained JSON keys: ' + received
+                        + '\nCorrect only the proposed scene; the fixed contract remains unchanged.')
     raise error
 
 
@@ -199,6 +218,14 @@ def _visual_plan_edit_scene(data, slot_id):
         system_prompt, user_prompt, temperature=None, max_tokens=4000,
         model=SLIDE_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
         image_references=references or None, usage_ctx=_usage_ctx('image', data))
+    fatal = _ai_fatal_error_dict(response)
+    if fatal is not None:
+        raise FatalAICallError(fatal.get('message'), error_code=fatal.get('error_code'),
+                               http_status=fatal.get('http_status'),
+                               provider_message=fatal.get('provider_message'))
+    if isinstance(response, dict) and response.get('error'):
+        raise visual_plan_geometry.PlanGeometryError(
+            _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
     result = parse_json_object(_get_chat_response_text(response))
     if isinstance(result, dict) and result.get('clear') is False:
         return {'success': True, 'slotId': slot_id, 'needsClarification': True,
