@@ -8,6 +8,11 @@
       return typeof wfTr === 'function' ? wfTr(text) : text;
     }
 
+    function financialParkingQuoteExcerpt(text) {
+      const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+      return words.length > 15 ? words.slice(0, 15).join(' ') + '...' : words.join(' ');
+    }
+
     function financialParkingObject(value) {
       if (value && typeof value === 'object' && !Array.isArray(value)) return value;
       try { const parsed = JSON.parse(value || '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; }
@@ -172,9 +177,10 @@
       const body = document.querySelector('#parkingRequirementsTable tbody');
       if (body) body.innerHTML = (plan.requirements || []).map(row => {
         const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
+        const quote = String(row.sourceQuote || '').split('\n').map(financialParkingQuoteExcerpt).filter(Boolean).join(' — ');
         return '<tr><td>' + escapeHtml(row.name || '') + '</td><td>' + escapeHtml(financialParkingText(row.summary || basis)) + '</td><td>'
           + (row.quantity == null ? '—' : money(row.quantity)) + '</td><td>' + (row.spaces == null ? escapeHtml(financialParkingText('غير موثق')) : money(row.spaces))
-          + '</td><td><span class="financial-parking-reference" title="' + escapeHtml(row.sourceQuote || '') + '">' + escapeHtml(financialParkingText(row.sourceQuote || '')) + '</span></td></tr>';
+          + '</td><td><span class="financial-parking-reference" title="' + escapeHtml(row.sourceQuote || '') + '">' + escapeHtml(financialParkingText(quote)) + '</span></td></tr>';
       }).join('');
       const noteLines = [plan.areaBasis, ...(plan.missing || []), ...(plan.warnings || [])].filter(Boolean);
       if (plan.approved === true && !error && plan.requiredSpaces != null) {

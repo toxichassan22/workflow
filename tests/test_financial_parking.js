@@ -260,6 +260,26 @@ test('the approve action only shows while a proposal exists', () => {
   assert.equal(approve.textContent, 'إلغاء اعتماد اقتراح المواقف');
 });
 
+test('the documented requirement cell shows a concise excerpt with the full quote on hover', () => {
+  const f = fixture();
+  const long = 'اشتراط البلدية رقم سبعة: ' + 'نص '.repeat(60) + 'النهاية البعيدة تماماً';
+  const plan = f.proposal();
+  plan.requirements = [{ componentId: 'c1', name: 'شقق سكنية', basis: 'units',
+    quantity: 100, spaces: 100, summary: 'موقف لكل وحدة', sourceQuote: long }];
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const body = { innerHTML: '' };
+  const byId = f.context.document.getElementById;
+  const bySelector = f.context.document.querySelector;
+  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {} : byId(id);
+  f.context.document.querySelector = s => s === '#parkingRequirementsTable tbody' ? body : bySelector(s);
+  f.context.renderFinancialParking();
+  const tail = long.slice(-20);
+  assert.equal(body.innerHTML.split(tail).length - 1, 1);
+  assert(body.innerHTML.includes('...'));
+  assert(body.innerHTML.includes('title="' + f.context.escapeHtml(long) + '"'));
+  assert(body.innerHTML.includes('اشتراط البلدية رقم سبعة'));
+});
+
 test('generated-row notes render escaped inside the editable textarea', () => {
   const f = fixture();
   const element = { dataset: {}, innerHTML: '', querySelectorAll: () => [] };
