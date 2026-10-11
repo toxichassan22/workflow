@@ -1,4 +1,4 @@
-ص    // The land/croquis section is the single source of truth for the approved area, floor count
+    // The land/croquis section is the single source of truth for the approved area, floor count
     // and coverage ratio; the financial study mirrors them read-only so the two cannot disagree.
     function syncFinancialFromLand() {
       const landAreaInput = document.getElementById('landArea');
