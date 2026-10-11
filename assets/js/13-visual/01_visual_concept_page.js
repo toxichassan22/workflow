@@ -238,6 +238,9 @@
         }
         showVisualConceptMissing('');
         tenantVisualConceptState.slots[slotId].prompt = response.prompt;
+        if (slotId === 'cover') {
+          tenantVisualConceptState.slots[slotId].styleRefStamp = visualConceptStyleRefSignature();
+        }
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast(WFT('vc.prompt_ready', 'تم تجهيز وصف {slot}', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
@@ -260,6 +263,13 @@
       }
       if (!liveSlot().prompt) {
         await generateVisualConceptPrompt(slotId);
+      } else if (slotId === 'cover' && visualConceptCoverStyleRefStale()) {
+        // The hidden prompt predates the ref names — the prompt writer edits
+        // just the reference assignments in place, so the new mapping is
+        // written in proper prompt language without touching anything else.
+        await generateVisualConceptPrompt(
+          slotId,
+          'الصور المرجعية للتصميم اتغيّرت — حدّث تعيينها في الوصف فقط: اربط كل صورة مرجعية مسمّاة بالعنصر الذي يصفه اسمها كما ورد في بيانات المشروع، واحذف تعيين أي صورة لم تعد موجودة، ولا تغيّر أي تفاصيل أخرى.');
       }
       if (!liveSlot() || !liveSlot().prompt) return;
       const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
@@ -422,6 +432,7 @@
           toast(WFT('vc.edited_toast', 'تم تعديل الصورة — اعتمدها لتثبيتها.'));
         } else {
           liveSlot().prompt = response.prompt;
+          if (slotId === 'cover') liveSlot().styleRefStamp = visualConceptStyleRefSignature();
           liveSlot().chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
           markVisualConceptDirty();
           renderVisualConceptPage();

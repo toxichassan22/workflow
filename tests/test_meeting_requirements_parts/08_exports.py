@@ -1124,6 +1124,16 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('last 3 attached images', sent_prompt)
         self.assertIn('نادي النساء', sent_prompt)
 
+        # When the ref set changes after the prompt was written, the stamp
+        # comparison marks it stale and the prompt writer re-binds the named
+        # references in proper prompt language instead of a bolted-on line.
+        index_source = read_frontend_text()
+        self.assertIn('function visualConceptStyleRefSignature()', index_source)
+        self.assertIn('function visualConceptCoverStyleRefStale()', index_source)
+        self.assertIn('styleRefStamp', index_source)
+        self.assertIn('visualConceptCoverStyleRefStale()', index_source)
+        self.assertIn('لا تغيّر أي تفاصيل أخرى', index_source)
+
         # Major-section approvals gate the chain plans → exterior → interior →
         # sketches: the posted plan images alone are not enough — the plans
         # section flag must be there, and it must match its items.

@@ -143,6 +143,28 @@
       toast('تم حذف الصور المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
     }
 
+    // The signature of the ref set a cover prompt was written against: ids,
+    // labels and descriptions joined, so any rename or description edit flips
+    // it and marks the stored prompt stale.
+    function visualConceptStyleRefSignature() {
+      const state = tenantVisualConceptState || {};
+      const ids = Array.isArray(state.styleReferenceFileIds) ? state.styleReferenceFileIds : [];
+      const labels = Array.isArray(state.styleReferenceLabels) ? state.styleReferenceLabels : [];
+      const descriptions = Array.isArray(state.styleReferenceDescriptions) ? state.styleReferenceDescriptions : [];
+      return ids.map((id, index) =>
+        String(id) + '|' + String(labels[index] || '') + '|' + String(descriptions[index] || '')
+      ).join('~');
+    }
+
+    // The stored cover prompt is hidden, so this comparison is the only
+    // freshness signal — a prompt whose stamp differs from the current
+    // signature was written against a different ref set.
+    function visualConceptCoverStyleRefStale() {
+      const slot = tenantVisualConceptState?.slots?.cover;
+      if (!slot || !slot.prompt) return false;
+      return String(slot.styleRefStamp || '') !== visualConceptStyleRefSignature();
+    }
+
     // Every chip carries its own remove button: the parallel id/name/label/
     // description arrays stay index-aligned, so one splice per array drops a
     // single reference without disturbing the rest.

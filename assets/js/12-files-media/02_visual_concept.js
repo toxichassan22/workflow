@@ -404,6 +404,7 @@
           sourceFileName: String(slot.sourceFileName || ''),
           label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80),
           caption: String(slot.caption || '').slice(0, 400),
+          styleRefStamp: String(slot.styleRefStamp || '').slice(0, 4000),
           sketch: normalizeVisualConceptSketch(slot.sketch)
         };
       });
