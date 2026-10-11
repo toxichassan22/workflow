@@ -57,6 +57,20 @@ test('the parcel preview uses one uniform scale for both surveyed axes', () => {
   assert.equal(Math.abs(points[1][0] - points[0][0]), Math.abs(points[2][1] - points[1][1]));
 });
 
+test('the preview merges per-point parcel ids into one drawn boundary', () => {
+  const context = fixture();
+  const host = { innerHTML: '' };
+  context.renderVisualConceptBoundarySvg(host, [
+    { point: '1', parcel_id: 'P-1', eastings: 500000, northings: 2000000 },
+    { point: '2', parcel_id: 'P-2', eastings: 500020, northings: 2000000 },
+    { point: '3', parcel_id: 'P-3', eastings: 500020, northings: 2000020 },
+    { point: '4', parcel_id: 'P-4', eastings: 500000, northings: 2000020 },
+  ]);
+  const parcel = host.innerHTML.match(/<polygon points="([^"]+)"/);
+  assert.ok(parcel);
+  assert.equal(parcel[1].split(' ').length, 4);
+});
+
 test('empty or boolean survey values cannot become invented zero coordinates', () => {
   const context = fixture();
   const result = plain(context.visualConceptBoundaryPoints([

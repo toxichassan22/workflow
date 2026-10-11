@@ -132,6 +132,18 @@ def boundary_geometry(value):
     grouped = {}
     for point in surveyed:
         grouped.setdefault(point['parcel_id'] or 'parcel_1', []).append(point)
+    if not any(len(rows) >= 3 for rows in grouped.values()):
+        # A parcel under three vertices can never be a polygon, so per-point
+        # parcel ids here are extraction noise, not real parcels — merge the
+        # rows back into one boundary (exact-coordinate duplicates dropped).
+        merged, seen = [], set()
+        for row in surveyed:
+            key = (row['eastings'], row['northings'])
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+        grouped = {'parcel_1': merged}
     parcels = []
     for parcel_id, rows in grouped.items():
         polygon = validate_polygon([[row['eastings'] - origin[0], row['northings'] - origin[1]] for row in rows])

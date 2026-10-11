@@ -165,7 +165,9 @@ def _visual_concept_render_plan_boundary_reference(points, tenant_id):
             draw.line(screen + [screen[0]], fill=(23, 43, 77), width=8, joint='curve')
             for x, y in screen:
                 draw.ellipse((x - 9, y - 9, x + 9, y + 9), fill=(23, 43, 77))
-        draw.text((150, 100), 'N', fill=(23, 43, 77))
+        draw.line([(150, 160), (150, 80)], fill=(23, 43, 77), width=8)
+        draw.polygon([(150, 60), (134, 92), (166, 92)], fill=(23, 43, 77))
+        draw.text((142, 190), 'N', fill=(23, 43, 77))
         buffer = BytesIO()
         image.save(buffer, format='PNG')
         encoded = base64.b64encode(buffer.getvalue()).decode('ascii')

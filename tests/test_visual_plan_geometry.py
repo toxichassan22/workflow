@@ -41,6 +41,18 @@ class VisualPlanGeometryTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
         validate_footprint([[6, 4], [12, 4], [12, 10], [6, 10]], geometry, {'west': 5, 'south': 3})
 
+    def test_per_point_parcel_ids_merge_into_one_boundary(self):
+        points = [{'point': str(index + 1), 'parcel_id': f'P-{index + 1}',
+                   'eastings': x, 'northings': y}
+                  for index, (x, y) in enumerate(((0, 0), (40, 0), (40, 30), (0, 30)))]
+        geometry = boundary_geometry(points)
+        self.assertEqual(len(geometry['parcels']), 1)
+        self.assertEqual(len(geometry['parcels'][0]['polygon']), 4)
+        points[2]['parcel_id'] = points[1]['parcel_id'] = 'real-parcel'
+        points[3]['parcel_id'] = 'real-parcel'
+        with self.assertRaises(PlanGeometryError):
+            boundary_geometry(points)
+
     def test_invalid_survey_values_and_crossed_edges_are_rejected(self):
         for value in ('', True, float('nan'), float('inf')):
             points = self.points()

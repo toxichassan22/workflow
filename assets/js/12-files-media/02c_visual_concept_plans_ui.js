@@ -42,6 +42,19 @@
         if (!parcels.has(id)) parcels.set(id, []);
         parcels.get(id).push(row);
       });
+      // Per-point parcel ids are extraction noise — a fragment under three
+      // vertices can never be a polygon — so merge every row into one parcel.
+      if (!Array.from(parcels.values()).some(parcel => parcel.length >= 3)) {
+        const merged = [], seen = new Set();
+        rows.forEach(row => {
+          const key = row.eastings + ':' + row.northings;
+          if (seen.has(key)) return;
+          seen.add(key);
+          merged.push(row);
+        });
+        parcels.clear();
+        parcels.set('parcel_1', merged);
+      }
       const polygons = Array.from(parcels.values()).map(parcel =>
         '<polygon points="' + parcel.map(toPoint).map(point => point.join(',')).join(' ') +
         '" fill="#e8f0e8" stroke="#172b4d" stroke-width="7"></polygon>').join('');
@@ -50,7 +63,10 @@
         return '<circle cx="' + x + '" cy="' + y + '" r="9" fill="#172b4d"><title>' + escapeHtml(item.point || String(index + 1)) + '</title></circle>';
       }).join('');
       host.innerHTML = '<svg viewBox="0 0 1000 700" role="img" aria-label="حدود الأرض" class="plans-boundary-svg">' +
-        polygons + circles + '<text x="82" y="80" fill="#172b4d" font-size="24">N</text></svg>';
+        polygons + circles +
+        '<line x1="90" y1="155" x2="90" y2="70" stroke="#172b4d" stroke-width="7"></line>' +
+        '<polygon points="90,50 76,78 104,78" fill="#172b4d"></polygon>' +
+        '<text x="82" y="185" fill="#172b4d" font-size="24">N</text></svg>';
     }
 
     function visualConceptDistributionTotalsRowsHtml(distribution) {
