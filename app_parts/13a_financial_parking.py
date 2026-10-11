@@ -229,7 +229,13 @@ def api_suggest_financial_parking():
         return billing_error
     project = _financial_parking_project(draft.get('draft_data'))
     old_plan = financial_parking.parking_object(project['financial_study_model'].get('parkingPlan'))
-    model = financial_parking.remove_parking_plan(project['financial_study_model'])
+    # The applied state stays untouched while a proposal is pending: generated
+    # rows and the basement target only land through the approval endpoint.
+    # parking_snapshot ignores plan-stamped rows and resolves the basement input
+    # back to its base value, so the new proposal is built on clean inputs.
+    # The model is copied so the pending plan never mutates the hydrated draft —
+    # save_project_draft compares against it to detect real changes.
+    model = copy.deepcopy(project['financial_study_model'])
     project['financial_study_model'] = model
     snapshot = financial_parking.parking_snapshot(project)
     if not snapshot['components']:
@@ -266,11 +272,6 @@ def api_suggest_financial_parking():
                 plan['warnings'].append(text)
     model['parkingPlan'] = plan
     model['parkingSnapshot'] = snapshot
-    # The proposal lands in the components table at once as editable rows; the
-    # client reviews or adjusts them, and approval keeps whatever they changed.
-    model['dynamicRows']['components'].extend(copy.deepcopy(plan['components']))
-    if isinstance(model.get('financialCalcData'), dict):
-        model['financialCalcData']['components'] = copy.deepcopy(model['dynamicRows']['components'])
     project.pop('parking_regulation_facts', None)
     return _financial_parking_store(draft, project, model, old_plan=old_plan)
 

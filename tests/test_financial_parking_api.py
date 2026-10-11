@@ -78,19 +78,26 @@ class FinancialParkingApiTests(unittest.TestCase):
             'draftId': self.draft_id, 'planId': plan['id'], 'approved': approved,
             'expectedRevision': self.draft()['revision']})
 
-    def test_suggestion_uses_scoped_saved_inputs_and_lands_unapproved_in_the_table(self):
+    def test_suggestion_uses_scoped_saved_inputs_but_applies_nothing_before_approval(self):
         response, provider = self.suggest(projectData={'regulatory_constraints': 'موقف لكل 1 م²'})
         plan = response['financialModel']['parkingPlan']
         self.assertEqual(plan['requiredSpaces'], 130)
         self.assertFalse(plan['approved'])
         generated = [row for row in response['financialModel']['dynamicRows']['components']
                      if row.get('parkingPlanId')]
-        self.assertEqual(generated, plan['components'])
-        self.assertEqual(len(response['financialModel']['dynamicRows']['components']), 2 + len(generated))
+        self.assertEqual(generated, [])
+        self.assertEqual(len(response['financialModel']['dynamicRows']['components']), 2)
+        self.assertTrue(plan['components'])
         self.assertEqual(response['financialModel']['inputs']['basementArea'], 600)
         self.assertEqual(provider.call_args.kwargs['usage_ctx']['draft_id'], self.draft_id)
         self.assertEqual(provider.call_args.kwargs['usage_ctx']['tenant_id'], self.tenant)
         self.assertNotIn('موقف لكل 1 م²', provider.call_args.args[1])
+        approved = self.approve(plan)
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        model = approved.get_json()['financialModel']
+        self.assertEqual([row for row in model['dynamicRows']['components']
+                          if row.get('parkingPlanId')], plan['components'])
+        self.assertEqual(model['inputs']['basementArea'], plan['basementAreaTarget'])
 
     def test_approval_applies_exact_counts_and_keeps_a_single_generated_set(self):
         response, _ = self.suggest()
@@ -110,19 +117,16 @@ class FinancialParkingApiTests(unittest.TestCase):
         response, _ = self.suggest()
         plan = response['financialModel']['parkingPlan']
         payload = copy.deepcopy(self.draft()['draft_data'])
-        rows = payload['financial_study_model']['dynamicRows']['components']
-        edited = next(row for row in rows if row.get('id') == plan['components'][0]['id'])
+        edited = copy.deepcopy(plan['components'][0])
         edited.update(units=edited['units'] + 7, notes='ملاحظة العميل')
+        payload['financial_study_model']['dynamicRows']['components'].append(edited)
         saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         approved = self.approve(plan)
         self.assertEqual(approved.status_code, 200, approved.get_json())
         parking = [row for row in approved.get_json()['financialModel']['dynamicRows']['components']
                    if row.get('parkingPlanId')]
-        self.assertEqual(len(parking), len(plan['components']))
-        kept = next(row for row in parking if row['id'] == edited['id'])
-        self.assertEqual(kept['units'], edited['units'])
-        self.assertEqual(kept['notes'], 'ملاحظة العميل')
+        self.assertEqual(parking, [edited])
 
     def test_editing_generated_rows_after_approval_keeps_the_plan_approved(self):
         response, _ = self.suggest()
@@ -203,6 +207,29 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertFalse(model['parkingPlan']['approved'])
         self.assertEqual(model['inputs']['basementArea'], 600)
         self.assertEqual(len(model['dynamicRows']['components']), 2)
+
+    def test_a_new_suggestion_preserves_the_applied_state_until_its_approval(self):
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        self.assertEqual(self.approve(plan).status_code, 200)
+        applied = self.draft()['draft_data']['financial_study_model']
+        applied_rows = [row for row in applied['dynamicRows']['components'] if row.get('parkingPlanId')]
+        self.assertTrue(applied_rows)
+        response, _ = self.suggest()
+        pending = response['financialModel']
+        self.assertFalse(pending['parkingPlan']['approved'])
+        self.assertNotEqual(pending['parkingPlan']['id'], plan['id'])
+        rows = [row for row in pending['dynamicRows']['components'] if row.get('parkingPlanId')]
+        self.assertEqual(rows, applied_rows)
+        self.assertEqual(pending['inputs']['basementArea'], applied['inputs']['basementArea'])
+        self.assertIsNotNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
+        approved = self.approve(pending['parkingPlan'])
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        landed = [row for row in approved.get_json()['financialModel']['dynamicRows']['components']
+                  if row.get('parkingPlanId')]
+        self.assertTrue(landed)
+        self.assertTrue(all(str(row['parkingPlanId']) == str(pending['parkingPlan']['id']) for row in landed))
+        self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
 
     def test_provider_conflict_notes_warn_the_approver_without_blocking(self):
         self.rules['missing'] = ['تعارض موثق بين القيد الحالي والجدول في معدل الشقق.']

@@ -229,16 +229,30 @@ test('generated rows carry the documented requirement in collected notes', () =>
   assert.match(row.notes, /«/);
 });
 
-test('a suggestion lands in the components table as rows of its own', () => {
+test('a suggestion waits for approval without touching the components table', () => {
   const f = fixture();
   const plan = f.proposal();
   const snapshot = f.context.financialParkingStable(f.snapshot());
   const response = { success: true, draftId: 'draft-1', revision: 2,
     financialModel: { inputs: { basementArea: 600 },
-      dynamicRows: { components: plan.components }, parkingPlan: plan } };
+      dynamicRows: { components: [] }, parkingPlan: plan } };
+  assert.equal(f.context.financialParkingReceive(response, snapshot, 'draft-1'), true);
+  assert.equal(f.rows.length, 2);
+  assert.equal(f.inputs.basementArea.value, '600');
+  assert.match(f.context.financialParkingError(), /اعتماد اقتراح المواقف مطلوب/);
+});
+
+test('a pending re-suggestion keeps the previously applied rows in place', () => {
+  const f = fixture();
+  const applied = f.proposal(true);
+  const snapshot = f.context.financialParkingStable(f.snapshot());
+  const response = { success: true, draftId: 'draft-1', revision: 2,
+    financialModel: { inputs: { basementArea: 3900 },
+      dynamicRows: { components: applied.components }, parkingPlan: f.proposal() } };
   assert.equal(f.context.financialParkingReceive(response, snapshot, 'draft-1'), true);
   assert.equal(f.rows.length, 3);
   assert.equal(f.rows.at(-1).dataset.parkingPlanId, 'plan-1');
+  assert.equal(f.inputs.basementArea.value, '3900');
 });
 
 test('the approve action only shows while a proposal exists', () => {
