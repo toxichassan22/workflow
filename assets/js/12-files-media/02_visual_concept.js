@@ -424,11 +424,19 @@
         }
         if (!slot.prompt && moodboardPrompts[index]) slot.prompt = String(moodboardPrompts[index] || '').slice(0, 12000);
       });
+      const rawSectionApprovals = source.sectionApprovals && typeof source.sectionApprovals === 'object'
+        ? source.sectionApprovals
+        : (source.section_approvals && typeof source.section_approvals === 'object' ? source.section_approvals : {});
+      const sectionApprovals = {};
+      VISUAL_CONCEPT_SECTION_IDS.forEach(id => {
+        sectionApprovals[id] = Boolean(rawSectionApprovals[id]);
+      });
       return {
         version: 1,
         slots,
         plans2d: plans,
         plansWorkflow,
+        sectionApprovals,
         styleReferenceFileIds,
         styleReferenceFileId: styleReferenceFileIds[0] || '',
         styleReferenceNames,
@@ -490,6 +498,10 @@
         return slot.prompt || previousPrompts[index] || '';
       });
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      // Section approvals cannot outlive the items they certify — reconcile
+      // before every serialization so a revoked/unapproved item always drops
+      // its section flag (and, through the chain, every downstream flag).
+      if (typeof visualConceptSyncSectionApprovals === 'function') visualConceptSyncSectionApprovals();
       const hidden = document.getElementById('visualConceptData');
       if (hidden) hidden.value = JSON.stringify(tenantVisualConceptState);
     }
@@ -572,9 +584,12 @@
         if (planKind === 'uses') return 'مقفل حتى اعتماد مخطط الموقع العام.';
         if (planKind === 'massing') return 'مقفل حتى اعتماد مخططي الموقع العام وتوزيع الأدوار.';
       }
-      if (isVisualConceptInteriorSlot(slotId)) return 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.';
-      if (!visualConceptPlansApproved()) return 'اعتمد المخططات الثلاثة أولاً.';
-      return 'اعتمد الصورة الرئيسية أولاً.';
+      if (isVisualConceptInteriorSlot(slotId)) {
+        if (!visualConceptInteriorComponents().length) return 'لا توجد مكونات في الدراسة المالية بعد.';
+        return visualConceptSectionLockReason('internal');
+      }
+      if (visualConceptSectionLocked('external')) return visualConceptSectionLockReason('external');
+      return 'مقفل حتى اعتماد الصورة الرئيسية.';
     }
 
     function visualConceptSlotLocked(slotId) {
@@ -591,12 +606,11 @@
         return false;
       }
       if (isVisualConceptInteriorSlot(slotId)) {
-        return !tenantVisualConceptState.slots.cover.approvedImageUrl || !visualConceptInteriorComponents().length;
+        return !visualConceptSectionApproved('external') || !visualConceptInteriorComponents().length;
       }
-      // Exterior renders are built on the approved plan diagrams, so they stay
-      // locked until all three plans are approved; the angles still wait for
-      // the hero image on top of that.
-      if (!visualConceptPlansApproved()) return true;
+      // Exterior renders stay locked until the plans section is approved as a
+      // whole; the angles still wait for the hero image on top of that.
+      if (!visualConceptSectionApproved('plans2d')) return true;
       return slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
     }
 
@@ -640,7 +654,7 @@
       const referenceCard = document.getElementById('visualConceptInteriorReferenceCard');
       if (!host) return;
       const components = visualConceptInteriorComponents();
-      const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
+      const externalApproved = visualConceptSectionApproved('external');
       if (select) {
         const current = selectedVisualConceptInteriorComponentId();
         select.innerHTML = components.length
@@ -669,7 +683,7 @@
         id,
         label: WFT('vc.internal_concept', 'تصور داخلي: {name} — صورة {n}', { name: component?.name || WFT('vc.component_fallback', 'المكون'), n: index + 1 }),
         group: 'internal'
-      }, !coverApproved)).join('');
+      }, !externalApproved)).join('');
       const canAdd = viewIds.length < VISUAL_CONCEPT_MAX_INTERIOR_IMAGES;
       host.innerHTML = '<div class="visual-concept-interior-stack">' + cards + '</div>' +
         (canAdd ? '<div class="visual-concept-actions" style="margin-top:12px"><button type="button" class="btn ghost small" data-visual-action="add-interior">إضافة صورة داخلية</button></div>' : '');
@@ -1606,6 +1620,20 @@
       const externalStatus = document.getElementById('visualConceptHomeExternalStatus');
       const internalStatus = document.getElementById('visualConceptHomeInternalStatus');
       const externalCard = document.querySelector('.visual-concept-home-card[data-visual-concept-target="external"]');
+      // Home cards mirror the section chain: a locked card is disabled and its
+      // status names the approval that opens it.
+      document.querySelectorAll('.visual-concept-home-card[data-visual-concept-target]').forEach(card => {
+        card.disabled = visualConceptSectionLocked(card.getAttribute('data-visual-concept-target'));
+      });
+      const setStatus = (id, sectionId, readyText) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const locked = visualConceptSectionLocked(sectionId);
+        el.textContent = visualConceptSectionApproved(sectionId)
+          ? WFT('vc.sec.approved', 'قسم معتمد')
+          : (locked ? visualConceptSectionLockReason(sectionId) : readyText);
+        el.classList.toggle('locked', locked);
+      };
       if (preview) {
         if (image) {
           preview.src = image;
@@ -1616,20 +1644,17 @@
         }
       }
       if (externalCard) externalCard.classList.toggle('has-preview', !!image);
-      if (externalStatus) {
-        externalStatus.textContent = cover.status === 'approved'
-          ? 'معتمدة'
-          : (image ? 'تم التوليد — تحتاج اعتماد' : 'جاهز للعمل');
-      }
-      if (internalStatus) {
-        internalStatus.textContent = cover.approvedImageUrl
-          ? (visualConceptInteriorComponents().length ? 'جاهز للعمل' : 'أضف مكونات الدراسة المالية')
-          : 'مقفل حتى اعتماد الصورة الرئيسية';
-      }
+      setStatus('visualConceptHomeExternalStatus', 'external',
+        cover.status === 'approved' ? 'معتمدة' : (image ? 'تم التوليد — تحتاج اعتماد' : 'جاهز للعمل'));
+      setStatus('visualConceptHomeInternalStatus', 'internal',
+        visualConceptInteriorComponents().length ? 'جاهز للعمل' : 'لا توجد مكونات في الدراسة المالية بعد.');
       const plansStatus = document.getElementById('visualConceptHomePlansStatus');
       if (plansStatus) {
         const plans = visualConceptPlans();
-        plansStatus.textContent = plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات';
+        plansStatus.textContent = visualConceptSectionApproved('plans2d')
+          ? WFT('vc.sec.approved', 'قسم معتمد')
+          : (plans.length ? plans.length + ' مخطط' : 'لا توجد مخططات');
+        plansStatus.classList.remove('locked');
       }
       updateVisualConceptSketchesHomeStatus();
     }

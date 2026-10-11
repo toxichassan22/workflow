@@ -631,6 +631,19 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("new Set(['home', 'external', 'internal', 'plans2d', 'sketches'])", index_source)
         self.assertIn('plans2d: plans', index_source)
         self.assertIn('<h3>المخططات</h3>', index_source)
+        # Home cards run in the generation order — plans first, then exterior,
+        # interior, sketches — and each section carries its own approval flag.
+        self.assertEqual(
+            re.findall(r'visual-concept-home-card" data-visual-concept-target="([^"]+)"', index_source),
+            ['plans2d', 'external', 'internal', 'sketches'])
+        self.assertIn('sectionApprovals', index_source)
+        self.assertIn('data-visual-section-bar', index_source)
+        self.assertIn('data-visual-action="section-approve"', index_source)
+        self.assertIn('function visualConceptSectionApproved(id)', index_source)
+        self.assertIn('function visualConceptSectionBlockers(id)', index_source)
+        self.assertIn('function visualConceptSyncSectionApprovals()', index_source)
+        self.assertIn('function approveVisualConceptSection(id)', index_source)
+        self.assertIn('function unapproveVisualConceptSection(id)', index_source)
         self.assertNotIn('المخططات 2D', index_source)
         self.assertNotIn('نفس المبنى المعتمد', index_source)
         self.assertNotIn('tenantMainImagePage', index_source)
@@ -884,7 +897,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'slotId': 'cover',
                 'prompt': 'Hero image from the project facts',
                 'planImages': plan_images,
-                'projectData': facts,
+                'projectData': {**facts, 'visual_concept': {'sectionApprovals': {'plans2d': True}}},
             })
         self.assertEqual(cover.status_code, 200, cover.get_json())
         self.assertEqual(cover.get_json()['image'], '/uploads/creative/cover.png')
@@ -899,7 +912,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'slotId': 'east',
                 'coverImage': '/uploads/creative/cover.png',
                 'planImages': plan_images,
-                'projectData': facts,
+                'projectData': {**facts, 'visual_concept': {'sectionApprovals': {'plans2d': True}}},
             })
         self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
         self.assertEqual(east_prompt.get_json()['slotId'], 'right')
@@ -919,7 +932,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'slotId': 'right',
                 'coverImage': '/uploads/creative/cover.png',
                 'planImages': plan_images,
-                'projectData': facts,
+                'projectData': {**facts, 'visual_concept': {'sectionApprovals': {'plans2d': True}}},
             })
         self.assertEqual(grounded.status_code, 200, grounded.get_json())
         self.assertEqual(captured_facts.get('plan_image_urls'), list(plan_images.values()))
@@ -956,6 +969,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'projectData': {
                     **facts,
                     'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+                    'visual_concept': {'sectionApprovals': {'external': True}},
                 },
             })
         self.assertEqual(interior.status_code, 200, interior.get_json())
@@ -1027,6 +1041,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'styleReferenceNames': ['w-club.png', 'hotel.png', 'm-club.png'],
                 'styleReferenceLabels': ['نادي النساء', 'البرج الفندقي', 'نادي الرجال'],
                 'styleReferenceDescriptions': ['مبنى منخفض بطراز إسلامي', '', ''],
+                'sectionApprovals': {'plans2d': True},
             },
         }
         meta = self.application_module._visual_concept_style_reference_meta(facts_with_refs)
@@ -1061,6 +1076,70 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertFalse(any(
             'ref-club-w' in item or 'ref-tower-h' in item or 'ref-club-m' in item
             for item in angle_refs))
+
+        # Major-section approvals gate the chain plans → exterior → interior →
+        # sketches: the posted plan images alone are not enough — the plans
+        # section flag must be there, and it must match its items.
+        exterior_no_section = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'cover',
+            'prompt': 'Hero image from the project facts',
+            'planImages': plan_images,
+            'projectData': facts,
+        })
+        self.assertEqual(exterior_no_section.status_code, 400, exterior_no_section.get_json())
+        self.assertEqual(exterior_no_section.get_json()['error_code'], 'SECTION_APPROVAL_REQUIRED')
+
+        exterior_stale_flag = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'cover',
+            'prompt': 'Hero image from the project facts',
+            'planImages': {'site': '/uploads/creative/plan_site.png'},
+            'projectData': {**facts, 'visual_concept': {'sectionApprovals': {'plans2d': True}}},
+        })
+        # With under three plan images the legacy gate still fires first.
+        self.assertEqual(exterior_stale_flag.status_code, 400, exterior_stale_flag.get_json())
+        self.assertEqual(exterior_stale_flag.get_json()['error_code'], 'PLANS_IMAGES_REQUIRED')
+
+        interior_no_section = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'interior_comp-1',
+            'prompt': 'Apartment interior',
+            'componentId': 'comp-1',
+            'coverImage': '/uploads/creative/cover.png',
+            'projectData': {
+                **facts,
+                'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+            },
+        })
+        self.assertEqual(interior_no_section.status_code, 400, interior_no_section.get_json())
+        self.assertEqual(interior_no_section.get_json()['error_code'], 'SECTION_APPROVAL_REQUIRED')
+        self.assertEqual(interior_no_section.get_json()['section'], 'external')
+
+        # A posted flag whose mirror shows unapproved items fails the strict
+        # re-check instead of certifying stale content.
+        interior_stale_flag = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'interior_comp-1',
+            'prompt': 'Apartment interior',
+            'componentId': 'comp-1',
+            'coverImage': '/uploads/creative/cover.png',
+            'projectData': {
+                **facts,
+                'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+                'visual_concept': {
+                    'sectionApprovals': {'external': True},
+                    'slots': {'cover': {'approvedImageUrl': '/uploads/creative/cover.png'}},
+                },
+            },
+        })
+        self.assertEqual(interior_stale_flag.status_code, 400, interior_stale_flag.get_json())
+        self.assertEqual(interior_stale_flag.get_json()['error_code'], 'SECTION_ITEMS_INCOMPLETE')
+
+        sketch_no_section = client.post('/api/visual-concept/sketch', headers=self._headers(self.token_a), json={
+            'slotId': 'cover',
+            'sourceImage': '/uploads/creative/cover.png',
+            'projectData': facts,
+        })
+        self.assertEqual(sketch_no_section.status_code, 400, sketch_no_section.get_json())
+        self.assertEqual(sketch_no_section.get_json()['error_code'], 'SECTION_APPROVAL_REQUIRED')
+        self.assertEqual(sketch_no_section.get_json()['section'], 'internal')
 
         index_source = read_frontend_text()
         self.assertIn('visualConceptInteriorComponentSelect', index_source)

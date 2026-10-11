@@ -298,21 +298,21 @@
       body.innerHTML = `
         <div id="visualConceptHome" class="visual-concept-home" data-visual-concept-view="home">
           <div class="visual-concept-home-grid">
-            <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
+            <button type="button" class="visual-concept-home-card" data-visual-concept-target="plans2d">
               <span class="visual-concept-home-badge">القسم الأول</span>
+              <h3>المخططات</h3>
+              <span class="visual-concept-home-status" id="visualConceptHomePlansStatus">لا توجد مخططات</span>
+            </button>
+            <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
+              <span class="visual-concept-home-badge">القسم الثاني</span>
               <h3>التصور الخارجي</h3>
               <img id="visualConceptHomeCoverPreview" class="visual-concept-home-preview" alt="معاينة الصورة الرئيسية" hidden>
               <span class="visual-concept-home-status" id="visualConceptHomeExternalStatus">جاهز للعمل</span>
             </button>
             <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
-              <span class="visual-concept-home-badge">القسم الثاني</span>
+              <span class="visual-concept-home-badge">القسم الثالث</span>
               <h3>التصور الداخلي</h3>
               <span class="visual-concept-home-status" id="visualConceptHomeInternalStatus">جاهز للعمل</span>
-            </button>
-            <button type="button" class="visual-concept-home-card" data-visual-concept-target="plans2d">
-              <span class="visual-concept-home-badge">القسم الثالث</span>
-              <h3>المخططات</h3>
-              <span class="visual-concept-home-status" id="visualConceptHomePlansStatus">لا توجد مخططات</span>
             </button>
             <button type="button" class="visual-concept-home-card" data-visual-concept-target="sketches">
               <span class="visual-concept-home-badge">القسم الرابع</span>
@@ -340,6 +340,7 @@
             </div>
           </div>
           <div id="visualConceptWorkspace" class="visual-concept-page"></div>
+          <div data-visual-section-bar="external"></div>
         </div>
         <div id="visualConceptInternalView" class="visual-concept-section" data-visual-concept-view="internal" hidden>
           <div class="visual-concept-view-head">
@@ -364,6 +365,7 @@
             </div>
           </div>
           <div id="visualConceptInternalWorkspace" class="visual-concept-page"></div>
+          <div data-visual-section-bar="internal"></div>
         </div>
         <div id="visualConceptPlansView" class="visual-concept-section" data-visual-concept-view="plans2d" hidden>
           <div class="visual-concept-view-head">
@@ -392,6 +394,7 @@
           <div class="visual-concept-actions">
             <button type="button" class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
           </div>
+          <div data-visual-section-bar="plans2d"></div>
         </div>
         <div id="visualConceptSketchesView" class="visual-concept-section" data-visual-concept-view="sketches" hidden>
           <div class="visual-concept-view-head">
@@ -401,6 +404,7 @@
             <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
           </div>
           <div id="visualConceptSketchesWorkspace" class="visual-concept-page"></div>
+          <div data-visual-section-bar="sketches"></div>
         </div>
         <input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">
       `;

@@ -459,6 +459,9 @@ def api_visual_concept_prompt():
             'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
+    section_gate = _visual_concept_section_gate(data, _visual_concept_section_requirement(slot_id))
+    if section_gate:
+        return jsonify(section_gate), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
@@ -537,6 +540,9 @@ def api_visual_concept_generate():
             'error': 'اعتمد الصورة الرئيسية قبل توليد التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
+    section_gate = _visual_concept_section_gate(data, _visual_concept_section_requirement(slot_id))
+    if section_gate:
+        return jsonify(section_gate), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     image = call_images_api(prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
@@ -593,6 +599,9 @@ def api_visual_concept_chat():
             'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
+    section_gate = _visual_concept_section_gate(data, _visual_concept_section_requirement(slot_id))
+    if section_gate:
+        return jsonify(section_gate), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     try:
         prompt, reply = _visual_concept_generate_prompt_text(

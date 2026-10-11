@@ -20,6 +20,12 @@ def api_visual_concept_sketch():
     if not slot_id or _visual_concept_is_plan_slot(slot_id):
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف',
                         'error_code': 'SLOT_INVALID'}), 400
+    # Sketches are the last leg: they only run once the interior section is
+    # approved as a whole. The mirror is dropped from this payload, so the
+    # posted sectionApprovals flag stands alone here.
+    section_gate = _visual_concept_section_gate(data, 'internal')
+    if section_gate:
+        return jsonify(section_gate), 400
     tenant_id = getattr(g, 'tenant_id', None)
     # The source arrives as its stored /uploads/ url (generated) or as the
     # project-file id (upload mode); both resolve to a tenant-owned data URI.

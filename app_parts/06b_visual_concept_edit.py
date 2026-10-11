@@ -112,6 +112,9 @@ def api_visual_concept_edit():
             'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
+    section_gate = _visual_concept_section_gate(data, _visual_concept_section_requirement(slot_id))
+    if section_gate:
+        return jsonify(section_gate), 400
     base_image = _visual_concept_edit_base_image(data, tenant_id=getattr(g, 'tenant_id', None))
     if not base_image:
         return jsonify({

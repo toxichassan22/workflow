@@ -71,6 +71,16 @@
     function updateVisualConceptSketchesHomeStatus() {
       const status = document.getElementById('visualConceptHomeSketchesStatus');
       if (!status) return;
+      const locked = visualConceptSectionLocked('sketches');
+      status.classList.toggle('locked', locked);
+      if (visualConceptSectionApproved('sketches')) {
+        status.textContent = WFT('vc.sec.approved', 'قسم معتمد');
+        return;
+      }
+      if (locked) {
+        status.textContent = visualConceptSectionLockReason('sketches');
+        return;
+      }
       const count = visualConceptSketchSourceIds().filter(id => {
         const sketch = tenantVisualConceptState?.slots?.[id]?.sketch || {};
         return durableImageUrl(sketch.approvedImageUrl) || durableImageUrl(sketch.imageUrl);
@@ -130,6 +140,10 @@
 
     async function generateVisualConceptSketch(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
+      if (visualConceptSectionLocked('sketches')) {
+        showVisualConceptLockNotice(visualConceptSectionLockReason('sketches'));
+        return;
+      }
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
       if (!liveSlot() || visualConceptSketchGenerating.has(slotId)) return;
       const sketch = visualConceptSketchOf(slotId);
@@ -151,6 +165,9 @@
         delete payload.projectData.visual_concept;
         payload.sourceImage = sourceImage;
         payload.sourceFileId = liveSlot().sourceFileId || '';
+        // The mirror stays out of the payload — the section flags travel alone
+        // so the server can re-check the interior-section approval it gates on.
+        payload.sectionApprovals = { ...(tenantVisualConceptState.sectionApprovals || {}) };
         payload.instruction = String(visualConceptSketchOf(slotId).instruction || '').slice(0, 2000);
         const response = await apiWithTimeout('POST', '/api/visual-concept/sketch', payload, 180000,
           WFT('vcsketch.timeout', 'انتهت مهلة توليد السكتش؛ أعد المحاولة.'));

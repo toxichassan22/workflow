@@ -16,6 +16,8 @@
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
         else if (action === 'add-interior') addVisualConceptInteriorView();
+        else if (action === 'section-approve') approveVisualConceptSection(button.getAttribute('data-visual-section'));
+        else if (action === 'section-unapprove') unapproveVisualConceptSection(button.getAttribute('data-visual-section'));
         else if (action === 'set-mode') {
           const targetMode = button.getAttribute('data-visual-mode');
           const slot = tenantVisualConceptState?.slots?.[slotId];
@@ -46,12 +48,12 @@
       updateVisualConceptHomeCards();
       if (!host) return;
       renderVisualConceptStyleReference();
-      const plansApproved = visualConceptPlansApproved();
+      const externalLocked = visualConceptSectionLocked('external');
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
-      const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], !plansApproved);
-      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !plansApproved || !coverApproved)).join('');
-      const lockHint = !plansApproved
-        ? '<p class="tenant-hint visual-concept-lock-hint">التصورات الخارجية مقفلة حتى اعتماد المخططات الثلاثة.</p>'
+      const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], externalLocked);
+      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, externalLocked || !coverApproved)).join('');
+      const lockHint = externalLocked
+        ? '<p class="tenant-hint visual-concept-lock-hint">التصورات الخارجية مقفلة حتى اعتماد قسم المخططات.</p>'
         : (coverApproved ? '' : '<p class="tenant-hint visual-concept-lock-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>');
       host.innerHTML = coverHtml +
         '<div class="visual-concept-stack">' +
@@ -60,6 +62,7 @@
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
       renderVisualConceptSketches();
+      refreshVisualConceptSectionBars();
       const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
       bindRoot.querySelectorAll('[data-visual-caption]').forEach(input => {
         input.addEventListener('input', () => {
@@ -165,7 +168,13 @@
 
     function showVisualConceptView(view) {
       const allowed = new Set(['home', 'external', 'internal', 'plans2d', 'sketches']);
-      const next = allowed.has(view) ? view : 'home';
+      let next = allowed.has(view) ? view : 'home';
+      // A section view only opens once its predecessor section is approved —
+      // locked navigation falls back to home with the reason on screen.
+      if (visualConceptSectionLocked(next)) {
+        showVisualConceptLockNotice(visualConceptSectionLockReason(next));
+        next = 'home';
+      }
       document.querySelectorAll('#section-visual-concept [data-visual-concept-view], #tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
         node.hidden = node.dataset.visualConceptView !== next;
       });
