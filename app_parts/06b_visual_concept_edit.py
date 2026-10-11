@@ -1,0 +1,148 @@
+
+# ── Visual concept image edit ────────────────────────────────────────────────
+# The client "send edit" box used to rewrite the hidden generation prompt, so
+# the next generate rebuilt the image from scratch and dropped the approved
+# composition. Edits now go straight to the image model as a surgical edit of
+# the slot's own current image: a fixed hidden wrapper forbids hallucination
+# and any unrequested change, and the client's raw text is embedded inside it.
+# A cheap text-model gate reads the request against the actual image first —
+# when it is vague or misleading it returns a clarifying question instead of
+# editing.
+
+
+def _visual_concept_edit_base_image(data, tenant_id=None):
+    """The slot's current image as a model-readable data URI.
+
+    The client posts the card's own image url; ``blob:`` handles are dead
+    outside their tab and remote urls are refused by the reference validator,
+    so only durable tenant-owned uploads or inline data URIs get through.
+    """
+    raw = str(data.get('image') or data.get('imageUrl') or data.get('currentImage') or '').strip()
+    if not raw or raw.lower().startswith('blob:'):
+        return ''
+    prepared = _prepare_image_reference_for_model(raw, tenant_id)
+    return prepared or ''
+
+
+def _visual_concept_edit_prompt(instruction, slot_id, facts):
+    """Hidden mandatory wrapper: the client's text slots into a fixed contract
+    that forbids the model from touching anything unrequested — even when the
+    client never says «don't change anything else»."""
+    slot_label = _visual_concept_slot_label(slot_id, facts)
+    return (
+        'Edit the attached image titled "' + str(slot_label) + '". '
+        'This is a surgical edit of the supplied image, not a regeneration: the attached '
+        'image is the source of truth and the output must remain the same image with only '
+        'the requested change applied. '
+        'Do not hallucinate, invent, or add any element, object, or detail on your own. '
+        'Do not delete, restyle, move, or alter anything that is not part of the request. '
+        'Keep the camera angle, framing, composition, architecture, materials, colors, '
+        'lighting, and every other detail of the input image identical. '
+        'Any aspect of the image the request does not mention stays untouched. '
+        'Requested change: ' + instruction
+    )
+
+
+def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx=None):
+    """Gate the edit before it costs an image call: the text model sees the
+    actual image plus the request and decides whether the request is a clear,
+    directly executable visual edit. Returns a dict {clear, question} or None
+    when the check itself failed — the edit then proceeds anyway because the
+    hidden wrapper already constrains the outcome."""
+    slot_label = _visual_concept_slot_label(slot_id, facts)
+    system_prompt = (
+        'أنت حارس جودة لطلبات تعديل صورة معمارية واحدة قبل إرسالها إلى محرر الصور. '
+        'محرر الصور ينفذ طلب العميل حرفيًا على الصورة المرفقة ولا يغيّر شيئًا آخر. '
+        'مهمتك فقط الحكم على وضوح الطلب: هل هو تعديل بصري محدد قابل للتنفيذ مباشرة على هذه الصورة؟ '
+        'اعتبر الطلب غير واضح إذا كان فضفاضًا لا يحدد ما الذي يتغير، أو مضللًا يشير إلى عنصر '
+        'غير موجود في الصورة أو موجود بتكرار دون تحديد المقصود، أو ليس تعديلًا على الصورة أصلًا '
+        'كأن يكون سؤالًا أو طلب معلومات أو رأيًا. '
+        'عند عدم الوضوح اكتب سؤالًا عربيًا واحدًا قصيرًا يطلب بالضبط ما تحتاجه لتنفيذ التعديل، '
+        'ولا تسأل عمّا هو واضح أصلًا. أعد JSON فقط: {"clear":true|false,"question":""}.'
+    )
+    user_prompt = (
+        'الصورة المرفقة هي «' + str(slot_label) + '» للمشروع.\n'
+        'طلب التعديل من العميل:\n' + instruction
+    )
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=1200,
+            model=SLIDE_TEXT_MODEL, reasoning_effort='low',
+            response_format={'type': 'json_object'},
+            image_references=[base_image] if base_image else None,
+            usage_ctx=usage_ctx or _usage_ctx('image'))
+        parsed = parse_json_object(_get_chat_response_text(response))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+@app.route('/api/visual-concept/edit', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_edit():
+    data = request.get_json(silent=True) or {}
+    _billing_guard = _require_billing_balance('image_generation')
+    if _billing_guard is not None:
+        return _billing_guard
+    slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
+    if not slot_id:
+        return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    workflow_error = _visual_concept_plan_workflow_error(
+        data, slot_id, require_boundary=True, require_distribution=True)
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
+    if not instruction:
+        return jsonify({'success': False, 'error': 'اكتب طلب التعديل أولاً', 'error_code': 'MESSAGE_REQUIRED'}), 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return jsonify({
+            'success': False,
+            'error': 'أكمل الحقول الناقصة قبل تعديل التصور البصري',
+            'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+            'missingFields': missing,
+        }), 400
+    external_gate = _visual_concept_external_gate(data, slot_id)
+    if external_gate:
+        return jsonify(external_gate), 400
+    cover_image = _visual_concept_cover_image(data)
+    if slot_id != 'cover' and not _visual_concept_is_plan_slot(slot_id) and not cover_image:
+        return jsonify({
+            'success': False,
+            'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',
+            'error_code': 'COVER_REQUIRED',
+        }), 400
+    base_image = _visual_concept_edit_base_image(data, tenant_id=getattr(g, 'tenant_id', None))
+    if not base_image:
+        return jsonify({
+            'success': False,
+            'error': 'لا توجد صورة حالية قابلة للتعديل في هذا الحقل',
+            'error_code': 'IMAGE_REQUIRED',
+        }), 400
+    usage_ctx = _usage_ctx('image', data)
+    clarity = _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx)
+    if isinstance(clarity, dict) and clarity.get('clear') is False:
+        question = _visual_concept_text(clarity.get('question'), 600) or 'حدد ما الذي تريد تغييره في الصورة بالضبط.'
+        return jsonify({
+            'success': True,
+            'slotId': slot_id,
+            'needsClarification': True,
+            'question': question,
+        })
+    edit_prompt = _visual_concept_edit_prompt(instruction, slot_id, facts)
+    image = call_images_api(edit_prompt, [base_image], model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            usage_ctx=usage_ctx)
+    if not image:
+        fatal = _ai_fatal_http_response(last_images_api_error())
+        if fatal is not None:
+            return fatal
+        if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
+            return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
+        return jsonify({'success': False, 'error': 'تعذر تعديل الصورة', 'error_code': 'IMAGE_FAILED'}), 503
+    return jsonify({
+        'success': True,
+        'slotId': slot_id,
+        'image': persist_generated_image(image, g.tenant_id),
+        'reply': 'تم تعديل الصورة حسب طلبك.',
+        'model': VISUAL_CONCEPT_IMAGE_MODEL,
+    })

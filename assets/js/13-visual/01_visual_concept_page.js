@@ -366,28 +366,60 @@
         return;
       }
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
+      // With a durable image the edit applies to the image itself, wrapped in the
+      // server's fixed surgical-edit contract. Before the first image exists the
+      // same box steers the hidden prompt instead — there is nothing to edit yet.
+      const baseImage = durableImageUrl(liveSlot().imageUrl || liveSlot().approvedImageUrl);
+      const editImage = Boolean(baseImage);
       liveSlot().chat.push({ role: 'user', text: message });
       markVisualConceptDirty();
-      showLoader('جاري تعديل وصف الصورة', 'يتم تطبيق ملاحظاتك على نفس المشروع...');
+      showLoader(
+        editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : 'جاري تعديل وصف الصورة',
+        editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...');
       try {
         const payload = await collectVisualConceptPayload(slotId);
         payload.message = message;
-        const response = await api('POST', '/api/visual-concept/chat', payload);
+        if (editImage) payload.image = baseImage;
+        const response = editImage
+          ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
+          : await api('POST', '/api/visual-concept/chat', payload);
         hideLoader();
-        if (!response?.success || !response.prompt) {
-          const errorText = visualConceptMissingMessage(response) || response?.error || 'تعذر تعديل الوصف';
+        if (editImage && response?.needsClarification) {
+          showVisualConceptMissing('');
+          liveSlot().chat.push({
+            role: 'assistant',
+            text: response.question || WFT('vc.clarify_fallback', 'حدد ما الذي تريد تغييره في الصورة بالضبط.')
+          });
+          markVisualConceptDirty();
+          renderVisualConceptPage();
+          return;
+        }
+        const editFailed = editImage ? (!response?.success || !response.image) : (!response?.success || !response.prompt);
+        if (editFailed) {
+          const errorText = visualConceptMissingMessage(response) || response?.error
+            || (editImage ? WFT('vc.edit_failed', 'تعذر تعديل الصورة') : 'تعذر تعديل الوصف');
           showVisualConceptMissing(visualConceptMissingMessage(response));
           toast(errorText);
           return;
         }
         showVisualConceptMissing('');
-        liveSlot().prompt = response.prompt;
-        liveSlot().chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-        toast('تم تحديث الوصف. اضغط توليد الصورة لتطبيق التعديل.');
+        if (editImage) {
+          liveSlot().imageUrl = visualConceptImageUrl(response.image);
+          liveSlot().approvedImageUrl = '';
+          liveSlot().status = 'review';
+          liveSlot().chat.push({ role: 'assistant', text: response.reply || WFT('vc.edited_reply', 'تم تعديل الصورة حسب طلبك.') });
+          markVisualConceptDirty();
+          renderVisualConceptPage();
+          toast(WFT('vc.edited_toast', 'تم تعديل الصورة — اعتمدها لتثبيتها.'));
+        } else {
+          liveSlot().prompt = response.prompt;
+          liveSlot().chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
+          markVisualConceptDirty();
+          renderVisualConceptPage();
+          toast('تم تحديث الوصف. اضغط توليد الصورة لتطبيق التعديل.');
+        }
       } catch (error) {
         hideLoader();
-        toast(error.message || 'تعذر تعديل الوصف');
+        toast(error.message || WFT('vc.edit_failed', 'تعذر تعديل الصورة'));
       }
     }

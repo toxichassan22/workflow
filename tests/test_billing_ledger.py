@@ -469,6 +469,7 @@ class BillingLedgerTests(unittest.TestCase):
         paid_posts = [
             ('/api/visual-concept/generate', {'slotId': 'cover'}),
             ('/api/visual-concept/chat', {'slotId': 'cover'}),
+            ('/api/visual-concept/edit', {'slotId': 'cover'}),
             ('/api/visual-concept/plans-verify', {}),
             ('/api/visual-concept/plans-boundary', {
                 'mode': 'ai',
