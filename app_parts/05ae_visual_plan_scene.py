@@ -283,6 +283,21 @@ def _visual_plan_create_scene(data, context=None):
                 raw_obj = {'buildings': top_level}
         raw_keys = [str(key) for key in raw_obj] if isinstance(raw_obj, dict) else []
         proposed = _visual_plan_normalize_layout(raw_obj)
+        model_error = ''
+        if isinstance(proposed, dict) and not isinstance(proposed.get('buildings'), (list, dict)):
+            err_val = raw_obj.get('error') if isinstance(raw_obj, dict) else None
+            if isinstance(err_val, dict):
+                model_error = str(err_val.get('message') or err_val.get('msg') or err_val)[:200]
+            elif err_val:
+                model_error = str(err_val)[:200]
+        if model_error:
+            error = visual_plan_geometry.PlanGeometryError(
+                'ردّ النموذج برسالة بدل التوزيع الهندسي: ' + model_error, 'PLANS_LAYOUT_INVALID')
+            app.logger.warning('Visual plan layout refused — model error payload: %s', model_error)
+            feedback = ('\nYour previous reply returned {"error": ...} instead of the layout: ' + model_error
+                        + '\nDo not reply with an error object. Emit the JSON scene with one footprint'
+                        ' per program building id — the validator checks feasibility, not you.')
+            continue
         try:
             scene = visual_plan_scene.make_scene(contract, program, proposed, VISUAL_PLAN_SCENE_VERSION)
             return _visual_plan_seal_scene(data, scene, context), context, reference_url
