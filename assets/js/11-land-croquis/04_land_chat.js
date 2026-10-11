@@ -192,10 +192,10 @@
       const wrap = document.createElement('div');
       wrap.className = 'land-chat-wrap';
       wrap.innerHTML =
-        '<button type="button" class="land-chat-fab" id="landChatFab" aria-label="شات الأرض والكروكي">AI</button>' +
+        '<button type="button" class="land-chat-fab" id="landChatFab" aria-label="شات تنظيمات الأرض">AI</button>' +
         '<div class="land-chat-panel" id="landChatPanel" hidden>' +
         '<div class="land-chat-header">' +
-        '<div class="land-chat-title">شات الأرض والكروكي</div>' +
+        '<div class="land-chat-title">شات تنظيمات الأرض</div>' +
         '<div class="land-chat-actions">' +
         '<button type="button" class="land-chat-action" id="landChatMinimize" title="إخفاء" aria-label="إخفاء" onclick="toggleLandChat(false)">&gt;&lt;</button>' +
         '<button type="button" class="land-chat-action" id="landChatEnd" title="إنهاء" aria-label="إنهاء" onclick="showLandChatEndConfirm()">×</button>' +
@@ -203,7 +203,7 @@
         '<div class="land-chat-messages" id="landChatMessages"></div>' +
         '<div class="land-chat-input-row">' +
         '<textarea id="landChatInput" class="land-chat-input" rows="1" ' +
-        'placeholder="اسأل عن بيانات الأرض والكروكي..." data-i18n-ph="land_chat.placeholder" data-section-lock-ignore="1"></textarea>' +
+        'placeholder="اسأل عن تنظيمات وبيانات الأرض..." data-i18n-ph="land_chat.placeholder" data-section-lock-ignore="1"></textarea>' +
         '<button type="button" class="btn primary land-chat-send" id="landChatSend" onclick="sendLandChat()">إرسال</button>' +
         '</div>' +
         '<div class="land-chat-confirm" id="landChatConfirm" hidden>' +
@@ -284,7 +284,7 @@
       if (!messages.length) {
         const empty = document.createElement('div');
         empty.className = 'land-chat-empty';
-        empty.textContent = 'شات مخصص لبيانات الأرض والكروكي — يغطي معاملات البناء والأدوار المسموحة والارتدادات والإحداثيات والتوزيعات والاشتراطات الموثقة.';
+        empty.textContent = 'شات مخصص لتنظيمات وبيانات الأرض — يغطي معاملات البناء والأدوار المسموحة والارتدادات والإحداثيات والتوزيعات والاشتراطات الموثقة.';
         box.appendChild(empty);
       }
       messages.forEach(msg => {

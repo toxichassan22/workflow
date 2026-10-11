@@ -715,5 +715,5 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "pkg.validity_open": "الصلاحية: بلا انتهاء محدد",
   "pkg.price_line": "{name} — {credit} نقطة{price}",
   "pkg.price_sar_suffix": " — {price} ريال سعودي",
-  "land_chat.placeholder": "اسأل عن بيانات الأرض والكروكي..."
+  "land_chat.placeholder": "اسأل عن تنظيمات وبيانات الأرض..."
 }/*I18N_AR_END*/;
