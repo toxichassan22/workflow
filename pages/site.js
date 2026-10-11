@@ -123,19 +123,6 @@
     });
   }
 
-  function initSpotlight() {
-    // Cursor-tracked radial glow on dark glass surfaces. Cheap — one
-    // pointermove per card, two custom properties, CSS does the rest.
-    if (reduceMotion || !window.matchMedia('(hover: hover)').matches) return;
-    document.querySelectorAll('.feature-card, .file-item').forEach(function (el) {
-      el.addEventListener('pointermove', function (ev) {
-        var r = el.getBoundingClientRect();
-        el.style.setProperty('--mx', ((ev.clientX - r.left) / r.width * 100).toFixed(1) + '%');
-        el.style.setProperty('--my', ((ev.clientY - r.top) / r.height * 100).toFixed(1) + '%');
-      });
-    });
-  }
-
   function initTopbar() {
     var bar = document.querySelector('.site-topbar.on-dark');
     if (!bar) return;
@@ -473,7 +460,6 @@
   initJoinForm();
   initReveal();
   initTilt();
-  initSpotlight();
   initTopbar();
   initShowcase();
   initOpening();
