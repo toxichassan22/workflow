@@ -665,6 +665,30 @@
       transform: scale(1.03);
     }
 
+    .visual-concept-reference-filename {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .visual-concept-reference-item input[type="text"],
+    .visual-concept-reference-item textarea {
+      width: 100%;
+      font-size: 11px;
+      cursor: text;
+    }
+
+    .visual-concept-reference-item textarea {
+      text-align: start;
+      resize: vertical;
+      min-height: 38px;
+    }
+
+    .visual-concept-reference-remove {
+      justify-self: center;
+    }
+
     .visual-concept-actions,
     .visual-concept-chat-row {
       display: flex;
@@ -765,6 +789,42 @@
     .visual-concept-home-status.locked {
       background: #f3f3f3;
       color: #8a8a8a;
+    }
+
+    .visual-concept-section-approval {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .visual-concept-section-approval .visual-concept-section-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .visual-concept-section-approval.approved {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+
+    .visual-concept-section-approval.approved .visual-concept-section-status {
+      color: #166534;
+      font-weight: 700;
+    }
+
+    .visual-concept-section-approval.locked {
+      background: #f8fafc;
+    }
+
+    .visual-concept-section-approval.waiting .visual-concept-section-status {
+      color: #92400e;
     }
 
     #section-visual-concept [data-visual-concept-view][hidden],

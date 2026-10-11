@@ -796,6 +796,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
         self.assertIn('style_reference_file_id', source)
         self.assertIn('style_reference_file_ids', source)
+        self.assertIn('def _visual_concept_style_reference_meta(project_data):', source)
+        self.assertIn("'style_references': _visual_concept_style_reference_meta(source)", source)
+        self.assertIn('client style references, in order:', source)
         self.assertIn('VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5', source)
         self.assertIn('VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 4', source)
         self.assertIn('You are a smart editor of an existing English architectural image prompt.', source)
@@ -1014,9 +1017,60 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         plan_refs = plan_call.call_args.args[1]
         self.assertTrue(any('overview.png' in str(item) for item in plan_refs))
 
+        # Named style references map to elements: the meta reader aligns each
+        # label with its image so "reference N" means the same thing in the
+        # facts text, the slot instruction, and the input_references order.
+        facts_with_refs = {
+            **facts,
+            'visual_concept': {
+                'styleReferenceFileIds': ['ref-club-w', 'ref-tower-h', 'ref-club-m'],
+                'styleReferenceNames': ['w-club.png', 'hotel.png', 'm-club.png'],
+                'styleReferenceLabels': ['نادي النساء', 'البرج الفندقي', 'نادي الرجال'],
+                'styleReferenceDescriptions': ['مبنى منخفض بطراز إسلامي', '', ''],
+            },
+        }
+        meta = self.application_module._visual_concept_style_reference_meta(facts_with_refs)
+        self.assertEqual([item['name'] for item in meta], ['نادي النساء', 'البرج الفندقي', 'نادي الرجال'])
+        self.assertEqual(meta[0]['description'], 'مبنى منخفض بطراز إسلامي')
+        facts_meta = self.application_module._visual_concept_facts(facts_with_refs)
+        self.assertEqual(len(facts_meta['style_references']), 3)
+        cover_instruction = self.application_module._visual_concept_slot_instruction('cover', facts_meta)
+        self.assertIn('style references, in order:', cover_instruction)
+        self.assertIn('نادي النساء', cover_instruction)
+        refs_text = self.application_module._visual_concept_style_reference_facts_text(facts_meta)
+        self.assertIn('«البرج الفندقي»', refs_text)
+        self.assertIn('مبنى منخفض بطراز إسلامي', refs_text)
+
+        # Angle slots re-render the approved hero: style refs stay out of their
+        # reference set entirely — plans and the cover image lead it instead.
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,DDDD') as angle_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/right.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id, tenant_id=None: f'data:image/png;base64,{file_id}'):
+            angle = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'right',
+                'prompt': 'Right elevation',
+                'coverImage': '/uploads/creative/cover.png',
+                'planImages': plan_images,
+                'projectData': facts_with_refs,
+            })
+        self.assertEqual(angle.status_code, 200, angle.get_json())
+        angle_refs = [str(item) for item in angle_call.call_args.args[1]]
+        self.assertTrue(any('cover.png' in item for item in angle_refs))
+        self.assertTrue(any('plan_site.png' in item for item in angle_refs))
+        self.assertFalse(any(
+            'ref-club-w' in item or 'ref-tower-h' in item or 'ref-club-m' in item
+            for item in angle_refs))
+
         index_source = read_frontend_text()
         self.assertIn('visualConceptInteriorComponentSelect', index_source)
         self.assertIn('function visualConceptInteriorSlotId', index_source)
+        self.assertIn('styleReferenceLabels', index_source)
+        self.assertIn('styleReferenceDescriptions', index_source)
+        self.assertIn('data-ref-meta', index_source)
+        self.assertIn('function onVisualConceptStyleReferenceMeta(event)', index_source)
+        self.assertIn('visualConceptReferenceNameSeed', index_source)
+        self.assertIn('function visualConceptReferenceTextList', index_source)
         self.assertNotIn("function addConceptualPlansSection(form, before)", index_source)
         self.assertNotIn('data-key="conceptual_plans"', index_source)
         self.assertEqual(self.application_module._visual_concept_interior_component_id('interior_comp-1::3'), 'comp-1')

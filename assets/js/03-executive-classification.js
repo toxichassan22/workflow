@@ -413,8 +413,15 @@
       });
       const refInput = body.querySelector('#visualConceptStyleReferenceInput');
       if (refInput) refInput.addEventListener('change', () => uploadVisualConceptStyleReference(refInput));
+      const refPreview = body.querySelector('#visualConceptStyleReferencePreview');
+      if (refPreview) {
+        refPreview.addEventListener('input', onVisualConceptStyleReferenceMeta);
+        refPreview.addEventListener('click', onVisualConceptReferenceListClick);
+      }
       const intInput = body.querySelector('#visualConceptInteriorReferenceInput');
       if (intInput) intInput.addEventListener('change', () => uploadVisualConceptInteriorReferences(intInput));
+      const intRefPreview = body.querySelector('#visualConceptInteriorReferencePreview');
+      if (intRefPreview) intRefPreview.addEventListener('click', onVisualConceptReferenceListClick);
       const plansInput = body.querySelector('#visualConceptPlansUploadInput');
       if (plansInput) plansInput.addEventListener('change', () => uploadVisualConceptPlanImages(plansInput));
       const addPlanButton = body.querySelector('#visualConceptAddPlanBtn');

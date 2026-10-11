@@ -255,6 +255,40 @@ def _visual_concept_style_reference_id(project_data):
     return next(iter(_visual_concept_style_reference_ids(project_data)), '')
 
 
+def _visual_concept_style_reference_meta(project_data):
+    """Ordered ``{id, name, description}`` per style reference, aligned with the
+    id list so "reference N" means the same image in the facts text, the slot
+    instruction, and the generation ``input_references`` order."""
+    ids = _visual_concept_style_reference_ids(project_data)
+    if not ids:
+        return []
+    source = project_data if isinstance(project_data, dict) else {}
+    visual = source.get('visual_concept')
+    if isinstance(visual, str):
+        visual = _visual_concept_parse_json(visual, {})
+    visual = visual if isinstance(visual, dict) else {}
+    primary_ids = _visual_concept_list(
+        visual.get('styleReferenceFileIds') or visual.get('style_reference_file_ids'))
+    names = _visual_concept_list(
+        visual.get('styleReferenceLabels') or visual.get('style_reference_labels')
+        or source.get('visual_style_reference_labels'))
+    descriptions = _visual_concept_list(
+        visual.get('styleReferenceDescriptions') or visual.get('style_reference_descriptions')
+        or source.get('visual_style_reference_descriptions'))
+    meta = []
+    for position, file_id in enumerate(ids):
+        try:
+            index = primary_ids.index(file_id)
+        except ValueError:
+            index = position
+        meta.append({
+            'id': file_id,
+            'name': _visual_concept_text(names[index] if index < len(names) else '', 120),
+            'description': _visual_concept_text(descriptions[index] if index < len(descriptions) else '', 800),
+        })
+    return meta
+
+
 def _visual_concept_overview_map_url(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
@@ -398,6 +432,7 @@ def _visual_concept_facts(project_data):
         'components': components,
         'style_reference_file_id': style_reference_id,
         'style_reference_file_ids': style_reference_ids,
+        'style_references': _visual_concept_style_reference_meta(source),
         'overview_map_url': map_url,
     }
     return facts
@@ -495,11 +530,22 @@ def _visual_concept_slot_label(slot_id, facts=None):
 def _visual_concept_slot_instruction(slot_id, facts):
     name = facts.get('project_name') or 'the project'
     if slot_id == 'cover':
-        style_note = (
-            'If a style-reference building image is attached, follow its architectural signature, materials, and design language. '
-            if facts.get('style_reference_file_ids') else
-            'No style-reference image was supplied; invent the architecture from the project facts only. '
-        )
+        style_refs = facts.get('style_references') or []
+        if style_refs:
+            mapping = '; '.join(
+                f'{index}) "{item["name"] or "unnamed"}"'
+                + (f' — {item["description"]}' if item.get('description') else '')
+                for index, item in enumerate(style_refs, 1))
+            style_note = (
+                f'The last {len(style_refs)} attached images are client style references, in order: {mapping}. '
+                "Apply each named reference's architectural signature, materials, and design language only "
+                'to the element its name describes — a reference never spills onto other elements. Unnamed '
+                'references shape the overall project style. Write reference names in English. '
+            )
+        else:
+            style_note = (
+                'No style-reference image was supplied; invent the architecture from the project facts only. '
+            )
         plan_note = (
             'The attached planning diagrams (site plan, vertical program, conceptual massing) are the '
             'approved design: the building massing, heights, use bands, footprints, and entries in the '
@@ -582,6 +628,26 @@ def _visual_concept_slot_instruction(slot_id, facts):
     )
 
 
+def _visual_concept_style_reference_facts_text(facts):
+    """The named-reference enumeration the prompt writer sees: every style
+    reference arrives in the same order as the attached images, each bound to
+    the element its client-given name describes."""
+    meta = facts.get('style_references') or []
+    if not meta:
+        return 'غير مرفوعة — ولّد التصميم من البيانات فقط'
+    lines = []
+    for index, item in enumerate(meta, 1):
+        name = item.get('name') or 'بدون اسم — طراز عام للمشروع'
+        entry = f'{index}) «{name}»'
+        if item.get('description'):
+            entry += f' — {item["description"]}'
+        lines.append(entry)
+    return (
+        'مرفقة — هي آخر الصور المرفقة ومرتبة بالترتيب نفسه، وكل صورة تخص العنصر المسمّى فيها فقط:\n'
+        + '\n'.join(lines)
+    )
+
+
 def _visual_concept_facts_prompt(facts, slot_id):
     directions = '\n'.join(
         f"- {row['direction']}: {row['regulation_text']}" for row in facts.get('directions') or []
@@ -612,7 +678,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"جدول الاتجاهات:\n{directions}\n"
         f"مكونات الدراسة المالية:\n{components}\n"
         f"المكون الداخلي المختار: {selected_component}\n"
-        f"صور مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_ids') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
+        f"صور مرجعية للتصميم: {_visual_concept_style_reference_facts_text(facts)}\n"
         f"صور مرجعية للمكون الداخلي: {'مرفقة' if facts.get('interior_reference_file_ids') else 'غير مرفوعة'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
         f"نوع الصورة المطلوبة: {_visual_concept_slot_label(slot_id, facts)}\n"
@@ -863,8 +929,9 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     plan_urls = list(facts.get('plan_image_urls') or [])
     # Exterior slots render the approved plans: the three diagrams lead the
-    # reference set, then the hero image (angles only) and any style refs.
-    external_cap = 3 + VISUAL_CONCEPT_MAX_REFERENCE_IMAGES
+    # reference set, then the map and every named style ref — 4 urls + 5 files
+    # must all fit so the enumerated order matches the attached order.
+    external_cap = 4 + VISUAL_CONCEPT_MAX_REFERENCE_IMAGES
     if slot_id == 'cover':
         file_ids = list(facts.get('style_reference_file_ids') or [])
         map_urls = [facts['overview_map_url']] if facts.get('overview_map_url') else []
@@ -899,10 +966,10 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             map_url = facts.get('overview_map_url')
             urls = [map_url] if map_url else []
         return _visual_concept_reference_uris(urls=urls, tenant_id=tenant_id)
-    file_ids = list(facts.get('style_reference_file_ids') or [])[:2]
+    # Angle slots re-render the approved hero image from another viewpoint —
+    # the hero already carries the style, so style references would only fight it.
     return _visual_concept_reference_uris(
-        urls=plan_urls + urls, file_ids=file_ids,
-        max_images=external_cap, urls_first=True, tenant_id=tenant_id)
+        urls=plan_urls + urls, max_images=external_cap, urls_first=True, tenant_id=tenant_id)
 
 
 def _visual_concept_request_bundle(data, slot_id):

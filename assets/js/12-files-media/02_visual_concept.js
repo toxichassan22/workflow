@@ -249,6 +249,13 @@
       }
     }
 
+    // Labels and descriptions stay position-aligned with the id list, so empty
+    // entries are kept instead of being filtered out like referenceList does.
+    function visualConceptReferenceTextList(value, limit) {
+      if (!Array.isArray(value)) return [];
+      return value.map(item => String(item || '').trim().slice(0, limit));
+    }
+
     // A plan is a slot too: plans2d keeps the durable record the slides and exports read
     // (title, description, file, published image), while slots[plan.id] carries the working
     // state (mode, prompt, chat, approval) so plans run through the same prompt-edit-
@@ -319,6 +326,19 @@
       const legacyReferenceName = String(source.styleReferenceName || '').trim();
       if (legacyReferenceName && !styleReferenceNames.includes(legacyReferenceName)) styleReferenceNames.unshift(legacyReferenceName);
       styleReferenceNames.splice(5);
+      // The element name + note each reference ships to the model with; a missing
+      // label is seeded from a human-typed file stem (e.g. "نادي النساء.png").
+      const styleReferenceLabels = visualConceptReferenceTextList(
+        source.styleReferenceLabels || source.style_reference_labels, 80);
+      const styleReferenceDescriptions = visualConceptReferenceTextList(
+        source.styleReferenceDescriptions || source.style_reference_descriptions, 600);
+      styleReferenceFileIds.forEach((id, index) => {
+        if (!styleReferenceLabels[index]) {
+          styleReferenceLabels[index] = visualConceptReferenceNameSeed(styleReferenceNames[index]);
+        }
+      });
+      styleReferenceLabels.splice(5);
+      styleReferenceDescriptions.splice(5);
       const slots = {};
       // A slot that already carries its own state must never be rebuilt from the legacy
       // tenantCreativeImages mirrors: those hold previews too, so they used to re-approve
@@ -413,6 +433,8 @@
         styleReferenceFileId: styleReferenceFileIds[0] || '',
         styleReferenceNames,
         styleReferenceName: styleReferenceNames[0] || '',
+        styleReferenceLabels,
+        styleReferenceDescriptions,
         deletedInteriorSlots: Array.from(deletedInteriorSlots),
         selectedInteriorComponentId: String(source.selectedInteriorComponentId || '').trim()
       };
@@ -450,6 +472,9 @@
         ? tenantVisualConceptState.styleReferenceFileIds.slice(0, 5) : [];
       tenantProjectData.visual_style_reference_file_ids = referenceIds;
       tenantProjectData.visual_style_reference_file_id = referenceIds[0] || '';
+      tenantProjectData.visual_style_reference_names = (tenantVisualConceptState.styleReferenceNames || []).slice(0, 5);
+      tenantProjectData.visual_style_reference_labels = (tenantVisualConceptState.styleReferenceLabels || []).slice(0, 5);
+      tenantProjectData.visual_style_reference_descriptions = (tenantVisualConceptState.styleReferenceDescriptions || []).slice(0, 5);
       const cover = tenantVisualConceptState.slots.cover || {};
       tenantCreativeImages = previousImages;
       // These mirrors reach the export and the slide prompts, so a session-only blob URL is
@@ -580,17 +605,6 @@
       return String(select?.value || tenantVisualConceptState?.selectedInteriorComponentId || visualConceptInteriorComponents()[0]?.id || '').trim();
     }
 
-    function visualConceptInteriorReferenceIds(slotId) {
-      const componentId = visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId();
-      const firstId = visualConceptInteriorSlotId(componentId, 1);
-      const slot = tenantVisualConceptState.slots[slotId] || {};
-      const first = tenantVisualConceptState.slots[firstId] || {};
-      const ids = Array.isArray(slot.styleReferenceFileIds) && slot.styleReferenceFileIds.length
-        ? slot.styleReferenceFileIds
-        : (first.styleReferenceFileIds || []);
-      return ids.slice(0, 5);
-    }
-
     function visualConceptInteriorViewIds(componentId) {
       const deleted = new Set(tenantVisualConceptState.deletedInteriorSlots || []);
       const ids = [];
@@ -617,30 +631,6 @@
       tenantVisualConceptState.slots[nextId] = emptyVisualConceptSlot(nextId);
       markVisualConceptDirty();
       renderVisualConceptPage();
-    }
-
-    function renderVisualConceptInteriorReferences(slotId) {
-      const preview = document.getElementById('visualConceptInteriorReferencePreview');
-      if (!preview) return;
-      const componentId = visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId();
-      const firstId = visualConceptInteriorSlotId(componentId, 1);
-      const slot = tenantVisualConceptState.slots[firstId] || tenantVisualConceptState.slots[slotId] || emptyVisualConceptSlot(firstId);
-      const ids = Array.isArray(slot.styleReferenceFileIds) ? slot.styleReferenceFileIds : [];
-      const names = Array.isArray(slot.styleReferenceNames) ? slot.styleReferenceNames : [];
-      if (!ids.length) {
-        preview.textContent = 'لم تُرفع صور مرجعية لهذا المكون.';
-        return;
-      }
-      preview.innerHTML = '<div class="visual-concept-reference-list"></div>';
-      const list = preview.firstElementChild;
-      ids.forEach((fileId, index) => {
-        const item = document.createElement('div');
-        item.className = 'visual-concept-reference-item';
-        const refLabel = WFT('vc.reference_image', 'صورة مرجعية {n}', { n: index + 1 });
-        item.innerHTML = '<img alt="' + refLabel + '"><span>' + escapeHtml(names[index] || refLabel) + '</span>';
-        list.appendChild(item);
-        attachProjectFileThumbnail(item.querySelector('img'), fileId);
-      });
     }
 
     function renderVisualConceptInteriorWorkspace() {
@@ -875,154 +865,9 @@
       return value + (value.includes('?') ? '&' : '?') + 't=' + Date.now();
     }
 
-    function renderVisualConceptStyleReference() {
-      const preview = document.getElementById('visualConceptStyleReferencePreview');
-      if (!preview) return;
-      const ids = Array.isArray(tenantVisualConceptState?.styleReferenceFileIds)
-        ? tenantVisualConceptState.styleReferenceFileIds : [];
-      const names = Array.isArray(tenantVisualConceptState?.styleReferenceNames)
-        ? tenantVisualConceptState.styleReferenceNames : [];
-      if (!ids.length) {
-        preview.textContent = 'لم تُرفع صور مرجعية.';
-        return;
-      }
-      preview.innerHTML = '<div class="visual-concept-reference-list"></div>';
-      const list = preview.firstElementChild;
-      ids.forEach((fileId, index) => {
-        const item = document.createElement('div');
-        item.className = 'visual-concept-reference-item';
-        const refLabel = WFT('vc.reference_image', 'صورة مرجعية {n}', { n: index + 1 });
-        item.innerHTML = '<img alt="' + refLabel + '"><span>' + escapeHtml(names[index] || refLabel) + '</span>';
-        list.appendChild(item);
-        attachProjectFileThumbnail(item.querySelector('img'), fileId);
-      });
-    }
-
-    async function uploadVisualConceptStyleReference(input) {
-      const files = Array.from(input?.files || []);
-      if (!files.length) return;
-      if (files.length > 5) toast('سيتم رفع أول 5 صور فقط.');
-      try {
-        input.dataset.projectFileType = 'visual_reference';
-        const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
-        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).map((file, index) => ({
-          id: file?.id || file,
-          name: file?.originalName || files[index]?.name || ''
-        })).filter(file => file.id);
-        if (!incoming.length) throw new Error('تعذر رفع الصور المرجعية');
-        tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
-        const merged = [];
-        const existingIds = tenantVisualConceptState.styleReferenceFileIds || [];
-        const existingNames = tenantVisualConceptState.styleReferenceNames || [];
-        existingIds.forEach((id, index) => merged.push({ id, name: existingNames[index] || '' }));
-        incoming.forEach(file => {
-          const found = merged.find(item => String(item.id) === String(file.id));
-          if (found) found.name = found.name || file.name;
-          else merged.push(file);
-        });
-        const limited = merged.slice(0, 5);
-        tenantVisualConceptState.styleReferenceFileIds = limited.map(file => file.id);
-        tenantVisualConceptState.styleReferenceNames = limited.map(file => file.name);
-        tenantVisualConceptState.styleReferenceFileId = limited[0]?.id || '';
-        tenantVisualConceptState.styleReferenceName = limited[0]?.name || '';
-        markVisualConceptDirty();
-        renderVisualConceptStyleReference();
-        toast(WFT('vc.refs_saved', 'تم حفظ {n} صور مرجعية.', { n: limited.length }));
-      } catch (error) {
-        toast(error.message || 'تعذر رفع الصور المرجعية');
-      } finally {
-        if (input) input.value = '';
-      }
-    }
-
-    async function uploadVisualConceptInteriorReferences(input) {
-      const files = Array.from(input?.files || []);
-      if (!files.length) return;
-      const componentId = selectedVisualConceptInteriorComponentId();
-      if (!componentId) {
-        toast('اختر مكونًا أولًا');
-        return;
-      }
-      const remaining = Math.max(0, VISUAL_CONCEPT_MAX_INTERIOR_IMAGES - visualConceptInteriorViewIds(componentId).filter(id => {
-        const slot = tenantVisualConceptState.slots[id] || {};
-        return slot.imageUrl || slot.approvedImageUrl || slot.sourceFileId;
-      }).length);
-      if (!remaining) {
-        toast('تم الوصول إلى الحد الأقصى لصور هذا المكون');
-        input.value = '';
-        return;
-      }
-      const slotId = visualConceptInteriorSlotId(componentId, 1);
-      if (files.length > 4) toast('سيتم رفع أول 4 صور فقط.');
-      try {
-        input.dataset.projectFileType = 'visual_reference';
-        const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
-        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).map((file, index) => ({
-          id: file?.id || file,
-          name: file?.originalName || files[index]?.name || ''
-        })).filter(file => file.id);
-        if (!incoming.length) throw new Error('تعذر رفع الصور المرجعية');
-        tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
-        if (!tenantVisualConceptState.slots[slotId]) tenantVisualConceptState.slots[slotId] = emptyVisualConceptSlot(slotId);
-        const slot = tenantVisualConceptState.slots[slotId];
-        const merged = [];
-        (slot.styleReferenceFileIds || []).forEach((id, index) => merged.push({ id, name: (slot.styleReferenceNames || [])[index] || '' }));
-        incoming.forEach(file => {
-          const found = merged.find(item => String(item.id) === String(file.id));
-          if (found) found.name = found.name || file.name;
-          else merged.push(file);
-        });
-        const limited = merged.slice(0, 4);
-        slot.styleReferenceFileIds = limited.map(file => file.id);
-        slot.styleReferenceNames = limited.map(file => file.name);
-        const revivedViewIds = [];
-        for (let index = 0; index < limited.length; index += 1) {
-          const file = limited[index];
-          const viewId = visualConceptInteriorSlotId(componentId, index + 1);
-          revivedViewIds.push(viewId);
-          if (!tenantVisualConceptState.slots[viewId]) tenantVisualConceptState.slots[viewId] = emptyVisualConceptSlot(viewId);
-          const viewSlot = tenantVisualConceptState.slots[viewId];
-          if (!viewSlot.imageUrl && !viewSlot.approvedImageUrl) {
-            viewSlot.sourceFileId = file.id;
-            viewSlot.sourceFileName = file.name;
-            viewSlot.imageUrl = await publishProjectFileImageUrl(file.id);
-            viewSlot.status = viewSlot.status === 'approved' ? viewSlot.status : 'review';
-          }
-        }
-        tenantVisualConceptState.deletedInteriorSlots = (tenantVisualConceptState.deletedInteriorSlots || [])
-          .filter(id => !revivedViewIds.includes(id));
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-        toast('تم حفظ صور هذا المكون.');
-      } catch (error) {
-        toast(error.message || 'تعذر رفع الصور المرجعية');
-      } finally {
-        if (input) input.value = '';
-      }
-    }
-
-    function clearVisualConceptInteriorReferences() {
-      const componentId = selectedVisualConceptInteriorComponentId();
-      const slotId = visualConceptInteriorSlotId(componentId, 1);
-      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
-      if (!tenantVisualConceptState.slots[slotId]) return;
-      tenantVisualConceptState.slots[slotId].styleReferenceFileIds = [];
-      tenantVisualConceptState.slots[slotId].styleReferenceNames = [];
-      markVisualConceptDirty();
-      renderVisualConceptInteriorReferences(slotId);
-      toast('تم حذف صور هذا المكون.');
-    }
-
-    function clearVisualConceptStyleReference() {
-      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
-      tenantVisualConceptState.styleReferenceFileIds = [];
-      tenantVisualConceptState.styleReferenceFileId = '';
-      tenantVisualConceptState.styleReferenceNames = [];
-      tenantVisualConceptState.styleReferenceName = '';
-      markVisualConceptDirty();
-      renderVisualConceptStyleReference();
-      toast('تم حذف الصور المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
-    }
+    // Style- and interior-reference upload/render helpers live in
+    // 12-files-media/04_visual_concept_references.js — this file stays the
+    // state machine; that part owns the reference UI.
 
     function visualConceptPlans() {
       if (!Array.isArray(tenantVisualConceptState?.plans2d)) {
