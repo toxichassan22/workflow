@@ -160,6 +160,8 @@ class OtpDeviceAuthTests(unittest.TestCase):
         trusted_token = verify_data.get('trustedDeviceToken')
         self.assertTrue(jwt_token)
         self.assertTrue(trusted_token)
+        # The challenge email rides along so the client scopes the token map.
+        self.assertEqual(verify_data.get('email'), 'owner@landloom.test')
 
         # 4. Subsequent login with trustedDeviceToken -> logs in without OTP
         subsequent_resp = self.client.post('/api/auth/login', json={

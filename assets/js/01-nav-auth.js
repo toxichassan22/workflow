@@ -284,13 +284,16 @@
     // ─────────────────────────────────────────────────────────────────────────
 
     const T_DEVICE_ID_KEY = 'landloom_device_id';
-    const T_TRUSTED_DEVICE_KEY = 'landloom_trusted_device_token';
+    const T_TRUSTED_DEVICE_KEY = 'landloom_trusted_device_tokens';
+    const T_TRUSTED_DEVICE_LEGACY_KEY = 'landloom_trusted_device_token';
     let currentLoginChallengeToken = null;
+    let currentLoginIdentity = null;
     let otpResendCooldownTimer = null;
+    let memoryDeviceId = null;
 
     function getOrCreateDeviceId() {
-      let id = null;
-      try { id = localStorage.getItem(T_DEVICE_ID_KEY); } catch (e) {}
+      let id = memoryDeviceId;
+      try { id = id || localStorage.getItem(T_DEVICE_ID_KEY); } catch (e) {}
       if (!id) {
         try {
           id = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -299,9 +302,40 @@
         } catch (e) {
           id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
         }
-        try { localStorage.setItem(T_DEVICE_ID_KEY, id); } catch (e) {}
       }
+      memoryDeviceId = id;
+      try { localStorage.setItem(T_DEVICE_ID_KEY, id); } catch (e) {}
       return id;
+    }
+
+    // A trusted-device token is per login identity: one browser can hold the
+    // platform admin, a company and its employees at once, so the tokens live
+    // in an {email: token} map. The old single slot got overwritten by every
+    // OTP verify, which forced an OTP on each login after switching accounts.
+    function getTrustedDeviceToken(identity) {
+      const key = (identity || '').toLowerCase().trim();
+      try {
+        const map = JSON.parse(localStorage.getItem(T_TRUSTED_DEVICE_KEY) || '{}');
+        if (map && typeof map === 'object' && map[key]) return map[key];
+      } catch (e) {}
+      // Installs from before the map kept one token under the legacy key:
+      // offering it once costs nothing — a wrong-account token just falls back
+      // to OTP, and the verify then stores it under the right identity.
+      try { return localStorage.getItem(T_TRUSTED_DEVICE_LEGACY_KEY) || ''; } catch (e) { return ''; }
+    }
+
+    function storeTrustedDeviceToken(identity, token) {
+      const key = (identity || '').toLowerCase().trim();
+      if (!key || !token) return;
+      try {
+        let map = {};
+        try { map = JSON.parse(localStorage.getItem(T_TRUSTED_DEVICE_KEY) || '{}') || {}; } catch (e) {}
+        map[key] = token;
+        const keys = Object.keys(map);
+        while (keys.length > 20) delete map[keys.shift()];
+        localStorage.setItem(T_TRUSTED_DEVICE_KEY, JSON.stringify(map));
+      } catch (e) {}
+      try { localStorage.removeItem(T_TRUSTED_DEVICE_LEGACY_KEY); } catch (e) {}
     }
 
     function getDeviceFingerprint() {
@@ -430,9 +464,9 @@
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
       const deviceId = getOrCreateDeviceId();
-      let trustedDeviceToken = '';
-      try { trustedDeviceToken = localStorage.getItem(T_TRUSTED_DEVICE_KEY) || ''; } catch (e) {}
+      const trustedDeviceToken = getTrustedDeviceToken(email);
       const deviceFingerprint = getDeviceFingerprint();
+      currentLoginIdentity = email;
 
       const data = await api('POST', '/api/auth/login', {
         email,
@@ -497,7 +531,7 @@
 
       if (data && data.success && data.token) {
         if (data.trustedDeviceToken) {
-          try { localStorage.setItem(T_TRUSTED_DEVICE_KEY, data.trustedDeviceToken); } catch (err) {}
+          storeTrustedDeviceToken(data.email || currentLoginIdentity, data.trustedDeviceToken);
         }
         clearInterval(otpResendCooldownTimer);
         setTenantToken(data.token);
@@ -555,6 +589,7 @@
 
     function handleLoginOtpCancel() {
       currentLoginChallengeToken = null;
+      currentLoginIdentity = null;
       clearInterval(otpResendCooldownTimer);
       resetOtpBoxes();
       const loginForm = document.getElementById('loginForm');

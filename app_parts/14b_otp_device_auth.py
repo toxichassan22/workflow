@@ -156,6 +156,7 @@ def api_auth_login_verify_otp():
             },
             'trustedDeviceToken': trusted_device_token,
             'deviceId': device_id,
+            'email': challenge['email'],
         })
     else:
         tenant = db.get_tenant_by_id(challenge['tenant_id'])
@@ -188,6 +189,7 @@ def api_auth_login_verify_otp():
             },
             'trustedDeviceToken': trusted_device_token,
             'deviceId': device_id,
+            'email': challenge['email'],
         })
 
 
