@@ -118,18 +118,37 @@ def _visual_plan_rect_polygon(value):
     return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
 
 
+def _visual_plan_find_layout(node, depth=0):
+    if depth > 4 or not isinstance(node, dict):
+        return None
+    if isinstance(node.get('buildings'), (list, dict)):
+        return node
+    return next((hit for value in node.values()
+                 if (hit := _visual_plan_find_layout(value, depth + 1)) is not None), None)
+
+
 def _visual_plan_normalize_layout(proposed):
     """Tolerate harmless model noise before the strict scene validator: unwrap a
-    single wrapper object carrying the layout, drop keys outside the scene
-    contract at every level, and accept a buildings map keyed by building id.
-    make_scene still enforces every required field — only the noise is stripped."""
+    wrapper object carrying the layout (a bare buildings list, a lone building
+    item recovered from an array response, or arbitrarily nested containers),
+    accept common aliases for the buildings list, and drop keys outside the
+    scene contract at every level. make_scene still enforces every required
+    field — only the noise is stripped."""
+    if isinstance(proposed, list):
+        proposed = {'buildings': proposed}
     if not isinstance(proposed, dict):
         return proposed
+    if isinstance(proposed.get('id'), str) and ('footprint' in proposed or 'facades' in proposed):
+        proposed = {'buildings': [proposed]}
     if 'buildings' not in proposed:
-        nested = next((value for value in proposed.values()
-                       if isinstance(value, dict) and isinstance(value.get('buildings'), list)), None)
+        nested = _visual_plan_find_layout(proposed)
         if nested is not None:
             proposed = nested
+    if not isinstance(proposed.get('buildings'), (list, dict)):
+        for alias in ('masses', 'massing', 'towers', 'blocks', 'footprints', 'buildingLayout'):
+            if isinstance(proposed.get(alias), (list, dict)):
+                proposed = {**proposed, 'buildings': proposed[alias]}
+                break
     layout = {key: value for key, value in proposed.items() if key in _PLAN_LAYOUT_KEYS}
     buildings = layout.get('buildings')
     if isinstance(buildings, dict):
@@ -222,6 +241,7 @@ def _visual_plan_create_scene(data, context=None):
                    + json.dumps(program, ensure_ascii=False))
     feedback = ''
     error = None
+    raw_keys = []
     cap = 8000
     for attempt in range(2):
         response = call_openrouter_chat(
@@ -253,7 +273,16 @@ def _visual_plan_create_scene(data, context=None):
             continue
         if not text_out.strip():
             text_out = _get_chat_response_text(response)
-        proposed = _visual_plan_normalize_layout(parse_json_object(text_out))
+        raw_obj = parse_json_object(text_out)
+        if not (isinstance(raw_obj, dict) and raw_obj.get('buildings')):
+            try:
+                top_level = json.loads(text_out.strip())
+            except Exception:
+                top_level = None
+            if isinstance(top_level, list):
+                raw_obj = {'buildings': top_level}
+        raw_keys = [str(key) for key in raw_obj] if isinstance(raw_obj, dict) else []
+        proposed = _visual_plan_normalize_layout(raw_obj)
         try:
             scene = visual_plan_scene.make_scene(contract, program, proposed, VISUAL_PLAN_SCENE_VERSION)
             return _visual_plan_seal_scene(data, scene, context), context, reference_url
@@ -272,6 +301,9 @@ def _visual_plan_create_scene(data, context=None):
                            + ' — return exactly one footprint per program building id.'
                            if missing else '')
                         + '\nCorrect only the proposed scene; the fixed contract remains unchanged.')
+    if raw_keys:
+        error = visual_plan_geometry.PlanGeometryError(
+            str(error) + ' — المفاتيح الواصلة: ' + '، '.join(raw_keys[:12]), error.code)
     raise error
 
 

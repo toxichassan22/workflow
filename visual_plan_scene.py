@@ -167,14 +167,23 @@ def make_scene(contract, program, layout, version=1):
     if not isinstance(proposed, list):
         raise PlanGeometryError('لم يصل توزيع هندسي صالح للمباني.', 'PLANS_LAYOUT_INVALID')
     by_id = {building['id']: building for building in program['buildings']}
+    named = {}
+    for building in program['buildings']:
+        for variant in (building.get('name'), building.get('label')):
+            if isinstance(variant, str) and variant.strip():
+                named.setdefault(variant.strip(), building['id'])
+                named.setdefault(variant.strip().casefold(), building['id'])
     buildings = []
     for raw in proposed:
-        if not isinstance(raw, dict) or set(raw) - {'id', 'footprint', 'facades'} or raw.get('id') not in by_id:
+        bid = raw.get('id') if isinstance(raw, dict) else None
+        if isinstance(bid, str) and bid not in by_id:
+            bid = named.get(bid.strip()) or named.get(bid.strip().casefold())
+        if not isinstance(raw, dict) or set(raw) - {'id', 'footprint', 'facades'} or bid not in by_id:
             raise PlanGeometryError('نتيجة تخطيط أحد المباني غير صالحة.', 'PLANS_LAYOUT_INVALID')
         facades = raw.get('facades') or {}
         if not isinstance(facades, dict) or set(facades) - set(DIRECTION_VECTORS):
             raise PlanGeometryError('نتيجة تخطيط إحدى الواجهات غير صالحة.', 'PLANS_LAYOUT_INVALID')
-        buildings.append({**copy.deepcopy(by_id[raw['id']]),
+        buildings.append({**copy.deepcopy(by_id[bid]),
                           'footprint': validate_polygon(raw.get('footprint'), 24),
                           'facades': {side: facade_style(style) for side, style in facades.items()}})
     placed = {building['id'] for building in buildings}
