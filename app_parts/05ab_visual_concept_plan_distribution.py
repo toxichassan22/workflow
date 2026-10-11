@@ -270,14 +270,16 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 'detail': (f'«{row.get("component") or "مكوّن"}» مساحة مفتوحة في الدراسة — '
                            f'صيغة الدور «{row.get("floor_range") or "—"}» تحوّله لكتلة بناء؛ '
                            'استخدم «مساحة مفتوحة» وأسنده للموقع العام'),
-                'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
+                'result': 'متعارض', 'severity': 'high', 'fixedFact': True,
+                'row_ids': [row.get('id')]})
         elif parsed is None:
             checks.append({
                 'item': 'صيغة الدور غير مفهومة',
                 'detail': (f'«{row.get("component") or "مكوّن"}» — «{row.get("floor_range") or "—"}» '
                            'ليست صيغة معروفة؛ استخدم «أرضي» أو نطاقًا رقميًا أو «بدروم N» '
                            'أو «ميزانين» أو «ملحق علوي» أو «مساحة مفتوحة»'),
-                'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
+                'result': 'متعارض', 'severity': 'high', 'fixedFact': True,
+                'row_ids': [row.get('id')]})
         if is_site_row or not parsed or parsed['kind'] in ('basement', 'roof', 'site'):
             continue
         building = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
@@ -310,7 +312,8 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 checks.append({
                     'item': 'تجاوز سقف الأدوار الموثق',
                     'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد الموثق {cap:g} دورًا',
-                    'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
+                    'result': 'متعارض', 'severity': 'high', 'fixedFact': True,
+                    'row_ids': [row.get('id')]})
     land = _visual_concept_number(context.get('land_area') or regulations.get('croquis_land_area'))
     coverage = _visual_concept_number(context.get('coverage_ratio') or regulations.get('coverage_ratio')
                                       or regulations.get('building_ratio_coverage'))
@@ -340,7 +343,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                 'detail': (f'مجموع البصمات المطلوبة للمباني فوق الأرض {required:g} م² يتجاوز حد التغطية '
                            f'{footprint_cap:g} م² — لا يوجد ترتيب كتل يحقق التوزيع؛ '
                            'قلّل أكبر مساحة دور بكل مبنى أو راجع نسبة التغطية'),
-                'result': 'متعارض', 'severity': 'high',
+                'result': 'متعارض', 'severity': 'high', 'fixedFact': True, 'fixable': False,
                 'row_ids': [row.get('id') for entries in by_building.values() for _parsed, row in entries]})
     far = _visual_concept_number(context.get('floor_area_ratio')) or _visual_concept_number(regulations.get('floor_area_ratio'))
     if not far:
