@@ -154,10 +154,10 @@
       }
       const previousImage = sketch.imageUrl || sketch.approvedImageUrl;
       visualConceptSketchGenerating.add(slotId);
-      renderVisualConceptPage();
-      showLoader(WFT('vcsketch.generating', 'جاري توليد السكتش'),
-        WFT('vcsketch.generating_detail', 'يتم تحويل الصورة إلى سكتش معماري...'));
       try {
+        renderVisualConceptPage();
+        showLoader(WFT('vcsketch.generating', 'جاري توليد السكتش'),
+          WFT('vcsketch.generating_detail', 'يتم تحويل الصورة إلى سكتش معماري...'));
         const payload = await collectVisualConceptPayload(slotId);
         // The sketch endpoint reads slotId, the source image and the note —
         // the visual_concept state mirror is dropped like the plans payload.
@@ -191,7 +191,12 @@
         renderVisualConceptPage();
         toast(error.message || WFT('vcsketch.failed', 'تعذر توليد السكتش'));
       } finally {
+        // The in-path renders above all painted while the flag was still set,
+        // so the card came back with «قيد التوليد» and a disabled approve
+        // button. Clear it first, then repaint — or the dead card stays until
+        // an unrelated render happens to repaint it.
         visualConceptSketchGenerating.delete(slotId);
+        renderVisualConceptPage();
       }
     }
 
