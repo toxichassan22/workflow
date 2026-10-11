@@ -552,7 +552,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("data-key=\"visual_concept\"", index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn('saveProjectAsDraft', index_source)
-        self.assertIn("api('POST', '/api/visual-concept/prompt'", index_source)
+        self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/prompt'", index_source)
         self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
         self.assertIn('visual-concept-stack', index_source)
         self.assertIn('.visual-concept-preview img {', index_source)
@@ -596,10 +596,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-distribution'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-distribution-check'", index_source)
-        self.assertIn("api('POST', '/api/visual-concept/plans-prompts'", index_source)
+        self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/plans-prompts'", index_source)
         self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض')", index_source)
         self.assertIn('const canApprove = !conflicts.length', index_source)
-        self.assertIn("if (conflicts.length || (!checks.length && !workflow.verification.canProceed)) return;", index_source)
+        self.assertIn("if (conflicts.length || workflow.verification.canProceed === false || (!checks.length && !workflow.verification.canProceed)) return;", index_source)
         self.assertIn("WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')", index_source)
         self.assertIn('plans-conflict-solution', index_source)
         self.assertIn("WFT('plans.proposed_solution', 'الحل المقترح:')", index_source)
@@ -718,7 +718,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         start = index_source.index('async function prepareVisualConceptPlansPrompts()')
         body = index_source[start:index_source.index('function addVisualConceptPlan()', start)]
         self.assertLess(
-            body.index("api('POST', '/api/visual-concept/plans-prompts'"),
+            body.index("visualConceptPlanJobApi('POST', '/api/visual-concept/plans-prompts'"),
             body.index('const workflow = visualConceptPlansWorkflowState()'))
         self.assertIn('workflow.promptsError', body)
         self.assertIn('visualConceptPlansPromptsPending', index_source)
@@ -991,7 +991,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(
             self.application_module._visual_concept_slot_label('plan_site', {}), 'الموقع العام المبسط')
 
-        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', side_effect=AssertionError('plan drafts ship verbatim')):
+        # The deterministic drawing prompt derives from the fixed contract and
+        # the approved distribution alone — the sealed scene is only required to
+        # render, and the free-text prompt writer is never consulted on plan
+        # slots even when an instruction arrives (edits go through the scene).
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', side_effect=AssertionError('plan prompts are deterministic')):
             plan_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
@@ -1003,7 +1007,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('APPROVED DISTRIBUTION MODEL', plan_prompt.get_json()['prompt'])
         self.assertIn('DRAWING REQUESTED', plan_prompt.get_json()['prompt'])
 
-        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Edited plan prompt', 'تم')):
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', side_effect=AssertionError('instructions never rewrite plan prompts')):
             plan_edit = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'planDescription': 'مخطط موقع عام مبسط',
@@ -1012,24 +1016,52 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'projectData': facts,
             })
         self.assertEqual(plan_edit.status_code, 200, plan_edit.get_json())
-        self.assertEqual(plan_edit.get_json()['prompt'], 'Edited plan prompt')
+        self.assertIn('APPROVED DISTRIBUTION MODEL', plan_edit.get_json()['prompt'])
 
-        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,CCCC') as plan_call, \
-                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
-                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+        # Rendering a diagram requires the sealed engineering scene: sol proposes
+        # the editable layout once, the server seals it against the fixed
+        # contract, and every render draws that scene deterministically.
+        plan_points = [
+            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
+            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
+            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
+        ]
+        plan_facts = {
+            **facts,
+            'survey_coordinates': plan_points,
+            'land_and_building_summary': facts['land_and_building_summary'] + '، والواجهة الرئيسية شرقية',
+        }
+        plan_workflow = {
+            'verification': {'approved': True},
+            'boundary': {'approved': True, 'points': plan_points},
+            'distribution': {'approved': True, 'rows': [{
+                'building': 'A', 'floor_range': '1-12', 'component': 'مكاتب',
+                'units_per_floor': 2, 'floor_area_sqm': 640, 'circulation': ''}]},
+        }
+        layout = {'buildings': [{'id': 'b1', 'footprint': [[70, 4], [102, 4], [102, 24], [70, 24]]}]}
+        with patch.object(self.application_module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(layout)}}]
+        }):
+            prepared = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+                'plansWorkflow': plan_workflow,
+                'projectData': plan_facts,
+            })
+        self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        plan_workflow['scene'] = prepared.get_json()['scene']
+        plan_workflow['prompts'] = prepared.get_json()['prompts']
+
+        with patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'):
             plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'prompt': 'Conceptual site plan',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True}, 'distribution': {'approved': True}},
-                'projectData': facts,
+                'plansWorkflow': plan_workflow,
+                'projectData': plan_facts,
             })
         self.assertEqual(plan.status_code, 200, plan.get_json())
         self.assertEqual(plan.get_json()['slotId'], 'plan_site')
         self.assertEqual(plan.get_json()['image'], '/uploads/creative/plan.png')
-        self.assertTrue(plan_call.called)
-        self.assertEqual(plan_call.call_args.kwargs.get('model'), self.application_module.VISUAL_CONCEPT_IMAGE_MODEL)
-        plan_refs = plan_call.call_args.args[1]
-        self.assertTrue(any('overview.png' in str(item) for item in plan_refs))
+        self.assertEqual(plan.get_json()['engine'], 'surveyed_geometry')
+        self.assertEqual(plan.get_json()['scene']['token'], plan_workflow['scene']['token'])
 
         # Named style references map to elements: the meta reader aligns each
         # label with its image so "reference N" means the same thing in the
@@ -1305,7 +1337,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             'approved_floor_count': 52,
             'approved_coverage_ratio': 60,
             'survey_coordinates': points,
-            'directions_table': [{'direction': 'west', 'regulation_text': 'كورنيش 16م'}],
+            'directions_table': [{'direction': 'north', 'regulation_text': 'كورنيش 16م'}],
             'project_components_data': [
                 {'name': 'Luxury Apartments', 'useType': 'residential', 'units': 244, 'floorRange': '26-52'}
             ],
@@ -1359,17 +1391,14 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(gated.status_code, 400, gated.get_json())
         self.assertEqual(gated.get_json()['error_code'], 'PLANS_DISTRIBUTION_REQUIRED')
 
-        # sol adapts the fixed DRAWING REQUESTED bodies to the approved distribution;
-        # the header + APPROVED DISTRIBUTION MODEL spec are spliced back verbatim, so
-        # approved facts (name, floors, areas) cannot be dropped by the rewrite.
-        adapted = {
-            'site': "DRAWING REQUESTED — 'CONCEPTUAL SITE PLAN': adapted site body — no podium, no basement pocket, single approved tower. " * 2,
-            'uses': "DRAWING REQUESTED — 'VERTICAL PROGRAM': adapted stack body — one approved band only. " * 3,
-            'massing': "DRAWING REQUESTED — 'CONCEPTUAL MASSING': adapted massing body — one volume only. " * 3,
-        }
+        # sol proposes only the editable scene layout; the surveyed parcel, the
+        # approved floor program and the deterministic prompt bodies stay
+        # server-side facts — a tampered proposal is refused by the validator.
+        layout = {'buildings': [{'id': 'b1',
+                                 'footprint': [[13.69, 4.56], [97.58, 32.08], [104.89, 2.48]]}]}
         with patch.object(module, 'call_openrouter_chat', return_value={
-            'choices': [{'message': {'content': json.dumps(adapted, ensure_ascii=False)}}]
-        }) as adapt_call:
+            'choices': [{'message': {'content': json.dumps(layout)}}]
+        }) as layout_call:
             prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
                 'projectData': project_data,
                 'plansWorkflow': {
@@ -1379,11 +1408,13 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 }
             })
         self.assertEqual(prompts.status_code, 200, prompts.get_json())
-        self.assertTrue(adapt_call.called)
+        self.assertTrue(layout_call.called)
+        scene = prompts.get_json()['scene']
+        self.assertTrue(scene['token'])
+        self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
         site_prompt = prompts.get_json()['prompts']['site']
         self.assertIn('اسم المشروع: The View', site_prompt)
         self.assertIn('APPROVED DISTRIBUTION MODEL', site_prompt)
-        self.assertIn('adapted site body', site_prompt)
         self.assertIn('Luxury Apartments', site_prompt)
         self.assertIn('26-52', site_prompt)
         for kind in ('uses', 'massing'):
@@ -1392,9 +1423,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn('اشتراطات1', serialized_prompts)
         self.assertNotIn('اشتراطات2', serialized_prompts)
 
-        # When the adaptation call fails, the deterministic bodies still ship.
+        # The layout proposal is the only model hop in preparation — when the
+        # provider is down, prepare fails honestly instead of shipping prompts
+        # for a scene that was never sealed.
         with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')):
-            prompts = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+            offline = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
                 'projectData': project_data,
                 'plansWorkflow': {
                     'verification': {'approved': True},
@@ -1402,20 +1435,20 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                     'distribution': {'approved': True, 'rows': approved_rows},
                 }
             })
-        self.assertEqual(prompts.status_code, 200, prompts.get_json())
-        self.assertIn('DRAWING REQUESTED', prompts.get_json()['prompts']['site'])
+        self.assertEqual(offline.status_code, 503, offline.get_json())
+        self.assertEqual(offline.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
 
-        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,CCCC') as image_call, \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'), \
-                patch.object(module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'):
+        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'):
             generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site', 'planKind': 'site', 'prompt': 'SITE PROMPT',
                 'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}, 'distribution': {'approved': True, 'rows': approved_rows}},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}, 'distribution': {'approved': True, 'rows': approved_rows}, 'scene': scene, 'prompts': prompts.get_json()['prompts']},
                 'projectData': project_data
             })
         self.assertEqual(generated.status_code, 200, generated.get_json())
-        self.assertTrue(any('parcel-ref.png' in str(item) for item in image_call.call_args.args[1]))
+        self.assertEqual(generated.get_json()['image'], '/uploads/creative/site.png')
+        self.assertEqual(generated.get_json()['engine'], 'surveyed_geometry')
+        self.assertEqual(generated.get_json()['scene']['token'], scene['token'])
 
     def test_plans_distribution_is_proposed_checked_and_gates_prompts(self):
         module = self.application_module
@@ -1763,9 +1796,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(untouched.status_code, 200, untouched.get_json())
         self.assertFalse(untouched.get_json()['repaired'])
 
-    def test_plans_generate_sequentially_on_approved_plan_images(self):
-        """The diagrams are drawn in order: uses needs the approved site plan,
-        massing needs both — each previous image ships as a generation reference."""
+    def test_plans_render_independently_from_the_sealed_scene(self):
+        """The three diagrams render the same sealed engineering scene in any
+        order — shared surveyed geometry, no image gates another image, and a
+        hand-edited scene fails the signature check outright."""
         module = self.application_module
         client = self.app.test_client()
         points = [
@@ -1777,6 +1811,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             'project_name': 'The View',
             'croquis_land_area': 7012,
             'survey_coordinates': points,
+            'facades_directions': 'غربية',
             'project_components_data': [
                 {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800}],
         }
@@ -1789,37 +1824,41 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'units_per_floor': 1, 'floor_area_sqm': 150, 'circulation': ''}]},
         }
 
-        # uses is gated on the approved site image; massing on both predecessors.
-        for slot, images in (('plan_uses', {}),
-                             ('plan_uses', {'uses': '/uploads/creative/uses.png'}),
-                             ('plan_massing', {'site': '/uploads/creative/site.png'})):
-            gated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-                'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
-                'plansWorkflow': workflow, 'planImages': images})
-            self.assertEqual(gated.status_code, 400, (slot, images, gated.get_json()))
-            self.assertEqual(gated.get_json()['error_code'], 'PLANS_ORDER_REQUIRED')
+        gated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
+            'plansWorkflow': workflow})
+        self.assertEqual(gated.status_code, 400, gated.get_json())
+        self.assertEqual(gated.get_json()['error_code'], 'PLANS_SCENE_REQUIRED')
 
-        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,U') as image_call, \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'), \
-                patch.object(module, '_prepare_image_reference_for_model',
-                             side_effect=lambda url, tenant_id=None: 'ref:' + str(url)):
-            uses = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-                'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
-                'plansWorkflow': workflow,
-                'planImages': {'site': '/uploads/creative/site.png'}})
-            self.assertEqual(uses.status_code, 200, uses.get_json())
-            self.assertEqual(image_call.call_args.args[1], ['ref:/uploads/creative/site.png'])
+        layout = {'buildings': [{'id': 'b1', 'footprint': [[60, 8], [75, 8], [75, 18], [60, 18]]}]}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(layout)}}]
+        }):
+            prepared = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow})
+        self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        scene = prepared.get_json()['scene']
+        self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
 
-            massing = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-                'slotId': 'plan_massing', 'prompt': 'PROMPT', 'projectData': project_data,
-                'plansWorkflow': workflow,
-                'planImages': {'site': '/uploads/creative/site.png',
-                               'uses': '/uploads/creative/uses.png'}})
-            self.assertEqual(massing.status_code, 200, massing.get_json())
-            refs = image_call.call_args.args[1]
-            self.assertEqual(refs[:2], ['ref:/uploads/creative/site.png',
-                                        'ref:/uploads/creative/uses.png'])
-            self.assertIn('ref:/uploads/creative/parcel-ref.png', refs)
+        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+            for slot in ('plan_massing', 'plan_uses', 'plan_site'):
+                response = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                    'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
+                    'plansWorkflow': {**workflow, 'scene': scene}})
+                self.assertEqual(response.status_code, 200, (slot, response.get_json()))
+                self.assertEqual(response.get_json()['image'], '/uploads/creative/out.png')
+                self.assertEqual(response.get_json()['engine'], 'surveyed_geometry')
+                self.assertEqual(response.get_json()['scene']['token'], scene['token'])
+
+        # The gate trusts the sealed contract, not posted order or images: a
+        # footprint moved outside the edit path breaks the token.
+        tampered = json.loads(json.dumps(scene))
+        tampered['buildings'][0]['footprint'][0] = [0, 0]
+        refused = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'plan_site', 'prompt': 'PROMPT', 'projectData': project_data,
+            'plansWorkflow': {**workflow, 'scene': tampered}})
+        self.assertEqual(refused.status_code, 400, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'PLANS_SCENE_INVALID')
 
     def test_sbc_evidence_search_is_bounded_and_scored(self):
         module = self.application_module

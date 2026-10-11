@@ -14,7 +14,7 @@ def _financial_parking_refresh_context(context, project_data):
     model = financial_parking.parking_object(source.get('financial_study_model'))
     plan = financial_parking.parking_object(model.get('parkingPlan'))
     if not plan and not any(row.get('parkingPlanId') for row in financial_parking.parking_model_components(model)):
-        return context
+        return _visual_plan_refresh_site_context(context, source)
     context['parking'] = {
         'planId': plan.get('id'), 'approved': not financial_parking.parking_plan_error(source),
         'requiredSpaces': plan.get('requiredSpaces'), 'existingSpaces': plan.get('existingSpaces'),
@@ -22,7 +22,7 @@ def _financial_parking_refresh_context(context, project_data):
         'areaPerSpace': plan.get('areaPerSpace'), 'areaIsEstimate': plan.get('areaIsEstimate'),
         'areaBasis': plan.get('areaBasis'), 'footprintArea': plan.get('footprintArea'),
     }
-    return context
+    return _visual_plan_refresh_site_context(context, source)
 
 
 def _financial_parking_visual_brief(context):

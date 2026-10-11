@@ -652,7 +652,7 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
                   if not hint.get('cap') and hint is not low_sector]
     high_sector = (explicit_open or open_hints or [None])[0]
     street_dirs, _other_dirs, sea_dir = _visual_concept_plan_direction_scan(context)
-    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector)
+    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector, context)
     all_bands = bands + [band for block in blocks for band in block['bands']]
     return {
         'bands': bands,

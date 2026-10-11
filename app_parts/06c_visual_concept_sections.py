@@ -1,8 +1,8 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # VISUAL CONCEPT SECTION GATES
 #
-# The workspace runs as four approved sections in a fixed order — plans →
-# exterior → interior → sketches. Each paid route re-checks the chain before a
+# The workspace runs as four approved sections in a fixed order — plans,
+# exterior, interior, sketches. Each paid route re-checks the chain before a
 # provider call: the posted sectionApprovals flag plus, when the visual_concept
 # mirror ships with the request, the underlying item approvals it certifies.
 # Plans is the all-items leg (the exterior model consumes the three-diagram

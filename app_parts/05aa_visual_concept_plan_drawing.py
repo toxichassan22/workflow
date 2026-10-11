@@ -98,7 +98,7 @@ def _visual_concept_plan_model(context, regulations):
                 context, _VISUAL_PLAN_USE_LABEL.get(category, 'Amenities')),
         })
 
-    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector)
+    main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector, context)
     has_residential = any(band['category'] == 'residential' for band in bands_out)
     block_label = (f"{low_sector['direction'].title()} Block"
                    if low_sector and low_sector.get('direction') else 'Low Block')
@@ -487,7 +487,8 @@ def _visual_concept_plan_drawing_prompt(kind, context, model=None):
         'uses': _visual_concept_plan_uses_body,
         'massing': _visual_concept_plan_massing_body,
     }.get(kind, _visual_concept_plan_massing_body)(context, model, regulations)
-    return (_visual_concept_plan_prompt_header(kind, context) + spec + '\n' + body)
+    return (_visual_concept_plan_prompt_header(kind, context)
+            + _visual_concept_plan_context_text(context) + spec + '\n' + body)
 
 
 def _visual_concept_plan_prompt_templates(context, model=None):

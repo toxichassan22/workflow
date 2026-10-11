@@ -247,7 +247,7 @@
       try {
         const payload = await collectVisualConceptPayload(slotId);
         if (instruction) payload.instruction = instruction;
-        const response = await api('POST', '/api/visual-concept/prompt', payload);
+        const response = await visualConceptPlanJobApi('POST', '/api/visual-concept/prompt', payload);
         hideLoader();
         if (!response?.success || !response.prompt) {
           const message = visualConceptMissingMessage(response) || response?.error || 'تعذر إنشاء الوصف';
@@ -256,6 +256,7 @@
           return;
         }
         showVisualConceptMissing('');
+        receiveVisualConceptPlanScene(response.scene, slotId);
         tenantVisualConceptState.slots[slotId].prompt = response.prompt;
         if (slotId === 'cover') {
           tenantVisualConceptState.slots[slotId].styleRefStamp = visualConceptStyleRefSignature();
@@ -328,6 +329,10 @@
           return;
         }
         showVisualConceptMissing('');
+        if (isVisualConceptWorkflowPlan(slotId)) {
+          receiveVisualConceptPlanScene(response.scene, slotId);
+          if (response.scene?.token) liveSlot().sceneToken = response.scene.token;
+        }
         liveSlot().prompt = response.prompt || liveSlot().prompt;
         liveSlot().imageUrl = visualConceptImageUrl(response.image);
         liveSlot().approvedImageUrl = '';
@@ -474,8 +479,12 @@
       // With a durable image the edit applies to the image itself, wrapped in the
       // server's fixed surgical-edit contract. Before the first image exists the
       // same box steers the hidden prompt instead — there is nothing to edit yet.
+      const planWorkflowSlot = isVisualConceptWorkflowPlan(slotId);
       const baseImage = durableImageUrl(liveSlot().imageUrl || liveSlot().approvedImageUrl);
-      const editImage = Boolean(baseImage);
+      // Workflow plans edit the shared geometric scene rather than pixels: even
+      // before the first render the same box applies a surgical scene edit and
+      // the server re-renders the diagram from the validated result.
+      const editImage = planWorkflowSlot || Boolean(baseImage);
       const refs = (visualConceptChatRefs[slotId] || []).slice(0, 5);
       liveSlot().chat.push({ role: 'user', text: message, attachments: refs.map(file => file.name) });
       markVisualConceptDirty();
@@ -487,9 +496,12 @@
         payload.message = message;
         if (editImage) payload.image = baseImage;
         if (refs.length) payload.editReferenceFileIds = refs.map(file => file.id);
-        const response = editImage
-          ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
-          : await api('POST', '/api/visual-concept/chat', payload);
+        if (planWorkflowSlot) visualConceptPlanScenePending = true;
+        const response = planWorkflowSlot
+          ? await visualConceptPlanJobApi('POST', '/api/visual-concept/edit', payload)
+          : (editImage
+            ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
+            : await api('POST', '/api/visual-concept/chat', payload));
         hideLoader();
         if (editImage && response?.needsClarification) {
           showVisualConceptMissing('');
@@ -512,6 +524,10 @@
         showVisualConceptMissing('');
         visualConceptChatRefs[slotId] = [];
         if (editImage) {
+          if (planWorkflowSlot) {
+            receiveVisualConceptPlanScene(response.scene, slotId);
+            if (response.scene?.token) liveSlot().sceneToken = response.scene.token;
+          }
           liveSlot().imageUrl = visualConceptImageUrl(response.image);
           liveSlot().approvedImageUrl = '';
           liveSlot().status = 'review';
@@ -530,5 +546,7 @@
       } catch (error) {
         hideLoader();
         toast(error.message || WFT('vc.edit_failed', 'تعذر تعديل الصورة'));
+      } finally {
+        if (planWorkflowSlot) visualConceptPlanScenePending = false;
       }
     }

@@ -278,6 +278,9 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         f"Location: {location or 'not recorded'}\n"
         f"Recorded project idea: {context.get('project_idea') or 'not recorded'}\n"
         f"Recorded land brief: {context.get('land_brief') or 'not recorded'}\n"
+        f"Croquis regulatory constraints: {context.get('croquis_regulatory_constraints') or 'not recorded'}\n"
+        f"Primary frontage from the croquis: {json.dumps(context.get('primary_frontage') or {}, ensure_ascii=False)}\n"
+        f"Client plan notes: {context.get('client_notes') or 'none'}\n"
         f"Land area: {context.get('land_area') or 'not recorded'}\n"
         f"Secondary recorded area figure (not the design basis when it differs): {context.get('design_area') or 'not recorded'}\n"
         f"Coverage ratio: {context.get('coverage_ratio') or 'not recorded'}\n"
@@ -655,12 +658,12 @@ def _visual_concept_plan_direction_scan(context):
     return street_dirs, other_dirs, sea_dir
 
 
-def _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector):
-    """The main entry belongs on the sea/corniche frontage when one is recorded;
+def _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector, context=None):
+    """The main entry follows the frontage recorded in the croquis and summary;
     the residential entry takes the next street and the service entry a third
     street when one exists — never a neighbor edge (no entry crosses a plot line)."""
-    main_dir = sea_dir or (street_dirs[0] if street_dirs else (
-        high_sector['direction'] if high_sector else ''))
+    main_dir = ((context.get('primary_frontage') or {}).get('direction') or '') if isinstance(context, dict) else (
+        sea_dir or (street_dirs[0] if street_dirs else (high_sector['direction'] if high_sector else '')))
     res_dir = next((direction for direction in street_dirs if direction != main_dir), '')
     svc_dir = next((direction for direction in street_dirs
                     if direction not in (main_dir, res_dir)), res_dir)
@@ -845,44 +848,6 @@ def _visual_concept_plan_adapt_bodies(distribution, bodies, data):
     return adapted
 
 
-def _visual_concept_render_plan_boundary_reference(points, tenant_id):
-    points = _visual_concept_plan_boundary_points(points)
-    if len(points) < 3:
-        return ''
-    try:
-        from io import BytesIO
-        from PIL import Image, ImageDraw
-        eastings = [float(item['eastings']) for item in points]
-        northings = [float(item['northings']) for item in points]
-        min_e, max_e = min(eastings), max(eastings)
-        min_n, max_n = min(northings), max(northings)
-        span = max(max_e - min_e, max_n - min_n) or 1
-        width = height = 1200
-        margin = 150
-        scale = (width - 2 * margin) / span
-        def to_pixel(east, north):
-            x = margin + (east - min_e) * scale + (width - 2 * margin - (max_e - min_e) * scale) / 2
-            y = height - (margin + (north - min_n) * scale + (height - 2 * margin - (max_n - min_n) * scale) / 2)
-            return int(round(x)), int(round(y))
-        image = Image.new('RGB', (width, height), 'white')
-        draw = ImageDraw.Draw(image)
-        polygon = [to_pixel(east, north) for east, north in zip(eastings, northings)]
-        draw.polygon(polygon, fill=(232, 240, 232), outline=(23, 43, 77))
-        draw.line(polygon + [polygon[0]], fill=(23, 43, 77), width=8, joint='curve')
-        for point in polygon:
-            draw.ellipse([point[0] - 9, point[1] - 9, point[0] + 9, point[1] + 9], fill=(23, 43, 77))
-        arrow_x, arrow_y = margin, margin
-        draw.line([(arrow_x, arrow_y + 75), (arrow_x, arrow_y)], fill=(23, 43, 77), width=8)
-        draw.polygon([(arrow_x, arrow_y - 16), (arrow_x - 15, arrow_y + 12), (arrow_x + 15, arrow_y + 12)], fill=(23, 43, 77))
-        buffer = BytesIO()
-        image.save(buffer, format='PNG')
-        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
-        return persist_generated_image(f'data:image/png;base64,{encoded}', tenant_id) or ''
-    except Exception as error:
-        app.logger.warning('Could not render plan boundary reference: %s', error)
-        return ''
-
-
 def _visual_concept_plan_regulation_input(project_data, context):
     return {
         'project_facts': {
@@ -912,15 +877,13 @@ def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False, r
         return {'success': False, 'error': 'اعتماد حدود الأرض مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_BOUNDARY_REQUIRED'}
     if require_distribution and not distribution.get('approved'):
         return {'success': False, 'error': 'اعتماد توزيع المكونات مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_DISTRIBUTION_REQUIRED'}
-    # Sequential generation: each diagram is drawn on the previous approved
-    # image(s), so a later kind cannot run before its predecessors are approved.
-    kind = _visual_concept_plan_kind(slot_id, data.get('planKind'))
-    plan_images = _visual_concept_plan_image_map(data)
-    missing = [dep for dep in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ())
-               if not plan_images.get(dep)]
-    if missing:
-        missing_labels = ' و'.join(_VISUAL_PLAN_KIND_LABELS[dep] for dep in missing)
-        return {'success': False,
-                'error': f'اعتمد {missing_labels} قبل توليد {_VISUAL_PLAN_KIND_LABELS.get(kind, "المخطط")}',
-                'error_code': 'PLANS_ORDER_REQUIRED'}
+    # Shared surveyed geometry drives every diagram independently; previous
+    # approved images are references only, never additional approval gates.
+    if require_distribution:
+        try:
+            if not _visual_plan_notes_review_valid(data):
+                return {'success': False, 'error': 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+                        'error_code': 'PLANS_NOTES_CHECK_REQUIRED'}
+        except visual_plan_geometry.PlanGeometryError as error:
+            return {'success': False, 'error': str(error), 'error_code': error.code}
     return None

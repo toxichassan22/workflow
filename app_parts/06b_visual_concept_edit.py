@@ -137,6 +137,8 @@ def api_visual_concept_edit():
         data, slot_id, require_boundary=True, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
+    if _visual_concept_plan_kind(slot_id):
+        return _visual_plan_dispatch('edit', data, slot_id)
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:
         return jsonify({'success': False, 'error': 'اكتب طلب التعديل أولاً', 'error_code': 'MESSAGE_REQUIRED'}), 400

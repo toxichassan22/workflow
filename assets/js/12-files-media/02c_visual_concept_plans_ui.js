@@ -1,0 +1,335 @@
+    function visualConceptPlans() {
+      if (!Array.isArray(tenantVisualConceptState?.plans2d)) {
+        if (tenantVisualConceptState) tenantVisualConceptState.plans2d = [];
+        else return [];
+      }
+      return tenantVisualConceptState.plans2d;
+    }
+
+    function visualConceptPlanMode(plan) {
+      const slot = tenantVisualConceptState?.slots?.[plan?.id];
+      const mode = slot ? slot.mode : plan?.mode;
+      return mode === 'upload' ? 'upload' : 'generate';
+    }
+
+    function setVisualConceptPlansTab(tab) {
+      const active = tab === 'upload' ? 'upload' : 'generate';
+      document.querySelectorAll('[data-visual-plans-tab]').forEach(button => {
+        button.classList.toggle('active', button.getAttribute('data-visual-plans-tab') === active);
+      });
+      document.querySelectorAll('[data-visual-plans-panel]').forEach(panel => {
+        panel.hidden = panel.getAttribute('data-visual-plans-panel') !== active;
+      });
+    }
+
+    function renderVisualConceptBoundarySvg(host, points) {
+      if (!host) return;
+      const rows = visualConceptBoundaryPoints(points);
+      if (rows.length < 3) {
+        host.innerHTML = '<p class="tenant-hint">لا توجد نقاط حدود مكتملة.</p>';
+        return;
+      }
+      const xs = rows.map(item => item.eastings), ys = rows.map(item => item.northings);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      const scale = Math.min(800 / Math.max(maxX - minX, 1e-7), 500 / Math.max(maxY - minY, 1e-7));
+      const left = (1000 - (maxX - minX) * scale) / 2;
+      const bottom = (700 - (maxY - minY) * scale) / 2;
+      const toPoint = item => [Math.round(left + (item.eastings - minX) * scale),
+        Math.round(700 - bottom - (item.northings - minY) * scale)];
+      const parcels = new Map();
+      rows.forEach(row => {
+        const id = row.parcel_id || 'parcel_1';
+        if (!parcels.has(id)) parcels.set(id, []);
+        parcels.get(id).push(row);
+      });
+      const polygons = Array.from(parcels.values()).map(parcel =>
+        '<polygon points="' + parcel.map(toPoint).map(point => point.join(',')).join(' ') +
+        '" fill="#e8f0e8" stroke="#172b4d" stroke-width="7"></polygon>').join('');
+      const circles = rows.map((item, index) => {
+        const [x, y] = toPoint(item);
+        return '<circle cx="' + x + '" cy="' + y + '" r="9" fill="#172b4d"><title>' + escapeHtml(item.point || String(index + 1)) + '</title></circle>';
+      }).join('');
+      host.innerHTML = '<svg viewBox="0 0 1000 700" role="img" aria-label="حدود الأرض" class="plans-boundary-svg">' +
+        polygons + circles + '<text x="82" y="80" fill="#172b4d" font-size="24">N</text></svg>';
+    }
+
+    function visualConceptDistributionTotalsRowsHtml(distribution) {
+      const totals = Array.isArray(distribution.totals) ? distribution.totals : [];
+      if (!totals.length) return '';
+      const fmt = value => (value === null || value === undefined || value === '') ? '—'
+        : (typeof value === 'number' ? String(Math.round(value * 100) / 100) : String(value));
+      const rowsHtml = totals.map(item => {
+        const deltas = [];
+        if (typeof item.delta_units === 'number' && item.delta_units) deltas.push(WFT('vc.delta_units', 'وحدات {n}', { n: (item.delta_units > 0 ? '+' : '') + item.delta_units }));
+        if (typeof item.delta_area === 'number' && item.delta_area) deltas.push('م² ' + (item.delta_area > 0 ? '+' : '') + item.delta_area);
+        const hasRequired = typeof item.required_units === 'number' || typeof item.required_area === 'number';
+        const deltaText = deltas.length ? deltas.join('، ') : (hasRequired ? 'مطابق للدراسة' : '—');
+        const impact = deltas.length ? '<div class="plans-conflict-location">يؤثر في الدراسة المالية</div>' : '';
+        return '<tr class="plans-distribution-total"><td colspan="3">' + escapeHtml(item.component || '') + '</td>' +
+          '<td>' + escapeHtml(fmt(item.units)) + ' / ' + escapeHtml(fmt(item.required_units)) + '</td>' +
+          '<td>' + escapeHtml(fmt(item.area)) + ' / ' + escapeHtml(fmt(item.required_area)) + '</td>' +
+          '<td colspan="2">' + escapeHtml(deltaText) + impact + '</td></tr>';
+      }).join('');
+      return '<tr class="plans-distribution-total-head"><td colspan="3">إجمالي المكونات</td>' +
+        '<td>الوحدات توزيع/دراسة</td><td>المساحة توزيع/دراسة</td><td colspan="2">الفرق</td></tr>' + rowsHtml;
+    }
+
+    function visualConceptDistributionEditorHtml(distribution) {
+      const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
+      const head = '<thead><tr><th>المبنى</th><th>الدور أو نطاق الأدوار</th><th>الاستخدام / المكون</th>' +
+        '<th>عدد الوحدات لكل دور</th><th>مساحة الدور الإجمالية</th><th>الحركة والخدمات ضمن المساحة</th><th></th></tr></thead>';
+      const body = rows.length ? rows.map(row =>
+        '<tr>' +
+        '<td><input data-dist-field="building" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.building) + '"></td>' +
+        '<td><input data-dist-field="floor_range" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.floor_range) + '" placeholder="1-4"></td>' +
+        '<td><input data-dist-field="component" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.component) + '"></td>' +
+        '<td><input data-dist-field="units_per_floor" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.units_per_floor ?? '') + '"></td>' +
+        '<td><input data-dist-field="floor_area_sqm" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.floor_area_sqm ?? '') + '"></td>' +
+        '<td><input data-dist-field="circulation" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.circulation) + '"></td>' +
+        '<td><button type="button" class="btn ghost small" data-dist-remove="' + escapeHtml(row.id) + '">حذف</button></td>' +
+        '</tr>').join('')
+        : '<tr><td colspan="7" class="plans-workflow-empty">لم يُقترح توزيع بعد.</td></tr>';
+      return '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-distribution-table">' +
+        head + '<tbody>' + body + '</tbody>' +
+        '<tfoot data-plans-distribution-totals>' + visualConceptDistributionTotalsRowsHtml(distribution) + '</tfoot>' +
+        '</table></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="add-distribution-row">إضافة صف</button></div>';
+    }
+
+    function visualConceptPlanNotesValid(workflow = visualConceptPlansWorkflowState()) {
+      return !workflow.clientNotes.trim() || Boolean(workflow.notesReview.verified && workflow.notesReview.canProceed
+        && workflow.notesReview.token && workflow.notesReview.inputSignature);
+    }
+
+    function visualConceptPlanNotesResultsHtml(workflow = visualConceptPlansWorkflowState()) {
+      if (!workflow.clientNotes.trim()) return '';
+      const review = workflow.notesReview;
+      if (!review.verified) return '<p class="tenant-hint">' + escapeHtml(WFT('plans.notes_unchecked', 'الملاحظات غير مفحوصة.')) + '</p>';
+      const labels = { 'مطابق': WFT('plans.note_valid', 'مطابق'), 'متعارض': WFT('plans.note_conflict', 'متعارض'),
+        'يحتاج توضيح': WFT('plans.note_unclear', 'يحتاج توضيح') };
+      const rows = review.checks.map(check => '<li><strong>' + escapeHtml(labels[check.result] || check.result) +
+        '</strong>: ' + escapeHtml(check.note || '') + (check.detail ? '<div>' + escapeHtml(check.detail) + '</div>' : '') + '</li>').join('');
+      return '<div class="' + (visualConceptPlanNotesValid(workflow) ? 'plans-workflow-success' : 'plans-workflow-notice') +
+        '"><ul class="plans-issue-list">' + rows + '</ul></div>';
+    }
+
+    function visualConceptDistributionResultsHtml(distribution) {
+      const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
+      const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
+      const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
+      const findings = checks.map(item => {
+          const label = item.result === 'متعارض' && item.fixable === false
+            ? 'متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات'
+            : (item.result || '');
+          return (label && label !== 'مطابق' ? label + ': ' : '') + (item.detail || item.item || '');
+        })
+        .concat(issues.flatMap(item =>
+          (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
+        .filter(Boolean);
+      const reviewed = Boolean(distribution.aiReviewed);
+      const findingsHtml = findings.length
+        ? '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
+          findings.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
+        : (rows.length
+          ? (reviewed
+            ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>'
+            : '<p class="tenant-hint">لم يُفحص بعد.</p>')
+          : '');
+      const canApprove = rows.length > 0 && reviewed && !visualConceptDistributionBlocking(distribution).length
+        && visualConceptPlanNotesValid();
+      return findingsHtml +
+        '<div class="visual-concept-actions">' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص وإصلاح التعارضات</button>' +
+        '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
+        (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
+        '</div>';
+    }
+
+    function visualConceptDistributionBlocking(distribution) {
+      const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
+      const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
+      return checks.filter(item => item.result === 'متعارض' || item.severity === 'high')
+        .concat(issues.filter(item => item.severity === 'high'));
+    }
+
+    function renderVisualConceptPlansWorkflow() {
+      const root = document.getElementById('visualConceptPlansWorkflow');
+      if (!root) return;
+      const workflow = visualConceptPlansWorkflowState();
+      const verification = workflow.verification || {};
+      const boundary = workflow.boundary || {};
+      const distribution = workflow.distribution || {};
+      const verified = Boolean(verification.approved);
+      const boundaryApproved = Boolean(boundary.approved);
+      const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesValid(workflow);
+      const promptReady = Boolean(workflow.promptReady);
+      const defaultStage = !verified ? 'verify' : ((boundaryApproved && distApproved) ? 'generate' : 'boundary');
+      const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
+      const activeStage = requestedStage === 'generate' && !(boundaryApproved && distApproved)
+        ? (verified ? 'boundary' : 'verify')
+        : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
+      const checks = Array.isArray(verification.checks) ? verification.checks : [];
+      const conflicts = checks.filter(item => item.result === 'متعارض');
+      const canApprove = !conflicts.length && verification.canProceed !== false && (checks.length > 0 || verification.canProceed);
+      const checkRows = conflicts.length ? conflicts.map(item =>
+        '<tr><td>' + escapeHtml(item.item || '') +
+        ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +
+        '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
+        (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
+        (item.suggestion ? '<div class="plans-conflict-solution"><strong>' + escapeHtml(WFT('plans.proposed_solution', 'الحل المقترح:')) + '</strong> ' + escapeHtml(item.suggestion) + '</div>' : '') +
+        escapeHtml(item.action || '') + '</td></tr>'
+      ).join('') : '<tr><td colspan="5" class="plans-workflow-empty plans-workflow-success">' + escapeHtml(WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</td></tr>';
+      const conflictPoints = conflicts.flatMap(item => Array.isArray(item.issues) ? item.issues : []).filter(Boolean);
+      const issueList = conflictPoints.length
+        ? '<ul class="plans-issue-list plans-issue-summary">' + conflictPoints.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul>'
+        : '';
+      const existingImages = VISUAL_CONCEPT_PLAN_KINDS.some(item => tenantVisualConceptState.slots[item.id]?.imageUrl);
+      const promptCards = promptReady || existingImages
+        ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
+          renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
+        ).join('') + '</div>'
+        : '<p class="tenant-hint">المخططات غير جاهزة للتوليد بعد.</p>';
+      root.innerHTML =
+        '<div class="plans-workflow-card">' +
+        '<ol class="plans-workflow-steps">' +
+        '<li class="' + (activeStage === 'verify' ? 'is-active' : (verified ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="verify">التحقق من التضارب</button></li>' +
+        '<li class="' + (activeStage === 'boundary' ? 'is-active' : (boundaryApproved && distApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود وتوزيع المكونات</button></li>' +
+        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>توليد المخططات</button></li>' +
+        '</ol>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
+        '<p class="' + (conflicts.length ? 'tenant-hint' : 'plans-workflow-success') + '" data-plans-verification-summary>' + escapeHtml(conflicts.length ? WFT('plans.conflicts_count', 'عدد التعارضات المباشرة: ') + conflicts.length : WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</p>' +
+        (issueList ? '<div class="plans-workflow-notice">' + issueList + '</div>' : '') +
+        '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
+        '</section>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
+        '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-meta"><p class="tenant-hint">حدود الرسم مأخوذة من جدول الإحداثيات المعتمد في الأرض والكروكي.</p></div></div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="boundary-ai">تعديل الحدود بالذكاء الاصطناعي</button><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
+        '<label>ملاحظات تعديل الحدود</label><textarea rows="3" data-plans-boundary-instruction>' + escapeHtml(boundary.instruction || '') + '</textarea>' +
+        '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
+        '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
+        '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'إضافة ملاحظات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
+        '<label for="visualConceptPlanClientNotes">' + escapeHtml(WFT('plans.notes_label', 'ملاحظات المخططات')) + '</label>' +
+        '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="4000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
+        '<div data-plans-notes-results>' + visualConceptPlanNotesResultsHtml(workflow) + '</div>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="check-notes" ' + (!workflow.clientNotes.trim() ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.notes_check', 'فحص الملاحظات')) + '</button></div>' +
+        '</section>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">تجهيز توليد المخططات</button></div>' +
+        '<p class="tenant-hint">' + escapeHtml(promptReady ? 'المخططات جاهزة للتوليد.' : (workflow.promptsError ? 'تعذر تجهيز توليد المخططات: ' + workflow.promptsError : 'المخططات الثلاثة غير جاهزة للتوليد.')) + '</p>' +
+        '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
+        '</section></div>';
+      const preview = root.querySelector('[data-plans-boundary-preview]');
+      renderVisualConceptBoundarySvg(preview, boundary.points);
+      // Delegated binding, once: the distribution results container is re-rendered
+      // in place after every re-check, so per-button listeners would die with it.
+      if (!root.dataset.plansWorkflowBound) {
+        root.dataset.plansWorkflowBound = 'true';
+        root.addEventListener('click', event => {
+          const tab = event.target.closest('[data-plans-workflow-tab]');
+          if (tab && !tab.disabled) {
+            const stage = tab.getAttribute('data-plans-workflow-tab');
+            const state = visualConceptPlansWorkflowState();
+            if (stage === 'boundary' && !state.verification.approved) return;
+            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesValid(state))) return;
+            state.viewStage = stage;
+            persistVisualConceptDraftState();
+            renderVisualConceptPage();
+            return;
+          }
+          const removeBtn = event.target.closest('[data-dist-remove]');
+          if (removeBtn) {
+            const state = visualConceptPlansWorkflowState();
+            const id = removeBtn.getAttribute('data-dist-remove');
+            state.distribution.rows = (state.distribution.rows || []).filter(item => item.id !== id);
+            state.distribution.approved = false;
+            state.distribution.aiReviewed = false;
+            state.distribution.checks = [];
+            state.distribution.issues = [];
+            invalidateVisualConceptPlanGeneration(state);
+            markVisualConceptDirty();
+            renderVisualConceptPage();
+            scheduleVisualConceptDistributionCheck();
+            return;
+          }
+          const actionBtn = event.target.closest('[data-plans-workflow-action]');
+          if (!actionBtn || actionBtn.disabled) return;
+          const action = actionBtn.getAttribute('data-plans-workflow-action');
+          const state = visualConceptPlansWorkflowState();
+          if (action === 'open-land-data') {
+            state.verification.approved = false;
+            state.boundary.approved = false;
+            state.distribution.approved = false;
+            state.distribution.aiReviewed = false;
+            state.distribution.checks = [];
+            state.distribution.issues = [];
+            invalidateVisualConceptPlanGeneration(state);
+            state.viewStage = 'verify';
+            state.status = 'idle';
+            markVisualConceptDirty();
+            if (typeof showSection === 'function') showSection('land_croquis');
+          } else if (action === 'verify') verifyVisualConceptPlans();
+          else if (action === 'approve-verification') approveVisualConceptPlansVerification();
+          else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
+          else if (action === 'boundary-ai') reviseVisualConceptPlansBoundaryWithAi();
+          else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
+          else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
+          else if (action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution();
+          else if (action === 'check-notes') checkVisualConceptPlanNotes();
+          else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
+          else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
+          else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
+        });
+        root.addEventListener('input', event => {
+          const input = event.target.closest('[data-plans-client-notes]');
+          if (!input) return;
+          setVisualConceptPlanNotes(input.value);
+          const state = visualConceptPlansWorkflowState();
+          const notesHost = root.querySelector('[data-plans-notes-results]');
+          if (notesHost) notesHost.innerHTML = visualConceptPlanNotesResultsHtml(state);
+          const resultsHost = root.querySelector('[data-plans-distribution-results]');
+          if (resultsHost) resultsHost.innerHTML = visualConceptDistributionResultsHtml(state.distribution);
+          const check = root.querySelector('[data-plans-workflow-action="check-notes"]');
+          if (check) check.disabled = !state.clientNotes.trim();
+          const generate = root.querySelector('[data-plans-workflow-tab="generate"]');
+          if (generate) generate.disabled = true;
+        });
+        root.addEventListener('change', event => {
+          const input = event.target.closest('[data-dist-field]');
+          if (!input) return;
+          const state = visualConceptPlansWorkflowState();
+          const id = input.getAttribute('data-dist-id');
+          const field = input.getAttribute('data-dist-field');
+          const row = (state.distribution.rows || []).find(item => item.id === id);
+          if (!row) return;
+          row[field] = input.value;
+          state.distribution.approved = false;
+          state.distribution.aiReviewed = false;
+          state.distribution.checks = [];
+          state.distribution.issues = [];
+          invalidateVisualConceptPlanGeneration(state);
+          markVisualConceptDirty();
+          scheduleVisualConceptDistributionCheck();
+        });
+      }
+    }
+
+    function renderVisualConceptPlans() {
+      renderVisualConceptPlansWorkflow();
+      const uploadHost = document.getElementById('visualConceptPlansUploadList');
+      const count = document.getElementById('visualConceptPlansCount');
+      const input = document.getElementById('visualConceptPlansUploadInput');
+      const plans = visualConceptPlans().filter(plan => !isVisualConceptWorkflowPlan(plan.id));
+      if (count) count.textContent = plans.length ? WFT('vc.plans_count', '{n} مخطط مرفوع', { n: plans.length }) : WFT('vc.plans_none', 'لا توجد مخططات مرفوعة.');
+      if (input) input.disabled = plans.length >= VISUAL_CONCEPT_MAX_PLANS;
+      if (!uploadHost) return;
+      plans.forEach(plan => {
+        if (!tenantVisualConceptState.slots[plan.id]) tenantVisualConceptState.slots[plan.id] = visualConceptPlanSeed(plan) || emptyVisualConceptSlot(plan.id);
+      });
+      uploadHost.innerHTML = plans.length
+        ? '<div class="visual-concept-stack">' + plans.map(plan => renderVisualConceptSlot({ id: plan.id, label: plan.title || 'مخطط', group: 'plans' }, false)).join('') + '</div>'
+        : '<p class="tenant-hint">لا توجد مخططات مرفوعة.</p>';
+    }

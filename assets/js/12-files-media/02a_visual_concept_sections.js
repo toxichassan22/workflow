@@ -1,7 +1,7 @@
 /* 12-files-media/02a_visual_concept_sections.js — Visual Concept section approvals */
 
     /* ── Major-section approvals, the workflow's second tier. The workspace runs
-       as a strict sequence — plans → exterior → interior → sketches — and each
+       as a strict sequence — plans, exterior, interior, sketches — and each
        leg carries one durable flag that certifies its generated content.
        Plans is the all-items leg: the exterior model consumes the full
        three-diagram set, so every plan must be approved. The later legs
