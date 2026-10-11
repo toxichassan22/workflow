@@ -81,6 +81,38 @@ def _visual_concept_plan_component_base(name):
     return stripped or text
 
 
+def _visual_concept_plan_site_component_keys(context):
+    """Component keys the study records as land items — «مساحة مفتوحة» use
+    types and surface parking. A distribution row for one of them is a site
+    element, never a building floor, whatever its floor cell says."""
+    keys = set()
+    for comp in context.get('components') or []:
+        if comp.get('parkingPlanId'):
+            continue
+        use = str(comp.get('useType') or '').strip().lower()
+        site = use in ('openarea', 'open_area', 'open area') or 'مفتوح' in use
+        site = site or str(comp.get('parkingLocation') or '').strip().lower() == 'surface'
+        if not site:
+            continue
+        for variant in (comp.get('name'), _visual_concept_plan_component_base(comp.get('name'))):
+            key = _visual_concept_plan_component_key(variant)
+            if key:
+                keys.add(key)
+    return keys
+
+
+def _visual_concept_plan_name_site(name, site_keys):
+    if not site_keys:
+        return False
+    keys = (_visual_concept_plan_component_key(variant)
+            for variant in (name, _visual_concept_plan_component_base(name)))
+    return any(key and key in site_keys for key in keys)
+
+
+def _visual_concept_plan_row_site(row, site_keys):
+    return _visual_concept_plan_name_site(row.get('component'), site_keys)
+
+
 def _visual_concept_plan_distribution_totals(rows, context):
     """Per-component totals from the distribution table, each matched against the
     required figure recorded in the project components / financial study rows.
@@ -222,14 +254,23 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
     by_building = {}
     ids_by_component = {}
     parsed_rows = []
+    site_keys = _visual_concept_plan_site_component_keys(context)
     for row in rows:
         parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
         parsed_rows.append((row, parsed))
+        is_site_row = _visual_concept_plan_row_site(row, site_keys)
         row_key = _visual_concept_plan_component_key(
             _visual_concept_plan_component_base(row.get('component')))
         if row_key:
             ids_by_component.setdefault(row_key, []).append(row.get('id'))
-        if not parsed or parsed['kind'] in ('basement', 'roof', 'site'):
+        if is_site_row and (not parsed or parsed['kind'] != 'site'):
+            checks.append({
+                'item': 'مكوّن مساحة مفتوحة مسجَّل كدور مبنى',
+                'detail': (f'«{row.get("component") or "مكوّن"}» مساحة مفتوحة في الدراسة — '
+                           f'صيغة الدور «{row.get("floor_range") or "—"}» تحوّله لكتلة بناء؛ '
+                           'استخدم «مساحة مفتوحة» وأسنده للموقع العام'),
+                'result': 'متعارض', 'severity': 'high', 'row_ids': [row.get('id')]})
+        if is_site_row or not parsed or parsed['kind'] in ('basement', 'roof', 'site'):
             continue
         building = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'
         by_building.setdefault(building, []).append((parsed, row))
@@ -501,14 +542,19 @@ def _visual_concept_plan_fallback_distribution(context, regulations):
     client still gets an editable starting point when the text call fails."""
     model = _visual_concept_plan_model(context, regulations)
     rows = []
+    site_keys = _visual_concept_plan_site_component_keys(context)
     if model:
         for band in model.get('bands') or []:
+            items = [item for item in band.get('items') or []
+                     if not _visual_concept_plan_name_site(item.get('name'), site_keys)]
             names = '، '.join(_visual_concept_plan_sanitize_text(item.get('name'))
-                              for item in band.get('items') or [] if item.get('name'))
+                              for item in items if item.get('name'))
+            if not names:
+                continue
             floors = band.get('floors') or 1
-            units = sum(item['units'] for item in band.get('items') or []
+            units = sum(item['units'] for item in items
                         if isinstance(item.get('units'), (int, float)))
-            area = sum(item['builtArea'] for item in band.get('items') or []
+            area = sum(item['builtArea'] for item in items
                        if isinstance(item.get('builtArea'), (int, float)))
             rows.append({
                 'building': 'المبنى الرئيسي', 'floor_range': band.get('range') or '',
@@ -521,6 +567,12 @@ def _visual_concept_plan_fallback_distribution(context, regulations):
                 'building': block.get('label') or 'مبنى ثانٍ', 'floor_range': f"1-{block.get('cap') or 1}",
                 'component': block.get('use') or '', 'units_per_floor': None,
                 'floor_area_sqm': None, 'circulation': ''})
+        for item in context.get('components') or []:
+            if _visual_concept_plan_name_site(item.get('name'), site_keys):
+                rows.append({'building': 'الموقع العام', 'floor_range': 'مساحة مفتوحة',
+                             'component': item['name'], 'units_per_floor': item.get('units'),
+                             'floor_area_sqm': item.get('builtArea') or item.get('unitArea'),
+                             'circulation': ''})
         if model.get('below') and not any(row.get('parkingPlanId') for row in context.get('components') or []):
             rows.append({'building': 'المبنى الرئيسي', 'floor_range': 'B1',
                          'component': 'مواقف سيارات', 'units_per_floor': None,
@@ -583,9 +635,10 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
         }
 
     buildings, by_key, site_rows = [], {}, []
+    site_keys = _visual_concept_plan_site_component_keys(context)
     for row in rows:
         parsed = parsed_of(row)
-        if parsed and parsed['kind'] == 'site':
+        if (parsed and parsed['kind'] == 'site') or _visual_concept_plan_row_site(row, site_keys):
             site_rows.append(row)
             continue
         name = _visual_concept_plan_sanitize_text(row.get('building')) or 'المبنى الرئيسي'

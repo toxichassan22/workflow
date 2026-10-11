@@ -4,6 +4,7 @@ import visual_plan_renderer as visual_plan_renderer
 
 def _visual_plan_program(contract, context):
     groups, site_items = {}, []
+    site_keys = _visual_concept_plan_site_component_keys(context)
     floor_cap = (_visual_concept_number(context.get('approved_floor_count'))
                  or _visual_concept_plan_regulation_floor_cap(context.get('regulations') or {}))
     for row in contract['distribution']['rows']:
@@ -23,7 +24,7 @@ def _visual_plan_program(contract, context):
                 'floorRange': row['floor_range'], 'kind': parsed['kind'], 'count': parsed['count'],
                 'lo': parsed['lo'], 'hi': parsed['hi'], 'area': row['floor_area_sqm'],
                 'units': row['units_per_floor'], 'circulation': row['circulation']}
-        if parsed['kind'] == 'site':
+        if parsed['kind'] == 'site' or _visual_concept_plan_row_site(row, site_keys):
             site_items.append(band)
         else:
             name = row['building'] or 'المبنى الرئيسي'
@@ -258,8 +259,14 @@ def _visual_plan_create_scene(data, context=None):
                 cap *= 2
             received = ', '.join(sorted(proposed.keys())) if isinstance(proposed, dict) and proposed else 'none'
             app.logger.warning('Visual plan layout refused (%s, finish=%s, keys=%s)', failure, finish, received)
+            returned = {item.get('id') for item in (proposed.get('buildings') or [])
+                        if isinstance(item, dict)} if isinstance(proposed, dict) else set()
+            missing = [building['id'] for building in program['buildings'] if building['id'] not in returned]
             feedback = ('\nThe previous proposal failed geometry validation: ' + str(failure)
                         + '\nIt contained JSON keys: ' + received
+                        + ('\nIt returned no footprint for building ids: ' + ', '.join(missing)
+                           + ' — return exactly one footprint per program building id.'
+                           if missing else '')
                         + '\nCorrect only the proposed scene; the fixed contract remains unchanged.')
     raise error
 
