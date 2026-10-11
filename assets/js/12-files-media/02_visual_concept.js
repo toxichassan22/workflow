@@ -702,7 +702,11 @@
       const approved = slot.status === 'approved';
       const frozen = approved;
       const waitCover = locked && !approved;
-      const generateDisabled = frozen || waitCover || slot.status === 'generating';
+      // A merely-locked slot keeps its generate button clickable: pressing it
+      // raises the lock notice with the missing precondition, which a disabled
+      // button could never surface. The chat row stays gated on the lock.
+      const generateBtnDisabled = frozen || slot.status === 'generating';
+      const generateDisabled = generateBtnDisabled || waitCover;
       const mode = slot.mode === 'upload' ? 'upload' : 'ai';
       const disableAiSwitch = frozen || (hasImage && mode === 'upload');
       const disableUploadSwitch = frozen || (hasImage && mode === 'ai');
@@ -755,7 +759,7 @@
           ? '<label>وصف المخطط</label><textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>'
           : '') +
           '<div class="visual-concept-actions">' +
-          '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
+          '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateBtnDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
           deleteBtn + deleteFieldBtn +
           '</div>' +
@@ -767,7 +771,7 @@
       }
 
       const lockHint = waitCover
-        ? '<p class="tenant-hint">' + escapeHtml(visualConceptLockMessage(slotDef.id)) + '</p>'
+        ? '<p class="tenant-hint visual-concept-lock-hint">' + escapeHtml(visualConceptLockMessage(slotDef.id)) + '</p>'
         : '';
       return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head">' + heading +
@@ -817,6 +821,41 @@
         const img = modal.querySelector('#visualConceptLightboxImg');
         if (img) img.src = '';
       }
+    }
+
+    // Locked slots keep a live generate button; pressing it surfaces the
+    // missing precondition in a real dialog so the client cannot miss it.
+    function showVisualConceptLockNotice(message) {
+      let modal = document.getElementById('visualConceptLockNotice');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'visualConceptLockNotice';
+        modal.className = 'll-modal-overlay';
+        modal.setAttribute('data-a11y-modal', '');
+        modal.style.display = 'none';
+        modal.innerHTML =
+          '<div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="visualConceptLockNoticeTitle">' +
+          '<div class="sag-modal-head"><h2 id="visualConceptLockNoticeTitle">التوليد مقفل</h2></div>' +
+          '<p id="visualConceptLockNoticeText" class="visual-concept-lock-hint"></p>' +
+          '<div class="sag-modal-actions"><button type="button" class="btn primary" data-visual-lock-close>إغلاق</button></div>' +
+          '</div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', event => {
+          if (event.target === modal || event.target.closest('[data-visual-lock-close]')) {
+            closeVisualConceptLockNotice();
+          }
+        });
+      }
+      modal.querySelector('#visualConceptLockNoticeText').textContent = String(message || '');
+      modal.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
+    }
+
+    function closeVisualConceptLockNotice() {
+      const modal = document.getElementById('visualConceptLockNotice');
+      if (!modal) return;
+      modal.style.display = 'none';
+      if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
     }
 
     if (!window._visualConceptLightboxEscapeBound) {
@@ -1452,6 +1491,11 @@
 
     async function checkVisualConceptPlansDistribution(mode, options) {
       const silent = Boolean(options && options.silent);
+      // holdFindings keeps the verdicts out of state and off-screen: the
+      // check-and-repair motion runs several adjudications, and flashing each
+      // intermediate conflict list reads as a glitch — only the list that
+      // survives the final pass is published.
+      const holdFindings = Boolean(options && options.holdFindings);
       const seedWorkflow = visualConceptPlansWorkflowState();
       if (!seedWorkflow.verification.approved || !(seedWorkflow.distribution.rows || []).length) return;
       if (!silent) showLoader(WFT('plans.distribution_check_loading', 'جاري فحص التوزيع'),
@@ -1468,7 +1512,7 @@
         }
         const workflow = visualConceptPlansWorkflowState();
         workflow.distribution.totals = Array.isArray(response.totals) ? response.totals : [];
-        if (!silent) {
+        if (!silent && !holdFindings) {
           // Verdicts display only after sol adjudicates — the silent local pass
           // refreshes totals but never writes a conflict list on its own.
           workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
@@ -1478,10 +1522,16 @@
         markVisualConceptDirty();
         const totalsHost = document.querySelector('[data-plans-distribution-totals]');
         if (totalsHost) totalsHost.innerHTML = visualConceptDistributionTotalsRowsHtml(workflow.distribution);
-        const host = document.querySelector('[data-plans-distribution-results]');
-        if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
-        else renderVisualConceptPage();
-        return true;
+        if (!holdFindings) {
+          const host = document.querySelector('[data-plans-distribution-results]');
+          if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
+          else renderVisualConceptPage();
+          return true;
+        }
+        return {
+          checks: Array.isArray(response.checks) ? response.checks : [],
+          issues: Array.isArray(response.issues) ? response.issues : []
+        };
       } catch (error) {
         if (silent) return;
         hideLoader();
@@ -1491,25 +1541,38 @@
 
     // One motion: sol adjudicates the deterministic findings, surgically repairs
     // whatever he still confirms as blocking, then re-checks the repaired table —
-    // «يولد ويفحص ويعدّل ويتأكد». The findings on screen always describe the
-    // current table, never a pre-repair snapshot.
+    // «يولد ويفحص ويعدّل ويتأكد». Intermediate verdicts are held off-screen for
+    // the whole motion — the conflict list that renders at the end is only what
+    // the repair could not settle, so nothing appears, vanishes and reappears.
     async function checkAndRepairVisualConceptPlansDistribution() {
-      const checked = await checkVisualConceptPlansDistribution('ai');
-      if (!checked) return;
-      const distribution = visualConceptPlansWorkflowState().distribution;
+      const firstPass = await checkVisualConceptPlansDistribution('ai', { holdFindings: true });
+      if (!firstPass) return;
+      const checks = Array.isArray(firstPass.checks) ? firstPass.checks : [];
+      const issues = Array.isArray(firstPass.issues) ? firstPass.issues : [];
+      const publishFindings = () => {
+        const state = visualConceptPlansWorkflowState();
+        state.distribution.checks = checks;
+        state.distribution.issues = issues;
+        state.distribution.aiReviewed = true;
+        markVisualConceptDirty();
+        const host = document.querySelector('[data-plans-distribution-results]');
+        if (host) host.innerHTML = visualConceptDistributionResultsHtml(state.distribution);
+        else renderVisualConceptPage();
+      };
       // Repair runs on every finding the server considers fixable — blocking or
       // advisory — plus sol's issue notes, mirroring `repairable or issues` in
       // the endpoint. A clean bill skips the pass, and a verdict marked
       // fixable=false points at the approved program itself, not a row edit.
-      const repairable = (distribution.checks || []).filter(
+      const repairable = checks.filter(
         (item) => item && item.result !== 'مطابق' && item.fixable !== false);
-      if (!(distribution.rows || []).length
-          || !(repairable.length || (distribution.issues || []).length)) return;
-      const repaired = await repairVisualConceptPlansDistribution();
+      const rows = visualConceptPlansWorkflowState().distribution.rows || [];
+      if (!rows.length || !(repairable.length || issues.length)) { publishFindings(); return; }
+      const repaired = await repairVisualConceptPlansDistribution({ checks, issues });
       if (repaired) await checkVisualConceptPlansDistribution('ai');
+      else publishFindings();
     }
 
-    async function repairVisualConceptPlansDistribution() {
+    async function repairVisualConceptPlansDistribution(findings) {
       if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return false; }
       const seedWorkflow = visualConceptPlansWorkflowState();
       if (!(seedWorkflow.distribution.rows || []).length) return false;
@@ -1517,10 +1580,16 @@
         WFT('plans.distribution_repair_loading_detail', 'يعالج الذكاء الصفوف المتعارضة ويحدّث المجاميع...'), 40);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
+        // Findings may arrive held off-state from the check-and-repair motion;
+        // otherwise fall back to whatever verdicts state currently carries.
+        const heldChecks = findings && Array.isArray(findings.checks)
+          ? findings.checks : (seedWorkflow.distribution.checks || []);
+        const heldIssues = findings && Array.isArray(findings.issues)
+          ? findings.issues : seedWorkflow.distribution.issues;
         payload.distribution = {
           rows: seedWorkflow.distribution.rows,
-          issues: seedWorkflow.distribution.issues,
-          checks: (seedWorkflow.distribution.checks || []).filter((check) => check.result !== 'مطابق'),
+          issues: heldIssues,
+          checks: heldChecks.filter((check) => check.result !== 'مطابق'),
         };
         const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
         hideLoader();

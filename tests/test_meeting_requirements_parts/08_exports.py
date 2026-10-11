@@ -692,7 +692,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn('const slot = tenantVisualConceptState.slots[slotId];', body)
         self.assertNotIn('slot.imageUrl =', body)
         chat_start = index_source.index('async function sendVisualConceptChat(slotId)')
-        chat_body = index_source[chat_start:chat_start + 2200]
+        chat_end = index_source.index('\n    }\n', chat_start)
+        chat_body = index_source[chat_start:chat_end]
         self.assertIn('liveSlot().prompt = response.prompt;', chat_body)
         self.assertNotIn('slot.chat.push({ role: \'assistant\'', chat_body)
 
@@ -722,11 +723,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         # detached workflow too: check findings never reached the draft, approval
         # stayed blocked on stale conflicts, and the whole AI repair vanished.
         check_start = index_source.index('async function checkVisualConceptPlansDistribution(')
-        check_body = index_source[check_start:index_source.index('async function repairVisualConceptPlansDistribution()', check_start)]
+        check_body = index_source[check_start:index_source.index('async function repairVisualConceptPlansDistribution(', check_start)]
         self.assertLess(
             check_body.index("api('POST', '/api/visual-concept/plans-distribution-check'"),
             check_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        repair_start = index_source.index('async function repairVisualConceptPlansDistribution()')
+        repair_start = index_source.index('async function repairVisualConceptPlansDistribution(')
         repair_body = index_source[repair_start:index_source.index('function approveVisualConceptPlansDistribution()', repair_start)]
         self.assertLess(
             repair_body.index("api('POST', '/api/visual-concept/plans-distribution-repair'"),
@@ -759,9 +760,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('aiReviewed = false', repair_body)
         self.assertIn("check.result !== 'مطابق'", repair_body)
         chain_start = index_source.index('async function checkAndRepairVisualConceptPlansDistribution(')
-        chain_body = index_source[chain_start:chain_start + 1400]
+        chain_end = index_source.index('async function repairVisualConceptPlansDistribution(', chain_start)
+        chain_body = index_source[chain_start:chain_end]
         self.assertGreaterEqual(
-            chain_body.count("checkVisualConceptPlansDistribution('ai')"), 2)
+            chain_body.count("checkVisualConceptPlansDistribution('ai'"), 2)
         # A fixable=false blocker is a program-vs-regulation conflict — the
         # chain skips the futile repair and the row is labelled with its
         # upstream source instead of looping forever.

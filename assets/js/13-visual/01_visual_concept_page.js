@@ -51,8 +51,8 @@
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], !plansApproved);
       const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !plansApproved || !coverApproved)).join('');
       const lockHint = !plansApproved
-        ? '<p class="tenant-hint">التصورات الخارجية مقفلة حتى اعتماد المخططات الثلاثة.</p>'
-        : (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>');
+        ? '<p class="tenant-hint visual-concept-lock-hint">التصورات الخارجية مقفلة حتى اعتماد المخططات الثلاثة.</p>'
+        : (coverApproved ? '' : '<p class="tenant-hint visual-concept-lock-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>');
       host.innerHTML = coverHtml +
         '<div class="visual-concept-stack">' +
         lockHint +
@@ -212,7 +212,7 @@
     async function generateVisualConceptPrompt(slotId, instruction) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
-        toast(visualConceptLockMessage(slotId));
+        showVisualConceptLockNotice(visualConceptLockMessage(slotId));
         return;
       }
       showLoader('جاري إنشاء وصف التصور البصري', 'يتم قراءة بيانات المشروع والصور المرجعية...');
@@ -246,7 +246,7 @@
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
       if (!liveSlot() || liveSlot().status === 'generating') return;
       if (visualConceptSlotLocked(slotId)) {
-        toast(visualConceptLockMessage(slotId));
+        showVisualConceptLockNotice(visualConceptLockMessage(slotId));
         return;
       }
       if (!liveSlot().prompt) {
@@ -356,7 +356,7 @@
     async function sendVisualConceptChat(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
-        toast(visualConceptLockMessage(slotId));
+        showVisualConceptLockNotice(visualConceptLockMessage(slotId));
         return;
       }
       const input = document.querySelector('[data-visual-chat="' + slotId + '"]');

@@ -796,6 +796,11 @@
       font-weight: 700;
     }
 
+    .visual-concept-lock-hint {
+      color: #9c1d1d;
+      font-weight: 700;
+    }
+
     .tenant-form-actions {
       display: flex;
       flex-wrap: wrap;

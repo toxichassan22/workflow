@@ -137,6 +137,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "مطابق للدراسة": "Matches the study",
   "مقفل حتى اعتماد مخطط الموقع العام.": "Locked until the site plan is approved.",
   "مقفل حتى اعتماد مخططي الموقع العام وتوزيع الأدوار.": "Locked until the site plan and the floor layout are approved.",
+  "التوليد مقفل": "Generation is locked",
   "ملاحظات تعديل الحدود": "Boundary edit notes",
   "وحدات": "Units",
   "يؤثر في الدراسة المالية": "Affects the financial study",
