@@ -1,7 +1,7 @@
 /* 11-land-croquis/04_land_chat.js — scoped Q&A chat pinned inside the
- * land/croquis section (temporary feature). A draggable floating ball opens a
- * panel anchored to it; the server answers only from the recorded land data
- * and must state uncertainty instead of guessing. */
+ * land/croquis section. A draggable floating ball opens a panel anchored to
+ * it; the server answers only from the recorded land data and must state
+ * uncertainty instead of guessing. */
 
     const LAND_CHAT_HISTORY_KEPT = 10;
     const LAND_CHAT_POS_KEY = 'landChatFabPos';

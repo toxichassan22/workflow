@@ -1,9 +1,10 @@
-# ━━━ Scoped Q&A chat for the land/croquis section (temporary feature) ━━━
+# ━━━ Scoped Q&A chat for the land/croquis section ━━━
 #
 # One-shot chat endpoint: the model answers questions about the parcel only from
 # the recorded land data (section fields, document analysis, verified regulation
 # facts). When a value is not in the data or is uncertain, the prompt forces the
-# reply to say so instead of guessing — «لا تضليل».
+# reply to say so instead of guessing — «لا تضليل». It may suggest field edits
+# as grounded guidance, but it never applies them — the client owns every change.
 
 LAND_CHAT_FIELD_LABELS = (
     ('project_name', 'اسم المشروع'),
@@ -68,7 +69,10 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- اكتب المعادلات كنص عادي يقرؤه الإنسان (مثال: مسطح البناء = 7.0 × المساحة = 56000 م²)، وممنوع صيغ LaTeX أو رموزها مثل $ و \\times و \\text، وممنوع تنسيق Markdown تمامًا (لا ** ولا ### ولا جداول).\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
-    '- لا تقترح تعديلات ولا تنفذ إجراءات على البيانات — الإجابة معلوماتية فقط.'
+    '- يجوز اقتراح تعديل على قيم القسم كنص إرشادي مبني على البيانات المرفقة حصرًا: '
+    'انسب كل قيمة مقترحة إلى مصدرها الموثق (جدول التنظيم، الحقائق التنظيمية، ملفات الأمانة) '
+    'بلا اجتهاد ولا افتراض قيمة غير مسجلة، وإن لم تدعم البيانات اقتراحًا فصرّح بذلك. '
+    'ممنوع تنفيذ أي تعديل أو إجراء — الاقتراح إرشاد يقرره العميل ويطبقه بنفسه.'
 )
 
 
@@ -144,8 +148,40 @@ def _land_chat_regulation_evidence(message, source):
         for record in top)
 
 
-def _land_chat_context(project_data, message=''):
-    """Everything the land chat may answer from, grouped for the prompt."""
+_LAND_CHAT_ANALYSIS_DROP_KEYS = {
+    # Extraction internals and raw tables are operator diagnostics or duplicate
+    # data the chat already receives through the labeled fields and the
+    # survey/directions context blocks — they are the bulk of the payload.
+    'extraction_diagnostics', 'document_processing', 'land_document_processing',
+    'coordinate_tables', 'regulation_coordinates', 'survey_coordinates',
+    'coordinates', 'coordinates_table_source_page',
+}
+
+
+def _land_chat_slim_analysis(analysis):
+    """Copy the document analysis minus heavy internals and duplicated tables,
+    so the context stays small enough to resend with every chat turn."""
+    def slim_dict(source):
+        return {
+            key: value for key, value in source.items()
+            if key not in _LAND_CHAT_ANALYSIS_DROP_KEYS and value not in (None, '', [], {})
+        }
+
+    slimmed = slim_dict(analysis)
+    parcels = slimmed.get('parcels')
+    if isinstance(parcels, list):
+        slimmed['parcels'] = [
+            slim_dict(parcel) if isinstance(parcel, dict) else parcel
+            for parcel in parcels
+        ]
+    return slimmed
+
+
+def _land_chat_context(project_data):
+    """Everything the land chat may answer from, grouped for the prompt — the
+    stable part only. The question-scored municipality snippets are appended
+    by the route after this block, so this JSON stays identical between turns
+    and can hit provider-side prefix caching."""
     source = project_data if isinstance(project_data, dict) else {}
     context = {}
     fields = {}
@@ -167,7 +203,9 @@ def _land_chat_context(project_data, message=''):
     if isinstance(analysis, str):
         analysis = _visual_concept_parse_json(analysis, None)
     if isinstance(analysis, dict) and analysis:
-        context['تحليل مستندات الأرض'] = analysis
+        slimmed_analysis = _land_chat_slim_analysis(analysis)
+        if slimmed_analysis:
+            context['تحليل مستندات الأرض'] = slimmed_analysis
     component_source = dict(source)
     if isinstance(component_source.get('financial_study_model'), str):
         component_source['financial_study_model'] = _visual_concept_parse_json(
@@ -226,9 +264,6 @@ def _land_chat_context(project_data, message=''):
             if isinstance(general, dict) and general:
                 context['القواعد العامة الموثقة لاشتراطات المدينة'] = (
                     _land_chat_scrub_rule_refs(general))
-    evidence = _land_chat_regulation_evidence(message, source)
-    if evidence:
-        context['نصوص الاشتراطات الموثقة من ملفات الأمانة'] = evidence
     return context
 
 
@@ -294,14 +329,21 @@ def api_land_chat():
         return jsonify({'success': False, 'error': 'اكتب السؤال أولاً',
                         'error_code': 'MESSAGE_REQUIRED'}), 400
     project_data = clean_project_data(data.get('projectData') or {})
-    context_json = json.dumps(_land_chat_context(project_data, message), ensure_ascii=False, default=str)[:60000]
+    context_json = json.dumps(_land_chat_context(project_data), ensure_ascii=False, default=str)[:60000]
+    # Question-scored municipality snippets and history sit AFTER the stable
+    # context block: both change per turn, so the request prefix stays
+    # identical and can hit provider-side prompt caching.
+    evidence = _land_chat_regulation_evidence(message, project_data)
     prior = ''
     history = _land_chat_history(data.get('history'))
     if history:
         prior = 'سياق المحادثة السابقة:\n' + '\n'.join(
             f"{'المستخدم' if turn['role'] == 'user' else 'المساعد'}: {turn['content']}"
             for turn in history) + '\n\n'
-    user_content = f"{prior}بيانات الأرض والكروكي المتاحة:\n{context_json}\n\nسؤال المستخدم: {message}"
+    user_content = f"بيانات الأرض والكروكي المتاحة:\n{context_json}\n\n"
+    if evidence:
+        user_content += f"نصوص الاشتراطات الموثقة من ملفات الأمانة:\n{evidence}\n\n"
+    user_content += f"{prior}سؤال المستخدم: {message}"
     try:
         response = call_text_chat(
             LAND_CHAT_SYSTEM_PROMPT, user_content, max_tokens=2500,
