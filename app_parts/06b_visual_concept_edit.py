@@ -59,7 +59,27 @@ def _visual_concept_edit_prompt(instruction, slot_id, facts, ref_count=0):
     )
 
 
-def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx=None, extra_images=None):
+def _visual_concept_edit_chat_tail(data, slot_id, limit=4):
+    """The last few chat lines posted with the request — the clarity gate sees
+    them so an element identified one message ago does not get asked again."""
+    state = _visual_concept_posted_state(data)
+    slot_state = (state.get('slots') or {}).get(slot_id) or {}
+    chat = slot_state.get('chat')
+    lines = []
+    for entry in (chat if isinstance(chat, list) else [])[-limit:]:
+        if not isinstance(entry, dict) or not str(entry.get('text') or '').strip():
+            continue
+        speaker = 'النظام' if entry.get('role') == 'assistant' else 'العميل'
+        line = f'{speaker}: {str(entry["text"]).strip()[:300]}'
+        attached = entry.get('attachments')
+        if isinstance(attached, list) and attached:
+            line += ' (مرفق: ' + '، '.join(str(name) for name in attached[:3]) + ')'
+        lines.append(line)
+    return lines
+
+
+def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx=None,
+                                 extra_images=None, chat_tail=None):
     """Gate the edit before it costs an image call: the text model sees the
     actual image plus the request and decides whether the request is a clear,
     directly executable visual edit. Returns a dict {clear, question} or None
@@ -73,12 +93,22 @@ def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_
         'اعتبر الطلب غير واضح إذا كان فضفاضًا لا يحدد ما الذي يتغير، أو مضللًا يشير إلى عنصر '
         'غير موجود في الصورة أو موجود بتكرار دون تحديد المقصود، أو ليس تعديلًا على الصورة أصلًا '
         'كأن يكون سؤالًا أو طلب معلومات أو رأيًا. '
+        'قد يصل العميل صورًا مرجعية إضافية بعد الصورة الأساسية — عبارات مثل «الصورة المرفوعة» '
+        'أو «الصورة المرجعية» تعنيها، ووجود مرجع مرفق مع عنصر محدد يجعل الطلب واضحًا تمامًا؛ '
+        'لا تسأل عن عناصر النقل من المرجع ولا عن الصورة نفسها. '
+        'وإذا كان العميل قد حدّد العنصر في رسالة سابقة من المحادثة فلا تسأل عنه مجددًا. '
         'عند عدم الوضوح اكتب سؤالًا عربيًا واحدًا قصيرًا يطلب بالضبط ما تحتاجه لتنفيذ التعديل، '
         'ولا تسأل عمّا هو واضح أصلًا. أعد JSON فقط: {"clear":true|false,"question":""}.'
     )
+    context = ''
+    if chat_tail:
+        context = 'آخر رسائل المحادثة بين العميل والنظام:\n' + '\n'.join(chat_tail) + '\n'
+    ref_count = len(extra_images or [])
     user_prompt = (
-        'الصورة المرفقة هي «' + str(slot_label) + '» للمشروع.\n'
-        'طلب التعديل من العميل:\n' + instruction
+        'الصورة الأولى المرفقة هي «' + str(slot_label) + '» للمشروع.\n'
+        + context
+        + (f'العميل أرفق {ref_count} صورة مرجعية مع طلبه (الصور بعد الأساسية).\n' if ref_count else '')
+        + 'طلب التعديل من العميل:\n' + instruction
     )
     try:
         response = call_openrouter_chat(
@@ -140,7 +170,9 @@ def api_visual_concept_edit():
         }), 400
     ref_uris = _visual_concept_edit_reference_uris(data)
     usage_ctx = _usage_ctx('image', data)
-    clarity = _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx, ref_uris)
+    clarity = _visual_concept_edit_clarity(
+        slot_id, facts, instruction, base_image, usage_ctx, ref_uris,
+        _visual_concept_edit_chat_tail(data, slot_id))
     if isinstance(clarity, dict) and clarity.get('clear') is False:
         question = _visual_concept_text(clarity.get('question'), 600) or 'حدد ما الذي تريد تغييره في الصورة بالضبط.'
         return jsonify({

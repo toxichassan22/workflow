@@ -1158,6 +1158,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('def _visual_concept_edit_reference_uris', source)
         self.assertIn('client-supplied style references', source)
         self.assertIn('editReferenceFileIds', source)
+        # The clarity gate sees the attachments and the chat tail, so a named
+        # element plus a pinned reference never loops into clarifying questions.
+        self.assertIn('def _visual_concept_edit_chat_tail', source)
+        self.assertIn('آخر رسائل المحادثة', source)
+        self.assertIn('scrollHeight', index_source)
 
         # Major-section approvals gate the chain plans → exterior → interior →
         # sketches: the posted plan images alone are not enough — the plans

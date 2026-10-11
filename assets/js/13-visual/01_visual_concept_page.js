@@ -99,6 +99,11 @@
       bindRoot.querySelectorAll('[data-visual-chat-refs]').forEach(box => {
         renderVisualConceptChatRefs(box.getAttribute('data-visual-chat-refs'));
       });
+      // The chat strip re-renders scrolled to the top — land on the newest
+      // message instead, like every chat view.
+      bindRoot.querySelectorAll('.visual-concept-chat').forEach(box => {
+        box.scrollTop = box.scrollHeight;
+      });
       repairVisualConceptStoredImages();
     }
 
