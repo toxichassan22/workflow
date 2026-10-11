@@ -735,9 +735,11 @@
       const deleteBtn = hasImage
         ? '<button type="button" class="btn danger small" data-visual-action="delete-image" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>حذف الصورة</button>'
         : '';
+      // «حذف المخطط» removes an uploaded plan entry; the three workflow plans
+      // are fixed stages, so their cards only ever carry «حذف الصورة».
       const deleteFieldBtn = isVisualConceptInteriorSlot(slotDef.id)
         ? '<button type="button" class="btn danger small" data-visual-action="delete-interior-field" data-visual-slot="' + slotDef.id + '">حذف الحقل</button>'
-        : (isVisualConceptPlanSlot(slotDef.id)
+        : (isVisualConceptPlanSlot(slotDef.id) && !isVisualConceptWorkflowPlan(slotDef.id)
           ? '<button type="button" class="btn danger small" data-visual-action="delete-plan" data-visual-slot="' + slotDef.id + '">حذف المخطط</button>'
           : '');
 
