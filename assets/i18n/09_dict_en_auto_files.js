@@ -41,6 +41,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "شعار المشروع": "Project Logo",
   "صور مرجعية.": "reference images.",
   "صورة مرجعية": "Reference Image",
+  "الصور المرجعية للتصميم اتغيّرت — حدّث تعيينها في الوصف فقط: اربط كل صورة مرجعية مسمّاة بالعنصر الذي يصفه اسمها كما ورد في بيانات المشروع، واحذف تعيين أي صورة لم تعد موجودة، ولا تغيّر أي تفاصيل أخرى.": "The design reference images changed — update only their assignment in the description: bind each named reference image to the element its name describes as given in the project data, remove the assignment of any image that no longer exists, and do not change any other details.",
   "فوق": "Top",
   "قيد التوليد": "Generating",
   "لا توجد تعديلات بعد.": "No edits yet.",
