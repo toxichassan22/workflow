@@ -452,6 +452,7 @@
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
       if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
       if (typeof persistExecutiveContentFromDom === 'function') persistExecutiveContentFromDom();
+      if (typeof persistBestUseDraftState === 'function') persistBestUseDraftState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {

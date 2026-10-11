@@ -117,6 +117,8 @@
       window._lastAnalyzedAddress = (source.location_address || '').trim();
       enhanceProjectClassificationFields();
       applyMarketStudyState(parseStoredLandTable(source.market_study_data) || getMarketStudyState());
+      if (typeof persistBestUseDraftState === 'function') persistBestUseDraftState();
+      if (typeof renderBestUse === 'function') renderBestUse();
       // Marked last on purpose: if anything above throws, the form stays unfilled and a save keeps
       // the stored values instead of writing this form's blanks over them.
       markTenantProjectFormFilled();
@@ -350,6 +352,7 @@
       });
       refreshActiveSectionApproveButton();
       try { if (typeof refreshAllSectionVersionLines === 'function') refreshAllSectionVersionLines(); } catch (e) {}
+      if (typeof renderBestUse === 'function') renderBestUse();
     }
 
     function activeProjectSectionKey() {
@@ -383,6 +386,10 @@
     }
 
     async function setSectionStatus(sectionKey, status) {
+      if (sectionKey === 'section-best-use' && status === 'approved' && typeof bestUseSectionError === 'function') {
+        const error = bestUseSectionError();
+        if (error) { toast(error); return; }
+      }
       if (sectionKey === 'section-financial-calc' && status === 'approved' && typeof financialParkingError === 'function') {
         const error = financialParkingError();
         if (error) { toast(financialParkingText(error)); return; }
@@ -498,9 +505,15 @@
       const keys = [];
       let landCroquisBlocked = false;
       let locationBlocked = false;
+      let bestUseBlocked = false;
       sections.forEach(sec => {
         if (sec.dataset.underConstruction === '1') return;
         const key = sec.dataset.section;
+        if (key === 'section-best-use' && typeof bestUseSectionRequired === 'function') {
+          if (!bestUseSectionRequired()) return;
+          const error = bestUseSectionError();
+          if (error) { bestUseBlocked = true; toast(error); return; }
+        }
         if (key === 'location') {
           if (!tenantProjectData.site_analysis_approved
               || !String(tenantProjectData.site_analysis || '').trim()
@@ -542,7 +555,7 @@
           failed += 1;
         }
       }
-      if (failed || landCroquisBlocked || locationBlocked) {
+      if (failed || landCroquisBlocked || locationBlocked || bestUseBlocked) {
         toast('تم اعتماد الأقسام المكتملة، وبقي قسم يحتاج استكمال متطلبات الاعتماد');
       } else {
         toast('تم اعتماد جميع الأقسام');

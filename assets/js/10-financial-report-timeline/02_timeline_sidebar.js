@@ -175,6 +175,7 @@
             persistExecutiveContentFromDom();
           }
           if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+          if (typeof persistBestUseDraftState === 'function') persistBestUseDraftState();
           if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
           if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
           renumberTenantSlides();
@@ -269,7 +270,8 @@
         let expectedRev = tenantDraftRevision;
         for (let attempt = 0; attempt < 2; attempt++) {
           resp = await api('POST', '/api/project-draft',
-            { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
+            { draftData: snapshot, sectionStatuses: typeof bestUseOptionalStatuses === 'function'
+                ? bestUseOptionalStatuses(tenantProjectSectionStatuses) : tenantProjectSectionStatuses, status: 'draft',
               slideCheckpoint, expectedRevision: expectedRev },
             false, { onProgress });
           if (!resp || resp.success || resp.error_code !== 'DRAFT_REVISION_CONFLICT') break;

@@ -124,6 +124,7 @@ def api_save_project_draft():
         g.tenant_id, previous, section_statuses, previous_statuses)
     draft_data = _sanitize_save_workflow_claims(
         g.tenant_id, save_draft_id, draft_data, previous_data)
+    section_statuses = _best_use_save_statuses(draft_data, section_statuses, previous_statuses)
     # ISS-030: a save that names the revision it was made against cannot
     # silently overwrite a draft that moved meanwhile — the conflict surfaces
     # instead of the later save rewinding the earlier one's edits.
@@ -482,6 +483,7 @@ def _sanitize_save_workflow_claims(tenant_id, draft_id, draft_data, stored_data)
             tenant_id, draft_id)
     _sanitize_map_approval_claims(tenant_id, draft_id, draft_data, stored)
     _sanitize_financial_parking_claims(draft_data, stored)
+    _sanitize_best_use_claims(draft_data, stored)
     return draft_data
 
 

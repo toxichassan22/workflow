@@ -850,6 +850,7 @@
 
       const contactSectionDiv = renderFormSection('contact');
       if (contactSectionDiv) form.appendChild(contactSectionDiv);
+      if (typeof addBestUseSection === 'function') addBestUseSection(form);
 
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();

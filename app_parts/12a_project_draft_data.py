@@ -44,7 +44,7 @@ def _hidden_field_sections():
         allowed = db.get_user_field_sections(g.user_id, g.tenant_id) or {}
     except Exception:
         return set()
-    return {key for key, granted in allowed.items() if not granted} - {'general'}
+    return _best_use_hidden_sections({key for key, granted in allowed.items() if not granted} - {'general'})
 
 
 def _draft_data_for_response(data):
@@ -132,6 +132,8 @@ DRAFT_FIELD_SECTION_BLOBS = {
     'market_study_data': 'section-market-study',
     'visual_concept': 'section-visual-concept',
     'executive_content': 'section-executive-content',
+    'best_use_data': 'section-best-use',
+    'best_use_chat': 'section-best-use',
 }
 
 # Widget-section blobs that belong to a section snapshot even though no input
@@ -145,6 +147,7 @@ SECTION_SNAPSHOT_BLOBS = {
     'section-market-study': ['market_study_data'],
     'section-visual-concept': ['visual_concept'],
     'section-executive-content': ['executive_content'],
+    'section-best-use': ['best_use_data'],
 }
 SECTION_SNAPSHOT_LOCATION_EXTRAS = [
     'site_analysis_approved',
@@ -153,6 +156,7 @@ SECTION_SNAPSHOT_LOCATION_EXTRAS = [
 ]
 SECTION_SNAPSHOT_EXCLUDED_KEYS = {
     'tenantCreativeImages', 'tenantSlidesData', 'pageDrafts', 'designerChat', 'map_styles',
+    'best_use_chat',
 }
 
 SECTION_VERSION_AR_LABELS = {
@@ -166,6 +170,7 @@ SECTION_VERSION_AR_LABELS = {
     'section-market-study': 'دراسة السوق',
     'section-visual-concept': 'التصور البصري',
     'section-executive-content': 'المحتوى التنفيذي',
+    'section-best-use': 'أفضل استخدامات',
 }
 
 
@@ -342,7 +347,7 @@ def _section_version_readiness(draft, section_key, section_map=None, overview=No
         except Exception:
             overview = {}
     meta = (overview or {}).get(section_key)
-    if _financial_parking_section_error(draft, section_key):
+    if _generated_section_error(draft, section_key):
         return 'not_approved', meta
     if not meta:
         return 'legacy', None
@@ -379,9 +384,10 @@ def _void_stale_section_approvals(tenant_id, draft_id, draft_data, statuses=None
     section_map = _draft_field_section_map(tenant_id)
     slices = None
     stale = {}
-    if statuses.get('section-financial-calc') == 'approved' and _financial_parking_section_error(
-            {'draft_data': draft_data}, 'section-financial-calc'):
-        stale['section-financial-calc'] = 'draft'
+    for section_key in ('section-financial-calc', 'section-best-use'):
+        if statuses.get(section_key) == 'approved' and _generated_section_error(
+                {'draft_data': draft_data}, section_key):
+            stale[section_key] = 'draft'
     model = financial_parking.parking_object((draft_data or {}).get('financial_study_model'))
     if model.get('parkingPlan', {}).get('inputsChanged') and statuses.get('section-visual-concept') == 'approved':
         stale['section-visual-concept'] = 'draft'
@@ -535,7 +541,7 @@ def _sanitize_save_section_statuses(tenant_id, draft, incoming, stored_statuses)
     for key, value in incoming.items():
         if not isinstance(key, str) or not key or value not in {'draft', 'approved'}:
             continue
-        if value == 'approved' and _financial_parking_section_error(draft, key):
+        if value == 'approved' and _generated_section_error(draft, key):
             sanitized[key] = 'draft'
             blocked.append(key)
             continue

@@ -84,60 +84,82 @@
 .feature-card h3 { margin: 0 0 8px; font-size: 17.5px; color: var(--ink); font-weight: 800; }
 .feature-card p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; }
 
-/* ── Flow: a vertical timeline of product mockups ──────────────────────────
-   The five steps sit as nodes on a continuous rail — number markers ride the
-   line, and pressing a step unfolds its app-window mockup (chrome bar, side
-   nav, screen body) in the text column below. Panels collapse only under
-   body.js — a scriptless page keeps every mockup visible. */
+/* ── Flow: a centered timeline of product mockups ──────────────────────────
+   One rail down the middle; the five steps alternate right and left of it so
+   the sequence reads as a path. Pressing a step fills its marker and unfolds
+   an app-window mockup (chrome bar, side nav, screen body) across the full
+   width below. Panels collapse only under body.js — a scriptless page keeps
+   every mockup visible. */
 
 .flow {
-  display: flex;
-  flex-direction: column;
-  max-width: 1040px;
+  max-width: 1080px;
   margin: 0 auto;
 }
 
-.flow-step { position: relative; padding: 16px 0; }
+.flow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 18px 0;
+}
 
-/* The rail: one segment per step so the first starts at its marker and the
-   last ends at its marker — no stubs hanging above or below the timeline. */
+.flow-panel { grid-column: 1 / -1; }
+
+/* The rail: one centered segment per step; the first starts at its marker,
+   the last ends at its marker — no stubs above or below the timeline. */
 .flow-step::before {
   content: '';
   position: absolute;
-  inset-inline-start: 19px;
+  left: calc(50% - 1px);
   top: 0;
   bottom: 0;
   width: 2px;
   background: rgba(15, 169, 196, .22);
 }
-.flow-step:first-child::before { top: 26px; }
-.flow-step:last-child::before { bottom: calc(100% - 26px); }
+.flow-step:first-child::before { top: 33px; }
+.flow-step:last-child::before { bottom: calc(100% - 33px); }
 
 .flow-head {
   display: flex;
-  align-items: flex-start;
-  gap: 20px;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
-  padding: 4px 0;
+  padding: 6px 0;
   border: 0;
   background: none;
   font-family: inherit;
-  text-align: start;
   cursor: pointer;
 }
 
 .flow-head:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: 2px; border-radius: 8px; }
 
+/* Odd steps take the first column, even steps the second; text always faces
+   the rail (end-aligned toward it) and keeps ~90px of corridor clear for the
+   line and its marker. */
+.flow-step:nth-child(odd) .flow-head {
+  grid-column: 1;
+  text-align: end;
+  align-items: flex-end;
+  padding-inline-end: 46px;
+}
+.flow-step:nth-child(even) .flow-head {
+  grid-column: 2;
+  text-align: start;
+  align-items: flex-start;
+  padding-inline-start: 46px;
+}
+
 .flow-head .num {
-  flex: none;
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
   z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
-  margin-top: 4px;
   border-radius: 50%;
   background: #fff;
   border: 1.5px solid rgba(15, 169, 196, .55);
@@ -155,14 +177,12 @@
   color: var(--ink);
 }
 
-.flow-head-body { flex: 1; min-width: 0; }
+.flow-head-body { min-width: 0; }
 .flow-title { display: block; font-size: 17px; font-weight: 800; color: var(--ink); line-height: 1.5; transition: color .15s; }
 .flow-head:hover .flow-title { color: var(--teal-dark); }
-.flow-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 13.5px; line-height: 1.75; max-width: 660px; }
+.flow-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
 
 .flow-tag {
-  flex: none;
-  margin-top: 6px;
   font-size: 11px;
   font-weight: 800;
   color: var(--teal-dark);
@@ -182,8 +202,8 @@ body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
 
 /* App-window mockup: navy frame, chrome bar, side nav, white screen body. */
 .shot {
-  margin: 16px 0 18px;
-  margin-inline-start: 58px;
+  margin: 16px auto 10px;
+  max-width: 960px;
   background: linear-gradient(160deg, #0B2745, #071B31);
   border: 1px solid rgba(23, 200, 227, .2);
   border-radius: 16px;
@@ -652,6 +672,21 @@ body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
   .hero .wrap { grid-template-columns: 1fr; gap: 38px; }
   .hero-visual { max-width: 480px; margin: 12px auto 0; }
   .features { grid-template-columns: 1fr 1fr; }
+  /* The zigzag flattens: rail docks to the start edge, every step occupies
+     the single column, and text returns to start alignment. */
+  .flow-step { grid-template-columns: 1fr; }
+  .flow-step:nth-child(odd) .flow-head,
+  .flow-step:nth-child(even) .flow-head {
+    grid-column: 1 / -1;
+    text-align: start;
+    align-items: flex-start;
+    padding-inline-start: 58px;
+    padding-inline-end: 0;
+  }
+  .flow-head .num { left: auto; inset-inline-start: 0; transform: none; }
+  .flow-step::before { left: auto; inset-inline-start: 19px; }
+  .shot { margin-inline: 58px 0; max-width: none; }
+
   /* The side nav becomes a horizontal strip on narrow screens so the shot
      keeps its full width for the screen body. */
   .shot-main { grid-template-columns: 1fr; }
@@ -699,14 +734,15 @@ body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
   .feature-card { padding: 22px; }
   .flow-step { padding: 12px 0; }
   .flow-step::before { inset-inline-start: 17px; }
-  .flow-step:first-child::before { top: 22px; }
-  .flow-step:last-child::before { bottom: calc(100% - 22px); }
-  .flow-head { gap: 14px; }
-  .flow-head .num { width: 34px; height: 34px; font-size: 14px; }
+  .flow-step:first-child::before { top: 29px; }
+  .flow-step:last-child::before { bottom: calc(100% - 29px); }
+  .flow-step:nth-child(odd) .flow-head,
+  .flow-step:nth-child(even) .flow-head { padding-inline-start: 50px; }
+  .flow-head .num { width: 34px; height: 34px; font-size: 14px; top: 12px; }
   .flow-title { font-size: 15.5px; }
   .flow-desc { font-size: 12.5px; }
   .flow-tag { display: none; }
-  .shot { margin: 12px 0 14px; margin-inline-start: 48px; padding: 8px; border-radius: 12px; }
+  .shot { margin: 12px 0 14px; margin-inline-start: 50px; padding: 8px; border-radius: 12px; }
   .shot-body { padding: 14px; }
   .shot-grid { grid-template-columns: 1fr; }
   .shot-crumb { font-size: 11px; }

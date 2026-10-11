@@ -342,6 +342,7 @@ FIELD_SECTIONS = [
     {'key': 'section-market-study', 'label': 'دراسة السوق'},
     {'key': 'section-visual-concept', 'label': 'التصور البصري'},
     {'key': 'section-executive-content', 'label': 'المحتوى التنفيذي'},
+    {'key': 'section-best-use', 'label': 'أفضل استخدامات'},
 ]
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}

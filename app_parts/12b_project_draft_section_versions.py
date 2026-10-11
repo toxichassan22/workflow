@@ -22,10 +22,11 @@ def api_update_section_status():
         if bulk.get('location') == 'approved' and not _location_workflow_complete(before):
             return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                             'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
-        if bulk.get('section-financial-calc') == 'approved':
-            parking_error = _financial_parking_section_error(before, 'section-financial-calc')
-            if parking_error:
-                return jsonify(parking_error), 400
+        for key, value in bulk.items():
+            if value == 'approved':
+                content_error = _generated_section_error(before, key)
+                if content_error:
+                    return jsonify(content_error), 400
         if draft_id:
             blocked = db.pending_section_versions(g.tenant_id, draft_id, list(bulk))
             if blocked:
@@ -70,9 +71,9 @@ def api_update_section_status():
         return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
     if section_status == 'approved':
-        parking_error = _financial_parking_section_error(before, section_key)
-        if parking_error:
-            return jsonify(parking_error), 400
+        content_error = _generated_section_error(before, section_key)
+        if content_error:
+            return jsonify(content_error), 400
     if draft_id and db.pending_section_versions(g.tenant_id, draft_id, [section_key]):
         return jsonify({'error': 'This section awaits a version decision; decide on the sent version first',
                         'error_code': 'SECTION_VERSION_PENDING', 'sections': [section_key]}), 409
@@ -120,9 +121,9 @@ def api_send_section_for_approval():
     if section_key == 'location' and not _location_workflow_complete(draft):
         return jsonify({'error': 'Site analysis approval and the four generated maps are required first',
                         'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
-    parking_error = _financial_parking_section_error(draft, section_key)
-    if parking_error:
-        return jsonify(parking_error), 400
+    content_error = _generated_section_error(draft, section_key)
+    if content_error:
+        return jsonify(content_error), 400
     stored = draft.get('draft_data') or {}
     section_map = _draft_field_section_map(g.tenant_id)
     snapshot = _section_snapshot_slice(stored, section_key, section_map)
@@ -269,14 +270,14 @@ def api_decide_section_version():
             if not granted.get(section_key):
                 return jsonify({'error': 'هذا القسم خارج نطاق اعتمادك',
                                 'error_code': 'section_scope_forbidden'}), 403
-    if decision == 'approved' and version['section_key'] == 'section-financial-calc':
-        parking_error = _financial_parking_section_error(draft, version['section_key'])
-        if not parking_error:
+    if decision == 'approved':
+        content_error = _generated_section_error(draft, version['section_key'])
+        if not content_error:
             snapshot = (db.get_section_version(g.tenant_id, version_id, include_snapshot=True) or {}).get('snapshot') or {}
-            parking_error = _financial_parking_section_error(
+            content_error = _generated_section_error(
                 {'draft_data': {**(draft.get('draft_data') or {}), **snapshot}}, version['section_key'])
-        if parking_error:
-            return jsonify(parking_error), 400
+        if content_error:
+            return jsonify(content_error), 400
     decided = db.decide_section_version(
         g.tenant_id, version_id, decision,
         actor_id, _project_draft_actor_name(), data.get('note'),

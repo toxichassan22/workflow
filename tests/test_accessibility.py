@@ -25,13 +25,15 @@ FRONTEND_CSS_ORDER = (
     'project-form/01a_location_maps.css',
     'project-form/02_fields_tables_rail.css',
     'project-form/03_timeline_board.css', 'project-form/04_financial_parking.css',
+    'project-form/05_best_use.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
     '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form/01_form_sections.js',
-    '07-project-form/02_section_versions.js', '08-location-maps/01_tables_approvals.js',
+    '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js',
+    '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',
     '10-financial-report-timeline/01_report_collect.js',

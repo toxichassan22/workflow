@@ -11,6 +11,10 @@ DRAFT_COPY_STRIPPED_KEYS = {
     # Generated artifacts the copy must re-earn through the gates.
     'tenantSlidesData', 'tenantSlidePlan', 'slide_generation_checkpoint',
     'tenantCreativeImages', 'pageDrafts',
+    # The Best Use proposal and its decision: its source snapshot is bound to
+    # the source draft's inputs, and an unapproved leftover would force the
+    # optional section on the copy.
+    'best_use_data', 'best_use_chat',
     # Designer/chat working state of the source file.
     'designerChat', 'designerChatSessions', 'chatHistory',
     # Identity fields that must not point back at the source draft.

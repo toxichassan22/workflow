@@ -125,7 +125,8 @@
     '[contenteditable]',
     '.slide', '.ge-slide-card', '.pdf-export-page',
     '#tenantChatMessages', '.tenant-chat-messages',
-    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
+    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog',
+    '.best-use-chat-messages', '.best-use-reasons', '.best-use-table tbody', '.best-use-proposal-heading h4'
   ].join(',');
   // Attribute pass uses the same skips minus textarea: a textarea body is
   // user content, but its placeholder is chrome. Image alt text is chrome
@@ -134,12 +135,14 @@
     'script', 'style', 'select', 'option', 'optgroup', '[contenteditable]',
     '.slide', '.ge-slide-card', '.pdf-export-page',
     '#tenantChatMessages', '.tenant-chat-messages',
-    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
+    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog',
+    '.best-use-chat-messages', '.best-use-reasons', '.best-use-table tbody', '.best-use-proposal-heading h4'
   ].join(',');
   var AUTO_CONTAINER_SKIP_SELECTOR = [
     '.slide', '.ge-slide-card', '.pdf-export-page',
     '#tenantChatMessages', '.tenant-chat-messages',
-    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
+    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog',
+    '.best-use-chat-messages', '.best-use-reasons', '.best-use-table tbody', '.best-use-proposal-heading h4'
   ].join(',');
   var AR_RE = /[؀-ۿ]/;
   var autoApplied = [];

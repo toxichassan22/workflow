@@ -1074,10 +1074,18 @@ def get_section_approval_validity_days(tenant_id):
 
 
 def expired_approved_sections(tenant_id, draft_id):
-    """Sections whose latest approved version passed its validity window."""
+    """Sections whose latest approved version passed its validity window.
+
+    Versions are immutable history: a section the draft no longer tracks as
+    approved — an optional feature its proposal was rejected on, say — cannot
+    gate the project through a stale version row. When no statuses are stored
+    the overview alone decides, same as before."""
     overview = section_versions_overview(tenant_id, draft_id)
+    draft = get_project_draft_by_id(tenant_id, draft_id) or {}
+    statuses = draft.get('section_statuses') or {}
     return [key for key, meta in overview.items()
-            if meta.get('status') == 'approved' and meta.get('is_expired')]
+            if meta.get('status') == 'approved' and meta.get('is_expired')
+            and (not statuses or statuses.get(key) == 'approved')]
 
 
 GENERATION_INPUT_EXCLUDED_KEYS = {
@@ -1088,7 +1096,7 @@ GENERATION_INPUT_EXCLUDED_KEYS = {
     'access_road_label_sizes', 'catchment_label_positions',
     # Working/chat state that does not feed the generation prompts.
     'designerChat', 'designerChatSessions', 'chatHistory', 'draftHistory',
-    'tenantArchiveCache',
+    'tenantArchiveCache', 'best_use_data', 'best_use_chat',
     # Identity/bookkeeping fields the client round-trips.
     'draftId', 'draft_id', 'schema_version', 'sectionStatuses',
     # Transient UI state, view parameters and client-side mirrors.

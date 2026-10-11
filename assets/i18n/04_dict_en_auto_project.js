@@ -6,6 +6,7 @@
  * keep the I18N_EN_AUTO_BEGIN/END markers and JSON quoting (the Python
  * suite parses the block between them). Loaded before i18n.js. */
 window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/{
+  "أفضل استخدامات": "Best Use",
   "إرسال للاعتماد": "Send for approval",
   "اعتماد": "Approve",
   "اعتماد تحليل الموقع والخرائط الأربع مطلوب قبل اعتماد قسم الموقع": "Site analysis and the four maps approval is required before approving the location section",
