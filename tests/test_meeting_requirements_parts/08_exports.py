@@ -1137,6 +1137,16 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('visualConceptCoverStyleRefStale()', index_source)
         self.assertIn('لا تغيّر أي تفاصيل أخرى', index_source)
 
+        # The cover card also gets a manual escape hatch: a regen button whose
+        # hint lights up when the stored prompt predates the current refs, and
+        # clearing the prompt first forces the writer into create mode.
+        self.assertIn('data-visual-action="regen-prompt"', index_source)
+        self.assertIn('function regenerateVisualConceptPrompt(slotId)', index_source)
+        self.assertIn("action === 'regen-prompt'", index_source)
+        self.assertIn('visual-concept-regen-hint', index_source)
+        self.assertIn('vc.regen_prompt_hint', index_source)
+        self.assertIn('إعادة توليد الوصف', index_source)
+
         # Major-section approvals gate the chain plans → exterior → interior →
         # sketches: the posted plan images alone are not enough — the plans
         # section flag must be there, and it must match its items.

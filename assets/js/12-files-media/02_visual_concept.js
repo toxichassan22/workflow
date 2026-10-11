@@ -777,6 +777,14 @@
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
           deleteBtn + deleteFieldBtn +
           '</div>' +
+          (slotDef.id === 'cover'
+            ? '<div class="visual-concept-regen-row">' +
+              '<button type="button" class="btn ghost small" data-visual-action="regen-prompt" data-visual-slot="cover" ' + (generateBtnDisabled ? 'disabled' : '') + '>' +
+              escapeHtml(WFT('vc.regen_prompt', 'إعادة توليد الوصف')) + '</button>' +
+              '<span class="visual-concept-regen-hint' + (visualConceptCoverStyleRefStale() ? ' stale' : '') + '">' +
+              escapeHtml(WFT('vc.regen_prompt_hint', 'يُحدَّث بعد إضافة أو تعديل الصور المرجعية')) + '</span>' +
+              '</div>'
+            : '') +
           '<div class="visual-concept-chat">' + chat + '</div>' +
           '<div class="visual-concept-chat-row">' +
           '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +

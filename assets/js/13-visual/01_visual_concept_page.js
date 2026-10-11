@@ -18,6 +18,7 @@
         else if (action === 'add-interior') addVisualConceptInteriorView();
         else if (action === 'section-approve') approveVisualConceptSection(button.getAttribute('data-visual-section'));
         else if (action === 'section-unapprove') unapproveVisualConceptSection(button.getAttribute('data-visual-section'));
+        else if (action === 'regen-prompt') regenerateVisualConceptPrompt(slotId);
         else if (action === 'set-mode') {
           const targetMode = button.getAttribute('data-visual-mode');
           const slot = tenantVisualConceptState?.slots?.[slotId];
@@ -247,6 +248,26 @@
       } catch (error) {
         hideLoader();
         toast(error.message || 'تعذر إنشاء الوصف');
+      }
+    }
+
+    // Manual escape hatch for the hidden prompt: clearing it before the call
+    // drops currentPrompt from the payload, so the writer runs in create mode
+    // and stale prose cannot survive the rebuild — the old prompt is restored
+    // only if the rewrite fails.
+    async function regenerateVisualConceptPrompt(slotId) {
+      if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
+      if (visualConceptSlotLocked(slotId)) {
+        showVisualConceptLockNotice(visualConceptLockMessage(slotId));
+        return;
+      }
+      const liveSlot = () => tenantVisualConceptState.slots[slotId];
+      const keepPrompt = liveSlot() ? liveSlot().prompt : '';
+      if (liveSlot()) liveSlot().prompt = '';
+      await generateVisualConceptPrompt(slotId);
+      if (liveSlot() && !liveSlot().prompt && keepPrompt) {
+        liveSlot().prompt = keepPrompt;
+        markVisualConceptDirty();
       }
     }
 

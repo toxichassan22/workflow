@@ -689,6 +689,24 @@
       justify-self: center;
     }
 
+    .visual-concept-regen-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .visual-concept-regen-hint {
+      color: #15803d;
+      font-size: 11px;
+    }
+
+    .visual-concept-regen-hint.stale {
+      color: #b45309;
+      font-weight: 700;
+    }
+
     .visual-concept-actions,
     .visual-concept-chat-row {
       display: flex;

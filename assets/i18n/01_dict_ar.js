@@ -616,6 +616,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "vc.ref_removed": "تم حذف الصورة المرجعية.",
   "vc.ref_name": "اسم العنصر",
   "vc.ref_desc": "وصف الصورة",
+  "vc.regen_prompt": "إعادة توليد الوصف",
+  "vc.regen_prompt_hint": "يُحدَّث بعد إضافة أو تعديل الصور المرجعية",
   "vc.delta_units": "وحدات {n}",
   "vc.plans_count": "{n} مخطط مرفوع",
   "vc.plans_none": "لا توجد مخططات مرفوعة.",
