@@ -10,7 +10,9 @@ DIRECTION_WORDS = {
     'east': r'(?:الشرق(?:ي(?:ة|ه)?)?|شرق(?:ي(?:ة|ه)?)?|\beast(?:ern)?\b)',
     'west': r'(?:الغرب(?:ي(?:ة|ه)?)?|غرب(?:ي(?:ة|ه)?)?|\bwest(?:ern)?\b)',
 }
-MAIN_FRONTAGE = r'(?:الواجه[ةه]\s*(?:الرئيسي[ةه]|الاساسي[ةه]|الأساسي[ةه])|المدخل\s*الرئيسي|(?:main|primary|principal)\s+(?:facade|frontage|entrance|entry))'
+_DIRECTION_WORD = r'(?:' + '|'.join(DIRECTION_WORDS.values()) + r')'
+MAIN_FRONTAGE = (r'(?:الواجه[ةه]\s*(?:' + _DIRECTION_WORD + r'\s+)?(?:الرئيسي[ةه]|الاساسي[ةه]|الأساسي[ةه])'
+                 r'|المدخل\s*الرئيسي|(?:main|primary|principal)\s+(?:facade|frontage|entrance|entry))')
 OPPOSITE = {'north': 'south', 'south': 'north', 'east': 'west', 'west': 'east'}
 LEFT = {'north': 'west', 'south': 'east', 'east': 'north', 'west': 'south'}
 
@@ -77,7 +79,7 @@ def primary_frontage(summary, constraints, rows, facade_directions=''):
                 continue
             found = [(key, match.start(), match.end()) for key, pattern in DIRECTION_WORDS.items()
                      for match in re.finditer(pattern, fragment, re.IGNORECASE)]
-            after = [item for item in found if marker.end() <= item[1] <= marker.end() + 55]
+            after = [item for item in found if marker.start() <= item[1] <= marker.end() + 55]
             before = [item for item in found if marker.start() - 30 <= item[2] <= marker.start()]
             nearest = min(after, key=lambda item: item[1]) if after else (
                 max(before, key=lambda item: item[2]) if before else None)
