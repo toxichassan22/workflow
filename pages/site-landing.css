@@ -31,19 +31,22 @@
    On entry the camera pushes in over the map while the Saudi border draws
    itself, marker pins rain down across it — the last lands on Riyadh —
    and LANDLOOM collapses out of a wide
-   tracking blur into its lockup — then the whole overlay zooms through and
-   hands off to the hero. site.js initOpening() scrubs the timeline on a
-   rAF clock; click or Escape skips; body.intro-done fires the exit. The
-   overlay only exists with JS (body.js gates display) so a scriptless load
-   lands straight on the page, and reduced motion drops it entirely (rule
-   at the bottom of site-sections.css). */
+   tracking blur into its lockup. site.js initOpening() scrubs the timeline
+   on a rAF clock; click or Escape skips. The intro is a real first section
+   of the page — a viewport-height block in the flow — so when the timeline
+   lands it just stays on its settled frame: the visitor's own scroll lifts
+   it away like any other section, and scrolling back up returns to it (it
+   never replays and never leaves on its own). It only exists with JS
+   (body.js gates display) so a scriptless load lands straight on the page,
+   and reduced motion drops it entirely (rule at the bottom of
+   site-sections.css). */
 
 html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
 
 .intro {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
+  position: relative;
+  height: 100vh;
+  height: 100svh;
   display: none;
   align-items: center;
   justify-content: center;
@@ -56,17 +59,6 @@ html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
 }
 
 body.js .intro { display: flex; }
-
-/* pointer-events die with intro-done so the exiting overlay never swallows
-   clicks, and initOpening removes the node outright once the exit plays. */
-body.intro-done .intro {
-  pointer-events: none;
-  animation: introExit .85s cubic-bezier(.55, 0, .8, .4) .05s forwards;
-}
-
-@keyframes introExit {
-  to { transform: scale(1.14); opacity: 0; filter: blur(10px); }
-}
 
 .intro-stage {
   position: relative;

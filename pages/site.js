@@ -136,13 +136,14 @@
   /* ── Opening: auto-played cinematic ──────────────────────────────────────
      On entry the camera pushes in over the map while the Saudi border draws
      itself, marker pins rain down across it — the last lands on Riyadh —
-     and LANDLOOM collapses out of a wide tracking blur into its
-     lockup, then the overlay zooms through and the hero takes over. One rAF
-     clock scrubs the whole timeline; click or Escape skips to the last
-     frame. body.intro-done fires the CSS exit and releases the hero
-     entrance (initHeroEnter listens for ll:intro-done). Reduced-motion
-     removes the overlay outright; without JS it never shows (body.js gates
-     .intro's display). */
+     and LANDLOOM collapses out of a wide tracking blur into its lockup. One
+     rAF clock scrubs the timeline; click or Escape skips to the last frame.
+     The intro is the page's first block, not an overlay: when the timeline
+     lands it simply stays as the settled frame — the visitor's own scroll
+     lifts it away like any other section, and scrolling back up returns to
+     it (it never replays and never leaves on its own). intro-lock bars
+     scrolling only while it plays. Reduced-motion removes it outright;
+     without JS it never shows (body.js gates .intro's display). */
 
   function initOpening() {
     var intro = document.getElementById('intro');
@@ -252,11 +253,8 @@
       document.documentElement.classList.remove('intro-lock');
       document.body.classList.add('intro-done');
       document.dispatchEvent(new CustomEvent('ll:intro-done'));
-      // The overlay is gone visually after the exit animation — drop it from
-      // the DOM so it can never keep a transparent click-catcher on screen.
-      window.setTimeout(function () {
-        if (intro.parentNode) intro.parentNode.removeChild(intro);
-      }, 1200);
+      // Nothing leaves the DOM: the intro stays as the page's first block on
+      // its settled frame, so scrolling back up lands on it again.
     }
 
     function loop(now) {
@@ -267,7 +265,7 @@
     }
 
     function skip() { skipped = true; }
-    intro.addEventListener('click', skip);
+    intro.addEventListener('click', function () { if (!done) skip(); });
     document.addEventListener('keydown', function (ev) {
       if ((ev.key === 'Escape' || ev.key === ' ') && !done) skip();
     });
@@ -278,9 +276,9 @@
   /* ── Hero entrance ───────────────────────────────────────────────────────
      body.entered fires the hero's staggered riseIn/deckIn animations and the
      metric counters. It trips when the hero scrolls ~a fifth into view — but
-     only after the intro overlay has zoomed through (ll:intro-done), so the
-     entrance never plays unseen behind it. Pages without a hero get it
-     immediately. */
+     only after the intro timeline lands (ll:intro-done), so the entrance
+     never plays unseen while the opening is still running. Pages without a
+     hero get it immediately. */
 
   function initHeroEnter() {
     var hero = document.querySelector('.hero');
