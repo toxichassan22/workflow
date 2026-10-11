@@ -315,6 +315,8 @@
       const messages = document.getElementById('bestUseChatMessages');
       messages.innerHTML = '';
       const history = bestUseChatState().messages || [];
+      const chatSection = root.querySelector('.best-use-chat');
+      if (chatSection) chatSection.hidden = !(state.id || history.length || bestUseBusy);
       if (!history.length) {
         const empty = document.createElement('p');
         empty.className = 'best-use-chat-empty';

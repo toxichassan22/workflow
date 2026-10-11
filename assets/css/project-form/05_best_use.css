@@ -119,60 +119,68 @@
 .best-use-chat {
   display: grid;
   gap: 12px;
-  padding: 20px;
-  border-radius: 12px;
-  background: var(--navy, #07182C);
-  color: var(--white, #FFFFFF);
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+  color: var(--navy, #07182C);
+}
+.best-use-chat[hidden] {
+  display: none;
 }
 .best-use-chat h4,
 .best-use-chat label {
   margin: 0;
   color: inherit;
 }
+.best-use-chat h4 {
+  font-size: 14px;
+}
 .best-use-chat-messages {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   align-content: start;
-  max-height: 440px;
-  min-height: 100px;
+  max-height: 380px;
+  min-height: 60px;
   overflow-y: auto;
+  padding: 2px;
 }
 .best-use-chat-message {
-  max-width: 92%;
-  padding: 12px 14px;
-  border: 1px solid var(--white, #FFFFFF);
-  border-radius: 10px;
+  max-width: 88%;
+  padding: 10px 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
   white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 13px;
+  line-height: 1.75;
+  font-size: 13.5px;
   overflow-wrap: anywhere;
 }
-.best-use-chat-message.assistant {
-  justify-self: start;
-  background: var(--white, #FFFFFF);
-  color: var(--navy, #07182C);
-}
 .best-use-chat-message.user {
+  justify-self: start;
+  background: var(--navy, #07182C);
+  border-color: var(--navy, #07182C);
+  color: var(--white, #FFFFFF);
+}
+.best-use-chat-message.assistant {
   justify-self: end;
+  background: var(--white, #FFFFFF);
 }
 .best-use-chat textarea {
   width: 100%;
-  min-height: 85px;
+  min-height: 72px;
   resize: vertical;
-  border: 1px solid var(--white, #FFFFFF);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px 12px;
   background: var(--white, #FFFFFF);
   color: var(--navy, #07182C);
   font-family: inherit;
 }
-.best-use-chat .btn.ghost {
-  color: var(--white, #FFFFFF);
-  border-color: var(--white, #FFFFFF);
-}
 .best-use-chat-empty {
-  opacity: .8;
+  color: #64748b;
   font-size: 13px;
+  text-align: center;
+  padding: 14px 8px;
 }
 @media (max-width: 680px) {
   .best-use-metrics {
