@@ -1123,6 +1123,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         sent_prompt = named_call.call_args.args[0]
         self.assertIn('last 3 attached images', sent_prompt)
         self.assertIn('نادي النساء', sent_prompt)
+        # The response echoes the stored prompt — the suffix must not bake
+        # into it or every regenerate would stack another copy.
+        self.assertEqual(named_cover.get_json()['prompt'], 'Hero image from the project facts')
 
         # When the ref set changes after the prompt was written, the stamp
         # comparison marks it stale and the prompt writer re-binds the named
