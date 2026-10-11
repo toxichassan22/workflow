@@ -84,40 +84,58 @@
 .feature-card h3 { margin: 0 0 8px; font-size: 17.5px; color: var(--ink); font-weight: 800; }
 .feature-card p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; }
 
-/* ── Flow ────────────────────────────────────────────────────────────────── */
+/* ── Flow: vertical interactive steps ──────────────────────────────────────
+   Five steps stacked vertically; each header is a button whose press unfolds
+   a product mockup — an app window (chrome bar, side nav, screen body) that
+   shows what the step looks like inside the system, styled like the hero's
+   market-study card. Panels collapse only under body.js — a scriptless page
+   keeps every mockup visible. */
 
-/* Five numbered steps in one row. The only "pipeline" left is the hairline
-   behind the number circles — no shared sheet, no per-step artwork. */
 .flow {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.flow::before {
-  content: '';
-  position: absolute;
-  top: 19px;
-  inset-inline: 9%;
-  height: 1px;
-  background: var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1000px;
+  margin: 0 auto;
 }
 
 .flow-step {
-  position: relative;
-  padding: 0 16px;
-  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #fff;
+  transition: border-color .2s, box-shadow .2s;
 }
 
-.flow-step .num {
-  position: relative;
-  z-index: 1;
+.flow-step:hover { border-color: rgba(15, 169, 196, .4); }
+
+.flow-step.open {
+  border-color: rgba(15, 169, 196, .55);
+  box-shadow: 0 18px 44px rgba(8, 38, 70, .08);
+}
+
+.flow-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+  padding: 20px 22px;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.flow-head:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: -2px; }
+
+.flow-head .num {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
-  margin: 0 auto 16px;
+  margin-top: 2px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid rgba(15, 169, 196, .55);
@@ -125,12 +143,169 @@
   font-weight: 800;
   font-size: 15px;
   direction: ltr;
-  /* The white halo masks the connector hairline behind the circle. */
-  box-shadow: 0 0 0 7px #fff;
 }
 
-.flow-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--ink); font-weight: 800; line-height: 1.5; }
-.flow-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.75; }
+.flow-step.open .flow-head .num {
+  background: linear-gradient(135deg, var(--teal), var(--teal-bright));
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.flow-head-body { flex: 1; min-width: 0; }
+.flow-title { display: block; font-size: 16.5px; font-weight: 800; color: var(--ink); line-height: 1.5; }
+.flow-desc { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+
+.flow-tag {
+  flex: none;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--teal-dark);
+  background: var(--teal-soft);
+  border: 1px solid rgba(15, 169, 196, .35);
+  border-radius: 999px;
+  padding: 4px 13px;
+}
+
+/* The fold: a grid-rows 0fr→1fr track collapses the panel. Spacing lives on
+   the .shot's margin (clipped by overflow:hidden) — padding on the inner
+   would keep the closed panel ~16px tall since a box can't shrink below
+   its own padding. */
+body.js .flow-panel { display: grid; grid-template-rows: 0fr; }
+body.js .flow-step.open .flow-panel { grid-template-rows: 1fr; }
+.flow-panel-in { overflow: hidden; min-height: 0; }
+
+/* App-window mockup: navy frame, chrome bar, side nav, white screen body. */
+.shot {
+  margin: 0 16px 16px;
+  background: linear-gradient(160deg, #0B2745, #071B31);
+  border: 1px solid rgba(23, 200, 227, .2);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 22px 55px rgba(4, 16, 31, .2);
+}
+
+.shot-bar { display: flex; align-items: center; gap: 10px; padding: 2px 4px 12px; }
+.shot-crumb { font-size: 12px; font-weight: 700; color: #D9E8F0; }
+.shot-tag {
+  margin-inline-start: auto;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--teal-bright);
+  background: rgba(23, 200, 227, .1);
+  border: 1px solid rgba(23, 200, 227, .25);
+  border-radius: 999px;
+  padding: 3px 11px;
+  white-space: nowrap;
+}
+
+.shot-main {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 330px;
+}
+
+.shot-side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 10px;
+  background: #F2F7FA;
+  border-inline-end: 1px solid var(--line);
+}
+.shot-side-name { font-size: 11px; font-weight: 800; color: var(--muted); padding: 0 8px; margin-bottom: 8px; }
+.side-item { font-size: 12.5px; font-weight: 700; color: #41556A; border-radius: 8px; padding: 7px 10px; }
+.side-item.on { background: rgba(15, 169, 196, .12); color: var(--teal-dark); }
+
+.shot-body { padding: 22px; min-width: 0; }
+.shot-body.cols { display: grid; grid-template-columns: 1.02fr .98fr; gap: 18px; align-items: start; }
+.shot-title { margin: 0 0 14px; font-size: 15.5px; font-weight: 800; color: var(--ink); }
+.shot-sub { margin: 16px 0 8px; font-size: 12px; font-weight: 800; color: var(--muted); }
+
+.shot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sf-label { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+.sf-input {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #FBFDFF;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.sf-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.sf-pills i {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 14px;
+}
+.sf-pills i.on { color: var(--teal-dark); background: var(--teal-soft); border-color: rgba(15, 169, 196, .5); }
+
+.shot-actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.sf-btn {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 18px;
+}
+.sf-btn.accent { border-color: transparent; background: linear-gradient(135deg, var(--teal), var(--teal-bright)); }
+.sf-btn.mini { padding: 4px 13px; font-size: 11px; color: var(--teal-dark); border-color: rgba(15, 169, 196, .45); margin-inline-start: auto; }
+
+.shot-files, .shot-rows { display: flex; flex-direction: column; gap: 8px; }
+.shot-file, .shot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.sf-kind {
+  direction: ltr;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  color: var(--p);
+  background: #EAF1F8;
+  border: 1px solid #D7E4EF;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.sf-name { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.sr-name { flex: 1; font-size: 12.5px; font-weight: 700; color: var(--ink); min-width: 0; }
+.sr-src {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: #F0F4F8;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.sf-state { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 4px 12px; white-space: nowrap; }
+.shot-file .sf-state, .shot-row .sf-state { margin-inline-start: auto; }
+.sf-state.ok { color: var(--teal-dark); background: var(--teal-soft); }
+.sf-state.run { color: var(--p); background: #EAF1F8; }
+.sf-state.wait { color: var(--muted); background: #F0F4F8; }
+.sr-bar { flex: 1 1 100%; height: 5px; border-radius: 3px; background: #E7EEF4; overflow: hidden; }
+.sr-bar i { display: block; height: 100%; width: 55%; border-radius: 3px; background: linear-gradient(90deg, var(--teal), var(--teal-bright)); }
+
+.shot-doc { border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: var(--shadow); padding: 18px; }
+.doc-title { margin: 0 0 2px; font-size: 15.5px; font-weight: 800; color: var(--ink); }
+.shot-doc .deck-lines { margin-top: 14px; }
+.shot-doc .deck-lines i:nth-child(4) { width: 52%; }
 
 /* ── Study contents: the study's own contents page ─────────────────────────
    The eleven components are set as a real document — a sheet with document
@@ -471,12 +646,21 @@
   .hero .wrap { grid-template-columns: 1fr; gap: 38px; }
   .hero-visual { max-width: 480px; margin: 12px auto 0; }
   .features { grid-template-columns: 1fr 1fr; }
-  /* The step row collapses into a stack — the connector hairline is a
-     five-column luxury. */
-  .flow { grid-template-columns: 1fr; gap: 22px; }
-  .flow::before { display: none; }
-  .flow-step { padding: 0; display: grid; grid-template-columns: 46px 1fr; gap: 14px; text-align: start; align-items: start; }
-  .flow-step .num { margin: 0; }
+  /* The side nav becomes a horizontal strip on narrow screens so the shot
+     keeps its full width for the screen body. */
+  .shot-main { grid-template-columns: 1fr; }
+  .shot-side {
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 10px;
+  }
+  .shot-side::-webkit-scrollbar { display: none; }
+  .shot-side-name { display: none; }
+  .side-item { white-space: nowrap; }
+  .shot-body.cols { grid-template-columns: 1fr; }
   .toc { grid-template-columns: 1fr; }
   .method-rows { grid-template-columns: 1fr; }
 }
@@ -507,6 +691,12 @@
   .section-title p { font-size: 15px; }
   .features { grid-template-columns: 1fr; }
   .feature-card { padding: 22px; }
+  .flow-head { padding: 16px 14px; gap: 12px; }
+  .flow-tag { display: none; }
+  .shot { margin: 0 10px 10px; padding: 8px; border-radius: 12px; }
+  .shot-body { padding: 14px; }
+  .shot-grid { grid-template-columns: 1fr; }
+  .shot-crumb { font-size: 11px; }
   .toc-panel { padding: 22px 20px; }
   .toc li { padding: 10px 0; }
   .toc-name { font-size: 14px; }
@@ -551,6 +741,12 @@
     from { opacity: 0; transform: translateY(14px) scale(.85); }
     to { opacity: 1; transform: none; }
   }
+  @keyframes shotIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: none; }
+  }
+  body.js .flow-panel { transition: grid-template-rows .45s ease; }
+  .flow-step.open .shot { animation: shotIn .4s ease both; }
   @keyframes orbDrift {
     from { transform: translate(0, 0) scale(1); }
     to { transform: translate(7%, -9%) scale(1.14); }

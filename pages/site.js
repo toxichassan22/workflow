@@ -133,6 +133,30 @@
     onScroll();
   }
 
+  /* ── Flow: vertical accordion of product mockups ─────────────────────────
+     Each step header unfolds its app-window mockup and folds the others;
+     pressing an open step folds it again. Without JS every panel stays open. */
+
+  function initFlow() {
+    var flow = document.querySelector('#how .flow');
+    if (!flow) return;
+    flow.addEventListener('click', function (ev) {
+      var head = ev.target.closest('.flow-head');
+      if (!head || !flow.contains(head)) return;
+      var step = head.parentNode;
+      var wasOpen = step.classList.contains('open');
+      flow.querySelectorAll('.flow-step.open').forEach(function (el) {
+        el.classList.remove('open');
+        var btn = el.querySelector('.flow-head');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+      if (!wasOpen) {
+        step.classList.add('open');
+        head.setAttribute('aria-expanded', 'true');
+      }
+    });
+  }
+
   /* ── Opening: auto-played cinematic ──────────────────────────────────────
      On entry the camera pushes in over the map while the Saudi border draws
      itself, marker pins rain down across it — the last lands on Riyadh —
@@ -459,6 +483,7 @@
   initReveal();
   initTilt();
   initTopbar();
+  initFlow();
   initShowcase();
   initOpening();
   initHeroEnter();
