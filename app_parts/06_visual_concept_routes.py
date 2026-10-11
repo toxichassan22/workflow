@@ -544,6 +544,7 @@ def api_visual_concept_generate():
     if section_gate:
         return jsonify(section_gate), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    prompt = _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id)
     image = call_images_api(prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
     if not image:

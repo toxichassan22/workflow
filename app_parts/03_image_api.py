@@ -942,7 +942,10 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
         file_ids = file_ids[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
         if len(file_ids) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
             map_urls = []
-        return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids, tenant_id=tenant_id)
+        # urls_first keeps the style refs trailing the map here too, matching
+        # the plans path so "the last N attached images" names them in both.
+        return _visual_concept_reference_uris(
+            urls=map_urls, file_ids=file_ids, urls_first=True, tenant_id=tenant_id)
     urls = [cover_image] if cover_image else []
     if _visual_concept_is_internal_slot(slot_id):
         file_ids = list(facts.get('interior_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
@@ -970,6 +973,26 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     # the hero already carries the style, so style references would only fight it.
     return _visual_concept_reference_uris(
         urls=plan_urls + urls, max_images=external_cap, urls_first=True, tenant_id=tenant_id)
+
+
+def _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id):
+    """The stored cover prompt may predate the client naming the style
+    references — it is hidden, so nothing regenerates it. Re-state the ordered
+    name map right before the image call so the current assignment always
+    reaches the model; cover always attaches the style refs last."""
+    if slot_id != 'cover':
+        return prompt
+    meta = list(facts.get('style_references') or [])
+    if not any(item.get('name') or item.get('description') for item in meta):
+        return prompt
+    mapping = '; '.join(
+        f"{index}) \"{item.get('name') or 'unnamed'}\""
+        + (f" — {item['description']}" if item.get('description') else '')
+        for index, item in enumerate(meta, 1))
+    return (
+        f"{prompt} The last {len(meta)} attached images are client style references, in order: {mapping}."
+        " Apply each named reference's design language only to the project element its name describes."
+    )
 
 
 def _visual_concept_request_bundle(data, slot_id):

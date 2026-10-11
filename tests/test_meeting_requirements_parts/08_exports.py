@@ -1077,6 +1077,53 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             'ref-club-w' in item or 'ref-tower-h' in item or 'ref-club-m' in item
             for item in angle_refs))
 
+        # The stored prompt may predate the names — a generation-time suffix
+        # re-states the ordered map so a stale hidden prompt still binds each
+        # named image to its element.
+        stale_prompt = 'Hero massing render, anonymous refs'
+        suffixed = self.application_module._visual_concept_attach_style_reference_suffix(
+            stale_prompt, facts_meta, 'cover')
+        self.assertTrue(suffixed.startswith(stale_prompt))
+        self.assertIn('last 3 attached images', suffixed)
+        self.assertIn('"نادي النساء"', suffixed)
+        self.assertIn('مبنى منخفض بطراز إسلامي', suffixed)
+        self.assertEqual(
+            self.application_module._visual_concept_attach_style_reference_suffix(
+                stale_prompt, facts_meta, 'right'), stale_prompt)
+        unnamed_facts = {'style_references': [{'id': 'a', 'name': '', 'description': ''}]}
+        self.assertEqual(
+            self.application_module._visual_concept_attach_style_reference_suffix(
+                stale_prompt, unnamed_facts, 'cover'), stale_prompt)
+
+        # Without plans the cover still attaches style refs last (after the
+        # map), keeping the suffix's "last N" wording true in both paths.
+        no_plan_facts = {**facts_meta, 'plan_image_urls': [], 'overview_map_url': '/uploads/map.png'}
+        with patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id, tenant_id=None: f'data:image/png;base64,{file_id}'):
+            cover_refs = self.application_module._visual_concept_collect_generation_references(
+                no_plan_facts, 'cover', '', tenant_id='tenant-a')
+        self.assertEqual(
+            [ref.rsplit(',', 1)[-1] for ref in cover_refs],
+            ['map.png', 'ref-club-w', 'ref-tower-h', 'ref-club-m'])
+
+        # The generate route applies the suffix itself: a stored prompt written
+        # before the refs were named still carries the ordered map to the
+        # image model.
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,EEEE') as named_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/cover2.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id, tenant_id=None: f'data:image/png;base64,{file_id}'):
+            named_cover = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'cover',
+                'prompt': 'Hero image from the project facts',
+                'planImages': plan_images,
+                'projectData': facts_with_refs,
+            })
+        self.assertEqual(named_cover.status_code, 200, named_cover.get_json())
+        sent_prompt = named_call.call_args.args[0]
+        self.assertIn('last 3 attached images', sent_prompt)
+        self.assertIn('نادي النساء', sent_prompt)
+
         # Major-section approvals gate the chain plans → exterior → interior →
         # sketches: the posted plan images alone are not enough — the plans
         # section flag must be there, and it must match its items.
