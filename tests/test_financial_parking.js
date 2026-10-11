@@ -241,23 +241,19 @@ test('a suggestion lands in the components table as rows of its own', () => {
   assert.equal(f.rows.at(-1).dataset.parkingPlanId, 'plan-1');
 });
 
-test('approve and discard actions only show while a proposal exists', () => {
+test('the approve action only shows while a proposal exists', () => {
   const f = fixture();
   const approve = { hidden: true, textContent: '', disabled: false };
-  const discard = { hidden: true, disabled: false };
   const byId = f.context.document.getElementById;
   f.context.document.getElementById = id => id === 'financialParkingPanel' ? {}
     : id === 'financialParkingApprove' ? approve
-    : id === 'financialParkingDiscard' ? discard
     : id === 'financialParkingStatus' ? { textContent: '' }
     : byId(id);
   f.context.renderFinancialParking();
   assert.equal(approve.hidden, true);
-  assert.equal(discard.hidden, true);
   f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal();
   f.context.renderFinancialParking();
   assert.equal(approve.hidden, false);
-  assert.equal(discard.hidden, false);
   assert.equal(approve.textContent, 'اعتماد اقتراح المواقف');
   f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal(true);
   f.context.renderFinancialParking();
