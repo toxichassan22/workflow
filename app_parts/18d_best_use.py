@@ -231,32 +231,42 @@ def _best_use_execute(draft, data, kind):
         prompt += '\n\nالمحادثة السابقة:\n' + json.dumps(prior, ensure_ascii=False)
         prompt += '\n\nrevise=' + ('true' if revise else 'false') + '\nرسالة العميل: ' + message
     system = best_use.CHAT_PROMPT if kind == 'chat' else best_use.SYSTEM_PROMPT
-    try:
-        response = call_text_chat(system, prompt, max_tokens=8000 if kind == 'generate' or revise else 3000,
-                                  timeout=120, reasoning_effort='low', response_format={'type': 'json_object'},
-                                  image_references=_best_use_map_references(draft),
-                                  usage_ctx=_usage_ctx('best_use', data, draft_id=draft['id']))
-        parsed = _best_use_provider_result(response)
-        if kind == 'generate' or revise:
+    feedback, last_output = '', None
+    for attempt in range(2):
+        try:
+            response = call_text_chat(system, prompt + feedback,
+                                      max_tokens=8000 if kind == 'generate' or revise else 3000,
+                                      timeout=120, reasoning_effort='low', response_format={'type': 'json_object'},
+                                      image_references=_best_use_map_references(draft),
+                                      usage_ctx=_usage_ctx('best_use', data, draft_id=draft['id']))
+            parsed = _best_use_provider_result(response)
             raw = parsed.get('proposal') if revise else parsed
-            proposal = best_use.normalize_proposal(raw, project, _uuid.uuid4().hex)
-            proposal['generatedAt'] = db._utcnow().isoformat()
-            project['best_use_data'] = proposal
-        if kind == 'chat':
-            reply = _land_chat_clean_reply(best_use.text(parsed.get('reply'), 16000))
-            if not reply:
-                raise best_use.ProposalError('إجابة الشات غير متوفرة.')
-            project['best_use_chat'] = {'messages': (history + [
-                {'role': 'user', 'content': message}, {'role': 'assistant', 'content': reply}])[-100:]}
-    except best_use.ProposalError as error:
-        return _best_use_error('BEST_USE_INVALID_PROPOSAL', 422, validation=str(error))
-    except Exception as error:
-        fatal = _ai_fatal_http_response(error)
-        if fatal is not None:
-            response = app.make_response(fatal)
-            return response.get_json(), response.status_code
-        app.logger.warning('Best Use provider failed: %s', type(error).__name__)
-        return _best_use_error('BEST_USE_PROVIDER_FAILED', 503)
+            last_output = raw if isinstance(raw, dict) else parsed
+            if kind == 'generate' or revise:
+                proposal = best_use.normalize_proposal(raw, project, _uuid.uuid4().hex)
+                proposal['generatedAt'] = db._utcnow().isoformat()
+                project['best_use_data'] = proposal
+            if kind == 'chat':
+                reply = _land_chat_clean_reply(best_use.text(parsed.get('reply'), 16000))
+                if not reply:
+                    raise best_use.ProposalError('إجابة الشات غير متوفرة.')
+                project['best_use_chat'] = {'messages': (history + [
+                    {'role': 'user', 'content': message}, {'role': 'assistant', 'content': reply}])[-100:]}
+            break
+        except best_use.ProposalError as error:
+            if attempt:
+                return _best_use_error('BEST_USE_INVALID_PROPOSAL', 422, validation=str(error))
+            rejected = json.dumps(last_output, ensure_ascii=False)[:8000] if isinstance(last_output, dict) else ''
+            feedback = ('\n\nالرد السابق رُفض: ' + best_use.text(str(error), 400) + '.'
+                        + ('\nالرد المرفوض:\n' + rejected if rejected else '')
+                        + '\nأخرج الرد كاملًا مرة أخرى بنفس عقد JSON مع تصحيح المخالفة ضمن الحدود المعتمدة.')
+        except Exception as error:
+            fatal = _ai_fatal_http_response(error)
+            if fatal is not None:
+                response = app.make_response(fatal)
+                return response.get_json(), response.status_code
+            app.logger.warning('Best Use provider failed: %s', type(error).__name__)
+            return _best_use_error('BEST_USE_PROVIDER_FAILED', 503)
     statuses = dict(draft.get('section_statuses') or {})
     if kind == 'generate' or revise:
         statuses[best_use.SECTION_KEY] = 'draft'

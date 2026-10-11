@@ -191,7 +191,8 @@
         });
       }
       const pair = keys[response?.error_code];
-      return pair ? WFT(pair[0], pair[1]) : wfTr(response?.error || WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
+      const base = pair ? WFT(pair[0], pair[1]) : wfTr(response?.error || WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
+      return response?.validation ? base + ' ' + wfTr(String(response.validation)) : base;
     }
 
     function bestUseFormat(value) {

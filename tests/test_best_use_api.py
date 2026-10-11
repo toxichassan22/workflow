@@ -288,6 +288,32 @@ class BestUseApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503, response.get_json())
         self.assertEqual(self.draft()['draft_data'], before['draft_data'])
 
+    def test_a_rejected_distribution_is_retried_once_with_the_rejection_reason(self):
+        bad = copy.deepcopy(self.raw)
+        bad['components'][0].update(builtArea=9000)
+        replies = iter([self.provider_reply(bad), self.provider_reply(self.raw)])
+        with patch.object(self.application, 'call_text_chat', side_effect=lambda *a, **k: next(replies)) as provider:
+            response = self.client.post('/api/best-use/generate', headers=self.headers, json={
+                'draftId': self.draft_id, 'expectedRevision': self.draft()['revision']})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(provider.call_count, 2)
+        self.assertIn('رُفض', provider.call_args.args[1])
+        self.assertIn('الأدوار المعتمدة', provider.call_args.args[1])
+        self.assertEqual(response.get_json()['bestUse']['components'][0]['builtArea'], 8000)
+
+    def test_a_twice_rejected_distribution_still_fails_without_touching_the_draft(self):
+        before = self.draft()
+        bad = copy.deepcopy(self.raw)
+        bad['components'][0].update(builtArea=9000)
+        with patch.object(self.application, 'call_text_chat', return_value=self.provider_reply(bad)) as provider:
+            response = self.client.post('/api/best-use/generate', headers=self.headers, json={
+                'draftId': self.draft_id, 'expectedRevision': self.draft()['revision']})
+        self.assertEqual(response.status_code, 422, response.get_json())
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(response.get_json()['error_code'], 'BEST_USE_INVALID_PROPOSAL')
+        self.assertIn('الأدوار المعتمدة', response.get_json()['validation'])
+        self.assertEqual(self.draft()['draft_data'], before['draft_data'])
+
     def test_queued_jobs_are_scoped_and_complete_off_the_request_path(self):
         with patch.object(self.application.threading, 'Thread') as thread:
             queued = self.client.post('/api/best-use/generate', headers=self.headers, json={
