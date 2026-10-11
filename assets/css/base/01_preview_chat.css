@@ -1513,13 +1513,6 @@
       margin-bottom: 24px;
     }
 
-    .tenant-nav {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
     .tenant-dropdown {
       position: relative;
     }

@@ -100,6 +100,11 @@
           <img src="/assets/landloom-logo.png" alt="LandLoom">
         </div>
       </div>
+      <div class="tenant-sidebar-cta">
+        <button type="button" class="tenant-sidebar-link tenant-sidebar-action"
+          data-permission="create_presentation" data-nav-page="tenantProjectPage"
+          onclick="startTenantProject()" data-i18n="nav.new_proposal">مشروع جديد</button>
+      </div>
       <div class="tenant-sidebar-scroll">
         <nav class="tenant-sidebar-nav" data-nav-role="superadmin" aria-label="إدارة المنصة" data-i18n-aria="chrome.platform">
           <div class="tenant-nav-group">
@@ -147,9 +152,6 @@
               <button type="button" class="tenant-sidebar-link" data-permission-any="approvals,approve_generation,approve_final_file"
                 data-nav-page="tenantApprovalsPage" onclick="openTenantApprovals()"
                 data-i18n="nav.approve_offers">تعميد العروض</button>
-              <button type="button" class="tenant-sidebar-link tenant-sidebar-action"
-                data-permission="create_presentation" data-nav-page="tenantProjectPage"
-                onclick="startTenantProject()" data-i18n="nav.new_proposal">مشروع جديد</button>
             </div>
           </div>
           <div class="tenant-nav-group tenant-nav-collapsible" data-nav-group="operations">
@@ -195,13 +197,6 @@
           </div>
         </nav>
       </div>
-      <div class="tenant-sidebar-account">
-        <span class="tenant-account-label" data-i18n="chrome.current_account">الحساب الحالي</span>
-        <span id="tenantUserInfo" class="tenant-user-name"></span>
-        <span id="tenantWorkspaceRole" class="tenant-user-role" data-i18n="role.employee">موظف</span>
-        <button type="button" class="tenant-sidebar-logout" onclick="tenantLogout()"
-          data-i18n="nav.logout">خروج</button>
-      </div>
     </aside>
     <div class="tenant-sidebar-backdrop" onclick="closeTenantSidebar()"></div>
     <header class="tenant-topbar">
@@ -209,7 +204,7 @@
         <button type="button" id="tenantMobileMenuBtn" class="tenant-mobile-nav-btn"
           onclick="toggleTenantSidebar()" data-i18n="nav.menu">القائمة</button>
         <div class="tenant-brand tenant-topbar-brand">
-          <span class="tenant-brand-logo">
+          <span class="tenant-brand-logo" id="tenantBrandChip">
             <img id="tenantLogo" alt="" class="hidden">
             <span id="tenantLogoMark" class="tenant-brand-monogram" aria-hidden="true"></span>
           </span>
@@ -218,6 +213,8 @@
             <span id="tenantPlan" class="tenant-plan-badge">free</span>
           </div>
         </div>
+      </div>
+      <div class="tenant-topbar-side">
         <div class="tenant-notif tenant-bellbox">
           <button type="button" id="tenantBellBtn" class="tenant-bell-btn"
             onclick="tenantBellClicked(event)" aria-label="الإشعارات"
@@ -239,13 +236,33 @@
             </div>
           </div>
         </div>
-      </div>
-      <div class="tenant-topbar-search">
-        <input type="search" id="tenantGlobalSearch" placeholder="بحث..." data-i18n-ph="chrome.search"
-          aria-label="بحث" data-i18n-aria="chrome.search" onkeydown="tenantGlobalSearchKeydown(event)">
-      </div>
-      <div class="tenant-nav">
-        <button type="button" class="tenant-topbar-button" id="langToggleBtn" onclick="toggleAppLanguage()">English</button>
+        <div class="tenant-dropdown tenant-usermenu">
+          <button type="button" id="tenantUserChip" class="tenant-userchip"
+            onclick="toggleTenantDropdown(this)" aria-haspopup="true">
+            <span class="tenant-userchip-meta">
+              <span class="tenant-userchip-name" id="tenantChipName"></span>
+              <span class="tenant-userchip-role" id="tenantWorkspaceRole" data-i18n="role.employee">موظف</span>
+            </span>
+            <span class="tenant-userchip-avatar" id="tenantUserAvatar" aria-hidden="true"></span>
+            <span class="tenant-userchip-caret" aria-hidden="true"></span>
+          </button>
+          <div class="tenant-dropdown-menu tenant-usermenu-menu" role="menu">
+            <div class="tenant-usermenu-head">
+              <span class="tenant-usermenu-avatar" id="tenantUserAvatarLg" aria-hidden="true"></span>
+              <span class="tenant-usermenu-id">
+                <span class="tenant-usermenu-name" id="tenantMenuName"></span>
+                <span class="tenant-usermenu-sub" id="tenantMenuSub"></span>
+              </span>
+            </div>
+            <button type="button" class="tenant-usermenu-item" role="menuitem"
+              onclick="toggleAppLanguage(); closeTenantDropdown()">
+              <span data-i18n="chrome.language">اللغة</span>
+              <span class="tenant-usermenu-val lang-toggle-btn">English</span>
+            </button>
+            <button type="button" class="tenant-usermenu-item tenant-usermenu-danger" role="menuitem"
+              onclick="tenantLogout()" data-i18n="nav.logout">خروج</button>
+          </div>
+        </div>
       </div>
     </header>
 

@@ -42,6 +42,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "chrome.search": "بحث...",
   "chrome.search_companies": "بحث في الشركات...",
   "chrome.search_projects": "بحث في المشاريع...",
+  "chrome.language": "اللغة",
   "auth.tagline": "منصة توليد العروض والدراسات العقارية",
   "auth.sign_in": "تسجيل الدخول",
   "auth.otp_hint_generic": "رمز التحقق مرسل إلى البريد الإلكتروني",

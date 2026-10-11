@@ -393,9 +393,6 @@
         if (el.hasAttribute('data-permission') || el.hasAttribute('data-permission-any')) return;
         el.style.display = isCompanyAdmin ? '' : 'none';
       });
-      // Show user info in sidebar
-      const userInfo = document.getElementById('tenantUserInfo');
-      if (userInfo) userInfo.textContent = tenantUser._userName || tenantUser.companyName || '';
       // SAG admin: hide company-specific nav items, show admin panel button
       if (isSagAdmin) {
         document.querySelectorAll('.tenant-dash-card.tenant-admin-only').forEach(el => {
@@ -473,6 +470,32 @@
       markEl.textContent = name.trim().charAt(0) || '—';
     }
 
+    // A light logo disappears on the white chip, so the chip samples the
+    // uploaded logo and flips navy when the mark reads light. Same-origin
+    // /tenant-assets paths read fine; a cross-origin logo would taint the
+    // canvas, so any failure just keeps the default light chip.
+    function adaptTenantLogoChip(img, chip) {
+      if (!img || !chip) return;
+      try {
+        const size = 20;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+        let lum = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 60) continue;
+          lum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+          n++;
+        }
+        chip.dataset.logoTone = n ? (lum / n > 150 ? 'dark' : 'light') : '';
+      } catch (e) {
+        chip.dataset.logoTone = '';
+      }
+    }
+
     function applyTenantBrandingData(data) {
       if (!data || !data.success || !data.branding) return false;
       tenantBranding = data.branding;
@@ -487,13 +510,17 @@
       // for it (the product ships no placeholder images).
       const logoEl = document.getElementById('tenantLogo');
       const markEl = document.getElementById('tenantLogoMark');
+      const chipEl = document.getElementById('tenantBrandChip');
       updateTenantLogoMark();
+      if (chipEl) chipEl.dataset.logoTone = '';
       if (logoEl) {
         if (b.logo_path) {
           logoEl.onerror = () => {
             logoEl.classList.add('hidden');
             if (markEl) markEl.classList.remove('hidden');
+            if (chipEl) chipEl.dataset.logoTone = '';
           };
+          logoEl.onload = () => adaptTenantLogoChip(logoEl, chipEl);
           const logoSrc = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path + '?t=' + Date.now();
           logoEl.src = logoSrc;
           logoEl.classList.remove('hidden');

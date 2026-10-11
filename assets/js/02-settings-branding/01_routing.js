@@ -696,6 +696,19 @@
         roleEl.dataset.i18n = roleData[1];
         roleEl.textContent = WFT(roleData[1], roleData[2]);
       }
+      // The topbar user chip mirrors what the old sidebar account block showed:
+      // name, role, and the company line inside the dropdown.
+      const chipName = (tenantUser && (tenantUser._userName || tenantUser.companyName)) || '';
+      const chipCompany = wfBilingual(tenantUser && tenantUser.companyName,
+        tenantUser && (tenantUser.companyNameEn || tenantUser.company_name_en));
+      const chipInitial = chipName.trim().charAt(0) || '—';
+      [['tenantChipName', chipName], ['tenantMenuName', chipName],
+       ['tenantUserAvatar', chipInitial], ['tenantUserAvatarLg', chipInitial],
+       ['tenantMenuSub', WFT(roleData[1], roleData[2]) + ' — ' + chipCompany]]
+        .forEach(([id, text]) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = text;
+        });
       const contextEl = document.getElementById('tenantCurrentPageContext');
       if (contextEl) {
         const contextKey = isSagAdmin ? 'chrome.platform' : 'chrome.workspace';
@@ -708,17 +721,6 @@
       if (titleEl) {
         titleEl.dataset.i18n = pageData[0];
         titleEl.textContent = WFT(pageData[0], pageData[1]);
-      }
-      const searchWrap = document.querySelector('.tenant-topbar-search');
-      const searchInput = document.getElementById('tenantGlobalSearch');
-      if (searchWrap) {
-        const canSearch = isSagAdmin || hasPermission('view_presentations');
-        searchWrap.classList.toggle('tenant-hidden', !canSearch);
-        if (searchInput && canSearch) {
-          const searchKey = isSagAdmin ? 'chrome.search_companies' : 'chrome.search_projects';
-          searchInput.setAttribute('data-i18n-ph', searchKey);
-          searchInput.placeholder = WFT(searchKey, isSagAdmin ? 'بحث في الشركات' : 'بحث في المشاريع');
-        }
       }
       const parentPages = {
         tenantProjectPresentationsPage: 'tenantPresentationsPage',
@@ -790,28 +792,6 @@
     function setTenantBellDot(unreadCount) {
       const dot = document.getElementById('tenantBellDot');
       if (dot) dot.classList.toggle('hidden', !(Number(unreadCount) > 0));
-    }
-
-    function tenantGlobalSearchKeydown(event) {
-      if (!event || event.key !== 'Enter') return;
-      event.preventDefault();
-      runTenantGlobalSearch();
-    }
-
-    async function runTenantGlobalSearch() {
-      const input = document.getElementById('tenantGlobalSearch');
-      const q = String((input && input.value) || '').trim();
-      if (tenantUser && tenantUser.isAdmin) {
-        const box = document.getElementById('sagSearchInput');
-        if (box) box.value = q;
-        await openTenantCompanies();
-        if (typeof filterSagTenants === 'function') filterSagTenants();
-        return;
-      }
-      if (!hasPermission('view_presentations')) return;
-      const box = document.getElementById('projectArchiveSearch');
-      if (box) box.value = q;
-      await openTenantPresentations(true);
     }
 
     document.addEventListener('click', function (e) {

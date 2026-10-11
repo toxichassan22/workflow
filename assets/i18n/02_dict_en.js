@@ -42,6 +42,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "chrome.search": "Search...",
   "chrome.search_companies": "Search companies...",
   "chrome.search_projects": "Search projects...",
+  "chrome.language": "Language",
   "auth.tagline": "Real-estate proposal and study platform",
   "auth.sign_in": "Sign in",
   "auth.otp_hint_generic": "A verification code was sent to your email",

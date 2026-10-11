@@ -1,0 +1,218 @@
+    /* Shell chrome: topbar side cluster, user menu, sidebar CTA, logo chip tone.
+       New module — kept out of 04_export_responsive.css which is over the size
+       budget; loaded last in FRONTEND_CSS_ORDER so it wins equal-specificity
+       cascades (e.g. the physical right:0 on .tenant-dropdown-menu). */
+
+    .tenant-topbar-side {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    .tenant-sidebar-cta {
+      flex: 0 0 auto;
+      padding: 0 12px 10px;
+    }
+
+    .tenant-sidebar-cta .tenant-sidebar-action {
+      margin: 0;
+    }
+
+    /* The tenant logo chip adapts to the uploaded logo's luminance:
+       light logos get the navy chip, dark logos keep the white one. */
+    .tenant-brand-logo[data-logo-tone="dark"] {
+      background: #0a1f31;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 1px 2px rgba(15, 35, 51, .08);
+    }
+
+    .tenant-brand-logo[data-logo-tone="light"] {
+      background: #fff;
+    }
+
+    .tenant-usermenu {
+      position: relative;
+    }
+
+    .tenant-userchip {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 4px 10px 4px 6px;
+      border: 1px solid var(--ui-border);
+      border-radius: 12px;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+      cursor: pointer;
+      transition: background-color .16s ease, border-color .16s ease;
+    }
+
+    .tenant-userchip:hover {
+      border-color: var(--ui-border-strong);
+      background: var(--surface-subtle);
+    }
+
+    .tenant-userchip-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      min-width: 0;
+      line-height: 1.25;
+      text-align: start;
+    }
+
+    .tenant-userchip-name {
+      max-width: 150px;
+      overflow: hidden;
+      font-size: 12.5px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tenant-userchip-role {
+      color: var(--ink-muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .tenant-userchip-avatar,
+    .tenant-usermenu-avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 30px;
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      color: #fff;
+      background: var(--sidebar-bg);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .tenant-userchip-caret {
+      flex: 0 0 auto;
+      width: 7px;
+      height: 7px;
+      margin-inline-end: 2px;
+      border-left: 1.6px solid var(--ink-muted);
+      border-bottom: 1.6px solid var(--ink-muted);
+      transform: rotate(-45deg);
+      transition: transform .16s ease;
+    }
+
+    .tenant-usermenu.open .tenant-userchip-caret {
+      transform: rotate(135deg);
+    }
+
+    /* Anchored to the inline end so it never overflows the viewport edge:
+       RTL opens it leftward-to-right from the chip, LTR mirrors it. */
+    .tenant-usermenu-menu {
+      right: auto;
+      inset-inline-end: 0;
+      min-width: 236px;
+      padding: 6px;
+    }
+
+    .tenant-usermenu-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px 10px;
+      border-bottom: 1px solid var(--ui-border);
+      margin-bottom: 4px;
+    }
+
+    .tenant-usermenu-avatar {
+      flex-basis: 36px;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      font-size: 15px;
+    }
+
+    .tenant-usermenu-id {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      line-height: 1.35;
+    }
+
+    .tenant-usermenu-name {
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tenant-usermenu-sub {
+      overflow: hidden;
+      color: var(--ink-muted);
+      font-size: 10.5px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tenant-usermenu-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 8px;
+      color: var(--ink);
+      background: transparent;
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 700;
+      text-align: start;
+      cursor: pointer;
+    }
+
+    .tenant-usermenu-item:hover {
+      background: var(--surface-subtle);
+    }
+
+    .tenant-usermenu-val {
+      color: var(--ink-muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .tenant-usermenu-item.tenant-usermenu-danger {
+      color: var(--danger);
+    }
+
+    .tenant-usermenu-item.tenant-usermenu-danger:hover {
+      background: rgba(179, 58, 58, .08);
+    }
+
+    @media (max-width: 900px) {
+      .tenant-topbar-side {
+        justify-content: center;
+      }
+
+      /* The shared mobile dropdown rule pins menus to left:0; the user menu
+         keeps its logical inset-inline-end anchor instead. */
+      .tenant-usermenu-menu {
+        left: auto;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .tenant-userchip-meta {
+        display: none;
+      }
+
+      .tenant-userchip {
+        padding: 4px 8px 4px 4px;
+      }
+    }

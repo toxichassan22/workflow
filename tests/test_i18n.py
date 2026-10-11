@@ -43,7 +43,7 @@ FRONTEND_CSS_ORDER = (
     'base/01_preview_chat.css', 'base/02_tenant_pages.css',
     'base/03_the_view_model.css', 'base/04_export_responsive.css',
     'base/05_dashboard_viz.css', 'base/06_designer_activity.css',
-    'base/07_package_slider.css',
+    'base/07_package_slider.css', 'base/08_shell_chrome.css',
     'project-form/01_sections_changelog.css',
     'project-form/01a_location_maps.css',
     'project-form/02_fields_tables_rail.css',
@@ -448,7 +448,7 @@ class I18nFoundationTests(unittest.TestCase):
                 guard, src,
                 'auto-translate skip list must keep %s' % guard)
         html = INDEX.read_text(encoding='utf-8')
-        self.assertIn('langToggleBtn', html)
+        self.assertIn('tenantUserChip', html)
         self.assertIn('toggleAppLanguage', html)
 
     def test_dicts_are_in_sync_and_real(self):
