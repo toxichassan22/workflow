@@ -618,6 +618,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "vc.ref_desc": "Image description",
   "vc.regen_prompt": "Regenerate description",
   "vc.regen_prompt_hint": "Refreshed after adding or editing reference images",
+  "vc.chat_attach": "Attach image",
   "vc.delta_units": "{n} units",
   "vc.plans_count": "{n} uploaded plans",
   "vc.plans_none": "No plans uploaded.",

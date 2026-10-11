@@ -606,6 +606,9 @@ def api_visual_concept_chat():
     if section_gate:
         return jsonify(section_gate), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    # Images the client pinned to this message ride along so the writer can
+    # see exactly what "use this style" points at.
+    references += _visual_concept_edit_reference_uris(data)
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,

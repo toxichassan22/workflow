@@ -374,7 +374,9 @@
           || emptyVisualConceptSlot(id);
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
-          text: String(entry.text).slice(0, 4000)
+          text: String(entry.text).slice(0, 4000),
+          attachments: (Array.isArray(entry.attachments) ? entry.attachments : [])
+            .map(name => String(name).slice(0, 120)).slice(0, 5)
         })) : [];
         // A blob: URL is a handle into the tab that created it, so a stored one is dead and is
         // dropped here; repairVisualConceptStoredImages republishes it from the file id.
@@ -724,7 +726,8 @@
       const disableUploadSwitch = frozen || (hasImage && mode === 'ai');
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
-        '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? trDynamicI18n('النظام:') + ' ' : trDynamicI18n('أنت:') + ' ') + '</strong>' + escapeHtml(item.text) + '</div>'
+        '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? trDynamicI18n('النظام:') + ' ' : trDynamicI18n('أنت:') + ' ') + '</strong>' + escapeHtml(item.text) +
+        (item.attachments && item.attachments.length ? ' <em class="visual-concept-chat-attached">(' + escapeHtml(item.attachments.join('، ')) + ')</em>' : '') + '</div>'
       )).join('') || '<div class="tenant-hint">' + trDynamicI18n('لا توجد تعديلات بعد.') + '</div>';
       const title = visualConceptSlotLabel(slotDef.id);
       const preview = image
@@ -788,8 +791,11 @@
           '<div class="visual-concept-chat">' + chat + '</div>' +
           '<div class="visual-concept-chat-row">' +
           '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +
+          '<button type="button" class="btn ghost small" data-visual-action="chat-attach" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>' + escapeHtml(WFT('vc.chat_attach', 'إرفاق صورة')) + '</button>' +
           '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إرسال التعديل</button>' +
-          '</div>';
+          '<input type="file" accept="' + uploadAccept + '" multiple hidden data-visual-chat-upload="' + slotDef.id + '">' +
+          '</div>' +
+          '<div class="visual-concept-chat-refs" data-visual-chat-refs="' + slotDef.id + '"></div>';
       }
 
       const lockHint = waitCover

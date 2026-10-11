@@ -19,6 +19,11 @@
         else if (action === 'section-approve') approveVisualConceptSection(button.getAttribute('data-visual-section'));
         else if (action === 'section-unapprove') unapproveVisualConceptSection(button.getAttribute('data-visual-section'));
         else if (action === 'regen-prompt') regenerateVisualConceptPrompt(slotId);
+        else if (action === 'chat-attach') {
+          const picker = document.querySelector('[data-visual-chat-upload="' + slotId + '"]');
+          if (picker) picker.click();
+        }
+        else if (action === 'chat-ref-remove') removeVisualConceptChatRef(slotId, Number(button.getAttribute('data-ref-index')));
         else if (action === 'set-mode') {
           const targetMode = button.getAttribute('data-visual-mode');
           const slot = tenantVisualConceptState?.slots?.[slotId];
@@ -85,6 +90,14 @@
       });
       bindRoot.querySelectorAll('[data-visual-upload]').forEach(input => {
         input.addEventListener('change', () => uploadVisualConceptSlotImage(input.getAttribute('data-visual-upload'), input));
+      });
+      bindRoot.querySelectorAll('[data-visual-chat-upload]').forEach(input => {
+        input.addEventListener('change', () => attachVisualConceptChatImage(input.getAttribute('data-visual-chat-upload'), input));
+      });
+      // Pending chips live inside the re-rendered innerHTML — rebuild them or
+      // the strip would come back empty while the ids are still held.
+      bindRoot.querySelectorAll('[data-visual-chat-refs]').forEach(box => {
+        renderVisualConceptChatRefs(box.getAttribute('data-visual-chat-refs'));
       });
       repairVisualConceptStoredImages();
     }
@@ -393,6 +406,53 @@
       toast('تم حذف الصورة');
     }
 
+    // Pending per-message attachments: the client pins the exact reference
+    // image next to an edit request, so "use this on that element" binds to
+    // pixels instead of a name buried in the hidden prompt. Transient — the
+    // chips clear once the message carrying them succeeds.
+    const visualConceptChatRefs = {};
+
+    async function attachVisualConceptChatImage(slotId, input) {
+      const files = Array.from(input?.files || []);
+      if (!files.length) return;
+      try {
+        input.dataset.projectFileType = 'visual_reference';
+        const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
+        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).map((file, index) => ({
+          id: file?.id || file,
+          name: file?.originalName || files[index]?.name || ''
+        })).filter(file => file.id);
+        if (!incoming.length) throw new Error('تعذر رفع الصورة');
+        const list = visualConceptChatRefs[slotId] || (visualConceptChatRefs[slotId] = []);
+        incoming.forEach(file => {
+          if (list.length < 5 && !list.some(item => String(item.id) === String(file.id))) list.push(file);
+        });
+        renderVisualConceptChatRefs(slotId);
+      } catch (error) {
+        toast(error.message || 'تعذر رفع الصورة');
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
+    function renderVisualConceptChatRefs(slotId) {
+      const box = document.querySelector('[data-visual-chat-refs="' + slotId + '"]');
+      if (!box) return;
+      const list = visualConceptChatRefs[slotId] || [];
+      box.innerHTML = list.map((file, index) =>
+        '<span class="visual-concept-chat-ref-chip">' + escapeHtml(file.name || file.id) +
+        '<button type="button" class="visual-concept-chat-ref-remove" data-visual-action="chat-ref-remove"' +
+        ' data-visual-slot="' + slotId + '" data-ref-index="' + index + '">حذف</button></span>'
+      ).join('');
+    }
+
+    function removeVisualConceptChatRef(slotId, index) {
+      const list = visualConceptChatRefs[slotId] || [];
+      if (index < 0 || index >= list.length) return;
+      list.splice(index, 1);
+      renderVisualConceptChatRefs(slotId);
+    }
+
     async function sendVisualConceptChat(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
@@ -411,7 +471,8 @@
       // same box steers the hidden prompt instead — there is nothing to edit yet.
       const baseImage = durableImageUrl(liveSlot().imageUrl || liveSlot().approvedImageUrl);
       const editImage = Boolean(baseImage);
-      liveSlot().chat.push({ role: 'user', text: message });
+      const refs = (visualConceptChatRefs[slotId] || []).slice(0, 5);
+      liveSlot().chat.push({ role: 'user', text: message, attachments: refs.map(file => file.name) });
       markVisualConceptDirty();
       showLoader(
         editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : 'جاري تعديل وصف الصورة',
@@ -420,6 +481,7 @@
         const payload = await collectVisualConceptPayload(slotId);
         payload.message = message;
         if (editImage) payload.image = baseImage;
+        if (refs.length) payload.editReferenceFileIds = refs.map(file => file.id);
         const response = editImage
           ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
           : await api('POST', '/api/visual-concept/chat', payload);
@@ -443,6 +505,7 @@
           return;
         }
         showVisualConceptMissing('');
+        visualConceptChatRefs[slotId] = [];
         if (editImage) {
           liveSlot().imageUrl = visualConceptImageUrl(response.image);
           liveSlot().approvedImageUrl = '';

@@ -24,7 +24,20 @@ def _visual_concept_edit_base_image(data, tenant_id=None):
     return prepared or ''
 
 
-def _visual_concept_edit_prompt(instruction, slot_id, facts):
+def _visual_concept_edit_reference_uris(data, limit=5):
+    """Client images pinned to this edit message — the request and its style
+    references arrive together, so "use this on that element" binds to actual
+    pixels instead of a name somewhere in the prompt."""
+    tenant_id = getattr(g, 'tenant_id', None)
+    uris = []
+    for file_id in (data.get('editReferenceFileIds') or [])[:limit]:
+        uri = _visual_concept_project_file_data_uri(file_id, tenant_id)
+        if uri:
+            uris.append(uri)
+    return uris
+
+
+def _visual_concept_edit_prompt(instruction, slot_id, facts, ref_count=0):
     """Hidden mandatory wrapper: the client's text slots into a fixed contract
     that forbids the model from touching anything unrequested — even when the
     client never says «don't change anything else»."""
@@ -39,11 +52,14 @@ def _visual_concept_edit_prompt(instruction, slot_id, facts):
         'Keep the camera angle, framing, composition, architecture, materials, colors, '
         'lighting, and every other detail of the input image identical. '
         'Any aspect of the image the request does not mention stays untouched. '
-        'Requested change: ' + instruction
+        + (f'The last {ref_count} attached images are client-supplied style references for '
+           'this edit — apply their design language only to the element the request names. '
+           if ref_count else '')
+        + 'Requested change: ' + instruction
     )
 
 
-def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx=None):
+def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx=None, extra_images=None):
     """Gate the edit before it costs an image call: the text model sees the
     actual image plus the request and decides whether the request is a clear,
     directly executable visual edit. Returns a dict {clear, question} or None
@@ -69,7 +85,7 @@ def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_
             system_prompt, user_prompt, temperature=None, max_tokens=1200,
             model=SLIDE_TEXT_MODEL, reasoning_effort='low',
             response_format={'type': 'json_object'},
-            image_references=[base_image] if base_image else None,
+            image_references=([base_image] + list(extra_images or [])) if base_image else None,
             usage_ctx=usage_ctx or _usage_ctx('image'))
         parsed = parse_json_object(_get_chat_response_text(response))
         return parsed if isinstance(parsed, dict) else None
@@ -122,8 +138,9 @@ def api_visual_concept_edit():
             'error': 'لا توجد صورة حالية قابلة للتعديل في هذا الحقل',
             'error_code': 'IMAGE_REQUIRED',
         }), 400
+    ref_uris = _visual_concept_edit_reference_uris(data)
     usage_ctx = _usage_ctx('image', data)
-    clarity = _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx)
+    clarity = _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_ctx, ref_uris)
     if isinstance(clarity, dict) and clarity.get('clear') is False:
         question = _visual_concept_text(clarity.get('question'), 600) or 'حدد ما الذي تريد تغييره في الصورة بالضبط.'
         return jsonify({
@@ -132,8 +149,8 @@ def api_visual_concept_edit():
             'needsClarification': True,
             'question': question,
         })
-    edit_prompt = _visual_concept_edit_prompt(instruction, slot_id, facts)
-    image = call_images_api(edit_prompt, [base_image], model=VISUAL_CONCEPT_IMAGE_MODEL,
+    edit_prompt = _visual_concept_edit_prompt(instruction, slot_id, facts, len(ref_uris))
+    image = call_images_api(edit_prompt, [base_image] + ref_uris, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=usage_ctx)
     if not image:
         fatal = _ai_fatal_http_response(last_images_api_error())

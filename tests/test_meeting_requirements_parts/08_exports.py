@@ -1147,6 +1147,18 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('vc.regen_prompt_hint', index_source)
         self.assertIn('إعادة توليد الوصف', index_source)
 
+        # Edit-time attachments: the chat box pins the exact reference image
+        # next to the request, so the edit model receives "use this" alongside
+        # the actual pixels instead of a name in the prompt.
+        self.assertIn('data-visual-action="chat-attach"', index_source)
+        self.assertIn('function attachVisualConceptChatImage', index_source)
+        self.assertIn('data-visual-chat-refs', index_source)
+        self.assertIn('data-visual-chat-upload', index_source)
+        self.assertIn('editReferenceFileIds', index_source)
+        self.assertIn('def _visual_concept_edit_reference_uris', source)
+        self.assertIn('client-supplied style references', source)
+        self.assertIn('editReferenceFileIds', source)
+
         # Major-section approvals gate the chain plans → exterior → interior →
         # sketches: the posted plan images alone are not enough — the plans
         # section flag must be there, and it must match its items.
