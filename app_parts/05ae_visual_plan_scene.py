@@ -89,6 +89,51 @@ def _visual_plan_scene_from_request(data):
     return scene, contract, context, program
 
 
+_PLAN_LAYOUT_KEYS = {'buildings', 'entries', 'openAreas', 'reply'}
+
+
+def _visual_plan_normalize_layout(proposed):
+    """Tolerate harmless model noise before the strict scene validator: unwrap a
+    single wrapper object carrying the layout, drop keys outside the scene
+    contract at every level, and accept a buildings map keyed by building id.
+    make_scene still enforces every required field — only the noise is stripped."""
+    if not isinstance(proposed, dict):
+        return proposed
+    if 'buildings' not in proposed:
+        nested = next((value for value in proposed.values()
+                       if isinstance(value, dict) and isinstance(value.get('buildings'), list)), None)
+        if nested is not None:
+            proposed = nested
+    layout = {key: value for key, value in proposed.items() if key in _PLAN_LAYOUT_KEYS}
+    buildings = layout.get('buildings')
+    if isinstance(buildings, dict):
+        buildings = [{**value, 'id': key} if isinstance(value, dict) else value
+                     for key, value in buildings.items()]
+        layout['buildings'] = buildings
+    if isinstance(buildings, list):
+        cleaned = []
+        for raw in buildings:
+            if not isinstance(raw, dict):
+                cleaned.append(raw)
+                continue
+            item = {key: raw[key] for key in ('id', 'footprint', 'facades') if key in raw}
+            facades = item.get('facades')
+            if isinstance(facades, dict):
+                item['facades'] = {side: {k: v for k, v in style.items()
+                                          if k in ('material', 'color', 'pattern')}
+                                   for side, style in facades.items()
+                                   if side in visual_plan_geometry.DIRECTION_VECTORS and isinstance(style, dict)}
+            cleaned.append(item)
+        layout['buildings'] = cleaned
+    for key, allowed in (('entries', ('id', 'kind', 'buildingId', 'side', 'position')),
+                         ('openAreas', ('id', 'componentId', 'kind', 'polygon'))):
+        rows = layout.get(key)
+        if isinstance(rows, list):
+            layout[key] = [{k: raw[k] for k in allowed if k in raw}
+                           if isinstance(raw, dict) else raw for raw in rows]
+    return layout
+
+
 def _visual_plan_create_scene(data, context=None):
     contract, context = _visual_plan_contract(data, context)
     if (contract['primaryFrontage'].get('status') == 'unresolved'
@@ -152,7 +197,7 @@ def _visual_plan_create_scene(data, context=None):
                 _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
             continue
         text_out = _get_chat_response_text(response)
-        proposed = parse_json_object(text_out)
+        proposed = _visual_plan_normalize_layout(parse_json_object(text_out))
         choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
         finish = str(choice.get('native_finish_reason') or choice.get('finish_reason') or '').lower()
         try:
@@ -227,6 +272,11 @@ def _visual_plan_edit_scene(data, slot_id):
         raise visual_plan_geometry.PlanGeometryError(
             _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
     result = parse_json_object(_get_chat_response_text(response))
+    if isinstance(result, dict) and 'clear' not in result and 'edits' not in result:
+        nested = next((v for v in result.values() if isinstance(v, dict)
+                       and ('clear' in v or 'edits' in v)), None)
+        if nested is not None:
+            result = nested
     if isinstance(result, dict) and result.get('clear') is False:
         return {'success': True, 'slotId': slot_id, 'needsClarification': True,
                 'question': _visual_concept_text(result.get('question'), 600) or 'العنصر المقصود بالتعديل غير واضح.'}
