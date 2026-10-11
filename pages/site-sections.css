@@ -1,5 +1,5 @@
 /* Landing-only styles, part 2: the light content sections (features,
-   contents, sources, flow, showcase, about), the join/request-access band,
+   contents, sources, flow, showcase), the join/request-access band,
    responsive rules and all motion. Loaded after site.css and site-landing.css
    on landing.html only — the legal pages never see this file. */
 
@@ -83,42 +83,6 @@
 
 .feature-card h3 { margin: 0 0 8px; font-size: 17.5px; color: var(--ink); font-weight: 800; }
 .feature-card p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; }
-
-/* ── About (folded into the landing page) ────────────────────────────────── */
-
-.about-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
-  gap: 44px;
-  align-items: center;
-}
-
-.about-split > * { min-width: 0; }
-
-.about-copy h2 { font-size: 28px; margin: 0 0 12px; color: var(--ink); font-weight: 800; }
-.about-copy .lead { color: var(--muted); font-size: 16px; margin: 0 0 14px; }
-.about-copy .lead:last-child { margin-bottom: 0; }
-
-.about-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.about-points li {
-  padding: 12px 16px;
-  padding-inline-start: 20px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  font-size: 14.5px; font-weight: 600; color: var(--ink);
-  position: relative;
-}
-.about-points li::before {
-  content: '';
-  position: absolute;
-  inset-inline-start: 0;
-  top: 0; bottom: 0;
-  width: 4px;
-  border-radius: 10px 0 0 10px;
-  background: linear-gradient(180deg, var(--teal), var(--teal-dark));
-}
-html[dir="rtl"] .about-points li::before { border-radius: 0 10px 10px 0; }
 
 /* ── Flow ────────────────────────────────────────────────────────────────── */
 
@@ -507,7 +471,6 @@ html[dir="rtl"] .about-points li::before { border-radius: 0 10px 10px 0; }
   .hero .wrap { grid-template-columns: 1fr; gap: 38px; }
   .hero-visual { max-width: 480px; margin: 12px auto 0; }
   .features { grid-template-columns: 1fr 1fr; }
-  .about-split { grid-template-columns: minmax(0, 1fr); gap: 30px; }
   /* The step row collapses into a stack — the connector hairline is a
      five-column luxury. */
   .flow { grid-template-columns: 1fr; gap: 22px; }
@@ -551,7 +514,6 @@ html[dir="rtl"] .about-points li::before { border-radius: 0 10px 10px 0; }
   .m-idx { width: 42px; height: 42px; font-size: 13px; border-radius: 11px; }
   .notice-card { padding: 22px 20px; }
   .notice-card p { font-size: 13.5px; text-align: start; }
-  .about-copy h2 { font-size: 23px; }
   .deck-viewer { padding: 10px; border-radius: 14px; }
 
   .join-band { padding: 56px 0; }
