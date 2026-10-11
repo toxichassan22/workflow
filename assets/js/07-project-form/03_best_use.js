@@ -107,8 +107,11 @@
 
     function bestUseCurrent() {
       const state = bestUseState();
+      // Responses re-sign /uploads/ links (an expiring ?s= token), so the stored
+      // snapshot arrives signed while the live snapshot is normalized. Compare
+      // both sides through the same normalization or the approval stays disabled.
       return !!state.id && !state.inputsChanged
-        && bestUseStable(bestUseSourceSnapshot()) === bestUseStable(state.sourceSnapshot || {});
+        && bestUseStable(bestUseSourceSnapshot()) === bestUseStable(bestUseNormalizeMedia(state.sourceSnapshot || {}));
     }
 
     function bestUseSectionError() {
@@ -411,15 +414,22 @@
         showLoader(WFT('best_use.processing_title', 'أفضل استخدامات'), WFT('best_use.saving', 'حفظ بيانات المشروع'), 5);
         try {
           const initialId = tenantProjectData.draftId;
-          const initial = bestUseStable(bestUseSourceSnapshot());
-          if (!(await saveProjectAsDraft(true, false))) return false;
-          if (tenantProjectData.draftId !== initialId || initial !== bestUseStable(bestUseSourceSnapshot())) {
+          const initial = bestUseSourceSnapshot();
+          if (!(await saveProjectAsDraft(true, false))) {
+            toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
+            return false;
+          }
+          const afterSave = bestUseSourceSnapshot();
+          if (tenantProjectData.draftId !== initialId || bestUseStable(initial) !== bestUseStable(afterSave)) {
+            console.warn('[BEST-USE] inputs changed during save:',
+              Object.keys({ ...initial, ...afterSave })
+                .filter(key => bestUseStable(initial[key]) !== bestUseStable(afterSave[key])));
             toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
             return false;
           }
           const requestContext = { draftId: tenantProjectData.draftId,
             editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter,
-            sourceSnapshot: bestUseSourceSnapshot() };
+            sourceSnapshot: afterSave };
           const payload = { draftId: requestContext.draftId, expectedRevision: tenantDraftRevision };
           let endpoint = 'decision';
           if (action === 'generate') endpoint = 'generate';

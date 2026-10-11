@@ -149,6 +149,25 @@ test('source changes invalidate the proposal but changed fetch signatures do not
   assert.equal(f.context.bestUseCurrent(), false);
 });
 
+test('a stored snapshot carrying response-signed media stays current', () => {
+  const f = fixture();
+  const proposal = f.proposal();
+  // JSON responses re-sign every /uploads/ URL, including ones nested inside
+  // best_use_data.sourceSnapshot — the stored copy must be normalized before
+  // comparing or the approve button never enables.
+  proposal.sourceSnapshot.maps['##MAP_OVERVIEW##'] = '/uploads/maps/site.png?s=signed-token';
+  proposal.sourceSnapshot.market_study_data = {
+    ...proposal.sourceSnapshot.market_study_data,
+    competitors: [{ name: 'منافس', logo_path: '/uploads/creative/t/logo.png?s=abc.def' }]
+  };
+  f.context.tenantProjectData.market_study_data = {
+    summary: { market_definition: 'طلب موثق على السكن' },
+    competitors: [{ name: 'منافس', logo_path: '/uploads/creative/t/logo.png' }]
+  };
+  f.context.tenantProjectData.best_use_data = proposal;
+  assert.equal(f.context.bestUseCurrent(), true);
+});
+
 test('a failed pre-save cannot start a generation or chat call', async () => {
   const f = fixture();
   f.context.saveProjectAsDraft = async () => false;
