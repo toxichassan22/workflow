@@ -90,6 +90,27 @@ def _visual_plan_scene_from_request(data):
 
 
 _PLAN_LAYOUT_KEYS = {'buildings', 'entries', 'openAreas', 'reply'}
+_PLAN_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
+
+
+def _visual_plan_rect_polygon(value):
+    """Expand a {"rect": [x, y, width, height]} footprint shorthand into a
+    polygon. The model matches an exact required area far more reliably with
+    width*height than by iterating shoelace math on free polygons."""
+    rect = None
+    if isinstance(value, dict):
+        rect = value.get('rect')
+        if rect is None and {'x', 'y', 'width', 'height'} <= set(value):
+            rect = [value.get('x'), value.get('y'), value.get('width'), value.get('height')]
+    elif (isinstance(value, (list, tuple)) and len(value) == 4
+          and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value)):
+        rect = value
+    if not isinstance(rect, (list, tuple)) or len(rect) != 4:
+        return None
+    x, y, w, h = (visual_plan_geometry.finite_number(item) for item in rect)
+    if None in (x, y, w, h) or w <= 0 or h <= 0:
+        return None
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
 
 
 def _visual_plan_normalize_layout(proposed):
@@ -117,6 +138,9 @@ def _visual_plan_normalize_layout(proposed):
                 cleaned.append(raw)
                 continue
             item = {key: raw[key] for key in ('id', 'footprint', 'facades') if key in raw}
+            rect = _visual_plan_rect_polygon(item.get('footprint'))
+            if rect is not None:
+                item['footprint'] = rect
             facades = item.get('facades')
             if isinstance(facades, dict):
                 item['facades'] = {side: {k: v for k, v in style.items()
@@ -129,8 +153,17 @@ def _visual_plan_normalize_layout(proposed):
                          ('openAreas', ('id', 'componentId', 'kind', 'polygon'))):
         rows = layout.get(key)
         if isinstance(rows, list):
-            layout[key] = [{k: raw[k] for k in allowed if k in raw}
-                           if isinstance(raw, dict) else raw for raw in rows]
+            cleaned_rows = []
+            for raw in rows:
+                if not isinstance(raw, dict):
+                    cleaned_rows.append(raw)
+                    continue
+                item = {k: raw[k] for k in allowed if k in raw}
+                rect = _visual_plan_rect_polygon(item.get('polygon'))
+                if rect is not None:
+                    item['polygon'] = rect
+                cleaned_rows.append(item)
+            layout[key] = cleaned_rows
     return layout
 
 
@@ -170,6 +203,9 @@ def _visual_plan_create_scene(data, context=None):
         'and residential entries must use recorded streets, never neighboring land. Entry position '
         'is a fraction 0..1 along the longest parcel edge on that side. Surface parking requires a '
         'recorded siteItems componentId and its recorded area. No source names, files or pages. '
+        'Any footprint or open-area polygon may be written as an axis-aligned rect instead: '
+        '{"rect":[x,y,width,height]} in metres — its area is exactly width*height, which makes '
+        'matching the required area exact; prefer it for rectangular masses. '
         'Return JSON only: {"buildings":[{"id":"b1","footprint":[[0,0],[1,0],[1,1],[0,1]],'
         '"facades":{"west":{"material":"glass","pattern":"grid"}}}],'
         '"entries":[{"id":"main_entry","kind":"main","buildingId":"b1","side":"west",'
@@ -181,7 +217,7 @@ def _visual_plan_create_scene(data, context=None):
                    + json.dumps(program, ensure_ascii=False))
     feedback = ''
     error = None
-    cap = 7000
+    cap = 8000
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
@@ -196,16 +232,29 @@ def _visual_plan_create_scene(data, context=None):
             error = visual_plan_geometry.PlanGeometryError(
                 _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
             continue
-        text_out = _get_chat_response_text(response)
-        proposed = _visual_plan_normalize_layout(parse_json_object(text_out))
         choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
         finish = str(choice.get('native_finish_reason') or choice.get('finish_reason') or '').lower()
+        message = choice.get('message') if isinstance(choice.get('message'), dict) else {}
+        text_out = _stringify_chat_part(message.get('content')) or ''
+        if finish in _PLAN_LENGTH_FINISH and not text_out.strip():
+            # Reasoning consumed the whole token cap before a single byte of
+            # JSON was written — that is truncation, not a bad layout.
+            error = visual_plan_geometry.PlanGeometryError(
+                'انقطع ناتج المزوّد قبل اكتمال التوزيع — أعد المحاولة.', 'PLANS_PROVIDER_FAILED')
+            cap = max(cap * 2, 16000)
+            app.logger.warning('Visual plan layout starved on reasoning (finish=%s, cap=%s)', finish, cap)
+            feedback = ('\nYour previous reply hit the output limit before the JSON began. '
+                        'Keep reasoning brief, emit the JSON first, and prefer the {"rect":...} form.')
+            continue
+        if not text_out.strip():
+            text_out = _get_chat_response_text(response)
+        proposed = _visual_plan_normalize_layout(parse_json_object(text_out))
         try:
             scene = visual_plan_scene.make_scene(contract, program, proposed, VISUAL_PLAN_SCENE_VERSION)
             return _visual_plan_seal_scene(data, scene, context), context, reference_url
         except visual_plan_geometry.PlanGeometryError as failure:
             error = failure
-            if finish == 'length' or not text_out.strip():
+            if finish in _PLAN_LENGTH_FINISH or not text_out.strip():
                 cap *= 2
             received = ', '.join(sorted(proposed.keys())) if isinstance(proposed, dict) and proposed else 'none'
             app.logger.warning('Visual plan layout refused (%s, finish=%s, keys=%s)', failure, finish, received)
