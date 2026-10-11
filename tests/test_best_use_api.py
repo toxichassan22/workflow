@@ -298,10 +298,11 @@ class BestUseApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(provider.call_count, 2)
         self.assertIn('رُفض', provider.call_args.args[1])
-        self.assertIn('الأدوار المعتمدة', provider.call_args.args[1])
+        self.assertIn('حصته الأرضية', provider.call_args.args[1])
+        self.assertIn('4 أدوار', provider.call_args.args[1])
         self.assertEqual(response.get_json()['bestUse']['components'][0]['builtArea'], 8000)
 
-    def test_a_twice_rejected_distribution_still_fails_without_touching_the_draft(self):
+    def test_a_repeatedly_rejected_distribution_still_fails_without_touching_the_draft(self):
         before = self.draft()
         bad = copy.deepcopy(self.raw)
         bad['components'][0].update(builtArea=9000)
@@ -309,9 +310,9 @@ class BestUseApiTests(unittest.TestCase):
             response = self.client.post('/api/best-use/generate', headers=self.headers, json={
                 'draftId': self.draft_id, 'expectedRevision': self.draft()['revision']})
         self.assertEqual(response.status_code, 422, response.get_json())
-        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(provider.call_count, 4)
         self.assertEqual(response.get_json()['error_code'], 'BEST_USE_INVALID_PROPOSAL')
-        self.assertIn('الأدوار المعتمدة', response.get_json()['validation'])
+        self.assertIn('حصته الأرضية', response.get_json()['validation'])
         self.assertEqual(self.draft()['draft_data'], before['draft_data'])
 
     def test_queued_jobs_are_scoped_and_complete_off_the_request_path(self):

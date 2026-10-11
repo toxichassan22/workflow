@@ -206,7 +206,7 @@ def _best_use_provider_result(response):
     return clean(parsed)
 
 
-def _best_use_execute(draft, data, kind):
+def _best_use_execute(draft, data, kind, job=None):
     project = copy.deepcopy(draft.get('draft_data') or {})
     proposal = best_use.read_object(project.get('best_use_data'))
     revise = kind == 'chat' and data.get('revise') is True
@@ -231,13 +231,14 @@ def _best_use_execute(draft, data, kind):
         prompt += '\n\nالمحادثة السابقة:\n' + json.dumps(prior, ensure_ascii=False)
         prompt += '\n\nrevise=' + ('true' if revise else 'false') + '\nرسالة العميل: ' + message
     system = best_use.CHAT_PROMPT if kind == 'chat' else best_use.SYSTEM_PROMPT
+    map_references = _best_use_map_references(draft)
     feedback, last_output = '', None
-    for attempt in range(2):
+    for attempt in range(4):
         try:
             response = call_text_chat(system, prompt + feedback,
                                       max_tokens=8000 if kind == 'generate' or revise else 3000,
                                       timeout=120, reasoning_effort='low', response_format={'type': 'json_object'},
-                                      image_references=_best_use_map_references(draft),
+                                      image_references=map_references,
                                       usage_ctx=_usage_ctx('best_use', data, draft_id=draft['id']))
             parsed = _best_use_provider_result(response)
             raw = parsed.get('proposal') if revise else parsed
@@ -254,12 +255,16 @@ def _best_use_execute(draft, data, kind):
                     {'role': 'user', 'content': message}, {'role': 'assistant', 'content': reply}])[-100:]}
             break
         except best_use.ProposalError as error:
-            if attempt:
+            if attempt == 3:
                 return _best_use_error('BEST_USE_INVALID_PROPOSAL', 422, validation=str(error))
             rejected = json.dumps(last_output, ensure_ascii=False)[:8000] if isinstance(last_output, dict) else ''
             feedback = ('\n\nالرد السابق رُفض: ' + best_use.text(str(error), 400) + '.'
                         + ('\nالرد المرفوض:\n' + rejected if rejected else '')
-                        + '\nأخرج الرد كاملًا مرة أخرى بنفس عقد JSON مع تصحيح المخالفة ضمن الحدود المعتمدة.')
+                        + '\nأخرج الرد كاملًا مرة أخرى بنفس عقد JSON مع تصحيح المخالفة فقط '
+                          'دون كسر أي قيد آخر ضمن الحدود المعتمدة.')
+            if job:
+                _write_job(_BEST_USE_JOB_NAMESPACE, job[0], job[1], {
+                    'status': 'running', 'progress': 30 + attempt * 15, 'draftId': data['draftId']})
         except Exception as error:
             fatal = _ai_fatal_http_response(error)
             if fatal is not None:
@@ -293,7 +298,8 @@ def _best_use_job_worker(flask_app, actor, data, kind, job_id):
                                   'error_code': 'SECTION_FORBIDDEN'}, 403
             else:
                 readiness = _best_use_readiness(draft)
-                result, status = readiness if readiness else _best_use_execute(draft, data, kind)
+                result, status = readiness if readiness else _best_use_execute(draft, data, kind,
+                                                                               job=(tenant_id, job_id))
             _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {
                 'status': 'completed' if status < 400 else 'failed', 'progress': 100,
                 'draftId': data['draftId'], 'result': result, 'httpStatus': status})

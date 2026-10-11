@@ -51,7 +51,13 @@ SYSTEM_PROMPT = (
     'capacity حساب الخادم الملزم: إجمالي المسطحات فوق الأرض لا يتجاوز maxBuiltArea، '
     'ومجموع الحصص الأرضية للمكونات فوق الأرض لا يتجاوز footprintLimit، '
     'والمساحات المفتوحة والبدروم لهما حدود مستقلة. '
-    'footprintArea حصة المكون من مسطح الأرض المبني؛ builtArea إجمالي مسطحاته عبر الأدوار. '
+    'وزّع footprintLimit على المكونات أولًا ثم احسب مسطحات كل مكون داخل حصته؛ '
+    'لا تنسخ قيم الحدود أرقامًا للمكونات ولا تساوِها بالضبط. '
+    'اترك هامشًا لا يقل عن متر مربع واحد تحت كل حد؛ الأرقام تُقرَّب لأقرب 0.1 وأي تجاوز يُرفض. '
+    'أخرج أرقامًا صحيحة أو بخانة عشرية واحدة فقط حتى تبقى متسقة بعد التقريب. '
+    'footprintArea حصة المكون من مسطح الأرض المبني ولا تنطبق إلا على المكونات فوق الأرض؛ '
+    'للمساحات المفتوحة والبدروم ومواقف السطح أو القبو اترك footprintArea صفرًا بينما يبقى builtArea مساحتها الفعلية. '
+    'builtArea إجمالي مسطحات المكون عبر الأدوار. '
     'لا يتجاوز builtArea حاصل footprintArea في عدد الأدوار المعتمد. '
     'المساحة البيعية أو التأجيرية لا تتجاوز المساحة المبنية، والمساحة المبنية لا تقل عن عدد الوحدات في مساحة الوحدة. '
     'المواقف السطحية ضمن المساحات المفتوحة ومواقف البدروم ضمن مساحته المدخلة فقط. '
@@ -223,49 +229,73 @@ def normalize_proposal(raw, project, proposal_id):
     permitted = SUPPORT_USES | set().union(*(MAIN_USES.get(kind, set()) for kind in project_types(project)))
     model_inputs = read_object(read_object(project.get('financial_study_model')).get('inputs'))
     revenue_mode = text(model_inputs.get('unitRevenueMode'))
-    rows, names = [], set()
+    rows, names, issues = [], set(), []
     totals = {'builtArea': 0.0, 'revenueArea': 0.0, 'footprintArea': 0.0, 'openArea': 0.0, 'basementArea': 0.0}
     for index, item in enumerate(raw['components']):
+        label = '«' + (text(item.get('name'), 200) if isinstance(item, dict) else '') + '»'
+        if label == '«»':
+            label = f'رقم {index + 1}'
         if not isinstance(item, dict):
-            raise ProposalError('بيانات أحد المكونات غير صالحة.')
+            issues.append(f'بيانات المكون رقم {index + 1} غير صالحة')
+            continue
         name, use_type = text(item.get('name'), 200), text(item.get('useType'), 40)
         investment = text(item.get('investmentModel'), 40)
         reason, area_reason = text(item.get('reason')), text(item.get('areaReason'))
-        if not name or name.casefold() in names or use_type not in permitted or investment not in INVESTMENT_MODELS:
-            raise ProposalError('اسم المكون أو استخدامه أو نموذج الاستفادة لا يطابق بيانات المشروع.')
-        if not reason or not area_reason:
-            raise ProposalError('سبب اختيار كل مكون وأساس مساحته مطلوبان.')
         numbers = {key: number(item.get(key)) for key in
                    ('units', 'unitArea', 'builtArea', 'revenueArea', 'footprintArea')}
         if any(value is None or value < 0 for value in numbers.values()):
-            raise ProposalError('المكونات تحتوي أرقامًا غير صالحة.')
+            issues.append(f'المكون {label} يحتوي أرقامًا غير صالحة')
+            continue
         units, unit_area, built, revenue, footprint = (numbers[key] for key in
                                                       ('units', 'unitArea', 'builtArea', 'revenueArea', 'footprintArea'))
-        if units < 1 or units != int(units) or unit_area <= 0 or built <= 0 or footprint <= 0:
-            raise ProposalError('أعداد الوحدات ومساحاتها وحصصها الأرضية يجب أن تكون موجبة.')
-        if revenue > built + 1e-6 or units * unit_area > built + 1e-6 or (investment == 'nonRevenue' and revenue != 0):
-            raise ProposalError('المساحات المبنية والبيعية وعدد الوحدات غير متسقة.')
-        if ((revenue_mode == 'sale' and investment not in {'sale', 'nonRevenue'})
-                or (revenue_mode == 'rental' and investment == 'sale')
-                or (revenue_mode == 'nonRevenue' and investment != 'nonRevenue')):
-            raise ProposalError('نموذج الاستفادة لا يطابق طبيعة وحدات المشروع الحالية.')
         location = text(item.get('parkingLocation') or 'aboveGround', 30) if use_type == 'parking' else ''
         if use_type == 'parking' and location not in {'aboveGround', 'surface', 'basement'}:
-            raise ProposalError('موقع المواقف غير صالح.')
+            issues.append(f'موقع المواقف في {label} ({location}) غير صالح')
+            location = 'aboveGround'
         category = 'openArea' if use_type == 'openArea' or location == 'surface' else (
             'basementArea' if use_type == 'basement' or location == 'basement' else 'builtArea')
-        if category == 'builtArea' and built > footprint * budget['floors'] + 1e-6:
-            raise ProposalError('مسطح أحد المكونات يتجاوز حصته الأرضية والأدوار المعتمدة.')
+        if footprint <= 0 and category != 'builtArea':
+            footprint = built
+        if not name or name.casefold() in names or use_type not in permitted or investment not in INVESTMENT_MODELS:
+            issues.append(f'اسم المكون أو استخدامه ({use_type or "?"}) أو نموذج الاستفادة '
+                          f'({investment or "?"}) لا يطابق بيانات المشروع — في {label}')
+        if not reason or not area_reason:
+            issues.append(f'سبب اختيار المكون {label} وأساس مساحته مطلوبان')
+        valid = units >= 1 and units == int(units) and unit_area > 0 and built > 0 and footprint > 0
+        if not valid:
+            issues.append(f'أعداد وحدات {label} ({units:g}) ومساحة الوحدة ({unit_area:g}) والمسطح المبني '
+                          f'({built:g}) والحصة الأرضية ({footprint:g}) يجب أن تكون موجبة'
+                          + (' وأعداد الوحدات صحيحة' if units != int(units) else ''))
+        else:
+            if revenue > built + 1e-6:
+                issues.append(f'المساحة البيعية في {label} ({revenue:g}) تتجاوز المساحة المبنية ({built:g})')
+            if units * unit_area > built + 1e-6:
+                issues.append(f'وحدات {label} ({units:g} × {unit_area:g} = {units * unit_area:g}) '
+                              f'تتجاوز مسطحها المبني ({built:g})')
+            if investment == 'nonRevenue' and revenue != 0:
+                issues.append(f'المكون {label} غير إيرادي لكن مساحته البيعية {revenue:g}')
+            if ((revenue_mode == 'sale' and investment not in {'sale', 'nonRevenue'})
+                    or (revenue_mode == 'rental' and investment == 'sale')
+                    or (revenue_mode == 'nonRevenue' and investment != 'nonRevenue')):
+                issues.append(f'نموذج الاستفادة في {label} ({investment}) '
+                              f'لا يطابق طبيعة وحدات المشروع ({revenue_mode})')
+            if category == 'builtArea' and built > footprint * budget['floors'] + 1e-6:
+                issues.append(f'مسطح {label} المبني ({built:g}) يتجاوز حصته الأرضية ({footprint:g}) '
+                              f'في {budget["floors"]:g} أدوار = {footprint * budget["floors"]:g}')
         names.add(name.casefold())
         row = {'id': f'best_{proposal_id}_{index + 1}', 'name': name, 'useType': use_type,
-               'units': int(units), 'unitArea': rounded(unit_area), 'builtArea': rounded(built),
-               'revenueArea': rounded(revenue), 'footprintArea': rounded(footprint),
-               'investmentModel': investment, 'reason': reason, 'areaReason': area_reason,
+               'units': max(0, int(units)) if units == int(units) else 0, 'unitArea': rounded(unit_area),
+               'builtArea': rounded(built), 'revenueArea': rounded(revenue),
+               'footprintArea': rounded(footprint), 'investmentModel': investment,
+               'reason': reason, 'areaReason': area_reason,
                'notes': text(item.get('notes')) or reason + '\n' + area_reason}
-        if (min(row['unitArea'], row['builtArea'], row['footprintArea']) <= 0
-                or row['units'] * row['unitArea'] > row['builtArea'] + 1e-6
-                or (category == 'builtArea' and row['builtArea'] > row['footprintArea'] * budget['floors'] + 1e-6)):
-            raise ProposalError('تقريب المساحات يجعل أرقام المكون غير متسقة.')
+        if valid:
+            if row['units'] * row['unitArea'] > row['builtArea'] + 1e-6:
+                issues.append(f'تقريب مساحات {label} يجعل الوحدات '
+                              f'({row["units"]:g} × {row["unitArea"]:g}) تتجاوز المسطح المبني ({row["builtArea"]:g})')
+            if category == 'builtArea' and row['builtArea'] > row['footprintArea'] * budget['floors'] + 1e-6:
+                issues.append(f'تقريب مسطح {label} ({row["builtArea"]:g}) يتجاوز حصته الأرضية '
+                              f'({row["footprintArea"]:g}) في {budget["floors"]:g} أدوار')
         if use_type == 'parking':
             row['parkingLocation'] = location
         rows.append(row)
@@ -273,12 +303,17 @@ def normalize_proposal(raw, project, proposal_id):
         totals['revenueArea'] += row['revenueArea']
         if category == 'builtArea':
             totals['footprintArea'] += row['footprintArea']
+    total_labels = {'builtArea': 'المسطحات فوق الأرض', 'footprintArea': 'الحصص الأرضية فوق الأرض',
+                    'openArea': 'المساحات المفتوحة', 'basementArea': 'مسطحات البدروم'}
     for total, limit in (('builtArea', 'maxBuiltArea'), ('footprintArea', 'footprintLimit'),
                          ('openArea', 'openAreaLimit'), ('basementArea', 'basementAreaLimit')):
         if totals[total] > budget[limit] + 1e-6:
-            raise ProposalError('توزيع المساحات يتجاوز التغطية أو الارتدادات أو المعامل أو المساحة المتاحة.')
+            issues.append(f'مجموع {total_labels[total]} ({totals[total]:.1f} م²) '
+                          f'يتجاوز الحد المعتمد ({budget[limit]:.1f} م²)')
     if totals['builtArea'] <= 0:
-        raise ProposalError('الاقتراح لا يتضمن مكونات مبنية لنوع المشروع المختار.')
+        issues.append('الاقتراح لا يتضمن مكونات مبنية لنوع المشروع المختار')
+    if issues:
+        raise ProposalError('مخالفات التوزيع:\n- ' + '\n- '.join(issues) + '.')
     return {
         'id': proposal_id, 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
         'sourceHash': source_hash(project), 'sourceSnapshot': source_snapshot(project),
