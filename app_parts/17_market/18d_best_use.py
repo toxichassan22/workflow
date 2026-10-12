@@ -78,6 +78,31 @@ def _best_use_save_statuses(project, incoming, stored):
     return statuses
 
 
+def _best_use_field_matches(stored, incoming):
+    """Posted fields are normalized (JSON strings decoded, numbers as numbers)
+    while drafts store raw input values — a shape-only difference is not an
+    edit, and writing it would falsely stale approved section snapshots."""
+    if stored == incoming:
+        return True
+    if isinstance(stored, str) and isinstance(incoming, (dict, list)):
+        try:
+            return json.loads(stored) == incoming
+        except (TypeError, ValueError):
+            return False
+    if isinstance(incoming, str) and isinstance(stored, (dict, list)):
+        try:
+            return stored == json.loads(incoming)
+        except (TypeError, ValueError):
+            return False
+    if isinstance(stored, str) != isinstance(incoming, str) or (
+            isinstance(stored, float) != isinstance(incoming, float)):
+        try:
+            return float(stored) == float(incoming)
+        except (TypeError, ValueError):
+            return str(stored or '') == str(incoming or '')
+    return False
+
+
 def _best_use_merge_fields(draft, data, source_fields):
     # The request carries the fields this flow consumes instead of a
     # pre-request draft save, so only these keys overlay the stored draft —
@@ -87,7 +112,8 @@ def _best_use_merge_fields(draft, data, source_fields):
     if not isinstance(fields, dict) or not isinstance(project, dict):
         return
     for key in source_fields:
-        if key != 'draftId' and key in fields:
+        if key != 'draftId' and key in fields \
+                and not _best_use_field_matches(project.get(key), fields[key]):
             project[key] = fields[key]
     maps = fields.get('maps')
     if isinstance(maps, dict):

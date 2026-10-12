@@ -218,6 +218,21 @@ class ExplorationApiTests(unittest.TestCase):
         response = self.decide(state, 'floorDistribution')
         self.assertEqual(response.status_code, 409)
 
+    def test_field_merge_skips_shape_only_differences_and_writes_real_edits(self):
+        # Drafts store raw input values (JSON strings, number text) while posted
+        # fields are normalized — rewriting equal values would falsely stale
+        # approved section snapshots ('land_croquis' flagged forever).
+        data = self.draft()['draft_data']
+        data['directions_table'] = '[{"direction": "شمال"}]'
+        data['location_lat'] = '21.5'
+        draft = dict(self.draft(), draft_data=data)
+        fields = {'directions_table': [{'direction': 'شمال'}], 'location_lat': 21.5,
+                  'setbacks': 'أمامي 5 م — تعديل حقيقي'}
+        self.application._best_use_merge_fields(draft, {'fields': fields}, workflow.SOURCE_FIELDS)
+        self.assertEqual(data['directions_table'], '[{"direction": "شمال"}]')
+        self.assertEqual(data['location_lat'], '21.5')
+        self.assertEqual(data['setbacks'], 'أمامي 5 م — تعديل حقيقي')
+
     def test_wrong_artifact_hash_foreign_draft_and_wrong_mode_are_refused(self):
         state, _ = self.concepts()
         response = self.decide(state, 'concepts', contentHash='wrong')
