@@ -206,9 +206,30 @@ test('stale inputs lock later stages again and the wizard snaps back', () => {
   f.context.tenantProjectData.approved_floor_count = 9;
   f.context.renderBestUseExplore();
   const html = f.inputs.bestUseExploreWorkspace.innerHTML;
-  assert.match(html, /setBestUseExploreStage\('land'\)[^>]*disabled/);
+  // A stage whose artifact exists stays viewable once stale — gating only locks
+  // stages that never produced one; the wizard drops to the deepest open stage.
+  assert.doesNotMatch(html, /setBestUseExploreStage\('land'\)[^>]*disabled/);
   assert.match(html, /setBestUseExploreStage\('floors'\)[^>]*disabled/);
+  assert.match(html, /class="btn primary small" onclick="setBestUseExploreStage\('land'\)"/);
+});
+
+test('opened stages stay navigable — the wizard never locks backward', () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  const state = readyExploreState(f.context);
+  state.landDistribution = { id: 'ld-1', contentHash: 'lh', inputHash: 'li' };
+  state.floorDistribution = { id: 'fd-1', contentHash: 'fh', inputHash: 'fi' };
+  f.context.tenantProjectData.best_use_explore_data = state;
+
+  f.context.renderBestUseExplore();
+  f.context.setBestUseExploreStage('concepts');
+  f.context.setBestUseExploreStage('land');
+  f.context.setBestUseExploreStage('concepts');
+  f.context.renderBestUseExplore();
+  const html = f.inputs.bestUseExploreWorkspace.innerHTML;
   assert.match(html, /class="btn primary small" onclick="setBestUseExploreStage\('concepts'\)"/);
+  assert.doesNotMatch(html, /setBestUseExploreStage\('land'\)[^>]*disabled/);
+  assert.doesNotMatch(html, /setBestUseExploreStage\('floors'\)[^>]*disabled/);
 });
 
 test('a failed concepts run pins the server error inside the workspace', async () => {

@@ -201,7 +201,7 @@
         hospitality: 'فندقي', industrial: 'صناعي ولوجستي', logistics: 'صناعي ولوجستي' };
       const types = bestUseDecoded(bestUseFieldValue('project_type'), []);
       const expected = [...new Set((concept.uses || []).map(use => main[use]).filter(Boolean))].sort();
-      if (Array.isArray(types) && bestUseStable([...types].sort()) === bestUseStable(expected)) return '';
+      if (Array.isArray(types) && expected.every(kind => types.includes(kind))) return '';
       return bestUseWarningHtml(WFT('best_use_explore.type_mismatch',
         'استخدام المفهوم يختلف عن نوع المشروع المسجل؛ البيانات الأساسية ودراسة السوق تخصان النوع المسجل.'));
     }
@@ -215,8 +215,18 @@
       return stage === 'concepts';
     }
 
+    function bestUseExploreStageNavigable(stage) {
+      // Forward progress stays gated on upstream readiness, but a stage that
+      // already produced an artifact always stays viewable — opening a later
+      // stage must never lock the customer out of an earlier one.
+      const state = bestUseExploreState();
+      const artifactName = stage === 'land' ? 'landDistribution'
+        : stage === 'floors' ? 'floorDistribution' : 'concepts';
+      return bestUseExploreStageReady(stage) || !!(state[artifactName]?.id && !state[artifactName]?.rejected);
+    }
+
     function setBestUseExploreStage(stage) {
-      if (bestUseExploreBusy || !bestUseExploreStageReady(stage)) return;
+      if (bestUseExploreBusy || !bestUseExploreStageNavigable(stage)) return;
       bestUseExploreStage = stage;
       renderBestUse();
     }
@@ -251,8 +261,9 @@
         land: bestUseExploreStageReady('land'),
         floors: bestUseExploreStageReady('floors')
       };
-      if (!stageReady[bestUseExploreStage]) {
-        bestUseExploreStage = stageReady.floors ? 'floors' : stageReady.land ? 'land' : 'concepts';
+      if (!stageReady[bestUseExploreStage] && !bestUseExploreStageNavigable(bestUseExploreStage)) {
+        bestUseExploreStage = bestUseExploreStageNavigable('floors') ? 'floors'
+          : bestUseExploreStageNavigable('land') ? 'land' : 'concepts';
       }
       let content = '';
       if (bestUseExploreStage === 'concepts') {
@@ -294,7 +305,7 @@
       const savedMessage = input?.value || '';
       root.innerHTML = '<nav class="best-use-stage-nav">' + stages.map(([stage, label]) => '<button type="button" class="btn '
         + (stage === bestUseExploreStage ? 'primary' : 'ghost') + ' small" onclick="setBestUseExploreStage(\'' + stage + '\')" '
-        + (bestUseExploreBusy || !stageReady[stage] ? 'disabled' : '') + '>' + label + '</button>').join('') + '</nav>'
+        + (bestUseExploreBusy || !bestUseExploreStageNavigable(stage) ? 'disabled' : '') + '>' + label + '</button>').join('') + '</nav>'
         + '<p class="tenant-hint' + (!bestUseExploreBusy && missing.length ? ' best-use-readiness-missing' : '')
         + '" role="status">' + (bestUseExploreBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
           : missing.length ? WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', { items: missing.map(bestUseMissingLabel).join('، ') })
