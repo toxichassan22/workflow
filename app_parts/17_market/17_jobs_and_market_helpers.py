@@ -263,23 +263,62 @@ def _market_search_ran(res):
 
 
 def _market_citation_pages(res):
-    """Citation pages with titles — the url_citation annotations the search returned."""
+    """Citation pages with titles — the url_citation annotations the search returned,
+    plus provider-native grounding (Google) chunks and their supported segments."""
     pages = []
-    seen = set()
+    seen = {}
+
+    def _add(url, title='', content=''):
+        url = str(url or '').strip()
+        if not url:
+            return
+        if url in seen:
+            page = pages[seen[url]]
+        else:
+            seen[url] = len(pages)
+            page = {'url': url, 'title': '', 'content': ''}
+            pages.append(page)
+        if title and not page['title']:
+            page['title'] = str(title).strip()
+        if content:
+            page['content'] = (page['content'] + '\n' + str(content)).strip()[:8000]
+
     for choice in (res.get('choices') or []) if isinstance(res, dict) else []:
         message = (choice or {}).get('message') or {}
         for annotation in message.get('annotations') or []:
             if not isinstance(annotation, dict):
                 continue
             citation = annotation.get('url_citation') if isinstance(annotation.get('url_citation'), dict) else {}
-            url = str(citation.get('url') or annotation.get('url') or '').strip()
-            if url and url not in seen:
-                seen.add(url)
-                pages.append({
-                    'url': url,
-                    'title': str(citation.get('title') or '').strip(),
-                    'content': str(citation.get('content') or '')[:8000],
-                })
+            _add(citation.get('url') or annotation.get('url'),
+                 citation.get('title'), citation.get('content'))
+        for citation in message.get('citations') or []:
+            if isinstance(citation, dict):
+                _add(citation.get('url'), citation.get('title'), citation.get('content'))
+            elif isinstance(citation, str):
+                _add(citation)
+        # Gemini/Google AI Mode grounding: groundingChunks carry the sources and
+        # groundingSupports link answer sentences to the chunks they cite — the
+        # supported text is evidence retrieved for that URL.
+        for meta in (choice.get('groundingMetadata'), message.get('groundingMetadata')):
+            if not isinstance(meta, dict):
+                continue
+            chunk_urls = {}
+            for index, chunk in enumerate(meta.get('groundingChunks') or []):
+                web = chunk.get('web') if isinstance(chunk, dict) else None
+                uri = str((web or {}).get('uri') or '').strip()
+                if uri:
+                    chunk_urls[index] = uri
+                    _add(uri, (web or {}).get('title'))
+            for support in meta.get('groundingSupports') or []:
+                if not isinstance(support, dict):
+                    continue
+                segment = support.get('segment') if isinstance(support.get('segment'), dict) else {}
+                text = segment.get('text') or support.get('text')
+                if not text:
+                    continue
+                for index in support.get('groundingChunkIndices') or []:
+                    if index in chunk_urls:
+                        _add(chunk_urls[index], content=text)
     return pages
 
 

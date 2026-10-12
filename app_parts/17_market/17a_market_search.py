@@ -28,15 +28,18 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     for key in ('max_uses', 'max_total_results'):
         if key in budget:
             search_params[key] = max(1, min(search_params[key], int(budget[key])))
+    budget_engine = ''
     if budget:
-        search_params['engine'] = 'exa'
+        budget_engine = str(budget.get('engine') or 'exa').strip() or 'exa'
+        search_params['engine'] = budget_engine
         search_params['max_results'] = min(int(budget.get('max_results') or 6),
                                            max(1, int(max_search_results)))
-        # Bounded scans are a quick comparison, not a market study — pin Exa's
-        # fastest mode so a rough price sweep does not take the deep-search path.
-        # 'instant' can come back blind on thin Arabic listing pages, so a caller
-        # may override with budget['mode'] for a deeper retry.
-        search_params['mode'] = str(budget.get('mode') or 'instant').strip() or 'instant'
+        if budget_engine == 'exa':
+            # Bounded scans are a quick comparison, not a market study — pin Exa's
+            # fastest mode so a rough price sweep does not take the deep-search
+            # path. 'instant' can come back blind on thin Arabic listing pages,
+            # so a caller may override with budget['mode'] for a deeper retry.
+            search_params['mode'] = str(budget.get('mode') or 'instant').strip() or 'instant'
     tools = [{
         'type': 'openrouter:web_search',
         'parameters': search_params,
@@ -46,13 +49,18 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     # grounding is model-decided too, so it silently does nothing. The `web`
     # plugin with engine `exa` runs the search on OpenRouter's side for EVERY
     # request and injects the retrieved pages — real grounding is guaranteed.
+    plugin_engine = (os.environ.get('MARKET_SEARCH_PLUGIN_ENGINE') or '').strip()
+    if not plugin_engine:
+        # A native (Google) budget grounds through the provider itself — routing
+        # the always-on plugin to Exa too would just double the search latency.
+        plugin_engine = 'native' if (budget and budget_engine != 'exa') else 'exa'
     plugin = {
         'id': 'web',
-        'engine': (os.environ.get('MARKET_SEARCH_PLUGIN_ENGINE') or 'exa').strip() or 'exa',
+        'engine': plugin_engine,
         'max_results': max(4, min(20, int(max_search_results or 8))),
     }
-    if budget:
-        plugin['mode'] = search_params['mode']
+    if budget and plugin_engine == 'exa':
+        plugin['mode'] = search_params.get('mode') or 'instant'
     plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
@@ -66,7 +74,10 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         (None, None),
     ]
     if budget:
-        attempts = [(tools, None), (None, None)]
+        # Exa budgets keep the forced tool call; native budgets ground through the
+        # always-on plugin — provider-native search is the model's own capability
+        # and cannot be forced via tool_choice anyway.
+        attempts = ([(tools, None)] if budget_engine == 'exa' else []) + [(None, None)]
     last_response = {}
     last_error = ''
     # A parseable JSON with zero executed searches is kept as a fallback, never as a

@@ -94,35 +94,43 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     if not city:
         raise best_use_contract.ProposalError('price_city_missing')
     candidates = []
+    retrieved = []
     for index, use in enumerate(uses):
         if progress:
             progress(20 + int(35 * index / max(1, len(uses))), 'prices',
                      {'use': use, 'index': index + 1, 'total': len(uses)})
         prompt = json.dumps({'city': city, 'district': district, 'use': use,
                             'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
-        rows = _best_use_price_scan_use(
+        # Google-native grounding first: the provider's own search answers fast
+        # and reads Arabic listing queries well; a deeper Exa pass retries uses
+        # the overview came back empty on.
+        rows, response = _best_use_price_scan_use(
             use, prompt, city, draft, data,
-            {'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 120}, 6)
+            {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120}, 6)
         if not rows:
-            # Exa instant can come back blind on thin Arabic listing pages — one
-            # deeper auto pass for the same use before reporting no evidence.
-            rows = _best_use_price_scan_use(
+            rows, response = _best_use_price_scan_use(
                 use, prompt, city, draft, data,
-                {'max_uses': 3, 'max_total_results': 16, 'max_tool_calls': 5, 'timeout': 120,
-                 'mode': 'auto', 'max_results': 8}, 8)
+                {'engine': 'exa', 'mode': 'auto', 'max_uses': 3, 'max_total_results': 16,
+                 'max_tool_calls': 5, 'timeout': 120, 'max_results': 8}, 8)
+        retrieved.extend(_market_citation_pages(response))
         candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
+    # verify_observation needs the excerpt inside a retrieved page — grounding
+    # pages already carry the cited text, so only fetch URLs the search did not.
+    covered = {best_use_prices.clean_url(page.get('url')) for page in retrieved if page.get('content')}
     pages = []
     urls = list(dict.fromkeys(best_use_prices.clean_url(row.get('url')) for row in candidates))
     for index, url in enumerate(urls):
         if progress:
             progress(55 + int(8 * index / max(1, len(urls))), 'priceEvidence',
                      {'index': index + 1, 'total': len(urls)})
-        if not url:
+        if not url or url in covered:
             continue
         page = _best_use_price_page(url)
         if page:
             pages.append(page)
-    return best_use_prices.build_scan(uses, candidates, pages, db._utcnow().isoformat(), city, district)
+    pages.extend(page for page in retrieved if page.get('content'))
+    return best_use_prices.build_scan(uses, candidates, pages, db._utcnow().isoformat(), city, district,
+                                      preliminary=True)
 
 
 def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap):
@@ -149,7 +157,7 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap
     rows = parsed.get('observations')
     if not isinstance(rows, list):
         raise best_use_contract.ProposalError('price_scan_invalid')
-    return rows
+    return rows, response
 
 
 def _best_use_guided_prices(project):

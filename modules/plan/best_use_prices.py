@@ -137,9 +137,10 @@ def verify_observation(raw, pages, retrieved_at, today=None):
             'independenceStatus': 'identified' if property_id or entity else 'unknown'}
 
 
-def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran=True):
+def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran=True, preliminary=False):
     if not search_ran:
         raise ProposalError('price_search_not_run')
+    minimum = 1 if preliminary else MIN_OBSERVATIONS
     observations, rejected, seen = [], [], set()
     for raw in candidates[:80]:
         try:
@@ -158,13 +159,22 @@ def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran
                  'saleUnit': 'sqm', 'rentUnit': 'sqm', 'rentPeriod': 'year',
                  'city': city, 'district': district, 'priceStatus': 'missing', 'sources': [], 'metrics': {}}
         for mode, key, period in (('sale', 'salePerSqm', 'oneOff'), ('rent', 'rentPerSqmYear', 'year')):
-            eligible = [item for item in observations if item['use'] == use and item['revenueMode'] == mode
-                        and item['unit'] == 'sqm' and item['period'] == period and item['city'] == city
-                        and item['district'] == district and item['freshnessStatus'] == 'fresh'
-                        and item['independenceStatus'] == 'identified']
+            if preliminary:
+                # Directional comparison, not a market study: grounded overview
+                # answers rarely carry per-listing dates or ad IDs, so one
+                # verified quote counts; only outright stale rows are dropped.
+                eligible = [item for item in observations if item['use'] == use and item['revenueMode'] == mode
+                            and item['unit'] == 'sqm' and item['period'] == period and item['city'] == city
+                            and item['freshnessStatus'] != 'stale'
+                            and (item['district'] == district or not item['district'])]
+            else:
+                eligible = [item for item in observations if item['use'] == use and item['revenueMode'] == mode
+                            and item['unit'] == 'sqm' and item['period'] == period and item['city'] == city
+                            and item['district'] == district and item['freshnessStatus'] == 'fresh'
+                            and item['independenceStatus'] == 'identified']
             metric = {'value': None, 'count': len(eligible), 'method': None, 'min': None, 'max': None,
                       'sourceIds': [item['id'] for item in eligible]}
-            if len(eligible) >= MIN_OBSERVATIONS:
+            if len(eligible) >= minimum:
                 values = [item['value'] for item in eligible]
                 metric.update(value=rounded(sum(values) / len(values)), method='arithmetic_mean',
                               min=min(values), max=max(values))
@@ -177,7 +187,7 @@ def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran
     return {'retrievedAt': retrieved_at, 'city': city, 'district': district, 'table': table,
             'observations': observations, 'rejectedEvidence': rejected, 'searchRan': search_ran,
             'status': 'partial' if any(row['priceStatus'] != 'available' for row in table) else 'complete',
-            'minimumObservations': MIN_OBSERVATIONS, 'maxAgeDays': MAX_AGE_DAYS}
+            'minimumObservations': minimum, 'preliminary': preliminary, 'maxAgeDays': MAX_AGE_DAYS}
 
 
 def revenue_potential(components, scan):
@@ -217,18 +227,25 @@ def evidence_current(scan, today=None):
     import db
     today = today or db._utcnow().date()
     by_id = {item.get('id'): item for item in scan.get('observations') or []}
+    minimum = int(scan.get('minimumObservations') or MIN_OBSERVATIONS)
+    preliminary = bool(scan.get('preliminary'))
     for row in scan.get('table') or []:
         for metric in (row.get('metrics') or {}).values():
             if metric.get('value') is None:
                 continue
             ids = metric.get('sourceIds') or []
-            if len(ids) < MIN_OBSERVATIONS:
+            if len(ids) < minimum:
                 return False
             for source_id in ids:
                 item = by_id.get(source_id) or {}
+                # Grounded overview answers carry no per-listing publish date —
+                # a preliminary scan stays current by its own retrieval age.
+                stamp = item.get('publishedAt')
+                if preliminary:
+                    stamp = item.get('retrievedAt') or scan.get('retrievedAt')
                 try:
-                    age = (today - date.fromisoformat(str(item.get('publishedAt'))[:10])).days
-                except ValueError:
+                    age = (today - date.fromisoformat(str(stamp)[:10])).days
+                except (ValueError, TypeError):
                     return False
                 if not 0 <= age <= MAX_AGE_DAYS:
                     return False
