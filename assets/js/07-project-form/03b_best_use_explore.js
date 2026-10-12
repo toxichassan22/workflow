@@ -172,8 +172,7 @@
           + escapeHtml(row.reason || '') + '</p><p>' + escapeHtml(row.areaReason || '') + '</p><p>'
           + escapeHtml(row.revenueAreaBasis || '') + '</p>'
           + (bestUseArray(row.floorAllocations).length ? '<p>' + WFT('best_use_explore.floor_allocations', 'تخصيصات الأدوار') + ': '
-            + bestUseArray(row.floorAllocations).map(item => bestUseFormat(item.floor) + ': ' + bestUseFormat(item.area)).join('، ') + '</p>' : '') + '</article>').join('')
-        + bestUseRevenuePotentialHtml(artifact.revenuePotential);
+            + bestUseArray(row.floorAllocations).map(item => bestUseFormat(item.floor) + ': ' + bestUseFormat(item.area)).join('، ') + '</p>' : '') + '</article>').join('');
     }
 
     function bestUseExploreMismatch(concept) {
@@ -219,7 +218,7 @@
           + '<div class="best-use-concept-grid">' + concepts.map(item => '<article class="best-use-concept-card '
             + (selected?.id === item.id ? 'selected' : '') + '"><h4>' + escapeHtml(item.name) + '</h4><p>' + escapeHtml(item.summary)
             + '</p><p>' + escapeHtml(item.siteFit) + '</p><p>' + escapeHtml(item.revenueBasis) + '</p>'
-            + bestUseRevenuePotentialHtml(item.revenuePotential) + '<button type="button" class="btn ghost small" onclick="runBestUseExplore(\'select\',{conceptId:\''
+            + '<button type="button" class="btn ghost small" onclick="runBestUseExplore(\'select\',{conceptId:\''
             + escapeHtml(item.id) + '\'})" ' + (unavailable || !bestUseExploreCurrent('concepts') ? 'disabled' : '') + '>'
             + (selected?.id === item.id ? WFT('best_use_explore.selected', 'المفهوم المختار') : WFT('best_use_explore.select', 'اختيار المفهوم'))
             + '</button></article>').join('') + '</div>' + bestUseExploreDecisionHtml('concepts');
@@ -248,7 +247,8 @@
       root.innerHTML = '<nav class="best-use-stage-nav">' + stages.map(([stage, label]) => '<button type="button" class="btn '
         + (stage === bestUseExploreStage ? 'primary' : 'ghost') + ' small" onclick="setBestUseExploreStage(\'' + stage + '\')" '
         + (bestUseExploreBusy ? 'disabled' : '') + '>' + label + '</button>').join('') + '</nav>'
-        + '<p class="tenant-hint" role="status">' + (bestUseExploreBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
+        + '<p class="tenant-hint' + (!bestUseExploreBusy && missing.length ? ' best-use-readiness-missing' : '')
+        + '" role="status">' + (bestUseExploreBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
           : missing.length ? WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', { items: missing.map(bestUseMissingLabel).join('، ') })
             : WFT('best_use_explore.ready', 'بيانات الأرض والموقع معتمدة؛ الاستكشاف مستقل عن فكرة المشروع ودراسة السوق.')) + '</p>'
         + content + '<button type="button" class="btn ghost small" onclick="saveProjectAsDraft()">' + WFT('best_use.save', 'حفظ كمسودة') + '</button>';

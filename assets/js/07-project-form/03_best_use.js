@@ -290,6 +290,7 @@
       const unavailable = bestUseBusy || missing.length > 0 || !hasPermission('create_presentation')
         || (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation');
       const readiness = document.getElementById('bestUseReadiness');
+      readiness.classList.toggle('best-use-readiness-missing', !bestUseBusy && missing.length > 0);
       readiness.textContent = bestUseBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
         : missing.length ? WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', { items: missing.map(bestUseMissingLabel).join('، ') })
           : WFT('best_use.ready', 'بيانات الأرض والموقع ودراسة السوق معتمدة.');
@@ -323,17 +324,11 @@
           ${totals.basementArea > 0 && budget.basementVerified === false ? bestUseWarningHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) : ''}
           ${!current ? bestUseWarningHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
-          ${typeof bestUseRevenuePotentialHtml === 'function' ? bestUseRevenuePotentialHtml(state.revenuePotential) : ''}
           <div class="best-use-actions best-use-decisions">
             <button type="button" class="btn primary small" onclick="runBestUseAction('${approved ? 'unapproved' : 'approved'}')" ${bestUseBusy || locked || (!approved && (!current || unavailable)) ? 'disabled' : ''}>${approved ? WFT('best_use.unapprove', 'الغاء الاعتماد') : WFT('best_use.approve', 'اعتماد واستبدال المكونات')}</button>
             <button type="button" class="btn ghost small" onclick="runBestUseAction('rejected')" ${bestUseBusy || locked || approved || state.rejected ? 'disabled' : ''}>${WFT('best_use.reject', 'رفض الاقتراح')}</button>
           </div>
-          ${state.unlinkedRevenueRows ? bestUseWarningHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) : ''}
-          <section class="best-use-reasons"><span class="best-use-note-tag">${WFT('best_use.notes_tag', 'ملاحظات الاقتراح')}</span><h4>${WFT('best_use.reason_title', 'سبب اختيار هذا التوزيع')}</h4>
-            <p>${escapeHtml(state.rationale || '')}</p>
-            <p>${escapeHtml(state.setbackExplanation || '')}</p>
-            ${rows.map(row => '<article><h5>' + escapeHtml(row.name || '') + '</h5><h6>' + WFT('best_use.pick_reason', 'سبب الاختيار') + '</h6><p>' + escapeHtml(row.reason || '') + '</p><h6>' + WFT('best_use.area_reason', 'أساس توزيع المساحة') + '</h6><p>' + escapeHtml(row.areaReason || '') + '</p></article>').join('')}
-          </section>`;
+          ${state.unlinkedRevenueRows ? bestUseWarningHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) : ''}`;
       }
       const messages = document.getElementById('bestUseChatMessages');
       messages.innerHTML = '';

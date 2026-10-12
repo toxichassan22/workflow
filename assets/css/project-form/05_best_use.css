@@ -35,14 +35,8 @@
 .best-use-proposal-heading h4 {
   margin: 0;
 }
-.best-use-note-tag {
-  justify-self: start;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border, #DCE3EB);
-  background: var(--teal-soft, #DFF6FB);
-  color: var(--teal-dark, #0A829B);
-  font-size: 11px;
+.best-use-readiness-missing {
+  color: var(--danger, #B42318) !important;
   font-weight: 700;
 }
 /* Also styles #landComputedMetrics in the location section. */
@@ -121,40 +115,6 @@
 .best-use-warning > span {
   flex: 1;
   line-height: 1.8;
-}
-.best-use-reasons {
-  display: grid;
-  gap: 10px;
-  padding: 18px;
-  border: 1px solid var(--border, #DCE3EB);
-  border-radius: 12px;
-  background: #F8FAFC;
-}
-.best-use-reasons h4,
-.best-use-reasons h5,
-.best-use-reasons h6,
-.best-use-reasons p {
-  margin: 0;
-}
-.best-use-reasons h4 {
-  font-size: 17px;
-}
-.best-use-reasons h5 {
-  font-size: 15px;
-}
-.best-use-reasons h6 {
-  font-size: 12px;
-}
-.best-use-reasons p {
-  white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 13px;
-}
-.best-use-reasons article {
-  display: grid;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border, #DCE3EB);
 }
 .best-use-chat {
   display: grid;
@@ -280,8 +240,7 @@
 }
 .best-use-concept-card,
 .best-use-price-scan,
-.best-use-source,
-.best-use-revenue {
+.best-use-source {
   display: grid;
   gap: 10px;
   padding: 16px;
@@ -295,9 +254,7 @@
 }
 .best-use-concept-card h4,
 .best-use-concept-card p,
-.best-use-source p,
-.best-use-revenue p,
-.best-use-revenue h5 {
+.best-use-source p {
   margin: 0;
   line-height: 1.7;
   white-space: pre-wrap;
