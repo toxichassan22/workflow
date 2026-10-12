@@ -1,7 +1,7 @@
 import copy
 
 from best_use_contract import (ProposalError, SUPPORT_USES, INVESTMENT_MODELS, capacity,
-                               number, rounded, text, read_object)
+                               canonical_use, number, rounded, text, read_object)
 import best_use_regulations as regulations
 import best_use_prices as prices
 import best_use_workflow as workflow
@@ -38,6 +38,7 @@ SYSTEM_PROMPT = (
 CONCEPT_PROMPT = SYSTEM_PROMPT + (
     'المطلوب حتى ثلاثة مفاهيم متميزة. لكل مفهوم name وsummary وsiteFit وrevenueBasis '
     'وuses وcomponents بتوزيع مسطحات تقديري صالح ضمن capacity. '
+    'uses مفاتيح من permittedUses حصرًا وبنفس الإملاء الإنجليزي. '
     'لا تضع أي مؤشر إيراد أو ترتيب بنفسك. المخرج {"concepts":[]}.'
 )
 LAND_PROMPT = SYSTEM_PROMPT + (
@@ -75,11 +76,11 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
         row = {key: copy.deepcopy(value) for key, value in raw_row.items() if key in fields}
         if any(not isinstance(row.get(key), str) for key in ('name', 'reason', 'areaReason', 'revenueAreaBasis')):
             raise ProposalError('نصوص المكون غير صالحة.')
-        name, use = text(row.get('name'), 200), text(row.get('useType'), 40)
+        name, use = text(row.get('name'), 200), canonical_use(row.get('useType'))
         if not name or name.casefold() in names or use not in permitted | SUPPORT_USES:
-            raise ProposalError('اسم المكون أو استخدامه غير صالح: ' + name)
+            raise ProposalError('اسم المكون أو استخدامه غير صالح: ' + name + ' (' + use + ')')
         names.add(name.casefold())
-        support_use = row.get('supportUseOf') if use in SUPPORT_USES else use
+        support_use = canonical_use(row.get('supportUseOf')) if use in SUPPORT_USES else use
         if support_use not in permitted:
             raise ProposalError('استخدام المكون المساند غير مثبت: ' + name)
         row['allowedUseBasis'] = regulations.validate_basis(dict(row, useType=support_use), regulation_data)
@@ -191,9 +192,12 @@ def concepts(raw, project, regulation_data, scan, artifact_id):
             raise ProposalError('بيانات مفهوم غير صالحة.')
         name = text(item.get('name'), 200)
         uses = item.get('uses')
+        if isinstance(uses, list):
+            uses = [canonical_use(use) for use in uses]
         if (not name or name.casefold() in names or not isinstance(uses, list) or not uses
                 or any(use not in regulation_data['permittedUses'] for use in uses)):
-            raise ProposalError('استخدامات المفهوم لا تطابق السماح التنظيمي.')
+            raise ProposalError('استخدامات المفهوم لا تطابق السماح التنظيمي: '
+                                + ', '.join(text(use, 40) for use in (uses or ['?'])))
         names.add(name.casefold())
         normalized = distribution(item, project, regulation_data, artifact_id + '_' + str(index), allowed_uses=uses)
         if set(uses) != {row['useType'] for row in normalized['components'] if row['useType'] not in SUPPORT_USES}:

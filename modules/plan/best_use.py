@@ -4,7 +4,7 @@ import re
 import db
 from best_use_geometry import number
 from best_use_contract import (ProposalError, decoded, read_object, text, rounded,
-                               capacity, apply_proposal, digest)
+                               capacity, apply_proposal, canonical_use, digest)
 
 
 SECTION_KEY = 'section-best-use'
@@ -225,7 +225,7 @@ def normalize_proposal(raw, project, proposal_id, version=1):
         if not isinstance(item, dict):
             issues.append(f'بيانات المكون رقم {index + 1} غير صالحة')
             continue
-        name, use_type = text(item.get('name'), 200), text(item.get('useType'), 40)
+        name, use_type = text(item.get('name'), 200), canonical_use(item.get('useType'))
         investment = text(item.get('investmentModel'), 40)
         reason, area_reason = text(item.get('reason')), text(item.get('areaReason'))
         numbers = {key: number(item.get(key)) for key in

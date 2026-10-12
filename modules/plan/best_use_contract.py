@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 import db
@@ -21,6 +22,25 @@ USE_TERMS = {
     'industrial': r'صناعي|صناعات|ورش|industrial',
     'logistics': r'لوجستي|مستودعات|تخزين|logistics|warehouses',
 }
+SUPPORT_TERMS = {
+    'services': r'خدمات|مرافق|services',
+    'parking': r'مواقف|جراجات|parking',
+    'openArea': r'مفتوح|مفتوحة|فراغات|تشجير|landscap|open\s*area',
+    'basement': r'بدروم|قبو|basement',
+}
+
+
+def canonical_use(value):
+    """Map a model-supplied use label to its canonical key — the model often
+    answers in Arabic ("سكني", "مواقف") while validations compare keys.
+    Unknown labels pass through unchanged so membership checks still reject."""
+    label = str(value or '').strip()
+    if not label or label in USE_TERMS or label in SUPPORT_TERMS:
+        return label
+    for key, pattern in list(USE_TERMS.items()) + list(SUPPORT_TERMS.items()):
+        if re.search(pattern, label, re.I):
+            return key
+    return label
 
 
 def digest(value):

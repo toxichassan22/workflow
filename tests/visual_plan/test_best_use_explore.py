@@ -2,8 +2,10 @@ import copy
 import unittest
 
 import best_use
+import best_use_explore as explore
 import best_use_workflow as workflow
 import best_use_regulations as regulations
+from best_use_contract import canonical_use
 from tests.visual_plan.test_best_use import project_fixture
 
 
@@ -150,6 +152,29 @@ class ExplorationContractTests(unittest.TestCase):
                                          'excerpt': 'الاستعمالات المسموحة: سكني بشرط موافقة الجهة'}]}
         with self.assertRaises(best_use.ProposalError):
             regulations.extract(self.project, pages, interpreted)
+
+    def test_concept_uses_accept_arabic_labels_and_name_unpermitted_ones(self):
+        self.assertEqual(canonical_use('سكني'), 'residential')
+        self.assertEqual(canonical_use('مواقف'), 'parking')
+        basis = {'use': 'residential', 'documentId': 'declared-inputs', 'page': 0,
+                 'excerpt': 'سكني', 'parcelScope': '42', 'landClassification': 'س ع',
+                 'conditions': [], 'status': 'permitted'}
+        regs = {'permittedUses': ['residential'], 'evidence': [basis], 'constraints': []}
+        row = {'name': 'شقق', 'useType': 'سكني', 'units': 1, 'unitArea': 500,
+               'builtArea': 500, 'grossArea': 500, 'revenueArea': 450, 'nonRevenueArea': 50,
+               'footprintArea': 500, 'investmentModel': 'sale',
+               'reason': 'سبب', 'areaReason': 'سبب', 'revenueAreaBasis': 'افتراض',
+               'allowedUseBasis': dict(basis)}
+        scan = {'table': [], 'observations': [], 'status': 'partial'}
+        raw = {'concepts': [{'name': 'مفهوم', 'summary': 's', 'siteFit': 's',
+                             'revenueBasis': 's', 'uses': ['سكني'], 'components': [row]}]}
+        result = explore.concepts(raw, self.project, regs, scan, 'art')
+        self.assertEqual(result['items'][0]['uses'], ['residential'])
+        self.assertEqual(result['items'][0]['components'][0]['useType'], 'residential')
+        raw['concepts'][0]['uses'] = ['فندقي']
+        with self.assertRaises(best_use.ProposalError) as ctx:
+            explore.concepts(raw, self.project, regs, scan, 'art')
+        self.assertIn('hospitality', str(ctx.exception))
 
     def test_selection_does_not_approve_or_gate_generation(self):
         self.populate()
