@@ -239,7 +239,6 @@
           <span class="best-use-optional" data-i18n="best_use.optional">${WFT('best_use.optional', 'اختياري')}</span>
           <div class="best-use-actions">
             <button type="button" id="bestUseGenerateButton" class="btn primary small" onclick="runBestUseAction('generate')">${WFT('best_use.generate', 'اقتراح أفضل توزيع')}</button>
-            <button type="button" class="btn ghost small" data-i18n="best_use.save" onclick="saveProjectAsDraft()">${WFT('best_use.save', 'حفظ كمسودة')}</button>
           </div>
         </div>
         <p id="bestUseReadiness" class="tenant-hint" role="status"></p>

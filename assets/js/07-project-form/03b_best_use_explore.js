@@ -251,7 +251,7 @@
         + '" role="status">' + (bestUseExploreBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
           : missing.length ? WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', { items: missing.map(bestUseMissingLabel).join('، ') })
             : WFT('best_use_explore.ready', 'بيانات الأرض والموقع معتمدة؛ الاستكشاف مستقل عن فكرة المشروع ودراسة السوق.')) + '</p>'
-        + content + '<button type="button" class="btn ghost small" onclick="saveProjectAsDraft()">' + WFT('best_use.save', 'حفظ كمسودة') + '</button>';
+        + content;
       const liveInput = document.getElementById('bestUseExploreChatInput');
       if (liveInput) {
         liveInput.value = savedMessage;
