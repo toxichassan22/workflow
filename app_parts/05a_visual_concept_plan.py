@@ -205,6 +205,7 @@ _VISUAL_PLAN_VOLATILE_FIELDS = (
     ('design_area', ('approved_financial_area', 'land_area', 'total_area_sqm'), 80, False),
     ('coverage_ratio', ('approved_coverage_ratio', 'coverage_ratio'), 120, False),
     ('floor_area_ratio', ('approved_floor_area_ratio', 'floor_area_ratio'), 40, False),
+    ('typical_floor_coverage', ('approved_typical_floor_coverage',), 40, False),
     ('open_area', ('open_area', 'open_spaces', 'open_space_area'), 120, False),
     ('floor_count', ('approved_floor_count', 'max_floors_height', 'table_floors'), 120, False),
     ('approved_floor_count', ('approved_floor_count',), 40, False),
@@ -285,6 +286,7 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         f"Secondary recorded area figure (not the design basis when it differs): {context.get('design_area') or 'not recorded'}\n"
         f"Coverage ratio: {context.get('coverage_ratio') or 'not recorded'}\n"
         f"Approved building coefficient (FAR): {context.get('floor_area_ratio') or 'not recorded'}\n"
+        f"Approved typical floors coverage: {context.get('typical_floor_coverage') or 'not recorded'}\n"
         f"Open area: {context.get('open_area') or 'not recorded'}\n"
         f"Approved floor count/height: {context.get('floor_count') or 'not recorded'}\n"
         f"North direction: {context.get('north_direction') or 'not recorded'}\n"

@@ -220,7 +220,7 @@ VISUAL_CONCEPT_REQUIRED_FIELDS = (
     ('target_audience', 'الفئات المستهدفة'),
     ('approved_financial_area', 'المساحة المعتمدة للدراسة المالية'),
     ('approved_floor_count', 'عدد الأدوار المعتمدة'),
-    ('approved_coverage_ratio', 'نسبة التغطية المعتمدة'),
+    ('approved_coverage_ratio', 'نسبة تغطية البناء المعتمدة'),
     ('approved_floor_area_ratio', 'معامل البناء المعتمد'),
     ('facades', 'عدد الواجهات على الشارع واتجاهاتها'),
     ('allowed_uses', 'الاستخدامات المسموحة'),
@@ -459,7 +459,7 @@ def _visual_concept_missing_fields(facts, slot_id='cover'):
     if _visual_concept_number(facts.get('approved_floor_count')) in (None, 0):
         missing.append({'key': 'approved_floor_count', 'label': 'عدد الأدوار المعتمدة'})
     if _visual_concept_number(facts.get('approved_coverage_ratio')) in (None, 0):
-        missing.append({'key': 'approved_coverage_ratio', 'label': 'نسبة التغطية المعتمدة'})
+        missing.append({'key': 'approved_coverage_ratio', 'label': 'نسبة تغطية البناء المعتمدة'})
     if _visual_concept_number(facts.get('approved_floor_area_ratio')) in (None, 0):
         missing.append({'key': 'approved_floor_area_ratio', 'label': 'معامل البناء المعتمد'})
     if not facts.get('facades_count') or not facts.get('facades_directions'):
@@ -669,7 +669,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"الفئات المستهدفة: {facts.get('target_audience')}\n"
         f"المساحة المعتمدة للدراسة المالية: {facts.get('approved_financial_area')}\n"
         f"عدد الأدوار المعتمدة: {facts.get('approved_floor_count')}\n"
-        f"نسبة التغطية المعتمدة: {facts.get('approved_coverage_ratio')}\n"
+        f"نسبة تغطية البناء المعتمدة: {facts.get('approved_coverage_ratio')}\n"
         f"معامل مسطح البناء المعتمد (FAR): {facts.get('approved_floor_area_ratio')}\n"
         f"عدد الواجهات على الشارع: {facts.get('facades_count')}\n"
         f"اتجاهات الواجهات: {facts.get('facades_directions')}\n"

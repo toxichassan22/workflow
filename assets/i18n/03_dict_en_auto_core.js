@@ -597,7 +597,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "م² مخصصة من أصل": "Allocated sqm out of",
   "م² — المتبقي": "sqm — remaining",
   "مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.": "Taken from “Approved floors” in the land & Croquis Section — edit it there.",
-  "مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.": "Taken from “Approved coverage” in the land & Croquis Section — edit it there.",
+  "مأخوذة من «تغطية البناء» في قسم الأرض والكروكي — عدّلها من هناك.": "Taken from “Building coverage” in the land & Croquis Section — edit it there.",
   "مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.": "Taken from “Approved area for the Financial study” in the land & Croquis Section — edit it there.",
   "مأخوذة من تاريخي بداية المشروع ونهايته في قسم الجدول الزمني.": "Taken from the project start and end dates in the Timeline Section.",
   "مؤشرات مالية": "Financial Indicators",

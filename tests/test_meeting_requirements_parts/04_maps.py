@@ -140,7 +140,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertEqual(field['fieldType'], 'number')
         self.assertTrue(field['isRequired'])
         coverage = next(item for item in fields if item['fieldKey'] == 'approved_coverage_ratio')
-        self.assertEqual(coverage['fieldLabel'], 'التغطية المعتمدة (%)')
+        self.assertEqual(coverage['fieldLabel'], 'تغطية البناء (%)')
         self.assertEqual(coverage['fieldType'], 'number')
         self.assertTrue(coverage['isRequired'])
         land_fields = {item['fieldKey']: item for item in fields}

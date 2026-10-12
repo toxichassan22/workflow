@@ -22,7 +22,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use.need_area": "Approved area",
   "best_use.need_floors": "Approved floor count",
   "best_use.need_far": "Approved floor area ratio FAR",
-  "best_use.need_coverage": "Approved coverage",
+  "best_use.need_coverage": "Building coverage",
   "best_use.need_setbacks": "Setbacks",
   "best_use.need_uses": "Permitted uses",
   "best_use.need_buildable": "Available buildable area",

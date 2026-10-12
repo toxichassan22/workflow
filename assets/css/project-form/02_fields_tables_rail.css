@@ -1194,3 +1194,18 @@
       font: inherit;
       background: #fff;
     }
+
+    .land-metrics-violated > div {
+      border-color: #efb3b3;
+      border-inline-start-color: #b3261e;
+    }
+
+    .land-cap-warning {
+      padding: 12px;
+      border-inline-start: 3px solid #b3261e;
+      background: #fff0f0;
+      color: #9c1d1d;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+    }

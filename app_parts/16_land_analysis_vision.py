@@ -522,6 +522,7 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
     parcel.pop('approved_floors', None)
     parcel.pop('approved_coverage_ratio', None)
     parcel.pop('approved_floor_area_ratio', None)
+    parcel.pop('approved_typical_floor_coverage', None)
     for key in PARCEL_PLACEHOLDER_KEYS:
         if is_placeholder_value(parcel.get(key)):
             parcel[key] = ''
@@ -964,6 +965,7 @@ def _normalize_land_document_result(resp_json, text_content='', project_type='')
     result.pop('approved_floors', None)
     result.pop('approved_coverage_ratio', None)
     result.pop('approved_floor_area_ratio', None)
+    result.pop('approved_typical_floor_coverage', None)
     result['parcels'] = normalized_parcels
     aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
     top_regulation_rows = _regulation_coordinate_rows_from_payload(resp_json)

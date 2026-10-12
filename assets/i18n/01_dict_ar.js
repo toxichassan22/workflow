@@ -22,7 +22,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "best_use.need_area": "المساحة المعتمدة",
   "best_use.need_floors": "الأدوار المعتمدة",
   "best_use.need_far": "معامل مسطح البناء المعتمد FAR",
-  "best_use.need_coverage": "التغطية المعتمدة",
+  "best_use.need_coverage": "تغطية البناء",
   "best_use.need_setbacks": "الارتدادات",
   "best_use.need_uses": "الاستخدامات المسموحة",
   "best_use.need_buildable": "مساحة بناء متاحة",

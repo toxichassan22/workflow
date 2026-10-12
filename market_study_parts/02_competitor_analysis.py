@@ -326,7 +326,7 @@ def _site_context_lines(payload):
     if floors:
         rows.append(f"- عدد الأدوار المعتمدة: {floors}")
     if coverage:
-        rows.append(f"- نسبة التغطية المعتمدة: {coverage}")
+        rows.append(f"- نسبة تغطية البناء المعتمدة: {coverage}")
     floor_area_ratio = payload.get('approvedFloorAreaRatio') or payload.get('approved_floor_area_ratio')
     if floor_area_ratio:
         rows.append(f"- معامل مسطح البناء المعتمد (FAR): {floor_area_ratio}")

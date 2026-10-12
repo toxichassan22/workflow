@@ -634,7 +634,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('id="coverageRate" type="number" value="" readonly', index_source)
         self.assertIn('id="floorCount" type="number" min="1" value="" readonly', index_source)
         self.assertIn('مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي', index_source)
-        self.assertIn('مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي', index_source)
+        self.assertIn('مأخوذة من «تغطية البناء» في قسم الأرض والكروكي', index_source)
         self.assertIn('مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي', index_source)
 
         # Changing those land fields re-mirrors them into the financial study.

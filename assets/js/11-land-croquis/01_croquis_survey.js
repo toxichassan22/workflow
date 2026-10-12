@@ -317,7 +317,7 @@
         }
         inputs.forEach(inp => {
           if (inp.hasAttribute('data-section-lock-ignore')) return;
-          if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio', 'approved_floor_area_ratio'].includes(inp.dataset.key)) {
+          if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio', 'approved_floor_area_ratio', 'approved_typical_floor_coverage'].includes(inp.dataset.key)) {
             inp.disabled = true;
           }
         });

@@ -32,8 +32,9 @@ LAND_CHAT_FIELD_LABELS = (
     ('building_ratio_setbacks', 'نسب البناء والارتدادات'),
     ('max_floors_height', 'الارتفاع أو عدد الأدوار المسموح'),
     ('approved_floor_count', 'الأدوار المعتمدة'),
-    ('approved_coverage_ratio', 'التغطية المعتمدة'),
+    ('approved_coverage_ratio', 'تغطية البناء (%)'),
     ('approved_floor_area_ratio', 'معامل مسطح البناء المعتمد (FAR)'),
+    ('approved_typical_floor_coverage', 'التغطية للطوابق المتكررة (%)'),
     ('allowed_uses', 'الاستخدامات المسموحة'),
     ('allowed_uses_restrictions', 'الاستخدامات والقيود التنظيمية المسجلة'),
     ('parking_requirements', 'اشتراطات المواقف'),
@@ -53,7 +54,10 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- السجل الكامل للمنطقة التنظيمية الموثقة: كل شرائح المساحات ومعاملاتها واستثناءاتها وقيودها لمنطقة القطعة إن طُبقت.\n'
     '- القواعد العامة الموثقة لاشتراطات المدينة: الجداول والقواعد المشتركة (المواقف، الارتدادات، الارتفاعات، الملاحق…) إن توفرت للمدينة.\n'
     '- نصوص الاشتراطات الموثقة من ملفات الأمانة: مقتطفات النص الكامل للوائح البلدية مختارة بحسب سؤال المستخدم.\n'
-    '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، التغطية المعتمدة، معامل البناء المعتمد).\n'
+    '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، تغطية البناء، تغطية الطوابق المتكررة، معامل البناء المعتمد).\n'
+    '- القيم المحسوبة من المدخلات المعتمدة: إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة)، مساحة البناء، مساحة الدور، ومساحة الأدوار المتكررة بالمتر المربع، مع التنبيه عند تجاوز مجموع الأدوار المتكررة مع مساحة البناء حد إجمالي المسطحات.\n'
+    '- قسم أفضل استخدامات: التوزيع المقترح أو المعتمد لمكونات المشروع ومساحاتها وحصصها الأرضية ونماذج الاستفادة وأسبابها وحالة الاعتماد.\n'
+    '- قسم المخططات التصورية: نتيجة التحقق من المدخلات، حد الأرض المعتمد، توزيع المكونات على الأدوار، ملاحظات العميل ونقاط المراجعة.\n'
     'قواعد إلزامية:\n'
     '- أجب بلغة سؤال المستخدم نفسها — العربية إن كتب بالعربية، والإنجليزية إن كتب بها.\n'
     '- اسم المنصة «لاندلوم» (Landloom) — اكتبه بهذه التهجئة حرفيًا كلما ذُكر ولا تغيّر حروفه.\n'
@@ -177,6 +181,72 @@ def _land_chat_slim_analysis(analysis):
     return slimmed
 
 
+def _land_chat_derived_metrics(source):
+    """Deterministic m² figures the chat can quote directly instead of
+    recomputing them per question — plus the mandatory capacity check:
+    repeated floors area + building footprint must not exceed the total
+    built area (approved area × FAR)."""
+    metrics = {}
+    area = _visual_concept_number(source.get('approved_financial_area'))
+    far = _visual_concept_number(source.get('approved_floor_area_ratio'))
+    coverage = _visual_concept_number(source.get('approved_coverage_ratio'))
+    typical = _visual_concept_number(source.get('approved_typical_floor_coverage'))
+    floors = _visual_concept_number(source.get('approved_floor_count'))
+    total = area * far if area and far else None
+    building = area * coverage / 100 if area and coverage else None
+    floor_area = area * typical / 100 if area and typical else None
+    repeated = floor_area * floors if floor_area and floors else None
+    if total:
+        metrics['إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة) م²'] = round(total, 1)
+    if building:
+        metrics['مساحة البناء (تغطية البناء × المساحة المعتمدة) م²'] = round(building, 1)
+    if repeated:
+        metrics['مساحة الأدوار المتكررة (مساحة الدور × عدد الأدوار) م²'] = round(repeated, 1)
+    if floor_area:
+        metrics['مساحة الدور (تغطية الطوابق المتكررة × المساحة المعتمدة) م²'] = round(floor_area, 1)
+    if total and repeated is not None and building is not None and repeated + building > total + 0.05:
+        metrics['تنبيه'] = ('مجموع مساحة الأدوار المتكررة مع مساحة البناء '
+                            f'({repeated + building:.1f} م²) يتجاوز إجمالي مسطحات البناء '
+                            f'({total:.1f} م²)')
+    return metrics
+
+
+_LAND_CHAT_BEST_USE_COMPONENT_KEYS = (
+    'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea',
+    'footprintArea', 'investmentModel', 'parkingLocation', 'reason',
+    'areaReason', 'notes',
+)
+
+
+def _land_chat_slim_best_use(raw):
+    """The best-use proposal minus draft internals (sourceHash, sourceSnapshot)
+    so the chat can discuss the recorded distribution without the audit blob."""
+    proposal = raw if isinstance(raw, dict) else _visual_concept_parse_json(raw, {})
+    if not isinstance(proposal, dict) or not proposal:
+        return {}
+    slim = {}
+    for key in ('title', 'rationale', 'setbackExplanation'):
+        text = _visual_concept_text(proposal.get(key), 6000)
+        if text:
+            slim[key] = text
+    if proposal.get('approved'):
+        slim['approved'] = True
+    if proposal.get('rejected'):
+        slim['rejected'] = True
+    for key in ('capacity', 'totals'):
+        value = proposal.get(key)
+        if isinstance(value, dict) and value:
+            slim[key] = value
+    components = proposal.get('components')
+    if isinstance(components, list) and components:
+        slim['components'] = [
+            {key: row[key] for key in _LAND_CHAT_BEST_USE_COMPONENT_KEYS
+             if row.get(key) not in (None, '')}
+            for row in components[:60] if isinstance(row, dict)
+        ]
+    return slim
+
+
 def _land_chat_context(project_data):
     """Everything the land chat may answer from, grouped for the prompt — the
     stable part only. The question-scored municipality snippets are appended
@@ -192,6 +262,9 @@ def _land_chat_context(project_data):
         fields[label] = _visual_concept_text(value, 3000)
     if fields:
         context['حقول قسم الأرض والكروكي'] = fields
+    derived = _land_chat_derived_metrics(source)
+    if derived:
+        context['قيم محسوبة من القيم المعتمدة'] = derived
     for key, label in (('survey_coordinates', 'إحداثيات المساحة'),
                        ('directions_table', 'جدول الاتجاهات')):
         rows = source.get(key)
@@ -223,20 +296,71 @@ def _land_chat_context(project_data):
     if not isinstance(distribution, dict):
         distribution = {}
     distribution_payload = {}
-    for key in ('rows', 'totals', 'checks', 'issues'):
+    for key in ('rows', 'totals', 'notes', 'checks', 'issues'):
         rows = distribution.get(key)
         if isinstance(rows, list) and rows:
             distribution_payload[key] = rows[:60]
-    if distribution.get('approved'):
-        distribution_payload['approved'] = True
+    for flag in ('approved', 'aiReviewed'):
+        if distribution.get(flag):
+            distribution_payload[flag] = True
     if distribution_payload:
         context['توزيع المخطط التصوري على الأدوار'] = distribution_payload
     verification = plans.get('verification') or {}
     if not isinstance(verification, dict):
         verification = {}
-    verification_issues = verification.get('issues')
-    if isinstance(verification_issues, list) and verification_issues:
-        context['نقاط مراجعة التحقق من المخطط'] = verification_issues[:30]
+    verification_payload = {}
+    for key in ('checks', 'issues'):
+        rows = verification.get(key)
+        if isinstance(rows, list) and rows:
+            verification_payload[key] = rows[:30]
+    summary = _visual_concept_text(verification.get('summary'), 1600)
+    if summary:
+        verification_payload['summary'] = summary
+    for flag in ('canProceed', 'approved'):
+        if verification.get(flag):
+            verification_payload[flag] = True
+    if verification_payload:
+        context['التحقق من مدخلات المخططات'] = verification_payload
+    boundary = plans.get('boundary') or {}
+    if isinstance(boundary, dict):
+        boundary_payload = {}
+        points = boundary.get('points')
+        if isinstance(points, list) and points:
+            boundary_payload['points'] = points[:60]
+        instruction = _visual_concept_text(boundary.get('instruction'), 2000)
+        if instruction:
+            boundary_payload['instruction'] = instruction
+        if boundary.get('approved'):
+            boundary_payload['approved'] = True
+        if boundary_payload:
+            context['حد الأرض للمخططات'] = boundary_payload
+    client_notes = _visual_concept_text(plans.get('clientNotes'), 4000)
+    if client_notes:
+        context['ملاحظات العميل على المخططات'] = client_notes
+    plans_status = _visual_concept_text(plans.get('status'), 40)
+    if plans_status:
+        context['حالة سير عمل المخططات'] = plans_status
+    slots = concept.get('slots')
+    if isinstance(slots, dict):
+        slot_payload = {}
+        for slot_id, slot in slots.items():
+            if not isinstance(slot, dict) or not str(slot_id).startswith('plan_'):
+                continue
+            entry = {}
+            status = _visual_concept_text(slot.get('status'), 40)
+            if status:
+                entry['status'] = status
+            if slot.get('approvedImageUrl') or slot.get('approved_image_url'):
+                entry['approved_image'] = True
+            elif slot.get('imageUrl') or slot.get('image_url'):
+                entry['generated_image'] = True
+            if entry:
+                slot_payload[_visual_concept_text(slot.get('label') or slot_id, 80)] = entry
+        if slot_payload:
+            context['حالة صور المخططات التصورية'] = slot_payload
+    best_use = _land_chat_slim_best_use(source.get('best_use_data'))
+    if best_use:
+        context['قسم أفضل استخدامات'] = best_use
     try:
         facts = _visual_concept_plan_regulation_facts(source)
     except Exception:

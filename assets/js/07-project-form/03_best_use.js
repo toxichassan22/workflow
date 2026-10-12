@@ -169,7 +169,7 @@
         approved_financial_area: ['best_use.need_area', 'المساحة المعتمدة'],
         approved_floor_count: ['best_use.need_floors', 'الأدوار المعتمدة'],
         approved_floor_area_ratio: ['best_use.need_far', 'معامل مسطح البناء المعتمد FAR'],
-        approved_coverage_ratio: ['best_use.need_coverage', 'التغطية المعتمدة'],
+        approved_coverage_ratio: ['best_use.need_coverage', 'تغطية البناء'],
         setbacks: ['best_use.need_setbacks', 'الارتدادات'], allowed_uses: ['best_use.need_uses', 'الاستخدامات المسموحة'],
         buildable_area: ['best_use.need_buildable', 'مساحة بناء متاحة']
       };

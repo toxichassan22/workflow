@@ -132,7 +132,7 @@
       const workflow = tenantVisualConceptState?.plansWorkflow || emptyVisualConceptPlansWorkflow();
       const keys = ['project_name', 'project_idea', 'city', 'district', 'croquis_land_area',
         'land_area', 'approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio',
-        'approved_floor_area_ratio', 'land_and_building_summary', 'regulatory_constraints',
+        'approved_floor_area_ratio', 'approved_typical_floor_coverage', 'land_and_building_summary', 'regulatory_constraints',
         'north_direction', 'surrounding_streets', 'setbacks', 'building_ratio_setbacks',
         'directions_table', 'survey_coordinates', 'regulation_coordinates', 'facades_directions',
         'land_documents_analysis', 'project_components_data', 'financial_study_model'];
