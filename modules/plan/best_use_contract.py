@@ -71,7 +71,7 @@ def capacity(project):
         'setbackVerified': setback is not None, 'footprintLimit': footprint,
         'farLimit': area * far, 'maxBuiltArea': min(area * far, footprint * floors),
         'openAreaLimit': max(0, area - coverage_footprint),
-        'basementAreaLimit': max(0, area), 'basementVerified': False,
+        'basementAreaLimit': max(0, area),
         'warnings': [
             'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.'
         ] + ([] if setback is not None else [

@@ -321,7 +321,6 @@
         proposal.innerHTML = `
           <div class="best-use-proposal-heading"><h4>${escapeHtml(state.title || WFT('best_use.distribution', 'التوزيع المقترح'))}</h4><span class="best-use-status">${escapeHtml(status)}</span></div>
           ${budget.setbackVerified === false ? bestUseWarningHtml(WFT('best_use.geometry_unverified', 'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.')) : ''}
-          ${totals.basementArea > 0 && budget.basementVerified === false ? bestUseWarningHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) : ''}
           ${!current ? bestUseWarningHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
           <div class="best-use-actions best-use-decisions">

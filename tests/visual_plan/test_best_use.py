@@ -220,7 +220,7 @@ class BestUseTests(unittest.TestCase):
     def test_basement_capacity_is_a_planning_bound_not_calculator_input_or_permission(self):
         budget = best_use.capacity(self.project)
         self.assertEqual(budget['basementAreaLimit'], 5000)
-        self.assertFalse(budget['basementVerified'])
+        self.assertNotIn('basementVerified', budget)
         basement = {'name': 'بدروم تخطيطي', 'useType': 'basement', 'units': 1,
                     'unitArea': 1000, 'builtArea': 1000, 'revenueArea': 0,
                     'footprintArea': 0, 'investmentModel': 'nonRevenue',

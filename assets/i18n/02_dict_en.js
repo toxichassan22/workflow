@@ -136,7 +136,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use_explore.month": "Month",
   "best_use_explore.night": "Night",
   "best_use.basement_area": "Proposed Basement Area",
-  "best_use.basement_unverified": "The basement limit is a planning bound for one level within the land area. Regulatory permission and underground setbacks have not been verified.",
+
   "lang.switch_to_arabic": "عربي",
   "lang.switch_to_english": "English",
   "loader.done": "Done",

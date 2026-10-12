@@ -136,7 +136,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "best_use_explore.month": "شهر",
   "best_use_explore.night": "ليلة",
   "best_use.basement_area": "مسطحات البدروم المقترحة",
-  "best_use.basement_unverified": "سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.",
+
   "lang.switch_to_arabic": "عربي",
   "lang.switch_to_english": "English",
   "loader.done": "اكتمل",
