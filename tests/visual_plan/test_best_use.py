@@ -128,6 +128,16 @@ class BestUseTests(unittest.TestCase):
         budget = best_use.capacity(self.project)
         self.assertEqual(budget['setbackIssue']['code'], 'setbacks')
 
+    def test_an_unresolved_setback_names_the_edge_and_what_was_parsed(self):
+        self.project['setbacks'] = 'الارتداد الأمامي 5 م، الخلفي 3 م، الجانبي 2 م'
+        self.project['directions_table'] = [{'direction': 'شمال', 'description': 'حد مجاور'}]
+        budget = best_use.capacity(self.project)
+        issue = budget['setbackIssue']
+        self.assertEqual(issue['code'], 'unresolved')
+        self.assertEqual(issue['fronts'], [])
+        self.assertEqual(issue['parsed'], ['back', 'front', 'side'])
+        self.assertIn(issue['direction'], ('north', 'south', 'east', 'west'))
+
     def test_a_single_documented_setback_is_not_invented_for_other_boundaries(self):
         self.project['setbacks'] = 'الارتداد الأمامي 5 م'
         self.assertFalse(best_use.capacity(self.project)['setbackVerified'])

@@ -180,7 +180,8 @@ def setback_envelope(project):
             if len(fronts) > 1 and values.get('back') != setback:
                 return None, {'code': 'frontages'}
         if setback is None:
-            return None, {'code': 'unresolved'}
+            return None, {'code': 'unresolved', 'direction': direction,
+                          'fronts': sorted(fronts), 'parsed': sorted(values)}
         clipped = _clip(clipped, a, normal, setback)
         if len(clipped) < 3:
             return 0.0, None

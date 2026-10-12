@@ -285,6 +285,16 @@
           'مساحة مضلع الإحداثيات ({a} م²) تختلف عن مساحة الصك ({b} م²)؛ المساحات توصية تخطيطية.',
           { a: bestUseFormat(issue.polygonArea), b: bestUseFormat(issue.cadastralArea) });
       }
+      if (code === 'unresolved' && issue.direction) {
+        const dirNames = { north: 'الشمالي', south: 'الجنوبي', east: 'الشرقي', west: 'الغربي' };
+        const valNames = { front: 'أمامي', back: 'خلفي', side: 'جانبي', ...dirNames };
+        const nothing = WFT('best_use.issue_none', 'لا شيء');
+        const fronts = (issue.fronts || []).map(item => dirNames[item] || item).join('، ') || nothing;
+        const parsed = (issue.parsed || []).map(item => valNames[item] || item).join('، ') || nothing;
+        return WFT('best_use.issue_unresolved_detail',
+          'تعذّر تحديد قيمة ارتداد للحد {dir}؛ الواجهات المكتشفة في جدول الاتجاهات: {fronts}؛ الارتدادات المقروءة من النص: {parsed}؛ المساحات توصية تخطيطية.',
+          { dir: dirNames[issue.direction] || issue.direction, fronts, parsed });
+      }
       const messages = {
         rows: 'best_use.issue_poly_rows', coords: 'best_use.issue_poly_coords',
         parcels: 'best_use.issue_poly_parcels', points: 'best_use.issue_poly_points',

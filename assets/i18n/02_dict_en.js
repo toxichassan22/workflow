@@ -81,6 +81,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use.issue_concave": "The land shape is concave — geometric setback verification only supports convex shapes; areas are planning recommendations.",
   "best_use.issue_degenerate": "The survey polygon contains a zero-length edge; areas are planning recommendations.",
   "best_use.issue_unresolved": "A setback value could not be determined for one of the land boundaries from the entered data; areas are planning recommendations.",
+  "best_use.issue_unresolved_detail": "No setback value could be determined for the {dir} boundary; frontages detected in the directions table: {fronts}; setback values read from the text: {parsed}; areas are planning recommendations.",
+  "best_use.issue_none": "none",
   "best_use.issue_frontages": "Multiple frontages with conflicting setbacks prevented the envelope determination; areas are planning recommendations.",
   "best_use.chat_empty": "No messages in this conversation.",
   "best_use.local_changed": "The current inputs changed during processing. Local components were not replaced.",
