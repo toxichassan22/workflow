@@ -342,7 +342,7 @@
       }
       const messages = document.getElementById('bestUseChatMessages');
       messages.innerHTML = '';
-      const history = bestUseChatState().messages || [];
+      const history = bestUseArray(bestUseChatState().messages);
       const chatSection = root.querySelector('.best-use-chat');
       if (chatSection) chatSection.hidden = !(state.id || history.length || bestUseBusy);
       if (!history.length) {
@@ -367,7 +367,12 @@
     }
 
     function applyBestUseResponse(response, requestContext) {
-      if (tenantProjectData?.draftId !== requestContext.draftId || response.draftId !== requestContext.draftId) return false;
+      if (tenantProjectData?.draftId !== requestContext.draftId || response.draftId !== requestContext.draftId) {
+        console.warn('[BEST-USE] response rejected: draft mismatch',
+          { expected: requestContext.draftId, current: tenantProjectData?.draftId, received: response?.draftId });
+        toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
+        return false;
+      }
       const fresh = (typeof draftEditCounter === 'undefined' || draftEditCounter === requestContext.editCounter)
         && bestUseStable(bestUseSourceSnapshot()) === bestUseStable(requestContext.sourceSnapshot);
       if (response.revision !== undefined) tenantDraftRevision = Number(response.revision);
@@ -376,6 +381,12 @@
       if (response.sectionStatuses && typeof applySectionStatuses === 'function') applySectionStatuses(response.sectionStatuses);
       if (!bestUseSectionRequired()) delete tenantProjectSectionStatuses[BEST_USE_SECTION_KEY];
       if (response.componentsApplied && !fresh) {
+        const current = bestUseSourceSnapshot();
+        console.warn('[BEST-USE] response rejected: inputs changed while processing',
+          { editCounter: typeof draftEditCounter === 'undefined' ? null : draftEditCounter,
+            expectedEditCounter: requestContext.editCounter,
+            changed: Object.keys({ ...requestContext.sourceSnapshot, ...current })
+              .filter(key => bestUseStable(requestContext.sourceSnapshot[key]) !== bestUseStable(current[key])) });
         persistBestUseDraftState();
         toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
         renderBestUse();
@@ -418,6 +429,7 @@
           const initialId = tenantProjectData.draftId;
           const initial = bestUseSourceSnapshot();
           if (!(await saveProjectAsDraft(true, false))) {
+            console.warn('[BEST-USE]', action, 'aborted: draft save failed');
             toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
             return false;
           }
@@ -443,12 +455,17 @@
           updateLoaderProgress(20, WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
           let response = await api('POST', '/api/best-use/' + endpoint, payload);
           response = await bestUseAwaitJob(response, requestContext.draftId);
-          if (!response?.success) { toast(bestUseErrorText(response)); return false; }
+          if (!response?.success) {
+            console.warn('[BEST-USE]', action, 'request failed:', response);
+            toast(bestUseErrorText(response));
+            return false;
+          }
           const received = applyBestUseResponse(response, requestContext);
           if (received && endpoint === 'chat' && input?.value.trim() === message) input.value = '';
           updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'));
           return received;
         } catch (error) {
+          console.warn('[BEST-USE]', action, 'threw:', error);
           toast(WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
           return false;
         } finally {

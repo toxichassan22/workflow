@@ -29,6 +29,7 @@
     function bestUseActiveMode() { return tenantProjectData?.best_use_mode || 'guided'; }
     function bestUseExploreState() { return bestUseObject(tenantProjectData?.best_use_explore_data); }
     function bestUseExploreChat() { return bestUseObject(tenantProjectData?.best_use_explore_chat); }
+    function bestUseArray(value) { return Array.isArray(value) ? value : []; }
 
     function bestUseExploreSourceSnapshot() {
       const snapshot = {};
@@ -130,12 +131,12 @@
       const headings = [WFT('best_use.use', 'الاستخدام'), WFT('best_use_explore.sale_rate', 'متوسط سعر البيع للمتر'),
         WFT('best_use_explore.rent_rate', 'متوسط الإيجار السنوي للمتر'), WFT('best_use_explore.samples', 'مشاهدات البيع / الإيجار'),
         WFT('best_use_explore.scope', 'النطاق الجغرافي')];
-      const rows = (scan.table || []).map(row => '<tr>' + [bestUseExploreUseLabel(row.use),
+      const rows = bestUseArray(scan.table).map(row => '<tr>' + [bestUseExploreUseLabel(row.use),
         row.salePerSqm === null ? missing : bestUseFormat(row.salePerSqm),
         row.rentPerSqmYear === null ? missing : bestUseFormat(row.rentPerSqmYear),
         (row.metrics?.sale?.count || 0) + ' / ' + (row.metrics?.rent?.count || 0), [row.city, row.district].filter(Boolean).join('، ')]
         .map(value => '<td>' + escapeHtml(value) + '</td>').join('') + '</tr>').join('');
-      const observations = (scan.observations || []).map(item => {
+      const observations = bestUseArray(scan.observations).map(item => {
         const url = String(item.url || '');
         const safe = /^https:\/\//i.test(url);
         return '<article class="best-use-source"><p>' + escapeHtml(bestUseExploreUseLabel(item.use) + ' — '
@@ -160,18 +161,18 @@
       const headings = [WFT('best_use.component', 'المكون'), WFT('best_use.use', 'الاستخدام'),
         WFT('best_use.allocated_footprint', 'الحصة الأرضية م²'), WFT('best_use.built_area', 'المساحة المبنية م²'),
         WFT('best_use.revenue_area', 'المساحة البيعية / التأجيرية م²'), WFT('best_use.investment_model', 'نموذج الاستفادة')];
-      const rows = (artifact.components || []).map(row => '<tr>' + [row.name, bestUseExploreUseLabel(row.useType),
+      const rows = bestUseArray(artifact.components).map(row => '<tr>' + [row.name, bestUseExploreUseLabel(row.useType),
         bestUseFormat(row.footprintArea), bestUseFormat(row.builtArea), bestUseFormat(row.revenueArea),
         bestUseOptionText(investmentModels, row.investmentModel)].map(value => '<td>' + escapeHtml(value) + '</td>').join('') + '</tr>').join('');
       return '<h4>' + escapeHtml(artifact.title || '') + '</h4><div class="table-wrap"><table class="best-use-table"><thead><tr>'
         + headings.map(label => '<th>' + label + '</th>').join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
         + '<p class="best-use-warning">' + WFT('best_use_explore.planning_only', 'سيناريو تخطيطي لا يشمل التكاليف أو صافي العائد.') + '</p>'
         + '<p>' + escapeHtml(artifact.rationale || '') + '</p><p>' + escapeHtml(artifact.setbackExplanation || '') + '</p>'
-        + (artifact.components || []).map(row => '<article class="best-use-source"><h5>' + escapeHtml(row.name) + '</h5><p>'
+        + bestUseArray(artifact.components).map(row => '<article class="best-use-source"><h5>' + escapeHtml(row.name) + '</h5><p>'
           + escapeHtml(row.reason || '') + '</p><p>' + escapeHtml(row.areaReason || '') + '</p><p>'
           + escapeHtml(row.revenueAreaBasis || '') + '</p>'
-          + (row.floorAllocations?.length ? '<p>' + WFT('best_use_explore.floor_allocations', 'تخصيصات الأدوار') + ': '
-            + row.floorAllocations.map(item => bestUseFormat(item.floor) + ': ' + bestUseFormat(item.area)).join('، ') + '</p>' : '') + '</article>').join('')
+          + (bestUseArray(row.floorAllocations).length ? '<p>' + WFT('best_use_explore.floor_allocations', 'تخصيصات الأدوار') + ': '
+            + bestUseArray(row.floorAllocations).map(item => bestUseFormat(item.floor) + ': ' + bestUseFormat(item.area)).join('، ') + '</p>' : '') + '</article>').join('')
         + bestUseRevenuePotentialHtml(artifact.revenuePotential);
     }
 
@@ -199,7 +200,7 @@
       const missing = bestUseExploreMissing();
       const locked = tenantProjectSectionStatuses?.[BEST_USE_SECTION_KEY] === 'approved';
       const unavailable = bestUseExploreBusy || locked || missing.length > 0 || !hasPermission('create_presentation') || tenantProjectMode === 'presentation';
-      const concepts = state.concepts?.items || [];
+      const concepts = bestUseArray(state.concepts?.items);
       const selected = concepts.find(item => item.id === state.selectedConceptId);
       const stages = [
         ['concepts', WFT('best_use_explore.concepts_stage', 'المفاهيم والأسعار')],
@@ -212,8 +213,8 @@
         content = '<button type="button" class="btn primary small" onclick="runBestUseExplore(\'concepts\')" '
           + (unavailable || generationLocked ? 'disabled' : '') + '>' + WFT('best_use_explore.generate_concepts', 'توليد المفاهيم ومسح الأسعار') + '</button>'
           + (state.regulations?.requiresApproval ? bestUseExploreDecisionHtml('regulations') : '')
-          + (state.regulations?.permittedUses?.length ? '<p>' + WFT('best_use.need_uses', 'الاستخدامات المسموحة') + ': '
-            + state.regulations.permittedUses.map(bestUseExploreUseLabel).map(escapeHtml).join('، ') + '</p>' : '')
+          + (bestUseArray(state.regulations?.permittedUses).length ? '<p>' + WFT('best_use.need_uses', 'الاستخدامات المسموحة') + ': '
+            + bestUseArray(state.regulations?.permittedUses).map(bestUseExploreUseLabel).map(escapeHtml).join('، ') + '</p>' : '')
           + bestUseExplorePriceHtml(state.priceScan)
           + '<div class="best-use-concept-grid">' + concepts.map(item => '<article class="best-use-concept-card '
             + (selected?.id === item.id ? 'selected' : '') + '"><h4>' + escapeHtml(item.name) + '</h4><p>' + escapeHtml(item.summary)
@@ -230,7 +231,7 @@
           + WFT('best_use.generate', 'اقتراح أفضل توزيع') + '</button>' + bestUseExploreMismatch(selected)
           + bestUseExploreDistributionHtml(state[name]) + bestUseExploreDecisionHtml(name)
           + '<section class="best-use-chat best-use-explore-chat"><h4>' + WFT('best_use.chat_title', 'مناقشة التوزيع')
-          + '</h4><div class="best-use-chat-messages" role="log">' + (bestUseExploreChat()[bestUseExploreStage] || [])
+          + '</h4><div class="best-use-chat-messages" role="log">' + bestUseArray(bestUseExploreChat()[bestUseExploreStage])
             .map(turn => '<div class="best-use-chat-message ' + (turn.role === 'user' ? 'user' : 'assistant') + '">'
               + escapeHtml(turn.content || '') + '</div>').join('') + '</div>'
           + '<label for="bestUseExploreChatInput">' + WFT('best_use.message', 'الرسالة') + '</label>'
@@ -263,11 +264,22 @@
     }
 
     function applyBestUseExploreResponse(response, requestContext) {
-      if (tenantProjectData?.draftId !== requestContext.draftId || response.draftId !== requestContext.draftId) return false;
+      if (tenantProjectData?.draftId !== requestContext.draftId || response.draftId !== requestContext.draftId) {
+        console.warn('[BEST-USE-EXPLORE] response rejected: draft mismatch',
+          { expected: requestContext.draftId, current: tenantProjectData?.draftId, received: response?.draftId });
+        toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
+        return false;
+      }
       const fresh = (typeof draftEditCounter === 'undefined' || draftEditCounter === requestContext.editCounter)
         && bestUseStable(bestUseExploreSourceSnapshot()) === bestUseStable(requestContext.sourceSnapshot);
       if (response.revision !== undefined) tenantDraftRevision = Number(response.revision);
       if (!fresh) {
+        const current = bestUseExploreSourceSnapshot();
+        console.warn('[BEST-USE-EXPLORE] response rejected: inputs changed while processing',
+          { editCounter: typeof draftEditCounter === 'undefined' ? null : draftEditCounter,
+            expectedEditCounter: requestContext.editCounter,
+            changed: Object.keys({ ...requestContext.sourceSnapshot, ...current })
+              .filter(key => bestUseStable(requestContext.sourceSnapshot[key]) !== bestUseStable(current[key])) });
         toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
         return false;
       }
@@ -313,7 +325,11 @@
         try {
           const initialId = tenantProjectData?.draftId;
           const initial = bestUseExploreSourceSnapshot();
-          if (!(await saveProjectAsDraft(true, false))) { toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.')); return false; }
+          if (!(await saveProjectAsDraft(true, false))) {
+            console.warn('[BEST-USE-EXPLORE]', action, 'aborted: draft save failed');
+            toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
+            return false;
+          }
           const afterSave = bestUseExploreSourceSnapshot();
           if (bestUseStable(initial) !== bestUseStable(afterSave)) {
             console.warn('[BEST-USE-EXPLORE] inputs changed during save:',
@@ -359,7 +375,11 @@
             updateLoaderProgress(response?.progress || 20, labels[response?.step] || WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم'));
           }
           if (response?.jobId && !['completed', 'failed'].includes(response.status)) response = { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
-          if (!response?.success) { toast(bestUseExploreErrorText(response)); return false; }
+          if (!response?.success) {
+            console.warn('[BEST-USE-EXPLORE]', action, 'request failed:', response);
+            toast(bestUseExploreErrorText(response));
+            return false;
+          }
           const received = applyBestUseExploreResponse(response, requestContext);
           if (received && ['chat', 'revise'].includes(action)) {
             const input = document.getElementById('bestUseExploreChatInput');
@@ -368,6 +388,7 @@
           updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'));
           return received;
         } catch (error) {
+          console.warn('[BEST-USE-EXPLORE]', action, 'threw:', error);
           toast(WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
           return false;
         } finally {
