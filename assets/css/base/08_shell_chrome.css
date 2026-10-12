@@ -205,6 +205,20 @@
       .tenant-usermenu-menu {
         left: auto;
       }
+
+      /* With the side cluster centered, no edge anchor keeps a 360px panel
+         on screen. Static lifts the panels' containing block to the sticky
+         topbar so they span its width; the badge and dot live inside the
+         positioned bell button and are unaffected. */
+      .tenant-notif {
+        position: static;
+      }
+
+      .tenant-notif-dropdown,
+      .tenant-bell-panel {
+        inset-inline: 10px;
+        width: auto;
+      }
     }
 
     @media (max-width: 600px) {
