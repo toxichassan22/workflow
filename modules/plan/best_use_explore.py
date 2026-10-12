@@ -174,7 +174,8 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
     for key, limit in (('builtArea', built_limit), ('footprintArea', footprint_limit),
                        ('openArea', budget['openAreaLimit']), ('basementArea', budget['basementAreaLimit'])):
         if totals[key] > limit + 1e-6:
-            raise ProposalError('إجمالي مساحات الاستكشاف يتجاوز الحد: ' + key)
+            raise ProposalError(f'إجمالي مساحات الاستكشاف يتجاوز الحد: {key} '
+                                f'({totals[key]:g} > {limit:g})')
     if totals['builtArea'] <= 0 or any(value > footprint_limit + 1e-6 for value in floor_totals.values()):
         raise ProposalError('التوزيع لا يتفق مع حدود المسطحات المتاحة.')
     if typical_cap and any(value > typical_cap + 1e-6
