@@ -328,7 +328,11 @@
             <button type="button" class="btn primary small" onclick="runBestUseAction('${approved ? 'unapproved' : 'approved'}')" ${bestUseBusy || locked || (!approved && (!current || unavailable)) ? 'disabled' : ''}>${approved ? WFT('best_use.unapprove', 'الغاء الاعتماد') : WFT('best_use.approve', 'اعتماد واستبدال المكونات')}</button>
             <button type="button" class="btn ghost small" onclick="runBestUseAction('rejected')" ${bestUseBusy || locked || approved || state.rejected ? 'disabled' : ''}>${WFT('best_use.reject', 'رفض الاقتراح')}</button>
           </div>
-          ${state.unlinkedRevenueRows ? bestUseWarningHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) : ''}`;
+          ${state.unlinkedRevenueRows ? bestUseWarningHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) : ''}
+          <section class="best-use-reasons"><span class="best-use-note-tag">${WFT('best_use.notes_tag', 'ملاحظات الاقتراح')}</span><h4>${WFT('best_use.reason_title', 'سبب اختيار هذا التوزيع')}</h4>
+            <details class="best-use-reason"><summary>${WFT('best_use.reason_summary', 'ملخص التوزيع')}</summary><div><p>${escapeHtml(state.rationale || '')}</p><p>${escapeHtml(state.setbackExplanation || '')}</p></div></details>
+            ${rows.map(row => '<details class="best-use-reason"><summary>' + escapeHtml(row.name || '') + '</summary><div><h6>' + WFT('best_use.pick_reason', 'سبب الاختيار') + '</h6><p>' + escapeHtml(row.reason || '') + '</p><h6>' + WFT('best_use.area_reason', 'أساس توزيع المساحة') + '</h6><p>' + escapeHtml(row.areaReason || '') + '</p></div></details>').join('')}
+          </section>`;
       }
       const messages = document.getElementById('bestUseChatMessages');
       messages.innerHTML = '';

@@ -39,6 +39,16 @@
   color: var(--danger, #B42318) !important;
   font-weight: 700;
 }
+.best-use-note-tag {
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #DCE3EB);
+  background: var(--teal-soft, #DFF6FB);
+  color: var(--teal-dark, #0A829B);
+  font-size: 11px;
+  font-weight: 700;
+}
 /* Also styles #landComputedMetrics in the location section. */
 .best-use-metrics {
   display: grid;
@@ -115,6 +125,58 @@
 .best-use-warning > span {
   flex: 1;
   line-height: 1.8;
+}
+.best-use-reasons {
+  display: grid;
+  gap: 10px;
+}
+.best-use-reasons h4 {
+  margin: 0;
+  font-size: 17px;
+}
+.best-use-reason {
+  border: 1px solid var(--border, #DCE3EB);
+  border-radius: 8px;
+  background: var(--white, #FFFFFF);
+}
+.best-use-reason summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  list-style: none;
+}
+.best-use-reason summary::-webkit-details-marker {
+  display: none;
+}
+.best-use-reason summary::after {
+  content: '';
+  border-inline: 5px solid transparent;
+  border-block-start: 7px solid var(--teal-dark, #0A829B);
+  transition: transform 0.2s;
+}
+.best-use-reason[open] summary::after {
+  transform: rotate(180deg);
+}
+.best-use-reason > div {
+  display: grid;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+.best-use-reason h6 {
+  margin: 0;
+  font-size: 11px;
+  color: var(--teal-dark, #0A829B);
+}
+.best-use-reason p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  font-size: 13px;
 }
 .best-use-chat {
   display: grid;
