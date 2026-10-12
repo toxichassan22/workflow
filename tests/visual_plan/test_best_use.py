@@ -113,7 +113,20 @@ class BestUseTests(unittest.TestCase):
         budget = best_use.capacity(self.project)
         self.assertFalse(budget['setbackVerified'])
         self.assertIsNone(budget['setbackFootprint'])
+        self.assertEqual(budget['setbackIssue']['code'], 'polygon')
         self.assertTrue(budget['warnings'])
+
+    def test_setback_issue_names_the_specific_failure(self):
+        self.project['croquis_land_area'] = 6000
+        budget = best_use.capacity(self.project)
+        self.assertFalse(budget['setbackVerified'])
+        self.assertEqual(budget['setbackIssue']['code'], 'mismatch')
+        self.assertEqual(budget['setbackIssue']['cadastralArea'], 6000)
+        self.assertAlmostEqual(budget['setbackIssue']['polygonArea'], 5000)
+        self.project['croquis_land_area'] = 5000
+        self.project['setbacks'] = ''
+        budget = best_use.capacity(self.project)
+        self.assertEqual(budget['setbackIssue']['code'], 'setbacks')
 
     def test_a_single_documented_setback_is_not_invented_for_other_boundaries(self):
         self.project['setbacks'] = 'الارتداد الأمامي 5 م'

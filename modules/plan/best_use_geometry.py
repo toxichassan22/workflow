@@ -125,19 +125,24 @@ def _clip(points, origin, normal, setback):
 
 def setback_envelope(project):
     points = _polygon(project)
+    if not points:
+        return None, {'code': 'polygon'}
     values = _setback_values(project.get('setbacks'))
-    if not points or not values:
-        return None
+    if not values:
+        return None, {'code': 'setbacks'}
     signed = _signed_area(points)
     cadastral = number(project.get('croquis_land_area'))
-    if not cadastral or abs(abs(signed) - cadastral) > max(5, cadastral * 0.03):
-        return None
+    if not cadastral:
+        return None, {'code': 'cadastral'}
+    if abs(abs(signed) - cadastral) > max(5, cadastral * 0.03):
+        return None, {'code': 'mismatch', 'polygonArea': round(abs(signed), 1),
+                      'cadastralArea': cadastral}
     if signed < 0:
         points.reverse()
     triples = zip(points, points[1:] + points[:1], points[2:] + points[:2])
     if any((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) < -1e-8
            for a, b, c in triples):
-        return None
+        return None, {'code': 'concave'}
     fronts = _frontages(project)
     common = set(values.values())
     uniform = len(common) == 1 and ({'front', 'back', 'side'}.issubset(values)
@@ -147,7 +152,7 @@ def setback_envelope(project):
         dx, dy = b[0] - a[0], b[1] - a[1]
         length = math.hypot(dx, dy)
         if length <= 1e-8:
-            return None
+            return None, {'code': 'degenerate'}
         normal = (-dy / length, dx / length)
         direction = ('east' if dy > 0 else 'west') if abs(dy) > abs(dx) else ('south' if dx > 0 else 'north')
         setback = values.get(direction)
@@ -160,10 +165,10 @@ def setback_envelope(project):
         if setback is None and fronts and direction not in fronts:
             setback = values.get('side')
             if len(fronts) > 1 and values.get('back') != setback:
-                return None
+                return None, {'code': 'frontages'}
         if setback is None:
-            return None
+            return None, {'code': 'unresolved'}
         clipped = _clip(clipped, a, normal, setback)
         if len(clipped) < 3:
-            return 0.0
-    return abs(_signed_area(clipped))
+            return 0.0, None
+    return abs(_signed_area(clipped)), None

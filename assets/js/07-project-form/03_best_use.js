@@ -277,6 +277,34 @@
         + escapeHtml(WFT('best_use.warning_tag', 'تنبيه')) + '</strong><span>' + escapeHtml(text) + '</span></p>';
     }
 
+    function bestUseSetbackMessage(budget) {
+      const issue = budget && budget.setbackIssue;
+      const code = issue && issue.code;
+      if (code === 'mismatch' && issue.polygonArea && issue.cadastralArea) {
+        return WFT('best_use.issue_mismatch',
+          'مساحة مضلع الإحداثيات ({a} م²) تختلف عن مساحة الصك ({b} م²)؛ المساحات توصية تخطيطية.',
+          { a: bestUseFormat(issue.polygonArea), b: bestUseFormat(issue.cadastralArea) });
+      }
+      const messages = {
+        polygon: 'best_use.issue_polygon', setbacks: 'best_use.issue_setbacks',
+        cadastral: 'best_use.issue_cadastral', concave: 'best_use.issue_concave',
+        degenerate: 'best_use.issue_degenerate', unresolved: 'best_use.issue_unresolved',
+        frontages: 'best_use.issue_frontages',
+      };
+      const fallback = {
+        polygon: 'جدول الإحداثيات غير مكتمل أو يحتوي أكثر من قطعة أرض؛ المساحات توصية تخطيطية.',
+        setbacks: 'لم تُقرأ قيم الارتدادات من النص المدخل؛ المساحات توصية تخطيطية.',
+        cadastral: 'مساحة الصك غير مدخلة؛ المساحات توصية تخطيطية.',
+        concave: 'شكل الأرض مقعّر — التحقق الهندسي للارتدادات يدعم الأشكال المحدبة فقط؛ المساحات توصية تخطيطية.',
+        degenerate: 'مضلع الإحداثيات يحتوي ضلعًا بطول صفري؛ المساحات توصية تخطيطية.',
+        unresolved: 'تعذّر تحديد قيمة ارتداد لأحد حدود الأرض من البيانات المدخلة؛ المساحات توصية تخطيطية.',
+        frontages: 'تعدد الواجهات مع ارتدادات متعارضة منع تحديد الغلاف؛ المساحات توصية تخطيطية.',
+      };
+      if (messages[code]) return WFT(messages[code], fallback[code]);
+      return WFT('best_use.geometry_unverified',
+        'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.');
+    }
+
     function renderBestUse() {
       const root = document.getElementById(BEST_USE_SECTION_KEY);
       if (!root) return;
@@ -320,7 +348,7 @@
             : approved ? WFT('best_use.approved', 'معتمد') : WFT('best_use.pending', 'بانتظار الاعتماد');
         proposal.innerHTML = `
           <div class="best-use-proposal-heading"><h4>${escapeHtml(state.title || WFT('best_use.distribution', 'التوزيع المقترح'))}</h4><span class="best-use-status">${escapeHtml(status)}</span></div>
-          ${budget.setbackVerified === false ? bestUseWarningHtml(WFT('best_use.geometry_unverified', 'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.')) : ''}
+          ${budget.setbackVerified === false ? bestUseWarningHtml(bestUseSetbackMessage(budget)) : ''}
           ${!current ? bestUseWarningHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
           <div class="best-use-actions best-use-decisions">
