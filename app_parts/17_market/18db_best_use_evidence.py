@@ -114,7 +114,10 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
             search_context={'city': city, 'country': 'SA'}, max_search_results=6,
             search_budget={'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 75})
         if error or not _market_search_ran(response):
-            raise best_use_contract.ProposalError('price_search_not_run')
+            # Surface the provider's real reason — quota, timeout, malformed
+            # tool call — instead of a bare code that reads as "no results".
+            detail = (error or '').strip() or 'no_search_executed'
+            raise best_use_contract.ProposalError('price_search_not_run: ' + detail[:240])
         parsed = _best_use_explore_provider(response)
         rows = parsed.get('observations')
         if not isinstance(rows, list):
