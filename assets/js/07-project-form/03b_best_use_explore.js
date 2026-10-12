@@ -275,13 +275,17 @@
       if (response.revision !== undefined) tenantDraftRevision = Number(response.revision);
       if (!fresh) {
         const current = bestUseExploreSourceSnapshot();
-        console.warn('[BEST-USE-EXPLORE] response rejected: inputs changed while processing',
+        console.warn('[BEST-USE-EXPLORE] inputs changed while processing',
           { editCounter: typeof draftEditCounter === 'undefined' ? null : draftEditCounter,
-            expectedEditCounter: requestContext.editCounter,
+            expectedEditCounter: requestContext.editCounter, modeSwitch: !!requestContext.modeSwitch,
             changed: Object.keys({ ...requestContext.sourceSnapshot, ...current })
               .filter(key => bestUseStable(requestContext.sourceSnapshot[key]) !== bestUseStable(current[key])) });
-        toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-        return false;
+        // A mode response is authoritative server state — pending edits in
+        // other fields must not desync the client from the stored mode.
+        if (!requestContext.modeSwitch) {
+          toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
+          return false;
+        }
       }
       if (response.bestUseMode) tenantProjectData.best_use_mode = response.bestUseMode;
       if (response.explore) tenantProjectData.best_use_explore_data = bestUseObject(response.explore);
@@ -334,7 +338,7 @@
               toast(WFT('best_use.draft_missing', 'المسودة غير محفوظة بعد.'));
               return false;
             }
-            requestContext = { draftId: initialId,
+            requestContext = { draftId: initialId, modeSwitch: true,
               editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter,
               sourceSnapshot: bestUseExploreSourceSnapshot() };
           } else {

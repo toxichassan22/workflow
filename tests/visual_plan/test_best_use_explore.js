@@ -109,6 +109,31 @@ test('a stale client revision is healed by the mode response instead of conflict
   assert.equal(f.context.tenantDraftRevision, 9);
 });
 
+test('an edit landing during the mode request cannot desync the applied mode', async () => {
+  const f = fixture();
+  const original = f.context.apiWithTimeout;
+  f.context.apiWithTimeout = async (method, endpoint, payload) => {
+    const response = await original(method, endpoint, payload);
+    f.context.draftEditCounter += 1; // a bubbled form edit arriving mid-flight
+    return response;
+  };
+  assert.equal(await f.context.changeBestUseMode('explore'), true);
+  assert.equal(f.context.tenantProjectData.best_use_mode, 'explore');
+});
+
+test('an edit landing during a generation still rejects the response', async () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  const original = f.context.apiWithTimeout;
+  f.context.apiWithTimeout = async (method, endpoint, payload) => {
+    const response = await original(method, endpoint, payload);
+    f.context.draftEditCounter += 1;
+    return response;
+  };
+  f.inputs.bestUseExploreChatInput.value = 'لماذا؟';
+  assert.equal(await f.context.runBestUseExplore('chat'), false);
+});
+
 test('non-mode actions still save first and carry the revision precondition', async () => {
   const f = fixture();
   f.context.tenantProjectData.best_use_mode = 'explore';

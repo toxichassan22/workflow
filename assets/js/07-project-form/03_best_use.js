@@ -230,7 +230,7 @@
       body.className = 'best-use-body';
       body.innerHTML = `
         <label class="best-use-mode-label" for="bestUseMode">${WFT('best_use_explore.mode', 'وضع أفضل استخدام')}</label>
-        <select id="bestUseMode" onchange="changeBestUseMode(this.value)">
+        <select id="bestUseMode" oninput="event.stopPropagation()" onchange="event.stopPropagation(); changeBestUseMode(this.value)">
           <option value="guided">${WFT('best_use_explore.guided', 'توزيع موجّه بفكرة المشروع')}</option>
           <option value="explore">${WFT('best_use_explore.explore', 'استكشاف مستقل للأرض')}</option>
         </select>
