@@ -504,7 +504,7 @@
             return false;
           }
           const received = applyBestUseResponse(response, requestContext);
-          if (received && endpoint === 'chat' && input?.value.trim() === message) input.value = '';
+          if (received && input && (endpoint === 'generate' || (endpoint === 'chat' && input.value.trim() === message))) input.value = '';
           updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'));
           return received;
         } catch (error) {

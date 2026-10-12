@@ -217,6 +217,30 @@ class BestUseApiTests(unittest.TestCase):
         self.assertFalse(response.get_json()['bestUse']['approved'])
         self.assertEqual(self.draft()['draft_data']['financial_study_model'], before['draft_data']['financial_study_model'])
 
+    def test_every_regeneration_opens_a_fresh_empty_discussion(self):
+        self.generate()
+        reply = {'reply': 'تفسير التوزيع.', 'proposal': None}
+        with patch.object(self.application, 'call_text_chat', return_value=self.provider_reply(reply)):
+            response = self.client.post('/api/best-use/chat', headers=self.headers, json={
+                'draftId': self.draft_id, 'message': 'سؤال عن التوزيع السابق',
+                'expectedRevision': self.draft()['revision']})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(len(self.draft()['draft_data']['best_use_chat']['messages']), 2)
+        result, provider = self.generate()
+        self.assertEqual(result['chat'], {'messages': []})
+        self.assertEqual(self.draft()['draft_data']['best_use_chat'], {'messages': []})
+        self.assertNotIn('سؤال عن التوزيع السابق', provider.call_args.args[1])
+
+    def test_a_chat_revision_keeps_the_discussion_that_produced_it(self):
+        self.generate()
+        with patch.object(self.application, 'call_text_chat', return_value=self.provider_reply({
+                'reply': 'اقتراح معدل.', 'proposal': self.raw})):
+            response = self.client.post('/api/best-use/chat', headers=self.headers, json={
+                'draftId': self.draft_id, 'message': 'عدّل التوزيع', 'revise': True,
+                'expectedRevision': self.draft()['revision']})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(len(self.draft()['draft_data']['best_use_chat']['messages']), 2)
+
     def test_a_plain_question_cannot_silently_replace_the_proposal(self):
         result, _ = self.generate()
         with patch.object(self.application, 'call_text_chat', return_value=self.provider_reply({

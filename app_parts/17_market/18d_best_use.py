@@ -267,6 +267,8 @@ def _best_use_execute(draft, data, kind, job=None):
                 proposal['revenuePotential'] = best_use_prices.revenue_potential(proposal['components'], price_scan)
                 proposal['contentHash'] = best_use.proposal_content_hash(proposal)
                 project['best_use_data'] = proposal
+                if kind == 'generate':
+                    project['best_use_chat'] = {'messages': []}
             if kind == 'chat':
                 reply = _land_chat_clean_reply(best_use.text(parsed.get('reply'), 16000))
                 reply = re.sub(r'\s*[(（]?\s*revise\s*=\s*(?:true|false)\s*[)）]?', '', reply, flags=re.I).strip()
