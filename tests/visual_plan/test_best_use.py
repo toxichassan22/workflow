@@ -138,6 +138,22 @@ class BestUseTests(unittest.TestCase):
         self.assertEqual(issue['parsed'], ['back', 'front', 'side'])
         self.assertIn(issue['direction'], ('north', 'south', 'east', 'west'))
 
+    def test_direction_cells_and_regulation_text_cover_street_setbacks(self):
+        self.project['setbacks'] = ('الارتداد الأمامي جهة طريق المدينة المنورة لا يقل عن 5.0م '
+                                    '(أو 5.5م عند وجود مواقف)، والارتداد لباقي الشوارع المحيطة '
+                                    'الثلاثة (الشمالي والجنوبي والغربي) لا يقل عن 3.0م')
+        self.project['directions_table'] = [
+            {'direction': 'شرق', 'setback': '5.0م في حال عدم وجود مواقف سيا (5.5م)',
+             'regulation_text': 'طريق المدينة المنورة عرض 58.00م'},
+            {'direction': 'شمال', 'setback': '3.0م', 'regulation_text': 'شارع نور القلوب عرض 12م'},
+            {'direction': 'جنوب', 'setback': '3.0م', 'regulation_text': 'شارع الأمة الإسلامية'},
+            {'direction': 'غرب', 'setback': '3.0م', 'regulation_text': 'شارع البلد الطيب'},
+        ]
+        budget = best_use.capacity(self.project)
+        self.assertIsNone(budget['setbackIssue'])
+        self.assertTrue(budget['setbackVerified'])
+        self.assertAlmostEqual(budget['setbackFootprint'], 4026)
+
     def test_a_single_documented_setback_is_not_invented_for_other_boundaries(self):
         self.project['setbacks'] = 'الارتداد الأمامي 5 م'
         self.assertFalse(best_use.capacity(self.project)['setbackVerified'])

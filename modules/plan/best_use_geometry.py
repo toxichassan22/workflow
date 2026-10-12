@@ -46,7 +46,8 @@ def _frontages(project):
             continue
         direction = _cardinal(row.get('direction') or row.get('name') or row.get('side'))
         description = ' '.join(str(row.get(key) or '') for key in
-                               ('description', 'boundary', 'neighbor', 'type', 'kind', 'street_name', 'street'))
+                               ('description', 'boundary', 'neighbor', 'type', 'kind', 'street_name', 'street',
+                                'regulation_text', 'regulation', 'boundary_text', 'text', 'notes', 'summary'))
         if direction and (re.search(r'شارع|طريق|street|road', description, re.I)
                           or number(row.get('street_width') or row.get('streetWidth'))):
             found.add(direction)
@@ -67,10 +68,38 @@ def _setback_values(value):
         matches = re.findall(r'(?:' + label + r')[^\d\n;،]{0,32}'
                              r'(\d+(?:\.\d+)?)\s*(?:متر|امتار|م\b|meters?\b|m\b)', text, re.I)
         amounts = {number(item) for item in matches}
-        if len(amounts) > 1:
-            return {}
         if amounts:
-            values[key] = amounts.pop()
+            # Conditional setbacks ("5 بدون مواقف أو 5.5 معها") keep the strictest
+            # figure: the largest setback gives the smallest, never inflated, envelope.
+            values[key] = max(amounts)
+    return values
+
+
+_DIRECTION_SETBACK_CELL_KEYS = ('setback', 'setback_m', 'setback_text', 'setback_value',
+                                'setback_requirement', 'setback_meters',
+                                'الارتداد', 'ارتداد', 'ارتدادات')
+
+
+def _direction_setback_cells(project):
+    rows = _decoded(project.get('directions_table'), [])
+    if isinstance(rows, dict):
+        rows = [dict(value, direction=key) if isinstance(value, dict)
+                else {'direction': key, 'description': value} for key, value in rows.items()]
+    values = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        direction = _cardinal(row.get('direction') or row.get('name') or row.get('side'))
+        if not direction:
+            continue
+        cell = ' '.join(str(row.get(key) or '') for key in _DIRECTION_SETBACK_CELL_KEYS)
+        cell = cell.translate(_DIGITS).replace('٫', '.')
+        amounts = [amount for amount in
+                   (number(item) for item in
+                    re.findall(r'(\d+(?:\.\d+)?)\s*(?:متر|امتار|م\b|meters?\b|m\b)', cell, re.I))
+                   if amount is not None]
+        if amounts:
+            values[direction] = max(amounts)
     return values
 
 
@@ -141,6 +170,7 @@ def setback_envelope(project):
     if not points:
         return None, {'code': polygon_issue or 'polygon'}
     values = _setback_values(project.get('setbacks'))
+    values.update(_direction_setback_cells(project))
     if not values:
         return None, {'code': 'setbacks'}
     signed = _signed_area(points)
