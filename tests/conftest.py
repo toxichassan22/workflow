@@ -15,6 +15,23 @@ import sys
 
 import pytest
 
+# Tests run from anywhere: pin the repo root on sys.path, and expose every
+# folder under modules/ so `import app`/`import db` resolve regardless of the
+# invocation directory or test file depth.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_MODULES_ROOT = os.path.join(_REPO_ROOT, 'modules')
+_SCRIPTS_ROOT = os.path.join(_REPO_ROOT, 'scripts')
+sys.path.insert(0, _REPO_ROOT)
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+if os.path.isdir(_MODULES_ROOT):
+    for _dirpath, _dirnames, _filenames in os.walk(_MODULES_ROOT):
+        _dirnames.sort()
+        if any(_f.endswith('.py') for _f in _filenames) and _dirpath not in sys.path:
+            sys.path.insert(0, _dirpath)
+    del _dirpath, _dirnames, _filenames
+del _REPO_ROOT, _MODULES_ROOT
+
 
 @pytest.fixture(autouse=True)
 def _external_gates_default_off():

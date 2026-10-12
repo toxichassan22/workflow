@@ -5,6 +5,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "best_use.optional": "اختياري",
   "best_use.generate": "اقتراح أفضل توزيع",
   "best_use.save": "حفظ كمسودة",
+  "best_use.save_failed": "تعذر حفظ المسودة قبل المتابعة.",
   "best_use.chat_title": "مناقشة التوزيع",
   "best_use.message": "الرسالة",
   "best_use.send": "إرسال",

@@ -5,6 +5,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use.optional": "Optional",
   "best_use.generate": "Suggest Best Distribution",
   "best_use.save": "Save as Draft",
+  "best_use.save_failed": "Could not save the draft before continuing.",
   "best_use.chat_title": "Distribution Discussion",
   "best_use.message": "Message",
   "best_use.send": "Send",

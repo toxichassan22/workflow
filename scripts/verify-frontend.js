@@ -50,9 +50,18 @@ for (const name of i18nDictFiles) {
 // The bundle order authority is app.py (FRONTEND_I18N_ORDER) and must match
 // the on-disk set exactly, so no part is silently dropped from the bundle.
 const appPartsDir2 = path.join(ROOT, 'app_parts');
+function listPyRecursive(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listPyRecursive(full));
+    else if (entry.name.endsWith('.py')) out.push(full);
+  }
+  return out;
+}
 const appSource2 = ['app.py'].concat(
-  fs.existsSync(appPartsDir2) ? fs.readdirSync(appPartsDir2).filter((f) => f.endsWith('.py')).sort().map((f) => 'app_parts/' + f) : []
-).map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  fs.existsSync(appPartsDir2) ? listPyRecursive(appPartsDir2).sort((a, b) => path.basename(a).localeCompare(path.basename(b))) : []
+).map((f) => fs.readFileSync(path.isAbsolute(f) ? f : path.join(ROOT, f), 'utf8')).join('\n');
 const i18nOrder = readOrderTuple(appSource2, 'FRONTEND_I18N_ORDER');
 if (!i18nOrder || !i18nOrder.length) fail('app.py must define FRONTEND_I18N_ORDER');
 if (i18nOrder) {
@@ -92,11 +101,11 @@ function readOrderTuple(source, name) {
 const appPartsDir = path.join(ROOT, 'app_parts');
 const appSourceFiles = ['app.py'];
 if (fs.existsSync(appPartsDir)) {
-  for (const part of fs.readdirSync(appPartsDir).filter((f) => f.endsWith('.py')).sort()) {
-    appSourceFiles.push(path.join('app_parts', part));
+  for (const part of listPyRecursive(appPartsDir).sort((a, b) => path.basename(a).localeCompare(path.basename(b)))) {
+    appSourceFiles.push(part);
   }
 }
-const appSource = appSourceFiles.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+const appSource = appSourceFiles.map((f) => fs.readFileSync(path.isAbsolute(f) ? f : path.join(ROOT, f), 'utf8')).join('\n');
 const jsOrder = readOrderTuple(appSource, 'FRONTEND_JS_ORDER');
 const cssOrder = readOrderTuple(appSource, 'FRONTEND_CSS_ORDER');
 if (!jsOrder || !jsOrder.length) fail('app.py must define FRONTEND_JS_ORDER');

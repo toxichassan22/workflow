@@ -2,6 +2,7 @@
 # Loaded from site-packages by Dockerfile before gunicorn imports app:app.
 import importlib.abc
 import importlib.machinery
+import os
 import re
 import sys
 
@@ -122,3 +123,20 @@ class _SlideEngineFinder(importlib.abc.MetaPathFinder):
 
 if not any(isinstance(finder, _SlideEngineFinder) for finder in sys.meta_path):
     sys.meta_path.insert(0, _SlideEngineFinder())
+
+
+# Repo runtime modules live in topical folders under modules/ (kept off the
+# root). They are still plain top-level imports — import db, import auth —
+# so every folder holding .py files goes onto sys.path here. This file's own
+# location is the repo root locally (PYTHONPATH=/app in Docker); when a copied
+# site-packages variant loads instead, fall back to the working directory.
+for _base in (os.path.dirname(os.path.abspath(__file__)), os.getcwd()):
+    _MODULES_ROOT = os.path.join(_base, 'modules')
+    if os.path.isdir(_MODULES_ROOT):
+        if _MODULES_ROOT not in sys.path:
+            sys.path.insert(0, _MODULES_ROOT)
+        for _dirpath, _dirnames, _filenames in os.walk(_MODULES_ROOT):
+            _dirnames.sort()
+            if any(_f.endswith('.py') for _f in _filenames) and _dirpath not in sys.path:
+                sys.path.insert(0, _dirpath)
+del _base, _MODULES_ROOT

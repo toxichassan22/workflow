@@ -50,6 +50,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "التغطية للطوابق المتكررة (%)": "Typical floors coverage (%)",
   "إجمالي مسطحات البناء (م²)": "Total floor area (sqm)",
   "مساحة البناء (م²)": "Building footprint (sqm)",
+  "مساحة الأدوار المتكررة": "Repeated floors area",
   "مساحة الأدوار المتكررة (م²)": "Repeated floors area (sqm)",
   "مساحة الدور (م²)": "Floor area (sqm)",
   "مجموع مساحة الأدوار المتكررة مع مساحة البناء يتجاوز إجمالي مسطحات البناء": "Repeated floors area plus building footprint exceeds the total built area",

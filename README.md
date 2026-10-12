@@ -8,9 +8,12 @@ super admin owns the platform catalog and tenant keys.
 ## Stack
 
 - **Backend:** Flask. `app.py` is only the loader — routes and helpers live in
-  ordered part files under `app_parts/` that are `exec`'d into one shared
-  namespace. Same split applies to `db.py`/`db_parts/`,
-  `slide_engine.py`/`slide_engine_parts/` and `maps_service.py`/`maps_service_parts/`.
+  ordered part files under `app_parts/` (grouped into functional subfolders)
+  that are `exec`'d into one shared namespace. The other runtime modules live
+  under `modules/<domain>/` (`db`, `slides`, `pdf`, `maps`, `market`,
+  `designer`, `plan`, `platform`), each loader keeping its `<stem>_parts/`
+  beside it; `sitecustomize.py`, `app.py` and `tests/conftest.py` put every
+  module folder on `sys.path`, so imports stay plain `import db`.
 - **Frontend:** one single-page app. `index.html` is a slim shell; scripts and
   styles under `assets/js`, `assets/css` and `assets/i18n` are concatenated
   into `/assets/app.bundle.{js,css}` at request time — no build step.
@@ -18,8 +21,8 @@ super admin owns the platform catalog and tenant keys.
   switches to Postgres where supported.
 - **AI:** OpenRouter for all text and image generation (`OPENROUTER_KEY`).
   Every call is metered per tenant in `ai_usage_events`.
-- **PDF:** PyMuPDF (`fitz`) + HTML render pipelines under `exports/`,
-  `pdf_generator*_parts/` and `generate_pdf_from_preview_parts/`.
+- **PDF:** PyMuPDF (`fitz`) + HTML render pipelines under `modules/pdf/`
+  (`exports/`, `pdf_generator*_parts/`, `generate_pdf_from_preview_parts/`).
 - **Maps:** Google Maps Static, Places (New), Distance Matrix and Street View
   Static — one restricted key (`GOOGLE_MAPS_API_KEY`). The tenant map preview
   can additionally mount a live `google.maps.Map` for free pan/zoom when a
@@ -29,16 +32,18 @@ super admin owns the platform catalog and tenant keys.
 
 | Path | What lives there |
 |---|---|
-| `app_parts/` | Flask routes and helpers, `exec`'d by `app.py` in name order |
-| `db_parts/` | Schema, billing ledger, drafts, presentations, tenants |
-| `slide_engine_parts/` | Deck model, layout, HTML render |
-| `maps_service_parts/` | Geocoding, static maps, overlays |
+| `app_parts/<NN_group>/` | Flask routes and helpers, `exec`'d by `app.py` in filename order |
+| `modules/db/` | `db.py`, `db_driver.py`, `db_parts/` — schema, billing, drafts, tenants |
+| `modules/slides/` | `slide_engine*`, `design_templates*`, `presentation_assets`, fonts bundle |
+| `modules/pdf/` | `pdf_generator*`, `generate_pdf_from_preview*`, `exports/` exporters |
+| `modules/maps/` | `maps_service*` — geocoding, static maps, overlays + `city_landmarks.json`, `fonts/` |
+| `modules/market/` | `market_study*` |
+| `modules/designer/` | `designer_agent_*`, `designer_chat_*`, `designer_numbers` |
+| `modules/plan/` | `best_use*`, `visual_plan_*`, `executive_content`, `financial_parking` |
+| `modules/platform/` | `auth`, `change_tracking*`, `email_templates`, `city_regulations` + `rules/`, `regulations/` |
 | `assets/` | Frontend JS/CSS/i18n parts, served as two bundles |
-| `rules/` | Verified building-regulation digest consumed by the regulations path |
-| `clean*.md` | Verified Arabic transcriptions of the regulation PDFs |
-| `exports/` | PPTX/PDF exporters |
-| `scripts/` | Maintenance tooling (`verify-frontend.js`, backup, fonts bundle) |
-| `tests/` | unittest/pytest suites |
+| `scripts/` | Maintenance tooling (`verify-frontend.js`, backup, fonts bundle) + dev scripts |
+| `tests/<area>/` | unittest/pytest suites grouped by area (`security/`, `designer/`, `maps/`…) |
 
 ## Setup
 
