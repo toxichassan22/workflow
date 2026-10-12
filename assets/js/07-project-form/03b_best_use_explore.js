@@ -324,25 +324,41 @@
         showLoader(WFT('best_use.processing_title', 'أفضل استخدامات'), WFT('best_use.saving', 'حفظ بيانات المشروع'), 5);
         try {
           const initialId = tenantProjectData?.draftId;
-          const initial = bestUseExploreSourceSnapshot();
-          if (!(await saveProjectAsDraft(true, false))) {
-            console.warn('[BEST-USE-EXPLORE]', action, 'aborted: draft save failed');
-            toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
-            return false;
+          let requestContext;
+          if (action === 'mode') {
+            // Switching modes only flips the server-owned best_use_mode flag —
+            // it must not force a draft save (or inherit its revision
+            // conflicts). The endpoint applies the switch to the stored draft
+            // atomically, and the response heals the client's revision.
+            if (!initialId) {
+              toast(WFT('best_use.draft_missing', 'المسودة غير محفوظة بعد.'));
+              return false;
+            }
+            requestContext = { draftId: initialId,
+              editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter,
+              sourceSnapshot: bestUseExploreSourceSnapshot() };
+          } else {
+            const initial = bestUseExploreSourceSnapshot();
+            if (!(await saveProjectAsDraft(true, false))) {
+              console.warn('[BEST-USE-EXPLORE]', action, 'aborted: draft save failed');
+              toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
+              return false;
+            }
+            const afterSave = bestUseExploreSourceSnapshot();
+            if (bestUseStable(initial) !== bestUseStable(afterSave)) {
+              console.warn('[BEST-USE-EXPLORE] inputs changed during save:',
+                Object.keys({ ...initial, ...afterSave })
+                  .filter(key => bestUseStable(initial[key]) !== bestUseStable(afterSave[key])));
+            }
+            if (tenantProjectData?.draftId !== initialId
+                || bestUseStable(initial) !== bestUseStable(afterSave)) {
+              toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
+              return false;
+            }
+            requestContext = { draftId: initialId, editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter, sourceSnapshot: afterSave };
           }
-          const afterSave = bestUseExploreSourceSnapshot();
-          if (bestUseStable(initial) !== bestUseStable(afterSave)) {
-            console.warn('[BEST-USE-EXPLORE] inputs changed during save:',
-              Object.keys({ ...initial, ...afterSave })
-                .filter(key => bestUseStable(initial[key]) !== bestUseStable(afterSave[key])));
-          }
-          if (tenantProjectData?.draftId !== initialId
-              || (action !== 'mode' && bestUseStable(initial) !== bestUseStable(afterSave))) {
-            toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-            return false;
-          }
-          const requestContext = { draftId: initialId, editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter, sourceSnapshot: afterSave };
-          const payload = { draftId: initialId, expectedRevision: tenantDraftRevision };
+          const payload = { draftId: initialId };
+          if (action !== 'mode') payload.expectedRevision = tenantDraftRevision;
           let endpoint = '/api/best-use/explore/';
           if (action === 'mode') { endpoint = '/api/best-use/mode'; payload.mode = options.mode; }
           else if (action === 'select') {
