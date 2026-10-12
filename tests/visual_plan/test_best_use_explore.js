@@ -18,7 +18,8 @@ function fixture() {
     bestUseExploreData: { value: '', dataset: { key: 'best_use_explore_data' } },
     bestUseExploreChat: { value: '', dataset: { key: 'best_use_explore_chat' } },
     bestUseModeData: { value: '', dataset: { key: 'best_use_mode' } },
-    bestUseExploreChatInput: { value: '' },
+    bestUseExploreChatInput: { value: '', addEventListener() {} },
+    bestUseExploreWorkspace: { innerHTML: '', hidden: false },
     bestUseMode: { value: 'guided', disabled: false }
   };
   const context = vm.createContext({
@@ -27,7 +28,7 @@ function fixture() {
       draftId: 'draft-1', project_type: '["سكني"]', project_name: 'مشروع سكني',
       approved_financial_area: 5000, croquis_land_area: 5000, approved_coverage_ratio: 60,
       approved_floor_count: 4, approved_floor_area_ratio: 2,
-      setbacks: 'أمامي 5 م', allowed_uses: 'سكني',
+      setbacks: 'أمامي 5 م', allowed_uses: 'سكني', city: 'الرياض',
       land_documents_files_file_ids: ['croquis-1'],
       location_address: 'الرياض', location_lat: '21.5', location_lng: '39.2',
       best_use_mode: 'guided', best_use_explore_data: {}, best_use_explore_chat: {},
@@ -50,6 +51,9 @@ function fixture() {
     },
     WFT: (key, fallback = key, params = {}) => fallback.replace(/\{(\w+)\}/g, (match, name) => params[name] ?? match),
     wfTr: text => text,
+    escapeHtml: text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    useTypes: [{ v: 'residential', t: 'سكني' }],
+    investmentModels: [{ v: 'sale', t: 'بيع وحدات' }],
     toast: text => context.toasts.push(text),
     confirm: () => true,
     saveProjectAsDraft: async () => { context.saves++; return true; },
@@ -142,4 +146,100 @@ test('non-mode actions still save first and carry the revision precondition', as
   assert.equal(f.context.saves, 1);
   assert.equal(f.context.requests[0].endpoint, '/api/best-use/explore/chat');
   assert.equal(f.context.requests[0].payload.expectedRevision, 3);
+});
+
+function readyExploreState(context) {
+  return {
+    mode: 'explore', sourceSnapshot: context.bestUseExploreSourceSnapshot(),
+    regulations: { id: 'reg-1', contentHash: 'rh', inputHash: 'ri' },
+    priceScan: { id: 'ps-1', contentHash: 'ph', inputHash: 'pi' },
+    concepts: { id: 'co-1', version: 3, contentHash: 'ch', inputHash: 'ci',
+      items: [{ id: 'concept-1', name: 'مفهوم سكني', summary: 'ملخص', siteFit: 'ملاءمة', revenueBasis: 'أساس' }] },
+    selectedConceptId: 'concept-1', selectedConceptVersion: 3
+  };
+}
+
+test('explore stages unlock only after their prerequisite artifacts are current', () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  assert.equal(f.context.bestUseExploreStageReady('concepts'), true);
+  assert.equal(f.context.bestUseExploreStageReady('land'), false);
+  assert.equal(f.context.bestUseExploreStageReady('floors'), false);
+
+  const unselected = readyExploreState(f.context);
+  delete unselected.selectedConceptId;
+  delete unselected.selectedConceptVersion;
+  f.context.tenantProjectData.best_use_explore_data = unselected;
+  assert.equal(f.context.bestUseExploreStageReady('land'), false);
+  assert.equal(f.context.bestUseExploreStageReady('floors'), false);
+
+  const state = readyExploreState(f.context);
+  f.context.tenantProjectData.best_use_explore_data = state;
+  assert.equal(f.context.bestUseExploreStageReady('land'), true);
+  assert.equal(f.context.bestUseExploreStageReady('floors'), false);
+
+  state.landDistribution = { id: 'ld-1', contentHash: 'lh', inputHash: 'li' };
+  assert.equal(f.context.bestUseExploreStageReady('floors'), true);
+});
+
+test('stale inputs lock later stages again and the wizard snaps back', () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  const state = readyExploreState(f.context);
+  state.landDistribution = { id: 'ld-1', contentHash: 'lh', inputHash: 'li' };
+  f.context.tenantProjectData.best_use_explore_data = state;
+
+  f.context.renderBestUseExplore(); // first render anchors the draft and picks the deepest stage
+  f.context.setBestUseExploreStage('floors');
+  assert.equal(f.context.renders, 1);
+  f.context.renderBestUseExplore();
+  assert.match(f.inputs.bestUseExploreWorkspace.innerHTML,
+    /class="btn primary small" onclick="setBestUseExploreStage\('floors'\)"/);
+
+  f.context.tenantProjectData.approved_floor_count = 9;
+  f.context.renderBestUseExplore();
+  const html = f.inputs.bestUseExploreWorkspace.innerHTML;
+  assert.match(html, /setBestUseExploreStage\('land'\)[^>]*disabled/);
+  assert.match(html, /setBestUseExploreStage\('floors'\)[^>]*disabled/);
+  assert.match(html, /class="btn primary small" onclick="setBestUseExploreStage\('concepts'\)"/);
+});
+
+test('a failed concepts run pins the server error inside the workspace', async () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  f.context.apiWithTimeout = async (method, endpoint, payload) => {
+    f.context.requests.push({ method, endpoint, payload });
+    if (method === 'POST') return { success: true, jobId: 'job-1', status: 'queued' };
+    return { success: false, status: 'failed', jobId: 'job-1',
+      error_code: 'BEST_USE_SEARCH_FAILED', error: 'تعذر إجراء مسح أسعار حي موثق.', validation: 'price_search_not_run' };
+  };
+  f.context.renderBestUseExplore(); // the workspace renders before a run can start
+  assert.equal(await f.context.runBestUseExplore('concepts'), false);
+  f.context.renderBestUseExplore();
+  const html = f.inputs.bestUseExploreWorkspace.innerHTML;
+  assert.match(html, /role="alert"[^>]*>[^<]*مسح أسعار[^<]*price_search_not_run/);
+  assert.equal(f.context.toasts.length, 1);
+});
+
+test('a successful concepts run clears a pinned error and renders the concepts', async () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  let fail = true;
+  f.context.apiWithTimeout = async (method, endpoint, payload) => {
+    f.context.requests.push({ method, endpoint, payload });
+    if (method === 'POST') return { success: true, jobId: 'job-' + f.context.requests.length, status: 'queued' };
+    if (fail) return { success: false, status: 'failed', jobId: 'job-1', error_code: 'BEST_USE_SEARCH_FAILED', error: 'تعذر' };
+    return { success: true, status: 'completed', jobId: 'job-2', draftId: 'draft-1', revision: 9,
+      explore: readyExploreState(f.context), exploreChat: {}, sectionStatuses: {} };
+  };
+  f.context.renderBestUseExplore(); // the workspace renders before a run can start
+  assert.equal(await f.context.runBestUseExplore('concepts'), false);
+  f.context.renderBestUseExplore();
+  assert.match(f.inputs.bestUseExploreWorkspace.innerHTML, /role="alert"/);
+  fail = false;
+  assert.equal(await f.context.runBestUseExplore('concepts'), true);
+  f.context.renderBestUseExplore();
+  const html = f.inputs.bestUseExploreWorkspace.innerHTML;
+  assert.doesNotMatch(html, /role="alert"/);
+  assert.match(html, /best-use-concept-card/);
 });
