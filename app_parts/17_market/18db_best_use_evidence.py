@@ -93,27 +93,46 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     city, district = best_use_contract.text(project.get('city'), 150), best_use_contract.text(project.get('district'), 150)
     if not city:
         raise best_use_contract.ProposalError('price_city_missing')
-    candidates = []
-    retrieved = []
-    for index, use in enumerate(uses):
-        if progress:
-            progress(20 + int(35 * index / max(1, len(uses))), 'prices',
-                     {'use': use, 'index': index + 1, 'total': len(uses)})
+    usage_ctx = _usage_ctx('best_use_price_scan', data, draft_id=draft['id'])
+
+    def _scan_use(use):
         prompt = json.dumps({'city': city, 'district': district, 'use': use,
                             'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
-        # Google-native grounding first: the provider's own search answers fast
-        # and reads Arabic listing queries well; a deeper Exa pass retries uses
-        # the overview came back empty on.
-        rows, response = _best_use_price_scan_use(
-            use, prompt, city, draft, data,
-            {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120}, 6)
-        if not rows:
-            rows, response = _best_use_price_scan_use(
-                use, prompt, city, draft, data,
-                {'engine': 'exa', 'mode': 'auto', 'max_uses': 3, 'max_total_results': 16,
-                 'max_tool_calls': 5, 'timeout': 120, 'max_results': 8}, 8)
-        retrieved.extend(_market_citation_pages(response))
-        candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
+        with _worker_app_context():
+            try:
+                # Google-native grounding first: the provider's own search answers
+                # fast and reads Arabic listing queries well.
+                rows, response = _best_use_price_scan_use(
+                    use, prompt, city, draft, data,
+                    {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120},
+                    6, usage_ctx)
+            except best_use_contract.ProposalError as error:
+                # A native grounding pass that leaves no detectable search trace
+                # falls through to the deeper Exa pass instead of failing the scan.
+                if not str(error).startswith('price_search_not_run'):
+                    raise
+                rows, response = [], None
+            if not rows:
+                rows, response = _best_use_price_scan_use(
+                    use, prompt, city, draft, data,
+                    {'engine': 'exa', 'mode': 'auto', 'max_uses': 3, 'max_total_results': 16,
+                     'max_tool_calls': 5, 'timeout': 120, 'max_results': 8}, 8, usage_ctx)
+        return use, rows, response
+
+    candidates, retrieved = [], []
+    done = [0]
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=max(1, min(4, len(uses)))) as pool:
+        futures = {pool.submit(_scan_use, use): use for use in uses}
+        for future in as_completed(futures):
+            use, rows, response = future.result()
+            done[0] += 1
+            if progress:
+                progress(20 + int(35 * done[0] / max(1, len(uses))), 'prices',
+                         {'use': use, 'index': done[0], 'total': len(uses)})
+            if response:
+                retrieved.extend(_market_citation_pages(response))
+            candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
     # verify_observation needs the excerpt inside a retrieved page — grounding
     # pages already carry the cited text, so only fetch URLs the search did not.
     covered = {best_use_prices.clean_url(page.get('url')) for page in retrieved if page.get('content')}
@@ -133,7 +152,7 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                                       preliminary=True)
 
 
-def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap):
+def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap, usage_ctx):
     response, error = _call_market_study_model(
         'مسح أسعار صغير حي من الويب للاستخدام والمنطقة المحددين فقط. '
         'بحث بيع وبحث إيجار، لا دراسة سوق ولا بيانات مشروع أساسية. '
@@ -145,7 +164,7 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap
         '"value":100,"currency":"SAR","unit":"sqm|unit|room","period":"oneOff|year|month|night",'
         '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
         'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
-        prompt, max_tokens=4000, usage_ctx=_usage_ctx('best_use_price_scan', data, draft_id=draft['id']),
+        prompt, max_tokens=4000, usage_ctx=usage_ctx,
         search_context={'city': city, 'country': 'SA'},
         max_search_results=results_cap, search_budget=budget)
     if error or not _market_search_ran(response):

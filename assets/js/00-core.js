@@ -96,7 +96,10 @@
       renderLoaderProgress(pct, stepText);
       loaderProgressReal = true;
       loaderProgressAnchorAt = Date.now();
-      loaderProgressStartValue = loaderProgressValue;
+      // Anchor the drift window to the last REPORTED value, not the displayed
+      // one — otherwise each real update re-anchors above creep's own drift and
+      // the bar ratchets far ahead of actual progress again.
+      loaderProgressStartValue = clampLoaderProgress(pct);
     }
 
     function hideLoader(completionText) {

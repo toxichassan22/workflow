@@ -259,7 +259,18 @@ def _market_search_ran(res):
         requests_count = int(tool_use.get('web_search_requests') or 0)
     except (TypeError, ValueError):
         requests_count = 0
-    return requests_count > 0 or bool(_market_citation_urls(res))
+    if requests_count > 0 or bool(_market_citation_urls(res)):
+        return True
+    # Provider-native grounding (Google) may skip url_citation annotations and
+    # report only its own metadata — a recorded webSearchQueries list proves a
+    # real search executed even when zero chunks came back citable.
+    for choice in res.get('choices') or []:
+        message = (choice or {}).get('message') or {}
+        for holder in (choice, message):
+            meta = (holder or {}).get('groundingMetadata') or (holder or {}).get('grounding_metadata')
+            if isinstance(meta, dict) and (meta.get('webSearchQueries') or meta.get('web_search_queries')):
+                return True
+    return False
 
 
 def _market_citation_pages(res):
@@ -299,7 +310,8 @@ def _market_citation_pages(res):
         # Gemini/Google AI Mode grounding: groundingChunks carry the sources and
         # groundingSupports link answer sentences to the chunks they cite — the
         # supported text is evidence retrieved for that URL.
-        for meta in (choice.get('groundingMetadata'), message.get('groundingMetadata')):
+        for holder in (choice, message):
+            meta = holder.get('groundingMetadata') or holder.get('grounding_metadata')
             if not isinstance(meta, dict):
                 continue
             chunk_urls = {}
