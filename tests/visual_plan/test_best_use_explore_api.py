@@ -107,6 +107,17 @@ class ExplorationApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         return response.get_json()['explore']
 
+    def test_request_fields_overlay_only_the_explore_source_fields(self):
+        raw = {'concepts': [{'name': 'مفهوم سكني', 'summary': 'توصية تخطيطية.', 'siteFit': 'موقع قريب من الخدمات.',
+                            'revenueBasis': 'لا توجد أسعار كافية للمقارنة.', 'uses': ['residential'],
+                            'components': [row_fixture(self.basis)]}]}
+        with patch.object(self.application, 'call_text_chat', return_value=self.provider(raw)):
+            response = self.post('concepts', fields={'city': 'أبها', 'project_name': 'تجاوز غير مسموح'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        saved = self.draft()
+        self.assertEqual(saved['draft_data']['city'], 'أبها')
+        self.assertEqual(saved['draft_data']['project_name'], self.project['project_name'])
+
     def floors(self):
         state = self.land()
         row = row_fixture(self.basis)

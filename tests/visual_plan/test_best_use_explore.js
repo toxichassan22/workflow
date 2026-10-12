@@ -138,14 +138,18 @@ test('an edit landing during a generation still rejects the response', async () 
   assert.equal(await f.context.runBestUseExplore('chat'), false);
 });
 
-test('non-mode actions still save first and carry the revision precondition', async () => {
+test('non-mode actions carry source fields and the revision precondition without a draft save', async () => {
   const f = fixture();
   f.context.tenantProjectData.best_use_mode = 'explore';
   f.inputs.bestUseExploreChatInput.value = 'لماذا هذا التوزيع؟';
   assert.equal(await f.context.runBestUseExplore('chat'), true);
-  assert.equal(f.context.saves, 1);
-  assert.equal(f.context.requests[0].endpoint, '/api/best-use/explore/chat');
-  assert.equal(f.context.requests[0].payload.expectedRevision, 3);
+  assert.equal(f.context.saves, 0);
+  const request = f.context.requests[0];
+  assert.equal(request.endpoint, '/api/best-use/explore/chat');
+  assert.equal(request.payload.expectedRevision, 3);
+  assert.equal(request.payload.fields.city, 'الرياض');
+  assert.equal(request.payload.fields.location_lat, '21.5');
+  assert.equal('draftId' in request.payload.fields, false);
 });
 
 function readyExploreState(context) {

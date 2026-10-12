@@ -101,6 +101,24 @@
 
     function bestUseState() { return bestUseObject(tenantProjectData?.best_use_data); }
     function bestUseChatState() { return bestUseObject(tenantProjectData?.best_use_chat); }
+
+    // Best-use requests carry the fields they consume in `fields`; the server
+    // overlays just those keys on the stored draft. No draft save runs — pending
+    // edits elsewhere in the form stay unsaved until the client saves them.
+    function bestUseSyncInputs() {
+      if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+      if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) persistMarketStudyFromDom();
+      if (typeof LOCATION_TABLE_FIELDS !== 'undefined' && typeof serializeLocationTable === 'function') {
+        Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
+      }
+    }
+
+    function bestUseSourceFields(snapshot, keys) {
+      const fields = {};
+      (keys || BEST_USE_SOURCE_FIELDS).forEach(key => { if (key !== 'draftId') fields[key] = bestUseFieldValue(key); });
+      fields.maps = (snapshot || bestUseSourceSnapshot()).maps || {};
+      return fields;
+    }
     function bestUseSectionRequired() {
       if (typeof bestUseActiveMode === 'function' && bestUseActiveMode() === 'explore') return bestUseExploreSectionRequired();
       const state = bestUseState(); return !!state.id && !state.rejected;
@@ -467,27 +485,20 @@
       bestUseRequestTask = (async () => {
         bestUseBusy = true;
         renderBestUse();
-        showLoader(WFT('best_use.processing_title', 'أفضل استخدامات'), WFT('best_use.saving', 'حفظ بيانات المشروع'), 5);
+        showLoader(WFT('best_use.processing_title', 'أفضل استخدامات'), WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'), 20);
         try {
           const initialId = tenantProjectData.draftId;
-          const initial = bestUseSourceSnapshot();
-          if (!(await saveProjectAsDraft(true, false))) {
-            console.warn('[BEST-USE]', action, 'aborted: draft save failed');
-            toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
+          if (!initialId) {
+            console.warn('[BEST-USE]', action, 'aborted: draft missing');
+            toast(WFT('best_use.draft_missing', 'المسودة غير محفوظة بعد.'));
             return false;
           }
-          const afterSave = bestUseSourceSnapshot();
-          if (tenantProjectData.draftId !== initialId || bestUseStable(initial) !== bestUseStable(afterSave)) {
-            console.warn('[BEST-USE] inputs changed during save:',
-              Object.keys({ ...initial, ...afterSave })
-                .filter(key => bestUseStable(initial[key]) !== bestUseStable(afterSave[key])));
-            toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-            return false;
-          }
-          const requestContext = { draftId: tenantProjectData.draftId,
+          bestUseSyncInputs();
+          const requestContext = { draftId: initialId,
             editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter,
-            sourceSnapshot: afterSave };
-          const payload = { draftId: requestContext.draftId, expectedRevision: tenantDraftRevision };
+            sourceSnapshot: bestUseSourceSnapshot() };
+          const payload = { draftId: initialId, expectedRevision: tenantDraftRevision,
+            fields: bestUseSourceFields(requestContext.sourceSnapshot) };
           let endpoint = 'decision';
           if (action === 'generate') endpoint = 'generate';
           else if (action === 'chat' || action === 'revise') {

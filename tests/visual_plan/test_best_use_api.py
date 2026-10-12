@@ -100,6 +100,21 @@ class BestUseApiTests(unittest.TestCase):
         self.assertNotIn('isDistinguished', prompt)
         self.assertEqual(result['bestUse']['capacity']['far'], 2)
 
+    def test_request_fields_overlay_the_stored_inputs_without_a_full_save(self):
+        # The client sends the fields the flow consumes instead of saving the
+        # draft first — the merge must take whitelisted keys only, leave every
+        # other stored value alone, and feed the generation context.
+        fields = {'project_name': 'اسم معدل', 'approved_floor_area_ratio': '3',
+                  'visual_concept': 'must-not-merge', 'financial_study_model': {}}
+        result, provider = self.generate(fields=fields)
+        saved = self.draft()
+        self.assertEqual(saved['draft_data']['project_name'], 'اسم معدل')
+        self.assertEqual(saved['draft_data']['approved_floor_area_ratio'], '3')
+        self.assertEqual(result['bestUse']['capacity']['far'], 3)
+        self.assertIn('اسم معدل', provider.call_args.args[1])
+        self.assertEqual(saved['draft_data']['visual_concept'], self.project['visual_concept'])
+        self.assertEqual(saved['draft_data']['financial_study_model'], self.project['financial_study_model'])
+
     def test_approval_replaces_the_table_once_and_demotes_only_dependent_financial_approval(self):
         result, _ = self.generate()
         before = self.draft()

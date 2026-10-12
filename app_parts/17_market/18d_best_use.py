@@ -78,6 +78,31 @@ def _best_use_save_statuses(project, incoming, stored):
     return statuses
 
 
+def _best_use_merge_fields(draft, data, source_fields):
+    # The request carries the fields this flow consumes instead of a
+    # pre-request draft save, so only these keys overlay the stored draft —
+    # unrelated pending edits elsewhere in the form are never swept in.
+    fields = data.get('fields')
+    project = draft.get('draft_data') if isinstance(draft, dict) else None
+    if not isinstance(fields, dict) or not isinstance(project, dict):
+        return
+    for key in source_fields:
+        if key != 'draftId' and key in fields:
+            project[key] = fields[key]
+    maps = fields.get('maps')
+    if isinstance(maps, dict):
+        creative = best_use.read_object(project.get('tenantCreativeImages'))
+        placeholders = best_use.read_object(creative.get('map_placeholders'))
+        for token in best_use.MAP_TOKENS:
+            value = best_use.text(maps.get(token), 2000)
+            if value:
+                placeholders[token] = value
+            else:
+                placeholders.pop(token, None)
+        creative['map_placeholders'] = placeholders
+        project['tenantCreativeImages'] = creative
+
+
 def _best_use_draft(data, applying=False):
     draft_id = data.get('draftId')
     if not isinstance(draft_id, str) or not draft_id or len(draft_id) > 120:
@@ -102,6 +127,7 @@ def _best_use_draft(data, applying=False):
         return None, (jsonify({'success': False, 'error': 'المسودة تغيّرت منذ آخر قراءة.',
                                'error_code': 'DRAFT_REVISION_CONFLICT',
                                'currentRevision': draft.get('revision')}), 409)
+    _best_use_merge_fields(draft, data, best_use.SOURCE_FIELDS)
     return draft, None
 
 

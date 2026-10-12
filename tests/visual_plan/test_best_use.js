@@ -186,12 +186,30 @@ test('a stored snapshot carrying response-signed media stays current', () => {
   assert.equal(f.context.bestUseCurrent(), true);
 });
 
-test('a failed pre-save cannot start a generation or chat call', async () => {
+test('a missing draft cannot start a generation or chat call', async () => {
   const f = fixture();
-  f.context.saveProjectAsDraft = async () => false;
+  f.context.tenantProjectData.draftId = '';
   f.context.api = async () => { throw new Error('No request should run'); };
   assert.equal(await f.context.runBestUseAction('generate'), false);
   assert.equal(await f.context.sendBestUseChat(), false);
+  assert.equal(f.context.saves, 0);
+});
+
+test('actions post the consumed fields and revision without saving the draft', async () => {
+  const f = fixture();
+  f.context.api = async (method, endpoint, payload) => {
+    f.context.requests.push({ method, endpoint, payload });
+    return { success: true, draftId: 'draft-1', revision: 2, bestUse: f.proposal(), chat: { messages: [] } };
+  };
+  assert.equal(await f.context.runBestUseAction('generate'), true);
+  assert.equal(f.context.saves, 0);
+  const request = f.context.requests[0];
+  assert.equal(request.endpoint, '/api/best-use/generate');
+  assert.equal(request.payload.expectedRevision, 1);
+  assert.equal(request.payload.fields.project_name, 'مشروع سكني');
+  assert.equal(request.payload.fields.approved_floor_area_ratio, 2);
+  assert.equal(request.payload.fields.maps['##MAP_OVERVIEW##'], '/uploads/maps/site.png');
+  assert.equal('draftId' in request.payload.fields, false);
 });
 
 test('approval cancellation and rejection do not send a destructive request without consent', async () => {

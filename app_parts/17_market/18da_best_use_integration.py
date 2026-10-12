@@ -66,6 +66,8 @@ def _best_use_explore_draft(data, applying=False, mode_change=False):
     if not mode_change and _best_use_active_mode(draft.get('draft_data')) != 'explore':
         result, status = _best_use_error('BEST_USE_WRONG_MODE', 409)
         return None, (jsonify(result), status)
+    if not mode_change:
+        _best_use_merge_fields(draft, data, best_use_workflow.SOURCE_FIELDS)
     return draft, None
 
 
