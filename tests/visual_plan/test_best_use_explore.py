@@ -15,8 +15,6 @@ class ExplorationContractTests(unittest.TestCase):
         self.project.update(plot_number_croquis='42', zoning_code='س ع')
         self.project['best_use_explore_data'] = {'mode': 'explore'}
         self.project['best_use_mode'] = 'explore'
-        self.pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel',
-                       'text': 'رقم القطعة: 42\nكود التنظيم: س ع\nالاستخدامات المسموحة: سكني، تجاري\n'}]
 
     def artifact(self, name, payload):
         state = self.project['best_use_explore_data']
@@ -70,88 +68,37 @@ class ExplorationContractTests(unittest.TestCase):
         self.project.update(approved_floor_count=1, approved_typical_floor_coverage='')
         self.assertEqual(workflow.missing_inputs(self.project, {'land_croquis': 'approved', 'location': 'approved'}), [])
 
-    def test_complete_scoped_use_list_is_parsed_without_a_model(self):
-        result = regulations.extract(self.project, self.pages)
+    def test_declared_uses_are_parsed_without_documents_or_a_model(self):
+        self.project['allowed_uses'] = 'سكني، تجاري'
+        result = regulations.declared(self.project)
         self.assertEqual(set(result['permittedUses']), {'residential', 'retail', 'office', 'entertainment'})
-        self.assertFalse(result['requiresApproval'])
-        self.assertTrue(result['evidence'])
-        for item in result['evidence']:
-            self.assertEqual(item['documentId'], 'croquis-1')
-            self.assertEqual(item['parcelScope'], '42')
-            self.assertIn(item['excerpt'], self.pages[0]['text'])
-
-    def test_negation_conditions_wrong_scope_and_partial_text_fail_closed(self):
-        cases = ['رقم القطعة: 99\nالاستخدامات المسموحة: سكني',
-                 'رقم القطعة: 42\nالاستخدامات المسموحة: سكني بشرط موافقة الجهة',
-                 'رقم القطعة: 42\nالاستخدامات المسموحة: سكني، لا يسمح بتجاري',
-                 'رقم القطعة: 42\nالاستخدامات المسموحة: حسب المخطط المعتمد',
-                 'رقم القطعة: 42\nالاستخدامات المسموحة: سكني\nيحظر تطوير الأرض',
-                 'رقم القطعة: 42\nالاستخدامات المسموحة: سكني\nلا يسمح بالاستخدام السكني']
-        for text in cases:
-            with self.subTest(text=text), self.assertRaises(best_use.ProposalError):
-                regulations.extract(self.project, [dict(self.pages[0], text=text + '\nكود التنظيم: س ع')])
-
-    def test_a_croquis_without_parcel_identifiers_falls_back_to_declared_uses(self):
-        pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel',
-                  'text': 'كروكي قديم بلا رقم قطعة أو كود تنظيم'}]
-        result = regulations.extract(self.project, pages)
-        self.assertEqual(result['permittedUses'], ['residential'])
         self.assertEqual(result['basis'], 'declared')
         self.assertTrue(result['requiresApproval'])
-        self.assertFalse(result['scope']['proven'])
-        self.assertEqual(result['scope']['plotNumber'], '42')
-        self.assertTrue(all(item['documentId'] == 'declared-inputs' for item in result['evidence']))
-        # A document that does mark a different parcel still proves the wrong file.
-        pages[0]['text'] = 'رقم القطعة: 99\nالاستخدامات المسموحة: سكني'
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages)
+        self.assertTrue(result['evidence'])
+        for item in result['evidence']:
+            self.assertEqual(item['documentId'], 'declared-inputs')
+            self.assertEqual(item['parcelScope'], '42')
+            self.assertEqual(item['landClassification'], 'س ع')
+            self.assertEqual(item['excerpt'], 'سكني، تجاري')
 
     def test_declared_uses_drop_negated_or_conditional_clauses(self):
-        pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel', 'text': 'كروكي قديم'}]
         self.project['allowed_uses'] = 'سكني، تجاري بشرط موافقة الجهة، صناعي غير مسموح'
-        result = regulations.extract(self.project, pages)
+        result = regulations.declared(self.project)
         self.assertEqual(result['permittedUses'], ['residential'])
         self.project['allowed_uses'] = 'لا يسمح بأي استخدام'
         with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages)
+            regulations.declared(self.project)
 
-    def test_a_document_without_declarations_still_fails_without_declared_uses(self):
-        pages = [dict(self.pages[0], text='رقم القطعة: 42\nكود التنظيم: س ع\nالمشروع السكني مسموح')]
-        self.project['allowed_uses'] = ''
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages)
+    def test_missing_or_unparseable_declared_uses_fail_closed(self):
+        for value in ('', 'غير محددة في المرجع المتاح', 'حسب المخطط المعتمد', 'سكني بشرط موافقة الجهة'):
+            with self.subTest(value=value), self.assertRaises(best_use.ProposalError):
+                regulations.declared(dict(self.project, allowed_uses=value))
 
-    def test_model_excerpt_must_be_a_full_verifiable_declaration_not_a_word(self):
-        raw = {'declarations': [{'documentId': 'croquis-1', 'page': 1, 'excerpt': 'سكني'}]}
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, self.pages, raw)
-
-    def test_interpreted_declarations_must_quote_the_scoped_page_verbatim(self):
-        pages = [dict(self.pages[0], text='رقم القطعة: 42\nكود التنظيم: س ع\nيسمح بالاستعمالات الآتية على القطعة: سكني\n')]
-        # No machine-readable declaration: the declared client inputs carry it.
-        result = regulations.extract(self.project, pages)
-        self.assertEqual(result['basis'], 'declared')
-        self.assertEqual(result['permittedUses'], ['residential'])
-        interpreted = {'declarations': [{'documentId': 'croquis-1', 'page': 1,
-                                         'excerpt': 'الاستعمالات المسموحة: سكني'}]}
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages, interpreted)
-        interpreted['declarations'][0].update(page=2)
-        pages[0]['text'] += 'الاستعمالات المسموحة: سكني\n'
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages, interpreted)
-        interpreted['declarations'][0].update(page=1)
-        result = regulations.extract(self.project, pages, interpreted)
-        self.assertEqual(result['permittedUses'], ['residential'])
-        self.assertTrue(result['requiresApproval'])
-        self.assertTrue(all(item['parcelScope'] == '42' for item in result['evidence']))
-
-    def test_an_interpreted_negated_or_conditional_list_still_fails_closed(self):
-        pages = [dict(self.pages[0], text='رقم القطعة: 42\nكود التنظيم: س ع\nالاستعمالات المسموحة: سكني بشرط موافقة الجهة\n')]
-        interpreted = {'declarations': [{'documentId': 'croquis-1', 'page': 1,
-                                         'excerpt': 'الاستعمالات المسموحة: سكني بشرط موافقة الجهة'}]}
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages, interpreted)
+    def test_a_documented_development_ban_in_the_summary_fields_still_blocks(self):
+        for key in ('allowed_uses', 'regulatory_constraints', 'land_and_building_summary'):
+            project = dict(self.project, **{key: self.project[key] + '\nيحظر تطوير الأرض'})
+            with self.subTest(key=key), self.assertRaises(best_use.ProposalError):
+                regulations.declared(project)
 
     def test_concept_uses_accept_arabic_labels_and_name_unpermitted_ones(self):
         self.assertEqual(canonical_use('سكني'), 'residential')

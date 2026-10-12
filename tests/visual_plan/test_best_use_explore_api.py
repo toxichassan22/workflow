@@ -48,9 +48,7 @@ class ExplorationApiTests(unittest.TestCase):
                             best_use_mode='explore', best_use_explore_data={'mode': 'explore'},
                             project_type='["فندقي"]', project_idea='فكرة العميل السرية',
                             market_study_data={'summary': 'دراسة السوق السرية'}, land_use_status='غير مسموح')
-        self.pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel',
-                       'text': 'رقم القطعة: 42\nكود التنظيم: س ع\nالاستخدامات المسموحة: سكني\n'}]
-        self.regulations = regulations.extract(self.project, self.pages)
+        self.regulations = regulations.declared(self.project)
         self.basis = self.regulations['evidence'][0]
         self.scan = {'table': [{'use': 'residential', 'salePerSqm': None, 'rentPerSqmYear': None, 'metrics': {}}],
                      'observations': [], 'status': 'partial', 'searchRan': True, 'city': 'جدة', 'district': 'حي الاختبار'}
@@ -62,7 +60,7 @@ class ExplorationApiTests(unittest.TestCase):
             self.draft_id = db.save_project_draft(self.tenant, 'tenant-admin:' + self.tenant,
                 self.project, self.statuses, draft_id=self.project['draftId'])
         for name, value in (('_require_billing_balance', None), ('_best_use_documents_backed', True),
-                            ('_best_use_regulation_pages', self.pages), ('_best_use_scan_prices', self.scan),
+                            ('_best_use_scan_prices', self.scan),
                             ('_best_use_map_references', []), ('_bill_tenant_unbilled_usage_async', None),
                             ('_best_use_price_page', None)):
             mocked = patch.object(self.application, name, return_value=value)
@@ -180,7 +178,7 @@ class ExplorationApiTests(unittest.TestCase):
         revision = self.draft()['revision']
         self.assertEqual(self.decide(state, 'floorDistribution').status_code, 200)
         self.assertEqual(self.draft()['revision'], revision)
-        for name in ('priceScan', 'concepts', 'landDistribution'):
+        for name in ('regulations', 'priceScan', 'concepts', 'landDistribution'):
             response = self.decide(self.draft()['draft_data']['best_use_explore_data'], name)
             self.assertEqual(response.status_code, 200, response.get_json())
             self.assertFalse(response.get_json()['componentsApplied'])

@@ -1,53 +1,8 @@
-def _best_use_regulation_pages(draft):
-    import fitz
-    project = draft.get('draft_data') or {}
-    pages = []
-    for file_id in best_use_contract.decoded(project.get('land_documents_files_file_ids'), []):
-        record = db.get_project_file(g.tenant_id, file_id)
-        if not record or record.get('file_type') not in {'land_document', 'croquis'}:
-            raise best_use_contract.ProposalError('regulatory_document_missing')
-        if record.get('draft_id') and str(record['draft_id']) != str(draft['id']):
-            raise best_use_contract.ProposalError('regulatory_document_scope')
-        path = _resolve_project_file_storage_path(record, g.tenant_id)
-        if not path:
-            raise best_use_contract.ProposalError('regulatory_document_missing')
-        try:
-            with fitz.open(path) as document:
-                if len(document) > 150:
-                    raise best_use_contract.ProposalError('regulatory_document_too_large')
-                for index, page in enumerate(document, 1):
-                    pages.append({'documentId': file_id, 'page': index, 'kind': 'parcel', 'text': page.get_text()})
-        except (OSError, RuntimeError, ValueError) as error:
-            raise best_use_contract.ProposalError('regulatory_document_unreadable') from error
-    if not pages:
-        raise best_use_contract.ProposalError('regulatory_full_text_missing')
-    pages.extend(best_use_regulations.local_pages(project, pages))
-    return pages
-
-
 def _best_use_extract_regulations(draft, data):
-    project = draft.get('draft_data') or {}
-    pages = _best_use_regulation_pages(draft)
-    try:
-        return best_use_regulations.extract(project, pages)
-    except best_use_contract.ProposalError as error:
-        if not str(error).startswith('regulatory_uses_complete'):
-            raise
-    if sum(len(page['text']) for page in pages) > 120000:
-        raise best_use_contract.ProposalError('regulatory_full_text_too_large')
-    prompt = json.dumps({'scope': best_use_regulations.parcel_scope(project, pages), 'documents': pages}, ensure_ascii=False)
-    response = call_text_chat(
-        'تفسير محدود للنصوص التنظيمية الأصلية. لا توجد فكرة مشروع أو دراسة سوق. '
-        'حدد قائمة الاستعمالات الكاملة المنطبقة على القطعة دون تخمين السماح أو تجاهل نفي أو شرط. '
-        'أعد JSON {"declarations":[{"documentId":"","page":1,"excerpt":"الاقتباس الكامل الحرفي"}]} '
-        'أو {"declarations":[]} عند غياب قائمة كاملة. لا أرقام أو تصنيفات مخترعة.',
-        prompt, max_tokens=2500, timeout=75, reasoning_effort='low', response_format={'type': 'json_object'},
-        usage_ctx=_usage_ctx('best_use_regulations', data, draft_id=draft['id']))
-    interpreted = _best_use_explore_provider(response)
-    result = best_use_regulations.extract(project, pages, interpreted)
-    result['interpretedDeclarations'] = [item for item in (interpreted.get('declarations') or [])
-                                        if isinstance(item, dict)]
-    return result
+    # The croquis analysis already distilled the parcel's regulation text into
+    # the declared fields — the summary is the permitted-uses source, so parcel
+    # documents and municipal files are never re-read here.
+    return best_use_regulations.declared(draft.get('draft_data') or {})
 
 
 def _best_use_verify_regulations(draft):
@@ -55,11 +10,8 @@ def _best_use_verify_regulations(draft):
     stored = (project.get('best_use_explore_data') or {}).get('regulations') or {}
     if not best_use_workflow.current(project, 'regulations'):
         raise best_use_contract.ProposalError('regulatory_inputs_changed')
-    interpreted = None
-    if stored.get('requiresApproval') and stored.get('interpretedDeclarations'):
-        interpreted = {'declarations': stored['interpretedDeclarations']}
-    current = best_use_regulations.extract(project, _best_use_regulation_pages(draft), interpreted)
-    if current['sourceDocuments'] != stored.get('sourceDocuments') or current['permittedUses'] != stored.get('permittedUses'):
+    current = best_use_regulations.declared(project)
+    if current['permittedUses'] != stored.get('permittedUses'):
         raise best_use_contract.ProposalError('regulatory_inputs_changed')
     return stored
 
@@ -122,6 +74,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     candidates, retrieved = [], []
     done = [0]
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    if progress:
+        progress(15, 'prices', {'index': 0, 'total': len(uses)})
     with ThreadPoolExecutor(max_workers=max(1, min(4, len(uses)))) as pool:
         futures = {pool.submit(_scan_use, use): use for use in uses}
         for future in as_completed(futures):
