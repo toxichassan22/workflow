@@ -25,6 +25,7 @@
     let bestUseExploreTask = null;
     let bestUseExploreStage = 'concepts';
     let bestUseExploreDraftId = '';
+    let bestUseExploreNotice = '';
 
     function bestUseActiveMode() { return tenantProjectData?.best_use_mode || 'guided'; }
     function bestUseExploreState() { return bestUseObject(tenantProjectData?.best_use_explore_data); }
@@ -186,7 +187,26 @@
         'استخدام المفهوم يختلف عن نوع المشروع المسجل؛ البيانات الأساسية ودراسة السوق تخصان النوع المسجل.'));
     }
 
-    function setBestUseExploreStage(stage) { bestUseExploreStage = stage; renderBestUse(); }
+    function bestUseExploreStageReady(stage) {
+      const state = bestUseExploreState();
+      const selected = state.selectedConceptVersion === state.concepts?.version
+        && bestUseArray(state.concepts?.items).find(item => item.id === state.selectedConceptId);
+      if (stage === 'land') return !!selected && bestUseExploreCurrent('concepts');
+      if (stage === 'floors') return !!selected && bestUseExploreCurrent('landDistribution');
+      return stage === 'concepts';
+    }
+
+    function setBestUseExploreStage(stage) {
+      if (bestUseExploreBusy || !bestUseExploreStageReady(stage)) return;
+      bestUseExploreStage = stage;
+      renderBestUse();
+    }
+
+    function bestUseExploreFail(text) {
+      bestUseExploreNotice = String(text || '');
+      toast(text);
+      return false;
+    }
 
     function renderBestUseExplore() {
       const root = document.getElementById('bestUseExploreWorkspace');
@@ -195,6 +215,7 @@
       if (bestUseExploreDraftId !== tenantProjectData?.draftId) {
         bestUseExploreDraftId = tenantProjectData?.draftId || '';
         bestUseExploreStage = state.floorDistribution?.id ? 'floors' : state.landDistribution?.id ? 'land' : 'concepts';
+        bestUseExploreNotice = '';
       }
       const missing = bestUseExploreMissing();
       const locked = tenantProjectSectionStatuses?.[BEST_USE_SECTION_KEY] === 'approved';
@@ -206,6 +227,14 @@
         ['land', WFT('best_use_explore.land_stage', 'التوزيع الأرضي')],
         ['floors', WFT('best_use_explore.floors_stage', 'توزيع الأدوار')]
       ];
+      const stageReady = {
+        concepts: true,
+        land: bestUseExploreStageReady('land'),
+        floors: bestUseExploreStageReady('floors')
+      };
+      if (!stageReady[bestUseExploreStage]) {
+        bestUseExploreStage = stageReady.floors ? 'floors' : stageReady.land ? 'land' : 'concepts';
+      }
       let content = '';
       if (bestUseExploreStage === 'concepts') {
         const generationLocked = ['regulations', 'priceScan', 'concepts'].some(bestUseExploreApproved);
@@ -246,11 +275,12 @@
       const savedMessage = input?.value || '';
       root.innerHTML = '<nav class="best-use-stage-nav">' + stages.map(([stage, label]) => '<button type="button" class="btn '
         + (stage === bestUseExploreStage ? 'primary' : 'ghost') + ' small" onclick="setBestUseExploreStage(\'' + stage + '\')" '
-        + (bestUseExploreBusy ? 'disabled' : '') + '>' + label + '</button>').join('') + '</nav>'
+        + (bestUseExploreBusy || !stageReady[stage] ? 'disabled' : '') + '>' + label + '</button>').join('') + '</nav>'
         + '<p class="tenant-hint' + (!bestUseExploreBusy && missing.length ? ' best-use-readiness-missing' : '')
         + '" role="status">' + (bestUseExploreBusy ? WFT('best_use.busy', 'جاري معالجة التوزيع...')
           : missing.length ? WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', { items: missing.map(bestUseMissingLabel).join('، ') })
             : WFT('best_use_explore.ready', 'بيانات الأرض والموقع معتمدة؛ الاستكشاف مستقل عن فكرة المشروع ودراسة السوق.')) + '</p>'
+        + (bestUseExploreNotice ? '<p class="tenant-hint best-use-readiness-missing" role="alert">' + escapeHtml(bestUseExploreNotice) + '</p>' : '')
         + content;
       const liveInput = document.getElementById('bestUseExploreChatInput');
       if (liveInput) {
@@ -267,8 +297,7 @@
       if (tenantProjectData?.draftId !== requestContext.draftId || response.draftId !== requestContext.draftId) {
         console.warn('[BEST-USE-EXPLORE] response rejected: draft mismatch',
           { expected: requestContext.draftId, current: tenantProjectData?.draftId, received: response?.draftId });
-        toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-        return false;
+        return bestUseExploreFail(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
       }
       const fresh = (typeof draftEditCounter === 'undefined' || draftEditCounter === requestContext.editCounter)
         && bestUseStable(bestUseExploreSourceSnapshot()) === bestUseStable(requestContext.sourceSnapshot);
@@ -283,8 +312,7 @@
         // A mode response is authoritative server state — pending edits in
         // other fields must not desync the client from the stored mode.
         if (!requestContext.modeSwitch) {
-          toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-          return false;
+          return bestUseExploreFail(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
         }
       }
       if (response.bestUseMode) tenantProjectData.best_use_mode = response.bestUseMode;
@@ -310,7 +338,8 @@
         BEST_USE_SEARCH_FAILED: ['best_use_explore.search_failed', 'تعذر إجراء مسح أسعار حي موثق.']
       };
       const entry = keys[response?.error_code];
-      return entry ? WFT(entry[0], entry[1]) : bestUseErrorText(response);
+      const base = entry ? WFT(entry[0], entry[1]) : bestUseErrorText(response);
+      return entry && response?.validation ? base + ' ' + wfTr(String(response.validation)) : base;
     }
 
     function runBestUseExplore(action, options = {}) {
@@ -324,6 +353,7 @@
           && !confirm(WFT('best_use.replace_confirm', 'اعتماد هذا التوزيع واستبدال جميع المكونات الحالية؟ سيعود قسم الدراسة المالية إلى مسودة.'))) return Promise.resolve(false);
       bestUseExploreTask = (async () => {
         bestUseExploreBusy = true;
+        bestUseExploreNotice = '';
         renderBestUse();
         showLoader(WFT('best_use.processing_title', 'أفضل استخدامات'), WFT('best_use.saving', 'حفظ بيانات المشروع'), 5);
         try {
@@ -335,8 +365,7 @@
             // conflicts). The endpoint applies the switch to the stored draft
             // atomically, and the response heals the client's revision.
             if (!initialId) {
-              toast(WFT('best_use.draft_missing', 'المسودة غير محفوظة بعد.'));
-              return false;
+              return bestUseExploreFail(WFT('best_use.draft_missing', 'المسودة غير محفوظة بعد.'));
             }
             requestContext = { draftId: initialId, modeSwitch: true,
               editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter,
@@ -345,8 +374,7 @@
             const initial = bestUseExploreSourceSnapshot();
             if (!(await saveProjectAsDraft(true, false))) {
               console.warn('[BEST-USE-EXPLORE]', action, 'aborted: draft save failed');
-              toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
-              return false;
+              return bestUseExploreFail(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.'));
             }
             const afterSave = bestUseExploreSourceSnapshot();
             if (bestUseStable(initial) !== bestUseStable(afterSave)) {
@@ -356,8 +384,7 @@
             }
             if (tenantProjectData?.draftId !== initialId
                 || bestUseStable(initial) !== bestUseStable(afterSave)) {
-              toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
-              return false;
+              return bestUseExploreFail(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
             }
             requestContext = { draftId: initialId, editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter, sourceSnapshot: afterSave };
           }
@@ -397,8 +424,7 @@
           if (response?.jobId && !['completed', 'failed'].includes(response.status)) response = { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
           if (!response?.success) {
             console.warn('[BEST-USE-EXPLORE]', action, 'request failed:', response);
-            toast(bestUseExploreErrorText(response));
-            return false;
+            return bestUseExploreFail(bestUseExploreErrorText(response));
           }
           const received = applyBestUseExploreResponse(response, requestContext);
           if (received && ['chat', 'revise'].includes(action)) {
@@ -409,7 +435,7 @@
           return received;
         } catch (error) {
           console.warn('[BEST-USE-EXPLORE]', action, 'threw:', error);
-          toast(WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
+          bestUseExploreFail(WFT('best_use.failed', 'تعذر معالجة أفضل استخدامات.'));
           return false;
         } finally {
           bestUseExploreBusy = false;
