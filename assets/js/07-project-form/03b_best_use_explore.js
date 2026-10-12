@@ -166,7 +166,7 @@
         bestUseOptionText(investmentModels, row.investmentModel)].map(value => '<td>' + escapeHtml(value) + '</td>').join('') + '</tr>').join('');
       return '<h4>' + escapeHtml(artifact.title || '') + '</h4><div class="table-wrap"><table class="best-use-table"><thead><tr>'
         + headings.map(label => '<th>' + label + '</th>').join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-        + '<p class="best-use-warning">' + WFT('best_use_explore.planning_only', 'سيناريو تخطيطي لا يشمل التكاليف أو صافي العائد.') + '</p>'
+        + bestUseWarningHtml(WFT('best_use_explore.planning_only', 'سيناريو تخطيطي لا يشمل التكاليف أو صافي العائد.'))
         + '<p>' + escapeHtml(artifact.rationale || '') + '</p><p>' + escapeHtml(artifact.setbackExplanation || '') + '</p>'
         + bestUseArray(artifact.components).map(row => '<article class="best-use-source"><h5>' + escapeHtml(row.name) + '</h5><p>'
           + escapeHtml(row.reason || '') + '</p><p>' + escapeHtml(row.areaReason || '') + '</p><p>'
@@ -183,8 +183,8 @@
       const types = bestUseDecoded(bestUseFieldValue('project_type'), []);
       const expected = [...new Set((concept.uses || []).map(use => main[use]).filter(Boolean))].sort();
       if (Array.isArray(types) && bestUseStable([...types].sort()) === bestUseStable(expected)) return '';
-      return '<p class="best-use-warning">' + WFT('best_use_explore.type_mismatch',
-        'استخدام المفهوم يختلف عن نوع المشروع المسجل؛ البيانات الأساسية ودراسة السوق تخصان النوع المسجل.') + '</p>';
+      return bestUseWarningHtml(WFT('best_use_explore.type_mismatch',
+        'استخدام المفهوم يختلف عن نوع المشروع المسجل؛ البيانات الأساسية ودراسة السوق تخصان النوع المسجل.'));
     }
 
     function setBestUseExploreStage(stage) { bestUseExploreStage = stage; renderBestUse(); }

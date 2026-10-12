@@ -272,6 +272,11 @@
       renderBestUse();
     }
 
+    function bestUseWarningHtml(text) {
+      return '<p class="best-use-warning"><strong class="best-use-warning-tag">'
+        + escapeHtml(WFT('best_use.warning_tag', 'تنبيه')) + '</strong><span>' + escapeHtml(text) + '</span></p>';
+    }
+
     function renderBestUse() {
       const root = document.getElementById(BEST_USE_SECTION_KEY);
       if (!root) return;
@@ -300,15 +305,6 @@
       } else {
         const budget = state.capacity || {};
         const totals = state.totals || {};
-        const metrics = [
-          [WFT('best_use.land_area', 'مساحة الأرض'), budget.landArea],
-          [WFT('best_use.far', 'معامل مسطح البناء FAR'), budget.far],
-          [WFT('best_use.floors', 'الأدوار المعتمدة'), budget.floors],
-          [WFT('best_use.footprint', 'المسطح الأرضي المتاح'), budget.footprintLimit],
-          [WFT('best_use.capacity', 'الحد الأقصى للمسطحات'), budget.maxBuiltArea],
-          [WFT('best_use.proposed_area', 'المسطحات المقترحة'), totals.builtArea],
-          [WFT('best_use.basement_area', 'مسطحات البدروم المقترحة'), totals.basementArea]
-        ];
         const headings = [WFT('best_use.component', 'المكون'), WFT('best_use.use', 'الاستخدام'),
           WFT('best_use.units', 'عدد الوحدات'), WFT('best_use.unit_area', 'مساحة الوحدة م²'),
           WFT('best_use.built_area', 'المساحة المبنية م²'), WFT('best_use.revenue_area', 'المساحة البيعية / التأجيرية م²'),
@@ -323,21 +319,20 @@
             : approved ? WFT('best_use.approved', 'معتمد') : WFT('best_use.pending', 'بانتظار الاعتماد');
         proposal.innerHTML = `
           <div class="best-use-proposal-heading"><h4>${escapeHtml(state.title || WFT('best_use.distribution', 'التوزيع المقترح'))}</h4><span class="best-use-status">${escapeHtml(status)}</span></div>
-          <div class="best-use-metrics">${metrics.map(([label, value]) => '<div><span>' + escapeHtml(label) + '</span><strong>' + bestUseFormat(value) + '</strong></div>').join('')}</div>
-          ${budget.setbackVerified === false ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.geometry_unverified', 'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.')) + '</p>' : ''}
-          ${totals.basementArea > 0 && budget.basementVerified === false ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) + '</p>' : ''}
-          ${!current ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) + '</p>' : ''}
+          ${budget.setbackVerified === false ? bestUseWarningHtml(WFT('best_use.geometry_unverified', 'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.')) : ''}
+          ${totals.basementArea > 0 && budget.basementVerified === false ? bestUseWarningHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) : ''}
+          ${!current ? bestUseWarningHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
           ${typeof bestUseRevenuePotentialHtml === 'function' ? bestUseRevenuePotentialHtml(state.revenuePotential) : ''}
           <div class="best-use-actions best-use-decisions">
             <button type="button" class="btn primary small" onclick="runBestUseAction('${approved ? 'unapproved' : 'approved'}')" ${bestUseBusy || locked || (!approved && (!current || unavailable)) ? 'disabled' : ''}>${approved ? WFT('best_use.unapprove', 'الغاء الاعتماد') : WFT('best_use.approve', 'اعتماد واستبدال المكونات')}</button>
             <button type="button" class="btn ghost small" onclick="runBestUseAction('rejected')" ${bestUseBusy || locked || approved || state.rejected ? 'disabled' : ''}>${WFT('best_use.reject', 'رفض الاقتراح')}</button>
           </div>
-          ${state.unlinkedRevenueRows ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) + '</p>' : ''}
-          <section class="best-use-reasons"><h4>${WFT('best_use.reason_title', 'سبب اختيار هذا التوزيع')}</h4>
+          ${state.unlinkedRevenueRows ? bestUseWarningHtml(WFT('best_use.revenue_links', 'بنود إيرادات بدون ارتباط بمكون بعد الاستبدال: {n}', { n: bestUseFormat(state.unlinkedRevenueRows) })) : ''}
+          <section class="best-use-reasons"><span class="best-use-note-tag">${WFT('best_use.notes_tag', 'ملاحظات الاقتراح')}</span><h4>${WFT('best_use.reason_title', 'سبب اختيار هذا التوزيع')}</h4>
             <p>${escapeHtml(state.rationale || '')}</p>
             <p>${escapeHtml(state.setbackExplanation || '')}</p>
-            ${rows.map(row => '<article><h5>' + escapeHtml(row.name || '') + '</h5><p>' + escapeHtml(row.reason || '') + '</p><h6>' + WFT('best_use.area_reason', 'أساس توزيع المساحة') + '</h6><p>' + escapeHtml(row.areaReason || '') + '</p></article>').join('')}
+            ${rows.map(row => '<article><h5>' + escapeHtml(row.name || '') + '</h5><h6>' + WFT('best_use.pick_reason', 'سبب الاختيار') + '</h6><p>' + escapeHtml(row.reason || '') + '</p><h6>' + WFT('best_use.area_reason', 'أساس توزيع المساحة') + '</h6><p>' + escapeHtml(row.areaReason || '') + '</p></article>').join('')}
           </section>`;
       }
       const messages = document.getElementById('bestUseChatMessages');

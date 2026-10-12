@@ -35,6 +35,17 @@
 .best-use-proposal-heading h4 {
   margin: 0;
 }
+.best-use-note-tag {
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #DCE3EB);
+  background: var(--teal-soft, #DFF6FB);
+  color: var(--teal-dark, #0A829B);
+  font-size: 11px;
+  font-weight: 700;
+}
+/* Also styles #landComputedMetrics in the location section. */
 .best-use-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -82,12 +93,34 @@
 .best-use-decisions {
   margin: 16px 0;
 }
+/* Warnings must read as something that needs the client's attention, so they
+   run amber rather than the calm teal used for informational notes. */
 .best-use-warning {
-  padding: 12px;
-  border-inline-start: 3px solid var(--teal-bright, #17C8E3);
-  background: var(--teal-soft, #DFF6FB);
-  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #E5B567;
+  border-inline-start: 4px solid #D9962B;
+  background: #FDF6E4;
+  border-radius: 8px;
   font-size: 13px;
+  font-weight: 600;
+  color: #6B4E10;
+}
+.best-use-warning-tag {
+  flex: none;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: #D9962B;
+  color: var(--white, #FFFFFF);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.9;
+}
+.best-use-warning > span {
+  flex: 1;
+  line-height: 1.8;
 }
 .best-use-reasons {
   display: grid;
@@ -95,7 +128,7 @@
   padding: 18px;
   border: 1px solid var(--border, #DCE3EB);
   border-radius: 12px;
-  background: var(--white, #FFFFFF);
+  background: #F8FAFC;
 }
 .best-use-reasons h4,
 .best-use-reasons h5,

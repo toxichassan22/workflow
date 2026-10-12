@@ -37,7 +37,9 @@
         [WFT('best_use_explore.sale_potential', 'إمكان إيراد البيع التقديري'), metric.saleTotal],
         [WFT('best_use_explore.rent_potential', 'إمكان إيراد الإيجار السنوي التقديري'), metric.annualRentTotal]
       ].filter(([, value]) => value !== null && value !== undefined);
-      return '<section class="best-use-revenue"><h5>' + WFT('best_use_explore.revenue_title', 'إمكان الإيراد التقديري') + '</h5>'
+      return '<section class="best-use-revenue"><span class="best-use-note-tag">'
+        + WFT('best_use_explore.note_tag', 'ملاحظة توضيحية') + '</span><h5>'
+        + WFT('best_use_explore.revenue_title', 'إمكان الإيراد التقديري') + '</h5>'
         + values.map(([label, value]) => '<p>' + escapeHtml(label) + ': ' + bestUseFormat(value) + ' '
           + WFT('best_use_explore.currency', 'ريال سعودي') + '</p>').join('')
         + '<p>' + escapeHtml(labels[metric.comparisonStatus] || labels.insufficient_data) + '</p>'
