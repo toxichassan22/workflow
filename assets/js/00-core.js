@@ -19,7 +19,9 @@
     let loaderHideTimer = null;
     let loaderProgressValue = 0;
     let loaderProgressStartValue = 0;
+    let loaderProgressAnchorAt = 0;
     let loaderProgressMax = 92;
+    let loaderProgressReal = false;
     let loaderSessionActive = false;
     let genProgressValue = 0;
     const inlineLoaderTimers = new WeakMap();
@@ -53,11 +55,14 @@
 
     function startLoaderProgressTimer() {
       stopLoaderProgressTimer();
-      const startedAt = Date.now();
+      loaderProgressAnchorAt = Date.now();
       loaderProgressStartValue = loaderProgressValue;
       loaderProgressTimer = setInterval(() => {
-        const elapsed = Date.now() - startedAt;
-        const estimated = Math.min(loaderProgressMax, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
+        const elapsed = Date.now() - loaderProgressAnchorAt;
+        const ceiling = loaderProgressReal
+          ? Math.min(loaderProgressMax, loaderProgressStartValue + 10)
+          : loaderProgressMax;
+        const estimated = Math.min(ceiling, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
         if (estimated > loaderProgressValue) renderLoaderProgress(estimated);
       }, 700);
     }
@@ -78,6 +83,7 @@
       } else {
         loaderSessionActive = true;
         loaderProgressValue = 0;
+        loaderProgressReal = false;
         renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
       }
       loader.style.display = 'flex';
@@ -88,6 +94,9 @@
       const prog = document.getElementById('globalLoaderProgress');
       if (prog) prog.style.display = 'block';
       renderLoaderProgress(pct, stepText);
+      loaderProgressReal = true;
+      loaderProgressAnchorAt = Date.now();
+      loaderProgressStartValue = loaderProgressValue;
     }
 
     function hideLoader(completionText) {
@@ -102,6 +111,7 @@
         loader.style.display = 'none';
         loaderSessionActive = false;
         loaderProgressMax = 92;
+        loaderProgressReal = false;
         renderLoaderProgress(0, WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
       }, 420);
     }

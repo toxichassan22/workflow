@@ -428,7 +428,11 @@
               land: WFT('best_use_explore.land_stage', 'التوزيع الأرضي'), floors: WFT('best_use_explore.floors_stage', 'توزيع الأدوار'),
               saving: WFT('best_use.saving', 'حفظ بيانات المشروع')
             };
-            updateLoaderProgress(response?.progress || 20, labels[response?.step] || WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم'));
+            let label = labels[response?.step] || WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم');
+            const detail = response?.detail;
+            if (detail && detail.use) label += ' — ' + bestUseExploreUseLabel(detail.use);
+            if (detail && Number(detail.index) > 0 && Number(detail.total) > 1) label += ' ' + detail.index + '/' + detail.total;
+            updateLoaderProgress(response?.progress || 20, label);
           }
           if (response?.jobId && !['completed', 'failed'].includes(response.status)) response = { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
           if (!response?.success) {

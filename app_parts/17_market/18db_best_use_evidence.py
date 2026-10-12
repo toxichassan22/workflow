@@ -96,7 +96,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     candidates = []
     for index, use in enumerate(uses):
         if progress:
-            progress(20 + int(35 * index / max(1, len(uses))), 'prices')
+            progress(20 + int(35 * index / max(1, len(uses))), 'prices',
+                     {'use': use, 'index': index + 1, 'total': len(uses)})
         prompt = json.dumps({'city': city, 'district': district, 'use': use,
                             'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
         response, error = _call_market_study_model(
@@ -127,7 +128,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     urls = list(dict.fromkeys(best_use_prices.clean_url(row.get('url')) for row in candidates))
     for index, url in enumerate(urls):
         if progress:
-            progress(55 + int(8 * index / max(1, len(urls))), 'priceEvidence')
+            progress(55 + int(8 * index / max(1, len(urls))), 'priceEvidence',
+                     {'index': index + 1, 'total': len(urls)})
         if not url:
             continue
         page = _best_use_price_page(url)

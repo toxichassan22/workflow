@@ -49,10 +49,13 @@ def _best_use_explore_execute(draft, data, kind, job=None):
     stage_error = _best_use_explore_stage_error(project, kind, data)
     if stage_error:
         return stage_error
-    def progress(value, step):
+    def progress(value, step, detail=None):
         if job:
-            _write_job(_BEST_USE_JOB_NAMESPACE, job[0], job[1], {'status': 'running', 'flow': 'explore',
-                'draftId': draft['id'], 'progress': value, 'step': step})
+            payload = {'status': 'running', 'flow': 'explore',
+                'draftId': draft['id'], 'progress': value, 'step': step}
+            if detail:
+                payload['detail'] = detail
+            _write_job(_BEST_USE_JOB_NAMESPACE, job[0], job[1], payload)
     try:
         if kind == 'concepts':
             progress(10, 'regulations')
@@ -84,7 +87,7 @@ def _best_use_explore_execute(draft, data, kind, job=None):
                                         'message': message, 'revise': data.get('revise') is True}, ensure_ascii=False)
         feedback, parsed, normalized = '', None, None
         for attempt in range(3):
-            progress(65 + attempt * 8, stage)
+            progress(65 + attempt * 8, stage, {'index': attempt + 1, 'total': 3})
             response = call_text_chat(system, prompt + feedback, max_tokens=10000 if targets else 2500,
                                       timeout=100, reasoning_effort='low', response_format={'type': 'json_object'},
                                       image_references=_best_use_map_references(draft),
@@ -237,7 +240,8 @@ def api_best_use_explore_job(job_id):
         result, status = _best_use_error('BEST_USE_JOB_INTERRUPTED', 503)
         return jsonify(result), status
     return jsonify({'success': True, 'status': job.get('status') or 'running', 'jobId': job_id,
-                    'progress': job.get('progress') or 10, 'step': job.get('step') or 'regulations'})
+                    'progress': job.get('progress') or 10, 'step': job.get('step') or 'regulations',
+                    'detail': job.get('detail')})
 
 
 @app.route('/api/best-use/explore/concepts/select', methods=['POST'])
