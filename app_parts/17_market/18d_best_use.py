@@ -59,10 +59,13 @@ def _sanitize_best_use_claims(project, stored):
         else:
             project.pop(key, None)
     proposal = best_use.read_object(project.get('best_use_data'))
-    if proposal.get('id') and not best_use.proposal_current(project, proposal):
-        proposal.update(approved=False, inputsChanged=True)
-        for key in ('approvedAt', 'approvedBy', 'approvedContentHash', 'approvedInputHash'):
-            proposal.pop(key, None)
+    if proposal.get('id'):
+        if best_use.proposal_current(project, proposal):
+            proposal.pop('inputsChanged', None)
+        else:
+            proposal.update(approved=False, inputsChanged=True)
+            for key in ('approvedAt', 'approvedBy', 'approvedContentHash', 'approvedInputHash'):
+                proposal.pop(key, None)
         project['best_use_data'] = proposal
 
 
@@ -266,6 +269,7 @@ def _best_use_execute(draft, data, kind, job=None):
                 project['best_use_data'] = proposal
             if kind == 'chat':
                 reply = _land_chat_clean_reply(best_use.text(parsed.get('reply'), 16000))
+                reply = re.sub(r'\s*[(（]?\s*revise\s*=\s*(?:true|false)\s*[)）]?', '', reply, flags=re.I).strip()
                 if not reply:
                     raise best_use.ProposalError('إجابة الشات غير متوفرة.')
                 project['best_use_chat'] = {'messages': (history + [

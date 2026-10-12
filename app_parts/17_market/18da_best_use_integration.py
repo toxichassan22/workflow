@@ -131,16 +131,20 @@ def api_best_use_mode():
     project = copy.deepcopy(draft.get('draft_data') or {})
     if _best_use_active_mode(project) == data['mode']:
         return jsonify(_best_use_explore_response(draft))
-    guided = best_use.read_object(project.get('best_use_data'))
-    if guided.get('id'):
-        guided.update(approved=False, inputsChanged=True)
-        for key in ('approvedAt', 'approvedBy'):
-            guided.pop(key, None)
-        project['best_use_data'] = guided
+    # A mode switch flips the server-owned flag only. It is not an input edit:
+    # the guided proposal and the explore artifacts keep their approval and
+    # freshness — real input changes are caught by the save-path sanitizers,
+    # which re-verify hashes and mark inputsChanged only when they diverge.
     explore = best_use_contract.read_object(project.get('best_use_explore_data'))
     explore.setdefault('mode', 'explore')
-    best_use_workflow.invalidate(explore, best_use_workflow.ARTIFACTS)
     project.update(best_use_mode=data['mode'], best_use_explore_data=explore)
+    # Heal stale markers left over from earlier behaviour: artifacts whose
+    # hashes still verify are current again, genuinely stale ones stay flagged.
+    best_use_workflow.refresh(project)
+    guided = best_use.read_object(project.get('best_use_data'))
+    if guided.get('id') and best_use.proposal_current(project, guided):
+        guided.pop('inputsChanged', None)
+        project['best_use_data'] = guided
     statuses = dict(draft.get('section_statuses') or {})
     if _best_use_required(project):
         statuses[best_use.SECTION_KEY] = 'draft'

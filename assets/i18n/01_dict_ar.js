@@ -9,6 +9,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "best_use.message": "الرسالة",
   "best_use.send": "إرسال",
   "best_use.revise": "تحديث التوزيع",
+  "best_use.apply_discussed": "طبّق التعديلات التي نوقشت في المحادثة.",
   "best_use.inputs_changed": "تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.",
   "best_use.approval_required": "اقتراح أفضل استخدامات غير معتمد.",
   "best_use.need_type": "نوع المشروع",

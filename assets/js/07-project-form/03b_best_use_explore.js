@@ -42,7 +42,9 @@
       const maps = bestUseObject(bestUseObject(tenantProjectData?.tenantCreativeImages).map_placeholders);
       snapshot.maps = Object.fromEntries(['##MAP_OVERVIEW##', '##MAP_ACCESS##', '##MAP_CATCHMENT##', '##MAP_LANDMARKS##']
         .filter(key => maps[key]).map(key => [key, maps[key]]));
-      snapshot.mode = bestUseActiveMode();
+      // Pin the snapshot to the explore family's own mode marker, not the live
+      // toggle — switching modes is not an input change.
+      snapshot.mode = bestUseExploreState().mode || 'explore';
       return bestUseNormalizeMedia(snapshot);
     }
 
@@ -54,6 +56,10 @@
     function bestUseExploreCurrent(name, visited = []) {
       const state = bestUseExploreState();
       const artifact = state[name];
+      // Per-artifact inputsChanged carries staleness the client cannot
+      // recompute (an artifact built against an older dependency version) —
+      // the server keeps it accurate via refresh(), which also heals flags
+      // whose inputs verify unchanged again.
       if (visited.includes(name) || !artifact?.id || artifact.inputsChanged || artifact.rejected) return false;
       if (bestUseStable(bestUseExploreSourceSnapshot()) !== bestUseStable(bestUseNormalizeMedia(state.sourceSnapshot || {}))) return false;
       if (!BEST_USE_EXPLORE_DEPENDENCIES[name].every(key => bestUseExploreCurrent(key, [...visited, name]))) return false;

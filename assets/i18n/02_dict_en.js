@@ -9,6 +9,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use.message": "Message",
   "best_use.send": "Send",
   "best_use.revise": "Update Distribution",
+  "best_use.apply_discussed": "Apply the changes discussed in the conversation.",
   "best_use.inputs_changed": "The land, location, or market study data used for this proposal has changed.",
   "best_use.approval_required": "The Best Use proposal is not approved.",
   "best_use.need_type": "Project type",

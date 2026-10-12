@@ -111,6 +111,9 @@
       // Responses re-sign /uploads/ links (an expiring ?s= token), so the stored
       // snapshot arrives signed while the live snapshot is normalized. Compare
       // both sides through the same normalization or the approval stays disabled.
+      // inputsChanged is server-maintained (also covers price-evidence expiry
+      // the client cannot recompute); the snapshot compare catches local edits.
+      // Both heal — the flag clears once the server verifies the inputs again.
       return !!state.id && !state.inputsChanged
         && bestUseStable(bestUseSourceSnapshot()) === bestUseStable(bestUseNormalizeMedia(state.sourceSnapshot || {}));
     }
@@ -390,7 +393,8 @@
       history.forEach(item => {
         const bubble = document.createElement('div');
         bubble.className = 'best-use-chat-message ' + (item.role === 'user' ? 'user' : 'assistant');
-        bubble.textContent = item.content || '';
+        bubble.textContent = String(item.content || '')
+          .replace(/\s*[(（]?\s*revise\s*=\s*(?:true|false)\s*[)）]?/gi, '').trim();
         messages.appendChild(bubble);
       });
       if (bestUseBusy) {
@@ -455,8 +459,11 @@
       if (!hasPermission('create_presentation')) return Promise.resolve(false);
       if (action === 'approved' && !confirm(WFT('best_use.replace_confirm', 'اعتماد هذا التوزيع واستبدال جميع المكونات الحالية؟ سيعود قسم الدراسة المالية إلى مسودة.'))) return Promise.resolve(false);
       const input = document.getElementById('bestUseChatInput');
-      const message = String(input?.value || '').trim();
-      if (['chat', 'revise'].includes(action) && !message) return Promise.resolve(false);
+      let message = String(input?.value || '').trim();
+      if (['chat', 'revise'].includes(action) && !message) {
+        if (action !== 'revise' || !bestUseArray(bestUseChatState().messages).length) return Promise.resolve(false);
+        message = WFT('best_use.apply_discussed', 'طبّق التعديلات التي نوقشت في المحادثة.');
+      }
       bestUseRequestTask = (async () => {
         bestUseBusy = true;
         renderBestUse();

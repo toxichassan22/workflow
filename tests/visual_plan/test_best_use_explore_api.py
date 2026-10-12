@@ -227,7 +227,7 @@ class ExplorationApiTests(unittest.TestCase):
         after = self.draft()['draft_data']
         self.assertEqual(after['best_use_mode'], 'guided')
         self.assertEqual(after['financial_study_model'], before['draft_data']['financial_study_model'])
-        self.assertTrue(after['best_use_explore_data']['floorDistribution']['inputsChanged'])
+        self.assertFalse(after['best_use_explore_data']['floorDistribution'].get('inputsChanged', False))
         self.assertTrue(after['best_use_explore_data']['concepts']['items'])
 
     def test_a_job_cannot_write_over_a_racing_save(self):

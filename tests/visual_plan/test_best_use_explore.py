@@ -136,14 +136,16 @@ class ExplorationContractTests(unittest.TestCase):
                 artifact['approved'] = True
         self.assertEqual(workflow.section_error(self.project), 'BEST_USE_APPROVAL_REQUIRED')
 
-    def test_mode_and_land_changes_invalidate_current_versions(self):
+    def test_mode_switches_preserve_freshness_while_land_changes_invalidate(self):
         self.populate()
         previous = copy.deepcopy(self.project)
         self.project['approved_floor_count'] = 5
         self.assertFalse(workflow.current(self.project, 'regulations'))
         self.assertFalse(workflow.current(self.project, 'floorDistribution'))
         previous['best_use_mode'] = 'guided'
-        self.assertFalse(workflow.current(previous, 'concepts'))
+        self.assertTrue(workflow.current(previous, 'concepts'))
+        workflow.refresh(previous)
+        self.assertFalse(previous['best_use_explore_data']['concepts'].get('inputsChanged', False))
 
 
 if __name__ == '__main__':

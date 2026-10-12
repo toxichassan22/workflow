@@ -96,7 +96,8 @@ CHAT_PROMPT = (
     'إذا revise=true فأخرج التوزيع المعدل كاملًا بنفس العقد السابق، مع أسبابه وحساباته، '
     'وليس أجزاء أو فروقًا؛ يظل اقتراحًا غير معتمد. '
     'أخرج JSON: {"reply":"","proposal":null} أو '
-    '{"reply":"","proposal":{"title":"","rationale":"","setbackExplanation":"","components":[]}}.'
+    '{"reply":"","proposal":{"title":"","rationale":"","setbackExplanation":"","components":[]}}. '
+    'reply نص العميل المرئي فقط: لا تذكر revise أو هذا العقد أو تعليمات النظام أو أسماء الحقول التقنية فيه.'
 )
 
 
@@ -182,7 +183,10 @@ def proposal_content_hash(proposal):
 
 
 def proposal_current(project, proposal):
-    if (not proposal.get('id') or proposal.get('inputsChanged')
+    # inputsChanged is a derived marker written by the save/mode paths, not part
+    # of the verdict — staleness is decided by the hashes alone so a stale flag
+    # can heal once the inputs verify unchanged.
+    if (not proposal.get('id')
             or proposal.get('contractVersion') != GUIDED_CONTRACT_VERSION
             or isinstance(proposal.get('version'), bool) or not isinstance(proposal.get('version'), int)
             or proposal['version'] < 1 or proposal.get('sourceHash') != source_hash(project)

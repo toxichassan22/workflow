@@ -44,7 +44,11 @@ def source_snapshot(project):
                          number(value) if key in NUMBER_FIELDS else text(value, 30000))
     maps = read_object(read_object(project.get('tenantCreativeImages')).get('map_placeholders'))
     snapshot['maps'] = {key: maps[key] for key in MAP_TOKENS if maps.get(key)}
-    snapshot['mode'] = project.get('best_use_mode') or 'guided'
+    # The snapshot must describe the artifact family's inputs, not the live UI
+    # toggle — reading best_use_mode here would make every mode switch hash as
+    # an input change. Pin it to the explore state's own marker, mirroring the
+    # guided side which reads best_use_data.mode.
+    snapshot['mode'] = read_object(project.get('best_use_explore_data')).get('mode') or 'explore'
     return db.normalize_generation_input(snapshot)
 
 
@@ -59,7 +63,7 @@ def prompt_context(project):
 def missing_inputs(project, statuses):
     source = source_snapshot(project)
     missing = []
-    if source['mode'] != 'explore':
+    if (project.get('best_use_mode') or 'guided') != 'explore':
         missing.append('best_use_mode')
     if not source['land_documents_files_file_ids']:
         missing.append('croquis')
@@ -116,7 +120,7 @@ def current(project, name, visited=None):
     visited.add(name)
     state = read_object(project.get('best_use_explore_data'))
     artifact = state.get(name)
-    if not isinstance(artifact, dict) or not artifact.get('id') or artifact.get('inputsChanged') or artifact.get('rejected'):
+    if not isinstance(artifact, dict) or not artifact.get('id') or artifact.get('rejected'):
         return False
     if any(not current(project, dependency, visited) for dependency in DEPENDENCIES[name]):
         return False
@@ -148,8 +152,16 @@ def refresh(project):
     state = read_object(project.get('best_use_explore_data'))
     if state.get('mode') != 'explore':
         return state
+    probe = dict(project, best_use_explore_data=state)
     for name in ARTIFACTS:
-        if state.get(name) and not current(dict(project, best_use_explore_data=state), name):
+        artifact = state.get(name)
+        if not isinstance(artifact, dict) or not artifact.get('id'):
+            continue
+        if current(probe, name):
+            # inputsChanged is a derived marker, not a verdict: heal it when the
+            # hashes verify the artifact is still built on the current inputs.
+            artifact['inputsChanged'] = False
+        else:
             invalidate(state, (name,))
     project['best_use_explore_data'] = state
     return state
