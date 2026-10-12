@@ -38,7 +38,9 @@ SYSTEM_PROMPT = (
 CONCEPT_PROMPT = SYSTEM_PROMPT + (
     'المطلوب حتى ثلاثة مفاهيم متميزة. لكل مفهوم name وsummary وsiteFit وrevenueBasis '
     'وuses وcomponents بتوزيع مسطحات تقديري صالح ضمن capacity. '
-    'uses مفاتيح من permittedUses حصرًا وبنفس الإملاء الإنجليزي. '
+    'uses مفاتيح من permittedUses حصرًا وبنفس الإملاء الإنجليزي، وكل useType في components '
+    'يكون ضمن uses المعلنة للمفهوم نفسه. السماح التنظيمي سقف صارم: لا تقترح استخدامًا '
+    'خارج permittedUses مهما كانت ملاءمته التجارية، ولا تمزج استخدامات غير مسموحة. '
     'لا تضع أي مؤشر إيراد أو ترتيب بنفسك. المخرج {"concepts":[]}.'
 )
 LAND_PROMPT = SYSTEM_PROMPT + (
