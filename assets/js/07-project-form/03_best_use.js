@@ -197,7 +197,13 @@
         approved_floor_count: ['best_use.need_floors', 'الأدوار المعتمدة'],
         approved_floor_area_ratio: ['best_use.need_far', 'معامل مسطح البناء المعتمد FAR'],
         approved_coverage_ratio: ['best_use.need_coverage', 'تغطية البناء'],
+        approved_typical_floor_coverage: ['best_use.need_typical_coverage', 'تغطية الأدوار المتكررة'],
         setbacks: ['best_use.need_setbacks', 'الارتدادات'], allowed_uses: ['best_use.need_uses', 'الاستخدامات المسموحة'],
+        land_and_building_summary: ['best_use.need_land_summary', 'ملخص بيانات الأرض والاشتراطات'],
+        regulatory_constraints: ['best_use.need_constraints', 'القيود التنظيمية'],
+        building_ratio_coverage: ['best_use.need_ratio', 'نسبة البناء والتغطية المعتمدة'],
+        directions_table: ['best_use.need_directions', 'جدول الاتجاهات والارتدادات'],
+        site_analysis: ['best_use.need_site_analysis', 'تحليل الموقع بالذكاء الاصطناعي'],
         buildable_area: ['best_use.need_buildable', 'مساحة بناء متاحة'],
         best_use_mode: ['best_use.mode_unavailable', 'وضع أفضل استخدام غير متاح حاليًا'],
         city: ['best_use.need_city', 'مدينة الأرض']

@@ -19,6 +19,8 @@ def project_fixture():
         'approved_coverage_ratio': 60,
         'approved_floor_count': 4,
         'approved_floor_area_ratio': 2,
+        'approved_typical_floor_coverage': 55,
+        'land_and_building_summary': 'أرض سكنية منتظمة على شارع شمالي',
         'building_ratio_coverage': 'التغطية المعتمدة 60% ومعامل مسطح البناء 2',
         'setbacks': 'الارتداد الأمامي 5 م، الخلفي 5 م، الجانبي 5 م',
         'allowed_uses': 'سكني وخدمات المشروع',
@@ -107,6 +109,29 @@ class BestUseTests(unittest.TestCase):
         budget = best_use.capacity(self.project)
         self.assertAlmostEqual(budget['setbackFootprint'], 3600)
         self.assertEqual(budget['maxBuiltArea'], 14400)
+
+    def test_a_parking_conditioned_setback_exposes_both_regimes(self):
+        self.project['approved_coverage_ratio'] = 90
+        self.project['approved_floor_area_ratio'] = 4
+        self.project['setbacks'] = ('الارتداد الأمامي 5 م ومع مواقف خارجية 5.5 م،'
+                                    ' الخلفي 5 م، الجانبي 5 م')
+        budget = best_use.capacity(self.project)
+        # Surface parking deepens the frontage setback to 5.5m: 90 x 39.5.
+        self.assertAlmostEqual(budget['setbackFootprint'], 3555)
+        self.assertAlmostEqual(budget['footprintLimit'], 3555)
+        # Without surface parking the base 5m regime applies: 90 x 40.
+        self.assertAlmostEqual(budget['setbackFootprintNoSurfaceParking'], 3600)
+        self.assertAlmostEqual(budget['footprintLimitNoSurfaceParking'], 3600)
+
+    def test_a_parking_conditioned_direction_cell_exposes_both_regimes(self):
+        self.project['approved_coverage_ratio'] = 90
+        self.project['approved_floor_area_ratio'] = 4
+        self.project['setbacks'] = 'الارتداد الخلفي 5 م والجانبي 5 م'
+        self.project['directions_table'] = [
+            {'direction': 'شمال', 'description': 'شارع', 'الارتداد': '5 م وعند المواقف الخارجية 5.5 م'}]
+        budget = best_use.capacity(self.project)
+        self.assertAlmostEqual(budget['setbackFootprint'], 3555)
+        self.assertAlmostEqual(budget['footprintLimitNoSurfaceParking'], 3600)
 
     def test_missing_geometry_is_reported_not_claimed_as_a_verified_envelope(self):
         self.project['survey_coordinates'] = []

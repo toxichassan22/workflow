@@ -16,24 +16,25 @@ META = {'id', 'version', 'contentHash', 'inputHash', 'generatedAt', 'approved', 
 EXPLORE_EXCLUDED = {
     'project_name', 'project_type', 'project_subtype', 'project_idea', 'project_level',
     'activity_class', 'target_audience', 'project_language', 'market_study_data',
-    'land_documents_analysis', 'allowed_uses', 'land_use_status',
-    'land_and_building_summary', 'regulatory_constraints',
+    'land_documents_analysis', 'land_use_status',
 }
 
 
 SOURCE_FIELDS = (
     'draftId', 'land_documents_files_file_ids', 'croquis_land_area', 'approved_financial_area',
     'approved_coverage_ratio', 'approved_floor_count', 'approved_floor_area_ratio',
-    'building_ratio_coverage', 'setbacks', 'max_floors_height', 'boundary_lengths',
-    'surrounding_streets', 'survey_coordinates', 'directions_table', 'location_address',
-    'location_lat', 'location_lng', 'city', 'district', 'site_analysis', 'main_roads',
+    'approved_typical_floor_coverage', 'building_ratio_coverage', 'setbacks', 'max_floors_height',
+    'boundary_lengths', 'surrounding_streets', 'survey_coordinates', 'directions_table',
+    'location_address', 'location_lat', 'location_lng', 'city', 'district', 'site_analysis', 'main_roads',
     'nearby_landmarks_data', 'city_landmarks_data', 'catchment_areas',
     'location_polygon', 'location_polygon_source', 'plot_number_croquis', 'plan_number', 'zoning_code',
+    'allowed_uses', 'land_and_building_summary', 'regulatory_constraints',
 )
 JSON_FIELDS = {'land_documents_files_file_ids': [], 'survey_coordinates': [], 'directions_table': [],
                'nearby_landmarks_data': [], 'city_landmarks_data': [], 'location_polygon': []}
 NUMBER_FIELDS = {'croquis_land_area', 'approved_financial_area', 'approved_coverage_ratio',
-                 'approved_floor_count', 'approved_floor_area_ratio', 'location_lat', 'location_lng'}
+                 'approved_floor_count', 'approved_floor_area_ratio', 'approved_typical_floor_coverage',
+                 'location_lat', 'location_lng'}
 
 
 def source_snapshot(project):
@@ -79,10 +80,23 @@ def missing_inputs(project, statuses):
             missing.append(key)
     if source['approved_coverage_ratio'] is None or not 0 < source['approved_coverage_ratio'] <= 100:
         missing.append('approved_coverage_ratio')
+    if source['approved_floor_count'] and source['approved_floor_count'] > 1 \
+            and not (source['approved_typical_floor_coverage'] and source['approved_typical_floor_coverage'] > 0):
+        missing.append('approved_typical_floor_coverage')
     if not source['setbacks']:
         missing.append('setbacks')
     if not source['city']:
         missing.append('city')
+    # The client-declared regulation fields are the working basis — the croquis
+    # may be too old to carry them as text, so each is reported by name.
+    for key in ('allowed_uses', 'land_and_building_summary', 'regulatory_constraints',
+                'building_ratio_coverage'):
+        if not source[key]:
+            missing.append(key)
+    if not source['directions_table']:
+        missing.append('directions_table')
+    if not source['site_analysis']:
+        missing.append('site_analysis')
     if not missing and capacity(project)['maxBuiltArea'] <= 0:
         missing.append('buildable_area')
     return list(dict.fromkeys(missing))

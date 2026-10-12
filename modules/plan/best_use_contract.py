@@ -64,13 +64,21 @@ def capacity(project):
     far = number(project.get('approved_floor_area_ratio')) or 0
     coverage_footprint = area * coverage / 100
     setback, setback_issue = setback_envelope(project)
+    setback_base = setback_envelope(project, 'base')[0] if setback is not None else None
     footprint = min(coverage_footprint, setback) if setback is not None else coverage_footprint
+    footprint_base = min(coverage_footprint, setback_base) if setback_base is not None else coverage_footprint
+    typical = number(project.get('approved_typical_floor_coverage')) or 0
     return {
         'landArea': area, 'coveragePercent': coverage, 'floors': floors, 'far': far,
         'coverageFootprint': coverage_footprint, 'setbackFootprint': setback,
+        'setbackFootprintNoSurfaceParking': setback_base,
         'setbackVerified': setback is not None, 'setbackIssue': setback_issue,
         'footprintLimit': footprint,
+        'footprintLimitNoSurfaceParking': footprint_base,
         'farLimit': area * far, 'maxBuiltArea': min(area * far, footprint * floors),
+        'maxBuiltAreaNoSurfaceParking': min(area * far, footprint_base * floors),
+        'typicalFloorCoverage': typical,
+        'typicalFloorCap': area * typical / 100 if typical else None,
         'openAreaLimit': max(0, area - coverage_footprint),
         'basementAreaLimit': max(0, area),
         'warnings': [

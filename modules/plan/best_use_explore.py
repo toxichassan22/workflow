@@ -15,6 +15,11 @@ SYSTEM_PROMPT = (
     'مؤشر إمكان الإيراد يحسبه الخادم من المساحة الصافية والأسعار الموثقة، ولا ترتب ماليًا بنفسك. '
     'capacity حدود ملزمة. builtArea مجموع المسطحات، footprintArea حصة أرضية مبنية، '
     'ولا يتجاوز builtArea حاصل footprintArea في floors. الخدمات والممرات منفصلة عن revenueArea. '
+    'قد يكون الارتداد مشروطًا بالمواقف السطحية (مثل 5م للمبنى و5.5م عند استخدامه مواقف): '
+    'footprintLimit وmaxBuiltArea لتوزيع يتضمن مواقف سطحية، '
+    'وfootprintLimitNoSurfaceParking وmaxBuiltAreaNoSurfaceParking لتوزيع بلاها؛ '
+    'التزم بحدود نظام توزيعك واشرح القاعدة المختارة في setbackExplanation. '
+    'عند وجود typicalFloorCap لا يتجاوز مجموع مسطحات أي دور متكرر تلك القيمة. '
     'grossArea يساوي builtArea، وnonRevenueArea مع revenueArea يساوي grossArea. '
     'revenueAreaBasis يوضح افتراض صافي المساحة التخطيطي؛ لا توجد نسبة كفاءة مفترضة تلقائيًا. '
     'كل مكون يحمل allowedUseBasis من الدليل نفسه: documentId وpage وexcerpt وparcelScope وlandClassification. '
@@ -154,12 +159,22 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
             totals['footprintArea'] += row['footprintArea']
     if stage == 'floors' and land_ids != set(land_rows):
         raise ProposalError('توزيع الأدوار لم يحتفظ بكل مكونات الأرض.')
-    for key, limit in (('builtArea', 'maxBuiltArea'), ('footprintArea', 'footprintLimit'),
-                       ('openArea', 'openAreaLimit'), ('basementArea', 'basementAreaLimit')):
-        if totals[key] > budget[limit] + 1e-6:
+    # Parking-conditioned setbacks ("5م ومع مواقف خارجية 5.5م") pick their bound
+    # from the plan itself: a surface-parking row binds the parking envelope.
+    surface_parking = any(row.get('useType') == 'parking' and row.get('parkingLocation') == 'surface'
+                          for row in rows)
+    regime = '' if surface_parking else 'NoSurfaceParking'
+    footprint_limit, built_limit = budget['footprintLimit' + regime], budget['maxBuiltArea' + regime]
+    typical_cap = budget.get('typicalFloorCap')
+    for key, limit in (('builtArea', built_limit), ('footprintArea', footprint_limit),
+                       ('openArea', budget['openAreaLimit']), ('basementArea', budget['basementAreaLimit'])):
+        if totals[key] > limit + 1e-6:
             raise ProposalError('إجمالي مساحات الاستكشاف يتجاوز الحد: ' + key)
-    if totals['builtArea'] <= 0 or any(value > budget['footprintLimit'] + 1e-6 for value in floor_totals.values()):
+    if totals['builtArea'] <= 0 or any(value > footprint_limit + 1e-6 for value in floor_totals.values()):
         raise ProposalError('التوزيع لا يتفق مع حدود المسطحات المتاحة.')
+    if typical_cap and any(value > typical_cap + 1e-6
+                           for floor, value in floor_totals.items() if floor >= 2):
+        raise ProposalError('تخصيصات الأدوار المتكررة تتجاوز تغطيتها المعتمدة.')
     return {'title': text(raw.get('title'), 300), 'rationale': text(raw.get('rationale'), 16000),
             'setbackExplanation': text(raw.get('setbackExplanation'), 6000), 'components': rows,
             'capacity': budget, 'totals': {key: rounded(value) for key, value in totals.items()},
@@ -198,7 +213,9 @@ def concepts(raw, project, regulation_data, scan, artifact_id):
 def context(project, stage):
     state = read_object(project.get('best_use_explore_data'))
     result = workflow.prompt_context(project)
-    result['regulations'] = {key: state['regulations'].get(key) for key in ('permittedUses', 'evidence', 'constraints')}
+    result['regulations'] = {key: state['regulations'].get(key)
+                             for key in ('permittedUses', 'evidence', 'constraints',
+                                         'basis', 'scope', 'requiresApproval')}
     result['priceScan'] = {key: state['priceScan'].get(key) for key in ('table', 'observations', 'status')}
     if stage in ('land', 'floors'):
         result['selectedConcept'] = workflow.selected_concept(project)

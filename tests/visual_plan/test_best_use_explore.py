@@ -29,23 +29,43 @@ class ExplorationContractTests(unittest.TestCase):
         self.artifact('landDistribution', {'components': [{'footprintArea': 100}]})
         self.artifact('floorDistribution', {'components': [{'builtArea': 200}]})
 
-    def test_exploration_snapshot_is_independent_even_of_analysis_and_language(self):
+    def test_exploration_snapshot_stays_independent_while_tracking_declared_regulations(self):
         original = workflow.source_hash(self.project)
         self.project.update(project_type='["فندقي"]', project_idea='فندق فقط',
                             market_study_data={'summary': 'سوق آخر'}, project_language='en',
                             land_documents_analysis={'project_type': 'فندقي', 'allowed_uses': 'فندقي'},
-                            allowed_uses='فندقي', land_use_status='غير مسموح',
-                            regulatory_constraints='قيود تخص فكرة العميل')
+                            land_use_status='غير مسموح')
         self.assertEqual(workflow.source_hash(self.project), original)
         context = workflow.prompt_context(self.project)
         for key in workflow.EXPLORE_EXCLUDED:
             self.assertNotIn(key, context)
+        # The AI site analysis is a tracked explore input: it steers the
+        # distribution model, so it must be in the context and in the hash.
+        self.assertIn('site_analysis', context)
+        self.project.update(allowed_uses='سكني وتجاري', regulatory_constraints='قيود محدثة',
+                            site_analysis='تحليل مبني على فكرة العميل')
+        self.assertNotEqual(workflow.source_hash(self.project), original)
+        context = workflow.prompt_context(self.project)
+        self.assertEqual(context['allowed_uses'], 'سكني وتجاري')
+        self.assertEqual(context['regulatory_constraints'], 'قيود محدثة')
 
     def test_exploration_needs_land_and_location_but_not_project_type_or_market(self):
         self.project.pop('project_type')
         self.project.pop('market_study_data')
         self.project.pop('land_documents_analysis')
         self.project['land_use_status'] = 'غير مسموح'
+        self.assertEqual(workflow.missing_inputs(self.project, {'land_croquis': 'approved', 'location': 'approved'}), [])
+
+    def test_missing_inputs_name_each_declared_regulation_field(self):
+        self.project.update(allowed_uses='', land_and_building_summary='', regulatory_constraints='',
+                            building_ratio_coverage='', directions_table=[], approved_typical_floor_coverage='')
+        missing = workflow.missing_inputs(self.project, {'land_croquis': 'approved', 'location': 'approved'})
+        for key in ('allowed_uses', 'land_and_building_summary', 'regulatory_constraints',
+                    'building_ratio_coverage', 'directions_table', 'approved_typical_floor_coverage'):
+            self.assertIn(key, missing)
+
+    def test_typical_floor_coverage_is_optional_for_single_floor_land(self):
+        self.project.update(approved_floor_count=1, approved_typical_floor_coverage='')
         self.assertEqual(workflow.missing_inputs(self.project, {'land_croquis': 'approved', 'location': 'approved'}), [])
 
     def test_complete_scoped_use_list_is_parsed_without_a_model(self):
@@ -62,13 +82,42 @@ class ExplorationContractTests(unittest.TestCase):
         cases = ['رقم القطعة: 99\nالاستخدامات المسموحة: سكني',
                  'رقم القطعة: 42\nالاستخدامات المسموحة: سكني بشرط موافقة الجهة',
                  'رقم القطعة: 42\nالاستخدامات المسموحة: سكني، لا يسمح بتجاري',
-                 'رقم القطعة: 42\nالمشروع السكني مسموح',
                  'رقم القطعة: 42\nالاستخدامات المسموحة: حسب المخطط المعتمد',
                  'رقم القطعة: 42\nالاستخدامات المسموحة: سكني\nيحظر تطوير الأرض',
                  'رقم القطعة: 42\nالاستخدامات المسموحة: سكني\nلا يسمح بالاستخدام السكني']
         for text in cases:
             with self.subTest(text=text), self.assertRaises(best_use.ProposalError):
                 regulations.extract(self.project, [dict(self.pages[0], text=text + '\nكود التنظيم: س ع')])
+
+    def test_a_croquis_without_parcel_identifiers_falls_back_to_declared_uses(self):
+        pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel',
+                  'text': 'كروكي قديم بلا رقم قطعة أو كود تنظيم'}]
+        result = regulations.extract(self.project, pages)
+        self.assertEqual(result['permittedUses'], ['residential'])
+        self.assertEqual(result['basis'], 'declared')
+        self.assertTrue(result['requiresApproval'])
+        self.assertFalse(result['scope']['proven'])
+        self.assertEqual(result['scope']['plotNumber'], '42')
+        self.assertTrue(all(item['documentId'] == 'declared-inputs' for item in result['evidence']))
+        # A document that does mark a different parcel still proves the wrong file.
+        pages[0]['text'] = 'رقم القطعة: 99\nالاستخدامات المسموحة: سكني'
+        with self.assertRaises(best_use.ProposalError):
+            regulations.extract(self.project, pages)
+
+    def test_declared_uses_drop_negated_or_conditional_clauses(self):
+        pages = [{'documentId': 'croquis-1', 'page': 1, 'kind': 'parcel', 'text': 'كروكي قديم'}]
+        self.project['allowed_uses'] = 'سكني، تجاري بشرط موافقة الجهة، صناعي غير مسموح'
+        result = regulations.extract(self.project, pages)
+        self.assertEqual(result['permittedUses'], ['residential'])
+        self.project['allowed_uses'] = 'لا يسمح بأي استخدام'
+        with self.assertRaises(best_use.ProposalError):
+            regulations.extract(self.project, pages)
+
+    def test_a_document_without_declarations_still_fails_without_declared_uses(self):
+        pages = [dict(self.pages[0], text='رقم القطعة: 42\nكود التنظيم: س ع\nالمشروع السكني مسموح')]
+        self.project['allowed_uses'] = ''
+        with self.assertRaises(best_use.ProposalError):
+            regulations.extract(self.project, pages)
 
     def test_model_excerpt_must_be_a_full_verifiable_declaration_not_a_word(self):
         raw = {'declarations': [{'documentId': 'croquis-1', 'page': 1, 'excerpt': 'سكني'}]}
@@ -77,8 +126,10 @@ class ExplorationContractTests(unittest.TestCase):
 
     def test_interpreted_declarations_must_quote_the_scoped_page_verbatim(self):
         pages = [dict(self.pages[0], text='رقم القطعة: 42\nكود التنظيم: س ع\nيسمح بالاستعمالات الآتية على القطعة: سكني\n')]
-        with self.assertRaises(best_use.ProposalError):
-            regulations.extract(self.project, pages)
+        # No machine-readable declaration: the declared client inputs carry it.
+        result = regulations.extract(self.project, pages)
+        self.assertEqual(result['basis'], 'declared')
+        self.assertEqual(result['permittedUses'], ['residential'])
         interpreted = {'declarations': [{'documentId': 'croquis-1', 'page': 1,
                                          'excerpt': 'الاستعمالات المسموحة: سكني'}]}
         with self.assertRaises(best_use.ProposalError):

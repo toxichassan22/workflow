@@ -54,6 +54,35 @@ def _frontages(project):
     return found
 
 
+def _setback_pair(amounts, parking_conditioned):
+    """Split one direction's setback figures into the two regulatory regimes:
+    'base' applies to the plain building, 'parking' applies when the side is
+    used as surface parking ("5م ومع مواقف خارجية 5.5م"). Surface parking
+    demands the deeper setback, so the conditioned regime keeps the largest
+    figure and the base regime keeps the smallest; without a parking
+    condition both take the strictest figure."""
+    amounts = {amount for amount in amounts}
+    if len(amounts) < 2 or not parking_conditioned:
+        strictest = max(amounts)
+        return {'base': strictest, 'parking': strictest}
+    return {'base': min(amounts), 'parking': max(amounts)}
+
+
+def _merge_setback_pair(existing, new):
+    if existing is None:
+        return new
+    parking = max(existing['parking'], new['parking'])
+    return {'base': min(max(existing['base'], new['base']), parking),
+            'parking': parking}
+
+
+def _setback_amounts(value):
+    return [(amount, match.start(1)) for amount, match in
+            ((number(match.group(1)), match) for match in
+             re.finditer(r'(\d+(?:\.\d+)?)\s*(?:متر|امتار|م\b|meters?\b|m\b)', value, re.I))
+            if amount is not None]
+
+
 def _setback_values(value):
     text = str(value or '').translate(_DIGITS).replace('٫', '.')
     text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
@@ -64,14 +93,19 @@ def _setback_values(value):
         'east': r'شرقي(?:ة|ه)?|شرق|east', 'west': r'غربي(?:ة|ه)?|غرب|west',
     }
     values = {}
-    for key, label in patterns.items():
-        matches = re.findall(r'(?:' + label + r')[^\d\n;،]{0,32}'
-                             r'(\d+(?:\.\d+)?)\s*(?:متر|امتار|م\b|meters?\b|m\b)', text, re.I)
-        amounts = {number(item) for item in matches}
-        if amounts:
-            # Conditional setbacks ("5 بدون مواقف أو 5.5 معها") keep the strictest
-            # figure: the largest setback gives the smallest, never inflated, envelope.
-            values[key] = max(amounts)
+    for segment in re.split(r'[\n؛;]|\.(?!\d)', text):
+        parking = bool(re.search(r'مواقف|parking', segment, re.I))
+        marks = sorted((match.start(), match.end(), key) for key, label in patterns.items()
+                       for match in re.finditer(label, segment, re.I))
+        # Figures from a label to the next label belong to that direction —
+        # a conditioned second figure ("5م ومع مواقف خارجية 5.5م") stays in
+        # scope, while a plain clause keeps only its first figure as before.
+        for index, (start, end, key) in enumerate(marks):
+            stop = marks[index + 1][0] if index + 1 < len(marks) else len(segment)
+            hits = _setback_amounts(segment[end:stop])[:2 if parking else 1]
+            if hits:
+                values[key] = _merge_setback_pair(values.get(key),
+                                                _setback_pair([amount for amount, _pos in hits], parking))
     return values
 
 
@@ -94,12 +128,11 @@ def _direction_setback_cells(project):
             continue
         cell = ' '.join(str(row.get(key) or '') for key in _DIRECTION_SETBACK_CELL_KEYS)
         cell = cell.translate(_DIGITS).replace('٫', '.')
-        amounts = [amount for amount in
-                   (number(item) for item in
-                    re.findall(r'(\d+(?:\.\d+)?)\s*(?:متر|امتار|م\b|meters?\b|m\b)', cell, re.I))
-                   if amount is not None]
+        parking = bool(re.search(r'مواقف|parking', cell, re.I))
+        amounts = [amount for amount, _pos in _setback_amounts(cell)]
         if amounts:
-            values[direction] = max(amounts)
+            values[direction] = _merge_setback_pair(values.get(direction),
+                                                  _setback_pair(amounts, parking))
     return values
 
 
@@ -165,14 +198,16 @@ def _clip(points, origin, normal, setback):
     return output
 
 
-def setback_envelope(project):
+def setback_envelope(project, regime='parking'):
     points, polygon_issue = _polygon(project)
     if not points:
         return None, {'code': polygon_issue or 'polygon'}
-    values = _setback_values(project.get('setbacks'))
-    values.update(_direction_setback_cells(project))
-    if not values:
+    pairs = _setback_values(project.get('setbacks'))
+    pairs.update(_direction_setback_cells(project))
+    if not pairs:
         return None, {'code': 'setbacks'}
+    values = {key: pair[regime] if regime in pair else pair['parking']
+              for key, pair in pairs.items()}
     signed = _signed_area(points)
     cadastral = number(project.get('croquis_land_area'))
     if not cadastral:

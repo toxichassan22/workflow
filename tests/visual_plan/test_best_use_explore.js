@@ -27,10 +27,13 @@ function fixture() {
     tenantProjectData: {
       draftId: 'draft-1', project_type: '["سكني"]', project_name: 'مشروع سكني',
       approved_financial_area: 5000, croquis_land_area: 5000, approved_coverage_ratio: 60,
-      approved_floor_count: 4, approved_floor_area_ratio: 2,
+      approved_floor_count: 4, approved_floor_area_ratio: 2, approved_typical_floor_coverage: 55,
       setbacks: 'أمامي 5 م', allowed_uses: 'سكني', city: 'الرياض',
+      land_and_building_summary: 'أرض سكنية بموجب الكروكي', regulatory_constraints: 'لا يوجد',
+      building_ratio_coverage: 'التغطية المعتمدة 60%', directions_table: [{ direction: 'شمال', setback: '5 م' }],
       land_documents_files_file_ids: ['croquis-1'],
       location_address: 'الرياض', location_lat: '21.5', location_lng: '39.2',
+      site_analysis: 'موقع على محور حضري نشط',
       best_use_mode: 'guided', best_use_explore_data: {}, best_use_explore_chat: {},
       tenantCreativeImages: { map_placeholders: {} }
     },
@@ -223,6 +226,23 @@ test('a failed concepts run pins the server error inside the workspace', async (
   const html = f.inputs.bestUseExploreWorkspace.innerHTML;
   assert.match(html, /role="alert"[^>]*>[^<]*مسح أسعار[^<]*price_search_not_run/);
   assert.equal(f.context.toasts.length, 1);
+});
+
+test('missing inputs are reported by their own field names', () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_mode = 'explore';
+  assert.deepEqual(Array.from(f.context.bestUseExploreMissing()), []);
+  f.context.tenantProjectData.allowed_uses = '';
+  f.context.tenantProjectData.regulatory_constraints = '';
+  f.context.tenantProjectData.directions_table = '';
+  assert.equal(f.context.bestUseExploreMissing().join(','),
+    'allowed_uses,regulatory_constraints,directions_table');
+  assert.equal(f.context.bestUseMissingLabel('allowed_uses'), 'الاستخدامات المسموحة');
+  assert.equal(f.context.bestUseMissingLabel('regulatory_constraints'), 'القيود التنظيمية');
+  f.context.tenantProjectData.approved_typical_floor_coverage = '';
+  assert.ok(f.context.bestUseExploreMissing().includes('approved_typical_floor_coverage'));
+  f.context.tenantProjectData.approved_floor_count = 1;
+  assert.ok(!f.context.bestUseExploreMissing().includes('approved_typical_floor_coverage'));
 });
 
 test('a successful concepts run clears a pinned error and renders the concepts', async () => {

@@ -1,11 +1,12 @@
     const BEST_USE_EXPLORE_FIELDS = [
       'draftId', 'land_documents_files_file_ids', 'croquis_land_area', 'approved_financial_area',
       'approved_coverage_ratio', 'approved_floor_count', 'approved_floor_area_ratio',
-      'building_ratio_coverage', 'setbacks', 'max_floors_height', 'boundary_lengths',
-      'surrounding_streets', 'survey_coordinates', 'directions_table', 'location_address',
-      'location_lat', 'location_lng', 'city', 'district', 'site_analysis', 'main_roads',
+      'approved_typical_floor_coverage', 'building_ratio_coverage', 'setbacks', 'max_floors_height',
+      'boundary_lengths', 'surrounding_streets', 'survey_coordinates', 'directions_table',
+      'location_address', 'location_lat', 'location_lng', 'city', 'district', 'site_analysis', 'main_roads',
       'nearby_landmarks_data', 'city_landmarks_data', 'catchment_areas',
-      'location_polygon', 'location_polygon_source', 'plot_number_croquis', 'plan_number', 'zoning_code'
+      'location_polygon', 'location_polygon_source', 'plot_number_croquis', 'plan_number', 'zoning_code',
+      'allowed_uses', 'land_and_building_summary', 'regulatory_constraints'
     ];
     const BEST_USE_EXPLORE_JSON = {
       land_documents_files_file_ids: [], survey_coordinates: [], directions_table: [],
@@ -13,7 +14,8 @@
     };
     const BEST_USE_EXPLORE_NUMBERS = new Set([
       'croquis_land_area', 'approved_financial_area', 'approved_coverage_ratio',
-      'approved_floor_count', 'approved_floor_area_ratio', 'location_lat', 'location_lng'
+      'approved_floor_count', 'approved_floor_area_ratio', 'approved_typical_floor_coverage',
+      'location_lat', 'location_lng'
     ]);
     const BEST_USE_EXPLORE_ARTIFACTS = ['regulations', 'priceScan', 'concepts', 'landDistribution', 'floorDistribution'];
     const BEST_USE_EXPLORE_DEPENDENCIES = {
@@ -61,7 +63,12 @@
       // the server keeps it accurate via refresh(), which also heals flags
       // whose inputs verify unchanged again.
       if (visited.includes(name) || !artifact?.id || artifact.inputsChanged || artifact.rejected) return false;
-      if (bestUseStable(bestUseExploreSourceSnapshot()) !== bestUseStable(bestUseNormalizeMedia(state.sourceSnapshot || {}))) return false;
+      // Compare only the keys the current field list tracks — a stored snapshot
+      // built under an older list must not read as an input change by shape alone.
+      const live = bestUseExploreSourceSnapshot();
+      const stored = bestUseNormalizeMedia(state.sourceSnapshot || {});
+      const comparable = Object.fromEntries(Object.keys(live).map(key => [key, stored[key]]));
+      if (bestUseStable(live) !== bestUseStable(comparable)) return false;
       if (!BEST_USE_EXPLORE_DEPENDENCIES[name].every(key => bestUseExploreCurrent(key, [...visited, name]))) return false;
       if (['landDistribution', 'floorDistribution'].includes(name)
           && state.selectedConceptVersion !== state.concepts?.version) return false;
@@ -95,8 +102,14 @@
         if (!(source[key] > 0) || (key === 'approved_floor_count' && !Number.isInteger(source[key]))) missing.push(key);
       });
       if (!(source.approved_coverage_ratio > 0 && source.approved_coverage_ratio <= 100)) missing.push('approved_coverage_ratio');
+      if (source.approved_floor_count > 1 && !(source.approved_typical_floor_coverage > 0))
+        missing.push('approved_typical_floor_coverage');
       if (!source.setbacks) missing.push('setbacks');
       if (!source.city) missing.push('city');
+      ['allowed_uses', 'land_and_building_summary', 'regulatory_constraints', 'building_ratio_coverage']
+        .forEach(key => { if (!source[key]) missing.push(key); });
+      if (!source.directions_table.length) missing.push('directions_table');
+      if (!source.site_analysis) missing.push('site_analysis');
       return missing;
     }
 

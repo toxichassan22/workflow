@@ -51,6 +51,10 @@ SYSTEM_PROMPT = (
     'capacity حساب الخادم الملزم: إجمالي المسطحات فوق الأرض لا يتجاوز maxBuiltArea، '
     'ومجموع الحصص الأرضية للمكونات فوق الأرض لا يتجاوز footprintLimit، '
     'والمساحات المفتوحة والبدروم لهما حدود مستقلة. '
+    'قد يكون الارتداد مشروطًا بالمواقف السطحية (مثل 5م للمبنى و5.5م عند استخدامه مواقف): '
+    'footprintLimit وmaxBuiltArea لتوزيع يتضمن مواقف سطحية، '
+    'وfootprintLimitNoSurfaceParking وmaxBuiltAreaNoSurfaceParking لتوزيع بلاها؛ '
+    'التزم بحدود نظام توزيعك واشرح القاعدة المختارة في setbackExplanation. '
     'وزّع footprintLimit على المكونات أولًا ثم احسب مسطحات كل مكون داخل حصته؛ '
     'لا تنسخ قيم الحدود أرقامًا للمكونات ولا تساوِها بالضبط. '
     'اترك هامشًا لا يقل عن متر مربع واحد تحت كل حد؛ الأرقام تُقرَّب لأقرب 0.1 وأي تجاوز يُرفض. '
@@ -283,13 +287,19 @@ def normalize_proposal(raw, project, proposal_id, version=1):
         totals['revenueArea'] += row['revenueArea']
         if category == 'builtArea':
             totals['footprintArea'] += row['footprintArea']
+    # Parking-conditioned setbacks ("5م ومع مواقف خارجية 5.5م") pick their bound
+    # from the plan itself: a surface-parking row binds the parking envelope.
+    surface_parking = any(row.get('useType') == 'parking' and row.get('parkingLocation') == 'surface'
+                          for row in rows)
+    regime = '' if surface_parking else 'NoSurfaceParking'
+    footprint_limit, built_limit = budget['footprintLimit' + regime], budget['maxBuiltArea' + regime]
     total_labels = {'builtArea': 'المسطحات فوق الأرض', 'footprintArea': 'الحصص الأرضية فوق الأرض',
                     'openArea': 'المساحات المفتوحة', 'basementArea': 'مسطحات البدروم'}
-    for total, limit in (('builtArea', 'maxBuiltArea'), ('footprintArea', 'footprintLimit'),
-                         ('openArea', 'openAreaLimit'), ('basementArea', 'basementAreaLimit')):
-        if totals[total] > budget[limit] + 1e-6:
+    for total, limit in (('builtArea', built_limit), ('footprintArea', footprint_limit),
+                         ('openArea', budget['openAreaLimit']), ('basementArea', budget['basementAreaLimit'])):
+        if totals[total] > limit + 1e-6:
             issues.append(f'مجموع {total_labels[total]} ({totals[total]:.1f} م²) '
-                          f'يتجاوز الحد المعتمد ({budget[limit]:.1f} م²)')
+                          f'يتجاوز الحد المعتمد ({limit:.1f} م²)')
     if totals['builtArea'] <= 0:
         issues.append('الاقتراح لا يتضمن مكونات مبنية لنوع المشروع المختار')
     if issues:

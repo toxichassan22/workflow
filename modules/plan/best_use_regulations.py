@@ -18,27 +18,33 @@ def folded(value):
 def parcel_scope(project, pages):
     selected = folded(project.get('plot_number_croquis'))
     found = []
+    marked = False
     for page in pages:
         if page.get('kind') != 'parcel':
             continue
         normalized = str(page.get('text') or '').translate(DIGITS)
         plots = re.findall(r'(?:رقم القطعة|قطعة رقم|plot number)\s*[:：]?\s*([\w/-]+)', normalized, re.I)
+        if plots:
+            marked = True
         if not selected and len(set(plots)) == 1:
             found.append(plots[0])
         elif selected in plots:
             found.append(selected)
     if not selected and len(set(found)) == 1:
         selected = found[0]
-    if not selected or selected not in found:
+    # Older croquis documents carry no parcel marker at all — then the client's
+    # declared parcel data stands on its own and the artifact is approval-gated.
+    # When a document does mark parcels, a mismatch still proves the wrong file.
+    if marked and (not selected or selected not in found):
         raise ProposalError('regulatory_parcel_scope: لا يوجد نص مستند يثبت القطعة المقصودة.')
     codes = []
     for page in pages:
         raw = str(page.get('text') or '')
-        if page.get('kind') == 'parcel' and selected in folded(raw):
+        if page.get('kind') == 'parcel' and (not marked or not selected or selected in folded(raw)):
             codes.extend(folded(match) for match in re.findall(
                 r'(?:كود التنظيم|الكود التنظيمي|zoning code)\s*[:：]\s*([^\n]+)', raw, re.I))
     code = folded(project.get('zoning_code'))
-    if code and code not in codes:
+    if code and codes and code not in codes:
         raise ProposalError('regulatory_zoning_scope: كود التنظيم غير مثبت في مستند القطعة.')
     if not code and len(set(codes)) == 1:
         code = codes[0]
@@ -57,14 +63,40 @@ def parcel_scope(project, pages):
     if documented_cities and any(slug != target_city for slug in documented_cities):
         raise ProposalError('regulatory_city_scope: مدينة المستند لا تطابق موقع الأرض.')
     return {'plotNumber': selected, 'zoningCode': code, 'city': city,
-            'documentCity': documented_cities[0] if documented_cities else ''}
+            'documentCity': documented_cities[0] if documented_cities else '', 'proven': marked}
+
+
+def declared_basis(project, scope):
+    """The client's declared permitted uses — the regulatory floor when the
+    croquis text cannot prove them. Approval-gated, never silently trusted.
+    Conditional or negated clauses are dropped clause-by-clause so a plain
+    "سكني" survives a neighbouring "تجاري بشرط" without hard-failing."""
+    declared = text(project.get('allowed_uses'), 8000)
+    if not declared:
+        return None
+    uses = set()
+    for clause in re.split(r'[\n؛;,،.]', declared):
+        if NEGATION.search(clause) or CONDITIONAL.search(clause):
+            continue
+        for use, pattern in USE_TERMS.items():
+            if re.search(pattern, clause, re.I):
+                uses.add(use)
+        if re.search(r'تجاري(?:ة)?|commercial', clause, re.I):
+            uses.update({'retail', 'office', 'entertainment'})
+    if not uses:
+        return None
+    return {'permittedUses': sorted(uses),
+            'evidence': [{'use': use, 'documentId': 'declared-inputs', 'page': 0, 'excerpt': declared,
+                          'parcelScope': scope['plotNumber'], 'landClassification': scope['zoningCode'],
+                          'conditions': [], 'status': 'permitted'} for use in sorted(uses)],
+            'basis': 'declared'}
 
 
 def local_pages(project, parcel_pages):
     scope = parcel_scope(project, parcel_pages)
     slug, _label = city_regulations.resolve_site_city(scope['city'])
-    if (not slug or not city_regulations.is_local_city(slug) or scope['documentCity'] != slug
-            or not scope['zoningCode']):
+    if (not slug or not city_regulations.is_local_city(slug)
+            or (scope['documentCity'] and scope['documentCity'] != slug) or not scope['zoningCode']):
         return []
     lookup = regulation_digest._load('index.json')['lookup']
     entry = next((value for key, value in lookup.items() if folded(key) == scope['zoningCode']), None)
@@ -119,7 +151,9 @@ def extract(project, pages, interpreted=None):
         else:
             plots = re.findall(r'(?:رقم القطعة|قطعة رقم|plot number)\s*[:：]?\s*([\w/-]+)',
                                str(page.get('text') or '').translate(DIGITS), re.I)
-            if set(plots) != {scope['plotNumber']}:
+            # Unproven scope (no parcel markers in the document) keeps every
+            # client-attached parcel page — they all describe this land.
+            if scope['proven'] and set(plots) != {scope['plotNumber']}:
                 continue
         scoped.append(page)
     if any(GLOBAL_BAN.search(str(page.get('text') or '')) for page in scoped):
@@ -127,7 +161,7 @@ def extract(project, pages, interpreted=None):
     candidates = None
     if interpreted is not None:
         candidates = interpreted.get('declarations') if isinstance(interpreted, dict) else None
-        if not isinstance(candidates, list) or not candidates:
+        if not isinstance(candidates, list):
             raise ProposalError('regulatory_uses_complete: قائمة الأدلة غير مكتملة.')
     sources = [(page, excerpt, body) for page in scoped for excerpt, body in declarations(page)]
     if candidates is not None:
@@ -165,7 +199,17 @@ def extract(project, pages, interpreted=None):
                              'excerpt': excerpt, 'parcelScope': scope['plotNumber'],
                              'landClassification': scope['zoningCode'], 'conditions': [], 'status': 'permitted'})
     if not use_sets:
-        raise ProposalError('regulatory_uses_complete: النص التنظيمي الكامل للاستخدامات غير متوفر أو غير محسوم.')
+        # The client-declared uses are the regulatory floor when the document
+        # carries no full permitted-use declaration — approval-gated.
+        declared = declared_basis(project, scope)
+        if declared is None:
+            raise ProposalError('regulatory_uses_complete: النص التنظيمي الكامل للاستخدامات غير متوفر أو غير محسوم.')
+        return {'permittedUses': declared['permittedUses'], 'evidence': declared['evidence'],
+                'scope': scope, 'basis': 'declared',
+                'sourceDocuments': [{'documentId': page['documentId'], 'page': page['page'],
+                    'textHash': digest(page['text'])} for page in scoped],
+                'constraints': [{'documentId': page['documentId'], 'page': page['page'], 'text': page['text']}
+                                for page in scoped], 'requiresApproval': True}
     permitted = set.intersection(*use_sets)
     if not permitted:
         raise ProposalError('regulatory_uses_conflict: قوائم الاستخدامات في المستندات متعارضة.')
@@ -173,7 +217,7 @@ def extract(project, pages, interpreted=None):
             'scope': scope, 'sourceDocuments': [{'documentId': page['documentId'], 'page': page['page'],
                 'textHash': digest(page['text'])} for page in scoped],
             'constraints': [{'documentId': page['documentId'], 'page': page['page'], 'text': page['text']}
-                            for page in scoped], 'requiresApproval': interpreted is not None}
+                            for page in scoped], 'requiresApproval': interpreted is not None or not scope['proven']}
 
 
 def validate_basis(row, regulations):

@@ -19,7 +19,7 @@ def _best_use_regulation_pages(draft):
                     pages.append({'documentId': file_id, 'page': index, 'kind': 'parcel', 'text': page.get_text()})
         except (OSError, RuntimeError, ValueError) as error:
             raise best_use_contract.ProposalError('regulatory_document_unreadable') from error
-    if not pages or not any(page['text'].strip() for page in pages):
+    if not pages:
         raise best_use_contract.ProposalError('regulatory_full_text_missing')
     pages.extend(best_use_regulations.local_pages(project, pages))
     return pages
@@ -56,8 +56,8 @@ def _best_use_verify_regulations(draft):
     if not best_use_workflow.current(project, 'regulations'):
         raise best_use_contract.ProposalError('regulatory_inputs_changed')
     interpreted = None
-    if stored.get('requiresApproval'):
-        interpreted = {'declarations': stored.get('interpretedDeclarations') or []}
+    if stored.get('requiresApproval') and stored.get('interpretedDeclarations'):
+        interpreted = {'declarations': stored['interpretedDeclarations']}
     current = best_use_regulations.extract(project, _best_use_regulation_pages(draft), interpreted)
     if current['sourceDocuments'] != stored.get('sourceDocuments') or current['permittedUses'] != stored.get('permittedUses'):
         raise best_use_contract.ProposalError('regulatory_inputs_changed')
