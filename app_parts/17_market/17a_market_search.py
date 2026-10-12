@@ -74,10 +74,11 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         (None, None),
     ]
     if budget:
-        # Exa budgets keep the forced tool call; native budgets ground through the
-        # always-on plugin — provider-native search is the model's own capability
-        # and cannot be forced via tool_choice anyway.
-        attempts = ([(tools, None)] if budget_engine == 'exa' else []) + [(None, None)]
+        # The forced web_search tool call is what makes a search actually run —
+        # for engine 'native' OpenRouter executes it through the provider's own
+        # search (Google grounding on Gemini); the plugin alone is model-decided
+        # and silently returns memory answers.
+        attempts = [(tools, None), (None, None)]
     last_response = {}
     last_error = ''
     # A parseable JSON with zero executed searches is kept as a fallback, never as a
