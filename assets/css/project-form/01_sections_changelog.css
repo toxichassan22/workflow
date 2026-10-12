@@ -954,6 +954,13 @@
       font-size: 18px;
     }
 
+    /* Grid children default to min-width:auto and refuse to shrink below
+       their content — a wide table or nowrap row then stretches the whole
+       section past the card instead of scrolling inside its own wrap. */
+    .project-form-content .tenant-form-section > * {
+      min-width: 0;
+    }
+
     /* A section is a two-column grid for .tenant-field cells. Anything that is not a field —
        tables, headings, warning panels, action buttons — must span both columns, otherwise it
        sits in one cell and leaves an unexplained empty column beside it. */

@@ -5,6 +5,13 @@
   min-width: 0;
   color: var(--navy, #07182C);
 }
+/* Grid children default to min-width:auto and would refuse to shrink below
+   their content — the 840px proposal table then stretches the whole card
+   past the section instead of scrolling inside its wrap. */
+.best-use-body > *,
+#bestUseExploreWorkspace > * {
+  min-width: 0;
+}
 .best-use-toolbar,
 .best-use-actions,
 .best-use-proposal-heading {

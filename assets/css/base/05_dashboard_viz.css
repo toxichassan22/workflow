@@ -778,6 +778,13 @@
     }
 
     @media (max-width: 1100px) {
+      /* The off-canvas sidebar is translated past the inline-start edge but a
+         fixed element still counts toward the page's scrollable width, so the
+         whole document gains a horizontal scroll it should never have. */
+      html, body {
+        overflow-x: clip;
+      }
+
       .tenant-app {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: 64px minmax(calc(100vh - 64px), auto);
