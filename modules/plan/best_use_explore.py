@@ -112,7 +112,9 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
         if pool != 'builtArea' and footprint != 0:
             raise ProposalError('المكون المفتوح أو البدروم لا يحمل حصة أرضية فوق الأرض: ' + name)
         if pool == 'builtArea' and (footprint <= 0 or built > footprint * budget['floors'] + 1e-6):
-            raise ProposalError('المسطحات تتجاوز الحصة الأرضية والأدوار: ' + name)
+            raise ProposalError(f'المسطحات تتجاوز الحصة الأرضية والأدوار: {name} '
+                                f'(builtArea={built:g} > footprintArea={footprint:g} × floors={budget["floors"]:g} '
+                                f'= {footprint * budget["floors"]:g})')
         if stage == 'land' and pool == 'builtArea' and abs(built - footprint) > 1e-6:
             raise ProposalError('مرحلة الأرض لا توزع مسطحات الأدوار: ' + name)
         row.update({key: int(value) if key == 'units' else rounded(value) for key, value in values.items()})
