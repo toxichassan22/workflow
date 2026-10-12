@@ -314,8 +314,18 @@
           const initialId = tenantProjectData?.draftId;
           const initial = bestUseExploreSourceSnapshot();
           if (!(await saveProjectAsDraft(true, false))) { toast(WFT('best_use.save_failed', 'تعذر حفظ المسودة قبل المتابعة.')); return false; }
-          if (tenantProjectData?.draftId !== initialId || bestUseStable(initial) !== bestUseStable(bestUseExploreSourceSnapshot())) return false;
-          const requestContext = { draftId: initialId, editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter, sourceSnapshot: initial };
+          const afterSave = bestUseExploreSourceSnapshot();
+          if (bestUseStable(initial) !== bestUseStable(afterSave)) {
+            console.warn('[BEST-USE-EXPLORE] inputs changed during save:',
+              Object.keys({ ...initial, ...afterSave })
+                .filter(key => bestUseStable(initial[key]) !== bestUseStable(afterSave[key])));
+          }
+          if (tenantProjectData?.draftId !== initialId
+              || (action !== 'mode' && bestUseStable(initial) !== bestUseStable(afterSave))) {
+            toast(WFT('best_use.local_changed', 'تغيّرت المدخلات الحالية أثناء المعالجة؛ لم تُستبدل المكونات المحلية.'));
+            return false;
+          }
+          const requestContext = { draftId: initialId, editCounter: typeof draftEditCounter === 'undefined' ? 0 : draftEditCounter, sourceSnapshot: afterSave };
           const payload = { draftId: initialId, expectedRevision: tenantDraftRevision };
           let endpoint = '/api/best-use/explore/';
           if (action === 'mode') { endpoint = '/api/best-use/mode'; payload.mode = options.mode; }
@@ -332,12 +342,12 @@
             Object.assign(payload, { stage, message, revise: action === 'revise' });
           }
           updateLoaderProgress(15, WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم'));
-          let response = await api('POST', endpoint, payload);
+          let response = await apiWithTimeout('POST', endpoint, payload);
           const deadline = Date.now() + 1200000;
           while (response?.success && response.jobId && !['completed', 'failed'].includes(response.status)
                  && Date.now() < deadline && tenantProjectData?.draftId === initialId) {
             await new Promise(resolve => setTimeout(resolve, 1500));
-            response = await api('GET', '/api/best-use/explore/jobs/' + response.jobId);
+            response = await apiWithTimeout('GET', '/api/best-use/explore/jobs/' + response.jobId, undefined, 30000);
             const labels = {
               regulations: WFT('best_use_explore.progress_regulations', 'التحقق من الاستخدامات المسموحة'),
               prices: WFT('best_use_explore.progress_prices', 'مسح الأسعار الحي'),
