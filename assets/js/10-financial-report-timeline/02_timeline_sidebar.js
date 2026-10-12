@@ -338,7 +338,12 @@
             badge.style.color = '#991b1b';
             badge.innerHTML = 'فشل الحفظ — التغييرات ما زالت غير محفوظة';
           }
-          if (!silent) toast(resp.error || 'فشل حفظ المسودة');
+          // A revision conflict means another session wrote meanwhile — silent
+          // saves must still surface that, or flows like the best-use pre-save
+          // fail with a generic 'could not save' and no actionable reason.
+          if (!silent || (resp.error_code === 'DRAFT_REVISION_CONFLICT' && !slideCheckpoint)) {
+            toast(resp.error || 'فشل حفظ المسودة');
+          }
           return false;
         }
       } catch (e) {

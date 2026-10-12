@@ -225,6 +225,13 @@
 }
 .best-use-stage-nav .btn.ghost {
   color: var(--white, #FFFFFF);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.best-use-stage-nav .btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--white, #FFFFFF);
+  color: var(--white, #FFFFFF);
 }
 .best-use-concept-grid {
   display: grid;
