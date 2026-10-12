@@ -13,76 +13,175 @@ on:
       - lab
   workflow_dispatch:
 
+concurrency:
+  group: landloom-staging
+  cancel-in-progress: false
+
 jobs:
   deploy-staging:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Trigger Staging Deployment Webhook
+      - name: Trigger Staging Deployment Once
         env:
           STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          REQUEST_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          if [ -z "${STAGING_BASE_URL:-}" ]; then
-            echo "STAGING_BASE_URL secret is not configured"
+          if [ -z "${STAGING_BASE_URL:-}" ] || [ -z "${DEPLOY_WEBHOOK_SECRET:-}" ]; then
+            echo "STAGING_BASE_URL and DEPLOY_WEBHOOK_SECRET must be configured"
             exit 1
           fi
           base="${STAGING_BASE_URL%/}"
-          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST -H "X-Deploy-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" --data '' "$base/api/deploy-webhook-staging?commit=${{ github.sha }}"
+          case "$base" in
+            https://*) ;;
+            *) echo "STAGING_BASE_URL must use HTTPS"; exit 1 ;;
+          esac
+          response="$(curl --fail-with-body --silent --show-error --connect-timeout 15 --max-time 120 \
+            -X POST -H "X-Deploy-Secret: $DEPLOY_WEBHOOK_SECRET" \
+            -H "X-Deploy-Request-ID: $REQUEST_ID" --data '' \
+            "$base/api/deploy-webhook-staging?commit=$EXPECTED_COMMIT")" || {
+              rc=$?
+              printf '%s\n' "$response"
+              exit "$rc"
+            }
+          printf '%s\n' "$response"
+          accepted_commit="$(printf '%s' "$response" | jq -r '.expected_commit // empty')"
+          if [ "$accepted_commit" != "$EXPECTED_COMMIT" ]; then
+            echo "The webhook did not accept the expected deployment commit"
+            exit 1
+          fi
+          request_id="$(printf '%s' "$response" | jq -r '.request_id // empty')"
+          if [ -n "$request_id" ] && [[ ! "$request_id" =~ ^[A-Za-z0-9_-]{1,80}$ ]]; then
+            echo "Invalid deployment request ID returned by the server"
+            exit 1
+          fi
+          triggered_at="$(printf '%s' "$response" | jq -r '.timestamp // empty')"
+          if [[ ! "$triggered_at" =~ ^[0-9T:.+Z-]+$ ]]; then
+            echo "Invalid deployment timestamp returned by the server"
+            exit 1
+          fi
+          echo "STAGING_DEPLOY_REQUEST_ID=$request_id" >> "$GITHUB_ENV"
+          echo "STAGING_DEPLOY_TRIGGERED_AT=$triggered_at" >> "$GITHUB_ENV"
 
-      - name: Verify staged commit
+      - name: Await Deployment Result And Verify Once
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
           STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
         run: |
-          set -euo pipefail
-          base="${STAGING_BASE_URL%/}"
-          expected_short="${EXPECTED_COMMIT:0:7}"
-          # 72 x ~10s ≈ 12 min: covers a deploy queued behind one in-flight run
-          # (the lock is held only for pull→restart since playwright install
-          # now runs after the lock is released).
-          for attempt in $(seq 1 72); do
-            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$base/health?deploy_check=${EXPECTED_COMMIT}")"
-            deployed="$(printf '%s' "$health" | jq -r '.deployed_commit // .commit // "unknown"')"
-            echo "Staging check ${attempt}/72: deployed=${deployed} expected=${EXPECTED_COMMIT}"
-            if [ "$deployed" = "$EXPECTED_COMMIT" ] || [[ "$deployed" == "$expected_short"* ]]; then
-              echo "Verified staged commit ${deployed}"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Staging did not report expected commit ${EXPECTED_COMMIT}"
-          printf '%s' "$health" | jq -r '"Last server deploy attempt: " + ((.last_deploy // "none recorded") | tostring)'
-          exit 1
+          # Await one background deployment's recorded result, not repeated commit checks.
+          # Its first failure stops this job; only a completed deployment is verified.
+          # Deployment and final verification requests are never retried.
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from datetime import datetime, timezone
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-      - name: Verify staging land analysis route
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def fetch_json(url, secret=''):
+              headers = {'Cache-Control': 'no-cache'}
+              if secret:
+                  headers['X-Deploy-Secret'] = secret
+              request = Request(url, headers=headers)
+              with build_opener(NoRedirect()).open(request, timeout=20) as response:
+                  payload = json.loads(response.read(65536))
+              if not isinstance(payload, dict):
+                  raise RuntimeError('The deployment endpoint returned invalid JSON')
+              return payload
+
+          def utc_stamp(value):
+              stamp = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+              if stamp.tzinfo is None:
+                  stamp = stamp.replace(tzinfo=timezone.utc)
+              return stamp.replace(microsecond=0)
+
+          def wait_for_deployment(fetch, expected, request_id='', triggered_at='',
+                                  clock=time.monotonic, sleep=time.sleep, timeout=600):
+              started = clock()
+              previous = None
+              last_step = 'start'
+              while clock() - started < timeout:
+                  payload = fetch()
+                  state = payload if request_id else (payload.get('last_deploy') or {})
+                  matching = state.get('commit') == expected
+                  if matching and request_id and state.get('request_id') != request_id:
+                      raise RuntimeError('The deployment result belongs to a different request')
+                  if matching and not request_id and triggered_at and state.get('finished_at'):
+                      matching = utc_stamp(state['finished_at']) >= utc_stamp(triggered_at)
+                  if matching:
+                      status = state.get('status')
+                      last_step = str(state.get('step') or 'unknown')
+                      if status == 'failed':
+                          error = str(state.get('error') or 'See the server deploy.log for details')
+                          raise RuntimeError(f"Staging deployment failed at {last_step} "
+                                             f"(exit {state.get('exit_code')}): {error}")
+                      if status == 'deployed':
+                          print('Staging deployment completed', flush=True)
+                          return state
+                      if status not in {'queued', 'running'}:
+                          raise RuntimeError(f'Invalid deployment result: {status}')
+                      if status == 'queued' and clock() - started >= 30:
+                          raise RuntimeError('The server did not start the deployment process')
+                      progress = (status, last_step)
+                      if progress != previous:
+                          print(f'Staging deployment: {status} / {last_step}', flush=True)
+                          previous = progress
+                  elif clock() - started >= 30:
+                      raise RuntimeError('The server did not record this deployment request')
+                  sleep(2)
+              raise RuntimeError(f'Staging deployment timed out at {last_step}')
+
+          def verify_commit(fetch, expected):
+              payload = fetch()
+              deployed = payload.get('deployed_commit') or payload.get('commit')
+              if deployed != expected:
+                  raise RuntimeError(f'Staging verification failed: deployed={deployed} expected={expected}')
+              print(f'Verified staged commit {deployed}', flush=True)
+
+          def main():
+              base = os.environ['STAGING_BASE_URL'].rstrip('/')
+              expected = os.environ['EXPECTED_COMMIT']
+              secret = os.environ['DEPLOY_WEBHOOK_SECRET']
+              request_id = os.environ.get('STAGING_DEPLOY_REQUEST_ID', '')
+              result_url = (f'{base}/api/deploy-status-staging/{request_id}' if request_id
+                            else f'{base}/health?deploy_check={expected}')
+              wait_for_deployment(lambda: fetch_json(result_url, secret), expected, request_id,
+                                  os.environ.get('STAGING_DEPLOY_TRIGGERED_AT', ''))
+              verify_commit(lambda: fetch_json(f'{base}/health?deploy_check={expected}'), expected)
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception as error:
+                  message = str(error).replace(os.environ.get('DEPLOY_WEBHOOK_SECRET') or '\0', '[redacted]')
+                  message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::error::{message}', flush=True)
+                  raise SystemExit(1)
+          PY
+
+      - name: Verify Staging Land Analysis Route Once
         env:
           STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
         run: |
           set -euo pipefail
           base="${STAGING_BASE_URL%/}"
-          for attempt in $(seq 1 12); do
-            body_file="$(mktemp)"
-            route_status="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
-              -o "$body_file" -w '%{http_code}' -X POST \
-              -H 'Content-Type: application/json' --data '{}' \
-              "$base/api/extract-croquis" || true)"
-            if [ "$route_status" = "401" ]; then
-              echo "Verified staging /api/extract-croquis route (HTTP 401 without credentials)"
-              rm -f "$body_file"
-              exit 0
-            fi
-            echo "Staging route check ${attempt}/12: HTTP ${route_status}"
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          route_status="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
+            -o "$body_file" -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' --data '{}' \
+            "$base/api/extract-croquis")"
+          if [ "$route_status" != "401" ]; then
+            echo "Expected staging /api/extract-croquis to require authentication, got HTTP $route_status"
             head -c 500 "$body_file" | tr '\n' ' '; echo
-            rm -f "$body_file"
-            case "$route_status" in
-              502|503|504|000)
-                sleep 10
-                ;;
-              *)
-                echo "Expected staging /api/extract-croquis to require authentication, got HTTP ${route_status}"
-                exit 1
-                ;;
-            esac
-          done
-          echo "Staging /api/extract-croquis never returned HTTP 401 (transient 502/503/504 persisted)"
-          exit 1
+            exit 1
+          fi
+          echo "Verified staging /api/extract-croquis route (HTTP 401 without credentials)"

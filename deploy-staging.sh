@@ -12,7 +12,7 @@
 #   .env if cPanel created a different DocumentRoot.
 # Optional overrides: STAGING_REPO_DIR, STAGING_APP_DIR, STAGING_BRANCH.
 
-set -e
+set -eo pipefail
 
 export PATH="$HOME/bin:$PATH"
 export GIT_LFS_SKIP_SMUDGE=1
@@ -74,11 +74,18 @@ PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
 TARGET_COMMIT="${1:-}"
+REQUEST_ID="${STAGING_DEPLOY_REQUEST_ID:-manual-$(date -u '+%Y%m%d%H%M%S')-$$}"
 
 if [ -n "$TARGET_COMMIT" ] && [[ ! "$TARGET_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
   echo "ERROR: invalid target deployment commit"
   exit 1
 fi
+if [[ ! "$REQUEST_ID" =~ ^[A-Za-z0-9_-]{1,80}$ ]]; then
+  echo "ERROR: invalid deployment request ID"
+  exit 1
+fi
+mkdir -p "$APP_DIR/.deploy_runs"
+STEP_LOG="$(mktemp "$APP_DIR/.deploy_runs/$REQUEST_ID.XXXXXX.log")"
 
 # Record every run's outcome where /health can report it: a run that dies
 # mid-way used to leave only a stale .deployed_commit, and the GitHub check
@@ -86,21 +93,38 @@ fi
 DEPLOY_STEP="start"
 STATUS_FILE="$APP_DIR/.deploy_status"
 write_deploy_status() {
-  printf '{"commit":"%s","status":"%s","step":"%s","exit_code":%s,"finished_at":"%s"}\n' \
-    "${TARGET_COMMIT:-latest}" "$1" "$DEPLOY_STEP" "${2:-0}" \
-    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$STATUS_FILE" 2>/dev/null || true
+  local helper="$APP_DIR/scripts/deploy_runtime.py"
+  [ -f "$helper" ] || helper="$REPO_DIR/scripts/deploy_runtime.py"
+  if [ -f "$helper" ]; then
+    python3 "$helper" status --app-dir "$APP_DIR" --commit "${TARGET_COMMIT:-latest}" \
+      --request-id "$REQUEST_ID" --status "$1" --step "$DEPLOY_STEP" \
+      --exit-code "${2:-0}" --log-path "$STEP_LOG"
+  else
+    printf '{"commit":"%s","status":"%s","step":"%s","exit_code":%s,"finished_at":"%s"}\n' \
+      "${TARGET_COMMIT:-latest}" "$1" "$DEPLOY_STEP" "${2:-0}" \
+      "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$STATUS_FILE"
+  fi
 }
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then write_deploy_status failed "$rc"; fi' EXIT
+run_deploy_step() {
+  DEPLOY_STEP="$1"
+  shift
+  write_deploy_status running
+  "$@" 2>&1 | tee "$STEP_LOG"
+}
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then write_deploy_status failed "$rc" || true; fi' EXIT
 
 # Serialize deploys: two webhook spawns used to fight over one clone's git
 # locks and kill each other mid-run — code synced, marker never written.
 if command -v flock >/dev/null 2>&1; then
   DEPLOY_STEP="lock"
   exec 9>"${TMPDIR:-/tmp}/landloom-staging-deploy.lock"
-  if ! flock -w 1200 9; then
-    echo "ERROR: another staging deploy held the lock for 20 minutes"
+  if ! flock -n 9; then
+    echo "ERROR: another staging deployment is already running" | tee "$STEP_LOG"
     exit 1
   fi
+else
+  echo "ERROR: staging deployment requires flock" | tee "$STEP_LOG"
+  exit 1
 fi
 
 DEPLOY_STEP="pull"
@@ -115,24 +139,27 @@ if [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
 fi
 # GIT_TERMINAL_PROMPT=0: a missing/expired credential must fail fast here —
 # an interactive prompt would hang forever while holding the deploy lock.
-GIT_TERMINAL_PROMPT=0 git fetch origin "$BRANCH"
+run_deploy_step pull env GIT_TERMINAL_PROMPT=0 git fetch origin "$BRANCH"
 if [ -n "$TARGET_COMMIT" ]; then
   if ! git cat-file -e "${TARGET_COMMIT}^{commit}" 2>/dev/null; then
     echo "ERROR: target deployment commit is not available after fetch: $TARGET_COMMIT"
     exit 1
   fi
-  git reset --hard "$TARGET_COMMIT"
+  run_deploy_step pull git reset --hard "$TARGET_COMMIT"
 else
-  git reset --hard "origin/$BRANCH"
+  run_deploy_step pull git reset --hard "origin/$BRANCH"
 fi
 GIT_TERMINAL_PROMPT=0 git lfs pull 2>/dev/null || true
 
 DEPLOY_STEP="sync"
 echo "===== 2. Sync to staging app directory ($APP_DIR) ====="
 mkdir -p "$APP_DIR" "$WEB_ROOT"
-rsync -av \
+run_deploy_step sync rsync -av \
   --exclude='.deployed_commit' \
   --exclude='.deploy_status' \
+  --exclude='.deploy_runs' \
+  --exclude='.deploy_backups' \
+  --exclude='.deploy_inventory.json' \
   --exclude='app.db' \
   --exclude='data.db' \
   --exclude='.env' \
@@ -149,6 +176,8 @@ rsync -av \
   --exclude='outputs' \
   --exclude='uploads' \
   "$REPO_DIR/" "$APP_DIR/"
+run_deploy_step sync python3 "$APP_DIR/scripts/deploy_runtime.py" prepare \
+  --repo-dir "$REPO_DIR" --app-dir "$APP_DIR"
 
 echo "===== 3. Ensure scripts are executable ====="
 chmod +x "$APP_DIR/start_server.sh" 2>/dev/null || true
@@ -163,30 +192,29 @@ find . -name '*.pyc' -delete 2>/dev/null || true
 DEPLOY_STEP="deps"
 echo "===== 5. Update dependencies ====="
 if [ ! -d "$APP_DIR/venv" ]; then
-  python3 -m venv "$APP_DIR/venv"
+  run_deploy_step deps python3 -m venv "$APP_DIR/venv"
 fi
-"$PIP" install --upgrade pip setuptools wheel || true
-"$PIP" install -r "$APP_DIR/requirements.txt" || true
-"$PIP" install gunicorn || true
+run_deploy_step deps "$PIP" install --upgrade pip setuptools wheel
+run_deploy_step deps "$PIP" install -r "$APP_DIR/requirements.txt"
+run_deploy_step deps "$PIP" install gunicorn
 
 DEPLOY_STEP="migrate"
 echo "===== 6. Run database migrations ====="
-"$PYTHON" -c "import app; app.db.init_db()"
+run_deploy_step migrate "$PYTHON" -c "import app; app.db.init_db()"
 
 # The marker reports the commit this deploy was asked to ship — re-reading the
 # clone's HEAD here could record whatever a concurrent operation left behind.
 local_commit="${TARGET_COMMIT:-$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)}"
-if [ -n "$local_commit" ]; then
-  printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \
-    "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"
-fi
-
 DEPLOY_STEP="restart"
 echo "===== 7. Start/restart staging application server ====="
 # 9>&-: the lock fd is inheritable — anything the restart chain spawns (the
 # daemon above all) must not carry it or the lock outlives this deploy.
-bash "$APP_DIR/start_server-staging.sh" --force 9>&-
+run_deploy_step restart bash "$APP_DIR/start_server-staging.sh" --force 9>&-
 
+if [ -n "$local_commit" ]; then
+  printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \
+    "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"
+fi
 write_deploy_status deployed 0
 trap - EXIT
 

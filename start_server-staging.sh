@@ -65,6 +65,16 @@ GUNICORN="$APP_DIR/venv/bin/gunicorn"
 DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
 HEALTH_PATH="/health"
+NEW_PID=""
+HTACCESS_TEMP=""
+trap 'rc=$?; if [ "$rc" -ne 0 ] && [ -n "$NEW_PID" ]; then kill -TERM "$NEW_PID" 2>/dev/null || true; fi; if [ -n "$HTACCESS_TEMP" ]; then rm -f "$HTACCESS_TEMP"; fi' EXIT
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$APP_DIR/.staging-start.lock"
+  if ! flock -n 8; then
+    echo "ERROR: another staging server startup is already running"
+    exit 1
+  fi
+fi
 
 # Staging prefers its own port range so it never steals production port 8000.
 PORT="${STAGING_PORT:-${APP_PORT:-8001}}"
@@ -105,13 +115,15 @@ fi
 
 log "WARN: staging health check failed on port $PORT; restarting..."
 
-# Stop only staging gunicorn processes, then wait for the port to free up.
-pkill -TERM -f "$STAGING_GUNICORN_MATCH" 2>/dev/null || true
-for i in $(seq 1 15); do
-  (echo >/dev/tcp/127.0.0.1/$PORT) 2>/dev/null || break
-  sleep 1
-done
-pkill -9 -f "$STAGING_GUNICORN_MATCH" 2>/dev/null || true
+# Keep the current staging processes alive until the replacement is healthy.
+OLD_PIDS="$(pgrep -f "$STAGING_GUNICORN_MATCH" || true)"
+if [ -r "$APP_DIR/.staging-gunicorn-$PORT.pid" ]; then
+  read -r old_pid < "$APP_DIR/.staging-gunicorn-$PORT.pid" || old_pid=""
+  if [[ "$old_pid" =~ ^[0-9]+$ ]] && [ "$old_pid" -gt 1 ] \
+    && [ "$(readlink "/proc/$old_pid/cwd" 2>/dev/null)" = "$(cd "$APP_DIR" && pwd -P)" ]; then
+    OLD_PIDS="$old_pid"
+  fi
+fi
 
 # Pick a free port, preferring the staging port.
 SELECTED_PORT=""
@@ -131,10 +143,11 @@ log "Starting staging gunicorn on 127.0.0.1:$SELECTED_PORT"
 
 mkdir -p "$WEB_ROOT"
 cd "$APP_DIR"
-# fd 9 is the deploy script's flock: it is inheritable, and a daemon that
-# keeps it holds the deploy lock forever after the deploy exits. 9>&- drops
-# it for gunicorn; without it every later deploy starved at flock -w.
+# fd 8 and fd 9 protect startup and deployment; daemons must inherit neither.
+# Closing them for gunicorn keeps both locks scoped to the current script run.
+# Otherwise a healthy daemon could prevent every later deployment.
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
+  --pid "$APP_DIR/.staging-gunicorn-$SELECTED_PORT.pid" \
   --workers 2 \
   --threads 4 \
   --timeout 300 \
@@ -144,20 +157,25 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
-  </dev/null >>"$APP_DIR/boot.log" 2>&1 9>&- &
+  </dev/null >>"$APP_DIR/boot.log" 2>&1 8>&- 9>&- &
+NEW_PID=$!
 disown
 
 sleep 3
 
-# Expose staging via Apache immediately using the selected gunicorn port.
-sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$WEB_ROOT/.htaccess"
-log "Staging .htaccess routed to 127.0.0.1:$SELECTED_PORT"
+# The old proxy stays active until the new staging process passes health.
 
-# Final health check with retry loop
+# Wait for application readiness before the single traffic switch.
 HEALTH_OK=0
 for i in $(seq 1 15); do
-  if curl -fsS -m 5 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+  kill -0 "$NEW_PID" 2>/dev/null || break
+  health_status="$(curl --silent -m 5 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}")" || health_status="000"
+  if [ "$health_status" = "200" ]; then
     HEALTH_OK=1
+    break
+  elif [ "$health_status" != "000" ]; then
+    log "ERROR: staging health returned HTTP $health_status"
     break
   fi
   sleep 1
@@ -165,6 +183,14 @@ done
 
 if [ "$HEALTH_OK" -eq 1 ]; then
   write_deployment_marker
+  HTACCESS_TEMP="$(mktemp "$WEB_ROOT/.htaccess.XXXXXX")"
+  sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$HTACCESS_TEMP"
+  chmod 644 "$HTACCESS_TEMP"
+  mv "$HTACCESS_TEMP" "$WEB_ROOT/.htaccess"
+  log "Staging .htaccess routed to 127.0.0.1:$SELECTED_PORT"
+  if [ -n "$OLD_PIDS" ]; then
+    kill -TERM $OLD_PIDS 2>/dev/null || true
+  fi
   log "OK: staging gunicorn running on port $SELECTED_PORT"
 else
   log "ERROR: staging gunicorn failed health check on port $SELECTED_PORT"
