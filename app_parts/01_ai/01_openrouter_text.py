@@ -905,7 +905,7 @@ def _on_balance_changed(tenant_id):
 db.BALANCE_CHANGE_HOOK = _on_balance_changed
 
 
-def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, usage_ctx=None):
+def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None):
     gate = _tenant_key_gate(usage_ctx)
     if gate is not None:
         return {"error": gate}
@@ -948,6 +948,8 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         payload["plugins"] = plugins
     if max_tool_calls:
         payload["max_tool_calls"] = max_tool_calls
+    if tool_choice:
+        payload["tool_choice"] = tool_choice
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)

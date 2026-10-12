@@ -112,7 +112,7 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
             'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
             prompt, max_tokens=4000, usage_ctx=_usage_ctx('best_use_price_scan', data, draft_id=draft['id']),
             search_context={'city': city, 'country': 'SA'}, max_search_results=6,
-            search_budget={'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 75})
+            search_budget={'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 120})
         if error or not _market_search_ran(response):
             # Surface the provider's real reason — quota, timeout, malformed
             # tool call — instead of a bare code that reads as "no results".

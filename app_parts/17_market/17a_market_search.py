@@ -31,6 +31,9 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
     if budget:
         search_params['engine'] = 'exa'
         search_params['max_results'] = min(6, max(1, int(max_search_results)))
+        # Bounded scans are a quick comparison, not a market study — pin Exa's
+        # fastest mode so a rough price sweep does not take the deep-search path.
+        search_params['mode'] = 'instant'
     tools = [{
         'type': 'openrouter:web_search',
         'parameters': search_params,
@@ -45,6 +48,8 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         'engine': (os.environ.get('MARKET_SEARCH_PLUGIN_ENGINE') or 'exa').strip() or 'exa',
         'max_results': max(4, min(20, int(max_search_results or 8))),
     }
+    if budget:
+        plugin['mode'] = 'instant'
     plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
@@ -90,6 +95,9 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                 timeout=max(15, min(240, int(budget.get('timeout', 240)))),
                 usage_ctx=usage_ctx or _usage_ctx('market'),
                 max_tool_calls=max(1, min(14, int(budget.get('max_tool_calls', 14)))),
+                # Bounded scans may not answer from memory: force the tool so
+                # a real search executes instead of a model-decided skip.
+                tool_choice='required' if attempt_tools and budget else None,
             )
             last_error = _chat_error_message(last_response)
             text = _get_chat_response_text(last_response)
