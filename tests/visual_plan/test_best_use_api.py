@@ -43,7 +43,7 @@ class BestUseApiTests(unittest.TestCase):
         self.headers = {'Authorization': 'Bearer ' + self.token}
         self.statuses = {'land_croquis': 'approved', 'location': 'approved',
                          'section-market-study': 'approved', 'section-financial-calc': 'approved',
-                         'section-visual-concept': 'approved'}
+                         'section-visual-concept': 'approved', 'section-executive-content': 'approved'}
         with self.app.app_context():
             self.draft_id = db.save_project_draft(self.tenant, 'tenant-admin:' + self.tenant,
                                                    self.project, self.statuses,
@@ -109,6 +109,8 @@ class BestUseApiTests(unittest.TestCase):
         self.assertTrue(saved['draft_data']['best_use_data']['approved'])
         self.assertEqual(len(saved['draft_data']['financial_study_model']['dynamicRows']['components']), 3)
         self.assertEqual(saved['section_statuses']['section-financial-calc'], 'draft')
+        self.assertEqual(saved['section_statuses']['section-executive-content'], 'draft')
+        self.assertEqual(response.get_json()['sectionStatuses']['section-executive-content'], 'draft')
         self.assertEqual(saved['section_statuses']['section-best-use'], 'draft')
         self.assertEqual(saved['section_statuses']['section-visual-concept'], before['section_statuses']['section-visual-concept'])
         self.assertEqual(saved['draft_data']['visual_concept'], before['draft_data']['visual_concept'])
@@ -116,6 +118,41 @@ class BestUseApiTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200, again.get_json())
         self.assertEqual(self.draft()['revision'], saved['revision'])
         self.assertEqual(self.draft()['draft_data']['financial_study_model'], saved['draft_data']['financial_study_model'])
+
+    def test_calculator_inputs_do_not_constrain_or_invalidate_guided_generation(self):
+        result, provider = self.generate()
+        prompt = provider.call_args.args[1]
+        self.assertNotIn('unitRevenueMode', prompt)
+        self.assertNotIn('"basementArea":', prompt)
+        self.assertEqual(result['bestUse']['mode'], 'guided')
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        payload['financial_study_model']['inputs'].update(basementArea=3000, unitRevenueMode='rental')
+        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertFalse(self.draft()['draft_data']['best_use_data'].get('inputsChanged', False))
+        approved = self.decide(result['bestUse'])
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        self.assertEqual(approved.get_json()['financialModel']['inputs']['basementArea'], 0)
+        self.assertEqual(approved.get_json()['financialModel']['inputs']['unitRevenueMode'], 'rental')
+        self.assertEqual(self.draft()['draft_data']['best_use_data']['sourceHash'], result['bestUse']['sourceHash'])
+
+    def test_basement_totals_are_applied_only_on_approval_and_old_results_are_removed(self):
+        self.raw['components'].append({'name': 'بدروم', 'useType': 'basement', 'units': 1,
+            'unitArea': 1000, 'builtArea': 1000, 'revenueArea': 0, 'footprintArea': 0,
+            'investmentModel': 'nonRevenue', 'reason': 'مواقف تخطيطية تحتاج تحقق السماح.',
+            'areaReason': 'طبقة واحدة ضمن مساحة الأرض.'})
+        before = self.draft()['draft_data']['financial_study_model']
+        result, _ = self.generate()
+        self.assertEqual(self.draft()['draft_data']['financial_study_model'], before)
+        response = self.decide(result['bestUse'])
+        self.assertEqual(response.status_code, 200, response.get_json())
+        model = response.get_json()['financialModel']
+        self.assertEqual(model['inputs']['basementArea'], 1000)
+        self.assertEqual(model['inputs']['builtUpAreaAbove'], 8800)
+        self.assertEqual(set(model['financialCalcData']), {'components'})
+        revision = self.draft()['revision']
+        self.assertEqual(self.decide(result['bestUse']).status_code, 200)
+        self.assertEqual(self.draft()['revision'], revision)
 
     def test_rejection_leaves_existing_components_and_financial_approval_unchanged(self):
         result, _ = self.generate()
@@ -146,6 +183,23 @@ class BestUseApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertIn('ليه مساحة الشقق كده؟', provider.call_args.args[1])
         self.assertEqual(self.draft()['draft_data']['best_use_data'], result['bestUse'])
+
+    def test_old_proposal_snapshots_cannot_reintroduce_calculator_inputs_in_chat(self):
+        result, _ = self.generate()
+        draft = self.draft()
+        project = copy.deepcopy(draft['draft_data'])
+        project['best_use_data']['sourceSnapshot'].update(basementArea=99999, unitRevenueMode='sale')
+        project['best_use_data']['capacity']['basementAreaLimit'] = 99999
+        with self.app.app_context():
+            db.save_project_draft(self.tenant, draft['user_id'], project, draft_id=self.draft_id,
+                                  expected_revision=draft['revision'])
+        with patch.object(self.application, 'call_text_chat', return_value=self.provider_reply({
+                'reply': 'تفسير التوزيع.', 'proposal': None})) as provider:
+            response = self.client.post('/api/best-use/chat', headers=self.headers,
+                                        json={'draftId': self.draft_id, 'message': 'اشرح التوزيع'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertNotIn('unitRevenueMode', provider.call_args.args[1])
+        self.assertNotIn('99999', provider.call_args.args[1])
 
     def test_chat_revision_is_an_unapproved_proposal_not_a_component_edit(self):
         self.generate()

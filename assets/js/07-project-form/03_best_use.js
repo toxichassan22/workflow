@@ -95,9 +95,7 @@
       const maps = bestUseObject(creative.map_placeholders);
       snapshot.maps = Object.fromEntries(['##MAP_OVERVIEW##', '##MAP_ACCESS##', '##MAP_CATCHMENT##', '##MAP_LANDMARKS##']
         .filter(key => maps[key]).map(key => [key, maps[key]]));
-      const inputs = bestUseObject(bestUseObject(tenantProjectData?.financial_study_model).inputs);
-      snapshot.basementArea = bestUseNumber(document.getElementById('basementArea')?.value ?? inputs.basementArea);
-      snapshot.unitRevenueMode = String(document.getElementById('unitRevenueMode')?.value ?? inputs.unitRevenueMode ?? '').trim();
+      snapshot.mode = String(bestUseState().mode || 'guided').trim();
       return bestUseNormalizeMedia(snapshot);
     }
 
@@ -138,6 +136,7 @@
     function bestUseMissingFields() {
       const source = bestUseSourceSnapshot();
       const missing = [];
+      if (source.mode !== 'guided') missing.push('best_use_mode');
       if (!source.project_type.length || source.project_type.some(kind => !BEST_USE_MAIN_TYPES.includes(kind))) missing.push('project_type');
       if (!source.land_documents_files_file_ids.length || !Object.keys(bestUseObject(source.land_documents_analysis)).length) missing.push('croquis');
       if (!source.location_address || source.location_lat === null || source.location_lng === null
@@ -171,7 +170,8 @@
         approved_floor_area_ratio: ['best_use.need_far', 'معامل مسطح البناء المعتمد FAR'],
         approved_coverage_ratio: ['best_use.need_coverage', 'تغطية البناء'],
         setbacks: ['best_use.need_setbacks', 'الارتدادات'], allowed_uses: ['best_use.need_uses', 'الاستخدامات المسموحة'],
-        buildable_area: ['best_use.need_buildable', 'مساحة بناء متاحة']
+        buildable_area: ['best_use.need_buildable', 'مساحة بناء متاحة'],
+        best_use_mode: ['best_use.mode_unavailable', 'وضع أفضل استخدام غير متاح حاليًا']
       };
       const pair = labels[key];
       return pair ? WFT(pair[0], pair[1]) : key;
@@ -285,7 +285,8 @@
           [WFT('best_use.floors', 'الأدوار المعتمدة'), budget.floors],
           [WFT('best_use.footprint', 'المسطح الأرضي المتاح'), budget.footprintLimit],
           [WFT('best_use.capacity', 'الحد الأقصى للمسطحات'), budget.maxBuiltArea],
-          [WFT('best_use.proposed_area', 'المسطحات المقترحة'), totals.builtArea]
+          [WFT('best_use.proposed_area', 'المسطحات المقترحة'), totals.builtArea],
+          [WFT('best_use.basement_area', 'مسطحات البدروم المقترحة'), totals.basementArea]
         ];
         const headings = [WFT('best_use.component', 'المكون'), WFT('best_use.use', 'الاستخدام'),
           WFT('best_use.units', 'عدد الوحدات'), WFT('best_use.unit_area', 'مساحة الوحدة م²'),
@@ -303,6 +304,7 @@
           <div class="best-use-proposal-heading"><h4>${escapeHtml(state.title || WFT('best_use.distribution', 'التوزيع المقترح'))}</h4><span class="best-use-status">${escapeHtml(status)}</span></div>
           <div class="best-use-metrics">${metrics.map(([label, value]) => '<div><span>' + escapeHtml(label) + '</span><strong>' + bestUseFormat(value) + '</strong></div>').join('')}</div>
           ${budget.setbackVerified === false ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.geometry_unverified', 'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.')) + '</p>' : ''}
+          ${totals.basementArea > 0 && budget.basementVerified === false ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) + '</p>' : ''}
           ${!current ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) + '</p>' : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
           <div class="best-use-actions best-use-decisions">
@@ -366,8 +368,10 @@
         try {
           const body = document.querySelector('#componentsTable tbody');
           if (body) { body.replaceChildren(); (model.dynamicRows?.components || []).forEach(addComponent); }
-          const area = document.getElementById('builtUpAreaAbove');
-          if (area && model.inputs?.builtUpAreaAbove !== undefined) area.value = String(model.inputs.builtUpAreaAbove);
+          ['builtUpAreaAbove', 'basementArea'].forEach(key => {
+            const input = document.getElementById(key);
+            if (input && model.inputs?.[key] !== undefined) input.value = String(model.inputs[key]);
+          });
           if (typeof updateRevenueComponentOptions === 'function') updateRevenueComponentOptions();
           const revenues = Object.fromEntries((model.dynamicRows?.revenue || []).map(row => [row.id, row]));
           document.querySelectorAll('#revenueTable tbody tr').forEach(row => {

@@ -60,11 +60,17 @@ SYSTEM_PROMPT = (
     'builtArea إجمالي مسطحات المكون عبر الأدوار. '
     'لا يتجاوز builtArea حاصل footprintArea في عدد الأدوار المعتمد. '
     'المساحة البيعية أو التأجيرية لا تتجاوز المساحة المبنية، والمساحة المبنية لا تقل عن عدد الوحدات في مساحة الوحدة. '
-    'المواقف السطحية ضمن المساحات المفتوحة ومواقف البدروم ضمن مساحته المدخلة فقط. '
-    'لا تخترع استثناءات للأدوار أو مساحات بدروم أو اشتراطات مواقف. '
+    'المواقف السطحية ضمن المساحات المفتوحة ومواقف البدروم ضمن basementAreaLimit التخطيطي فقط. '
+    'هذا السقف طبقة واحدة ضمن مساحة الأرض وليس تصريحًا ببدروم؛ القيود التنظيمية الموثقة الأكثر تشددًا ملزمة. '
+    'عند غياب دليل السماح أو الارتدادات تحت الأرض صرّح بأن البدروم افتراض تخطيطي غير متحقق. '
+    'لا تخترع استثناءات للأدوار أو طبقات بدروم إضافية أو اشتراطات مواقف. '
     'عند عدم تحقق غلاف الارتدادات هندسيًا، صرّح بأن المساحة تقدير تخطيطي ضمن حد التغطية وليست غلاف بناء متحققًا، '
     'واشرح أثر الارتدادات والقيود دون اختراع أبعاد أو الجزم بصلاحية مخطط معماري. '
-    'اقترح أعدادًا ومساحات تخطيطية مبررة، وليس أسعارًا أو إيرادات أو تكاليف أو عوائد مالية. '
+    'اقترح أعدادًا ومساحات تخطيطية مبررة ونموذج استفادة مستقلًا لكل مكون؛ لا تتقيد باختيار البيع أو الإيجار في الحاسبة. '
+    'استند في تفضيل البيع أو الإيجار إلى أدلة دراسة السوق ووحداتها وفتراتها، وبيّن نقص الأدلة بدل الجزم بأفضلية مطلقة. '
+    'لا تخترع أسعارًا أو إيرادات أو تكاليف؛ لا تدّع صافي ربح أو ROI أو أعلى عائد استثماري. '
+    'المساحة في سعر موثق تعبر عن إمكان إيراد تقديري فقط، والحساب المالي من الخادم لا من الموديل. '
+    'دون مؤشر محسوب موحد من الخادم لا تخرج ترتيبًا ماليًا ولا تخلط إجمالي البيع بالإيجار السنوي. '
     'لكل مكون reason يشرح سبب الاستخدام من بيانات السوق والموقع وareaReason يشرح أساس حجمه وحدوده. '
     'rationale شرح منظم يربط كل أجزاء التوزيع بالطلب والقيود والخدمات، '
     'وsetbackExplanation يشرح التغطية والارتدادات من البيانات المسجلة. '
@@ -145,9 +151,7 @@ def source_snapshot(project):
     creative = read_object(project.get('tenantCreativeImages'))
     maps = read_object(creative.get('map_placeholders'))
     snapshot['maps'] = {key: maps[key] for key in MAP_TOKENS if maps.get(key)}
-    inputs = read_object(read_object(project.get('financial_study_model')).get('inputs'))
-    snapshot['basementArea'] = number(inputs.get('basementArea'))
-    snapshot['unitRevenueMode'] = text(inputs.get('unitRevenueMode'))
+    snapshot['mode'] = text(read_object(project.get('best_use_data')).get('mode')) or 'guided'
     return db.normalize_generation_input(snapshot)
 
 
@@ -166,21 +170,24 @@ def capacity(project):
     coverage_footprint = area * coverage / 100
     setback = setback_envelope(project)
     footprint = min(coverage_footprint, setback) if setback is not None else coverage_footprint
-    inputs = read_object(read_object(project.get('financial_study_model')).get('inputs'))
     return {
         'landArea': area, 'coveragePercent': coverage, 'floors': floors, 'far': far,
         'coverageFootprint': coverage_footprint, 'setbackFootprint': setback,
         'setbackVerified': setback is not None, 'footprintLimit': footprint,
         'farLimit': area * far, 'maxBuiltArea': min(area * far, footprint * floors),
         'openAreaLimit': max(0, area - coverage_footprint),
-        'basementAreaLimit': max(0, number(inputs.get('basementArea')) or 0),
-        'warnings': [] if setback is not None else [
-            'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.'],
+        'basementAreaLimit': max(0, area), 'basementVerified': False,
+        'warnings': [
+            'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.'
+        ] + ([] if setback is not None else [
+            'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.']),
     }
 
 
 def missing_inputs(project, statuses):
     missing = []
+    if source_snapshot(project)['mode'] != 'guided':
+        missing.append('best_use_mode')
     if not project_types(project) or any(kind not in MAIN_USES for kind in project_types(project)):
         missing.append('project_type')
     if not decoded(project.get('land_documents_files_file_ids'), []) or not read_object(project.get('land_documents_analysis')):
@@ -227,8 +234,6 @@ def normalize_proposal(raw, project, proposal_id):
         raise ProposalError('أسباب التوزيع أو شرح الارتدادات غير مكتمل.')
     budget = capacity(project)
     permitted = SUPPORT_USES | set().union(*(MAIN_USES.get(kind, set()) for kind in project_types(project)))
-    model_inputs = read_object(read_object(project.get('financial_study_model')).get('inputs'))
-    revenue_mode = text(model_inputs.get('unitRevenueMode'))
     rows, names, issues = [], set(), []
     totals = {'builtArea': 0.0, 'revenueArea': 0.0, 'footprintArea': 0.0, 'openArea': 0.0, 'basementArea': 0.0}
     for index, item in enumerate(raw['components']):
@@ -274,11 +279,6 @@ def normalize_proposal(raw, project, proposal_id):
                               f'تتجاوز مسطحها المبني ({built:g})')
             if investment == 'nonRevenue' and revenue != 0:
                 issues.append(f'المكون {label} غير إيرادي لكن مساحته البيعية {revenue:g}')
-            if ((revenue_mode == 'sale' and investment not in {'sale', 'nonRevenue'})
-                    or (revenue_mode == 'rental' and investment == 'sale')
-                    or (revenue_mode == 'nonRevenue' and investment != 'nonRevenue')):
-                issues.append(f'نموذج الاستفادة في {label} ({investment}) '
-                              f'لا يطابق طبيعة وحدات المشروع ({revenue_mode})')
             if category == 'builtArea' and built > footprint * budget['floors'] + 1e-6:
                 issues.append(f'مسطح {label} المبني ({built:g}) يتجاوز حصته الأرضية ({footprint:g}) '
                               f'في {budget["floors"]:g} أدوار = {footprint * budget["floors"]:g}')
@@ -315,7 +315,7 @@ def normalize_proposal(raw, project, proposal_id):
     if issues:
         raise ProposalError('مخالفات التوزيع:\n- ' + '\n- '.join(issues) + '.')
     return {
-        'id': proposal_id, 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
+        'id': proposal_id, 'mode': 'guided', 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
         'sourceHash': source_hash(project), 'sourceSnapshot': source_snapshot(project),
         'components': rows, 'rationale': rationale, 'setbackExplanation': setback_explanation,
         'capacity': budget, 'totals': {key: rounded(value) for key, value in totals.items()},
@@ -343,17 +343,20 @@ def apply_proposal(project, proposal):
     model['dynamicRows'] = dynamic
     inputs = read_object(model.get('inputs'))
     inputs['builtUpAreaAbove'] = proposal['totals']['builtArea']
+    inputs['basementArea'] = proposal['totals']['basementArea']
     model['inputs'] = inputs
-    for key in ('parkingPlan', 'parkingSnapshot'):
+    for key in ('parkingPlan', 'parkingSnapshot', 'projection', 'report'):
         model.pop(key, None)
-    calc = read_object(model.get('financialCalcData'))
-    calc['components'] = copy.deepcopy(rows)
+    tables = read_object(model.get('tables'))
+    for key in ('componentsTable', 'cashflowTable', 'debtScheduleTable', 'fundFeeScheduleTable', 'sensitivityTable'):
+        tables.pop(key, None)
+    if 'tables' in model:
+        model['tables'] = tables
+    calc = {'components': copy.deepcopy(rows)}
     model['financialCalcData'] = calc
     updated['financial_study_model'] = model
     updated['project_components_data'] = json.dumps(rows, ensure_ascii=False)
-    legacy = read_object(updated.get('financial_calc_data'))
-    legacy['components'] = copy.deepcopy(rows)
-    updated['financial_calc_data'] = json.dumps(legacy, ensure_ascii=False)
+    updated['financial_calc_data'] = json.dumps(calc, ensure_ascii=False)
     updated['best_use_data'] = dict(proposal, unlinkedRevenueRows=unlinked)
     return updated
 

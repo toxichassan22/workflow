@@ -158,7 +158,8 @@ def _best_use_response(draft, components_applied=False):
               'chat': best_use.read_object(project.get('best_use_chat')),
               'componentsApplied': components_applied,
               'sectionStatuses': {key: statuses[key] for key in
-                                  (best_use.SECTION_KEY, 'section-financial-calc') if key in statuses}}
+                                  (best_use.SECTION_KEY, 'section-financial-calc', 'section-executive-content')
+                                  if key in statuses}}
     if components_applied:
         result['financialModel'] = best_use.read_object(project.get('financial_study_model'))
         result['projectComponentsData'] = project.get('project_components_data') or '[]'
@@ -224,7 +225,9 @@ def _best_use_execute(draft, data, kind, job=None):
     if evidence:
         prompt += '\n\nنصوص موثقة من ملفات الأمانة:\n' + evidence
     if kind == 'chat':
-        prompt += '\n\nالتوزيع الحالي:\n' + json.dumps(proposal, ensure_ascii=False)
+        prompt_proposal = {key: proposal[key] for key in
+                           ('title', 'rationale', 'setbackExplanation', 'components', 'totals') if key in proposal}
+        prompt += '\n\nالتوزيع الحالي:\n' + json.dumps(prompt_proposal, ensure_ascii=False)
         prior = [{'role': 'user' if turn.get('role') == 'user' else 'assistant',
                   'content': best_use.text(turn.get('content'), 4000)}
                  for turn in history[-20:] if isinstance(turn, dict)]

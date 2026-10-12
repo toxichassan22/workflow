@@ -188,6 +188,71 @@ class BestUseTests(unittest.TestCase):
         self.project['approved_floor_area_ratio'] = 3
         self.assertNotEqual(best_use.source_hash(self.project), initial)
 
+    def test_calculator_revenue_mode_and_basement_are_not_generation_inputs(self):
+        initial = best_use.source_hash(self.project)
+        budget = best_use.capacity(self.project)
+        self.project['financial_study_model']['inputs'].update(basementArea=99999, unitRevenueMode='rental')
+        self.assertEqual(best_use.source_hash(self.project), initial)
+        self.assertEqual(best_use.capacity(self.project), budget)
+        context = best_use.prompt_context(self.project)
+        self.assertNotIn('basementArea', context)
+        self.assertNotIn('unitRevenueMode', context)
+        self.assertNotIn('financial_study_model', context)
+        self.assertEqual(context['mode'], 'guided')
+        self.assertEqual(best_use.normalize_proposal(self.raw, self.project, 'p1')['mode'], 'guided')
+
+    def test_component_investment_models_are_independent_of_calculator_mode(self):
+        for mode in ('sale', 'rental', 'nonRevenue'):
+            with self.subTest(mode=mode):
+                self.project['financial_study_model']['inputs']['unitRevenueMode'] = mode
+                self.raw['components'][0]['investmentModel'] = 'annualRent'
+                self.assertEqual(best_use.normalize_proposal(self.raw, self.project, 'p1')
+                                 ['components'][0]['investmentModel'], 'annualRent')
+
+    def test_mode_is_part_of_the_snapshot_and_unsupported_modes_are_not_ready(self):
+        initial = best_use.source_hash(self.project)
+        self.project['best_use_data'] = {'mode': 'guided'}
+        self.assertEqual(best_use.source_hash(self.project), initial)
+        self.project['best_use_data']['mode'] = 'explore'
+        self.assertNotEqual(best_use.source_hash(self.project), initial)
+        self.assertIn('best_use_mode', best_use.missing_inputs(self.project, self.statuses))
+
+    def test_basement_capacity_is_a_planning_bound_not_calculator_input_or_permission(self):
+        budget = best_use.capacity(self.project)
+        self.assertEqual(budget['basementAreaLimit'], 5000)
+        self.assertFalse(budget['basementVerified'])
+        basement = {'name': 'بدروم تخطيطي', 'useType': 'basement', 'units': 1,
+                    'unitArea': 1000, 'builtArea': 1000, 'revenueArea': 0,
+                    'footprintArea': 0, 'investmentModel': 'nonRevenue',
+                    'reason': 'اقتراح يحتاج تحقق السماح التنظيمي.', 'areaReason': 'طبقة ضمن مساحة الأرض.'}
+        self.raw['components'].append(basement)
+        proposal = best_use.normalize_proposal(self.raw, self.project, 'p1')
+        self.assertEqual(proposal['totals']['basementArea'], 1000)
+        updated = best_use.apply_proposal(self.project, proposal)
+        self.assertEqual(updated['financial_study_model']['inputs']['basementArea'], 1000)
+        basement.update(unitArea=5001, builtArea=5001)
+        with self.assertRaises(best_use.ProposalError):
+            best_use.normalize_proposal(self.raw, self.project, 'p2')
+
+    def test_application_drops_stale_calculations_but_keeps_manual_input_tables(self):
+        model = self.project['financial_study_model']
+        model.update(projection={'roi': 99}, report={'parts': ['old']},
+                     tables={'componentsTable': ['old'], 'costTable': ['manual']},
+                     parkingPlan={'id': 'old'}, parkingSnapshot={'old': True})
+        model['financialCalcData']['roi'] = 99
+        self.project['financial_calc_data'] = {'roi': 99}
+        self.project['financial_study_model']['inputs']['basementArea'] = 3000
+        proposal = best_use.normalize_proposal(self.raw, self.project, 'p1')
+        updated = best_use.apply_proposal(self.project, proposal)
+        model = updated['financial_study_model']
+        for key in ('projection', 'report', 'parkingPlan', 'parkingSnapshot'):
+            self.assertNotIn(key, model)
+        self.assertEqual(model['tables'], {'costTable': ['manual']})
+        self.assertEqual(model['financialCalcData'], {'components': model['dynamicRows']['components']})
+        self.assertEqual(best_use.read_object(updated['financial_calc_data']), model['financialCalcData'])
+        self.assertEqual(model['inputs']['basementArea'], 0)
+        self.assertEqual(model['dynamicRows']['cost'], [{'id': 'cost-1', 'price': 900}])
+
     def test_resigning_an_owned_map_does_not_invalidate_the_proposal(self):
         initial = best_use.source_hash(self.project)
         self.project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'] = '/uploads/maps/site.png?s=new&t=123'

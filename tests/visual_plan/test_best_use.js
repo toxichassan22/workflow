@@ -16,6 +16,7 @@ function fixture() {
     bestUseData: { value: '', dataset: { key: 'best_use_data' } },
     bestUseChatData: { value: '', dataset: { key: 'best_use_chat' } },
     builtUpAreaAbove: { value: '6000' },
+    basementArea: { value: '2500' },
     bestUseChatInput: { value: 'لماذا اخترت هذا التوزيع؟' }
   };
   const body = { replaceChildren() { rows.length = 0; } };
@@ -110,12 +111,14 @@ test('only an approval response replaces components and updates the area input',
   const proposed = f.proposal(true);
   model.dynamicRows.components = plain(proposed.components);
   model.inputs.builtUpAreaAbove = 8000;
+  model.inputs.basementArea = 1000;
   const visuals = plain(f.context.tenantProjectData.visual_concept);
   assert.equal(f.context.applyBestUseResponse({ success: true, draftId: 'draft-1', revision: 2,
     bestUse: proposed, financialModel: model, componentsApplied: true,
     sectionStatuses: { 'section-financial-calc': 'draft', 'section-best-use': 'draft' } }, f.requestContext()), true);
   assert.deepEqual(f.rows, plain(proposed.components));
   assert.equal(f.inputs.builtUpAreaAbove.value, '8000');
+  assert.equal(f.inputs.basementArea.value, '1000');
   assert.equal(f.context.tenantProjectData.financial_study_model.inputs.manualLandValue, 7000000);
   assert.deepEqual(plain(f.context.tenantProjectData.visual_concept), visuals);
   assert.equal(f.context.recalculations, 1);
@@ -146,6 +149,20 @@ test('source changes invalidate the proposal but changed fetch signatures do not
   f.context.tenantProjectData.tenantCreativeImages.map_placeholders['##MAP_OVERVIEW##'] = '/uploads/maps/site.png?s=new&t=123';
   assert.equal(f.context.bestUseCurrent(), true);
   f.context.tenantProjectData.approved_floor_area_ratio = 3;
+  assert.equal(f.context.bestUseCurrent(), false);
+});
+
+test('calculator basement and revenue modes do not change generation snapshots', () => {
+  const f = fixture();
+  f.context.tenantProjectData.best_use_data = f.proposal(true);
+  const snapshot = plain(f.context.bestUseSourceSnapshot());
+  assert.equal(snapshot.mode, 'guided');
+  assert.equal('basementArea' in snapshot, false);
+  assert.equal('unitRevenueMode' in snapshot, false);
+  f.inputs.basementArea.value = '9000';
+  f.context.tenantProjectData.financial_study_model.inputs.unitRevenueMode = 'rental';
+  assert.equal(f.context.bestUseCurrent(), true);
+  f.context.tenantProjectData.best_use_data.mode = 'explore';
   assert.equal(f.context.bestUseCurrent(), false);
 });
 
