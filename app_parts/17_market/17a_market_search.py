@@ -30,10 +30,13 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
             search_params[key] = max(1, min(search_params[key], int(budget[key])))
     if budget:
         search_params['engine'] = 'exa'
-        search_params['max_results'] = min(6, max(1, int(max_search_results)))
+        search_params['max_results'] = min(int(budget.get('max_results') or 6),
+                                           max(1, int(max_search_results)))
         # Bounded scans are a quick comparison, not a market study — pin Exa's
         # fastest mode so a rough price sweep does not take the deep-search path.
-        search_params['mode'] = 'instant'
+        # 'instant' can come back blind on thin Arabic listing pages, so a caller
+        # may override with budget['mode'] for a deeper retry.
+        search_params['mode'] = str(budget.get('mode') or 'instant').strip() or 'instant'
     tools = [{
         'type': 'openrouter:web_search',
         'parameters': search_params,
@@ -49,7 +52,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
         'max_results': max(4, min(20, int(max_search_results or 8))),
     }
     if budget:
-        plugin['mode'] = 'instant'
+        plugin['mode'] = search_params['mode']
     plugins = [plugin]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so

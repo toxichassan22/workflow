@@ -100,29 +100,16 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                      {'use': use, 'index': index + 1, 'total': len(uses)})
         prompt = json.dumps({'city': city, 'district': district, 'use': use,
                             'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
-        response, error = _call_market_study_model(
-            'مسح أسعار صغير حي من الويب للاستخدام والمنطقة المحددين فقط. '
-            'بحث بيع وبحث إيجار، لا دراسة سوق ولا بيانات مشروع أساسية. '
-            'لا تسم إعلانًا متوسطًا. لا تؤلف أسعارًا ولا تستخدم ذاكرة الموديل. '
-            'لكل سعر مقتطف حرفي من الصفحة يثبت السعر والاستخدام والمدينة والحي والعملة والوحدة والفترة. '
-            'الحي غير المتوفر يبقى فارغًا ولا تنسب بيانات المدينة إلى حي. لا تحول سعر الوحدة إلى متر. '
-            'تاريخ نشر السعر غير المثبت null. معرف الإعلان الحرفي في propertyId، أو اسم المشروع في entityName. '
-            'أعد JSON {"observations":[{"use":"' + use + '","revenueMode":"sale|rent",'
-            '"value":100,"currency":"SAR","unit":"sqm|unit|room","period":"oneOff|year|month|night",'
-            '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
-            'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
-            prompt, max_tokens=4000, usage_ctx=_usage_ctx('best_use_price_scan', data, draft_id=draft['id']),
-            search_context={'city': city, 'country': 'SA'}, max_search_results=6,
-            search_budget={'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 120})
-        if error or not _market_search_ran(response):
-            # Surface the provider's real reason — quota, timeout, malformed
-            # tool call — instead of a bare code that reads as "no results".
-            detail = (error or '').strip() or 'no_search_executed'
-            raise best_use_contract.ProposalError('price_search_not_run: ' + detail[:240])
-        parsed = _best_use_explore_provider(response)
-        rows = parsed.get('observations')
-        if not isinstance(rows, list):
-            raise best_use_contract.ProposalError('price_scan_invalid')
+        rows = _best_use_price_scan_use(
+            use, prompt, city, draft, data,
+            {'max_uses': 2, 'max_total_results': 8, 'max_tool_calls': 3, 'timeout': 120}, 6)
+        if not rows:
+            # Exa instant can come back blind on thin Arabic listing pages — one
+            # deeper auto pass for the same use before reporting no evidence.
+            rows = _best_use_price_scan_use(
+                use, prompt, city, draft, data,
+                {'max_uses': 3, 'max_total_results': 16, 'max_tool_calls': 5, 'timeout': 120,
+                 'mode': 'auto', 'max_results': 8}, 8)
         candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
     pages = []
     urls = list(dict.fromkeys(best_use_prices.clean_url(row.get('url')) for row in candidates))
@@ -136,6 +123,33 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
         if page:
             pages.append(page)
     return best_use_prices.build_scan(uses, candidates, pages, db._utcnow().isoformat(), city, district)
+
+
+def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap):
+    response, error = _call_market_study_model(
+        'مسح أسعار صغير حي من الويب للاستخدام والمنطقة المحددين فقط. '
+        'بحث بيع وبحث إيجار، لا دراسة سوق ولا بيانات مشروع أساسية. '
+        'لا تسم إعلانًا متوسطًا. لا تؤلف أسعارًا ولا تستخدم ذاكرة الموديل. '
+        'لكل سعر مقتطف حرفي من الصفحة يثبت السعر والاستخدام والمدينة والحي والعملة والوحدة والفترة. '
+        'الحي غير المتوفر يبقى فارغًا ولا تنسب بيانات المدينة إلى حي. لا تحول سعر الوحدة إلى متر. '
+        'تاريخ نشر السعر غير المثبت null. معرف الإعلان الحرفي في propertyId، أو اسم المشروع في entityName. '
+        'أعد JSON {"observations":[{"use":"' + use + '","revenueMode":"sale|rent",'
+        '"value":100,"currency":"SAR","unit":"sqm|unit|room","period":"oneOff|year|month|night",'
+        '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
+        'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
+        prompt, max_tokens=4000, usage_ctx=_usage_ctx('best_use_price_scan', data, draft_id=draft['id']),
+        search_context={'city': city, 'country': 'SA'},
+        max_search_results=results_cap, search_budget=budget)
+    if error or not _market_search_ran(response):
+        # Surface the provider's real reason — quota, timeout, malformed
+        # tool call — instead of a bare code that reads as "no results".
+        detail = (error or '').strip() or 'no_search_executed'
+        raise best_use_contract.ProposalError('price_search_not_run: ' + detail[:240])
+    parsed = _best_use_explore_provider(response)
+    rows = parsed.get('observations')
+    if not isinstance(rows, list):
+        raise best_use_contract.ProposalError('price_scan_invalid')
+    return rows
 
 
 def _best_use_guided_prices(project):
