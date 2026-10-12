@@ -101,7 +101,10 @@
 
     function bestUseState() { return bestUseObject(tenantProjectData?.best_use_data); }
     function bestUseChatState() { return bestUseObject(tenantProjectData?.best_use_chat); }
-    function bestUseSectionRequired() { const state = bestUseState(); return !!state.id && !state.rejected; }
+    function bestUseSectionRequired() {
+      if (typeof bestUseActiveMode === 'function' && bestUseActiveMode() === 'explore') return bestUseExploreSectionRequired();
+      const state = bestUseState(); return !!state.id && !state.rejected;
+    }
 
     function bestUseCurrent() {
       const state = bestUseState();
@@ -113,6 +116,7 @@
     }
 
     function bestUseSectionError() {
+      if (typeof bestUseActiveMode === 'function' && bestUseActiveMode() === 'explore') return bestUseExploreSectionError();
       if (!bestUseSectionRequired()) return '';
       if (!bestUseCurrent()) return WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.');
       return bestUseState().approved === true ? '' : WFT('best_use.approval_required', 'اقتراح أفضل استخدامات غير معتمد.');
@@ -126,11 +130,14 @@
     }
 
     function persistBestUseDraftState() {
-      [['best_use_data', 'bestUseData'], ['best_use_chat', 'bestUseChatData']].forEach(([key, id]) => {
+      [['best_use_data', 'bestUseData'], ['best_use_chat', 'bestUseChatData'],
+        ['best_use_explore_data', 'bestUseExploreData'], ['best_use_explore_chat', 'bestUseExploreChatData']].forEach(([key, id]) => {
         const value = bestUseObject(tenantProjectData?.[key]);
         const hidden = document.getElementById(id);
         if (hidden) hidden.value = JSON.stringify(value);
       });
+      const mode = document.getElementById('bestUseModeData');
+      if (mode) mode.value = tenantProjectData?.best_use_mode || 'guided';
     }
 
     function bestUseMissingFields() {
@@ -171,7 +178,8 @@
         approved_coverage_ratio: ['best_use.need_coverage', 'تغطية البناء'],
         setbacks: ['best_use.need_setbacks', 'الارتدادات'], allowed_uses: ['best_use.need_uses', 'الاستخدامات المسموحة'],
         buildable_area: ['best_use.need_buildable', 'مساحة بناء متاحة'],
-        best_use_mode: ['best_use.mode_unavailable', 'وضع أفضل استخدام غير متاح حاليًا']
+        best_use_mode: ['best_use.mode_unavailable', 'وضع أفضل استخدام غير متاح حاليًا'],
+        city: ['best_use.need_city', 'مدينة الأرض']
       };
       const pair = labels[key];
       return pair ? WFT(pair[0], pair[1]) : key;
@@ -221,6 +229,12 @@
       const body = document.createElement('div');
       body.className = 'best-use-body';
       body.innerHTML = `
+        <label class="best-use-mode-label" for="bestUseMode">${WFT('best_use_explore.mode', 'وضع أفضل استخدام')}</label>
+        <select id="bestUseMode" onchange="changeBestUseMode(this.value)">
+          <option value="guided">${WFT('best_use_explore.guided', 'توزيع موجّه بفكرة المشروع')}</option>
+          <option value="explore">${WFT('best_use_explore.explore', 'استكشاف مستقل للأرض')}</option>
+        </select>
+        <div id="bestUseGuidedWorkspace">
         <div class="best-use-toolbar">
           <span class="best-use-optional" data-i18n="best_use.optional">${WFT('best_use.optional', 'اختياري')}</span>
           <div class="best-use-actions">
@@ -240,6 +254,11 @@
             <button type="button" id="bestUseChatRevise" class="btn ghost small" onclick="sendBestUseChat(true)">${WFT('best_use.revise', 'تحديث التوزيع')}</button>
           </div>
         </section>
+        </div>
+        <div id="bestUseExploreWorkspace" hidden></div>
+        <input type="hidden" id="bestUseModeData" data-key="best_use_mode" data-type="text">
+        <input type="hidden" id="bestUseExploreData" data-key="best_use_explore_data" data-type="text">
+        <input type="hidden" id="bestUseExploreChatData" data-key="best_use_explore_chat" data-type="text">
         <input type="hidden" id="bestUseData" data-key="best_use_data" data-type="text">
         <input type="hidden" id="bestUseChatData" data-key="best_use_chat" data-type="text">`;
       section.appendChild(body);
@@ -256,6 +275,8 @@
     function renderBestUse() {
       const root = document.getElementById(BEST_USE_SECTION_KEY);
       if (!root) return;
+      if (typeof renderBestUseModeControls === 'function') renderBestUseModeControls();
+      if (typeof bestUseActiveMode === 'function' && bestUseActiveMode() === 'explore') { renderBestUseExplore(); return; }
       const state = bestUseState();
       const current = bestUseCurrent();
       const approved = state.approved === true;
@@ -307,6 +328,7 @@
           ${totals.basementArea > 0 && budget.basementVerified === false ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.basement_unverified', 'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.')) + '</p>' : ''}
           ${!current ? '<p class="best-use-warning">' + escapeHtml(WFT('best_use.inputs_changed', 'تغيّرت بيانات الأرض أو الموقع أو دراسة السوق التي بُني عليها الاقتراح.')) + '</p>' : ''}
           <div class="table-wrap"><table class="best-use-table"><thead><tr>${headings.map(label => '<th>' + escapeHtml(label) + '</th>').join('')}</tr></thead><tbody>${cells}</tbody></table></div>
+          ${typeof bestUseRevenuePotentialHtml === 'function' ? bestUseRevenuePotentialHtml(state.revenuePotential) : ''}
           <div class="best-use-actions best-use-decisions">
             <button type="button" class="btn primary small" onclick="runBestUseAction('${approved ? 'unapproved' : 'approved'}')" ${bestUseBusy || locked || (!approved && (!current || unavailable)) ? 'disabled' : ''}>${approved ? WFT('best_use.unapprove', 'الغاء الاعتماد') : WFT('best_use.approve', 'اعتماد واستبدال المكونات')}</button>
             <button type="button" class="btn ghost small" onclick="runBestUseAction('rejected')" ${bestUseBusy || locked || approved || state.rejected ? 'disabled' : ''}>${WFT('best_use.reject', 'رفض الاقتراح')}</button>
@@ -360,31 +382,7 @@
         return false;
       }
       if (response.componentsApplied && response.financialModel) {
-        const model = bestUseObject(response.financialModel);
-        tenantProjectData.financial_study_model = model;
-        tenantProjectData.project_components_data = response.projectComponentsData || JSON.stringify(model.dynamicRows?.components || []);
-        tenantProjectData.financial_calc_data = response.financialCalcData || JSON.stringify(model.financialCalcData || {});
-        window.__batchLoading = true;
-        try {
-          const body = document.querySelector('#componentsTable tbody');
-          if (body) { body.replaceChildren(); (model.dynamicRows?.components || []).forEach(addComponent); }
-          ['builtUpAreaAbove', 'basementArea'].forEach(key => {
-            const input = document.getElementById(key);
-            if (input && model.inputs?.[key] !== undefined) input.value = String(model.inputs[key]);
-          });
-          if (typeof updateRevenueComponentOptions === 'function') updateRevenueComponentOptions();
-          const revenues = Object.fromEntries((model.dynamicRows?.revenue || []).map(row => [row.id, row]));
-          document.querySelectorAll('#revenueTable tbody tr').forEach(row => {
-            const saved = revenues[row.dataset.revenueKey];
-            if (!saved) return;
-            row.dataset.componentId = saved.componentId || '';
-            const select = row.querySelector('[data-field="component"] select');
-            if (select) select.value = row.dataset.componentId;
-          });
-        } finally { window.__batchLoading = false; }
-        if (typeof calculateAll === 'function') calculateAll();
-        if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
-        if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
+        applyBestUseFinancialModel(response);
       }
       persistBestUseDraftState();
       renderBestUse();

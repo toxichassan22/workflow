@@ -7,7 +7,8 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'assets/js/07-project-form/03_best_use.js'), 'utf8');
+const source = ['03_best_use.js', '03a_best_use_calculator.js']
+  .map(file => fs.readFileSync(path.join(root, 'assets/js/07-project-form', file), 'utf8')).join('\n');
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fixture() {

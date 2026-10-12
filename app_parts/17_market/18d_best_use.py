@@ -33,13 +33,16 @@ def _best_use_section_error(draft, section_key):
     if section_key != best_use.SECTION_KEY:
         return None
     project = (draft or {}).get('draft_data') or {}
-    if not best_use.section_required(project):
+    if not _best_use_required(project):
         return None
+    if _best_use_active_mode(project) == 'explore':
+        code = best_use_workflow.section_error(project)
+        return _best_use_error(code)[0] if code else None
     proposal = best_use.read_object(project.get('best_use_data'))
     code = None
-    if proposal.get('inputsChanged') or proposal.get('sourceHash') != best_use.source_hash(project):
+    if not best_use.proposal_current(project, proposal):
         code = 'BEST_USE_INPUTS_CHANGED'
-    elif proposal.get('approved') is not True:
+    elif not best_use.proposal_approved(project, proposal):
         code = 'BEST_USE_APPROVAL_REQUIRED'
     return _best_use_error(code)[0] if code else None
 
@@ -49,22 +52,23 @@ def _generated_section_error(draft, section_key):
 
 
 def _sanitize_best_use_claims(project, stored):
+    _best_use_sanitize_explore(project, stored)
     for key in ('best_use_data', 'best_use_chat'):
         if key in (stored or {}):
             project[key] = copy.deepcopy(stored[key])
         else:
             project.pop(key, None)
     proposal = best_use.read_object(project.get('best_use_data'))
-    if proposal.get('id') and proposal.get('sourceHash') != best_use.source_hash(project):
+    if proposal.get('id') and not best_use.proposal_current(project, proposal):
         proposal.update(approved=False, inputsChanged=True)
-        proposal.pop('approvedAt', None)
-        proposal.pop('approvedBy', None)
+        for key in ('approvedAt', 'approvedBy', 'approvedContentHash', 'approvedInputHash'):
+            proposal.pop(key, None)
         project['best_use_data'] = proposal
 
 
 def _best_use_save_statuses(project, incoming, stored):
     statuses = dict(incoming if isinstance(incoming, dict) else stored or {})
-    if not best_use.section_required(project):
+    if not _best_use_required(project):
         statuses.pop(best_use.SECTION_KEY, None)
     elif _best_use_section_error({'draft_data': project}, best_use.SECTION_KEY):
         statuses[best_use.SECTION_KEY] = 'draft'
@@ -83,6 +87,9 @@ def _best_use_draft(data, applying=False):
     draft, error = _versioned_draft_or_404(draft_id)
     if error:
         return None, (jsonify({'success': False, **error}), 404)
+    if _best_use_active_mode(draft.get('draft_data')) != 'guided':
+        result, status = _best_use_error('BEST_USE_WRONG_MODE', 409)
+        return None, (jsonify(result), status)
     status = db.normalize_proposal_status(draft.get('status'))
     if db.proposal_status_is_locked(status):
         return None, _draft_locked_response(status)
@@ -218,6 +225,8 @@ def _best_use_execute(draft, data, kind, job=None):
     if kind == 'chat' and not message:
         return {'success': False, 'error': 'الرسالة غير متوفرة.', 'error_code': 'MESSAGE_REQUIRED'}, 400
     context = best_use.prompt_context(project)
+    price_scan = _best_use_guided_prices(project) if kind == 'generate' or revise else proposal.get('priceScan') or {}
+    context['priceEvidence'] = price_scan
     evidence = _land_chat_regulation_evidence(message or 'الاستخدامات والتغطية والارتدادات ومعامل مسطح البناء', project)
     chat = best_use.read_object(project.get('best_use_chat'))
     history = chat.get('messages') if isinstance(chat.get('messages'), list) else []
@@ -236,6 +245,8 @@ def _best_use_execute(draft, data, kind, job=None):
     system = best_use.CHAT_PROMPT if kind == 'chat' else best_use.SYSTEM_PROMPT
     map_references = _best_use_map_references(draft)
     feedback, last_output = '', None
+    prior_version = proposal.get('version')
+    generation_version = prior_version + 1 if isinstance(prior_version, int) and not isinstance(prior_version, bool) else 1
     for attempt in range(4):
         try:
             response = call_text_chat(system, prompt + feedback,
@@ -247,8 +258,11 @@ def _best_use_execute(draft, data, kind, job=None):
             raw = parsed.get('proposal') if revise else parsed
             last_output = raw if isinstance(raw, dict) else parsed
             if kind == 'generate' or revise:
-                proposal = best_use.normalize_proposal(raw, project, _uuid.uuid4().hex)
+                proposal = best_use.normalize_proposal(raw, project, _uuid.uuid4().hex, version=generation_version)
                 proposal['generatedAt'] = db._utcnow().isoformat()
+                proposal['priceScan'] = price_scan
+                proposal['revenuePotential'] = best_use_prices.revenue_potential(proposal['components'], price_scan)
+                proposal['contentHash'] = best_use.proposal_content_hash(proposal)
                 project['best_use_data'] = proposal
             if kind == 'chat':
                 reply = _land_chat_clean_reply(best_use.text(parsed.get('reply'), 16000))
@@ -402,7 +416,7 @@ def api_decide_best_use():
         return jsonify(result), status
     statuses = dict(draft.get('section_statuses') or {})
     if decision == 'approved':
-        if proposal.get('inputsChanged') or proposal.get('sourceHash') != best_use.source_hash(project):
+        if not best_use.proposal_current(project, proposal):
             result, status = _best_use_error('BEST_USE_INPUTS_CHANGED', 409)
             return jsonify(result), status
         readiness = _best_use_readiness(draft)
@@ -411,9 +425,19 @@ def api_decide_best_use():
             return jsonify(result), status
         if proposal.get('approved') is True:
             return jsonify(_best_use_response(draft))
-        validated = best_use.normalize_proposal(proposal, project, proposal['id'])
+        if proposal.get('priceScan') and not best_use_prices.evidence_current(proposal['priceScan']):
+            result, status = _best_use_error('BEST_USE_INPUTS_CHANGED', 409)
+            return jsonify(result), status
+        validated = best_use.normalize_proposal(proposal, project, proposal['id'],
+                                                version=proposal['version'])
         proposal.update(validated, approved=True, rejected=False, approvedBy=_project_draft_actor_id(),
                         approvedAt=db._utcnow().isoformat())
+        if proposal.get('priceScan'):
+            proposal['revenuePotential'] = best_use_prices.revenue_potential(
+                proposal['components'], proposal['priceScan'])
+        proposal['contentHash'] = best_use.proposal_content_hash(proposal)
+        proposal['approvedContentHash'] = proposal['contentHash']
+        proposal['approvedInputHash'] = proposal['inputHash']
         project = best_use.apply_proposal(project, proposal)
         statuses['section-financial-calc'] = 'draft'
         if 'section-executive-content' in statuses:

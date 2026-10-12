@@ -55,7 +55,7 @@ FRONTEND_JS_ORDER = (
     '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '06-team.js', '07-project-form/01_form_sections.js',
-    '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js',
+    '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js', '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',
     '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',

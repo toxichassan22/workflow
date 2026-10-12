@@ -1,14 +1,14 @@
-import copy
 import hashlib
 import json
 import re
-from decimal import Decimal, ROUND_HALF_UP
-
 import db
-from best_use_geometry import number, setback_envelope
+from best_use_geometry import number
+from best_use_contract import (ProposalError, decoded, read_object, text, rounded,
+                               capacity, apply_proposal, digest)
 
 
 SECTION_KEY = 'section-best-use'
+GUIDED_CONTRACT_VERSION = 2
 SOURCE_FIELDS = (
     'draftId', 'project_name', 'project_type', 'project_subtype', 'project_idea',
     'project_level', 'activity_class', 'target_audience', 'project_language',
@@ -72,6 +72,7 @@ SYSTEM_PROMPT = (
     'المساحة في سعر موثق تعبر عن إمكان إيراد تقديري فقط، والحساب المالي من الخادم لا من الموديل. '
     'دون مؤشر محسوب موحد من الخادم لا تخرج ترتيبًا ماليًا ولا تخلط إجمالي البيع بالإيجار السنوي. '
     'لكل مكون reason يشرح سبب الاستخدام من بيانات السوق والموقع وareaReason يشرح أساس حجمه وحدوده. '
+    'revenueAreaBasis يوضح افتراض صافي المساحة البيعية/التأجيرية وما استبعد للخدمات والممرات؛ لا تفترض نسبة كفاءة صامتة. '
     'rationale شرح منظم يربط كل أجزاء التوزيع بالطلب والقيود والخدمات، '
     'وsetbackExplanation يشرح التغطية والارتدادات من البيانات المسجلة. '
     'عند ذكر الاشتراطات انسبها إلى ملفات الأمانة فقط دون أرقام صفحات أو أسماء ملفات داخلية. '
@@ -84,7 +85,7 @@ SYSTEM_PROMPT = (
     '"components":[{"name":"","useType":"residential|retail|office|entertainment|hospitality|industrial|logistics|services|parking|openArea|basement",'
     '"units":1,"unitArea":100,"builtArea":100,"revenueArea":80,"footprintArea":100,'
     '"investmentModel":"sale|dailyRent|monthlyRent|annualRent|operating|nonRevenue",'
-    '"parkingLocation":"aboveGround|surface|basement","reason":"","areaReason":"","notes":""}]}'
+    '"parkingLocation":"aboveGround|surface|basement","reason":"","areaReason":"","revenueAreaBasis":"","notes":""}]}'
 )
 CHAT_PROMPT = (
     SYSTEM_PROMPT + '\nأنت الآن تناقش العميل حول هذا التوزيع، وتحتفظ بسياق الأسئلة والإجابات المرفق. '
@@ -97,32 +98,6 @@ CHAT_PROMPT = (
     'أخرج JSON: {"reply":"","proposal":null} أو '
     '{"reply":"","proposal":{"title":"","rationale":"","setbackExplanation":"","components":[]}}.'
 )
-
-
-class ProposalError(ValueError):
-    pass
-
-
-def decoded(value, default):
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (TypeError, ValueError):
-            return copy.deepcopy(default)
-    return copy.deepcopy(value) if isinstance(value, (dict, list)) else copy.deepcopy(default)
-
-
-def read_object(value):
-    result = decoded(value, {})
-    return result if isinstance(result, dict) else {}
-
-
-def text(value, limit=6000):
-    return str(value or '').strip()[:limit]
-
-
-def rounded(value):
-    return float(Decimal(str(value)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP))
 
 
 def project_types(project):
@@ -158,30 +133,6 @@ def source_snapshot(project):
 def source_hash(project):
     canonical = json.dumps(source_snapshot(project), ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
-
-
-def capacity(project):
-    area = number(project.get('approved_financial_area')) or 0
-    cadastral = number(project.get('croquis_land_area')) or 0
-    area = min(area, cadastral) if cadastral > 0 else area
-    coverage = number(project.get('approved_coverage_ratio')) or 0
-    floors = number(project.get('approved_floor_count')) or 0
-    far = number(project.get('approved_floor_area_ratio')) or 0
-    coverage_footprint = area * coverage / 100
-    setback = setback_envelope(project)
-    footprint = min(coverage_footprint, setback) if setback is not None else coverage_footprint
-    return {
-        'landArea': area, 'coveragePercent': coverage, 'floors': floors, 'far': far,
-        'coverageFootprint': coverage_footprint, 'setbackFootprint': setback,
-        'setbackVerified': setback is not None, 'footprintLimit': footprint,
-        'farLimit': area * far, 'maxBuiltArea': min(area * far, footprint * floors),
-        'openAreaLimit': max(0, area - coverage_footprint),
-        'basementAreaLimit': max(0, area), 'basementVerified': False,
-        'warnings': [
-            'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.'
-        ] + ([] if setback is not None else [
-            'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.']),
-    }
 
 
 def missing_inputs(project, statuses):
@@ -225,7 +176,30 @@ def section_required(project):
     return bool(proposal.get('id') and not proposal.get('rejected'))
 
 
-def normalize_proposal(raw, project, proposal_id):
+def proposal_content_hash(proposal):
+    return digest({key: proposal[key] for key in ('id', 'version', 'contractVersion', 'mode', 'title',
+        'rationale', 'setbackExplanation', 'components', 'capacity', 'totals', 'priceScan', 'revenuePotential') if key in proposal})
+
+
+def proposal_current(project, proposal):
+    if (not proposal.get('id') or proposal.get('inputsChanged')
+            or proposal.get('contractVersion') != GUIDED_CONTRACT_VERSION
+            or isinstance(proposal.get('version'), bool) or not isinstance(proposal.get('version'), int)
+            or proposal['version'] < 1 or proposal.get('sourceHash') != source_hash(project)
+            or proposal.get('inputHash') != proposal.get('sourceHash')
+            or proposal.get('contentHash') != proposal_content_hash(proposal)):
+        return False
+    from best_use_prices import evidence_current
+    return evidence_current(proposal.get('priceScan') or {})
+
+
+def proposal_approved(project, proposal):
+    return (proposal_current(project, proposal) and proposal.get('approved') is True
+            and proposal.get('approvedContentHash') == proposal.get('contentHash')
+            and proposal.get('approvedInputHash') == proposal.get('inputHash'))
+
+
+def normalize_proposal(raw, project, proposal_id, version=1):
     if not isinstance(raw, dict) or not isinstance(raw.get('components'), list) or not 1 <= len(raw['components']) <= 30:
         raise ProposalError('قائمة المكونات غير مكتملة.')
     rationale = text(raw.get('rationale'), 16000)
@@ -288,6 +262,8 @@ def normalize_proposal(raw, project, proposal_id):
                'builtArea': rounded(built), 'revenueArea': rounded(revenue),
                'footprintArea': rounded(footprint), 'investmentModel': investment,
                'reason': reason, 'areaReason': area_reason,
+               'grossArea': rounded(built), 'nonRevenueArea': rounded(built - revenue),
+               'revenueAreaBasis': text(item.get('revenueAreaBasis')),
                'notes': text(item.get('notes')) or reason + '\n' + area_reason}
         if valid:
             if row['units'] * row['unitArea'] > row['builtArea'] + 1e-6:
@@ -314,51 +290,16 @@ def normalize_proposal(raw, project, proposal_id):
         issues.append('الاقتراح لا يتضمن مكونات مبنية لنوع المشروع المختار')
     if issues:
         raise ProposalError('مخالفات التوزيع:\n- ' + '\n- '.join(issues) + '.')
-    return {
-        'id': proposal_id, 'mode': 'guided', 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
+    result = {
+        'id': proposal_id, 'version': version, 'contractVersion': GUIDED_CONTRACT_VERSION,
+        'mode': 'guided', 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
         'sourceHash': source_hash(project), 'sourceSnapshot': source_snapshot(project),
         'components': rows, 'rationale': rationale, 'setbackExplanation': setback_explanation,
         'capacity': budget, 'totals': {key: rounded(value) for key, value in totals.items()},
     }
-
-
-def apply_proposal(project, proposal):
-    updated = copy.deepcopy(project)
-    model = read_object(updated.get('financial_study_model'))
-    dynamic = read_object(model.get('dynamicRows'))
-    old = dynamic.get('components') if isinstance(dynamic.get('components'), list) else []
-    rows = [{key: value for key, value in row.items() if key not in {'reason', 'areaReason', 'footprintArea'}}
-            for row in proposal['components']]
-    old_names = {str(row.get('id')): text(row.get('name')).casefold()
-                 for row in old if isinstance(row, dict)}
-    new_ids = {text(row.get('name')).casefold(): row['id'] for row in rows}
-    unlinked = 0
-    for row in dynamic.get('revenue') or []:
-        if isinstance(row, dict) and row.get('componentId'):
-            linked = new_ids.get(old_names.get(str(row['componentId'])))
-            row['componentId'] = linked or ''
-            if not linked:
-                unlinked += 1
-    dynamic['components'] = rows
-    model['dynamicRows'] = dynamic
-    inputs = read_object(model.get('inputs'))
-    inputs['builtUpAreaAbove'] = proposal['totals']['builtArea']
-    inputs['basementArea'] = proposal['totals']['basementArea']
-    model['inputs'] = inputs
-    for key in ('parkingPlan', 'parkingSnapshot', 'projection', 'report'):
-        model.pop(key, None)
-    tables = read_object(model.get('tables'))
-    for key in ('componentsTable', 'cashflowTable', 'debtScheduleTable', 'fundFeeScheduleTable', 'sensitivityTable'):
-        tables.pop(key, None)
-    if 'tables' in model:
-        model['tables'] = tables
-    calc = {'components': copy.deepcopy(rows)}
-    model['financialCalcData'] = calc
-    updated['financial_study_model'] = model
-    updated['project_components_data'] = json.dumps(rows, ensure_ascii=False)
-    updated['financial_calc_data'] = json.dumps(calc, ensure_ascii=False)
-    updated['best_use_data'] = dict(proposal, unlinkedRevenueRows=unlinked)
-    return updated
+    result['inputHash'] = result['sourceHash']
+    result['contentHash'] = proposal_content_hash(result)
+    return result
 
 
 def prompt_context(project):
