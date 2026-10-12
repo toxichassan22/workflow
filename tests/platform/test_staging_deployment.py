@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -62,6 +63,36 @@ class StagingDeploymentRegressionTests(unittest.TestCase):
     def test_required_dependency_errors_are_not_ignored(self):
         script = (ROOT / 'deploy-staging.sh').read_text(encoding='utf-8')
         self.assertNotRegex(script, r'"\$PIP" install[^\n]*\|\| true')
+
+    def test_slide_vision_probe_loads_moved_modules_without_pythonpath(self):
+        script = (ROOT / 'deploy-staging.sh').read_text(encoding='utf-8')
+        probe = script.split('<<PY\n', 1)[1].split('\nPY\n', 1)[0]
+        with tempfile.TemporaryDirectory() as folder:
+            app_dir = Path(folder) / 'staging app'
+            scripts = app_dir / 'scripts'
+            scripts.mkdir(parents=True)
+            (scripts / '_bootstrap.py').write_text(
+                (ROOT / 'scripts/_bootstrap.py').read_text(encoding='utf-8'), encoding='utf-8')
+            pdf = app_dir / 'modules/pdf'
+            playwright = pdf / 'playwright'
+            playwright.mkdir(parents=True)
+            (pdf / 'generate_pdf_from_preview.py').write_text(
+                "def _launch_chromium(p):\n    return p.browser, 'fixture'\n", encoding='utf-8')
+            (playwright / '__init__.py').write_text('', encoding='utf-8')
+            (playwright / 'sync_api.py').write_text(
+                "class Browser:\n    version = 'fake-chromium'\n    def close(self): pass\n"
+                "class Playwright:\n    browser = Browser()\n"
+                "    def __enter__(self): return self\n    def __exit__(self, *args): pass\n"
+                "def sync_playwright(): return Playwright()\n", encoding='utf-8')
+            install_log = app_dir / 'install.log'
+            install_log.write_text('fixture install completed', encoding='utf-8')
+            probe = probe.replace('$install_log', install_log.as_posix())
+            result = subprocess.run([sys.executable, '-I', '-', str(scripts)], input=probe,
+                                    cwd=folder, text=True, capture_output=True, check=True)
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload['available'], payload)
+            self.assertEqual(payload['error'], 'chromium fake-chromium via fixture')
+            self.assertEqual(payload['installLog'], 'fixture install completed')
 
 
 class StagingRuntimeTests(unittest.TestCase):

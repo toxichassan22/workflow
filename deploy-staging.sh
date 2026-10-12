@@ -238,8 +238,10 @@ echo "===== 8. Headless browser for slide rendering (optional) ====="
       || echo "WARNING: playwright install $browser_target failed or timed out"
   done
 
-  "$PYTHON" - > "$APP_DIR/.vision_status.tmp" <<PY
+  "$PYTHON" - "$APP_DIR/scripts" > "$APP_DIR/.vision_status.tmp" <<PY
 import json
+import sys
+sys.path.insert(0, sys.argv[1])
 detail = ''
 try:
     with open("$install_log", encoding='utf-8', errors='replace') as fh:
@@ -248,6 +250,7 @@ except OSError as exc:
     detail = f'no install log: {exc}'
 available, error = False, ''
 try:
+    import _bootstrap
     import generate_pdf_from_preview as gp
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
