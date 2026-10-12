@@ -286,12 +286,18 @@
           { a: bestUseFormat(issue.polygonArea), b: bestUseFormat(issue.cadastralArea) });
       }
       const messages = {
+        rows: 'best_use.issue_poly_rows', coords: 'best_use.issue_poly_coords',
+        parcels: 'best_use.issue_poly_parcels', points: 'best_use.issue_poly_points',
         polygon: 'best_use.issue_polygon', setbacks: 'best_use.issue_setbacks',
         cadastral: 'best_use.issue_cadastral', concave: 'best_use.issue_concave',
         degenerate: 'best_use.issue_degenerate', unresolved: 'best_use.issue_unresolved',
         frontages: 'best_use.issue_frontages',
       };
       const fallback = {
+        rows: 'جدول الإحداثيات فارغ أو فيه أقل من 3 نقط؛ المساحات توصية تخطيطية.',
+        coords: 'قيم الإحداثيات ناقصة أو خارج نطاق UTM المتوقع؛ المساحات توصية تخطيطية.',
+        parcels: 'جدول الإحداثيات يحتوي أكثر من قطعة أرض؛ المساحات توصية تخطيطية.',
+        points: 'جدول الإحداثيات يحتوي أقل من 3 نقط فريدة؛ المساحات توصية تخطيطية.',
         polygon: 'جدول الإحداثيات غير مكتمل أو يحتوي أكثر من قطعة أرض؛ المساحات توصية تخطيطية.',
         setbacks: 'لم تُقرأ قيم الارتدادات من النص المدخل؛ المساحات توصية تخطيطية.',
         cadastral: 'مساحة الصك غير مدخلة؛ المساحات توصية تخطيطية.',

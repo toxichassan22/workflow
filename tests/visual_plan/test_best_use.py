@@ -113,7 +113,7 @@ class BestUseTests(unittest.TestCase):
         budget = best_use.capacity(self.project)
         self.assertFalse(budget['setbackVerified'])
         self.assertIsNone(budget['setbackFootprint'])
-        self.assertEqual(budget['setbackIssue']['code'], 'polygon')
+        self.assertEqual(budget['setbackIssue']['code'], 'rows')
         self.assertTrue(budget['warnings'])
 
     def test_setback_issue_names_the_specific_failure(self):

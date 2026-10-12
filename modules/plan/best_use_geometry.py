@@ -74,30 +74,43 @@ def _setback_values(value):
     return values
 
 
+def _polygon_rows(project):
+    for key in ('survey_coordinates', 'regulation_coordinates'):
+        rows = _decoded(project.get(key), [])
+        if isinstance(rows, list) and 3 <= len(rows) <= 200:
+            return rows
+    analysis = _decoded(project.get('land_documents_analysis'), {})
+    parcels = analysis.get('parcels') if isinstance(analysis, dict) else []
+    rows = [row for parcel in (parcels if isinstance(parcels, list) else [])
+            if isinstance(parcel, dict)
+            for row in (parcel.get('survey_coordinates') or [])]
+    return rows if isinstance(rows, list) and 3 <= len(rows) <= 200 else []
+
+
 def _polygon(project):
-    rows = _decoded(project.get('survey_coordinates'), [])
-    if not isinstance(rows, list) or not 3 <= len(rows) <= 200:
-        return []
+    rows = _polygon_rows(project)
+    if not rows:
+        return [], 'rows'
     points = []
     parcels = set()
     for row in rows:
         if not isinstance(row, dict):
-            return []
+            return [], 'coords'
         x = number(row.get('eastings', row.get('easting', row.get('x'))))
         y = number(row.get('northings', row.get('northing', row.get('y'))))
         if x is None or y is None or x < 1000 or y < 1000:
-            return []
+            return [], 'coords'
         parcels.add(str(row.get('parcel_id') or row.get('parcelId') or ''))
         if not points or points[-1] != (x, y):
             points.append((x, y))
     if len(parcels) > 1:
-        return []
+        return [], 'parcels'
     if points and points[0] == points[-1]:
         points.pop()
     if len(points) < 3 or len(set(points)) != len(points):
-        return []
+        return [], 'points'
     origin = points[0]
-    return [(x - origin[0], y - origin[1]) for x, y in points]
+    return [(x - origin[0], y - origin[1]) for x, y in points], None
 
 
 def _signed_area(points):
@@ -124,9 +137,9 @@ def _clip(points, origin, normal, setback):
 
 
 def setback_envelope(project):
-    points = _polygon(project)
+    points, polygon_issue = _polygon(project)
     if not points:
-        return None, {'code': 'polygon'}
+        return None, {'code': polygon_issue or 'polygon'}
     values = _setback_values(project.get('setbacks'))
     if not values:
         return None, {'code': 'setbacks'}
