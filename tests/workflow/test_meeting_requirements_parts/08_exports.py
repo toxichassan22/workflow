@@ -723,15 +723,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('workflow.promptsError', body)
         self.assertIn('visualConceptPlansPromptsPending', index_source)
         boundary_start = index_source.index('async function refreshVisualConceptPlansBoundary()')
-        boundary_body = index_source[boundary_start:index_source.index('async function reviseVisualConceptPlansBoundaryWithAi()', boundary_start)]
+        boundary_body = index_source[boundary_start:index_source.index('function approveVisualConceptPlansBoundary()', boundary_start)]
         self.assertLess(
             boundary_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
             boundary_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        ai_start = index_source.index('async function reviseVisualConceptPlansBoundaryWithAi()')
-        ai_body = index_source[ai_start:index_source.index('function approveVisualConceptPlansBoundary()', ai_start)]
-        self.assertLess(
-            ai_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
-            ai_body.index('const workflow = visualConceptPlansWorkflowState()'))
         # The distribution check and repair used to write their responses onto a
         # detached workflow too: check findings never reached the draft, approval
         # stayed blocked on stale conflicts, and the whole AI repair vanished.
@@ -1489,10 +1484,12 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         ], 'notes': ['فصل المداخل']}
         with patch.object(module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': json.dumps(proposed, ensure_ascii=False)}}]
-        }):
+        }) as propose_call:
             proposal = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
-                'projectData': project_data, 'plansWorkflow': workflow})
+                'projectData': project_data,
+                'plansWorkflow': {**workflow, 'distributionNotes': 'المواقف السطحية في خلف الأرض'}})
         self.assertEqual(proposal.status_code, 200, proposal.get_json())
+        self.assertIn('المواقف السطحية في خلف الأرض', propose_call.call_args[0][1])
         distribution = proposal.get_json()['distribution']
         self.assertEqual(len(distribution['rows']), 3)
         totals = {row['component']: row for row in distribution['totals']}
@@ -1554,11 +1551,78 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
 
         # When sol is offline the proposal falls back to the deterministic inferred
         # distribution so the client still gets an editable table.
-        with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')):
+        with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')) as offline_call:
             fallback = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
                 'projectData': project_data, 'plansWorkflow': workflow})
         self.assertEqual(fallback.status_code, 200, fallback.get_json())
         self.assertTrue(fallback.get_json()['distribution']['rows'])
+        self.assertNotIn('ملاحظات العميل على التوزيع', offline_call.call_args[0][1])
+
+    def test_plans_conflict_chat_explains_findings_without_editing(self):
+        """The conflict chat answers about the posted findings — advisory only:
+        it sees the same rows/regulations the checker saw but never writes."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        workflow = {'verification': {
+            'checks': [{'item': 'عدد الأدوار', 'field': 'floor_count',
+                        'section': 'بيانات المشروع', 'project': '30',
+                        'regulatory': 'بحد أقصى 20', 'result': 'متعارض',
+                        'issues': ['الأدوار تتجاوز الموثق'],
+                        'suggestion': 'خفّض الأدوار إلى 20'}],
+            'issues': [{'title': 'مراجعة', 'points': ['نقطة'], 'severity': 'low'}],
+            'summary': 'يوجد تعارض واحد', 'canProceed': False}}
+
+        missing = client.post('/api/visual-concept/plans-conflict-chat', headers=headers,
+                              json={'projectData': {}, 'plansWorkflow': workflow})
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.get_json()['error_code'], 'MESSAGE_REQUIRED')
+
+        empty = client.post('/api/visual-concept/plans-conflict-chat', headers=headers,
+                            json={'question': 'وش المشكلة؟', 'plansWorkflow': {}})
+        self.assertEqual(empty.status_code, 400)
+        self.assertEqual(empty.get_json()['error_code'], 'CONFLICT_CHAT_EMPTY')
+
+        with patch.object(module, 'call_text_chat', return_value={
+            'choices': [{'message': {'content': 'PLANS-CONFLICT-CHAT\nالمطلوب خفض الأدوار إلى 20.'}}]
+        }) as chat_call:
+            answer = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
+                'question': 'إيه المطلوب مني؟', 'scope': 'verify',
+                'projectData': {'project_name': 'X'},
+                'plansWorkflow': workflow,
+                'history': [{'role': 'user', 'content': 'سؤال سابق'}]})
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        self.assertIn('خفض الأدوار', answer.get_json()['reply'])
+        user_content = chat_call.call_args[0][1]
+        self.assertIn('خفّض الأدوار إلى 20', user_content)
+        self.assertIn('سؤال سابق', user_content)
+        self.assertIn('إيه المطلوب مني؟', user_content)
+
+        # The distribution scope also sees the proposed rows and the client's
+        # distribution notes, so it can explain a conflict against both.
+        dist_workflow = {'distribution': {
+            'checks': [{'item': 'مواقف', 'result': 'متعارض', 'detail': 'نقص مواقف'}],
+            'issues': [],
+            'rows': [{'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب'}],
+            'totals': []},
+            'distributionNotes': 'المواقف في البدروم'}
+        with patch.object(module, 'call_text_chat', return_value={
+            'choices': [{'message': {'content': 'PLANS-CONFLICT-CHAT\nبسبب نقص المواقف.'}}]
+        }) as dist_call:
+            dist = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
+                'question': 'ليش متعارض؟', 'scope': 'distribution',
+                'projectData': {}, 'plansWorkflow': dist_workflow})
+        self.assertEqual(dist.status_code, 200, dist.get_json())
+        dist_content = dist_call.call_args[0][1]
+        self.assertIn('المواقف في البدروم', dist_content)
+        self.assertIn('floor_range', dist_content)
+
+        # A provider failure surfaces as a clean 503, never an edited state.
+        with patch.object(module, 'call_text_chat', side_effect=RuntimeError('offline')):
+            failed = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
+                'question': 'وش الحل؟', 'scope': 'verify',
+                'projectData': {}, 'plansWorkflow': workflow})
+        self.assertEqual(failed.status_code, 503)
 
     def test_plans_distribution_totals_match_floor_scoped_study_rows(self):
         """The study stores components per floor («طابق أرضي - سكني» …) while the

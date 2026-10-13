@@ -161,6 +161,44 @@
         '</div>';
     }
 
+    // Advisory chat against the findings the checker produced — it explains and
+    // suggests edits but changes nothing itself, so it never touches inputStamp
+    // or any approval flag.
+    function visualConceptConflictChatHtml(scope, hasFindings) {
+      const workflow = visualConceptPlansWorkflowState();
+      const chats = workflow.conflictChats && workflow.conflictChats[scope]
+        ? workflow.conflictChats[scope] : [];
+      const log = chats.map(item =>
+        '<div class="visual-concept-chat-message"><strong>' +
+        (item.role === 'assistant' ? trDynamicI18n('النظام:') : trDynamicI18n('أنت:')) +
+        ' </strong>' + escapeHtml(item.text) + '</div>'
+      ).join('');
+      return '<div class="plans-conflict-chat">' +
+        '<div class="plans-workflow-panel-head"><h4>' +
+        escapeHtml(WFT('plans.conflict_chat_title', 'مناقشة نتائج الفحص')) + '</h4></div>' +
+        '<div class="visual-concept-chat" data-plans-conflict-log="' + scope + '">' +
+        (log || '<div class="tenant-hint">' + escapeHtml(WFT('plans.conflict_chat_empty', 'لا يوجد نقاش بعد.')) + '</div>') +
+        '</div>' +
+        '<div class="visual-concept-chat-row">' +
+        '<textarea rows="2" maxlength="2000" data-plans-conflict-input="' + scope + '"' +
+        (hasFindings ? '' : ' disabled') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-plans-workflow-action="conflict-chat" data-conflict-scope="' + scope + '"' +
+        (hasFindings ? '' : ' disabled') + '>' +
+        escapeHtml(WFT('plans.conflict_chat_send', 'إرسال')) + '</button>' +
+        '</div></div>';
+    }
+
+    function visualConceptConflictChatLogHtml(scope) {
+      const workflow = visualConceptPlansWorkflowState();
+      const chats = workflow.conflictChats && workflow.conflictChats[scope]
+        ? workflow.conflictChats[scope] : [];
+      return chats.map(item =>
+        '<div class="visual-concept-chat-message"><strong>' +
+        (item.role === 'assistant' ? trDynamicI18n('النظام:') : trDynamicI18n('أنت:')) +
+        ' </strong>' + escapeHtml(item.text) + '</div>'
+      ).join('') || '<div class="tenant-hint">' + escapeHtml(WFT('plans.conflict_chat_empty', 'لا يوجد نقاش بعد.')) + '</div>';
+    }
+
     function visualConceptDistributionBlocking(distribution) {
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
@@ -218,17 +256,21 @@
         (issueList ? '<div class="plans-workflow-notice">' + issueList + '</div>' : '') +
         '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
+        visualConceptConflictChatHtml('verify', checks.length > 0 || (Array.isArray(verification.issues) && verification.issues.length > 0)) +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
         '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-meta"><p class="tenant-hint">حدود الرسم من إحداثيات التنظيم أو أطوال الحدود الموثقة في الأرض والكروكي.</p></div></div>' +
-        '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="boundary-ai">تعديل الحدود بالذكاء الاصطناعي</button><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
-        '<label>ملاحظات تعديل الحدود</label><textarea rows="3" data-plans-boundary-instruction>' + escapeHtml(boundary.instruction || '') + '</textarea>' +
+        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
+        '<textarea rows="3" maxlength="2000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
         '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
-        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'إضافة ملاحظات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
-        '<label for="visualConceptPlanClientNotes">' + escapeHtml(WFT('plans.notes_label', 'ملاحظات المخططات')) + '</label>' +
+        visualConceptConflictChatHtml('distribution',
+          (Array.isArray(distribution.checks) && distribution.checks.length > 0)
+          || (Array.isArray(distribution.issues) && distribution.issues.length > 0)) +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'ملاحظات توليد المخططات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="4000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
         '<div data-plans-notes-results>' + visualConceptPlanNotesResultsHtml(workflow) + '</div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="check-notes" ' + (!workflow.clientNotes.trim() ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.notes_check', 'فحص الملاحظات')) + '</button></div>' +
@@ -290,16 +332,23 @@
           } else if (action === 'verify') verifyVisualConceptPlans();
           else if (action === 'approve-verification') approveVisualConceptPlansVerification();
           else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
-          else if (action === 'boundary-ai') reviseVisualConceptPlansBoundaryWithAi();
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution();
           else if (action === 'check-notes') checkVisualConceptPlanNotes();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
+          else if (action === 'conflict-chat') sendVisualConceptPlansConflictChat(actionBtn.getAttribute('data-conflict-scope'));
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
         });
         root.addEventListener('input', event => {
+          const distNotesInput = event.target.closest('[data-plans-distribution-notes]');
+          if (distNotesInput) {
+            const state = visualConceptPlansWorkflowState();
+            state.distributionNotes = String(distNotesInput.value || '').slice(0, 2000);
+            markVisualConceptDirty();
+            return;
+          }
           const input = event.target.closest('[data-plans-client-notes]');
           if (!input) return;
           setVisualConceptPlanNotes(input.value);

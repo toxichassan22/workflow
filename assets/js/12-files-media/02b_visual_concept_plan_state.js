@@ -30,8 +30,10 @@
       return {
         status: 'idle',
         verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
-        boundary: { points: [], referenceUrl: '', instruction: '', approved: false },
+        boundary: { points: [], referenceUrl: '', approved: false },
         distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false, aiReviewed: false },
+        distributionNotes: '',
+        conflictChats: { verify: [], distribution: [] },
         clientNotes: '',
         notesReview: { verified: false, canProceed: false, checks: [], issues: [], inputSignature: '', token: '' },
         scene: null,
@@ -55,6 +57,13 @@
       const boundary = source.boundary && typeof source.boundary === 'object' ? source.boundary : {};
       const distribution = source.distribution && typeof source.distribution === 'object' ? source.distribution : {};
       const review = source.notesReview && typeof source.notesReview === 'object' ? source.notesReview : {};
+      const chats = source.conflictChats && typeof source.conflictChats === 'object' ? source.conflictChats : {};
+      const chatTurns = list => (Array.isArray(list) ? list.slice(-12) : [])
+        .map(item => ({
+          role: item && item.role === 'assistant' ? 'assistant' : 'user',
+          text: String((item && item.text) || '').slice(0, 2000)
+        }))
+        .filter(item => item.text);
       const prompts = source.prompts && typeof source.prompts === 'object' ? source.prompts : {};
       const scene = source.scene && typeof source.scene === 'object' && source.scene.version === 1 ? source.scene : null;
       return {
@@ -70,7 +79,6 @@
         boundary: {
           points: visualConceptBoundaryPoints(boundary.points || boundary.survey_coordinates),
           referenceUrl: durableImageUrl(boundary.referenceUrl || boundary.reference_url),
-          instruction: String(boundary.instruction || '').slice(0, 2000),
           approved: Boolean(boundary.approved)
         },
         distribution: {
@@ -90,6 +98,8 @@
           approved: Boolean(distribution.approved),
           aiReviewed: Boolean(distribution.aiReviewed)
         },
+        distributionNotes: String(source.distributionNotes || '').slice(0, 2000),
+        conflictChats: { verify: chatTurns(chats.verify), distribution: chatTurns(chats.distribution) },
         clientNotes: String(source.clientNotes || '').slice(0, 4000),
         notesReview: {
           verified: Boolean(review.verified), canProceed: Boolean(review.canProceed),
@@ -140,7 +150,8 @@
         'land_documents_analysis', 'project_components_data', 'financial_study_model'];
       const fields = Object.fromEntries(keys.map(key => [key, projectData?.[key] ?? '']));
       const data = JSON.stringify({ fields, boundary: workflow.boundary.points,
-        distribution: workflow.distribution.rows, clientNotes: workflow.clientNotes });
+        distribution: workflow.distribution.rows, distributionNotes: workflow.distributionNotes,
+        clientNotes: workflow.clientNotes });
       let first = 2166136261, second = 5381;
       for (let index = 0; index < data.length; index += 1) {
         first = Math.imul(first ^ data.charCodeAt(index), 16777619);

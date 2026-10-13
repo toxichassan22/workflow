@@ -471,6 +471,7 @@ class BillingLedgerTests(unittest.TestCase):
             ('/api/visual-concept/chat', {'slotId': 'cover'}),
             ('/api/visual-concept/edit', {'slotId': 'cover'}),
             ('/api/visual-concept/plans-verify', {}),
+            ('/api/visual-concept/plans-conflict-chat', {}),
             ('/api/visual-concept/plans-boundary', {
                 'mode': 'ai',
                 'plansWorkflow': {'verification': {'approved': True}},

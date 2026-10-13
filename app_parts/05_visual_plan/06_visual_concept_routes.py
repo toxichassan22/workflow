@@ -195,9 +195,12 @@ def api_visual_concept_plans_distribution():
         'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
         'معتمدًا، ولا تذكر أسماء ملفات أو مصادر.'
     )
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
     user_prompt = (
         'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
         + _visual_concept_plan_context_text(context, diagram_rules=False)
+        + ('\nملاحظات العميل على التوزيع — رغبات تُطبَّق ضمن حدود الاشتراطات والبيانات '
+           'المعتمدة ولا تجاوزها:\n' + distribution_notes if distribution_notes else '')
         + '\nأعد جدول التوزيع المقترح: كل صف = مبنى + دور أو نطاق أدوار + مكوّن + عدد الوحدات لكل دور '
         '+ مساحة الدور الإجمالية + الحركة والخدمات ضمن المساحة.'
     )
@@ -235,6 +238,7 @@ def api_visual_concept_plans_distribution_check():
     distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
     checks = distribution['checks']
     issues = distribution['issues']
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
     can_proceed = not any(check.get('result') == 'متعارض' for check in checks)
     if str(data.get('mode') or '').lower() == 'ai':
         _billing_guard = _require_billing_balance('visual_concept')
@@ -289,6 +293,9 @@ def api_visual_concept_plans_distribution_check():
                          ensure_ascii=False)
             + '\n\nبنود الفحص الآلي المطلوب الحكم عليها كلها:\n'
             + json.dumps(indexed_checks, ensure_ascii=False)
+            + ('\n\nملاحظات العميل على التوزيع — سياق مقصود: اختيارًا طلبه العميل لا '
+               'يُعامل خطأً ما لم يخالف نصًا موثقًا:\n' + distribution_notes
+               if distribution_notes else '')
         )
         try:
             response = call_openrouter_chat(
@@ -447,6 +454,9 @@ def api_visual_concept_preflight():
 @require_permission('generate_images')
 def api_visual_concept_prompt():
     data = request.get_json(silent=True) or {}
+    _billing_guard = _require_billing_balance('visual_concept')
+    if _billing_guard is not None:
+        return _billing_guard
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
@@ -493,9 +503,6 @@ def api_visual_concept_prompt():
             })
         if plan_draft and not current_prompt:
             current_prompt = plan_draft
-    _billing_guard = _require_billing_balance('visual_concept')
-    if _billing_guard is not None:
-        return _billing_guard
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
