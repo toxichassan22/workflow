@@ -108,6 +108,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                 tools=attempt_tools,
                 plugins=plugins,
                 timeout=max(15, min(240, int(budget.get('timeout', 240)))),
+                reasoning_effort=budget.get('reasoning_effort'),
                 usage_ctx=usage_ctx or _usage_ctx('market'),
                 max_tool_calls=max(1, min(14, int(budget.get('max_tool_calls', 14)))),
                 # Bounded scans may not answer from memory: force the tool so

@@ -56,7 +56,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                 # fast and reads Arabic listing queries well.
                 rows, response = _best_use_price_scan_use(
                     use, prompt, city, draft, data,
-                    {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120},
+                    {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120,
+                     'reasoning_effort': 'low'},
                     6, usage_ctx)
             except best_use_contract.ProposalError as error:
                 # A native grounding pass that leaves no detectable search trace
@@ -68,7 +69,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                 rows, response = _best_use_price_scan_use(
                     use, prompt, city, draft, data,
                     {'engine': 'exa', 'mode': 'auto', 'max_uses': 3, 'max_total_results': 16,
-                     'max_tool_calls': 5, 'timeout': 120, 'max_results': 8}, 8, usage_ctx)
+                     'max_tool_calls': 5, 'timeout': 120, 'max_results': 8,
+                     'reasoning_effort': 'low'}, 8, usage_ctx)
         return use, rows, response
 
     candidates, retrieved = [], []
@@ -120,7 +122,7 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap
         '"value":100,"currency":"SAR","unit":"sqm|unit|room","period":"oneOff|year|month|night",'
         '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
         'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
-        prompt, max_tokens=4000, usage_ctx=usage_ctx,
+        prompt, max_tokens=12000, usage_ctx=usage_ctx,
         search_context={'city': city, 'country': 'SA'},
         max_search_results=results_cap, search_budget=budget)
     if error or not _market_search_ran(response):
