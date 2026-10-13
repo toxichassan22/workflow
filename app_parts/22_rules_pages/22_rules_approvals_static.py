@@ -335,6 +335,7 @@ FRONTEND_JS_ORDER = (
     '12-files-media/02b_visual_concept_plan_state.js',
     '12-files-media/02c_visual_concept_plans_ui.js',
     '12-files-media/02d_visual_concept_plan_actions.js',
+    '12-files-media/02e_plans_conflict_chat.js',
     '12-files-media/03_visual_concept_sketch.js',
     '12-files-media/04_visual_concept_references.js',
     '13-visual/01_visual_concept_page.js',

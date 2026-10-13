@@ -289,57 +289,6 @@
       }
     }
 
-    // Advisory only — the checker explains its findings and suggests what to
-    // edit; nothing here writes back into distribution or verification state.
-    async function sendVisualConceptPlansConflictChat(scope) {
-      scope = scope === 'distribution' ? 'distribution' : 'verify';
-      const workflow = visualConceptPlansWorkflowState();
-      const input = document.querySelector('[data-plans-conflict-input="' + scope + '"]');
-      const question = String((input && input.value) || '').trim();
-      if (!question) { toast(WFT('plans.conflict_chat_question', 'اكتب السؤال أولاً')); return; }
-      const source = scope === 'distribution' ? workflow.distribution : workflow.verification;
-      const hasFindings = (Array.isArray(source.checks) && source.checks.length)
-        || (Array.isArray(source.issues) && source.issues.length);
-      if (!hasFindings) { toast(WFT('plans.conflict_chat_no_findings', 'لا توجد نتائج فحص لمناقشتها بعد')); return; }
-      if (!visualConceptPlanActionBusy('conflict-chat', true)) return;
-      const chat = workflow.conflictChats[scope];
-      chat.push({ role: 'user', text: question.slice(0, 2000) });
-      markVisualConceptDirty();
-      const logHost = document.querySelector('[data-plans-conflict-log="' + scope + '"]');
-      if (logHost) {
-        logHost.innerHTML = visualConceptConflictChatLogHtml(scope);
-        logHost.scrollTop = logHost.scrollHeight;
-      }
-      if (input) input.value = '';
-      showLoader(WFT('plans.conflict_chat_loading', 'جاري الرد على السؤال'), '', 0);
-      try {
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        payload.scope = scope;
-        payload.question = question;
-        // Everything before the just-pushed turn is prior context for the model.
-        payload.history = chat.slice(-9, -1).map(item => ({ role: item.role, content: item.text }));
-        const response = await api('POST', '/api/visual-concept/plans-conflict-chat', payload);
-        hideLoader();
-        if (!response?.success || !response.reply) {
-          toast((response && response.error) || WFT('plans.conflict_chat_failed', 'تعذر الحصول على إجابة'));
-          return;
-        }
-        const live = visualConceptPlansWorkflowState();
-        live.conflictChats[scope].push({ role: 'assistant', text: String(response.reply).slice(0, 4000) });
-        markVisualConceptDirty();
-        const liveLog = document.querySelector('[data-plans-conflict-log="' + scope + '"]');
-        if (liveLog) {
-          liveLog.innerHTML = visualConceptConflictChatLogHtml(scope);
-          liveLog.scrollTop = liveLog.scrollHeight;
-        }
-      } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.conflict_chat_failed', 'تعذر الحصول على إجابة'));
-      } finally {
-        visualConceptPlanActionBusy('conflict-chat', false);
-      }
-    }
-
     async function repairVisualConceptPlansDistribution(findings) {
       if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return false; }
       const seedWorkflow = visualConceptPlansWorkflowState();
