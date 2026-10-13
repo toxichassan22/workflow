@@ -1,17 +1,18 @@
 PLANS_CONFLICT_CHAT_SYSTEM_PROMPT = (
-    'أنت مساعد توضيحي لنتائج فحص التعارضات في قسم المخططات داخل منصة «لاندلوم» (Landloom).\n'
-    'مهمتك الوحيدة شرح نتيجة الفحص للمستخدم: ما التعارض، أين يقع (اسم القسم والحقل)، لماذا سُجّل، '
-    'وما التعديل المطلوب بالقيم عند توفرها.\n'
+    'أنت مساعد توضيحي لقسم المخططات داخل منصة «لاندلوم» (Landloom).\n'
+    'مهمتك شرح نتائج الفحص والتوزيع المقترح المرفقين للمستخدم: ما التعارض، أين يقع (اسم القسم '
+    'والحقل)، لماذا سُجّل، وما التعديل المطلوب بالقيم عند توفرها — وإن لم تُسجَّل تعارضات '
+    'فأجب عن التوزيع المرفق نفسه ومكوناته وأرقامه.\n'
     'قواعد إلزامية:\n'
     '- أجب بلغة سؤال المستخدم نفسها، والرد الافتراضي قصير ومباشر: الإجابة أولاً ثم السبب في سطر أو سطرين.\n'
-    '- استند حصريًا إلى نتائج الفحص والبيانات المرفقة؛ لا تستنتج قيمة غير موجودة ولا تخمّن، '
+    '- استند حصريًا إلى نتائج الفحص والتوزيع والبيانات المرفقة؛ لا تستنتج قيمة غير موجودة ولا تخمّن، '
     'وإن نقصت المعلومات صرّح بذلك بدل التخمين.\n'
     '- عند اقتراح تعديل اذكر القسم والحقل والقيمة الحالية والقيمة المقترحة، '
     'وسمِّ دائمًا القيمة الموثقة مقابل قيمة المشروع.\n'
     '- كل اقتراح إرشاد يقرره العميل ويطبقه بنفسه — ممنوع الادعاء بأنك عدّلت شيئًا أو أنك تستطيع.\n'
     '- لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية؛ استخدم «البيانات التنظيمية الموثقة» '
     'أو «نتائج الفحص».\n'
-    '- هذا النقاش مخصص لنتائج الفحص المرفقة فقط؛ إن سُئلت عن شيء خارجها فوضّح ذلك باختصار.\n'
+    '- هذا النقاش مخصص لنتائج الفحص والتوزيع المرفقين فقط؛ إن سُئلت عن شيء خارجها فوضّح ذلك باختصار.\n'
     '- ممنوع تنسيق Markdown تمامًا (لا ** ولا ### ولا جداول) — نص عادي ونقاط قصيرة فقط.\n'
 )
 
@@ -46,17 +47,31 @@ def api_visual_concept_plans_conflict_chat():
     source = distribution if scope == 'distribution' else verification
     checks = source.get('checks') if isinstance(source.get('checks'), list) else []
     issues = source.get('issues') if isinstance(source.get('issues'), list) else []
-    if not checks and not issues:
-        return jsonify({'success': False, 'error': 'لا توجد نتائج فحص لمناقشتها بعد',
+    rows = distribution.get('rows') if isinstance(distribution.get('rows'), list) else []
+    totals = distribution.get('totals') if isinstance(distribution.get('totals'), list) else []
+    # The chat discusses whatever the stage already produced: verify needs its
+    # findings (or a run verification), distribution only needs the proposed
+    # table — a clean check with zero conflicts must still be discussable.
+    if scope == 'verify':
+        has_material = bool(checks or issues
+                            or _visual_concept_text(verification.get('summary'))
+                            or verification.get('approved'))
+    else:
+        has_material = bool(checks or issues or rows or totals)
+    if not has_material:
+        message = ('لا يوجد توزيع مقترح لمناقشته بعد' if scope == 'distribution'
+                   else 'لا توجد نتائج فحص لمناقشتها بعد')
+        return jsonify({'success': False, 'error': message,
                         'error_code': 'CONFLICT_CHAT_EMPTY'}), 400
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     context = _visual_concept_plan_context(project_data)
     findings = {'checks': checks[:40], 'issues': issues[:30]}
-    rows = distribution.get('rows') if isinstance(distribution.get('rows'), list) else []
-    totals = distribution.get('totals') if isinstance(distribution.get('totals'), list) else []
     if rows or totals:
         findings['distribution_rows'] = rows
         findings['distribution_totals'] = totals
+    if scope == 'distribution' and not (checks or issues):
+        findings['check_state'] = ('الفحص اكتمل دون تسجيل تعارضات' if distribution.get('aiReviewed')
+                                   else 'لم يُجرَّ فحص للتوزيع بعد')
     distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 1000000)
     if distribution_notes:
         findings['client_distribution_notes'] = distribution_notes

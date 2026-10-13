@@ -306,12 +306,16 @@
       const box = document.getElementById('plansChatMessages');
       if (!box) return;
       box.innerHTML = '';
-      const messages = plansConflictChatMessages();
+      const scope = plansConflictChatScope();
+      const messages = plansConflictChatMessages(scope);
       if (!messages.length) {
         const empty = document.createElement('div');
         empty.className = 'land-chat-empty';
-        empty.textContent = WFT('plans.conflict_chat_empty',
-          'شات مخصص لشرح نتائج الفحص — يوضح سبب التعارض ويقترح التعديل دون تغيير أي بيانات.');
+        empty.textContent = scope === 'verify'
+          ? WFT('plans.conflict_chat_empty',
+              'شات مخصص لشرح نتائج الفحص — يوضح سبب التعارض ويقترح التعديل دون تغيير أي بيانات.')
+          : WFT('plans.dist_chat_empty',
+              'شات مخصص لشرح التوزيع المقترح ونتائج فحصه — يوضح سبب التعارض ويقترح التعديل دون تغيير أي بيانات.');
         box.appendChild(empty);
       }
       messages.forEach(msg => {

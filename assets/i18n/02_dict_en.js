@@ -655,6 +655,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "plans.dist_risk_own": "If you choose to continue, you do so at your own responsibility.",
   "plans.dist_risk_continue": "Continue",
   "plans.dist_risk_cancel": "Cancel",
+  "plans.dist_chat_empty": "A chat scoped to the proposed distribution and its check results — it explains a conflict and suggests an edit without changing any data.",
   "land.docs.required": "Please upload the croquis, permit, and any supporting documents in the box first",
   "land.docs.analyzing": "Analyzing the croquis and documents together",
   "land.docs.analyzing_wait": "Analyzing the files and extracting zoning, directions, and coordinates...",

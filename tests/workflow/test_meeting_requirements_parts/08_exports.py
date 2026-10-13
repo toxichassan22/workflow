@@ -1606,6 +1606,20 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('المواقف في البدروم', dist_content)
         self.assertIn('floor_range', dist_content)
 
+        # The distribution chat also answers with zero findings — a clean or
+        # unrun check is still a discussable table, not a dead end.
+        with patch.object(module, 'call_text_chat', return_value={
+            'choices': [{'message': {'content': 'PLANS-CONFLICT-CHAT\nمكاتب على الأدوار 1-5.'}}]
+        }) as clean_call:
+            clean = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
+                'question': 'اشرح التوزيع', 'scope': 'distribution',
+                'projectData': {}, 'plansWorkflow': {'distribution': {
+                    'checks': [], 'issues': [], 'aiReviewed': True,
+                    'rows': [{'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب'}],
+                    'totals': []}}})
+        self.assertEqual(clean.status_code, 200, clean.get_json())
+        self.assertIn('الفحص اكتمل دون تسجيل تعارضات', clean_call.call_args[0][1])
+
         # A provider failure surfaces as a clean 503, never an edited state.
         with patch.object(module, 'call_text_chat', side_effect=RuntimeError('offline')):
             failed = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
