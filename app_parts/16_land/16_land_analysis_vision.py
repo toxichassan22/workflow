@@ -1115,6 +1115,8 @@ def build_land_analysis_site_context(data, tenant_id, lat, lng):
     return context, warnings
 
 
-MARKET_STUDY_MAX_TOKENS = int(os.environ.get('MARKET_STUDY_MAX_TOKENS', '65536'))
+# claude-haiku-5.5 emits up to 128K output tokens — the cap tracks the
+# model's ceiling so a full-axes summary is never truncated mid-JSON.
+MARKET_STUDY_MAX_TOKENS = int(os.environ.get('MARKET_STUDY_MAX_TOKENS', '128000'))
 MARKET_STUDY_MODEL = os.environ.get('MARKET_STUDY_MODEL') or GEMINI_TEXT_MODEL
 _MARKET_JOB_LOCK = threading.Lock()

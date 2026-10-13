@@ -1,18 +1,20 @@
-def _browse_agent_verify(task, usage_ctx):
-    """One self-hosted browse-agent run for a competitor verify.
+def _browse_agent_verify(task, usage_ctx, **agent_kwargs):
+    """One self-hosted browse-agent run for a competitor verify or the summary.
 
     Returns the agent's OpenRouter-shaped reply — every page it opened rides in
     as a url_citation annotation — or an ``{'error': ...}`` dict. Never raises:
     the verify path reports the failure as search_not_run instead of falling
     back to the paid provider, and the module can be absent on a deploy that
-    never enabled the flag.
+    never enabled the flag. ``agent_kwargs`` (search_budget, max_steps,
+    max_tokens, thinking) pass straight through to run_browse_agent.
     """
     try:
         # Flat module, attribute call: `web_browse.agent` would bind a second
         # module identity that `patch.object(agent, 'run_browse_agent')` in
         # tests silently misses.
         import agent as _agent_module
-        response = _agent_module.run_browse_agent(task, usage_ctx=usage_ctx)
+        response = _agent_module.run_browse_agent(
+            task, usage_ctx=usage_ctx, **agent_kwargs)
     except Exception as exc:
         return {'error': {'message': f'browse_agent: {exc}'}}
     if not isinstance(response, dict):

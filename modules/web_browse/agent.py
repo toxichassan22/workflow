@@ -18,18 +18,35 @@ _DEFAULT_MAX_STEPS = 10
 _PAGE_TEXT_TOOL_CAP = 12000
 _PAGE_TEXT_CITATION_CAP = 8000
 
-_AGENT_PREAMBLE = (
-    'أنت وكيل تصفّح ويب. لديك أداتان: web_search تُرجع عناوين وروابط ومقتطفات، '
-    'و open_url تقرأ نص الصفحة الفعلي. نفّذ عمليتي بحث كحد أقصى طوال المهمة، ثم '
-    'افتح أقرب نتيجة للمطلوب — ويمكنك فتح أكثر من رابط في الخطوة نفسها — وأجِب '
-    'بما طُلب منك فقط دون شرح خطواتك. لا تُعِد البحث بنفس الغرض: إن شحّت '
-    'النتائج فافتح أفضل ما وجدت أو أجب بما لديك.\n\n'
-)
+def _search_count_phrase(count):
+    """Arabic count wording for the preamble's search cap — dual for two,
+    an explicit number otherwise."""
+    if count == 1:
+        return 'عملية بحث واحدة'
+    if count == 2:
+        return 'عمليتي بحث'
+    return f'{count} عمليات بحث'
+
+
+def _agent_preamble(budget):
+    # The advertised cap keeps one grace search below the hard budget, so a
+    # model that genuinely needs its last lookup is not slapped by the
+    # refusal — at the default budget this reads «عمليتي بحث», unchanged.
+    advertised = max(1, budget - 1)
+    return (
+        'أنت وكيل تصفّح ويب. لديك أداتان: web_search تُرجع عناوين وروابط ومقتطفات، '
+        'و open_url تقرأ نص الصفحة الفعلي. نفّذ ' + _search_count_phrase(advertised) +
+        ' كحد أقصى طوال المهمة، ثم افتح أقرب نتيجة للمطلوب — ويمكنك فتح أكثر من رابط '
+        'في الخطوة نفسها — وأجِب بما طُلب منك فقط دون شرح خطواتك. لا تُعِد البحث بنفس '
+        'الغرض: إن شحّت النتائج فافتح أفضل ما وجدت أو أجب بما لديك.\n\n'
+    )
+
 
 # The preamble budgets two searches; the tool grants one grace call, then
 # refuses — a weak SERP must never let the model re-phrase itself into the
 # step cap (the round-2 review finding). The refusal is a directive the model
-# can act on: open what you have, or answer.
+# can act on: open what you have, or answer. Callers with wider research
+# tasks (the market summary) raise it via run_browse_agent's search_budget.
 _SEARCH_BUDGET = 3
 _SEARCH_BUDGET_REFUSAL = {
     'error': 'search_budget_exceeded',
@@ -111,7 +128,7 @@ def _tool_callable(session, name):
 
 
 def _run_web_search(session, args, search_state):
-    if search_state['count'] >= _SEARCH_BUDGET:
+    if search_state['count'] >= search_state.get('budget', _SEARCH_BUDGET):
         return dict(_SEARCH_BUDGET_REFUSAL)
     search_state['count'] += 1
     query = str(args.get('query') or '').strip()
@@ -214,7 +231,8 @@ def _record_agent_usage(usage_ctx, model, status, usage):
         pass
 
 
-def run_browse_agent(task, max_steps=None, usage_ctx=None):
+def run_browse_agent(task, max_steps=None, usage_ctx=None,
+                     search_budget=None, max_tokens=None, thinking=None):
     """Drive one Vertex tool-use loop against a real browser session.
 
     Returns an OpenRouter-shaped dict: choices[0].message.content holds the
@@ -222,6 +240,11 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None):
     annotation ({url, title, content} — text capped at 8K) and browse_trace
     lists every open attempt including failures. Transport errors and a step
     cap without final text return {"error": …} instead of raising.
+
+    ``search_budget`` raises/lowers the hard web_search cap (default 3 — one
+    more than the preamble advertises); ``max_tokens`` is the per-call output
+    cap (default 4000 — a market-summary JSON needs MARKET_STUDY_MAX_TOKENS);
+    ``thinking`` passes to generationConfig.thinkingLevel (default 'low').
     """
     trace = []
     pages = {}
@@ -239,16 +262,25 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None):
         max_steps = max(1, int(max_steps))
     except (TypeError, ValueError):
         max_steps = _DEFAULT_MAX_STEPS
+    try:
+        budget = max(1, int(search_budget)) if search_budget else _SEARCH_BUDGET
+    except (TypeError, ValueError):
+        budget = _SEARCH_BUDGET
+    try:
+        out_cap = max(1, int(max_tokens)) if max_tokens else 4000
+    except (TypeError, ValueError):
+        out_cap = 4000
+    thinking = str(thinking or 'low').strip() or 'low'
 
     contents = [{'role': 'user',
-                 'parts': [{'text': _AGENT_PREAMBLE + str(task or '')}]}]
+                 'parts': [{'text': _agent_preamble(budget) + str(task or '')}]}]
     session_cm = None
     session = None
-    search_state = {'count': 0}
+    search_state = {'count': 0, 'budget': budget}
     try:
         for step in range(max_steps):
             response = vertex_generate(contents, tools=_tool_declarations(),
-                                       max_tokens=4000, thinking='low')
+                                       max_tokens=out_cap, thinking=thinking)
             if not isinstance(response, dict):
                 error = {'message': 'vertex transport returned a non-dict response'}
                 break

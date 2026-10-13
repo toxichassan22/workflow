@@ -255,6 +255,58 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
         self.assertIn('error', result)
         self.assertEqual(result['error'].get('message'), 'boom')
 
+    def test_search_budget_param_caps_searches(self):
+        calls = []
+        vertex_impl = _scripted_vertex(
+            [_fn_response('web_search', {'query': 'q'})], calls)
+        searches = []
+
+        def counting_search(query):
+            searches.append(query)
+            return _default_results(query)
+
+        with _patched_pipeline(vertex_impl, web_search=counting_search):
+            result = agent.run_browse_agent('task', max_steps=6, search_budget=2)
+
+        # The hard cap granted exactly two real searches; every later call
+        # comes back as a budget refusal the model can act on instead of
+        # burning the step cap.
+        self.assertEqual(len(searches), 2)
+        transcript = json.dumps(calls[-1], ensure_ascii=False, default=str)
+        self.assertIn('search_budget_exceeded', transcript)
+        self.assertIn('error', result)
+
+    def test_preamble_advertises_one_less_than_the_hard_cap(self):
+        calls = []
+        vertex_impl = _scripted_vertex([_text_response()], calls)
+
+        with _patched_pipeline(vertex_impl):
+            agent.run_browse_agent('task')
+        self.assertIn('عمليتي بحث', calls[0][0]['parts'][0]['text'])
+
+        calls.clear()
+        with _patched_pipeline(vertex_impl):
+            agent.run_browse_agent('task', search_budget=8)
+        self.assertIn('7 عمليات بحث', calls[0][0]['parts'][0]['text'])
+
+    def test_output_cap_and_thinking_reach_the_transport(self):
+        seen = []
+
+        def fake(*_a, **kw):
+            seen.append(kw)
+            return _text_response()
+
+        with _patched_pipeline(fake):
+            agent.run_browse_agent('task', max_tokens=12345, thinking='medium')
+        self.assertEqual(seen[0].get('max_tokens'), 12345)
+        self.assertEqual(seen[0].get('thinking'), 'medium')
+
+        seen.clear()
+        with _patched_pipeline(fake):
+            agent.run_browse_agent('task')
+        self.assertEqual(seen[0].get('max_tokens'), 4000)
+        self.assertEqual(seen[0].get('thinking'), 'low')
+
     def test_never_cites_pages_the_agent_did_not_open(self):
         calls = []
         vertex_impl = _scripted_vertex([

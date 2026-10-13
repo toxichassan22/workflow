@@ -303,6 +303,14 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     }
 
 
+# A summary researches several axes at once — sale deals, live indicators,
+# rent tables, supply and demand — so the competitor-verify budget of three
+# searches and ten steps cannot cover it, and its final JSON needs the full
+# MARKET_STUDY_MAX_TOKENS cap rather than the agent's 4000-token default.
+_SUMMARY_SEARCH_BUDGET = 8
+_SUMMARY_MAX_STEPS = 16
+
+
 def _execute_market_summary(data, tenant_id=None, progress=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
@@ -330,14 +338,40 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     report(18, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
-    res, provider_error = _call_market_study_model(
-        system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
-        usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
-        search_context={'city': payload.get('city'), 'country': 'SA'},
-        # SOL is a reasoning model: every search round-trip and the final long
-        # JSON both pay the thinking tax. 'medium' keeps the depth of the web
-        # research while shaving minutes off a single-pass summary.
-        reasoning_effort='medium')
+    usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
+    if os.environ.get('BROWSER_AGENT') == '1':
+        # One self-hosted browse agent replaces the OpenRouter/Exa layer here
+        # too: it runs the searches and opens the pages itself, so the sources
+        # table and the figures rest only on pages it actually read. A
+        # transport failure — or a clean reply that opened zero pages — is an
+        # explicit search_not_run, never a silent paid fallback.
+        res = _browse_agent_verify(
+            system_prompt + '\n\n' + user_prompt, usage_ctx,
+            search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
+            max_tokens=MARKET_STUDY_MAX_TOKENS, thinking='max')
+        failed = res.get('error') is not None
+        provider_error = _chat_error_message(res)
+        if not failed and not _market_citation_pages(res):
+            # A clean reply that opened zero pages means nothing was read —
+            # "no browsed evidence", never a market study from memory.
+            provider_error = 'browse_agent: no browsed evidence'
+            failed = True
+        if failed:
+            return {
+                'success': False,
+                'error': 'تعذر تنفيذ بحث الويب لملخص السوق. لم يُستبدل النص الحالي.',
+                'failureReason': 'search_not_run',
+                'providerError': provider_error,
+            }
+    else:
+        res, provider_error = _call_market_study_model(
+            system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
+            usage_ctx=usage_ctx,
+            search_context={'city': payload.get('city'), 'country': 'SA'},
+            # SOL is a reasoning model: every search round-trip and the final long
+            # JSON both pay the thinking tax. 'medium' keeps the depth of the web
+            # research while shaving minutes off a single-pass summary.
+            reasoning_effort='medium')
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
