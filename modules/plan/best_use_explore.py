@@ -1,7 +1,8 @@
 import copy
+import re
 
 from best_use_contract import (ProposalError, SUPPORT_USES, INVESTMENT_MODELS, capacity,
-                               canonical_use, number, rounded, text, read_object)
+                               canonical_use, number, rounded, text, read_object, USE_TERMS)
 import best_use_regulations as regulations
 import best_use_prices as prices
 import best_use_workflow as workflow
@@ -24,7 +25,9 @@ SYSTEM_PROMPT = (
     'revenueAreaBasis يوضح افتراض صافي المساحة التخطيطي؛ لا توجد نسبة كفاءة مفترضة تلقائيًا. '
     'كل مكون يحمل allowedUseBasis من الدليل نفسه: documentId وpage وexcerpt وparcelScope وlandClassification. '
     'useType واحد من permittedUses أو services|parking|openArea|basement؛ '
-    'المساند يحمل supportUseOf من الاستخدامات المسموحة ودليله. المكونات غير الإيرادية نموذجها nonRevenue. '
+    'المساند يحمل supportUseOf بمفتاح إنجليزي واحد من الاستخدامات المسموحة '
+    '(الاستخدام الأساسي المخدوم، وفي مرحلتي الأرض والأدوار من uses المفهوم المختار حصرًا) ودليله. '
+    'المكونات غير الإيرادية نموذجها nonRevenue. '
     'المواقف السطحية والمفتوحة تحت openAreaLimit، والبدروم تحت basementAreaLimit التخطيطي '
     'ولا تدّع السماح التنظيمي ببدروم غير متحقق أو طبقات إضافية أو معدلات مواقف غير موثقة. '
     'لكل مكون name وunits صحيح وunitArea وbuiltArea وgrossArea وrevenueArea وnonRevenueArea '
@@ -86,8 +89,23 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
             raise ProposalError('اسم المكون أو استخدامه غير صالح: ' + name + ' (' + use + ')')
         names.add(name.casefold())
         support_use = canonical_use(row.get('supportUseOf')) if use in SUPPORT_USES else use
+        if use in SUPPORT_USES and support_use not in permitted:
+            # A shared support block may name several served uses in prose
+            # («مواقف سكني ومكاتب») — canonical_use returns the first key in
+            # dictionary order even when a permitted one appears later, so bind
+            # to any permitted use the label carries; an umbrella label binds to
+            # the concept's first use. The declared evidence check below still
+            # gates the component — every declared entry carries the same
+            # documentId/page/excerpt, so the binding is identical either way.
+            named = [key for key, pattern in USE_TERMS.items()
+                     if key in permitted and re.search(pattern, str(row.get('supportUseOf') or ''), re.I)]
+            if named:
+                support_use = named[0]
+            elif permitted:
+                support_use = sorted(permitted)[0]
         if support_use not in permitted:
-            raise ProposalError('استخدام المكون المساند غير مثبت: ' + name)
+            raise ProposalError('استخدام المكون المساند غير مثبت: ' + name
+                                + ' — supportUseOf مفتاح واحد من: ' + ', '.join(sorted(permitted)))
         row['allowedUseBasis'] = regulations.validate_basis(dict(row, useType=support_use), regulation_data)
         values = {key: number(row.get(key)) for key in
                   ('units', 'unitArea', 'builtArea', 'grossArea', 'nonRevenueArea', 'revenueArea', 'footprintArea')}

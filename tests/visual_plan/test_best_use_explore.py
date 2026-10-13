@@ -123,6 +123,50 @@ class ExplorationContractTests(unittest.TestCase):
             explore.concepts(raw, self.project, regs, scan, 'art')
         self.assertIn('hospitality', str(ctx.exception))
 
+    def test_a_shared_support_component_binds_to_a_permitted_use_its_label_names(self):
+        basis = {'documentId': 'declared-inputs', 'page': 0, 'excerpt': 'سكني ومكاتب',
+                 'parcelScope': '42', 'landClassification': 'س ع'}
+        regs = {'permittedUses': ['office', 'residential'],
+                'evidence': [dict(basis, use=use, conditions=[], status='permitted')
+                             for use in ('residential', 'office')],
+                'constraints': []}
+        components = [
+            {'name': 'مكاتب', 'useType': 'office', 'units': 1, 'unitArea': 500, 'builtArea': 500,
+             'grossArea': 500, 'revenueArea': 450, 'nonRevenueArea': 50, 'footprintArea': 500,
+             'investmentModel': 'annualRent', 'reason': 'سبب', 'areaReason': 'سبب',
+             'revenueAreaBasis': 'افتراض', 'allowedUseBasis': dict(basis)},
+            {'name': 'مواقف سيارات وخدمات ميكانيكية بالقبو', 'useType': 'parking', 'units': 1,
+             'unitArea': 3000, 'builtArea': 3000, 'grossArea': 3000, 'revenueArea': 0,
+             'nonRevenueArea': 3000, 'footprintArea': 0, 'investmentModel': 'nonRevenue',
+             'parkingLocation': 'basement', 'reason': 'سبب', 'areaReason': 'سبب',
+             'revenueAreaBasis': 'افتراض', 'supportUseOf': 'سكني ومكاتب',
+             'allowedUseBasis': dict(basis)}]
+        raw = {'title': 't', 'rationale': 'r', 'setbackExplanation': 'e', 'components': components}
+        # canonical_use resolves «سكني ومكاتب» to residential — outside an
+        # office-only concept — while the label still names the permitted
+        # office use; the support component binds to it instead of rejecting.
+        normalized = explore.distribution(raw, self.project, regs, 'art',
+                                          stage='land', allowed_uses=['office'])
+        parking = next(row for row in normalized['components'] if row['useType'] == 'parking')
+        self.assertEqual(parking['supportUseOf'], 'office')
+        normalized = explore.distribution(raw, self.project, regs, 'art',
+                                          stage='land', allowed_uses=['office', 'residential'])
+        parking = next(row for row in normalized['components'] if row['useType'] == 'parking')
+        self.assertEqual(parking['supportUseOf'], 'residential')
+        # An umbrella label binds to the concept's first permitted use — the
+        # declared evidence entry is the same for every permitted use anyway.
+        components[1]['supportUseOf'] = 'كل الاستخدامات المسموحة'
+        normalized = explore.distribution(raw, self.project, regs, 'art',
+                                          stage='land', allowed_uses=['office'])
+        parking = next(row for row in normalized['components'] if row['useType'] == 'parking')
+        self.assertEqual(parking['supportUseOf'], 'office')
+        # A fabricated basis still fails: the binding only picks the use, the
+        # declared evidence check still gates the component.
+        components[1]['allowedUseBasis'] = dict(basis, excerpt='دليل مخترع')
+        with self.assertRaises(best_use.ProposalError):
+            explore.distribution(raw, self.project, regs, 'art',
+                                 stage='land', allowed_uses=['office'])
+
     def test_selection_does_not_approve_or_gate_generation(self):
         self.populate()
         self.assertEqual(workflow.selected_concept(self.project)['id'], 'c1')
