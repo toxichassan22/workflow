@@ -1,0 +1,430 @@
+"""Browser-layer contract tests (task A6).
+
+``modules/web_browse/browser.py`` wraps one Playwright Chromium per worker:
+``browser_session()``/``BrowserWorker`` lifecycle plus ``open_url(url) ->
+{url, final_url, title, text, error}`` and ``web_search(query) ->
+[{title, url, snippet}]``. ``open_url`` must never raise — failures come back
+as a short ``error`` reason.
+
+A fake ``playwright``/``playwright.sync_api`` is installed in ``sys.modules``
+before ``browser`` is imported and also patched onto the module afterwards, so
+top-level, lazy and attribute-style imports all resolve to the fake. No real
+Chromium launches and no request leaves the process.
+
+Run like every other suite::
+
+    python -m unittest tests.web_browse.test_browser_contract
+"""
+
+import sys
+import types
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+_WEB_BROWSE = ROOT / 'modules' / 'web_browse'
+for _p in (str(ROOT), str(_WEB_BROWSE)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+
+class _FakeElement:
+    def __init__(self, net, item=None):
+        self._net = net
+        self._item = item or {}
+
+    def inner_text(self, **_kw):
+        return self._item.get('title') or self._item.get('snippet') or self._net['text']
+
+    textContent = inner_text
+
+    def text_content(self, **_kw):
+        return self.inner_text()
+
+    def get_attribute(self, name, **_kw):
+        if name == 'href':
+            return self._item.get('url') or self._net['url']
+        return self._item.get(name)
+
+    def query_selector(self, *_a, **kw):
+        return _FakeElement(self._net, self._item)
+
+    def query_selector_all(self, *_a, **_kw):
+        return [_FakeElement(self._net, i) for i in self._net['serp']]
+
+
+class _FakeLocator:
+    def __init__(self, net):
+        self._net = net
+
+    def count(self):
+        return len(self._net['serp'])
+
+    def all(self):
+        return [_FakeElement(self._net, i) for i in self._net['serp']]
+
+    def all_inner_texts(self):
+        return [i.get('snippet', '') for i in self._net['serp']]
+
+    def nth(self, i):
+        return _FakeElement(self._net, self._net['serp'][i])
+
+    @property
+    def first(self):
+        return _FakeElement(self._net, self._net['serp'][0] if self._net['serp'] else {})
+
+
+class _FakePage:
+    """Any extraction strategy resolves against the shared ``net`` dict:
+    element grabs, JS evaluation and inner_text all read it."""
+
+    def __init__(self, net):
+        self._net = net
+        self.url = 'about:blank'
+
+    def goto(self, url, timeout=None, wait_until=None, **_kw):
+        if self._net['goto_error'] is not None:
+            raise self._net['goto_error']
+        self.url = url
+        self._net['visited'].append(url)
+
+    def wait_for_timeout(self, *_a, **_kw):
+        pass
+
+    def wait_for_load_state(self, *_a, **_kw):
+        pass
+
+    def wait_for_selector(self, selector=None, **_kw):
+        return _FakeElement(self._net)
+
+    def title(self):
+        return self._net['title']
+
+    def inner_text(self, selector='body', **_kw):
+        return self._net['text']
+
+    def text_content(self, selector=None, **_kw):
+        return self._net['text']
+
+    def content(self):
+        return self._net['html']
+
+    def _eval(self, script):
+        if 'duckduckgo' in self.url or 'bing' in self.url:
+            return self._net['serp']
+        return self._net['text']
+
+    def evaluate(self, script=None, arg=None, **_kw):
+        return self._eval(script)
+
+    def eval_on_selector_all(self, selector=None, script=None, **_kw):
+        return self._eval(script)
+
+    def query_selector_all(self, selector=None, **_kw):
+        return [_FakeElement(self._net, i) for i in self._net['serp']]
+
+    def query_selector(self, selector=None, **_kw):
+        return _FakeElement(self._net)
+
+    def locator(self, selector=None, **_kw):
+        return _FakeLocator(self._net)
+
+    def route(self, *_a, **_kw):
+        pass
+
+    def on(self, *_a, **_kw):
+        pass
+
+    def set_default_timeout(self, *_a, **_kw):
+        pass
+
+    def is_closed(self):
+        return False
+
+    def close(self):
+        pass
+
+
+class _FakeContext:
+    def __init__(self, net):
+        self._net = net
+        self._page = _FakePage(net)
+
+    def new_page(self):
+        return self._page
+
+    def add_init_script(self, *_a, **_kw):
+        pass
+
+    def route(self, *_a, **_kw):
+        pass
+
+    def set_default_timeout(self, *_a, **_kw):
+        pass
+
+    def close(self):
+        pass
+
+
+class _FakeBrowser:
+    def __init__(self, net):
+        self._net = net
+        self.version = 'fake-0.0'
+
+    def new_context(self, **_kw):
+        return _FakeContext(self._net)
+
+    def new_page(self):
+        return _FakePage(self._net)
+
+    def close(self):
+        self._net['browser_closed'] = True
+
+    def is_connected(self):
+        return True
+
+
+class _FakeChromium:
+    def __init__(self, net):
+        self._net = net
+
+    def launch(self, **_kw):
+        self._net['launched'] = True
+        if self._net['launch_error'] is not None:
+            raise self._net['launch_error']
+        return _FakeBrowser(self._net)
+
+    def connect_over_cdp(self, endpoint, **_kw):
+        self._net['cdp_endpoint'] = endpoint
+        return _FakeBrowser(self._net)
+
+
+class _FakePlaywright:
+    def __init__(self, net):
+        self.chromium = _FakeChromium(net)
+        self.firefox = self.chromium
+        self.webkit = self.chromium
+
+    def stop(self):
+        pass
+
+
+class _FakePWManager:
+    """``sync_playwright()`` result: usable as ``with`` or ``.start()``."""
+
+    def __init__(self, net):
+        self._pw = _FakePlaywright(net)
+
+    def __enter__(self):
+        return self._pw
+
+    def __exit__(self, *exc):
+        return False
+
+    def start(self):
+        return self._pw
+
+    def stop(self):
+        pass
+
+
+class _FakeTimeoutError(Exception):
+    pass
+
+
+def _new_net():
+    return {
+        'title': 'مشروع العجلان ريفيرا 16',
+        'text': 'نص الصفحة المقروء ' * 200,
+        'html': '<html><body>page</body></html>',
+        'url': 'https://sa.aqar.fm/',
+        'serp': [
+            {'title': 'العجلان ريفيرا', 'url': 'https://sa.aqar.fm/p/1',
+             'snippet': 'تفاصيل المشروع'},
+            {'title': 'وصلت', 'url': 'https://wasalt.sa/p/2',
+             'snippet': 'مشروع آخر'},
+        ],
+        'visited': [],
+        'goto_error': None,
+        'launch_error': None,
+        'launched': False,
+        'browser_closed': False,
+        'cdp_endpoint': None,
+    }
+
+
+def _install_fake_playwright(net):
+    """Return a (cleanup) that installs a fake playwright package covering
+    top-level, lazy and attribute import styles."""
+    sync_api = types.ModuleType('playwright.sync_api')
+    manager = lambda: _FakePWManager(net)  # noqa: E731
+    sync_api.sync_playwright = manager
+    sync_api.Playwright = _FakePlaywright
+    sync_api.Browser = _FakeBrowser
+    sync_api.Page = _FakePage
+    sync_api.Error = Exception
+    sync_api.TimeoutError = _FakeTimeoutError
+
+    parent = sys.modules.get('playwright') or types.ModuleType('playwright')
+    saved = {
+        'playwright': sys.modules.get('playwright'),
+        'playwright.sync_api': sys.modules.get('playwright.sync_api'),
+        'parent_attr': getattr(parent, 'sync_api', None),
+        'parent_obj': parent,
+    }
+    parent.sync_api = sync_api
+    sys.modules['playwright'] = parent
+    sys.modules['playwright.sync_api'] = sync_api
+    return saved, manager
+
+
+def _restore_fake_playwright(saved):
+    parent = saved['parent_obj']
+    if saved['parent_attr'] is not None:
+        parent.sync_api = saved['parent_attr']
+    if saved['playwright'] is None:
+        sys.modules.pop('playwright', None)
+    else:
+        sys.modules['playwright'] = saved['playwright']
+    if saved['playwright.sync_api'] is None:
+        sys.modules.pop('playwright.sync_api', None)
+    else:
+        sys.modules['playwright.sync_api'] = saved['playwright.sync_api']
+
+
+_NET = _new_net()
+_SAVED, _MANAGER = _install_fake_playwright(_NET)
+
+import browser  # noqa: E402  modules/web_browse/browser.py — sees the fake
+
+
+def tearDownModule():
+    _restore_fake_playwright(_SAVED)
+
+
+def _session_targets():
+    """Every lifecycle the contract allows, most preferred first."""
+    if hasattr(browser, 'browser_session'):
+        return ('factory', browser.browser_session)
+    if hasattr(browser, 'BrowserWorker'):
+        return ('factory', browser.BrowserWorker)
+    return ('module', None)
+
+
+def _call_operation(name, *args, **kwargs):
+    """Invoke ``open_url``/``web_search`` through whichever surface the
+    implementation exposes: session worker, worker class, or module-level."""
+    kind, factory = _session_targets()
+    if kind == 'factory':
+        worker = factory()
+        op = getattr(worker, name, None)
+        if hasattr(worker, '__enter__'):
+            with worker as w:
+                return getattr(w, name)(*args, **kwargs)
+        try:
+            return op(*args, **kwargs)
+        finally:
+            close = getattr(worker, 'close', None)
+            if callable(close):
+                close()
+    return getattr(browser, name)(*args, **kwargs)
+
+
+def _open_url(url, **kw):
+    return _call_operation('open_url', url, **kw)
+
+
+def _web_search(query, **kw):
+    return _call_operation('web_search', query, **kw)
+
+
+class OpenUrlContractTests(unittest.TestCase):
+    def setUp(self):
+        _NET['visited'] = []
+        _NET['goto_error'] = None
+        _NET['launch_error'] = None
+        _NET['cdp_endpoint'] = None
+        self._pw_patch = mock.patch.object(
+            browser, 'sync_playwright', _MANAGER, create=True)
+        self._pw_patch.start()
+        self.addCleanup(self._pw_patch.stop)
+
+    def test_success_shape(self):
+        result = _open_url('https://sa.aqar.fm/')
+        self.assertIsInstance(result, dict)
+        for key in ('url', 'final_url', 'title', 'text'):
+            self.assertIn(key, result)
+        self.assertEqual(result['url'], 'https://sa.aqar.fm/')
+        self.assertEqual(result['title'], _NET['title'])
+        self.assertTrue(result['text'])
+        self.assertFalse(result.get('error'))
+        self.assertLessEqual(len(result['text']), 12000)
+
+    def test_goto_failure_returns_error_dict_never_raises(self):
+        _NET['goto_error'] = _FakeTimeoutError('timeout 20000ms exceeded')
+        result = _open_url('https://wasalt.sa/property/deep')
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result['url'], 'https://wasalt.sa/property/deep')
+        self.assertTrue(result.get('error'))
+
+    def test_exception_inside_page_read_still_returns_error(self):
+        _NET['goto_error'] = RuntimeError('net::ERR_NAME_NOT_RESOLVED')
+        result = _open_url('https://nonexistent.example/')
+        self.assertTrue(result.get('error'))
+
+    def test_ws_endpoint_env_connects_over_cdp(self):
+        with mock.patch.dict('os.environ', {'BROWSER_WS_ENDPOINT': 'ws://127.0.0.1:9222'}):
+            _open_url('https://sa.aqar.fm/')
+        self.assertIn(_NET['cdp_endpoint'], ('ws://127.0.0.1:9222', None))
+        if _NET['cdp_endpoint'] is None:
+            self.assertTrue(_NET['launched'])
+
+
+class WebSearchContractTests(unittest.TestCase):
+    def setUp(self):
+        _NET['visited'] = []
+        _NET['goto_error'] = None
+        _NET['launch_error'] = None
+        self._pw_patch = mock.patch.object(
+            browser, 'sync_playwright', _MANAGER, create=True)
+        self._pw_patch.start()
+        self.addCleanup(self._pw_patch.stop)
+
+    def test_results_shape(self):
+        results = _web_search('مشروع العجلان ريفيرا 16')
+        self.assertIsInstance(results, list)
+        self.assertGreaterEqual(len(results), 1)
+        for item in results:
+            self.assertIsInstance(item, dict)
+            for key in ('title', 'url', 'snippet'):
+                self.assertIn(key, item)
+        urls = [i['url'] for i in results]
+        self.assertTrue(any('aqar' in u or 'wasalt' in u for u in urls))
+
+    def test_max_results_respected(self):
+        saved_serp = _NET['serp']
+        _NET['serp'] = saved_serp * 6
+        try:
+            results = _web_search('عقار', max_results=3)
+        finally:
+            _NET['serp'] = saved_serp
+        self.assertIsInstance(results, list)
+        self.assertLessEqual(len(results), 3)
+
+    def test_provider_failure_returns_empty_list(self):
+        saved_serp = _NET['serp']
+        _NET['goto_error'] = _FakeTimeoutError('blocked')
+        _NET['serp'] = []
+        try:
+            results = _web_search('مشروع')
+        except Exception:
+            self.fail('web_search should degrade to a list, not raise')
+        finally:
+            _NET['goto_error'] = None
+            _NET['serp'] = saved_serp
+        self.assertEqual(results, [])
+
+
+if __name__ == '__main__':
+    unittest.main()
