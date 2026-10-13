@@ -529,7 +529,8 @@
       const boundariesText = directionRows
         .map(row => {
           const direction = directions[row.direction] || {};
-          return direction.boundary_length_m ? row.label + ': ' + direction.boundary_length_m + 'م' : '';
+          const length = row.boundary_length_m || direction.boundary_length_m;
+          return length ? row.label + ': ' + length + 'م' : '';
         })
         .filter(Boolean)
         .join(' | ');
@@ -620,6 +621,10 @@
           return ['regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes']
             .some(key => String(value[key] ?? '').trim());
         }).length;
+      const directionLengths = Number.isFinite(Number(diagnostics.directions_with_lengths))
+        ? Number(diagnostics.directions_with_lengths)
+        : Object.values(directionMap).filter(value =>
+          value && typeof value === 'object' && String(value.boundary_length_m ?? '').trim()).length;
       const missingTables = Array.isArray(diagnostics.missing_tables) ? diagnostics.missing_tables : [];
       const conflicts = Array.isArray(analysis?.conflicts) ? analysis.conflicts : [];
       const conflictTexts = conflicts.map(item => {
@@ -638,6 +643,7 @@
       if (!coordinateRows) issueTexts.push('جدول إحداثيات التنظيم فارغ أو غير مقروء');
       else if (completeCoordinateRows < coordinateRows) issueTexts.push('بعض صفوف الإحداثيات ناقصة أو غير واضحة');
       if (directionRows < 4) issueTexts.push('جدول الاتجاهات بموجب التنظيم ناقص أو غير واضح');
+      if (directionRows >= 1 && directionLengths < 4) issueTexts.push('أطوال حدود الأرض في جدول الاتجاهات ناقصة أو غير واضحة');
       issueTexts.push(...uncertainConflicts);
       let panel = document.getElementById('landAnalysisDiagnostics');
       if (!issueTexts.length) {

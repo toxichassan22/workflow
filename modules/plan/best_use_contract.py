@@ -5,7 +5,7 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 
 import db
-from best_use_geometry import number, setback_envelope
+from best_use_geometry import number, parcel_shape_source, setback_envelope
 
 
 SECTION_KEY = 'section-best-use'
@@ -14,11 +14,11 @@ SUPPORT_USES = {'services', 'parking', 'openArea', 'basement'}
 INVESTMENT_MODELS = {'sale', 'dailyRent', 'monthlyRent', 'annualRent', 'operating', 'nonRevenue'}
 DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')
 USE_TERMS = {
-    'residential': r'سكني|سكنيه|سكنية|مساكن|شقق|فيلات|residential',
-    'retail': r'محلات|تجاري|تجارية|retail|commercial',
-    'office': r'مكاتب|اداري|إداري|office',
+    'residential': r'سكني|سكنيه|سكنية|مساكن|شقق|شقة|فيلا|residential|apartment|villa',
+    'retail': r'محلات|تجاري|تجارية|معارض|معرض|retail|commercial|showroom',
+    'office': r'مكاتب|اداري|إداري|مكتب|office|administrative',
     'entertainment': r'ترفيه|entertainment',
-    'hospitality': r'فندقي|فنادق|فندق|منتجعات|hospitality|hotel',
+    'hospitality': r'فندقي|فنادق|فندق|منتجعات|مفروشة|مفروش|فندقية|hospitality|hotel|serviced',
     'industrial': r'صناعي|صناعات|ورش|industrial',
     'logistics': r'لوجستي|مستودعات|تخزين|logistics|warehouses',
 }
@@ -88,11 +88,13 @@ def capacity(project):
     footprint = min(coverage_footprint, setback) if setback is not None else coverage_footprint
     footprint_base = min(coverage_footprint, setback_base) if setback_base is not None else coverage_footprint
     typical = number(project.get('approved_typical_floor_coverage')) or 0
+    shape_source = parcel_shape_source(project)
     return {
         'landArea': area, 'coveragePercent': coverage, 'floors': floors, 'far': far,
         'coverageFootprint': coverage_footprint, 'setbackFootprint': setback,
         'setbackFootprintNoSurfaceParking': setback_base,
         'setbackVerified': setback is not None, 'setbackIssue': setback_issue,
+        'boundaryShape': shape_source,
         'footprintLimit': footprint,
         'footprintLimitNoSurfaceParking': footprint_base,
         'farLimit': area * far, 'maxBuiltArea': min(area * far, footprint * floors),
@@ -103,7 +105,9 @@ def capacity(project):
         'basementAreaLimit': max(0, area),
         'warnings': [
             'سقف البدروم تخطيطي لطبقة واحدة ضمن مساحة الأرض؛ السماح التنظيمي وغلاف الارتدادات تحت الأرض غير متحققين.'
-        ] + ([] if setback is not None else [
+        ] + (['شكل الأرض تقديري — مستطيل مبني على أطوال الحدود الموثقة وليس على إحداثيات مساحة؛ '
+              'الأبعاد المدخلة تقرر الغلاف والتوزيع.'] if shape_source == 'dimensions' else [])
+        + ([] if setback is not None else [
             'غلاف الارتدادات غير متحقق هندسيًا من البيانات المتاحة؛ المساحات توصية تخطيطية وليست مخططًا معماريًا.']),
     }
 

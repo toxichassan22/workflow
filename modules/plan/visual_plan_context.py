@@ -1,6 +1,7 @@
 import json
 import re
 
+import plot_shape
 from visual_plan_geometry import DIRECTION_VECTORS, PlanGeometryError, boundary_geometry, finite_number
 
 
@@ -79,7 +80,7 @@ def direction_rows(project, analysis, parcel):
         rows.append({'direction': direction, 'description': description, 'streetName': street_name,
                      'streetWidth': width, 'street': street,
                      'setback': text(item.get('setback') if item.get('setback') is not None else item.get('setback_m')),
-                     'boundaryLength': finite_number(item.get('boundary_length_m'))})
+                     'boundaryLength': plot_shape.row_length(item)})
     return rows
 
 
@@ -178,12 +179,22 @@ def croquis_contract(project, context, points=None):
         summary, constraints, rows, first_value(holders, 'facades_directions'),
         first_value(holders, 'main_facade_direction', 'primary_facade_direction', 'main_frontage_direction'))
     raw_points = points or first_value(holders, 'survey_coordinates', 'regulation_coordinates')
+    if not raw_points:
+        raw_points = plot_shape.dimension_survey_rows(project)
     geometry = boundary_geometry(raw_points)
     setback_text = text(first_value((project, parcel, analysis), 'setbacks', 'building_ratio_setbacks'))
+    boundary_lengths_text = text(first_value(holders, 'boundary_lengths'))
+    if not boundary_lengths_text:
+        # Structured direction rows may carry the lengths without a summary —
+        # the prompt still needs the documented dimensions.
+        labels = {'north': 'الشمالي', 'south': 'الجنوبي', 'east': 'الشرقي', 'west': 'الغربي'}
+        boundary_lengths_text = '، '.join(
+            f'{labels[key]} {value:g}م' for key, value in
+            plot_shape.direction_lengths(project).items() if value)
     return {'geometry': geometry, 'primaryFrontage': facade, 'directions': rows,
             'setbacks': recorded_setbacks(setback_text, rows, facade['direction']),
             'setbackText': setback_text, 'landBrief': summary, 'regulatoryConstraints': constraints,
-            'boundaryLengths': text(first_value(holders, 'boundary_lengths')),
+            'boundaryLengths': boundary_lengths_text,
             'northDirection': text(first_value(holders, 'north_direction')),
             'surroundingStreets': text(first_value(holders, 'surrounding_streets')),
             'landArea': context.get('land_area'), 'coverageRatio': context.get('coverage_ratio'),

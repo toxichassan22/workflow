@@ -81,7 +81,10 @@
       workflow.verification.approved = true;
       workflow.status = 'verified';
       workflow.viewStage = 'boundary';
-      if (!workflow.boundary.points.length) workflow.boundary.points = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
+      if (!workflow.boundary.points.length) {
+        const seeded = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
+        workflow.boundary.points = seeded.length ? seeded : surveyBoundaryPointsFromDimensions(tenantProjectData);
+      }
       markVisualConceptDirty();
       renderVisualConceptPage();
     }
@@ -91,7 +94,8 @@
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const seedWorkflow = visualConceptPlansWorkflowState();
-        const sourcePoints = visualConceptBoundaryPoints(payload.projectData?.survey_coordinates);
+        let sourcePoints = visualConceptBoundaryPoints(payload.projectData?.survey_coordinates);
+        if (sourcePoints.length < 3) sourcePoints = surveyBoundaryPointsFromDimensions(payload.projectData || {});
         if (sourcePoints.length >= 3) seedWorkflow.boundary.points = sourcePoints;
         payload.points = seedWorkflow.boundary.points;
         payload.mode = 'manual';

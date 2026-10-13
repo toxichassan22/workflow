@@ -326,6 +326,7 @@ FRONTEND_JS_ORDER = (
     '10-financial-report-timeline/01_report_collect.js',
     '10-financial-report-timeline/02_timeline_sidebar.js',
     '10-financial-report-timeline/03_timeline_board.js', '11-land-croquis/01_croquis_survey.js',
+    '11-land-croquis/01a_boundary_dimensions.js',
     '11-land-croquis/02_map_edits.js', '11-land-croquis/02a_map_approval_viewport.js',
     '11-land-croquis/03_interactive_map.js', '11-land-croquis/04_land_chat.js',
     '12-files-media/01_files_media.js',

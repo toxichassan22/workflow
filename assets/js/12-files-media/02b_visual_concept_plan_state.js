@@ -20,7 +20,8 @@
           parcel_id: String(source.parcel_id || source.parcelId || '').trim(),
           point: String(source.point || source.point_number || index + 1).trim(),
           eastings: coordinate(source.eastings ?? source.easting ?? source.x),
-          northings: coordinate(source.northings ?? source.northing ?? source.y)
+          northings: coordinate(source.northings ?? source.northing ?? source.y),
+          source: String(source.source || '').trim().slice(0, 40)
         };
       }).filter(item => Number.isFinite(item.eastings) && Number.isFinite(item.northings)).slice(0, 60);
     }
@@ -135,6 +136,7 @@
         'approved_floor_area_ratio', 'approved_typical_floor_coverage', 'land_and_building_summary', 'regulatory_constraints',
         'north_direction', 'surrounding_streets', 'setbacks', 'building_ratio_setbacks',
         'directions_table', 'survey_coordinates', 'regulation_coordinates', 'facades_directions',
+        'boundary_lengths',
         'land_documents_analysis', 'project_components_data', 'financial_study_model'];
       const fields = Object.fromEntries(keys.map(key => [key, projectData?.[key] ?? '']));
       const data = JSON.stringify({ fields, boundary: workflow.boundary.points,

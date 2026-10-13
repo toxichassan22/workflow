@@ -2,6 +2,8 @@ import json
 import math
 import re
 
+import plot_shape
+
 
 _DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')
 _DIRECTIONS = {'north': r'شمال|north', 'south': r'جنوب|south',
@@ -198,8 +200,24 @@ def _clip(points, origin, normal, setback):
     return output
 
 
+def parcel_shape_source(project):
+    """Where the plot's shape comes from: 'survey' for recorded coordinates,
+    'dimensions' for the rectangle synthesized from documented boundary
+    lengths, '' when neither exists."""
+    if _polygon_rows(project):
+        return 'survey'
+    return 'dimensions' if plot_shape.dimension_rectangle(project) else ''
+
+
 def setback_envelope(project, regime='parking'):
     points, polygon_issue = _polygon(project)
+    approximated = False
+    # With no usable coordinate rows, the documented boundary lengths still
+    # describe the parcel: a multi-parcel survey is never flattened into one
+    # rectangle, but missing/unreadable coordinates fall back to them.
+    if not points and polygon_issue in ('rows', 'coords', 'points'):
+        points = plot_shape.dimension_points(project)
+        approximated = bool(points)
     if not points:
         return None, {'code': polygon_issue or 'polygon'}
     pairs = _setback_values(project.get('setbacks'))
@@ -210,6 +228,8 @@ def setback_envelope(project, regime='parking'):
               for key, pair in pairs.items()}
     signed = _signed_area(points)
     cadastral = number(project.get('croquis_land_area'))
+    if not cadastral and approximated:
+        cadastral = abs(signed)
     if not cadastral:
         return None, {'code': 'cadastral'}
     if abs(abs(signed) - cadastral) > max(5, cadastral * 0.03):

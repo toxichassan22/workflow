@@ -99,7 +99,10 @@ def api_visual_concept_plans_boundary():
     if workflow_error:
         return jsonify(workflow_error), 400
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    points = _visual_concept_plan_boundary_points(data.get('points') or project_data.get('survey_coordinates'))
+    points = _visual_concept_plan_boundary_points(
+        data.get('points') or project_data.get('survey_coordinates')
+        or project_data.get('regulation_coordinates')
+        or plot_shape.dimension_survey_rows(project_data))
     instruction = _visual_concept_text(data.get('instruction'), 2000)
     if str(data.get('mode') or '').lower() == 'ai':
         _billing_guard = _require_billing_balance('visual_concept')

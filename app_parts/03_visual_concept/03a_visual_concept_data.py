@@ -103,6 +103,11 @@ def _visual_concept_directions(project_data):
             400,
         )
         setback = _visual_concept_text(item.get('setback') or item.get('setback_m'), 120)
+        boundary_length = _visual_concept_number(
+            item.get('boundary_length_m') or item.get('boundaryLength') or item.get('length_m'))
+        if boundary_length is not None and boundary_length > 0:
+            length_text = f'{boundary_length:g}'
+            text = (text + ' — طول الحد: ' + length_text + 'م') if text else ('طول الحد: ' + length_text + 'م')
         if setback:
             text = (text + ' — الارتداد: ' + setback) if text else ('الارتداد: ' + setback)
         if not text:

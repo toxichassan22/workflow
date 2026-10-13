@@ -245,8 +245,12 @@
       return Object.entries(labels).map(([direction, label]) => {
         const row = byDirection[direction] || {};
         const regulationText = row.regulation_text || row.regulation || row.text || '';
+        const boundaryLength = surveyBoundaryNumber(
+          row.boundary_length_m ?? row.length_m ?? row.boundaryLength ?? row.length)
+          ?? surveyDirectionLengthFromText(
+            [regulationText, row.description, row.notes, row.uses].filter(Boolean).join(' '));
         const fallbackText = [
-          row.boundary_length_m ?? row.length_m ? WFT('land.boundary_len', 'بطول {n}م', { n: row.boundary_length_m ?? row.length_m }) : '',
+          boundaryLength ? WFT('land.boundary_len', 'بطول {n}م', { n: boundaryLength }) : '',
           row.street_name || row.street || row.boundary || '',
           row.uses || row.notes || ''
         ].filter(Boolean).join(' — ');
@@ -254,18 +258,30 @@
           direction,
           label,
           regulation_text: regulationText || fallbackText,
-          setback: row.setback ?? row.setback_m ?? ''
+          boundary_length_m: boundaryLength ?? '',
+          setback: row.setback ?? row.setback_m ?? '',
+          street_name: row.street_name || row.street || '',
+          street_width_m: row.street_width_m ?? row.street_width ?? '',
+          uses: row.uses || '',
+          notes: row.notes || '',
+          source: row.source || 'regulation_table'
         };
       });
     }
 
     function collectSurveyDirections() {
-      return Array.from(document.querySelectorAll('#surveyDirectionsPanel tbody tr')).map(row => ({
-        direction: row.dataset.direction || '',
-        regulation_text: row.querySelector('[data-direction-field="regulation_text"]')?.value?.trim() || '',
-        setback: row.querySelector('[data-direction-field="setback"]')?.value?.trim() || '',
-        source: 'regulation_table'
-      }));
+      return Array.from(document.querySelectorAll('#surveyDirectionsPanel tbody tr')).map(row => {
+        let extra = {};
+        try { extra = JSON.parse(row.dataset.directionExtra || '{}'); } catch (error) { extra = {}; }
+        return {
+          ...extra,
+          direction: row.dataset.direction || '',
+          regulation_text: row.querySelector('[data-direction-field="regulation_text"]')?.value?.trim() || '',
+          boundary_length_m: row.querySelector('[data-direction-field="boundary_length_m"]')?.value?.trim() || '',
+          setback: row.querySelector('[data-direction-field="setback"]')?.value?.trim() || '',
+          source: extra.source || 'regulation_table'
+        };
+      });
     }
 
     function syncSurveyDirections() {
@@ -283,13 +299,18 @@
       if (hadValue && parseStoredLandTable(value) === null) return;
       const rows = normalizeSurveyDirections(value);
       panel.innerHTML = '<strong class="survey-directions-title">جدول الاتجاهات</strong>' +
-        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th><th>الارتداد</th></tr></thead><tbody></tbody></table></div>';
+        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th><th>طول الحد (م)</th><th>الارتداد</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
       rows.forEach(row => {
         const tr = document.createElement('tr');
         tr.dataset.direction = row.direction;
+        tr.dataset.directionExtra = JSON.stringify({
+          street_name: row.street_name || '', street_width_m: row.street_width_m ?? '',
+          uses: row.uses || '', notes: row.notes || '', source: row.source || 'regulation_table'
+        });
         tr.innerHTML = '<td>' + escapeHtml(row.label) + '</td>' +
           '<td><textarea data-direction-field="regulation_text" rows="2" placeholder="بطول ... يحده ...">' + escapeHtml(row.regulation_text || '') + '</textarea></td>' +
+          '<td><input type="text" data-direction-field="boundary_length_m" inputmode="decimal" value="' + escapeHtml(row.boundary_length_m ?? '') + '" placeholder="97"></td>' +
           '<td><input type="text" data-direction-field="setback" value="' + escapeHtml(row.setback ?? '') + '" placeholder="5"></td>';
         tr.querySelectorAll('textarea, input').forEach(control => control.addEventListener('input', syncSurveyDirections));
         tbody.appendChild(tr);

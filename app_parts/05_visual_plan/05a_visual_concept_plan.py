@@ -1,4 +1,5 @@
 
+import plot_shape
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -27,11 +28,13 @@ def _visual_concept_plan_boundary_points(value):
         return []
     points = []
     for index, item in enumerate(parsed):
+        point_source = ''
         if isinstance(item, dict):
             east = item.get('eastings') or item.get('easting') or item.get('x')
             north = item.get('northings') or item.get('northing') or item.get('y')
             point = item.get('point') or item.get('point_number') or str(index + 1)
             parcel_id = item.get('parcel_id') or item.get('parcelId') or ''
+            point_source = item.get('source')
         elif isinstance(item, (list, tuple)) and len(item) >= 2:
             east, north = item[0], item[1]
             point, parcel_id = str(index + 1), ''
@@ -46,6 +49,7 @@ def _visual_concept_plan_boundary_points(value):
             'point': _visual_concept_text(point, 40) or str(index + 1),
             'eastings': east_number,
             'northings': north_number,
+            'source': _visual_concept_text(point_source, 40),
         })
         if len(points) >= 60:
             break
@@ -226,7 +230,8 @@ def _visual_concept_plan_volatile_fields(source):
 def _visual_concept_plan_context(project_data, boundary_points=None, verification=None):
     source = project_data if isinstance(project_data, dict) else {}
     points = _visual_concept_plan_boundary_points(
-        boundary_points or source.get('survey_coordinates') or source.get('regulation_coordinates'))
+        boundary_points or source.get('survey_coordinates') or source.get('regulation_coordinates')
+        or plot_shape.dimension_survey_rows(source))
     directions = _visual_concept_directions(source)
     components = _visual_concept_components(source)
     context = {
@@ -256,9 +261,14 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
     context = context if isinstance(context, dict) else {}
     location = '، '.join(item for item in (context.get('city'), context.get('district')) if item)
     boundary = context.get('boundary_points') or []
+    boundary_from_dimensions = bool(boundary) and all(
+        item.get('source') == 'boundary_lengths' for item in boundary)
     boundary_text = '; '.join(
         f"{item.get('point')}: E {item.get('eastings')} / N {item.get('northings')}"
         for item in boundary)
+    boundary_label = ('Boundary rectangle derived from recorded side lengths '
+                      '(approximate — not surveyed coordinates)') if boundary_from_dimensions \
+        else 'Surveyed boundary points'
     directions = '\n'.join(
         f"- {item.get('direction')}: {item.get('regulation_text')}"
         for item in context.get('directions') or [] if item.get('regulation_text')) or 'غير متوفر'
@@ -292,7 +302,7 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         f"North direction: {context.get('north_direction') or 'not recorded'}\n"
         f"Setbacks: {context.get('setbacks') or 'not recorded'}\n"
         f"Surrounding streets: {context.get('surrounding_streets') or 'not recorded'}\n"
-        f"Surveyed boundary points: {boundary_text or 'not recorded'}\n"
+        f"{boundary_label}: {boundary_text or 'not recorded'}\n"
         f"Directions and edges:\n{directions}\n"
         f"Approved project components:\n{chr(10).join(components) or 'not recorded'}\n"
         f"Regulatory facts:\n{regulations}\n"

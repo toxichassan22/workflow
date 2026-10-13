@@ -1024,15 +1024,19 @@ def _build_land_extraction_diagnostics(result, document_processing=None):
         coordinate_rows = first_parcel.get('survey_coordinates') if isinstance(first_parcel.get('survey_coordinates'), list) else []
     directions = first_parcel.get('directions') if isinstance(first_parcel.get('directions'), dict) else {}
     direction_values = 0
+    direction_lengths = 0
     for direction in ('north', 'south', 'east', 'west'):
         value = directions.get(direction)
         if isinstance(value, dict):
             has_value = any(str(value.get(key) or '').strip() for key in (
                 'regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes'
             ))
+            has_length = bool(str(value.get('boundary_length_m') or '').strip())
         else:
             has_value = bool(str(value or '').strip())
+            has_length = False
         direction_values += int(has_value)
+        direction_lengths += int(has_length)
     complete_coordinates = sum(
         bool(str(row.get('eastings') or '').strip() and str(row.get('northings') or '').strip())
         for row in coordinate_rows if isinstance(row, dict)
@@ -1056,6 +1060,7 @@ def _build_land_extraction_diagnostics(result, document_processing=None):
         'coordinates_complete_rows': complete_coordinates,
         'directions_rows': 4,
         'directions_with_values': direction_values,
+        'directions_with_lengths': direction_lengths,
         'missing_tables': missing_tables,
         'conflict_count': len(conflicts),
         'coordinates_table_name': str(first_parcel.get('coordinates_table_name') or ''),
