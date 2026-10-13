@@ -857,38 +857,6 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
     print(f"[SLIDE-{slide_num}] FAIL All attempts failed for {slide_title}")
     return ''
 
-def build_slides_prompt(project_data, images, branding=None):
-    """Legacy single-shot prompt builder (kept for /api/generate compatibility)."""
-    project_data = clean_project_data(project_data)
-    images_info = _get_images_info(images, project_data)
-
-    # Resolve dynamic brand rules
-    if branding is None:
-        tenant_id = getattr(g, 'tenant_id', None)
-        branding = db.get_branding(tenant_id) if tenant_id else {}
-    dynamic_rules = build_design_rules(branding)
-    min_s, max_s, default_count = resolve_slide_bounds(branding)
-    slide_count = max(min_s, min(default_count, max_s))
-    fallback_plan = build_fallback_plan(branding, project_data)
-    slides = fallback_plan.get('slides', [])
-    generic_slide = {
-        'title': 'تفاصيل إضافية',
-        'type': 'content',
-        'design_style': _suggest_design_style('تفاصيل إضافية', slide_type='content'),
-        'content_density': 'medium',
-        'requires_image': False,
-        'bullets': []
-    }
-    if slide_engine.resolve_offer_lang(project_data) == slide_engine.OFFER_LANG_ENGLISH:
-        generic_slide['title'] = 'Additional details'
-        generic_slide['design_style'] = _suggest_design_style('Additional details', slide_type='content')
-
-    sys_prompt = build_system_prompt(project_data, images_info, dynamic_rules)
-    return sys_prompt + '\n\n'.join(
-        slide_engine.build_slide_user_msg(slides[i] if i < len(slides) else generic_slide, i + 1, slide_count, branding, project_data=project_data)
-        for i in range(slide_count)
-    )
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Extract HTML from model response
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -932,95 +900,6 @@ def validate_html(html, expected_count=None):
     if 'dir="rtl"' not in html:
         html = html.replace('<div class="slide"', '<div class="slide" dir="rtl"')
     return html
-
-def _extract_json_from_text(text):
-    """Try to find a valid JSON object with 'action' key in text.
-    Returns a dict or None."""
-    # 1) Try parsing the entire response as JSON
-    try:
-        parsed = json.loads(text.strip())
-        if isinstance(parsed, dict) and 'action' in parsed:
-            return parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
-    # 2) Try extracting from markdown code block
-    cb = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', text)
-    if cb:
-        try:
-            parsed = json.loads(cb.group(1).strip())
-            if isinstance(parsed, dict) and 'action' in parsed:
-                return parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
-    # 3) Balanced-brace scan for the first complete JSON object
-    start = text.find('{')
-    if start != -1:
-        depth = 0
-        in_str = False
-        esc = False
-        for i in range(start, len(text)):
-            c = text[i]
-            if esc:
-                esc = False
-                continue
-            if c == '\\' and in_str:
-                esc = True
-                continue
-            if c == '"' and not esc:
-                in_str = not in_str
-                continue
-            if not in_str:
-                if c == '{':
-                    depth += 1
-                elif c == '}':
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            parsed = json.loads(text[start:i+1])
-                            if isinstance(parsed, dict) and 'action' in parsed:
-                                return parsed
-                        except (json.JSONDecodeError, ValueError):
-                            pass
-                        break
-    return None
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ENDPOINT 1: Generate all slides HTML
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-@app.route('/api/generate', methods=['POST'])
-@require_permission('create_presentation')
-def api_generate():
-    data = request.json
-    _billing_guard = _require_billing_balance('slide_plan')
-    if _billing_guard is not None:
-        return _billing_guard
-    project_data = clean_project_data(data.get('projectData', {}))
-    images = data.get('images', {})
-
-    print(f"\n[GENERATE] Starting generation for: {project_data.get('projectName', 'Unknown')}")
-
-    prompt = build_slides_prompt(project_data, images)
-    print(f"[GENERATE] Prompt length: {len(prompt)} chars (4 batches)")
-
-    try:
-        response = call_text_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx_optional('slide', data))
-
-        raw = extract_chat_content(response, "GENERATE")
-        print(f"[GENERATE] model response: {len(raw)} chars")
-
-        html = extract_html_from_response(response)
-        html = validate_html(html)
-
-        slide_count = html.count('class="slide"')
-        print(f"[GENERATE] Final HTML: {len(html)} chars, {slide_count} slides")
-        return jsonify({'success': True, 'html': html})
-
-    except Exception as e:
-        print(f"[GENERATE ERROR] {str(e)}")
-        fatal = _ai_fatal_http_response(e)
-        if fatal is not None:
-            return fatal
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ENDPOINT 2: Generate images (1 cover + 4 moodboard)
