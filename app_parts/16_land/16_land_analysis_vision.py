@@ -1115,6 +1115,6 @@ def build_land_analysis_site_context(data, tenant_id, lat, lng):
     return context, warnings
 
 
-MARKET_STUDY_MAX_TOKENS = int(os.environ.get('MARKET_STUDY_MAX_TOKENS', '8000'))
+MARKET_STUDY_MAX_TOKENS = int(os.environ.get('MARKET_STUDY_MAX_TOKENS', '65536'))
 MARKET_STUDY_MODEL = os.environ.get('MARKET_STUDY_MODEL') or GEMINI_TEXT_MODEL
 _MARKET_JOB_LOCK = threading.Lock()
