@@ -21,7 +21,7 @@ reportlab>=4.0.0
 arabic_reshaper>=3.0.0
 python-bidi>=0.6.0
 emoji>=2.15.0
-playwright>=1.40.0
+playwright==1.63.0
 gunicorn>=21.0.0
 pyjwt>=2.14.0
 fontTools>=4.40.0

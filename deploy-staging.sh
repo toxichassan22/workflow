@@ -198,6 +198,16 @@ run_deploy_step deps "$PIP" install --upgrade pip setuptools wheel
 run_deploy_step deps "$PIP" install -r "$APP_DIR/requirements.txt"
 run_deploy_step deps "$PIP" install gunicorn
 
+# Headless Chromium for the web_browse search agents — best-effort: an
+# already-installed browser exits fast, and a failed/timed-out install must
+# not abort the deploy (step 8 retries post-lock; viability is verified
+# separately on the box). Bounded so a cold download cannot starve queued
+# webhook deploys holding this lock.
+pw_install_timeout=""
+command -v timeout >/dev/null 2>&1 && pw_install_timeout="timeout 600"
+$pw_install_timeout "$PYTHON" -m playwright install chromium >>"$STEP_LOG" 2>&1 \
+  || echo "WARNING: playwright install chromium failed or timed out" | tee -a "$STEP_LOG"
+
 DEPLOY_STEP="migrate"
 echo "===== 6. Run database migrations ====="
 run_deploy_step migrate "$PYTHON" -c "import app; app.db.init_db()"
