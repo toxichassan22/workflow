@@ -427,48 +427,6 @@ def _visual_concept_plan_adjudicate_checks(checks, reviews):
     return adjudicated
 
 
-def _visual_concept_plan_surgical_rows(old_rows, new_rows, editable_ids, allowed_keys=None):
-    """Keep the model's edit surgical: rows no check flagged are restored
-    verbatim — the model may edit, merge or drop only the flagged ids, and may
-    add brand-new rows (e.g. a study component the table is missing). Untouched
-    rows keep their original order; new rows append at the end. When
-    `allowed_keys` (the study's component keys) is given, a rename that lands
-    outside the study vocabulary — «الشقق السكنية الفاخرة» turned
-    «Residential» — is reverted and off-vocabulary additions are dropped, so
-    every row keeps matching its study totals."""
-    old_by_id = {row.get('id'): row for row in old_rows}
-    new_by_id = {}
-    extra_rows = []
-    for row in new_rows:
-        rid = row.get('id')
-        if rid in old_by_id or rid in new_by_id:
-            new_by_id[rid] = row
-        else:
-            extra_rows.append(row)
-    if allowed_keys is not None:
-        def _key(name):
-            return _visual_concept_plan_component_key(
-                _visual_concept_plan_component_base(name))
-        for rid, row in list(new_by_id.items()):
-            if rid in editable_ids and rid in old_by_id:
-                new_key = _key(row.get('component'))
-                old_key = _key(old_by_id[rid].get('component'))
-                if new_key != old_key and new_key not in allowed_keys:
-                    row = dict(row)
-                    row['component'] = old_by_id[rid].get('component')
-                    new_by_id[rid] = row
-        extra_rows = [row for row in extra_rows if _key(row.get('component')) in allowed_keys]
-    merged = []
-    for row in old_rows:
-        rid = row.get('id')
-        if rid in new_by_id:
-            merged.append(new_by_id[rid] if rid in editable_ids else row)
-        elif rid not in editable_ids:
-            merged.append(row)
-    merged.extend(extra_rows)
-    return merged
-
-
 def _visual_concept_plan_backfill_distribution_rows(rows, context):
     """Fill empty units_per_floor / floor_area_sqm on a fresh proposal from the
     recorded program: a component's required units and area spread evenly across

@@ -193,11 +193,6 @@
 
     async function checkVisualConceptPlansDistribution(mode, options) {
       const silent = Boolean(options && options.silent);
-      // holdFindings keeps the verdicts out of state and off-screen: the
-      // check-and-repair motion runs several adjudications, and flashing each
-      // intermediate conflict list reads as a glitch — only the list that
-      // survives the final pass is published.
-      const holdFindings = Boolean(options && options.holdFindings);
       const seedWorkflow = visualConceptPlansWorkflowState();
       if (!seedWorkflow.verification.approved || !(seedWorkflow.distribution.rows || []).length) return;
       if (!silent) showLoader(WFT('plans.distribution_check_loading', 'جاري فحص التوزيع'),
@@ -216,7 +211,7 @@
         }
         const workflow = visualConceptPlansWorkflowState();
         workflow.distribution.totals = Array.isArray(response.totals) ? response.totals : [];
-        if (!silent && !holdFindings) {
+        if (!silent) {
           // Verdicts display only after sol adjudicates — the silent local pass
           // refreshes totals but never writes a conflict list on its own.
           workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
@@ -228,110 +223,14 @@
         markVisualConceptDirty();
         const totalsHost = document.querySelector('[data-plans-distribution-totals]');
         if (totalsHost) totalsHost.innerHTML = visualConceptDistributionTotalsRowsHtml(workflow.distribution);
-        if (!holdFindings) {
-          const host = document.querySelector('[data-plans-distribution-results]');
-          if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
-          else renderVisualConceptPage();
-          return true;
-        }
-        return {
-          checks: Array.isArray(response.checks) ? response.checks : [],
-          issues: Array.isArray(response.issues) ? response.issues : [],
-          canProceed: response.canProceed !== false
-        };
+        const host = document.querySelector('[data-plans-distribution-results]');
+        if (host) host.innerHTML = visualConceptDistributionResultsHtml(workflow.distribution);
+        else if (!silent) renderVisualConceptPage();
+        return true;
       } catch (error) {
         if (silent) return;
         hideLoader();
         toast(error.message || WFT('plans.distribution_check_failed', 'تعذر فحص التوزيع'));
-      }
-    }
-
-    // One motion: sol adjudicates the deterministic findings, surgically repairs
-    // whatever he still confirms as blocking, then re-checks the repaired table —
-    // «يولد ويفحص ويعدّل ويتأكد». Intermediate verdicts are held off-screen for
-    // the whole motion — the conflict list that renders at the end is only what
-    // the repair could not settle, so nothing appears, vanishes and reappears.
-    async function checkAndRepairVisualConceptPlansDistribution() {
-      if (!visualConceptPlanActionBusy('check-distribution', true)) return;
-      try {
-        const firstPass = await checkVisualConceptPlansDistribution('ai', { holdFindings: true });
-        if (!firstPass) return;
-        const checks = Array.isArray(firstPass.checks) ? firstPass.checks : [];
-        const issues = Array.isArray(firstPass.issues) ? firstPass.issues : [];
-        const publishFindings = () => {
-          const state = visualConceptPlansWorkflowState();
-          state.distribution.checks = checks;
-          state.distribution.issues = issues;
-          state.conflictChats.distribution = [];
-          state.distribution.aiReviewed = true;
-          state.distribution.canProceed = firstPass.canProceed;
-          markVisualConceptDirty();
-          const host = document.querySelector('[data-plans-distribution-results]');
-          if (host) host.innerHTML = visualConceptDistributionResultsHtml(state.distribution);
-          else renderVisualConceptPage();
-        };
-        // Repair runs on every finding the server considers fixable — blocking or
-        // advisory — plus sol's issue notes, mirroring `repairable or issues` in
-        // the endpoint. A clean bill skips the pass, and a verdict marked
-        // fixable=false points at the approved program itself, not a row edit.
-        const repairable = checks.filter(
-          (item) => item && item.result !== 'مطابق' && item.fixable !== false);
-        const rows = visualConceptPlansWorkflowState().distribution.rows || [];
-        if (!rows.length || !(repairable.length || issues.length)) publishFindings();
-        else {
-          const repaired = await repairVisualConceptPlansDistribution({ checks, issues });
-          if (repaired) await checkVisualConceptPlansDistribution('ai');
-          else publishFindings();
-        }
-        if (visualConceptPlansWorkflowState().clientNotes.trim()) await checkVisualConceptPlanNotes();
-      } finally {
-        visualConceptPlanActionBusy('check-distribution', false);
-      }
-    }
-
-    async function repairVisualConceptPlansDistribution(findings) {
-      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return false; }
-      const seedWorkflow = visualConceptPlansWorkflowState();
-      if (!(seedWorkflow.distribution.rows || []).length) return false;
-      showLoader(WFT('plans.distribution_repair_loading', 'جاري إصلاح التوزيع'),
-        WFT('plans.distribution_repair_loading_detail', 'يعالج الذكاء الصفوف المتعارضة ويحدّث المجاميع...'), 40);
-      try {
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        const stamp = visualConceptPlanInputStamp();
-        // Findings may arrive held off-state from the check-and-repair motion;
-        // otherwise fall back to whatever verdicts state currently carries.
-        const heldChecks = findings && Array.isArray(findings.checks)
-          ? findings.checks : (seedWorkflow.distribution.checks || []);
-        const heldIssues = findings && Array.isArray(findings.issues)
-          ? findings.issues : seedWorkflow.distribution.issues;
-        payload.distribution = {
-          rows: seedWorkflow.distribution.rows,
-          issues: heldIssues,
-          checks: heldChecks.filter((check) => check.result !== 'مطابق'),
-        };
-        const response = await api('POST', '/api/visual-concept/plans-distribution-repair', payload);
-        hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) return false;
-        if (!response?.success) { toast(response?.error || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع')); return false; }
-        if (response.repaired === false) {
-          toast(WFT('plans.distribution_nothing_to_repair', 'لا توجد ملاحظات تستدعي الإصلاح'));
-          return false;
-        }
-        const workflow = visualConceptPlansWorkflowState();
-        workflow.distribution = normalizeVisualConceptPlansWorkflow({ distribution: response.distribution }).distribution;
-        // The rows changed — the pre-repair verdicts no longer describe this
-        // table. Findings stay hidden («لم يُفحص بعد») until sol re-adjudicates.
-        workflow.distribution.checks = [];
-        workflow.distribution.issues = [];
-        workflow.distribution.aiReviewed = false;
-        invalidateVisualConceptPlanGeneration(workflow);
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-        return true;
-      } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.distribution_repair_failed', 'تعذر إصلاح التوزيع'));
-        return false;
       }
     }
 

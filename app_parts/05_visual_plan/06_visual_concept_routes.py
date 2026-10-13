@@ -260,10 +260,11 @@ def api_visual_concept_plans_distribution_check():
             '«يحتاج تأكيد» تستدعي مراجعة العميل دون منع، أو «مطابق» إنذار كاذب لأن التوزيع '
             'سليم فعلًا (نطاقات متجاورة لا متداخلة، مبانٍ مختلفة، أو استخدامات مختلفة تشترك '
             'في الدور بشكل مشروع). راجع كل البنود المرقّمة ولا تترك بندًا بلا حكم. '
-            'ولكل بند متعارض قرّر fixable: true إن كان يُحل بتحرير صفوف الجدول، أو false إن '
+            'دورك التدقيق والتشخيص فقط — لا يوجد إصلاح آلي؛ العميل يعدّل يدويًا. '
+            'ولكل بند متعارض قرّر fixable: true إن كان يُحل بتحرير صفوف الجدول يدويًا، أو false إن '
             'كان مصدره بيانات المشروع المعتمدة نفسها مقابل الاشتراطات (برنامج يتجاوز معامل '
             'البناء مهما توزّع، استخدام غير مسموح به إطلاقًا) — حينها اشرح في detail أين '
-            'يصحّح المصدر بدل وصف التحرير المستحيل. '
+            'يصحّح المصدر (الدراسة أو الحقل المعتمد) بدل وصف التحرير المستحيل. '
             'لا تكتب بنود «لم يوثّق» عمّا لا يمكن لجدول توزيع إثباته بطبيعته (أبعاد المواقف، '
             'عروض الممرات والمنحدرات، جهات المداخل، مسافات الإخلاء، تفاصيل الحريق) — فهي مرحلة '
             'تصميم لاحقة. '
@@ -322,99 +323,6 @@ def api_visual_concept_plans_distribution_check():
     return jsonify({'success': True, 'totals': distribution['totals'],
                     'checks': checks, 'issues': issues,
                     'canProceed': can_proceed})
-
-
-@app.route('/api/visual-concept/plans-distribution-repair', methods=['POST'])
-@require_permission('generate_images')
-def api_visual_concept_plans_distribution_repair():
-    """Surgical AI repair of a distribution: the findings (checks + issues) go to
-    the model with the row ids each finding may touch, then the server restores
-    every unflagged row verbatim — so the model fixes what is flagged, never
-    rewrites the whole table."""
-    data = request.get_json(silent=True) or {}
-    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
-    if workflow_error:
-        return jsonify(workflow_error), 400
-    _project_data, workflow, _boundary, _points, context = _visual_concept_plans_context_from_request(data)
-    regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
-    posted = (data.get('distribution') if isinstance(data.get('distribution'), dict)
-              else (workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}))
-    distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
-    # normalize recomputes checks deterministically and drops the verdicts the
-    # client holds — but the repair must fix what sol CONFIRMED, so the posted
-    # (adjudicated) findings win when they exist. fixable=false findings are
-    # program-vs-regulation conflicts no row edit can resolve — they stay on
-    # screen as sol's verdict and are never fed back to the repair loop.
-    posted_checks = [check for check in posted.get('checks') or [] if isinstance(check, dict)]
-    findings = posted_checks or distribution['checks']
-    repairable = [check for check in findings
-                  if check.get('fixable', True) and check.get('result') != 'مطابق']
-    if not (distribution['rows'] and (repairable or distribution['issues'])):
-        return jsonify({'success': True, 'distribution': distribution, 'repaired': False})
-    _billing_guard = _require_billing_balance('visual_concept')
-    if _billing_guard is not None:
-        return _billing_guard
-    editable_ids = {rid for check in repairable
-                    for rid in (check.get('row_ids') or []) if rid}
-    system_prompt = (
-        'أنت مخطط معماري مفاهيمي تصحّح جدول توزيع مكونات على الأدوار بناءً على نتيجة فحص آلي. '
-        'أعد JSON فقط بالجدول الكامل: {"rows":[{"id":"","building":"","floor_range":"",'
-        '"component":"","units_per_floor":0,"floor_area_sqm":0,"circulation":""}],"notes":[""]}. '
-        'أدواتك الجراحية: عدّل قيم الصف المعلَّم، أو ادمج صفوف المكوّن الواحد المتداخلة في صف '
-        'واحد («أرضي + ميزانين» أو نطاق رقمي)، أو قسّم صفًا إلى نطاقات، أو احذف صفًا متعارضًا، '
-        'أو أضف صفًا بمُعرّف id جديد لمكوّن تطلبه الدراسة ولا صف له. '
-        'كل بند فحص يحمل row_ids — وهي وحدها الصفوف المسموح تعديلها أو حذفها؛ أي صف آخر '
-        'تنسخه حرفيًا بنفس id ونفس القيم دون أي تغيير. '
-        'بند فحص بقائمة row_ids فارغة يعني مكوّنًا مطلوبًا في الدراسة لا صف له في الجدول — '
-        'أضف له صفًا جديدًا أو أعد تسمية صف معلَّم يضمّه فعلًا. '
-        'وإن كان تجاوز معامل البناء أو الحد التنظيمي متأصلًا في البرنامج المعتمد نفسه، '
-        'فلا تحلّه بتقليص مساحات دون مجاميع الدراسة — أولويتك مطابقة المجاميع وحل التداخلات. '
-        'صيغ floor_range بالعربية فقط: "أرضي"، "ميزانين"، "بدروم 1" أو "بدروم 1-3" للقبو، '
-        '"1-4" لنطاق أدوار رقمي، "ملحق علوي" للسطح، و"مساحة مفتوحة" لمكوّنات «مساحة مفتوحة» '
-        'والمواقف السطحية — عناصر موقع تحت «الموقع العام» لا أدوار مبنى. '
-        'component اسم المكوّن كما ورد في '
-        'الدراسة حرفيًا — بالعربية ودون ترجمة أو إعادة صياغة أو اسم الدور. '
-        'التزم بسقف الأدوار ومعامل البناء وحد التغطية الموثقة ومجاميع الدراسة، ولا تُنتج '
-        'تعارضًا جديدًا ولا تترك فجوة مقابل مكوّن مطلوب. لا تذكر أسماء ملفات أو مصادر.'
-    )
-    user_prompt = (
-        'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
-        + _visual_concept_plan_context_text(context, diagram_rules=False)
-        + '\n\nالبيانات التنظيمية الموثقة:\n' + json.dumps(regulations, ensure_ascii=False)
-        + '\n\nجدول التوزيع الحالي:\n'
-        + json.dumps(distribution['rows'], ensure_ascii=False)
-        + '\n\nمجاميع التوزيع مقابل المطلوب في الدراسة:\n'
-        + json.dumps(distribution['totals'], ensure_ascii=False)
-        + '\n\nنتائج الفحص المطلوب معالجتها كلها:\n'
-        + json.dumps(repairable, ensure_ascii=False)
-        + ('\n\nملاحظات مراجعة سابقة (استرشادية):\n'
-           + json.dumps(distribution['issues'], ensure_ascii=False)
-           if distribution['issues'] else '')
-    )
-    try:
-        response = call_openrouter_chat(
-            system_prompt, user_prompt, temperature=None, max_tokens=8000,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
-            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
-        result = parse_json_object(_get_chat_response_text(response))
-    except Exception as error:
-        return jsonify({'success': False, 'error': 'تعذر إصلاح التوزيع بالذكاء الاصطناعي',
-                        'detail': str(error)[:300]}), 503
-    if not isinstance(result, dict) or not result.get('rows'):
-        return jsonify({'success': False, 'error': 'تعذر إصلاح التوزيع بالذكاء الاصطناعي'}), 503
-    candidate = _visual_concept_plan_normalize_distribution(result, context, regulations)
-    allowed_keys = set()
-    for comp in context.get('components') or []:
-        for variant in (comp.get('name'),
-                        _visual_concept_plan_component_base(comp.get('name'))):
-            key = _visual_concept_plan_component_key(variant)
-            if key:
-                allowed_keys.add(key)
-    enforced = _visual_concept_plan_surgical_rows(
-        distribution['rows'], candidate['rows'], editable_ids, allowed_keys)
-    repaired = _visual_concept_plan_normalize_distribution(
-        {'rows': enforced, 'issues': result.get('issues')}, context, regulations)
-    return jsonify({'success': True, 'distribution': repaired, 'repaired': True})
 
 
 @app.route('/api/visual-concept/plans-prompts', methods=['POST'])

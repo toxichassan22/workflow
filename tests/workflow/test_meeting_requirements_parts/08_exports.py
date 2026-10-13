@@ -727,28 +727,25 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertLess(
             boundary_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
             boundary_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        # The distribution check and repair used to write their responses onto a
-        # detached workflow too: check findings never reached the draft, approval
-        # stayed blocked on stale conflicts, and the whole AI repair vanished.
+        # The distribution check writes its findings onto the live workflow —
+        # they reach the draft, and approval sees them.
         check_start = index_source.index('async function checkVisualConceptPlansDistribution(')
-        check_body = index_source[check_start:index_source.index('async function repairVisualConceptPlansDistribution(', check_start)]
+        check_body = index_source[check_start:index_source.index('function approveVisualConceptPlansDistribution()', check_start)]
         self.assertLess(
             check_body.index("api('POST', '/api/visual-concept/plans-distribution-check'"),
             check_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        repair_start = index_source.index('async function repairVisualConceptPlansDistribution(')
-        repair_body = index_source[repair_start:index_source.index('function approveVisualConceptPlansDistribution()', repair_start)]
-        self.assertLess(
-            repair_body.index("api('POST', '/api/visual-concept/plans-distribution-repair'"),
-            repair_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        # The check action is one sol-driven motion: adjudicate, then repair what
-        # is still blocking.
-        self.assertIn('checkAndRepairVisualConceptPlansDistribution', index_source)
+        # The check action is a pure audit: sol adjudicates the deterministic
+        # findings and the client edits the table or the study data manually —
+        # no auto-repair pass exists anywhere.
         self.assertIn(
-            "action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution()",
+            "action === 'check-distribution') checkVisualConceptPlansDistribution('ai')",
             index_source)
+        self.assertNotIn('checkAndRepairVisualConceptPlansDistribution', index_source)
+        self.assertNotIn('repairVisualConceptPlansDistribution', index_source)
+        self.assertNotIn('plans-distribution-repair', index_source)
         # Findings belong to sol's review: the proposal lands verdict-free, the
         # silent pass refreshes totals only, and approval needs aiReviewed with
-        # no confirmed blockers — the standalone repair button is gone.
+        # no confirmed blockers.
         results_start = index_source.index('function visualConceptDistributionResultsHtml')
         results_body = index_source[results_start:index_source.index('function visualConceptDistributionBlocking', results_start)]
         self.assertIn('aiReviewed', results_body)
@@ -760,26 +757,13 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         approve_start = index_source.index('function approveVisualConceptPlansDistribution()')
         approve_body = index_source[approve_start:approve_start + 1200]
         self.assertIn('aiReviewed', approve_body)
-        # A repair changes rows, so the verdicts that described the old table are
-        # cleared («لم يُفحص بعد») and the chain re-checks — findings on screen
-        # always describe the table as it stands.
-        repair_start = index_source.index('async function repairVisualConceptPlansDistribution(')
-        repair_body = index_source[repair_start:repair_start + 4000]
-        self.assertIn('aiReviewed = false', repair_body)
-        self.assertIn("check.result !== 'مطابق'", repair_body)
-        chain_start = index_source.index('async function checkAndRepairVisualConceptPlansDistribution(')
-        chain_end = index_source.index('async function repairVisualConceptPlansDistribution(', chain_start)
-        chain_body = index_source[chain_start:chain_end]
-        self.assertGreaterEqual(
-            chain_body.count("checkVisualConceptPlansDistribution('ai'"), 2)
-        # A fixable=false blocker is a program-vs-regulation conflict — the
-        # chain skips the futile repair and the row is labelled with its
-        # upstream source instead of looping forever.
-        self.assertIn('fixable !== false', chain_body)
+        # A fixable=false blocker is a program-vs-regulation conflict — the row is
+        # labelled with its upstream source so the client edits the study data.
+        self.assertIn('fixable === false', results_body)
         self.assertIn('مصدره بيانات المشروع المعتمدة أو الاشتراطات', results_body)
-        repair_route = read_module_source('app.py')
-        self.assertIn("check.get('fixable', True)", repair_route)
-        self.assertIn('json.dumps(repairable', repair_route)
+        backend_source = read_module_source('app.py')
+        self.assertNotIn('plans-distribution-repair', backend_source)
+        self.assertNotIn('_visual_concept_plan_surgical_rows', backend_source)
         render_start = index_source.index('function renderVisualConceptPlansWorkflow()')
         render_body = index_source[render_start:index_source.index('function renderVisualConceptPlans()', render_start)]
         # A draft saved between boundary approval and prompt preparation used to reopen
@@ -1776,111 +1760,6 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             [], {'land_area': 7012, 'components': []},
             {'table_floors': 52, 'max_floors_height': 'حتى 23م'})
         self.assertFalse(any(c['item'] == 'تجاوز سقف الأدوار الموثق' for c in checks))
-
-    def test_plans_distribution_repair_keeps_component_names_in_study_vocabulary(self):
-        """A repair rename landing outside the study's component names —
-        «الشقق السكنية الفاخرة» rewritten as «Residential» — is reverted, an
-        off-vocabulary added row is dropped, but renaming a flagged row TO a
-        missing study component still sticks."""
-        module = self.application_module
-        surgical = module._visual_concept_plan_surgical_rows
-        key = lambda n: module._visual_concept_plan_component_key(
-            module._visual_concept_plan_component_base(n))
-        old = [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5',
-             'component': 'الشقق السكنية الفاخرة'},
-            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
-        ]
-        allowed = {key('الشقق السكنية الفاخرة'), key('مكاتب'), key('سبا')}
-        out = surgical(old, [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'Residential'},
-            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
-            {'id': 'r9', 'building': 'A', 'floor_range': 'أرضي', 'component': 'قاعة أفراح'},
-        ], {'r1'}, allowed)
-        self.assertEqual(out[0]['component'], 'الشقق السكنية الفاخرة')
-        self.assertEqual(len(out), 2)
-        renamed = surgical(old, [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'سبا'},
-            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
-        ], {'r1'}, allowed)
-        self.assertEqual(renamed[0]['component'], 'سبا')
-        # Without the vocabulary list the merge keeps legacy behaviour.
-        legacy = surgical(old, [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'Residential'},
-            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب'},
-        ], {'r1'})
-        self.assertEqual(legacy[0]['component'], 'Residential')
-
-    def test_plans_distribution_repair_edits_only_flagged_rows(self):
-        """The AI repair is surgical: the model receives the flagged row ids and
-        may edit/merge/drop them, but any row no check named is restored
-        verbatim even if the model rewrote it."""
-        module = self.application_module
-        client = self.app.test_client()
-        points = [
-            {'point': 'P1', 'eastings': 511085.849, 'northings': 2392264.840},
-            {'point': 'P2', 'eastings': 511189.416, 'northings': 2392298.825},
-            {'point': 'P3', 'eastings': 511198.442, 'northings': 2392262.273},
-        ]
-        project_data = {
-            'project_name': 'The View',
-            'croquis_land_area': 7012,
-            'survey_coordinates': points,
-            'project_components_data': [
-                {'name': 'مكاتب', 'useType': 'office', 'units': 16, 'builtArea': 3200},
-                {'name': 'شقق', 'useType': 'residential', 'units': 12, 'builtArea': 1800},
-            ],
-        }
-        workflow = {'verification': {'approved': True},
-                    'boundary': {'approved': True, 'points': points, 'referenceUrl': '/x.png'}}
-        # r1/r2 overlap on the same component; r3 is clean and matches the study.
-        distribution = {'rows': [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب',
-             'units_per_floor': 2, 'floor_area_sqm': 400},
-            {'id': 'r2', 'building': 'A', 'floor_range': '4-9', 'component': 'مكاتب',
-             'units_per_floor': 1, 'floor_area_sqm': 300},
-            {'id': 'r3', 'building': 'A', 'floor_range': '10-13', 'component': 'شقق',
-             'units_per_floor': 3, 'floor_area_sqm': 450},
-        ]}
-        ai_reply = {'rows': [
-            {'id': 'r1', 'building': 'A', 'floor_range': '1-5', 'component': 'مكاتب',
-             'units_per_floor': 2, 'floor_area_sqm': 400},
-            {'id': 'r2', 'building': 'A', 'floor_range': '6-9', 'component': 'مكاتب',
-             'units_per_floor': 1, 'floor_area_sqm': 300},
-            # The model was told not to touch r3 — it did anyway; the server reverts it.
-            {'id': 'r3', 'building': 'A', 'floor_range': '10-13', 'component': 'شقق',
-             'units_per_floor': 99, 'floor_area_sqm': 1},
-        ]}
-        with patch.object(module, 'call_openrouter_chat', return_value={
-            'choices': [{'message': {'content': json.dumps(ai_reply, ensure_ascii=False)}}]
-        }):
-            repaired = client.post('/api/visual-concept/plans-distribution-repair',
-                                   headers=self._headers(self.token_a), json={
-                'projectData': project_data, 'plansWorkflow': workflow,
-                'distribution': distribution})
-        self.assertEqual(repaired.status_code, 200, repaired.get_json())
-        result_rows = {row['id']: row for row in repaired.get_json()['distribution']['rows']}
-        self.assertEqual(result_rows['r2']['floor_range'], '6-9')
-        self.assertEqual(result_rows['r3']['units_per_floor'], 3)
-        self.assertEqual(result_rows['r3']['floor_area_sqm'], 450)
-        self.assertFalse(any(item['result'] == 'متعارض'
-                             for item in repaired.get_json()['distribution']['checks']))
-
-        # A clean table short-circuits — no model call, nothing changes.
-        clean = {'rows': [
-            {'id': 'c1', 'building': 'A', 'floor_range': '1-8', 'component': 'مكاتب',
-             'units_per_floor': 2, 'floor_area_sqm': 400},
-            {'id': 'c2', 'building': 'A', 'floor_range': '11-15', 'component': 'شقق',
-             'units_per_floor': 2.4, 'floor_area_sqm': 360},
-        ]}
-        with patch.object(module, 'call_openrouter_chat',
-                          side_effect=AssertionError('no findings — model must not run')):
-            untouched = client.post('/api/visual-concept/plans-distribution-repair',
-                                    headers=self._headers(self.token_a), json={
-                'projectData': project_data, 'plansWorkflow': workflow,
-                'distribution': clean})
-        self.assertEqual(untouched.status_code, 200, untouched.get_json())
-        self.assertFalse(untouched.get_json()['repaired'])
 
     def test_plans_render_independently_from_the_sealed_scene(self):
         """The three diagrams render the same sealed engineering scene in any

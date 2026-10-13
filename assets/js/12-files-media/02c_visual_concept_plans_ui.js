@@ -155,7 +155,7 @@
         && visualConceptPlanNotesValid();
       return findingsHtml +
         '<div class="visual-concept-actions">' +
-        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص وإصلاح التعارضات</button>' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
         (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
         '</div>';
@@ -292,7 +292,7 @@
           else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
-          else if (action === 'check-distribution') checkAndRepairVisualConceptPlansDistribution();
+          else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
           else if (action === 'check-notes') checkVisualConceptPlanNotes();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
