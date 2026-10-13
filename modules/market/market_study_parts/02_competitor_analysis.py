@@ -638,6 +638,20 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + ('Cover each axis with the brief elements, using short bullets inside an axis value when needed. Never put the detailed analysis in one paragraph or mix its axes.\n'
            if en else
            'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
+        + ('The geographic scope is binding on every axis: this project\'s market is the district '
+           'entered in the project data and the competitor scope stated there (or the stated scope '
+           'alone when no district is entered). Never analyze neighboring districts or wider areas — '
+           'not in sector performance, supply, demand, competition or the market gap. Every figure, '
+           'deal and price must belong to that same scope; a source describing another district is '
+           'out of scope and excluded. City-level figures may appear only as clearly-labeled '
+           'background, never as the basis of a judgment on this project\'s market.\n'
+           if en else
+           'النطاق الجغرافي ملزم في كل محاور التحليل: سوق هذا المشروع هو الحي المدخل في بيانات '
+           'المشروع ونطاق المنافسين المحدد فيها (أو النطاق المحدد وحده إن لم يُدخل حي). ممنوع تحليل '
+           'أحياء مجاورة أو نطاقات أوسع من المدخل — لا في أداء القطاع ولا في العرض أو الطلب أو '
+           'المنافسة أو الفجوة. كل رقم أو صفقة أو سعر يجب أن يخص نفس النطاق، والمصدر الذي يصف حيًّا '
+           'آخر خارج النطاق يُستبعد. أرقام المدينة العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى '
+           'عليها أحكام سوق المشروع.\n')
         + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
         + 'البعد الزمني ملزم في التحليل: لكل محور اربط القراءة بثلاث نقاط — ماضٍ داخل '
         + 'فترة البيانات المحددة (اتجاه الأسعار والطلب والمعروض عبرها)، وحاضر كما هو '
