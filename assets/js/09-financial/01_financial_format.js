@@ -205,7 +205,7 @@
             <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «تغطية البناء» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
-            <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
+            <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" value="" readonly class="readonly-highlight"><span class="help formula">المساحة المعتمدة للدراسة المالية × معامل مسطح البناء المعتمد (FAR) — مأخوذة من قسم الأرض والكروكي.</span></div>
             <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
 
             <div><label>إجمالي مسطحات البناء م²</label><input id="totalBuiltUpArea" readonly><span class="help formula">فوق الأرض + البدرومات.</span></div>

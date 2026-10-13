@@ -171,6 +171,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "المساحة البيعية × سعر البيع للمتر": "Saleable Area × Sale Price/m²",
   "المساحة البيعية المتبقية م²": "Remaining sale area sqm",
   "المساحة البيعية في بنود الإيرادات م²": "Sale area in revenue items sqm",
+  "المساحة المعتمدة للدراسة المالية × معامل مسطح البناء المعتمد (FAR) — مأخوذة من قسم الأرض والكروكي.": "Approved financial area × approved floor area ratio (FAR) — taken from the Land & Croquis section.",
   "المساحة المبنية م²": "Built-up area sqm",
   "المساحة المغطاة م²": "Covered area sqm",
   "المسودة محفوظة؛ تعذر حفظ العرض": "Draft saved; failed to save presentation",

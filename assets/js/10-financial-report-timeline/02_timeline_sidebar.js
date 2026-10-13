@@ -27,6 +27,18 @@
       mirrorApproved(floorInput, 'approved_floor_count');
       mirrorApproved(coverageInput, 'approved_coverage_ratio');
 
+      // مسطحات البناء فوق الأرض is the land section's own official product — approved
+      // financial area × approved FAR — so the study mirrors it rather than re-entering it.
+      const builtAreaInput = document.getElementById('builtUpAreaAbove');
+      if (builtAreaInput) {
+        const approvedArea = parseNumber(readLand('approved_financial_area'));
+        const approvedFar = parseNumber(readLand('approved_floor_area_ratio'));
+        const builtNext = approvedArea > 0 && approvedFar > 0
+          ? String(Math.round(approvedArea * approvedFar * 100) / 100)
+          : '';
+        if (builtAreaInput.value !== builtNext) builtAreaInput.value = builtNext;
+      }
+
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
       }

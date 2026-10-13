@@ -571,6 +571,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         for element in ('id="landArea" type="number" value=""',
                         'id="coverageRate" type="number" value=""',
                         'id="floorCount" type="number" min="1" value=""',
+                        'id="builtUpAreaAbove" type="number" value=""',
                         'id="developmentDurationText" type="text" value=""'):
             self.assertIn(element + ' readonly class="readonly-highlight"', index_source)
         self.assertNotIn('id="landArea" type="number" value="70000"', index_source)
@@ -582,6 +583,14 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn("mirrorApproved(floorInput, 'approved_floor_count');", index_source)
         self.assertIn("mirrorApproved(coverageInput, 'approved_coverage_ratio');", index_source)
         self.assertNotIn('if (landAreaInput && area > 0) landAreaInput.value', index_source)
+
+        # مسطحات البناء فوق الأرض is the land section's official product — approved area ×
+        # approved FAR — mirrored read-only; it used to be a free input that could disagree
+        # with the croquis figures the client already approved.
+        self.assertNotIn('id="builtUpAreaAbove" type="number" oninput=', index_source)
+        self.assertIn("const approvedArea = parseNumber(readLand('approved_financial_area'));", index_source)
+        self.assertIn("const approvedFar = parseNumber(readLand('approved_floor_area_ratio'));", index_source)
+        self.assertIn('approvedArea > 0 && approvedFar > 0', index_source)
 
         # Stage name and year are locked; only the two percentages remain editable.
         self.assertIn('<td data-field="name"><input value="${escapeHtml(d.name || \'\')}" readonly', index_source)
