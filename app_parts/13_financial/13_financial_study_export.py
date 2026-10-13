@@ -77,6 +77,10 @@ def _financial_report_format_number(value, key=''):
     number = _financial_report_plain_number(value)
     if number is None:
         return _financial_report_escape(value)
+    if isinstance(value, str) and value.strip() and not _FINANCIAL_DISPLAY_VALUE_RE.fullmatch(value.strip()):
+        # Compound text such as «سنة و6 شهور و12 يوم» renders verbatim — extracting the first
+        # digit used to collapse the whole duration into «6 سنة».
+        return _financial_report_escape(value)
     field = str(key or '')
     if field in _FINANCIAL_PERCENT_KEYS or (isinstance(value, str) and '%' in str(value)):
         if field in {'roi', 'projectIrr', 'equityIrr', 'irr'} and isinstance(value, (int, float)):
@@ -491,7 +495,8 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     if screen_parts:
         sections.extend(_financial_screen_sections(screen_parts))
         return _financial_report_document(sections, font_css, font_family)
-    sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), ('developmentYears', 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
+    dev_duration_key = 'developmentDurationText' if inputs.get('developmentDurationText') else 'developmentYears'
+    sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), (dev_duration_key, 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
     sections.append('<section><h2>2. الأرض والمساحات</h2>' + rows([('landArea', 'مساحة الأرض'), ('coverageRate', 'نسبة التغطية'), ('floorCount', 'عدد الطوابق'), ('builtUpAreaAbove', 'مسطحات البناء فوق الأرض'), ('basementArea', 'مساحة البدرومات'), ('landValueMethod', 'طريقة احتساب قيمة الأرض'), ('landStatus', 'حالة الأرض')]) + '</section>')
     for number, title, table_key in (
         ('3', 'مكونات المشروع', 'componentsTable'),
@@ -849,7 +854,7 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     draw_text('1. ملخص المشروع', 12)
     draw_kv_table([
         ('طبيعة الإيرادات', inputs.get('unitRevenueMode'), 'unitRevenueMode'),
-        ('مدة التطوير', inputs.get('developmentYears'), 'developmentYears'),
+        ('مدة التطوير', inputs.get('developmentDurationText') or inputs.get('developmentYears'), 'developmentYears'),
         ('سنوات التشغيل', inputs.get('operationYears'), 'operationYears'),
         ('مساحة الأرض', inputs.get('landArea'), 'landArea'),
     ])

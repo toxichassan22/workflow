@@ -329,11 +329,11 @@
         ['تاريخ إعداد التقرير', generatedAt]
       ]);
       const areaSummary = reportRows([
-        ['مدة تطوير المشروع', reportFieldValue('developmentYears') + ' سنة'],
+        ['مدة تطوير المشروع', reportFieldValue('developmentDurationText')],
         ['عدد سنوات التشغيل', reportFieldValue('operationYears') + ' سنة'],
         ['سنة بدء بيع الوحدات', reportFieldValue('salesStartYear')],
         ['عدد سنوات بيع الوحدات', reportFieldValue('salesYears') + ' سنة'],
-        ['سنة بدء التشغيل', reportFieldValue('operationStartYear')],
+        ['سنة بدء التشغيل', reportFieldValue('operationStartYear') || window.__financialProjection?.operationStartYear || ''],
         ['مساحة الأرض', reportFieldValue('landArea') + ' م²'],
         ['نسبة التغطية', reportFieldValue('coverageRate') + '%'],
         ['عدد الطوابق', reportFieldValue('floorCount')],

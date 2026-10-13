@@ -543,9 +543,13 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
 
         self.assertIn('function syncFinancialFromTimeline()', index_source)
 
-        # Development duration is derived from the project start/end dates and is not editable here.
-        self.assertIn('id="developmentYears" type="number" min="1" value="" readonly', index_source)
+        # Development duration is derived from the project start/end dates and is not editable here:
+        # the visible box shows the same «سنة وشهر» text the timeline shows, while the hidden
+        # «developmentYears» keeps the whole-year bucket count the cashflow engine needs.
+        self.assertIn('id="developmentDurationText" type="text" value="" readonly class="readonly-highlight"', index_source)
+        self.assertIn('id="developmentYears" type="number" min="1" value="" hidden', index_source)
         self.assertNotIn('id="developmentYears" type="number" min="1" value="4" oninput', index_source)
+        self.assertIn('devDurationInput.value = period ? timelineDurationText(period.start.ms, period.end.ms) : \'\';', index_source)
         self.assertIn("مأخوذة من تاريخي بداية المشروع ونهايته في قسم الجدول الزمني", index_source)
 
         # The duration mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
@@ -567,7 +571,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         for element in ('id="landArea" type="number" value=""',
                         'id="coverageRate" type="number" value=""',
                         'id="floorCount" type="number" min="1" value=""',
-                        'id="developmentYears" type="number" min="1" value=""'):
+                        'id="developmentDurationText" type="text" value=""'):
             self.assertIn(element + ' readonly class="readonly-highlight"', index_source)
         self.assertNotIn('id="landArea" type="number" value="70000"', index_source)
         self.assertNotIn('id="coverageRate" type="number" value="35"', index_source)
@@ -621,6 +625,51 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         financial_at = index_source.index('addFinancialCalculations(form);')
         self.assertLess(timeline_at, financial_at,
                         'the timeline section must be appended before the financial study')
+
+    def test_operation_start_year_is_a_client_input_with_a_safe_default(self):
+        """«سنة بدء التشغيل» is picked by the client, not a formula. An empty box still falls
+        back to «development duration + 1» so untouched drafts behave exactly as before."""
+        index_source = read_frontend_text()
+
+        # Editable input, no readonly flag and no fixed formula note under it.
+        self.assertIn('id="operationStartYear" type="number" min="1" oninput="calculateAll()"', index_source)
+        self.assertNotIn('id="operationStartYear" readonly', index_source)
+        self.assertNotIn('class="help formula">مدة التطوير + 1.', index_source)
+        self.assertIn('عند تركه فارغًا تُحتسب مدة التطوير + 1.', index_source)
+
+        # The engine reads the input with the development-duration-plus-one fallback, and the
+        # operation-year index counts from the picked start year, not from development end.
+        self.assertIn("Math.round(num('operationStartYear')) || developmentYears + 1", index_source)
+        self.assertIn('const rentalEndYear = modeFlags.rental ? operationStartYear + operationYears - 1', index_source)
+        self.assertIn('operationYear = inOperation ? year - operationStartYear + 1 : 0', index_source)
+
+        # The occupancy ramp's study-year column follows the picked start year too.
+        self.assertIn("const start = Math.round(num('operationStartYear')) || (num('developmentYears') || 0) + 1", index_source)
+        self.assertIn('studyInput.value = money(occupancyRampStudyYear(index + 1))', index_source)
+
+        # The printed report shows the entered year, or the effective fallback when empty.
+        self.assertIn("reportFieldValue('operationStartYear') || window.__financialProjection?.operationStartYear || ''", index_source)
+
+    def test_approved_financial_section_stays_locked_through_recalculations(self):
+        """Approving the study disables every control; a later calculateAll() must not
+        partially re-enable the section via its dynamic-visibility toggles, and a component
+        row added while approved must not slip in editable."""
+        index_source = read_frontend_text()
+
+        # The lock itself: approve disables everything, unapprove restores the prior state.
+        self.assertIn("section.classList.toggle('section-locked', approved);", index_source)
+        self.assertIn("control.dataset.sectionLockWasDisabled = control.disabled ? '1' : '0';", index_source)
+        self.assertIn("control.disabled = control.dataset.sectionLockWasDisabled === '1';", index_source)
+
+        # Components have no dedicated lock — approving the parking plan or the best-use
+        # distribution only replaces rows, it never locks the section; the lock comes from
+        # approving «الدراسة المالية والمؤشرات» itself.
+        self.assertNotIn("componentsTable tbody tr').forEach(tr => tr.querySelectorAll('input').forEach(x => x.disabled = true", index_source)
+
+        # calculateAll() re-stamps the lock at the end so dynamic field toggles and freshly
+        # appended rows cannot leave an approved study half-editable.
+        self.assertIn("financialSectionEl?.classList.contains('section-locked')", index_source)
+        self.assertIn("applySectionLockState('section-financial-calc', 'approved');", index_source)
 
     def test_financial_study_mirrors_approved_build_inputs_from_land(self):
         """Approved area, floor count and coverage are owned by land/croquis and read-only here."""

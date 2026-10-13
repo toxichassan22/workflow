@@ -440,14 +440,18 @@
       if (modeFlags.rental && document.querySelectorAll('#occupancyRampTable tbody tr').length !== operationYears) syncOccupancyRamp();
       const salesStartYear = Math.max(1, Math.round(num('salesStartYear') || 1));
       const salesYears = Math.max(1, Math.min(20, Math.round(num('salesYears') || 1)));
-      const operationStartYear = modeFlags.rental ? developmentYears + 1 : 0;
-      const rentalEndYear = modeFlags.rental ? developmentYears + operationYears : developmentYears;
+      // «سنة بدء التشغيل» is the client's own input now; an empty box still means the year
+      // right after development, which is what unsaved drafts and untouched models relied on.
+      const operationStartYear = modeFlags.rental
+        ? Math.max(1, Math.round(num('operationStartYear')) || developmentYears + 1)
+        : 0;
+      const rentalEndYear = modeFlags.rental ? operationStartYear + operationYears - 1 : developmentYears;
       const salesEndYear = modeFlags.sales ? salesStartYear + salesYears - 1 : developmentYears;
       const naturalTotalYears = Math.max(developmentYears, rentalEndYear, salesEndYear);
       const totalYears = naturalTotalYears;
       syncProjectYearBounds(totalYears, developmentYears);
       const disp = document.getElementById('totalProjectYearsDisplay');
-      const enteredYears = num('developmentYears') || num('operationYears') || num('salesYears') || num('salesStartYear');
+      const enteredYears = num('developmentYears') || num('operationYears') || num('operationStartYear') || num('salesYears') || num('salesStartYear');
       if (disp) disp.value = enteredYears ? totalYears + ' سنة' : '';
       const landArea = num('landArea'), coverage = num('coverageRate') / 100, basement = num('basementArea');
       const builtUpAreaAbove = num('builtUpAreaAbove');
@@ -463,8 +467,8 @@
       const landCostIncluded = landStatus === 'ownedIncluded' ? landValue : 0;
       const landContributionType = val('landContributionType') || 'inKind';
       const landContributionYear = Math.max(1, Math.min(totalYears, Math.round(num('landContributionYear') || 1)));
-      const covEl = document.getElementById('coveredArea'), openEl = document.getElementById('openArea'), tBuiltEl = document.getElementById('totalBuiltUpArea'), opStartEl = document.getElementById('operationStartYear'), lValEl = document.getElementById('landValue'), aRentEl = document.getElementById('annualLandRent');
-      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (opStartEl) opStartEl.value = modeFlags.rental ? (num('developmentYears') ? 'السنة ' + operationStartYear : '') : 'غير مطبق'; if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
+      const covEl = document.getElementById('coveredArea'), openEl = document.getElementById('openArea'), tBuiltEl = document.getElementById('totalBuiltUpArea'), lValEl = document.getElementById('landValue'), aRentEl = document.getElementById('annualLandRent');
+      if (covEl) covEl.value = money(covered); if (openEl) openEl.value = money(open); if (tBuiltEl) tBuiltEl.value = money(builtUpAreaAbove + basement); if (lValEl) lValEl.value = money(landValue); if (aRentEl) aRentEl.value = money(landRent);
       if (document.getElementById('landCostIncluded')) document.getElementById('landCostIncluded').value = money(landCostIncluded);
       if (document.getElementById('landRentSummary')) document.getElementById('landRentSummary').value = money(landRent);
 
@@ -579,7 +583,7 @@
       let cumulative = 0, totalOperatingCF = 0, terminal = 0, saleExitValue = 0, operatingExitValue = 0, saleExitGross = 0, operatingExitGross = 0, totalExitCosts = 0, finalCF = 0, debtBalance = 0, totalDrawn = 0, totalFinanceInterest = 0, totalCashEquity = 0, totalEquityDistributions = 0, cumulativeInvestedCapital = 0, cashReserve = 0, totalFundManagementFees = 0, totalAdditionalFundFees = 0, fundExitFeeTotal = 0, performanceFeeTotal = 0, cumulativeBeforePerformance = 0, revenueY1 = 0, opexY1 = 0, noiY1 = 0, fullOccupancyRevenue = 0, fullOccupancyOpex = 0, fullOccupancyNOI = 0, totalGraceDiscount = 0;
 
       for (let year = 1; year <= totalYears; year++) {
-        const inOperation = modeFlags.rental && year >= operationStartYear && (exitMethod === 'none' || year <= operatingExitYear), operationYear = inOperation ? year - developmentYears : 0, occupancyReach = inOperation ? occupancyReachForYear(operationYear) : 0, saleRevenue = (modeFlags.sales && year >= salesStartYear && year < Math.min(totalYears + 1, salesStartYear + salesYears)) ? saleRevenueTotal / Math.max(1, Math.min(salesYears, totalYears - salesStartYear + 1)) : 0;
+        const inOperation = modeFlags.rental && year >= operationStartYear && (exitMethod === 'none' || year <= operatingExitYear), operationYear = inOperation ? year - operationStartYear + 1 : 0, occupancyReach = inOperation ? occupancyReachForYear(operationYear) : 0, saleRevenue = (modeFlags.sales && year >= salesStartYear && year < Math.min(totalYears + 1, salesStartYear + salesYears)) ? saleRevenueTotal / Math.max(1, Math.min(salesYears, totalYears - salesStartYear + 1)) : 0;
         let revBaseAnnual = 0, revTotalAnnual = 0;
         revRows.forEach(tr => { if (isOperatingRevenueRow(tr) && inOperation) { const base = calculateRevenueBase(tr, 0); revBaseAnnual += base * occupancyReach; revTotalAnnual += base * occupancyReach; } });
         revRows.forEach(tr => { const method = tr.querySelector('[data-field="method"] select')?.value || 'areaRent'; if (method === 'percentRevenue' && inOperation) { revTotalAnnual += calculateRevenueBase(tr, revBaseAnnual); } });
@@ -775,7 +779,7 @@
       document.querySelectorAll('#occupancyRampTable tbody tr').forEach((tr, index) => {
         const row = projected.find(r => r.operationYear === index + 1);
         const c = tr.querySelector('.rampRevenue'); if (c) c.textContent = money(row?.operatingRevenue || 0);
-        const studyInput = tr.querySelector('[data-field="studyYear"] input'); if (studyInput) studyInput.value = money(developmentYears + index + 1);
+        const studyInput = tr.querySelector('[data-field="studyYear"] input'); if (studyInput) studyInput.value = money(occupancyRampStudyYear(index + 1));
       });
 
       window.__financialProjection = {
@@ -804,6 +808,13 @@
            components: componentRows,
            unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
          });
+       }
+       // Dynamic visibility toggles rewrite .disabled for their own reasons and rows added
+       // while the study is approved start enabled; re-stamp the section lock so an approved
+       // study stays fully locked after every recalculation.
+       const financialSectionEl = document.getElementById('section-financial-calc');
+       if (financialSectionEl?.classList.contains('section-locked') && typeof applySectionLockState === 'function') {
+         applySectionLockState('section-financial-calc', 'approved');
        }
        renderFinancialParking();
        refreshDynamicI18n(document.getElementById('section-financial-calc'));

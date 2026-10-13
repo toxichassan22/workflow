@@ -272,7 +272,8 @@ BLOB_KEY_LABELS = {
     'inputs': 'مدخلات الدراسة',
     # financial inputs
     'unitRevenueMode': 'نمط وحدات المشروع (بيعية/تأجيرية)',
-    'developmentYears': 'مدة تطوير المشروع (سنة)', 'salesStartYear': 'سنة بدء بيع الوحدات',
+    'developmentYears': 'مدة تطوير المشروع (سنة)', 'developmentDurationText': 'مدة تطوير المشروع',
+    'salesStartYear': 'سنة بدء بيع الوحدات',
     'salesYears': 'عدد سنوات بيع الوحدات', 'operationYears': 'عدد سنوات التشغيل',
     'operationStartYear': 'سنة بدء التشغيل', 'landArea': 'مساحة الأرض م²',
     'coverageRate': 'نسبة التغطية %', 'floorCount': 'عدد الطوابق',
