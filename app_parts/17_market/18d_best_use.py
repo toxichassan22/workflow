@@ -173,18 +173,47 @@ def _best_use_documents_backed(draft):
     return True
 
 
+def _section_gate_states(draft, section_keys):
+    """Version-readiness per gated section, named for the client.
+
+    Only failure states land in the map: ``not_approved`` splits into
+    ``pending`` (the newest version still awaits a decision) and
+    ``unapproved``, so the message can say what is actually missing instead of
+    a bare «اعتماد» that looks identical to a never-approved section.
+    """
+    overview = db.section_versions_overview(g.tenant_id, (draft or {}).get('id'))
+    section_map = _draft_field_section_map(g.tenant_id)
+    states = {}
+    for key in section_keys:
+        state, meta = _section_version_readiness(draft, key, section_map, overview=overview)
+        if state not in {'not_approved', 'stale', 'expired'}:
+            continue
+        states[key] = ('pending' if (meta or {}).get('status') == 'pending' else 'unapproved') \
+            if state == 'not_approved' else state
+    return states
+
+
+def _section_gate_statuses(draft, section_keys):
+    """Stored flat statuses for the gated keys — lets the caller's badges
+    resync against server truth when a gate refuses the action."""
+    stored = (draft or {}).get('section_statuses') or {}
+    return {key: stored[key] for key in section_keys if stored.get(key)}
+
+
 def _best_use_readiness(draft):
     project = draft.get('draft_data') or {}
     missing = best_use.missing_inputs(project, draft.get('section_statuses') or {})
     if not _best_use_documents_backed(draft) and 'croquis' not in missing:
         missing.append('croquis')
-    overview = db.section_versions_overview(g.tenant_id, draft['id'])
-    section_map = _draft_field_section_map(g.tenant_id)
-    for key in ('land_croquis', 'location', 'section-market-study'):
-        state, _meta = _section_version_readiness(draft, key, section_map, overview=overview)
-        if state in {'not_approved', 'stale', 'expired'} and key not in missing:
+    gated = ('land_croquis', 'location', 'section-market-study')
+    states = _section_gate_states(draft, gated)
+    for key in states:
+        if key not in missing:
             missing.append(key)
-    return _best_use_error('BEST_USE_PREREQUISITES_REQUIRED', missing=missing) if missing else None
+    if not missing:
+        return None
+    return _best_use_error('BEST_USE_PREREQUISITES_REQUIRED', missing=missing,
+                           sectionStatuses=_section_gate_statuses(draft, gated), sectionStates=states)
 
 
 def _best_use_map_references(draft):
@@ -220,7 +249,8 @@ def _best_use_response(draft, components_applied=False):
               'chat': best_use.read_object(project.get('best_use_chat')),
               'componentsApplied': components_applied,
               'sectionStatuses': {key: statuses[key] for key in
-                                  (best_use.SECTION_KEY, 'section-financial-calc', 'section-executive-content')
+                                  (best_use.SECTION_KEY, 'section-financial-calc', 'section-executive-content',
+                                   'land_croquis', 'location', 'section-market-study')
                                   if key in statuses}}
     if components_applied:
         result['financialModel'] = best_use.read_object(project.get('financial_study_model'))
@@ -240,6 +270,13 @@ def _best_use_store(draft, project, statuses, action, components_applied=False):
     except db.DraftLocked as locked:
         response = app.make_response(_draft_locked_response(locked.status))
         return response.get_json(), response.status_code
+    try:
+        # The request fields were just persisted: a gated section whose content
+        # drifted from its approved snapshot can no longer stand as approved.
+        _void_stale_section_approvals(
+            g.tenant_id, draft['id'], project, statuses=statuses)
+    except Exception:
+        pass
     saved = db.get_project_draft_by_id(g.tenant_id, draft['id'])
     labels = {'generate': 'توليد اقتراح أفضل استخدامات', 'revise': 'تعديل اقتراح أفضل استخدامات بالشات',
               'chat': 'مناقشة توزيع أفضل استخدامات', 'approved': 'اعتماد توزيع أفضل استخدامات واستبدال المكونات',

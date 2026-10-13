@@ -200,12 +200,27 @@ def api_save_project_draft():
         except Exception:
             pass
     saved_revision = None
+    stored_statuses = {}
     saved_row = db.get_db().execute(
-        'SELECT revision FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        'SELECT revision, section_statuses FROM project_drafts WHERE id = ? AND tenant_id = ?',
         (draft_id, g.tenant_id)).fetchone()
     if saved_row:
         saved_revision = int(saved_row['revision'] or 0)
-    return jsonify({'success': True, 'draftId': draft_id, 'revision': saved_revision})
+        # The stored map is the truth after snapshot staleness voided an
+        # approval — sending it back lets the caller's badges catch up instead
+        # of still showing a section as approved until the next reload.
+        try:
+            stored_statuses = json.loads(saved_row['section_statuses'] or '{}')
+        except (TypeError, ValueError):
+            stored_statuses = {}
+        if not isinstance(stored_statuses, dict):
+            stored_statuses = {}
+        denied_statuses = _hidden_field_sections()
+        if denied_statuses:
+            stored_statuses = {key: value for key, value in stored_statuses.items()
+                               if key not in denied_statuses}
+    return jsonify({'success': True, 'draftId': draft_id, 'revision': saved_revision,
+                    'sectionStatuses': stored_statuses})
 
 
 @app.route('/api/project-drafts', methods=['GET'])

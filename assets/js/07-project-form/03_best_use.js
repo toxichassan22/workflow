@@ -185,7 +185,13 @@
       return [...new Set(missing)];
     }
 
-    function bestUseMissingLabel(key) {
+    function bestUseMissingLabel(key, state) {
+      const statePhrases = {
+        stale: ['best_use.state_stale', 'تغيّر المحتوى بعد آخر اعتماد'],
+        expired: ['best_use.state_expired', 'انتهت صلاحية الاعتماد السابق'],
+        pending: ['best_use.state_pending', 'إصدار جديد بانتظار قرار الاعتماد'],
+        unapproved: ['best_use.state_unapproved', 'الإصدار الأخير غير معتمد']
+      };
       const labels = {
         project_type: ['best_use.need_type', 'نوع المشروع'], croquis: ['best_use.need_croquis', 'الكروكي وتحليل الأرض'],
         site_location: ['best_use.need_location', 'موقع الأرض'], market: ['best_use.need_market', 'دراسة السوق'],
@@ -209,7 +215,11 @@
         city: ['best_use.need_city', 'مدينة الأرض']
       };
       const pair = labels[key];
-      return pair ? WFT(pair[0], pair[1]) : key;
+      const base = pair ? WFT(pair[0], pair[1]) : key;
+      // States only describe the versioned section gates, never field keys.
+      const gated = { land_croquis: 1, location: 1, 'section-market-study': 1 };
+      const statePair = gated[key] ? statePhrases[typeof state === 'string' ? state : ''] : null;
+      return statePair ? base + ' — ' + WFT(statePair[0], statePair[1]) : base;
     }
 
     function bestUseErrorText(response) {
@@ -224,8 +234,9 @@
         SECTION_FORBIDDEN: ['best_use.forbidden', 'قسم غير متاح لهذا المستخدم']
       };
       if (response?.error_code === 'BEST_USE_PREREQUISITES_REQUIRED') {
+        const gateStates = response.sectionStates || {};
         return WFT('best_use.missing', 'بيانات أو اعتمادات غير مكتملة: {items}', {
-          items: (response.missing || []).map(bestUseMissingLabel).join('، ')
+          items: (response.missing || []).map(key => bestUseMissingLabel(key, gateStates[key])).join('، ')
         });
       }
       const pair = keys[response?.error_code];
@@ -517,6 +528,11 @@
           response = await bestUseAwaitJob(response, requestContext.draftId);
           if (!response?.success) {
             console.warn('[BEST-USE]', action, 'request failed:', response);
+            // The server is the source of truth for the gated sections — a
+            // refusal carries their real statuses so stale badges resync.
+            if (response?.sectionStatuses && typeof applySectionStatuses === 'function') {
+              applySectionStatuses(response.sectionStatuses);
+            }
             toast(bestUseErrorText(response));
             return false;
           }

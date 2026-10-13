@@ -65,6 +65,10 @@
           return;
         }
         toast(WFT('sectionver.send_done', 'تم إرسال القسم للاعتماد'));
+        // The server marks the section pending the moment the send lands —
+        // reflect it so the badge stops claiming an approval a pending
+        // version has already superseded.
+        applySectionStatuses({ [sectionKey]: 'pending' });
         openSectionVersionsPage(sectionKey);
         await loadAllSectionVersions();
       } finally {
@@ -98,6 +102,7 @@
         hideLoader();
         if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.cancel_failed', 'تعذر إلغاء طلب الاعتماد')); return; }
         toast(WFT('sectionver.cancel_done', 'تم إلغاء طلب الاعتماد'));
+        applySectionStatuses({ [sectionKey]: 'draft' });
         await loadAllSectionVersions();
       } finally {
         try { hideLoader(); } catch (e) {}
@@ -112,6 +117,7 @@
         if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.restore_failed', 'تعذر الاستعادة')); return; }
         if (result.revision !== undefined) tenantDraftRevision = Number(result.revision) || tenantDraftRevision;
         toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
+        applySectionStatuses({ [sectionKey]: 'pending' });
         openSectionVersionsPage(sectionKey);
         await loadAllSectionVersions();
       } finally {

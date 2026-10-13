@@ -450,6 +450,11 @@
           if (response?.jobId && !['completed', 'failed'].includes(response.status)) response = { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
           if (!response?.success) {
             console.warn('[BEST-USE-EXPLORE]', action, 'request failed:', response);
+            // The server is the source of truth for the gated sections — a
+            // refusal carries their real statuses so stale badges resync.
+            if (response?.sectionStatuses && typeof applySectionStatuses === 'function') {
+              applySectionStatuses(response.sectionStatuses);
+            }
             return bestUseExploreFail(bestUseExploreErrorText(response));
           }
           const received = applyBestUseExploreResponse(response, requestContext);

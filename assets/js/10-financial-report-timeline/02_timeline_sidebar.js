@@ -297,6 +297,14 @@
         if (sameDraftOpen) {
           if (resp.draftId) tenantProjectData.draftId = resp.draftId;
           if (resp.revision) tenantDraftRevision = Number(resp.revision) || tenantDraftRevision;
+          // A save may have voided approvals whose snapshots went stale — the
+          // stored statuses come back with the response so the badges heal
+          // instead of staying approved until the next reload.
+          if (resp.sectionStatuses && typeof applySectionStatuses === 'function'
+              && Object.entries(resp.sectionStatuses)
+                .some(([key, value]) => tenantProjectSectionStatuses[key] !== value)) {
+            applySectionStatuses(resp.sectionStatuses);
+          }
         }
         if (resp.success) {
           if (syncPresentation && savedPresentationId && snapshot.tenantSlidesData.length) {

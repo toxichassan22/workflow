@@ -79,7 +79,8 @@ def _best_use_explore_response(draft, applied=False):
               'exploreChat': best_use_contract.read_object(project.get('best_use_explore_chat')),
               'componentsApplied': applied, 'sectionStatuses': {key: value for key, value in
                   (draft.get('section_statuses') or {}).items() if key in
-                  {best_use.SECTION_KEY, 'section-financial-calc', 'section-executive-content'}}}
+                  {best_use.SECTION_KEY, 'section-financial-calc', 'section-executive-content',
+                   'land_croquis', 'location'}}}
     if applied:
         result.update(financialModel=project.get('financial_study_model') or {},
                       projectComponentsData=project.get('project_components_data') or '[]',
@@ -97,6 +98,13 @@ def _best_use_explore_store(draft, project, statuses, action, applied=False):
     except db.DraftLocked as locked:
         response = app.make_response(_draft_locked_response(locked.status))
         return response.get_json(), response.status_code
+    try:
+        # The request fields were just persisted: a gated section whose content
+        # drifted from its approved snapshot can no longer stand as approved.
+        _void_stale_section_approvals(
+            g.tenant_id, draft['id'], project, statuses=statuses)
+    except Exception:
+        pass
     _record_change('draft', draft['id'], action, [action], source='ai' if action.startswith('توليد') else 'manual')
     _bill_tenant_unbilled_usage_async(g.tenant_id)
     return _best_use_explore_response(db.get_project_draft_by_id(g.tenant_id, draft['id']), applied), 200
@@ -107,13 +115,14 @@ def _best_use_explore_readiness(draft):
     missing = best_use_workflow.missing_inputs(project, draft.get('section_statuses') or {})
     if not _best_use_documents_backed(draft):
         missing.append('croquis')
-    overview = db.section_versions_overview(g.tenant_id, draft['id'])
-    section_map = _draft_field_section_map(g.tenant_id)
-    for key in ('land_croquis', 'location'):
-        state, _meta = _section_version_readiness(draft, key, section_map, overview=overview)
-        if state in {'not_approved', 'stale', 'expired'}:
-            missing.append(key)
-    return _best_use_error('BEST_USE_PREREQUISITES_REQUIRED', missing=list(dict.fromkeys(missing))) if missing else None
+    gated = ('land_croquis', 'location')
+    states = _section_gate_states(draft, gated)
+    for key in states:
+        missing.append(key)
+    if not missing:
+        return None
+    return _best_use_error('BEST_USE_PREREQUISITES_REQUIRED', missing=list(dict.fromkeys(missing)),
+                           sectionStatuses=_section_gate_statuses(draft, gated), sectionStates=states)
 
 
 @app.route('/api/best-use/mode', methods=['POST'])
