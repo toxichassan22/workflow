@@ -333,7 +333,11 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     res, provider_error = _call_market_study_model(
         system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
         usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
-        search_context={'city': payload.get('city'), 'country': 'SA'})
+        search_context={'city': payload.get('city'), 'country': 'SA'},
+        # SOL is a reasoning model: every search round-trip and the final long
+        # JSON both pay the thinking tax. 'medium' keeps the depth of the web
+        # research while shaving minutes off a single-pass summary.
+        reasoning_effort='medium')
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:

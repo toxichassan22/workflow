@@ -1,5 +1,6 @@
 def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None,
-                             search_context=None, server_tools=True, max_search_results=8, search_budget=None):
+                             search_context=None, server_tools=True, max_search_results=8,
+                             search_budget=None, reasoning_effort=None):
     """Search-backed market call with JSON, provider, and credit fallbacks.
 
     ``server_tools=False`` drops the openrouter:web_search tool — Gemini answers
@@ -108,7 +109,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage
                 tools=attempt_tools,
                 plugins=plugins,
                 timeout=max(15, min(240, int(budget.get('timeout', 240)))),
-                reasoning_effort=budget.get('reasoning_effort'),
+                reasoning_effort=reasoning_effort or budget.get('reasoning_effort'),
                 usage_ctx=usage_ctx or _usage_ctx('market'),
                 max_tool_calls=max(1, min(14, int(budget.get('max_tool_calls', 14)))),
                 # Bounded scans may not answer from memory: force the tool so
