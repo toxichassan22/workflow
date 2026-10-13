@@ -334,7 +334,7 @@ def _land_chat_context(project_data):
             boundary_payload['approved'] = True
         if boundary_payload:
             context['حد الأرض للمخططات'] = boundary_payload
-    client_notes = _visual_concept_text(plans.get('clientNotes'), 4000)
+    client_notes = _visual_concept_text(plans.get('clientNotes'), 1000000)
     if client_notes:
         context['ملاحظات العميل على المخططات'] = client_notes
     plans_status = _visual_concept_text(plans.get('status'), 40)

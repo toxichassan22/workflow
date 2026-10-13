@@ -225,11 +225,11 @@
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
-        '<textarea rows="3" maxlength="2000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
+        '<textarea rows="3" maxlength="1000000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
         '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'ملاحظات توليد المخططات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
-        '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="4000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
+        '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="1000000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
         '<div data-plans-notes-results>' + visualConceptPlanNotesResultsHtml(workflow) + '</div>' +
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="check-notes" ' + (!workflow.clientNotes.trim() ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.notes_check', 'فحص الملاحظات')) + '</button></div>' +
         '</section>' +
@@ -302,7 +302,7 @@
           const distNotesInput = event.target.closest('[data-plans-distribution-notes]');
           if (distNotesInput) {
             const state = visualConceptPlansWorkflowState();
-            state.distributionNotes = String(distNotesInput.value || '').slice(0, 2000);
+            state.distributionNotes = String(distNotesInput.value || '').slice(0, 1000000);
             markVisualConceptDirty();
             return;
           }

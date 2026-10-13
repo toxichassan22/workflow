@@ -114,7 +114,7 @@ def _visual_plan_resolve_primary_frontage(summary, constraints, rows, data):
 def _visual_plan_notes(data):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     notes = workflow.get('clientNotes', '')
-    if not isinstance(notes, str) or len(notes) > 4000:
+    if not isinstance(notes, str) or len(notes) > 1000000:
         raise visual_plan_geometry.PlanGeometryError('ملاحظات المخططات غير صالحة أو تتجاوز الحجم المتاح.', 'PLANS_NOTES_INVALID')
     return notes.strip()
 

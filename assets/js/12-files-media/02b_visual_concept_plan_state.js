@@ -98,9 +98,9 @@
           approved: Boolean(distribution.approved),
           aiReviewed: Boolean(distribution.aiReviewed)
         },
-        distributionNotes: String(source.distributionNotes || '').slice(0, 2000),
+        distributionNotes: String(source.distributionNotes || '').slice(0, 1000000),
         conflictChats: { verify: chatTurns(chats.verify), distribution: chatTurns(chats.distribution) },
-        clientNotes: String(source.clientNotes || '').slice(0, 4000),
+        clientNotes: String(source.clientNotes || '').slice(0, 1000000),
         notesReview: {
           verified: Boolean(review.verified), canProceed: Boolean(review.canProceed),
           checks: Array.isArray(review.checks) ? review.checks.slice(0, 30) : [],
@@ -179,7 +179,7 @@
 
     function setVisualConceptPlanNotes(value) {
       const workflow = visualConceptPlansWorkflowState();
-      const notes = String(value || '').slice(0, 4000);
+      const notes = String(value || '').slice(0, 1000000);
       if (workflow.clientNotes === notes) return;
       workflow.clientNotes = notes;
       workflow.distribution.approved = false;

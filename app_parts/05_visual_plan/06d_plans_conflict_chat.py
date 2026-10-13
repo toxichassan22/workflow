@@ -57,7 +57,7 @@ def api_visual_concept_plans_conflict_chat():
     if rows or totals:
         findings['distribution_rows'] = rows
         findings['distribution_totals'] = totals
-    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 1000000)
     if distribution_notes:
         findings['client_distribution_notes'] = distribution_notes
     if scope == 'verify':

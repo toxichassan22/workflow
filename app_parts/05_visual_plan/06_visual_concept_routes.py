@@ -195,7 +195,7 @@ def api_visual_concept_plans_distribution():
         'الفندق عن السكن، الخدمات أسفلًا أو على السطح). لا تخترع مكونًا غير مدخل ولا تسقط مكونًا '
         'معتمدًا، ولا تذكر أسماء ملفات أو مصادر.'
     )
-    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 1000000)
     user_prompt = (
         'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
         + _visual_concept_plan_context_text(context, diagram_rules=False)
@@ -238,7 +238,7 @@ def api_visual_concept_plans_distribution_check():
     distribution = _visual_concept_plan_normalize_distribution(posted, context, regulations)
     checks = distribution['checks']
     issues = distribution['issues']
-    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 1000000)
     can_proceed = not any(check.get('result') == 'متعارض' for check in checks)
     if str(data.get('mode') or '').lower() == 'ai':
         _billing_guard = _require_billing_balance('visual_concept')
