@@ -1571,7 +1571,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                         'issues': ['الأدوار تتجاوز الموثق'],
                         'suggestion': 'خفّض الأدوار إلى 20'}],
             'issues': [{'title': 'مراجعة', 'points': ['نقطة'], 'severity': 'low'}],
-            'summary': 'يوجد تعارض واحد', 'canProceed': False}}
+            'summary': 'يوجد تعارض واحد', 'canProceed': False},
+            'distribution': {'rows': [{'building': 'A', 'floor_range': '1-5',
+                                       'component': 'مكاتب'}], 'totals': []}}
 
         missing = client.post('/api/visual-concept/plans-conflict-chat', headers=headers,
                               json={'projectData': {}, 'plansWorkflow': workflow})
@@ -1597,6 +1599,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('خفّض الأدوار إلى 20', user_content)
         self.assertIn('سؤال سابق', user_content)
         self.assertIn('إيه المطلوب مني؟', user_content)
+        # A verify-stage question still sees the proposed distribution when one
+        # exists — a regulation conflict only makes sense against those rows.
+        self.assertIn('floor_range', user_content)
 
         # The distribution scope also sees the proposed rows and the client's
         # distribution notes, so it can explain a conflict against both.
@@ -1623,6 +1628,23 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'question': 'وش الحل؟', 'scope': 'verify',
                 'projectData': {}, 'plansWorkflow': workflow})
         self.assertEqual(failed.status_code, 503)
+
+        # Thinking models burn reasoning tokens against max_tokens, so a short
+        # cap can cut the answer mid-sentence — finish_reason=length retries
+        # once with a bigger cap instead of shipping a truncated reply.
+        truncated = {'choices': [{'finish_reason': 'length',
+                                  'message': {'content': 'PLANS-CH\nالإجراء:'}}]}
+        complete = {'choices': [{'finish_reason': 'stop',
+                                 'message': {'content': 'PLANS-CH\nالإجراء: خفّض الأدوار.'}}]}
+        with patch.object(module, 'call_text_chat', side_effect=[truncated, complete]) as retry_call:
+            retried = client.post('/api/visual-concept/plans-conflict-chat', headers=headers, json={
+                'question': 'إيه الحل؟', 'scope': 'verify',
+                'projectData': {}, 'plansWorkflow': workflow})
+        self.assertEqual(retried.status_code, 200, retried.get_json())
+        self.assertIn('خفّض الأدوار', retried.get_json()['reply'])
+        self.assertEqual(retry_call.call_count, 2)
+        self.assertGreater(retry_call.call_args_list[1][1]['max_tokens'],
+                           retry_call.call_args_list[0][1]['max_tokens'])
 
     def test_plans_distribution_totals_match_floor_scoped_study_rows(self):
         """The study stores components per floor («طابق أرضي - سكني» …) while the

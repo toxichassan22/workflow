@@ -52,15 +52,15 @@ def api_visual_concept_plans_conflict_chat():
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     context = _visual_concept_plan_context(project_data)
     findings = {'checks': checks[:40], 'issues': issues[:30]}
-    if scope == 'distribution':
-        findings['distribution_rows'] = (
-            distribution.get('rows') if isinstance(distribution.get('rows'), list) else [])
-        findings['distribution_totals'] = (
-            distribution.get('totals') if isinstance(distribution.get('totals'), list) else [])
-        distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
-        if distribution_notes:
-            findings['client_distribution_notes'] = distribution_notes
-    else:
+    rows = distribution.get('rows') if isinstance(distribution.get('rows'), list) else []
+    totals = distribution.get('totals') if isinstance(distribution.get('totals'), list) else []
+    if rows or totals:
+        findings['distribution_rows'] = rows
+        findings['distribution_totals'] = totals
+    distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 2000)
+    if distribution_notes:
+        findings['client_distribution_notes'] = distribution_notes
+    if scope == 'verify':
         summary = _visual_concept_text(verification.get('summary'), 1600)
         if summary:
             findings['summary'] = summary
@@ -81,9 +81,22 @@ def api_visual_concept_plans_conflict_chat():
         '\n\n' + prior + 'سؤال المستخدم: ' + question
     )
     try:
-        response = call_text_chat(
-            PLANS_CONFLICT_CHAT_SYSTEM_PROMPT, user_content, max_tokens=2500,
-            usage_ctx=_usage_ctx_optional('ai_text', data))
+        # Thinking models count reasoning tokens toward max_tokens, so a short
+        # cap can still cut the visible answer mid-sentence — retry once with
+        # headroom on finish_reason=length (same pattern as land analysis).
+        cap = 6000
+        response = None
+        for attempt in range(2):
+            response = call_text_chat(
+                PLANS_CONFLICT_CHAT_SYSTEM_PROMPT, user_content, max_tokens=cap,
+                usage_ctx=_usage_ctx_optional('ai_text', data))
+            choices = response.get('choices') if isinstance(response, dict) else None
+            first = choices[0] if choices and isinstance(choices[0], dict) else {}
+            finish = first.get('finish_reason') or first.get('native_finish_reason')
+            if finish != 'length' or attempt == 1:
+                break
+            app.logger.warning('Plans conflict chat truncated at cap=%s; retrying', cap)
+            cap = 12000
         reply = _land_chat_clean_reply(
             extract_chat_content(response, 'PLANS-CONFLICT-CHAT'))
     except Exception as exc:
