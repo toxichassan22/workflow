@@ -33,6 +33,7 @@
         boundary: { points: [], referenceUrl: '', approved: false },
         distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false, aiReviewed: false },
         distributionNotes: '',
+        distributionRevision: '',
         conflictChats: { verify: [], distribution: [] },
         clientNotes: '',
         notesReview: { verified: false, canProceed: false, checks: [], issues: [], inputSignature: '', token: '' },
@@ -99,6 +100,7 @@
           aiReviewed: Boolean(distribution.aiReviewed)
         },
         distributionNotes: String(source.distributionNotes || '').slice(0, 1000000),
+        distributionRevision: String(source.distributionRevision || '').slice(0, 4000),
         conflictChats: { verify: chatTurns(chats.verify), distribution: chatTurns(chats.distribution) },
         clientNotes: String(source.clientNotes || '').slice(0, 1000000),
         notesReview: {

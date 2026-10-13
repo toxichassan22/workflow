@@ -199,14 +199,29 @@ def api_visual_concept_plans_distribution():
         'معتمدًا، ولا تذكر أسماء ملفات أو مصادر.'
     )
     distribution_notes = _visual_concept_text(workflow.get('distributionNotes'), 1000000)
+    # A revision applies the client's instruction to the posted table instead of
+    # redistributing from scratch — the rest of the rows must come back intact.
+    revision = _visual_concept_text(data.get('revision'), 4000)
+    posted_distribution = (data.get('distribution') if isinstance(data.get('distribution'), dict)
+                           else workflow.get('distribution') if isinstance(workflow.get('distribution'), dict)
+                           else {})
+    current_rows = posted_distribution.get('rows') if isinstance(posted_distribution.get('rows'), list) else []
+    revise = bool(revision and current_rows)
     user_prompt = (
         'بيانات المشروع المعتمدة الوحيدة المسموح الاعتماد عليها:\n'
         + _visual_concept_plan_context_text(context, diagram_rules=False)
         + ('\nملاحظات العميل على التوزيع — رغبات تُطبَّق ضمن حدود الاشتراطات والبيانات '
            'المعتمدة ولا تجاوزها:\n' + distribution_notes if distribution_notes else '')
-        + '\nأعد جدول التوزيع المقترح: كل صف = مبنى + دور أو نطاق أدوار + مكوّن + عدد الوحدات لكل دور '
-        '+ مساحة الدور الإجمالية + الحركة والخدمات ضمن المساحة.'
     )
+    if revise:
+        user_prompt += (
+            '\nالجدول الحالي المطلوب تعديله:\n' + json.dumps({'rows': current_rows}, ensure_ascii=False)
+            + '\nتعليمة العميل على هذا الجدول — طبّقها بدقة وأبقِ باقي الصفوف دون تغيير ما لم '
+            'تقتضِ التعليمة نفسها أو الاشتراطات تعديلها، وأعد الجدول كاملًا بعد التطبيق:\n' + revision
+        )
+    else:
+        user_prompt += ('\nأعد جدول التوزيع المقترح: كل صف = مبنى + دور أو نطاق أدوار + مكوّن + عدد الوحدات لكل دور '
+                        '+ مساحة الدور الإجمالية + الحركة والخدمات ضمن المساحة.')
     result = {}
     try:
         response = call_openrouter_chat(
@@ -217,6 +232,12 @@ def api_visual_concept_plans_distribution():
     except Exception:
         result = {}
     if not isinstance(result, dict) or not result.get('rows'):
+        if revise:
+            # A failed revision must not swap in a fresh distribution — the
+            # client's table stays untouched and the error surfaces instead.
+            return jsonify({'success': False,
+                            'error': 'تعذر تطبيق التعديل على التوزيع — الجدول لم يتغير',
+                            'error_code': 'DISTRIBUTION_REVISION_FAILED'}), 503
         result = _visual_concept_plan_fallback_distribution(context, regulations)
     result['rows'] = _financial_parking_merge_distribution_rows(result.get('rows') or [], context)
     distribution = _visual_concept_plan_normalize_distribution(

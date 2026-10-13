@@ -406,6 +406,17 @@
       white-space: nowrap;
     }
 
+    .plans-distribution-revise {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .plans-distribution-revise input {
+      flex: 1;
+    }
+
     .plans-distribution-table {
       min-width: 980px;
     }

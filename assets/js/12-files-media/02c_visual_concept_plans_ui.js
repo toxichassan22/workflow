@@ -228,6 +228,10 @@
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea rows="3" maxlength="1000000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
         '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
+        '<div class="plans-distribution-revise">' +
+        '<input type="text" maxlength="4000" data-plans-distribution-revision value="' + escapeHtml(workflow.distributionRevision || '') + '" placeholder="' + escapeHtml(WFT('plans.dist_revise_placeholder', 'انقل المكاتب من الدور الثالث إلى الخامس')) + '">' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="revise-distribution"' + ((Array.isArray(distribution.rows) && distribution.rows.length) ? '' : ' disabled') + '>' + escapeHtml(WFT('plans.dist_revise_button', 'تطبيق التعديل')) + '</button>' +
+        '</div>' +
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'ملاحظات توليد المخططات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="1000000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
@@ -293,6 +297,7 @@
           else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
           else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
+          else if (action === 'revise-distribution') reviseVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
           else if (action === 'check-notes') checkVisualConceptPlanNotes();
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
@@ -300,6 +305,13 @@
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
         });
         root.addEventListener('input', event => {
+          const revisionInput = event.target.closest('[data-plans-distribution-revision]');
+          if (revisionInput) {
+            const state = visualConceptPlansWorkflowState();
+            state.distributionRevision = String(revisionInput.value || '').slice(0, 4000);
+            markVisualConceptDirty();
+            return;
+          }
           const distNotesInput = event.target.closest('[data-plans-distribution-notes]');
           if (distNotesInput) {
             const state = visualConceptPlansWorkflowState();

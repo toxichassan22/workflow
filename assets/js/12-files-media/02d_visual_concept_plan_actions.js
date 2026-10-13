@@ -191,6 +191,48 @@
       }
     }
 
+    // A revision sends the current table plus the client's one-shot instruction;
+    // the model edits those rows instead of redistributing from scratch. The
+    // response lands in the same editable table and still needs a fresh check.
+    async function reviseVisualConceptPlansDistribution() {
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const seedWorkflow = visualConceptPlansWorkflowState();
+      const revision = String(seedWorkflow.distributionRevision || '').trim();
+      if (!revision) { toast(WFT('plans.dist_revise_required', 'اكتب التعديل المطلوب أولاً')); return; }
+      if (!(seedWorkflow.distribution.rows || []).length) return;
+      if (!visualConceptPlanActionBusy('revise-distribution', true)) return;
+      showLoader(WFT('plans.dist_revise_loading', 'جاري تعديل التوزيع'),
+        WFT('plans.dist_revise_loading_detail', 'يتم تطبيق التعديل على الجدول...'), 30);
+      try {
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        payload.revision = revision;
+        payload.distribution = { rows: seedWorkflow.distribution.rows };
+        const stamp = visualConceptPlanInputStamp();
+        const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
+        hideLoader();
+        if (stamp !== visualConceptPlanInputStamp()
+            || String(visualConceptPlansWorkflowState().distributionRevision || '').trim() !== revision) {
+          toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
+          return;
+        }
+        if (!response?.success) { toast(response?.error || WFT('plans.dist_revise_failed', 'تعذر تطبيق التعديل على التوزيع')); return; }
+        const workflow = visualConceptPlansWorkflowState();
+        workflow.distribution = normalizeVisualConceptPlansWorkflow({
+          distribution: { ...response.distribution, checks: [], issues: [] }
+        }).distribution;
+        workflow.distributionRevision = '';
+        workflow.planContext = response.planContext || workflow.planContext || null;
+        invalidateVisualConceptPlanGeneration(workflow);
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } catch (error) {
+        hideLoader();
+        toast(error.message || WFT('plans.dist_revise_failed', 'تعذر تطبيق التعديل على التوزيع'));
+      } finally {
+        visualConceptPlanActionBusy('revise-distribution', false);
+      }
+    }
+
     async function checkVisualConceptPlansDistribution(mode, options) {
       const silent = Boolean(options && options.silent);
       const seedWorkflow = visualConceptPlansWorkflowState();

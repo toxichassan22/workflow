@@ -1482,6 +1482,39 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(totals['شقق']['units'], 12)
         self.assertNotIn('notes', distribution)
 
+        # A revision edits the posted table instead of redistributing: the
+        # prompt carries the current rows plus the instruction, and the model
+        # is told to keep every untouched row.
+        revised = {'rows': [
+            {'building': 'المبنى الرئيسي', 'floor_range': '1-5', 'component': 'مكاتب',
+             'units_per_floor': 4, 'floor_area_sqm': 800, 'circulation': 'بهو'},
+            {'building': 'المبنى الرئيسي', 'floor_range': '6-15', 'component': 'شقق',
+             'units_per_floor': 1.2, 'floor_area_sqm': 180, 'circulation': ''},
+        ]}
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(revised, ensure_ascii=False)}}]
+        }) as revise_call:
+            revision = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow,
+                'distribution': {'rows': proposed['rows']},
+                'revision': 'انقل المكاتب من الأدوار 1-10 إلى 1-5'})
+        self.assertEqual(revision.status_code, 200, revision.get_json())
+        revise_prompt = revise_call.call_args[0][1]
+        self.assertIn('انقل المكاتب من الأدوار 1-10 إلى 1-5', revise_prompt)
+        self.assertIn('مواقف سيارات', revise_prompt)
+        self.assertIn('أبقِ باقي الصفوف', revise_prompt)
+        self.assertEqual(len(revision.get_json()['distribution']['rows']), 2)
+
+        # A failed revision never falls back to a fresh distribution — that
+        # would look like a successful edit while silently replacing the table.
+        with patch.object(module, 'call_openrouter_chat', side_effect=Exception('offline')):
+            failed_revision = client.post('/api/visual-concept/plans-distribution', headers=self._headers(self.token_a), json={
+                'projectData': project_data, 'plansWorkflow': workflow,
+                'distribution': {'rows': proposed['rows']},
+                'revision': 'بدّل المكاتب والشقق'})
+        self.assertEqual(failed_revision.status_code, 503)
+        self.assertEqual(failed_revision.get_json()['error_code'], 'DISTRIBUTION_REVISION_FAILED')
+
         # The local re-check is deterministic — the same component claiming
         # overlapping ranges in one building is a hard conflict; different
         # components sharing a floor only get a soft confirmation note.
