@@ -8,8 +8,11 @@ def _browse_agent_verify(task, usage_ctx):
     never enabled the flag.
     """
     try:
-        from web_browse.agent import run_browse_agent
-        response = run_browse_agent(task, usage_ctx=usage_ctx)
+        # Flat module, attribute call: `web_browse.agent` would bind a second
+        # module identity that `patch.object(agent, 'run_browse_agent')` in
+        # tests silently misses.
+        import agent as _agent_module
+        response = _agent_module.run_browse_agent(task, usage_ctx=usage_ctx)
     except Exception as exc:
         return {'error': {'message': f'browse_agent: {exc}'}}
     if not isinstance(response, dict):
