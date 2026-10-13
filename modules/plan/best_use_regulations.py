@@ -65,6 +65,14 @@ def validate_basis(row, regulations):
     use = row.get('useType')
     evidence = regulations.get('evidence') or []
     matches = [item for item in evidence if item.get('use') == use and item.get('status') == 'permitted']
+    if regulations.get('basis') == 'declared':
+        # Declared evidence is one identical entry per permitted use — the
+        # server attaches it rather than expecting the model to echo the whole
+        # allowed_uses summary verbatim. Membership in permittedUses is the
+        # real gate; it runs before this is reached.
+        if matches:
+            return dict(matches[0])
+        raise ProposalError('أساس السماح التنظيمي غير مثبت للمكون: ' + text(row.get('name'), 200))
     basis = row.get('allowedUseBasis')
     if not isinstance(basis, dict) or not any(all(basis.get(key) == item.get(key) for key in
             ('documentId', 'page', 'excerpt', 'parcelScope', 'landClassification')) for item in matches):

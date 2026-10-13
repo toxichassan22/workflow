@@ -166,6 +166,15 @@ class ExplorationContractTests(unittest.TestCase):
         with self.assertRaises(best_use.ProposalError):
             explore.distribution(raw, self.project, regs, 'art',
                                  stage='land', allowed_uses=['office'])
+        # Declared-basis regulations carry one identical evidence row per use —
+        # the server attaches it, so a component needs no verbatim copy at all.
+        regs['basis'] = 'declared'
+        components[1].pop('allowedUseBasis')
+        normalized = explore.distribution(raw, self.project, regs, 'art',
+                                          stage='land', allowed_uses=['office'])
+        parking = next(row for row in normalized['components'] if row['useType'] == 'parking')
+        self.assertEqual(parking['allowedUseBasis']['use'], 'office')
+        self.assertEqual(parking['allowedUseBasis']['documentId'], 'declared-inputs')
 
     def test_selection_does_not_approve_or_gate_generation(self):
         self.populate()
