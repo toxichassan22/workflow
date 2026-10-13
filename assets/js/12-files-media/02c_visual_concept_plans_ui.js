@@ -151,8 +151,9 @@
             ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>'
             : '<p class="tenant-hint">لم يُفحص بعد.</p>')
           : '');
-      const canApprove = rows.length > 0 && reviewed && !visualConceptDistributionBlocking(distribution).length
-        && visualConceptPlanNotesValid();
+      // Findings keep the button live — approving through them routes via the
+      // responsibility warning dialog instead of a dead disabled control.
+      const canApprove = rows.length > 0 && reviewed && visualConceptPlanNotesValid();
       return findingsHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +

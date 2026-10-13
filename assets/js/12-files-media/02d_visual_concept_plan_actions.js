@@ -234,16 +234,75 @@
       }
     }
 
+    // Approving a table that still carries confirmed conflicts is allowed, but
+    // only through the risk dialog — its continue button lands on
+    // applyVisualConceptPlansDistributionApproval directly.
     function approveVisualConceptPlansDistribution() {
       const workflow = visualConceptPlansWorkflowState();
       const rows = workflow.distribution.rows || [];
-      if (!rows.length || !workflow.distribution.aiReviewed || workflow.distribution.canProceed === false) return;
-      if (visualConceptDistributionBlocking(workflow.distribution).length || !visualConceptPlanNotesValid(workflow)) return;
+      if (!rows.length || !workflow.distribution.aiReviewed || !visualConceptPlanNotesValid(workflow)) return;
+      const hasConflicts = Boolean(visualConceptDistributionBlocking(workflow.distribution).length)
+        || workflow.distribution.canProceed === false;
+      if (hasConflicts) { showVisualConceptDistributionRisk(); return; }
+      applyVisualConceptPlansDistributionApproval(workflow);
+    }
+
+    function applyVisualConceptPlansDistributionApproval(workflow) {
       workflow.distribution.approved = true;
       invalidateVisualConceptPlanGeneration(workflow, false);
       workflow.viewStage = workflow.boundary.approved ? 'generate' : 'boundary';
       markVisualConceptDirty();
       renderVisualConceptPage();
+    }
+
+    function showVisualConceptDistributionRisk() {
+      let modal = document.getElementById('plansDistributionRisk');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'plansDistributionRisk';
+        modal.className = 'll-modal-overlay';
+        modal.setAttribute('data-a11y-modal', '');
+        modal.style.display = 'none';
+        modal.innerHTML =
+          '<div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="plansDistributionRiskTitle">' +
+          '<div class="sag-modal-head"><h2 id="plansDistributionRiskTitle"></h2></div>' +
+          '<p id="plansDistributionRiskBody" class="visual-concept-lock-hint"></p>' +
+          '<p id="plansDistributionRiskOwn" class="plans-distribution-risk"></p>' +
+          '<div class="sag-modal-actions" style="gap:8px;margin-top:16px">' +
+          '<button type="button" class="btn danger" data-plans-risk-continue></button>' +
+          '<button type="button" class="btn ghost" data-plans-risk-cancel></button>' +
+          '</div></div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', event => {
+          if (event.target === modal || event.target.closest('[data-plans-risk-cancel]')) {
+            closeVisualConceptDistributionRisk();
+            return;
+          }
+          if (event.target.closest('[data-plans-risk-continue]')) {
+            closeVisualConceptDistributionRisk();
+            applyVisualConceptPlansDistributionApproval(visualConceptPlansWorkflowState());
+          }
+        });
+      }
+      modal.querySelector('#plansDistributionRiskTitle').textContent =
+        WFT('plans.dist_risk_title', 'تعارضات في التوزيع');
+      modal.querySelector('#plansDistributionRiskBody').textContent =
+        WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.');
+      modal.querySelector('#plansDistributionRiskOwn').textContent =
+        WFT('plans.dist_risk_own', 'إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.');
+      modal.querySelector('[data-plans-risk-continue]').textContent =
+        WFT('plans.dist_risk_continue', 'استمرار');
+      modal.querySelector('[data-plans-risk-cancel]').textContent =
+        WFT('plans.dist_risk_cancel', 'إلغاء');
+      modal.style.display = 'flex';
+      if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
+    }
+
+    function closeVisualConceptDistributionRisk() {
+      const modal = document.getElementById('plansDistributionRisk');
+      if (!modal) return;
+      modal.style.display = 'none';
+      if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
     }
 
     async function checkVisualConceptPlanNotes() {

@@ -368,6 +368,13 @@
       font-weight: 700;
     }
 
+    .plans-distribution-risk {
+      margin: 10px 0 0;
+      color: var(--danger, #b33a3a);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
     .plans-issue-list {
       margin: 0;
       padding-inline-start: 18px;
