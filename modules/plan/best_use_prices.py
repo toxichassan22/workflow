@@ -1,7 +1,7 @@
 import re
 from datetime import date
 from html.parser import HTMLParser
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, unquote
 
 from best_use_contract import ProposalError, text, rounded, USE_TERMS, DIGITS, digest
 from best_use_geometry import number
@@ -101,16 +101,36 @@ def verify_observation(raw, pages, retrieved_at, today=None):
     city, district = text(raw.get('city'), 150), text(raw.get('district'), 150)
     if use not in USE_TERMS or mode not in MODE_TERMS or unit not in UNIT_TERMS or value is None or value <= 0:
         raise ProposalError('price_dimensions_invalid')
-    if raw.get('currency') != 'SAR' or not re.search(CURRENCY_TERMS, excerpt, re.I):
+    # The listing URL is structured evidence too — Saudi portals encode the
+    # use, operation and district taxonomy in the path («/شقق-للإيجار/حي-الأندلس/»),
+    # and '§' is the Saudi-riyal glyph aqar-style .sa hosts render in prices.
+    hostname = (urlsplit(url).hostname or '') if url else ''
+    url_hay = normalize_text(unquote(urlsplit(url).path)) if url else ''
+    hay = excerpt + (' ' + url_hay if url_hay else '')
+    currency_terms = CURRENCY_TERMS + (r'|§|⃁' if hostname.endswith('.sa') or hostname.split('.')[0] == 'sa' else '')
+    if raw.get('currency') != 'SAR' or not re.search(currency_terms, excerpt, re.I):
         raise ProposalError('price_currency_unproven')
-    if not city or normalize_text(city) not in excerpt or (district and normalize_text(district) not in excerpt):
+    if not city or (normalize_text(city) not in excerpt and normalize_text(city) not in url_hay) \
+            or (district and normalize_text(district) not in excerpt and normalize_text(district) not in url_hay):
         raise ProposalError('price_geography_unproven')
-    if not re.search(USE_TERMS[use], excerpt, re.I) or not re.search(MODE_TERMS[mode], excerpt, re.I):
+    # A district-level rate («سعر المتر في حي الأندلس») names no use or
+    # operation at all — accept it when nothing in the evidence contradicts
+    # the claim: another use's term, or a rent word on a price claimed as a
+    # sale (a rent claim itself still has to name rent).
+    use_ok = bool(re.search(USE_TERMS[use], hay, re.I)) or not any(
+        key != use and re.search(pattern, hay, re.I) for key, pattern in USE_TERMS.items())
+    mode_ok = bool(re.search(MODE_TERMS[mode], hay, re.I)) or (
+        mode == 'sale' and not re.search(MODE_TERMS['rent'], hay, re.I)) or (
+        # A periodic non-sqm rate is rent by nature — «290 ريال لليلة» /
+        # «65,000 ريال/سنوي» need no explicit إيجار word; nobody sells nights.
+        mode == 'rent' and unit != 'sqm' and period != 'oneOff'
+        and bool(re.search(PERIOD_TERMS.get(period, r'$^'), hay, re.I)))
+    if not use_ok or not mode_ok:
         raise ProposalError('price_use_or_operation_unproven')
     other_mode = 'rent' if mode == 'sale' else 'sale'
     if re.search(MODE_TERMS[other_mode], excerpt, re.I):
         raise ProposalError('price_operation_ambiguous')
-    if mode == 'rent' and (period not in PERIOD_TERMS or not re.search(PERIOD_TERMS[period], excerpt, re.I)):
+    if mode == 'rent' and (period not in PERIOD_TERMS or not re.search(PERIOD_TERMS[period], hay, re.I)):
         raise ProposalError('price_period_unproven')
     if mode == 'sale' and period != 'oneOff':
         raise ProposalError('price_period_invalid')
@@ -119,9 +139,20 @@ def verify_observation(raw, pages, retrieved_at, today=None):
     unit_term = UNIT_TERMS[unit]
     if unit != 'sqm' and PERIOD_TERMS.get(period):
         unit_term = '(?:' + unit_term + '|' + PERIOD_TERMS[period] + ')'
-    number_matches = [match for match in re.finditer(r'(?<![\d.,])[\d]+(?:[,٬][\d]{3})*(?:[.٫][\d]+)?', excerpt)
-                      if number(match.group(0)) == value]
-    if not any(re.search(CURRENCY_TERMS, excerpt[match.end():match.end() + 25], re.I)
+    number_matches = []
+    for match in re.finditer(r'(?<![\d.,])([\d]+(?:[,٬][\d]{3})*(?:[.٫][\d]+)?)\s*'
+                             r'(ألفاً?|ألفًا?|ألف|ملايين|مليار|مليون|thousands?|millions?|billions?)?', excerpt):
+        amount = number(match.group(1))
+        if amount is None:
+            continue
+        if match.group(2):
+            scale = (1000 if re.search(r'ألف|thousand', match.group(2))
+                     else 1000000 if re.search(r'مليون|ملايين|million', match.group(2)) else 1000000000)
+            amount *= scale
+        if amount == value:
+            number_matches.append(match)
+    if not any((re.search(currency_terms, excerpt[match.end():match.end() + 25], re.I)
+                or re.search(currency_terms, excerpt[max(0, match.start() - 8):match.start()], re.I))
                and re.search(unit_term, excerpt[match.end():match.end() + 75], re.I)
                for match in number_matches):
         raise ProposalError('price_value_unit_binding_unproven')

@@ -78,6 +78,39 @@ class PriceEvidenceTests(unittest.TestCase):
             prices.verify_observation(row, [{'url': row['url'], 'content': row['excerpt']}],
                                       '2026-10-12T10:00:00')
 
+    def test_district_rates_thousands_url_taxonomy_and_riyal_glyphs_are_evidence(self):
+        base = dict(self.observation(), propertyId='', publishedAt=None)
+        # A district-level sqm rate names no use or operation — nothing in the
+        # sentence contradicts the residential-sale claim («وسيط سعر المتر …»).
+        row = dict(base, value=4899,
+                   excerpt='وسيط سعر المتر المربع في جدة حي الاختبار هو ٤٬٨٩٩ ريال سعودي/م².')
+        self.assertEqual(prices.verify_observation(row, [], '2026-10-12T10:00:00')['value'], 4899)
+        # …but a rate that names a different use still contradicts the claim.
+        with self.assertRaises(ProposalError):
+            prices.verify_observation(
+                dict(row, excerpt='وسيط سعر المتر للمكاتب في جدة حي الاختبار هو ٤٬٨٩٩ ريال/م².'),
+                [], '2026-10-12T10:00:00')
+        # Thousand-word values bind («28 ألف ريال سنويًا» → 28000), and a
+        # periodic non-sqm price is rent evidence without an explicit إيجار.
+        row = dict(base, revenueMode='rent', unit='unit', period='year', value=28000,
+                   excerpt='أسعار شقق مفروشة في جدة حي الاختبار تبدأ من 28 ألف ريال سعودي سنويًا.')
+        self.assertEqual(prices.verify_observation(row, [], '2026-10-12T10:00:00')['use'], 'residential')
+        row['use'] = 'hospitality'  # furnished apartments read as hospitality too
+        self.assertEqual(prices.verify_observation(row, [], '2026-10-12T10:00:00')['use'], 'hospitality')
+        # The listing URL carries the portal's own taxonomy: «/شقق-للإيجار/» proves rent.
+        row = dict(base, revenueMode='rent', unit='unit', period='year', value=65000,
+                   url='https://aqar.fm/%D8%B4%D9%82%D9%82-%D9%84%D9%84%D8%A5%D9%8A%D8%AC%D8%A7%D8%B1/%D8%AC%D8%AF%D8%A9',
+                   excerpt='65,000 ريال/سنوي شقة في جدة حي الاختبار')
+        self.assertEqual(prices.verify_observation(row, [], '2026-10-12T10:00:00')['revenueMode'], 'rent')
+        # The riyal glyph on Saudi hosts counts as SAR; on other domains it does not.
+        row = dict(base, use='retail', revenueMode='rent', unit='unit', period='year', value=200000,
+                   url='https://sa.aqar.fm/%D9%85%D8%AD%D9%84%D8%A7%D8%AA-%D9%84%D9%84%D8%A5%D9%8A%D8%AC%D8%A7%D8%B1/x',
+                   excerpt='محل تجاري في جدة حي الاختبار 200,000 §/سنوي150م²')
+        self.assertEqual(prices.verify_observation(row, [], '2026-10-12T10:00:00')['use'], 'retail')
+        with self.assertRaises(ProposalError):
+            prices.verify_observation(dict(row, url='https://ae.example.com/shops-for-rent/x'),
+                                      [], '2026-10-12T10:00:00')
+
     def test_a_single_grounded_overview_fills_a_preliminary_scan(self):
         row = self.observation()
         row['url'] = ''
