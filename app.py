@@ -386,7 +386,7 @@ REQUIRE_TENANT_OPENROUTER_KEY = (
     (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
     and bool(OPENROUTER_MANAGEMENT_KEY)
 )
-GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
+GEMINI_TEXT_MODEL = "google/gemini-4-argon"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))

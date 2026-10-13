@@ -293,7 +293,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
 
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis'], 'تحليل من النموذج الاحتياطي')
-        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-3.8-flash')
+        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-4-argon')
 
     def test_project_draft_preserves_selected_landmark_details(self):
         client = self.app.test_client()
