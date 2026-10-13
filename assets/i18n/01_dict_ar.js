@@ -121,6 +121,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "best_use_explore.samples": "مشاهدات البيع / الإيجار",
   "best_use_explore.scope": "النطاق الجغرافي",
   "best_use_explore.listing_price": "سعر منشور وليس متوسطًا مستقلًا",
+  "best_use_explore.overview_price": "خلاصة بحث الويب الموثقة",
   "best_use_explore.published": "تاريخ نشر السعر",
   "best_use_explore.unknown": "غير محسوم",
   "best_use_explore.retrieved": "تاريخ الاسترجاع",

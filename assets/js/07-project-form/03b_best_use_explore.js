@@ -162,7 +162,9 @@
         return '<article class="best-use-source"><p>' + escapeHtml(bestUseExploreUseLabel(item.use) + ' — '
           + bestUseFormat(item.value) + ' ' + item.currency + ' / ' + item.unit + ' / ' + item.period) + '</p>'
           + '<p>' + escapeHtml([item.city, item.district].filter(Boolean).join('، ')) + '</p>'
-          + '<p>' + WFT('best_use_explore.listing_price', 'سعر منشور وليس متوسطًا مستقلًا') + '</p>'
+          + '<p>' + (item.observationKind === 'overview'
+            ? WFT('best_use_explore.overview_price', 'خلاصة بحث الويب الموثقة')
+            : WFT('best_use_explore.listing_price', 'سعر منشور وليس متوسطًا مستقلًا')) + '</p>'
           + '<p>' + WFT('best_use_explore.published', 'تاريخ نشر السعر') + ': '
           + escapeHtml(item.publishedAt || WFT('best_use_explore.unknown', 'غير محسوم')) + '</p>'
           + '<p>' + WFT('best_use_explore.retrieved', 'تاريخ الاسترجاع') + ': ' + escapeHtml(item.retrievedAt || '') + '</p>'

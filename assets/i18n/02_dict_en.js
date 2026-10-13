@@ -121,6 +121,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "best_use_explore.samples": "Sale / Rent Observations",
   "best_use_explore.scope": "Geographic Scope",
   "best_use_explore.listing_price": "Published price, not an independent average",
+  "best_use_explore.overview_price": "Verified web search overview",
   "best_use_explore.published": "Price Publication Date",
   "best_use_explore.unknown": "Unresolved",
   "best_use_explore.retrieved": "Retrieval Date",

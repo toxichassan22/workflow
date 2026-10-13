@@ -48,14 +48,46 @@ class PriceEvidenceTests(unittest.TestCase):
         self.assertIsNone(scan['table'][0]['salePerSqm'])
         self.assertTrue(all(row['city'] == 'الرياض' and row['district'] == 'حي آخر' for row in scan['observations']))
 
-    def test_links_without_retrieved_evidence_and_homepages_are_not_proof(self):
+    def test_grounded_answer_text_is_itself_evidence_for_an_overview(self):
         row = self.observation()
+        # Google AI Mode answers in synthesized sentences, not listing excerpts —
+        # the answer's own sentence is the evidence, so the row verifies as an
+        # 'overview' observation even when no page carried it verbatim.
         for pages in ([], [{'url': row['url'], 'content': 'سكني للبيع في جدة'}]):
-            with self.subTest(pages=pages), self.assertRaises(ProposalError):
-                prices.verify_observation(row, pages, '2026-10-12T10:00:00')
+            with self.subTest(pages=pages):
+                verified = prices.verify_observation(row, pages, '2026-10-12T10:00:00')
+                self.assertEqual(verified['observationKind'], 'overview')
         row['url'] = 'https://example.test/'
+        verified = prices.verify_observation(row, [], '2026-10-12T10:00:00')
+        self.assertEqual(verified['observationKind'], 'overview')
+        self.assertEqual(verified['url'], '')
+        for excerpt in ('الأسعار تختلف حسب الموقع', ''):
+            with self.subTest(excerpt=excerpt), self.assertRaises(ProposalError):
+                prices.verify_observation(dict(row, excerpt=excerpt), [], '2026-10-12T10:00:00')
+
+    def test_an_overview_average_is_evidence_while_a_listing_average_is_not(self):
+        row = self.observation()
+        row['excerpt'] = ('متوسط سعر المتر للشقق السكنية المعروضة للبيع في جدة حي الاختبار '
+                          'يبلغ 5000 ريال سعودي للمتر المربع. نشر: 2026-09-01')
+        verified = prices.verify_observation(row, [], '2026-10-12T10:00:00')
+        self.assertEqual(verified['observationKind'], 'overview')
+        self.assertEqual(verified['value'], 5000)
+        # The same sentence quoted verbatim from the cited page is a listing
+        # claim — and a page carrying an average is no individual observation.
         with self.assertRaises(ProposalError):
-            prices.verify_observation(row, [{'url': row['url'], 'content': row['excerpt']}], '2026-10-12T10:00:00')
+            prices.verify_observation(row, [{'url': row['url'], 'content': row['excerpt']}],
+                                      '2026-10-12T10:00:00')
+
+    def test_a_single_grounded_overview_fills_a_preliminary_scan(self):
+        row = self.observation()
+        row['url'] = ''
+        row['excerpt'] = ('متوسط سعر المتر للشقق السكنية المعروضة للبيع في جدة حي الاختبار '
+                          'يبلغ 5000 ريال سعودي للمتر المربع.')
+        row['publishedAt'] = None
+        row['propertyId'] = ''
+        scan = self.scan([row], preliminary=True)
+        self.assertEqual(scan['table'][0]['salePerSqm'], 5000)
+        self.assertEqual(scan['observations'][0]['observationKind'], 'overview')
 
     def test_value_currency_unit_and_period_are_bound_to_the_original_excerpt(self):
         row = self.observation(mode='rent')

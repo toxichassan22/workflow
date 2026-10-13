@@ -11,10 +11,11 @@ MIN_OBSERVATIONS = 3
 MAX_AGE_DAYS = 180
 MODE_TERMS = {'sale': r'للبيع|بيع|sale', 'rent': r'إيجار|ايجار|تأجير|rent|lease'}
 UNIT_TERMS = {'sqm': r'للمتر|لكل متر مربع|(?:per|/)\s*(?:sqm|m2|m²|م²|م2)',
-              'unit': r'للوحدة|per unit', 'room': r'للغرفة|per room'}
+              'unit': r'للوحدة|للفرد|للشخص|للتذكرة|per unit|per person|per ticket|per admission',
+              'room': r'للغرفة|للجناح|per room|per suite'}
 PERIOD_TERMS = {'year': r'سنوي|سنويا|السنة|سنة|annual|year',
                 'month': r'شهري|الشهر|شهر|monthly|month', 'night': r'ليلة|ليلي|night'}
-CURRENCY_TERMS = r'ريال\s+سعودي|SAR|Saudi riyal|ر\.\s*س'
+CURRENCY_TERMS = r'ريال|SAR|Saudi riyal|ر\.\s*س'
 
 
 class PageText(HTMLParser):
@@ -68,14 +69,31 @@ def normalize_text(value):
 
 
 def verify_observation(raw, pages, retrieved_at, today=None):
+    """Keep only observations whose evidence text proves every claimed field.
+
+    A verbatim excerpt inside the cited retrieved page is a ``listing``
+    observation. Grounded search answers (Google AI Mode) arrive as synthesized
+    sentences rather than listing excerpts: when the cited page does not carry
+    the excerpt it is an ``overview`` observation — the search's own answer text
+    is the evidence — and the field, geography and value bindings below still
+    gate it.
+    """
     if not isinstance(raw, dict):
         raise ProposalError('price_evidence_invalid')
     url = clean_url(raw.get('url'))
     page = next((page for page in pages if clean_url(page.get('url')) == url and url), None)
     excerpt = normalize_text(raw.get('excerpt'))
-    if not page or not excerpt or excerpt not in normalize_text(page.get('content')):
+    listing = bool(page and excerpt and excerpt in normalize_text(page.get('content')))
+    if not listing and excerpt:
+        # Another retrieved page or a cited grounding span carrying the same
+        # sentence still counts — bind the source that actually carries it.
+        quoted = next((entry for entry in pages
+                       if excerpt in normalize_text(entry.get('content'))), None)
+        if quoted is not None:
+            page, url = quoted, clean_url(quoted.get('url')) or url
+    if not excerpt:
         raise ProposalError('price_evidence_not_retrieved')
-    if re.search(r'متوسط|يبدأ من|ابتداء|نطاق سعري|average|starting from|between', excerpt, re.I):
+    if listing and re.search(r'متوسط|يبدأ من|ابتداء|نطاق سعري|average|starting from|between', excerpt, re.I):
         raise ProposalError('price_not_individual_observation')
     use, mode = text(raw.get('use'), 40), text(raw.get('revenueMode'), 20)
     unit, period = text(raw.get('unit'), 20), text(raw.get('period'), 20)
@@ -96,15 +114,20 @@ def verify_observation(raw, pages, retrieved_at, today=None):
         raise ProposalError('price_period_unproven')
     if mode == 'sale' and period != 'oneOff':
         raise ProposalError('price_period_invalid')
+    # A non-sqm price binds to its period instead — «560 ريالاً لليلة» is the
+    # room-night rate Google reports, with no sqm figure to invent.
+    unit_term = UNIT_TERMS[unit]
+    if unit != 'sqm' and PERIOD_TERMS.get(period):
+        unit_term = '(?:' + unit_term + '|' + PERIOD_TERMS[period] + ')'
     number_matches = [match for match in re.finditer(r'(?<![\d.,])[\d]+(?:[,٬][\d]{3})*(?:[.٫][\d]+)?', excerpt)
                       if number(match.group(0)) == value]
     if not any(re.search(CURRENCY_TERMS, excerpt[match.end():match.end() + 25], re.I)
-               and re.search(UNIT_TERMS[unit], excerpt[match.end():match.end() + 75], re.I)
+               and re.search(unit_term, excerpt[match.end():match.end() + 75], re.I)
                for match in number_matches):
         raise ProposalError('price_value_unit_binding_unproven')
     published = raw.get('publishedAt') or None
     if published:
-        proven_date = page.get('publishedAt') == published or bool(re.search(
+        proven_date = (page or {}).get('publishedAt') == published or bool(re.search(
             r'(?:نشر|تاريخ الإعلان|published)\s*[:：]?\s*' + re.escape(str(published)), excerpt, re.I))
         if not proven_date:
             published = None
@@ -125,16 +148,21 @@ def verify_observation(raw, pages, retrieved_at, today=None):
                       + re.escape(normalize_text(entity)) + r'(?=\s*[,،;.\n]|$)', excerpt, re.I) if entity else None
     if entity and not named:
         entity = ''
-    identity = ('property:' + property_id if property_id else 'entity:' + normalize_text(entity).casefold()
-                if entity else 'unidentified:' + digest({
-                    'use': use, 'mode': mode, 'city': city, 'district': district,
-                    'value': value, 'unit': unit, 'period': period, 'publishedAt': published}))
+    kind = 'listing' if listing else 'overview'
+    if property_id:
+        identity = 'property:' + property_id
+    elif entity:
+        identity = 'entity:' + normalize_text(entity).casefold()
+    else:
+        identity = ('unidentified' if listing else 'overview') + ':' + digest({
+            'use': use, 'mode': mode, 'city': city, 'district': district,
+            'value': value, 'unit': unit, 'period': period, 'publishedAt': published})
     return {'id': digest({'url': url, 'identity': identity})[:24], 'url': url, 'excerpt': text(raw.get('excerpt'), 5000),
             'use': use, 'revenueMode': mode, 'value': value, 'currency': 'SAR', 'unit': unit, 'period': period,
             'city': city, 'district': district, 'publishedAt': published, 'retrievedAt': retrieved_at,
-            'freshnessStatus': freshness, 'observationKind': 'listing', 'propertyId': property_id,
+            'freshnessStatus': freshness, 'observationKind': kind, 'propertyId': property_id,
             'identity': identity, 'entityName': entity,
-            'independenceStatus': 'identified' if property_id or entity else 'unknown'}
+            'independenceStatus': 'identified' if property_id or entity else ('unknown' if listing else 'overview')}
 
 
 def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran=True, preliminary=False):
