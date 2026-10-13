@@ -784,7 +784,7 @@ def api_ai_chat():
 {{"action": "reply", "response": "نص الرد"}}"""
 
     try:
-        response = call_text_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', data))
+        response = call_text_chat(prompt, message, max_tokens=2000, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx_optional('slide', data))
         reply = extract_chat_content(response, "CHAT")
 
         parsed = _extract_json_from_text(reply)
