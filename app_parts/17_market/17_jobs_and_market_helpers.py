@@ -152,7 +152,7 @@ def _redispatch_job(namespace, tenant_id, job_id, job):
     try:
         if namespace == '.market_jobs':
             kind = str(job.get('kind') or payload.get('kind') or '')
-            if kind not in ('competitors', 'summary'):
+            if kind not in ('competitors', 'summary', 'summary_chat', 'summary_consolidate'):
                 return False
             threading.Thread(
                 target=_market_job_worker,

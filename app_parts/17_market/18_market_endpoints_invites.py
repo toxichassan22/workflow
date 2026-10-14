@@ -455,6 +455,10 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
         try:
             if kind == 'competitors':
                 payload = _execute_market_competitors(data, tenant_id, progress=report)
+            elif kind == 'summary_chat':
+                payload = _execute_market_summary_chat(data, tenant_id, progress=report)
+            elif kind == 'summary_consolidate':
+                payload = _execute_market_summary_consolidate(data, tenant_id, progress=report)
             else:
                 payload = _execute_market_summary(data, tenant_id, progress=report)
             status = 'completed' if payload.get('success') else 'failed'
@@ -495,7 +499,7 @@ def _start_market_job(kind, executor):
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
         result = executor(data)
-        status = 200 if result.get('success') else 422
+        status = int(result.get('httpStatus') or (200 if result.get('success') else 422))
         return jsonify(result), status
     job_id = str(_uuid.uuid4())
     tenant_id = g.tenant_id
