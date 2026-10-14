@@ -38,10 +38,17 @@ class EvidencePoolContractTests(unittest.TestCase):
         source = (ROOT / 'modules' / 'web_browse' / 'evidence.py').read_text(
             encoding='utf-8')
         self.assertNotRegex(source, r'^\s*(import|from)\s+market_study')
+
         self.assertNotRegex(source, r'^\s*(import|from)\s+db\b')
         self.assertNotRegex(source.lower(), r'^\s*(import|from)\s+flask\b')
         self.assertEqual(evidence.EvidencePool.PAGE_TEXT_CAP, 8000)
         self.assertEqual(evidence.EvidencePool.MAX_PAGES, 250)
+
+    def test_contract_surface(self):
+        for name in ('add_query', 'query_results', 'add_page', 'mark_failed',
+                     'get_page', 'page_failed', 'pages', 'pages_for_name',
+                     'stats', 'to_dict', 'from_dict'):
+            self.assertTrue(callable(getattr(self.pool, name, None)), name)
 
     # ------------------------------------------------------------------
     # Queries
@@ -61,6 +68,14 @@ class EvidencePoolContractTests(unittest.TestCase):
         self.assertEqual(self.pool.add_query('أداء السوق', first), 1)
         self.assertEqual(self.pool.add_query('اداء السوق', first), 0)
         self.assertEqual(self.pool.stats()['queries'], 2)
+
+    def test_add_query_folds_ya_and_tatweel(self):
+        first = [{'title': 't', 'url': 'u', 'snippet': 's'}]
+        self.assertEqual(self.pool.add_query('مؤشر عقاري', first), 1)
+        # ى→ي and tatweel are the same query — not stored again.
+        self.assertEqual(self.pool.add_query('مؤشر عقارى', first), 0)
+        self.assertEqual(self.pool.add_query('مـؤشر عقاري', first), 0)
+        self.assertEqual(self.pool.stats()['queries'], 1)
 
     def test_query_results_none_empty_and_hit(self):
         self.assertIsNone(self.pool.query_results('لم تُنفَّذ'))
