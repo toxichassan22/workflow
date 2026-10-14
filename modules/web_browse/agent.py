@@ -45,6 +45,14 @@ _COMPACT_REPLY_PROMPT = (
     'إجابتك السابقة قُطعت عند حد الإخراج. أعد النتيجة نفسها الآن في صيغة '
     'أقصر: نفس بنية JSON والحقول، قيم مختصرة، بلا شرح أو تكرار.')
 
+# Answering straight off search snippets leaves every source "unverified"
+# downstream — nothing was ever read. When a run had real results to open
+# but produced a final answer with zero pages, spend one step forcing it.
+_OPEN_BEFORE_ANSWER_PROMPT = (
+    'أجبت دون فتح أي صفحة من نتائج البحث — إجابة لم تقرأ صفحة واحدة لا تُقبل. '
+    'افتح الآن بـ open_url أقرب رابط أو اثنين من النتائج للمطلوب، '
+    'ثم أعد إجابتك معتمدًا على الصفحة المقروءة.')
+
 def _search_count_phrase(count):
     """Arabic count wording for the preamble's search cap — dual for two,
     an explicit number otherwise."""
@@ -413,6 +421,8 @@ def _run_web_search(session, args, search_state, evidence_pool=None):
     if cached is not None:
         # A pooled answer costs no search — it does not consume the budget.
         _log_line(f'[BROWSE AGENT] pool hit query={query[:120]}')
+        if cached:
+            search_state['had_results'] = True
         return {'results': [
             {'title': str(item.get('title') or ''),
              'url': str(item.get('url') or ''),
@@ -442,6 +452,8 @@ def _run_web_search(session, args, search_state, evidence_pool=None):
         compact.append({'title': str(item.get('title') or ''),
                         'url': str(item.get('url') or ''),
                         'snippet': str(item.get('snippet') or '')})
+    if compact:
+        search_state['had_results'] = True
     # A real execution is recorded — an errored search is not, so a later
     # stage may retry a transiently failed lookup.
     _pool_store_query(evidence_pool, query, compact)
@@ -766,6 +778,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     effort = str(reasoning_effort or '').strip() or None
     effort_disabled = False
     compact_retried = False
+    open_nudged = False
     try:
         deadline = float(deadline) if deadline is not None else None
     except (TypeError, ValueError):
@@ -839,6 +852,18 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                     messages.append(_assistant_echo(msg))
                     messages.append(
                         {'role': 'user', 'content': _COMPACT_REPLY_PROMPT})
+                    continue
+                if (not open_nudged and not pages and not trace
+                        and search_state.get('had_results')
+                        and not _deadline_hit() and step + 1 < max_steps):
+                    # Final answer off snippets alone: searches returned
+                    # openable URLs but no page was ever read — downstream
+                    # marks every source unverified. One forced open round.
+                    open_nudged = True
+                    final_text = ''
+                    messages.append(_assistant_echo(msg))
+                    messages.append({'role': 'user',
+                                     'content': _OPEN_BEFORE_ANSWER_PROMPT})
                     continue
                 if not final_text:
                     error = {'message': 'model returned no text and no tool call'}

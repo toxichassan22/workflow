@@ -378,6 +378,51 @@ class ProgressEventTests(unittest.TestCase):
         self.assertEqual(len(tool_dones), 1)
         self.assertFalse(tool_dones[0]['ok'])
 
+    def test_zero_page_answer_gets_one_forced_open_round(self):
+        """Answering off snippets leaves every source unverified — with
+        openable results in hand the loop must push the model to read a
+        page before its answer is accepted."""
+        worker = _FakeWorker()
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
+            _text_response(),                       # answers, never opened
+            _fn_response(('open_url', {'url': _PAGE_URL})),
+            _text_response(),
+        ], calls)
+        with _patched_transport(chat, worker):
+            result = agent.run_browse_agent('task', max_steps=6)
+        self.assertNotIn('error', result)
+        self.assertEqual(worker.opened, [_PAGE_URL])
+        annotations = result['choices'][0]['message']['annotations']
+        self.assertEqual(annotations[0]['url_citation']['url'], _PAGE_URL)
+
+    def test_open_nudge_fires_only_once(self):
+        worker = _FakeWorker()
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
+            _text_response(),                       # nudge fires
+            _text_response(),                       # still no open — accepted
+        ], calls)
+        with _patched_transport(chat, worker):
+            result = agent.run_browse_agent('task', max_steps=6)
+        self.assertNotIn('error', result)
+        self.assertEqual(worker.opened, [])
+        self.assertEqual(len(calls), 3)
+
+    def test_no_search_hits_means_no_open_nudge(self):
+        worker = _FakeWorker(web_search=lambda q: [])
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
+            _text_response(),
+        ], calls)
+        with _patched_transport(chat, worker):
+            result = agent.run_browse_agent('task', max_steps=6)
+        self.assertNotIn('error', result)
+        self.assertEqual(len(calls), 2)
+
     def test_log_line_flushes_so_tail_sees_steps_live(self):
         """gunicorn block-buffers worker stdout — without flush=True a
         [BROWSE AGENT] line waits for ~8KB of output, so tail -f shows
