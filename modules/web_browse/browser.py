@@ -57,6 +57,8 @@ _SEARCH_LANG = 'en-US,en;q=0.9'
 # more useful to the caller than an opaque http_ status on a 200 wall page.
 _CAPTCHA_RE = re.compile(
     r'captcha|are you a robot|unusual traffic|anomaly|'
+    r'just a moment|verify you are|attention required|security check|'
+    r'challenge-platform|'
     r'لست روبوت|تحقق من أنك|رمز التحقق', re.I)
 
 _EXTRACT_JS = """() => {
@@ -390,12 +392,16 @@ class BrowserWorker:
             except Exception as exc:
                 print(f'[BROWSER] search provider={provider} failed: {exc}')
                 hits = []
-            if not hits and self._serp_blocked(provider):
+            if hits:
+                print(f'[BROWSER] search provider={provider} hits={len(hits)}')
+                return hits
+            title, walled = self._serp_state()
+            if walled:
                 streaks = getattr(self, '_serp_block_streak', None)
                 if streaks is None:
                     streaks = self._serp_block_streak = {}
                 streaks[provider] = streaks.get(provider, 0) + 1
-                print(f'[BROWSER] search provider={provider} blocked (bot wall)')
+                print(f"[BROWSER] search provider={provider} blocked (bot wall) title={title!r}")
                 if streaks[provider] >= 2:
                     blocked = getattr(self, '_blocked_serps', None)
                     if blocked is None:
@@ -403,22 +409,23 @@ class BrowserWorker:
                     blocked.add(provider)
                     print(f'[BROWSER] search provider={provider} skipped for this session')
                 continue
-            print(f'[BROWSER] search provider={provider} hits={len(hits)}')
-            if hits:
-                return hits
+            print(f"[BROWSER] search provider={provider} hits=0 title={title!r}")
         return []
 
-    def _serp_blocked(self, provider):
-        """Cheap wall check on the already-loaded SERP — only runs when the
-        extractor found no rows, so a real empty result page stays 'hits=0'
-        while a captcha/anomaly page reports 'blocked'."""
+    def _serp_state(self):
+        """(title, walled) of the already-loaded SERP — only consulted when
+        the extractor found no rows, so a real empty result page stays a
+        'hits=0' log line while a captcha/anomaly/challenge page reports
+        'blocked'. The title rides every line so a new wall shape or a
+        changed SERP markup shows up in the log instead of vanishing."""
         try:
             title = self._page.title() if self._page is not None else ''
             text = self._page.evaluate(
                 "() => document.body ? document.body.innerText.slice(0, 900) : ''")
         except Exception:
-            return False
-        return _looks_blocked(title or '', text or '')
+            return '', False
+        title = str(title or '')[:120]
+        return title, _looks_blocked(title, str(text or ''))
 
     def _search_once(self, provider, query, cap):
         page = self._ensure_page()

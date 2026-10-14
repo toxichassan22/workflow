@@ -481,8 +481,8 @@ class ProviderOrderTests(unittest.TestCase):
         calls = []
         with mock.patch.object(browser.BrowserWorker, '_search_once',
                                lambda self, p, q, c: calls.append(p) or []), \
-                mock.patch.object(browser.BrowserWorker, '_serp_blocked',
-                                  lambda self, p: p == 'brave'):
+                mock.patch.object(browser.BrowserWorker, '_serp_state',
+                                  lambda self: ('wall', calls[-1] == 'brave')):
             worker.web_search('query one')
             worker.web_search('query two')
             worker.web_search('query three')
@@ -495,8 +495,8 @@ class ProviderOrderTests(unittest.TestCase):
         calls = []
         with mock.patch.object(browser.BrowserWorker, '_search_once',
                                lambda self, p, q, c: calls.append(p) or []), \
-                mock.patch.object(browser.BrowserWorker, '_serp_blocked',
-                                  lambda self, p: False):
+                mock.patch.object(browser.BrowserWorker, '_serp_state',
+                                  lambda self: ('results page', False)):
             worker.web_search('q1')
             worker.web_search('q2')
         self.assertEqual(calls.count('brave'), 2)
