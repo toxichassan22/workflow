@@ -197,8 +197,8 @@
         '<div class="land-chat-header">' +
         '<div class="land-chat-title">شات تنظيمات الأرض</div>' +
         '<div class="land-chat-actions">' +
-        '<button type="button" class="land-chat-action" id="landChatMinimize" onclick="toggleLandChat(false)">إخفاء</button>' +
-        '<button type="button" class="land-chat-action" id="landChatEnd" onclick="showLandChatEndConfirm()">إنهاء</button>' +
+        '<button type="button" class="land-chat-action" id="landChatMinimize" title="إخفاء" aria-label="إخفاء" onclick="toggleLandChat(false)">&gt;&lt;</button>' +
+        '<button type="button" class="land-chat-action" id="landChatEnd" title="إنهاء" aria-label="إنهاء" onclick="showLandChatEndConfirm()">×</button>' +
         '</div></div>' +
         '<div class="land-chat-messages" id="landChatMessages"></div>' +
         '<div class="land-chat-input-row">' +

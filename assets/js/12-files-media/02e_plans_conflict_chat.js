@@ -204,8 +204,8 @@
         '<div><div class="land-chat-title" id="plansChatTitle"></div>' +
         '<div class="tenant-hint" id="plansChatScope" style="font-size:11px"></div></div>' +
         '<div class="land-chat-actions">' +
-        '<button type="button" class="land-chat-action" id="plansChatMinimize" onclick="togglePlansChat(false)">إخفاء</button>' +
-        '<button type="button" class="land-chat-action" id="plansChatEnd" onclick="showPlansChatEndConfirm()">إنهاء</button>' +
+        '<button type="button" class="land-chat-action" id="plansChatMinimize" title="إخفاء" aria-label="إخفاء" onclick="togglePlansChat(false)">&gt;&lt;</button>' +
+        '<button type="button" class="land-chat-action" id="plansChatEnd" title="إنهاء" aria-label="إنهاء" onclick="showPlansChatEndConfirm()">×</button>' +
         '</div></div>' +
         '<div class="land-chat-messages" id="plansChatMessages"></div>' +
         '<div class="land-chat-input-row">' +

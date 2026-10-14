@@ -447,11 +447,10 @@ test('the composer keeps a foot row with a real checkbox and the send action', (
   assert.match(css, /\.market-summary-chat-research input\[type="checkbox"\][^}]*min-height:\s*0/);
 });
 
-test('the panel header uses word buttons, not icon glyphs', () => {
+test('the panel header keeps its glyph buttons with accessible names', () => {
   const { context, inputs } = fixture();
   context.mountMarketSummaryChat(inputs['section-market-study']);
   const wrap = inputs['section-market-study'].children[0];
-  assert.match(wrap.innerHTML, />إخفاء</);
-  assert.match(wrap.innerHTML, />إنهاء</);
-  assert.doesNotMatch(wrap.innerHTML, /&gt;&lt;|>×</);
+  assert.match(wrap.innerHTML, /aria-label="إخفاء"[^>]*>&gt;&lt;/);
+  assert.match(wrap.innerHTML, /aria-label="إنهاء"[^>]*>×</);
 });

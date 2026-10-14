@@ -555,9 +555,13 @@
         '<div><div class="land-chat-title" id="marketSummaryChatTitle"></div></div>' +
         '<div class="land-chat-actions">' +
         '<button type="button" class="land-chat-action" id="marketSummaryChatMinimize"' +
-        ' onclick="toggleMarketSummaryChat(false)">' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '</button>' +
+        ' title="' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '"' +
+        ' aria-label="' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '"' +
+        ' onclick="toggleMarketSummaryChat(false)">&gt;&lt;</button>' +
         '<button type="button" class="land-chat-action" id="marketSummaryChatEnd"' +
-        ' onclick="showMarketSummaryChatEndConfirm()">' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '</button>' +
+        ' title="' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '"' +
+        ' aria-label="' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '"' +
+        ' onclick="showMarketSummaryChatEndConfirm()">×</button>' +
         '</div></div>' +
         '<div class="market-summary-chat-body" id="marketSummaryChat"></div>' +
         '<div class="land-chat-confirm" id="marketSummaryChatConfirm" hidden>' +

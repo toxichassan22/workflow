@@ -1052,22 +1052,21 @@
     }
 
     .land-chat-action {
-      border: 1px solid #e2e8f0;
-      background: var(--white, #fff);
-      color: #475569;
+      border: 0;
+      background: none;
+      color: #64748b;
       font: inherit;
-      font-size: 12px;
-      font-weight: 800;
+      font-size: 17px;
+      font-weight: 900;
       line-height: 1;
       cursor: pointer;
-      padding: 6px 10px;
-      border-radius: 999px;
+      padding: 5px 10px;
+      border-radius: 8px;
     }
 
     .land-chat-action:hover {
-      border-color: var(--teal, #0fa9c4);
-      background: var(--teal-soft, #dff6fb);
-      color: var(--teal-dark, #0a829b);
+      background: #e8eef4;
+      color: var(--p, #07182c);
     }
 
     .land-chat-confirm {
