@@ -78,6 +78,14 @@ except (TypeError, ValueError):
 # and the logo pass still get their share of the budget.
 _MARKET_EXPANSION_DEADLINE_MARGIN = 30
 
+# The known-sources plan runs before the browse agent, serially — a chain of
+# timed-out catalog entries must not eat the agent's share of the job budget,
+# so the stage runs on this sub-deadline instead of the job's own.
+try:
+    _SOURCE_PLAN_TIME_BUDGET = max(30, int(os.environ.get('MARKET_SOURCE_PLAN_BUDGET') or 150))
+except (TypeError, ValueError):
+    _SOURCE_PLAN_TIME_BUDGET = 150
+
 
 def _new_evidence_pool():
     """One EvidencePool per market job — shared by the source plan, every
@@ -134,9 +142,15 @@ def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
         return
     if not plan:
         return
+    plan_deadline = time.time() + _SOURCE_PLAN_TIME_BUDGET
+    if deadline is not None:
+        try:
+            plan_deadline = min(plan_deadline, float(deadline))
+        except (TypeError, ValueError):
+            pass
     try:
         outcome = run(plan, evidence_pool, _market_source_fetch_http,
-                      session=session, deadline=deadline, report=report)
+                      session=session, deadline=plan_deadline, report=report)
         print(f'[MARKET STUDY] source plan done: {outcome}')
     except Exception as exc:
         print(f'[MARKET STUDY] source plan fetch failed: {exc}')

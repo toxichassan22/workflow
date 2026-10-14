@@ -99,13 +99,34 @@ class BuildSourcePlanTests(unittest.TestCase):
             {'projectType': 'سكني', 'city': 'الرياض'})
         urls = [entry['url'] for entry in plan]
         for expected in (
-                'https://rei.rega.gov.sa',
                 'https://rei.rega.gov.sa/ar/cities/%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6',
                 'https://sakani.sa/reports-and-data',
-                'https://stats.gov.sa', 'https://sama.gov.sa',
-                'https://ejar.sa', 'https://nhc.sa',
-                'https://cbre.sa', 'https://jll.com/en-sa'):
+                'https://jll.com/en-sa'):
             self.assertIn(expected, urls)
+        # Bare homepages are nav shells — a fetch on one burns a page
+        # timeout for zero district evidence, so the plan never prefetches
+        # them even though the catalog lines still steer the free search.
+        for homepage in (
+                'https://rei.rega.gov.sa', 'https://stats.gov.sa',
+                'https://sama.gov.sa', 'https://ejar.sa', 'https://nhc.sa',
+                'https://cbre.sa'):
+            self.assertNotIn(homepage, urls)
+
+    def test_plan_prefetches_no_bare_homepages(self):
+        # Regression for the measured 47-failure plan stage: a catalog line
+        # names a source family, but its domain's bare homepage is a nav
+        # shell — only deep links may be prefetched.
+        for payload in ({'projectType': 'فندقي', 'city': 'جدة'},
+                        {'projectType': 'سكني', 'city': 'الرياض'},
+                        {'projectType': 'صناعي ولوجستي', 'city': 'الدمام'}):
+            plan = market_study.build_source_plan(payload)
+            for entry in plan:
+                self.assertFalse(
+                    market_study.is_generic_source_homepage(entry['url']),
+                    entry['url'])
+            purposes = {entry['purpose'] for entry in plan}
+            self.assertIn('dataset', purposes)
+            self.assertIn('listing', purposes)
 
     def test_dataset_expansion_entries_are_browser_bound(self):
         plan = market_study.build_source_plan(
@@ -157,10 +178,8 @@ class BuildSourcePlanTests(unittest.TestCase):
         plan = market_study.build_source_plan(
             {'projectType': 'متعدد الاستخدامات',
              'projectComponents': 'سكني، مكاتب', 'city': 'الرياض'})
-        urls = [entry['url'] for entry in plan]
-        # 'تجاري' sources land because مكاتب folds onto the commercial kind.
-        self.assertIn('https://mc.gov.sa', urls)
-        # …and the office listing category rides the portals too.
+        # 'مكاتب' folds onto the commercial kind — its office listing
+        # category exists only because that component's sources ran.
         decoded = [unquote(entry['url']) for entry in plan]
         self.assertTrue(any('مكاتب-' in u for u in decoded))
 

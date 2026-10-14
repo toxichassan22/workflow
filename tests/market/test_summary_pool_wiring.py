@@ -104,6 +104,7 @@ class _Fixture:
         self.worker = _FakeWorker()
         self.agent_calls = []
         self.events = []
+        self.plan_kwargs = {}
         self._pool_pages = list(pool_pages)
 
     def fake_agent(self, task, usage_ctx=None, **kwargs):
@@ -124,6 +125,7 @@ class _Fixture:
 
     def fake_run_plan(self, plan, pool=None, fetch_http=None, **kwargs):
         self.events.append('plan')
+        self.plan_kwargs = kwargs
         for url, title, text in self._pool_pages:
             pool.add_page(url, title=title, content=text, via='http')
         return {'fetched': len(self._pool_pages), 'skipped': 0, 'failed': 0}
@@ -203,6 +205,23 @@ class SummaryPoolWiringTests(unittest.TestCase):
         self.assertIn('plan', fx.events)
         self.assertIn('agent', fx.events)
         self.assertLess(fx.events.index('plan'), fx.events.index('agent'))
+
+    def test_source_plan_runs_on_its_own_stage_budget(self):
+        # The serial plan stage must not eat the browse agent's share of the
+        # job budget — measured runs died at deadline after ~50 catalog
+        # fetches stalled one timeout each. The plan gets a capped
+        # sub-deadline, never the job's own.
+        fx = _Fixture()
+        module = self.application_module
+        with self.app.app_context(), fx.patches(module):
+            result = module._execute_market_summary(
+                dict(self.PAYLOAD), tenant_id=None)
+        self.assertTrue(result['success'], result)
+        deadline = fx.plan_kwargs.get('deadline')
+        self.assertIsInstance(deadline, (int, float), fx.plan_kwargs)
+        self.assertGreater(deadline, time.time())
+        self.assertLessEqual(
+            deadline, time.time() + module._SOURCE_PLAN_TIME_BUDGET + 5)
 
     def test_summary_main_call_carries_pool_deadline_session(self):
         fx = _Fixture()

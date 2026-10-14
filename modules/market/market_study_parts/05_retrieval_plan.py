@@ -264,9 +264,12 @@ def build_source_plan(payload, offer_lang='ar'):
         lines.extend(TYPE_SOURCE_PRIORITY.get(kind) or [])
     for line in lines:
         for url in _catalog_urls(line):
-            if _host_in(_source_host(url), _LISTING_PORTAL_HOSTS) \
-                    and is_generic_source_homepage(url):
-                continue   # listing pages below carry this host's evidence
+            # A bare homepage is a nav shell, not evidence — its fetch just
+            # burns a full page timeout (the plan's failures run ~80% homepages).
+            # The catalog line still steers free search at this domain's deep
+            # pages; the city listing pages below carry the portals' evidence.
+            if is_generic_source_homepage(url):
+                continue
             _add(url, 'catalog', label=line)
 
     # 3) City-scoped pages: the indicators portal's public city page carries
