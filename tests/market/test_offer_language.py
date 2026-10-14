@@ -415,6 +415,21 @@ class TextModuleTests(unittest.TestCase):
         prompt = market_study.build_competitors_user_prompt(payload, [], mode='generate')
         self.assertIn('قائمة منافسين', prompt)
 
+    def test_competitors_prompt_keeps_distance_as_model_estimate(self):
+        """A named mall found on a list page was dropped because no retrieved
+        page printed its distance from the site — the prompt must state that
+        district/distance_km/lat/lng are the agent's own geographic estimate
+        and that a missing written distance is not a reason to drop a row."""
+        import market_study
+        prompt = market_study.build_competitors_user_prompt(
+            {'projectName': 'X', 'district': 'حي الأندلس', 'city': 'جدة',
+             'competitorRadius': '3'},
+            [], mode='generate')
+        self.assertIn('تقديرات جغرافية تكتبها أنت', prompt)
+        self.assertIn('لا تُشترط صفحة تذكر المسافة أو الإحداثيات حرفيًا', prompt)
+        self.assertIn('لا يُحذف منافس لأن مصدره لم يكتب مسافة', prompt)
+        self.assertIn('تقديراتك الجغرافية', prompt)
+
 
 if __name__ == '__main__':
     unittest.main()
